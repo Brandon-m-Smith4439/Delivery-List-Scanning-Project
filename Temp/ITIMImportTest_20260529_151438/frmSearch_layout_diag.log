@@ -1,0 +1,13 @@
+15:15:28 Configure before BuildLayout mode=SEARCH
+15:15:28 BuildLayout before ResetRuntimeControls
+15:15:29 Reset control lblTitle
+15:15:30 Reset control Image1
+15:15:30 BuildLayout after ResetRuntimeControls
+15:15:31 BuildLayout before title
+15:15:31 BuildLayout after title
+15:15:32 BuildLayout before status
+15:15:32 BuildLayout after status
+15:15:33 BuildLayout before submit
+15:15:33 BuildLayout before cancel
+15:15:34 BuildLayout complete
+15:15:34 Configure after BuildLayout

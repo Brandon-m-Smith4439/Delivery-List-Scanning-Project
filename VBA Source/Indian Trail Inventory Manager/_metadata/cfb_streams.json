@@ -1,0 +1,164 @@
+[
+  {
+    "path": "frmSearch/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 97,
+    "start_sector": 285
+  },
+  {
+    "path": "frmSearch/\u0003VBFrame",
+    "name": "\u0003VBFrame",
+    "size": 294,
+    "start_sector": 287
+  },
+  {
+    "path": "frmSearch/f",
+    "name": "f",
+    "size": 171,
+    "start_sector": 220
+  },
+  {
+    "path": "frmSearch/o",
+    "name": "o",
+    "size": 3911,
+    "start_sector": 223
+  },
+  {
+    "path": "PROJECT",
+    "name": "PROJECT",
+    "size": 896,
+    "start_sector": 298
+  },
+  {
+    "path": "PROJECTwm",
+    "name": "PROJECTwm",
+    "size": 353,
+    "start_sector": 292
+  },
+  {
+    "path": "VBA/__SRP_0",
+    "name": "__SRP_0",
+    "size": 19445,
+    "start_sector": 605
+  },
+  {
+    "path": "VBA/__SRP_1",
+    "name": "__SRP_1",
+    "size": 2936,
+    "start_sector": 174
+  },
+  {
+    "path": "VBA/__SRP_2",
+    "name": "__SRP_2",
+    "size": 36065,
+    "start_sector": 484
+  },
+  {
+    "path": "VBA/__SRP_3",
+    "name": "__SRP_3",
+    "size": 4462,
+    "start_sector": 556
+  },
+  {
+    "path": "VBA/__SRP_4",
+    "name": "__SRP_4",
+    "size": 14200,
+    "start_sector": 281
+  },
+  {
+    "path": "VBA/__SRP_5",
+    "name": "__SRP_5",
+    "size": 1654,
+    "start_sector": 82
+  },
+  {
+    "path": "VBA/__SRP_6",
+    "name": "__SRP_6",
+    "size": 680,
+    "start_sector": 19
+  },
+  {
+    "path": "VBA/__SRP_7",
+    "name": "__SRP_7",
+    "size": 106,
+    "start_sector": 30
+  },
+  {
+    "path": "VBA/__SRP_8",
+    "name": "__SRP_8",
+    "size": 6149,
+    "start_sector": 197
+  },
+  {
+    "path": "VBA/__SRP_9",
+    "name": "__SRP_9",
+    "size": 4138,
+    "start_sector": 211
+  },
+  {
+    "path": "VBA/_VBA_PROJECT",
+    "name": "_VBA_PROJECT",
+    "size": 14985,
+    "start_sector": 572
+  },
+  {
+    "path": "VBA/dir",
+    "name": "dir",
+    "size": 1116,
+    "start_sector": 156
+  },
+  {
+    "path": "VBA/frmSearch",
+    "name": "frmSearch",
+    "size": 28508,
+    "start_sector": 219
+  },
+  {
+    "path": "VBA/modIndianTrailInventoryData",
+    "name": "modIndianTrailInventoryData",
+    "size": 86945,
+    "start_sector": 311
+  },
+  {
+    "path": "VBA/modIndianTrailInventoryManager",
+    "name": "modIndianTrailInventoryManager",
+    "size": 90925,
+    "start_sector": 16
+  },
+  {
+    "path": "VBA/Sheet1",
+    "name": "Sheet1",
+    "size": 999,
+    "start_sector": 108
+  },
+  {
+    "path": "VBA/Sheet2",
+    "name": "Sheet2",
+    "size": 999,
+    "start_sector": 124
+  },
+  {
+    "path": "VBA/Sheet3",
+    "name": "Sheet3",
+    "size": 1539,
+    "start_sector": 57
+  },
+  {
+    "path": "VBA/Sheet4",
+    "name": "Sheet4",
+    "size": 999,
+    "start_sector": 140
+  },
+  {
+    "path": "VBA/Sheet6",
+    "name": "Sheet6",
+    "size": 1539,
+    "start_sector": 32
+  },
+  {
+    "path": "VBA/ThisWorkbook",
+    "name": "ThisWorkbook",
+    "size": 1196,
+    "start_sector": 0
+  }
+]

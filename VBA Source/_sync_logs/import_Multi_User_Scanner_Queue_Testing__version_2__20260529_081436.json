@@ -1,0 +1,15 @@
+﻿{
+    "workbook":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\Multi User Scanner Queue Testing (version 2).xlsm",
+    "sourceFolder":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\VBA Source\\Multi User Scanner Queue Testing (version 2)",
+    "dryRun":  false,
+    "backupPath":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\Backups\\VBA Sync Backups\\Multi User Scanner Queue Testing (version 2)__before_vba_import_20260529_081408.xlsm",
+    "syncedAt":  "2026-05-29T08:14:36",
+    "changes":  [
+                    {
+                        "Component":  "frmRushOrders",
+                        "File":  "frmRushOrders.frm",
+                        "Action":  "Update",
+                        "Lines":  472
+                    }
+                ]
+}

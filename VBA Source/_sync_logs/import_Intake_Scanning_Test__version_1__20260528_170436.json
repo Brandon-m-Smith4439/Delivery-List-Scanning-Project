@@ -1,0 +1,21 @@
+﻿{
+    "workbook":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\Intake_Scanning_Test (version 1).xlsm",
+    "sourceFolder":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\VBA Source\\Intake_Scanning_Test (version 1)",
+    "dryRun":  true,
+    "backupPath":  null,
+    "syncedAt":  "2026-05-28T17:04:36",
+    "changes":  [
+                    {
+                        "Component":  "modIntakeStation",
+                        "File":  "modIntakeStation.bas",
+                        "Action":  "Update",
+                        "Lines":  4966
+                    },
+                    {
+                        "Component":  "modPowerAutomateBridge",
+                        "File":  "modPowerAutomateBridge.bas",
+                        "Action":  "Update",
+                        "Lines":  1669
+                    }
+                ]
+}

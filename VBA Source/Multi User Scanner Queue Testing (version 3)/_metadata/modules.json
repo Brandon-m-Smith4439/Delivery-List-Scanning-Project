@@ -1,0 +1,229 @@
+{
+  "workbook": "C:\\Users\\brandon.m.smith\\My Projects\\Delivery List Scanning Project\\Multi User Scanner Queue Testing (version 3).xlsm",
+  "workbook_name": "Multi User Scanner Queue Testing (version 3).xlsm",
+  "exported_at": "2026-06-04T16:52:07",
+  "codepage": 1252,
+  "module_count": 27,
+  "modules": [
+    {
+      "name": "ThisWorkbook",
+      "stream_name": "ThisWorkbook",
+      "source_offset": 411910,
+      "module_type": "document",
+      "exported_file": "ThisWorkbook.cls",
+      "source_length": 249116
+    },
+    {
+      "name": "TemplateImporter",
+      "stream_name": "TemplateImporter",
+      "source_offset": 639779,
+      "module_type": "procedural",
+      "exported_file": "TemplateImporter.bas",
+      "source_length": 479255
+    },
+    {
+      "name": "ScannerValidation",
+      "stream_name": "ScannerValidation",
+      "source_offset": 126592,
+      "module_type": "procedural",
+      "exported_file": "ScannerValidation.bas",
+      "source_length": 100443
+    },
+    {
+      "name": "Sheet6",
+      "stream_name": "Sheet6",
+      "source_offset": 1016,
+      "module_type": "document",
+      "exported_file": "Sheet6.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet1",
+      "stream_name": "Sheet1",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet1.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet11",
+      "stream_name": "Sheet11",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet11.cls",
+      "source_length": 292
+    },
+    {
+      "name": "Sheet8",
+      "stream_name": "Sheet8",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet8.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet2",
+      "stream_name": "Sheet2",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet2.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet12",
+      "stream_name": "Sheet12",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet12.cls",
+      "source_length": 292
+    },
+    {
+      "name": "frmPrintOptions",
+      "stream_name": "frmPrintOptions",
+      "source_offset": 28497,
+      "module_type": "document",
+      "exported_file": "frmPrintOptions.frm",
+      "source_length": 14079
+    },
+    {
+      "name": "frmExportOptions",
+      "stream_name": "frmExportOptions",
+      "source_offset": 15801,
+      "module_type": "document",
+      "exported_file": "frmExportOptions.frm",
+      "source_length": 12709
+    },
+    {
+      "name": "modMasterQueueProcessor",
+      "stream_name": "modMasterQueueProcessor",
+      "source_offset": 174091,
+      "module_type": "procedural",
+      "exported_file": "modMasterQueueProcessor.bas",
+      "source_length": 133499
+    },
+    {
+      "name": "frmManualScanEntry",
+      "stream_name": "frmManualScanEntry",
+      "source_offset": 6259,
+      "module_type": "document",
+      "exported_file": "frmManualScanEntry.frm",
+      "source_length": 4334
+    },
+    {
+      "name": "modPowerAutomateBridge",
+      "stream_name": "modPowerAutomateBridge",
+      "source_offset": 86241,
+      "module_type": "procedural",
+      "exported_file": "modPowerAutomateBridge.bas",
+      "source_length": 61520
+    },
+    {
+      "name": "modSnapshotPublisher",
+      "stream_name": "modSnapshotPublisher",
+      "source_offset": 147725,
+      "module_type": "procedural",
+      "exported_file": "modSnapshotPublisher.bas",
+      "source_length": 78034
+    },
+    {
+      "name": "modQueueOverrideHelpers",
+      "stream_name": "modQueueOverrideHelpers",
+      "source_offset": 7658,
+      "module_type": "procedural",
+      "exported_file": "modQueueOverrideHelpers.bas",
+      "source_length": 5558
+    },
+    {
+      "name": "Sheet4",
+      "stream_name": "Sheet4",
+      "source_offset": 1016,
+      "module_type": "document",
+      "exported_file": "Sheet4.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet14",
+      "stream_name": "Sheet14",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet14.cls",
+      "source_length": 292
+    },
+    {
+      "name": "modIndianTrailBayAssignment",
+      "stream_name": "modIndianTrailBayAssignment",
+      "source_offset": 36512,
+      "module_type": "procedural",
+      "exported_file": "modIndianTrailBayAssignment.bas",
+      "source_length": 29883
+    },
+    {
+      "name": "Sheet3",
+      "stream_name": "Sheet3",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet3.cls",
+      "source_length": 291
+    },
+    {
+      "name": "frmRushOrders",
+      "stream_name": "frmRushOrders",
+      "source_offset": 17842,
+      "module_type": "document",
+      "exported_file": "frmRushOrders.frm",
+      "source_length": 14728
+    },
+    {
+      "name": "modRushOrders",
+      "stream_name": "modRushOrders",
+      "source_offset": 37960,
+      "module_type": "procedural",
+      "exported_file": "modRushOrders.bas",
+      "source_length": 33550
+    },
+    {
+      "name": "Sheet5",
+      "stream_name": "Sheet5",
+      "source_offset": 1016,
+      "module_type": "document",
+      "exported_file": "Sheet5.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet7",
+      "stream_name": "Sheet7",
+      "source_offset": 1016,
+      "module_type": "document",
+      "exported_file": "Sheet7.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet9",
+      "stream_name": "Sheet9",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet9.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet10",
+      "stream_name": "Sheet10",
+      "source_offset": 1016,
+      "module_type": "document",
+      "exported_file": "Sheet10.cls",
+      "source_length": 292
+    },
+    {
+      "name": "Sheet13",
+      "stream_name": "Sheet13",
+      "source_offset": 1016,
+      "module_type": "document",
+      "exported_file": "Sheet13.cls",
+      "source_length": 292
+    }
+  ],
+  "notes": [
+    "Source was extracted directly from xl/vbaProject.bin.",
+    "UserForm designer binary/state is preserved in _metadata/vbaProject.bin; exported .frm files contain the code stream and attributes."
+  ]
+}

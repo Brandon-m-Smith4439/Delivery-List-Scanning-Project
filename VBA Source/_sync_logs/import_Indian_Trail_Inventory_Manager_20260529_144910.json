@@ -1,0 +1,27 @@
+﻿{
+    "workbook":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\Temp\\ITIMImportTest_20260529_144828\\Indian Trail Inventory Manager.xlsm",
+    "sourceFolder":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\VBA Source\\Indian Trail Inventory Manager",
+    "dryRun":  false,
+    "backupPath":  null,
+    "syncedAt":  "2026-05-29T14:49:10",
+    "changes":  [
+                    {
+                        "Component":  "frmSearch",
+                        "File":  "frmSearch.frm",
+                        "Action":  "Update",
+                        "Lines":  385
+                    },
+                    {
+                        "Component":  "modIndianTrailInventoryData",
+                        "File":  "modIndianTrailInventoryData.bas",
+                        "Action":  "Create",
+                        "Lines":  920
+                    },
+                    {
+                        "Component":  "modIndianTrailInventoryManager",
+                        "File":  "modIndianTrailInventoryManager.bas",
+                        "Action":  "Update",
+                        "Lines":  1417
+                    }
+                ]
+}

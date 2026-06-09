@@ -1,0 +1,85 @@
+{
+  "workbook": "\\\\BFS-FSMA-PW02\\BAREFOOT-INSTALL\\Departments\\Glass Production\\Brandon\\Delivery List Scanning Project\\Indian Trail Inventory Manager.xlsm",
+  "workbook_name": "Indian Trail Inventory Manager.xlsm",
+  "exported_at": "2026-06-02T08:43:55",
+  "codepage": 1252,
+  "module_count": 9,
+  "modules": [
+    {
+      "name": "ThisWorkbook",
+      "stream_name": "ThisWorkbook",
+      "source_offset": 1016,
+      "module_type": "document",
+      "exported_file": "ThisWorkbook.cls",
+      "source_length": 297
+    },
+    {
+      "name": "Sheet6",
+      "stream_name": "Sheet6",
+      "source_offset": 1160,
+      "module_type": "document",
+      "exported_file": "Sheet6.cls",
+      "source_length": 528
+    },
+    {
+      "name": "modIndianTrailInventoryManager",
+      "stream_name": "modIndianTrailInventoryManager",
+      "source_offset": 71517,
+      "module_type": "procedural",
+      "exported_file": "modIndianTrailInventoryManager.bas",
+      "source_length": 49967
+    },
+    {
+      "name": "Sheet3",
+      "stream_name": "Sheet3",
+      "source_offset": 1160,
+      "module_type": "document",
+      "exported_file": "Sheet3.cls",
+      "source_length": 528
+    },
+    {
+      "name": "frmSearch",
+      "stream_name": "frmSearch",
+      "source_offset": 23823,
+      "module_type": "document",
+      "exported_file": "frmSearch.frm",
+      "source_length": 12309
+    },
+    {
+      "name": "modIndianTrailInventoryData",
+      "stream_name": "modIndianTrailInventoryData",
+      "source_offset": 69867,
+      "module_type": "procedural",
+      "exported_file": "modIndianTrailInventoryData.bas",
+      "source_length": 42521
+    },
+    {
+      "name": "Sheet1",
+      "stream_name": "Sheet1",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet1.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet2",
+      "stream_name": "Sheet2",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet2.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet4",
+      "stream_name": "Sheet4",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet4.cls",
+      "source_length": 291
+    }
+  ],
+  "notes": [
+    "Source was extracted directly from xl/vbaProject.bin.",
+    "UserForm designer binary/state is preserved in _metadata/vbaProject.bin; exported .frm files contain the code stream and attributes."
+  ]
+}

@@ -1,0 +1,33 @@
+﻿{
+    "workbook":  "C:\\Users\\brandon.m.smith\\My Projects\\Delivery List Scanning Project\\Multi User Scanner Queue Testing (version 3).xlsm",
+    "sourceFolder":  "C:\\Users\\brandon.m.smith\\My Projects\\Delivery List Scanning Project\\VBA Source\\Multi User Scanner Queue Testing (version 3)",
+    "dryRun":  false,
+    "backupPath":  "C:\\Users\\brandon.m.smith\\My Projects\\Delivery List Scanning Project\\Backups\\VBA Sync Backups\\Multi User Scanner Queue Testing (version 3)__before_vba_import_20260605_082633.xlsm",
+    "syncedAt":  "2026-06-05T08:26:41",
+    "changes":  [
+                    {
+                        "Component":  "modMasterQueueProcessor",
+                        "File":  "modMasterQueueProcessor.bas",
+                        "Action":  "Update",
+                        "Lines":  3739
+                    },
+                    {
+                        "Component":  "modSnapshotPublisher",
+                        "File":  "modSnapshotPublisher.bas",
+                        "Action":  "Update",
+                        "Lines":  2095
+                    },
+                    {
+                        "Component":  "ScannerValidation",
+                        "File":  "ScannerValidation.bas",
+                        "Action":  "Update",
+                        "Lines":  2723
+                    },
+                    {
+                        "Component":  "ThisWorkbook",
+                        "File":  "ThisWorkbook.cls",
+                        "Action":  "Update",
+                        "Lines":  7182
+                    }
+                ]
+}

@@ -1,0 +1,177 @@
+﻿{
+    "workbook":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\Intake_Scanning_Test (version 1).xlsm",
+    "sourceFolder":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\VBA Source\\Intake_Scanning_Test (version 1)",
+    "dryRun":  true,
+    "backupPath":  null,
+    "syncedAt":  "2026-05-28T15:37:24",
+    "changes":  [
+                    {
+                        "Component":  "frmExportOptions",
+                        "File":  "frmExportOptions.frm",
+                        "Action":  "Update",
+                        "Lines":  428
+                    },
+                    {
+                        "Component":  "frmManualScanEntry",
+                        "File":  "frmManualScanEntry.frm",
+                        "Action":  "Update",
+                        "Lines":  205
+                    },
+                    {
+                        "Component":  "frmPrintOptions",
+                        "File":  "frmPrintOptions.frm",
+                        "Action":  "Update",
+                        "Lines":  471
+                    },
+                    {
+                        "Component":  "frmProcessingNotice",
+                        "File":  "frmProcessingNotice.frm",
+                        "Action":  "Update",
+                        "Lines":  5
+                    },
+                    {
+                        "Component":  "frmScanAlert",
+                        "File":  "frmScanAlert.frm",
+                        "Action":  "Update",
+                        "Lines":  130
+                    },
+                    {
+                        "Component":  "frmScannerSettings",
+                        "File":  "frmScannerSettings.frm",
+                        "Action":  "Update",
+                        "Lines":  195
+                    },
+                    {
+                        "Component":  "modImportDebug",
+                        "File":  "modImportDebug.bas",
+                        "Action":  "Update",
+                        "Lines":  324
+                    },
+                    {
+                        "Component":  "modIntakePrintExport",
+                        "File":  "modIntakePrintExport.bas",
+                        "Action":  "Update",
+                        "Lines":  184
+                    },
+                    {
+                        "Component":  "modIntakePrintExportTemplates",
+                        "File":  "modIntakePrintExportTemplates.bas",
+                        "Action":  "Update",
+                        "Lines":  419
+                    },
+                    {
+                        "Component":  "modIntakePrintHelpers",
+                        "File":  "modIntakePrintHelpers.bas",
+                        "Action":  "Update",
+                        "Lines":  2582
+                    },
+                    {
+                        "Component":  "modIntakeStation",
+                        "File":  "modIntakeStation.bas",
+                        "Action":  "Update",
+                        "Lines":  4901
+                    },
+                    {
+                        "Component":  "modPowerAutomateBridge",
+                        "File":  "modPowerAutomateBridge.bas",
+                        "Action":  "Update",
+                        "Lines":  1635
+                    },
+                    {
+                        "Component":  "modProcessingNotice",
+                        "File":  "modProcessingNotice.bas",
+                        "Action":  "Update",
+                        "Lines":  162
+                    },
+                    {
+                        "Component":  "modQueueCommon",
+                        "File":  "modQueueCommon.bas",
+                        "Action":  "Update",
+                        "Lines":  547
+                    },
+                    {
+                        "Component":  "modRapidScanBuffer",
+                        "File":  "modRapidScanBuffer.bas",
+                        "Action":  "Update",
+                        "Lines":  880
+                    },
+                    {
+                        "Component":  "modScanAudit",
+                        "File":  "modScanAudit.bas",
+                        "Action":  "Update",
+                        "Lines":  370
+                    },
+                    {
+                        "Component":  "modScanningPanelButtons",
+                        "File":  "modScanningPanelButtons.bas",
+                        "Action":  "Update",
+                        "Lines":  457
+                    },
+                    {
+                        "Component":  "modStageSnapshot",
+                        "File":  "modStageSnapshot.bas",
+                        "Action":  "Update",
+                        "Lines":  6766
+                    },
+                    {
+                        "Component":  "Sheet1",
+                        "File":  "Sheet1.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet12",
+                        "File":  "Sheet12.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet2",
+                        "File":  "Sheet2.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet3",
+                        "File":  "Sheet3.cls",
+                        "Action":  "Update",
+                        "Lines":  6
+                    },
+                    {
+                        "Component":  "Sheet4",
+                        "File":  "Sheet4.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet5",
+                        "File":  "Sheet5.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet6",
+                        "File":  "Sheet6.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet7",
+                        "File":  "Sheet7.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet9",
+                        "File":  "Sheet9.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "ThisWorkbook",
+                        "File":  "ThisWorkbook.cls",
+                        "Action":  "Update",
+                        "Lines":  171
+                    }
+                ]
+}

@@ -1,0 +1,15 @@
+﻿{
+    "workbook":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\Temp\\VbaImportTest_20260529_094438\\Multi User Scanner Queue Testing (version 2).xlsm",
+    "sourceFolder":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\VBA Source\\Multi User Scanner Queue Testing (version 2)",
+    "dryRun":  false,
+    "backupPath":  null,
+    "syncedAt":  "2026-05-29T09:46:08",
+    "changes":  [
+                    {
+                        "Component":  "modMasterQueueProcessor",
+                        "File":  "modMasterQueueProcessor.bas",
+                        "Action":  "Update",
+                        "Lines":  3710
+                    }
+                ]
+}

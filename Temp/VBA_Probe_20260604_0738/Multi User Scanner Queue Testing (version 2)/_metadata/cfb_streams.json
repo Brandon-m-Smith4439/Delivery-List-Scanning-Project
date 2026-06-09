@@ -1,0 +1,620 @@
+[
+  {
+    "path": "frmExportOptions/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 97,
+    "start_sector": 661
+  },
+  {
+    "path": "frmExportOptions/\u0003VBFrame",
+    "name": "\u0003VBFrame",
+    "size": 312,
+    "start_sector": 663
+  },
+  {
+    "path": "frmExportOptions/f",
+    "name": "f",
+    "size": 451,
+    "start_sector": 610
+  },
+  {
+    "path": "frmExportOptions/i04/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 112,
+    "start_sector": 612
+  },
+  {
+    "path": "frmExportOptions/i04/f",
+    "name": "f",
+    "size": 309,
+    "start_sector": 620
+  },
+  {
+    "path": "frmExportOptions/i04/o",
+    "name": "o",
+    "size": 344,
+    "start_sector": 614
+  },
+  {
+    "path": "frmExportOptions/i18/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 112,
+    "start_sector": 625
+  },
+  {
+    "path": "frmExportOptions/i18/f",
+    "name": "f",
+    "size": 477,
+    "start_sector": 637
+  },
+  {
+    "path": "frmExportOptions/i18/o",
+    "name": "o",
+    "size": 640,
+    "start_sector": 627
+  },
+  {
+    "path": "frmExportOptions/i33/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 112,
+    "start_sector": 645
+  },
+  {
+    "path": "frmExportOptions/i33/f",
+    "name": "f",
+    "size": 253,
+    "start_sector": 651
+  },
+  {
+    "path": "frmExportOptions/i33/o",
+    "name": "o",
+    "size": 252,
+    "start_sector": 647
+  },
+  {
+    "path": "frmExportOptions/o",
+    "name": "o",
+    "size": 4135,
+    "start_sector": 5249
+  },
+  {
+    "path": "frmManualScanEntry/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 97,
+    "start_sector": 675
+  },
+  {
+    "path": "frmManualScanEntry/\u0003VBFrame",
+    "name": "\u0003VBFrame",
+    "size": 315,
+    "start_sector": 677
+  },
+  {
+    "path": "frmManualScanEntry/f",
+    "name": "f",
+    "size": 391,
+    "start_sector": 668
+  },
+  {
+    "path": "frmManualScanEntry/i04/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 112,
+    "start_sector": 734
+  },
+  {
+    "path": "frmManualScanEntry/i04/f",
+    "name": "f",
+    "size": 237,
+    "start_sector": 740
+  },
+  {
+    "path": "frmManualScanEntry/i04/o",
+    "name": "o",
+    "size": 240,
+    "start_sector": 736
+  },
+  {
+    "path": "frmManualScanEntry/i05/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 112,
+    "start_sector": 744
+  },
+  {
+    "path": "frmManualScanEntry/i05/f",
+    "name": "f",
+    "size": 369,
+    "start_sector": 752
+  },
+  {
+    "path": "frmManualScanEntry/i05/o",
+    "name": "o",
+    "size": 352,
+    "start_sector": 746
+  },
+  {
+    "path": "frmManualScanEntry/o",
+    "name": "o",
+    "size": 4163,
+    "start_sector": 4735
+  },
+  {
+    "path": "frmPrintOptions/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 97,
+    "start_sector": 603
+  },
+  {
+    "path": "frmPrintOptions/\u0003VBFrame",
+    "name": "\u0003VBFrame",
+    "size": 310,
+    "start_sector": 605
+  },
+  {
+    "path": "frmPrintOptions/f",
+    "name": "f",
+    "size": 491,
+    "start_sector": 552
+  },
+  {
+    "path": "frmPrintOptions/i01/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 112,
+    "start_sector": 554
+  },
+  {
+    "path": "frmPrintOptions/i01/f",
+    "name": "f",
+    "size": 309,
+    "start_sector": 562
+  },
+  {
+    "path": "frmPrintOptions/i01/o",
+    "name": "o",
+    "size": 344,
+    "start_sector": 556
+  },
+  {
+    "path": "frmPrintOptions/i06/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 112,
+    "start_sector": 567
+  },
+  {
+    "path": "frmPrintOptions/i06/f",
+    "name": "f",
+    "size": 477,
+    "start_sector": 579
+  },
+  {
+    "path": "frmPrintOptions/i06/o",
+    "name": "o",
+    "size": 640,
+    "start_sector": 569
+  },
+  {
+    "path": "frmPrintOptions/i13/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 112,
+    "start_sector": 587
+  },
+  {
+    "path": "frmPrintOptions/i13/f",
+    "name": "f",
+    "size": 253,
+    "start_sector": 593
+  },
+  {
+    "path": "frmPrintOptions/i13/o",
+    "name": "o",
+    "size": 252,
+    "start_sector": 589
+  },
+  {
+    "path": "frmPrintOptions/o",
+    "name": "o",
+    "size": 4191,
+    "start_sector": 3437
+  },
+  {
+    "path": "frmRushOrders/\u0001CompObj",
+    "name": "\u0001CompObj",
+    "size": 97,
+    "start_sector": 683
+  },
+  {
+    "path": "frmRushOrders/\u0003VBFrame",
+    "name": "\u0003VBFrame",
+    "size": 332,
+    "start_sector": 685
+  },
+  {
+    "path": "frmRushOrders/f",
+    "name": "f",
+    "size": 46,
+    "start_sector": 682
+  },
+  {
+    "path": "frmRushOrders/o",
+    "name": "o",
+    "size": 0,
+    "start_sector": 4294967294
+  },
+  {
+    "path": "PROJECT",
+    "name": "PROJECT",
+    "size": 1970,
+    "start_sector": 708
+  },
+  {
+    "path": "PROJECTwm",
+    "name": "PROJECTwm",
+    "size": 1055,
+    "start_sector": 691
+  },
+  {
+    "path": "VBA/__SRP_0",
+    "name": "__SRP_0",
+    "size": 79432,
+    "start_sector": 5058
+  },
+  {
+    "path": "VBA/__SRP_1",
+    "name": "__SRP_1",
+    "size": 9184,
+    "start_sector": 5215
+  },
+  {
+    "path": "VBA/__SRP_10",
+    "name": "__SRP_10",
+    "size": 3953,
+    "start_sector": 284
+  },
+  {
+    "path": "VBA/__SRP_11",
+    "name": "__SRP_11",
+    "size": 2582,
+    "start_sector": 346
+  },
+  {
+    "path": "VBA/__SRP_12",
+    "name": "__SRP_12",
+    "size": 83840,
+    "start_sector": 924
+  },
+  {
+    "path": "VBA/__SRP_13",
+    "name": "__SRP_13",
+    "size": 14908,
+    "start_sector": 1090
+  },
+  {
+    "path": "VBA/__SRP_14",
+    "name": "__SRP_14",
+    "size": 464,
+    "start_sector": 200
+  },
+  {
+    "path": "VBA/__SRP_15",
+    "name": "__SRP_15",
+    "size": 106,
+    "start_sector": 208
+  },
+  {
+    "path": "VBA/__SRP_16",
+    "name": "__SRP_16",
+    "size": 464,
+    "start_sector": 406
+  },
+  {
+    "path": "VBA/__SRP_17",
+    "name": "__SRP_17",
+    "size": 106,
+    "start_sector": 414
+  },
+  {
+    "path": "VBA/__SRP_18",
+    "name": "__SRP_18",
+    "size": 464,
+    "start_sector": 435
+  },
+  {
+    "path": "VBA/__SRP_19",
+    "name": "__SRP_19",
+    "size": 106,
+    "start_sector": 443
+  },
+  {
+    "path": "VBA/__SRP_1a",
+    "name": "__SRP_1a",
+    "size": 464,
+    "start_sector": 480
+  },
+  {
+    "path": "VBA/__SRP_1b",
+    "name": "__SRP_1b",
+    "size": 106,
+    "start_sector": 488
+  },
+  {
+    "path": "VBA/__SRP_1c",
+    "name": "__SRP_1c",
+    "size": 464,
+    "start_sector": 509
+  },
+  {
+    "path": "VBA/__SRP_1d",
+    "name": "__SRP_1d",
+    "size": 106,
+    "start_sector": 517
+  },
+  {
+    "path": "VBA/__SRP_1e",
+    "name": "__SRP_1e",
+    "size": 464,
+    "start_sector": 19
+  },
+  {
+    "path": "VBA/__SRP_1f",
+    "name": "__SRP_1f",
+    "size": 106,
+    "start_sector": 27
+  },
+  {
+    "path": "VBA/__SRP_2",
+    "name": "__SRP_2",
+    "size": 60599,
+    "start_sector": 2769
+  },
+  {
+    "path": "VBA/__SRP_3",
+    "name": "__SRP_3",
+    "size": 27822,
+    "start_sector": 2889
+  },
+  {
+    "path": "VBA/__SRP_4",
+    "name": "__SRP_4",
+    "size": 26118,
+    "start_sector": 3275
+  },
+  {
+    "path": "VBA/__SRP_5",
+    "name": "__SRP_5",
+    "size": 5354,
+    "start_sector": 3328
+  },
+  {
+    "path": "VBA/__SRP_6",
+    "name": "__SRP_6",
+    "size": 23230,
+    "start_sector": 3884
+  },
+  {
+    "path": "VBA/__SRP_7",
+    "name": "__SRP_7",
+    "size": 5816,
+    "start_sector": 3930
+  },
+  {
+    "path": "VBA/__SRP_8",
+    "name": "__SRP_8",
+    "size": 20556,
+    "start_sector": 4178
+  },
+  {
+    "path": "VBA/__SRP_9",
+    "name": "__SRP_9",
+    "size": 3406,
+    "start_sector": 109
+  },
+  {
+    "path": "VBA/__SRP_a",
+    "name": "__SRP_a",
+    "size": 40608,
+    "start_sector": 4523
+  },
+  {
+    "path": "VBA/__SRP_b",
+    "name": "__SRP_b",
+    "size": 4180,
+    "start_sector": 4604
+  },
+  {
+    "path": "VBA/__SRP_c",
+    "name": "__SRP_c",
+    "size": 502,
+    "start_sector": 163
+  },
+  {
+    "path": "VBA/__SRP_d",
+    "name": "__SRP_d",
+    "size": 626,
+    "start_sector": 171
+  },
+  {
+    "path": "VBA/__SRP_e",
+    "name": "__SRP_e",
+    "size": 879,
+    "start_sector": 226
+  },
+  {
+    "path": "VBA/__SRP_f",
+    "name": "__SRP_f",
+    "size": 1750,
+    "start_sector": 240
+  },
+  {
+    "path": "VBA/_VBA_PROJECT",
+    "name": "_VBA_PROJECT",
+    "size": 60747,
+    "start_sector": 4933
+  },
+  {
+    "path": "VBA/dir",
+    "name": "dir",
+    "size": 2088,
+    "start_sector": 519
+  },
+  {
+    "path": "VBA/frmExportOptions",
+    "name": "frmExportOptions",
+    "size": 20452,
+    "start_sector": 3397
+  },
+  {
+    "path": "VBA/frmManualScanEntry",
+    "name": "frmManualScanEntry",
+    "size": 8220,
+    "start_sector": 3944
+  },
+  {
+    "path": "VBA/frmPrintOptions",
+    "name": "frmPrintOptions",
+    "size": 22638,
+    "start_sector": 3351
+  },
+  {
+    "path": "VBA/frmRushOrders",
+    "name": "frmRushOrders",
+    "size": 23614,
+    "start_sector": 4745
+  },
+  {
+    "path": "VBA/modIndianTrailBayAssignment",
+    "name": "modIndianTrailBayAssignment",
+    "size": 48945,
+    "start_sector": 4639
+  },
+  {
+    "path": "VBA/modMasterQueueProcessor",
+    "name": "modMasterQueueProcessor",
+    "size": 224209,
+    "start_sector": 3438
+  },
+  {
+    "path": "VBA/modPowerAutomateBridge",
+    "name": "modPowerAutomateBridge",
+    "size": 110202,
+    "start_sector": 3957
+  },
+  {
+    "path": "VBA/modQueueOverrideHelpers",
+    "name": "modQueueOverrideHelpers",
+    "size": 9731,
+    "start_sector": 4613
+  },
+  {
+    "path": "VBA/modRushOrders",
+    "name": "modRushOrders",
+    "size": 51474,
+    "start_sector": 4792
+  },
+  {
+    "path": "VBA/modSnapshotPublisher",
+    "name": "modSnapshotPublisher",
+    "size": 149755,
+    "start_sector": 4224
+  },
+  {
+    "path": "VBA/ScannerValidation",
+    "name": "ScannerValidation",
+    "size": 167110,
+    "start_sector": 2942
+  },
+  {
+    "path": "VBA/Sheet1",
+    "name": "Sheet1",
+    "size": 999,
+    "start_sector": 29
+  },
+  {
+    "path": "VBA/Sheet10",
+    "name": "Sheet10",
+    "size": 1189,
+    "start_sector": 461
+  },
+  {
+    "path": "VBA/Sheet11",
+    "name": "Sheet11",
+    "size": 1000,
+    "start_sector": 45
+  },
+  {
+    "path": "VBA/Sheet12",
+    "name": "Sheet12",
+    "size": 1000,
+    "start_sector": 93
+  },
+  {
+    "path": "VBA/Sheet13",
+    "name": "Sheet13",
+    "size": 1189,
+    "start_sector": 490
+  },
+  {
+    "path": "VBA/Sheet14",
+    "name": "Sheet14",
+    "size": 1000,
+    "start_sector": 210
+  },
+  {
+    "path": "VBA/Sheet2",
+    "name": "Sheet2",
+    "size": 999,
+    "start_sector": 77
+  },
+  {
+    "path": "VBA/Sheet3",
+    "name": "Sheet3",
+    "size": 999,
+    "start_sector": 268
+  },
+  {
+    "path": "VBA/Sheet4",
+    "name": "Sheet4",
+    "size": 1188,
+    "start_sector": 181
+  },
+  {
+    "path": "VBA/Sheet5",
+    "name": "Sheet5",
+    "size": 1188,
+    "start_sector": 387
+  },
+  {
+    "path": "VBA/Sheet6",
+    "name": "Sheet6",
+    "size": 1188,
+    "start_sector": 0
+  },
+  {
+    "path": "VBA/Sheet7",
+    "name": "Sheet7",
+    "size": 1188,
+    "start_sector": 416
+  },
+  {
+    "path": "VBA/Sheet8",
+    "name": "Sheet8",
+    "size": 999,
+    "start_sector": 61
+  },
+  {
+    "path": "VBA/Sheet9",
+    "name": "Sheet9",
+    "size": 999,
+    "start_sector": 445
+  },
+  {
+    "path": "VBA/TemplateImporter",
+    "name": "TemplateImporter",
+    "size": 837348,
+    "start_sector": 1120
+  },
+  {
+    "path": "VBA/ThisWorkbook",
+    "name": "ThisWorkbook",
+    "size": 464600,
+    "start_sector": 8
+  }
+]

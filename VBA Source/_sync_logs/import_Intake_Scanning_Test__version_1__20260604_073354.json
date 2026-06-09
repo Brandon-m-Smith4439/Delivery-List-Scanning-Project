@@ -1,0 +1,15 @@
+﻿{
+    "workbook":  "C:\\Users\\brandon.m.smith\\My Projects\\Delivery List Scanning Project\\Intake_Scanning_Test (version 1).xlsm",
+    "sourceFolder":  "C:\\Users\\brandon.m.smith\\My Projects\\Delivery List Scanning Project\\VBA Source\\Intake_Scanning_Test (version 1)",
+    "dryRun":  true,
+    "backupPath":  null,
+    "syncedAt":  "2026-06-04T07:33:54",
+    "changes":  [
+                    {
+                        "Component":  "modIntakeStation",
+                        "File":  "modIntakeStation.bas",
+                        "Action":  "Update",
+                        "Lines":  5331
+                    }
+                ]
+}

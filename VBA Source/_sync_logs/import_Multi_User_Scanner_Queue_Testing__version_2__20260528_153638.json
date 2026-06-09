@@ -1,0 +1,171 @@
+﻿{
+    "workbook":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\Multi User Scanner Queue Testing (version 2).xlsm",
+    "sourceFolder":  "I:\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Delivery List Scanning Project\\VBA Source\\Multi User Scanner Queue Testing (version 2)",
+    "dryRun":  true,
+    "backupPath":  null,
+    "syncedAt":  "2026-05-28T15:36:38",
+    "changes":  [
+                    {
+                        "Component":  "frmExportOptions",
+                        "File":  "frmExportOptions.frm",
+                        "Action":  "Update",
+                        "Lines":  428
+                    },
+                    {
+                        "Component":  "frmManualScanEntry",
+                        "File":  "frmManualScanEntry.frm",
+                        "Action":  "Update",
+                        "Lines":  146
+                    },
+                    {
+                        "Component":  "frmPrintOptions",
+                        "File":  "frmPrintOptions.frm",
+                        "Action":  "Update",
+                        "Lines":  471
+                    },
+                    {
+                        "Component":  "frmRushOrders",
+                        "File":  "frmRushOrders.frm",
+                        "Action":  "Update",
+                        "Lines":  435
+                    },
+                    {
+                        "Component":  "modIndianTrailBayAssignment",
+                        "File":  "modIndianTrailBayAssignment.bas",
+                        "Action":  "Update",
+                        "Lines":  810
+                    },
+                    {
+                        "Component":  "modMasterQueueProcessor",
+                        "File":  "modMasterQueueProcessor.bas",
+                        "Action":  "Update",
+                        "Lines":  3576
+                    },
+                    {
+                        "Component":  "modPowerAutomateBridge",
+                        "File":  "modPowerAutomateBridge.bas",
+                        "Action":  "Update",
+                        "Lines":  1562
+                    },
+                    {
+                        "Component":  "modQueueOverrideHelpers",
+                        "File":  "modQueueOverrideHelpers.bas",
+                        "Action":  "Update",
+                        "Lines":  145
+                    },
+                    {
+                        "Component":  "modRushOrders",
+                        "File":  "modRushOrders.bas",
+                        "Action":  "Update",
+                        "Lines":  953
+                    },
+                    {
+                        "Component":  "modSnapshotPublisher",
+                        "File":  "modSnapshotPublisher.bas",
+                        "Action":  "Update",
+                        "Lines":  2085
+                    },
+                    {
+                        "Component":  "ScannerValidation",
+                        "File":  "ScannerValidation.bas",
+                        "Action":  "Update",
+                        "Lines":  2567
+                    },
+                    {
+                        "Component":  "Sheet1",
+                        "File":  "Sheet1.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet10",
+                        "File":  "Sheet10.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet11",
+                        "File":  "Sheet11.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet12",
+                        "File":  "Sheet12.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet13",
+                        "File":  "Sheet13.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet14",
+                        "File":  "Sheet14.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet2",
+                        "File":  "Sheet2.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet3",
+                        "File":  "Sheet3.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet4",
+                        "File":  "Sheet4.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet5",
+                        "File":  "Sheet5.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet6",
+                        "File":  "Sheet6.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet7",
+                        "File":  "Sheet7.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet8",
+                        "File":  "Sheet8.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "Sheet9",
+                        "File":  "Sheet9.cls",
+                        "Action":  "Update",
+                        "Lines":  1
+                    },
+                    {
+                        "Component":  "TemplateImporter",
+                        "File":  "TemplateImporter.bas",
+                        "Action":  "Update",
+                        "Lines":  12827
+                    },
+                    {
+                        "Component":  "ThisWorkbook",
+                        "File":  "ThisWorkbook.cls",
+                        "Action":  "Update",
+                        "Lines":  7120
+                    }
+                ]
+}

@@ -1,0 +1,237 @@
+{
+  "workbook": "\\\\BFS-FSMA-PW02\\BAREFOOT-INSTALL\\Departments\\Glass Production\\Brandon\\Delivery List Scanning Project\\Intake_Scanning_Test (version 1).xlsm",
+  "workbook_name": "Intake_Scanning_Test (version 1).xlsm",
+  "exported_at": "2026-05-29T08:17:24",
+  "codepage": 1252,
+  "module_count": 28,
+  "modules": [
+    {
+      "name": "ThisWorkbook",
+      "stream_name": "ThisWorkbook",
+      "source_offset": 8924,
+      "module_type": "document",
+      "exported_file": "ThisWorkbook.cls",
+      "source_length": 6162
+    },
+    {
+      "name": "Sheet3",
+      "stream_name": "Sheet3",
+      "source_offset": 1039,
+      "module_type": "document",
+      "exported_file": "Sheet3.cls",
+      "source_length": 385
+    },
+    {
+      "name": "Sheet2",
+      "stream_name": "Sheet2",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet2.cls",
+      "source_length": 291
+    },
+    {
+      "name": "modIntakeStation",
+      "stream_name": "modIntakeStation",
+      "source_offset": 218686,
+      "module_type": "procedural",
+      "exported_file": "modIntakeStation.bas",
+      "source_length": 184203
+    },
+    {
+      "name": "modQueueCommon",
+      "stream_name": "modQueueCommon",
+      "source_offset": 27565,
+      "module_type": "procedural",
+      "exported_file": "modQueueCommon.bas",
+      "source_length": 20105
+    },
+    {
+      "name": "modScanningPanelButtons",
+      "stream_name": "modScanningPanelButtons",
+      "source_offset": 21271,
+      "module_type": "procedural",
+      "exported_file": "modScanningPanelButtons.bas",
+      "source_length": 15495
+    },
+    {
+      "name": "frmScannerSettings",
+      "stream_name": "frmScannerSettings",
+      "source_offset": 8353,
+      "module_type": "document",
+      "exported_file": "frmScannerSettings.frm",
+      "source_length": 6689
+    },
+    {
+      "name": "Sheet1",
+      "stream_name": "Sheet1",
+      "source_offset": 839,
+      "module_type": "document",
+      "exported_file": "Sheet1.cls",
+      "source_length": 292
+    },
+    {
+      "name": "modStageSnapshot",
+      "stream_name": "modStageSnapshot",
+      "source_offset": 293031,
+      "module_type": "procedural",
+      "exported_file": "modStageSnapshot.bas",
+      "source_length": 236968
+    },
+    {
+      "name": "modRapidScanBuffer",
+      "stream_name": "modRapidScanBuffer",
+      "source_offset": 40152,
+      "module_type": "procedural",
+      "exported_file": "modRapidScanBuffer.bas",
+      "source_length": 32100
+    },
+    {
+      "name": "Sheet4",
+      "stream_name": "Sheet4",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet4.cls",
+      "source_length": 291
+    },
+    {
+      "name": "frmManualScanEntry",
+      "stream_name": "frmManualScanEntry",
+      "source_offset": 7815,
+      "module_type": "document",
+      "exported_file": "frmManualScanEntry.frm",
+      "source_length": 5526
+    },
+    {
+      "name": "modIntakePrintExport",
+      "stream_name": "modIntakePrintExport",
+      "source_offset": 9443,
+      "module_type": "procedural",
+      "exported_file": "modIntakePrintExport.bas",
+      "source_length": 6567
+    },
+    {
+      "name": "frmPrintOptions",
+      "stream_name": "frmPrintOptions",
+      "source_offset": 17521,
+      "module_type": "document",
+      "exported_file": "frmPrintOptions.frm",
+      "source_length": 14080
+    },
+    {
+      "name": "frmExportOptions",
+      "stream_name": "frmExportOptions",
+      "source_offset": 15813,
+      "module_type": "document",
+      "exported_file": "frmExportOptions.frm",
+      "source_length": 12710
+    },
+    {
+      "name": "modIntakePrintHelpers",
+      "stream_name": "modIntakePrintHelpers",
+      "source_offset": 104817,
+      "module_type": "procedural",
+      "exported_file": "modIntakePrintHelpers.bas",
+      "source_length": 96867
+    },
+    {
+      "name": "Sheet12",
+      "stream_name": "Sheet12",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet12.cls",
+      "source_length": 292
+    },
+    {
+      "name": "modIntakePrintExportTemplates",
+      "stream_name": "modIntakePrintExportTemplates",
+      "source_offset": 16528,
+      "module_type": "procedural",
+      "exported_file": "modIntakePrintExportTemplates.bas",
+      "source_length": 16778
+    },
+    {
+      "name": "modPowerAutomateBridge",
+      "stream_name": "modPowerAutomateBridge",
+      "source_offset": 84145,
+      "module_type": "procedural",
+      "exported_file": "modPowerAutomateBridge.bas",
+      "source_length": 66860
+    },
+    {
+      "name": "frmProcessingNotice",
+      "stream_name": "frmProcessingNotice",
+      "source_offset": 1191,
+      "module_type": "document",
+      "exported_file": "frmProcessingNotice.frm",
+      "source_length": 487
+    },
+    {
+      "name": "modProcessingNotice",
+      "stream_name": "modProcessingNotice",
+      "source_offset": 9054,
+      "module_type": "procedural",
+      "exported_file": "modProcessingNotice.bas",
+      "source_length": 5860
+    },
+    {
+      "name": "modImportDebug",
+      "stream_name": "modImportDebug",
+      "source_offset": 15457,
+      "module_type": "procedural",
+      "exported_file": "modImportDebug.bas",
+      "source_length": 11275
+    },
+    {
+      "name": "Sheet5",
+      "stream_name": "Sheet5",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet5.cls",
+      "source_length": 291
+    },
+    {
+      "name": "modScanAudit",
+      "stream_name": "modScanAudit",
+      "source_offset": 18344,
+      "module_type": "procedural",
+      "exported_file": "modScanAudit.bas",
+      "source_length": 12948
+    },
+    {
+      "name": "Sheet6",
+      "stream_name": "Sheet6",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet6.cls",
+      "source_length": 291
+    },
+    {
+      "name": "Sheet9",
+      "stream_name": "Sheet9",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet9.cls",
+      "source_length": 291
+    },
+    {
+      "name": "frmScanAlert",
+      "stream_name": "frmScanAlert",
+      "source_offset": 6052,
+      "module_type": "document",
+      "exported_file": "frmScanAlert.frm",
+      "source_length": 4586
+    },
+    {
+      "name": "Sheet7",
+      "stream_name": "Sheet7",
+      "source_offset": 827,
+      "module_type": "document",
+      "exported_file": "Sheet7.cls",
+      "source_length": 291
+    }
+  ],
+  "notes": [
+    "Source was extracted directly from xl/vbaProject.bin.",
+    "UserForm designer binary/state is preserved in _metadata/vbaProject.bin; exported .frm files contain the code stream and attributes."
+  ]
+}
