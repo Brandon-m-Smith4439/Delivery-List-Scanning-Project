@@ -1,0 +1,33 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache/files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temporary/project-generated folders
+Temp/
+Temp Delivery Lists/
+Backups/
+
+# Generated export/build files
+*.tar.gz
+*.zip
+*.log
+*.tmp
+
+# Excel temporary/lock files
+~$*.xlsm
+~$*.xlsx
+~$*.xls
+*.xlk
+
+# Local editor/system files
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
