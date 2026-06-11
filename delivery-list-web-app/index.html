@@ -6,225 +6,380 @@
   <title>Delivery List Scanner</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body data-mobile-view="scan">
+<body data-page="home" data-mobile-view="scan">
+  <section class="login-screen" id="loginPanel" hidden>
+    <form class="login-card" id="loginForm">
+      <img src="assets/barefoot-logo.jpg" alt="Barefoot & Company">
+      <h1>Delivery List Scanner</h1>
+      <label>
+        <span>Username</span>
+        <input id="loginUsername" type="text" autocomplete="username" value="admin">
+      </label>
+      <label>
+        <span>Password</span>
+        <input id="loginPassword" type="password" autocomplete="current-password">
+      </label>
+      <button type="submit">Sign in</button>
+      <p id="loginError" class="login-error"></p>
+    </form>
+  </section>
+
   <div class="app">
-    <header class="topbar">
+    <header class="app-header">
       <div class="brand">
         <img src="assets/barefoot-logo.jpg" alt="Barefoot & Company">
       </div>
-      <div class="title-block">
-        <h1 id="pageTitle">Delivery List</h1>
-        <p id="stageSubtitle">Staging - Airport Rd</p>
-        <label class="delivery-selector">
-          <span>List</span>
-          <select id="deliveryListSelect"></select>
+      <nav class="app-nav" aria-label="Main pages">
+        <button class="is-active" data-page-target="home" type="button">Home</button>
+        <button data-page-target="scan" type="button">Scan</button>
+        <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button">Bay Map</button>
+        <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button">Admin</button>
+      </nav>
+      <div class="header-search">
+        <label class="search-box">
+          <span class="search-icon"></span>
+          <input id="headerGlobalSearchInput" type="search" autocomplete="off" placeholder="Global search...">
         </label>
+        <button class="tool-button" id="headerGlobalSearchBtn" type="button">Search</button>
+        <div class="header-search-results" id="headerGlobalSearchResults" hidden></div>
       </div>
-      <div class="top-actions">
-        <label class="operator-field">
-          <span>Operator</span>
-          <input id="operatorInput" type="text" autocomplete="off" value="Scanner">
-        </label>
-        <label class="operator-field">
-          <span>Station</span>
-          <select id="stationSelect"></select>
-        </label>
+      <div class="header-actions">
+        <span class="signed-in-user" id="signedInUser"></span>
         <span class="backend-status" id="backendStatus">Local demo</span>
-        <button class="icon-button" id="refreshBtn" type="button" title="Refresh delivery list">
-          <span class="button-icon">R</span>
-          <span>Refresh</span>
-        </button>
-        <button class="auto-toggle" id="autoToggle" type="button" aria-pressed="true">
-          <span>Auto</span>
-          <span class="toggle-dot"></span>
-        </button>
+        <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
       </div>
     </header>
 
-    <main class="workspace">
-      <section class="list-panel" id="listPanel">
-        <div class="list-toolbar">
-          <label class="search-box">
-            <span class="search-icon"></span>
-            <input id="searchInput" type="search" autocomplete="off" placeholder="Search orders, jobs, customers...">
-          </label>
-          <div class="filter-tabs" role="tablist" aria-label="Delivery list filters">
-            <button class="tab is-active" data-filter="all" type="button">All <span id="countAll">(0)</span></button>
-            <button class="tab" data-filter="remaining" type="button">Not Scanned <span id="countRemaining">(0)</span></button>
-            <button class="tab" data-filter="partial" type="button">Partial <span id="countPartial">(0)</span></button>
-            <button class="tab" data-filter="complete" type="button">Complete <span id="countComplete">(0)</span></button>
-            <button class="tab" data-filter="errors" type="button">Errors <span id="countErrors">(0)</span></button>
+    <main>
+      <section class="page-view home-page" id="homePage">
+        <div class="page-heading">
+          <div>
+            <h1>Delivery List Overview</h1>
+            <p id="homeWelcome">Signed in</p>
           </div>
-          <button class="tool-button" id="filterBtn" type="button" title="Filter list">
-            <span class="filter-icon"></span>
-            <span>Filter</span>
-          </button>
+          <div class="overview-kpis" id="overviewStats"></div>
         </div>
 
-        <div class="table-wrap">
-          <table class="delivery-table">
-            <thead>
-              <tr>
-                <th>Job Nr.</th>
-                <th>Order Nr.</th>
-                <th>Item Nr.</th>
-                <th>Qty.</th>
-                <th>Dimensions</th>
-                <th>Customer</th>
-                <th>RM</th>
-                <th>Route</th>
-                <th>Process State</th>
-                <th>Queue State</th>
-              </tr>
-            </thead>
-            <tbody id="listRows"></tbody>
-          </table>
-        </div>
+        <div class="home-grid">
+          <section class="panel">
+            <div class="section-heading">
+              <h2>Find Delivery List</h2>
+              <span id="homeListCount">0 lists</span>
+            </div>
+            <div class="finder-toolbar">
+              <label class="search-box">
+                <span class="search-icon"></span>
+                <input id="homeListSearch" type="search" autocomplete="off" placeholder="Search date, stage, route...">
+              </label>
+              <select id="homeStageFilter">
+                <option value="all">All stages</option>
+                <option value="Airport Rd">Airport Rd</option>
+                <option value="Indian Trail">Indian Trail</option>
+                <option value="Customer Pickup">Customer Pickup</option>
+              </select>
+            </div>
+            <div class="delivery-list-grid" id="homeListGrid"></div>
+          </section>
 
-        <div class="list-footer">
-          <span id="totalItemsText">0 total items</span>
-          <div class="pager" aria-label="Pagination">
-            <button type="button" disabled>&lt;</button>
-            <button type="button" class="is-active">1</button>
-            <button type="button">2</button>
-            <button type="button">3</button>
-            <span>...</span>
-            <button type="button">10</button>
-            <button type="button">&gt;</button>
-          </div>
-          <label class="page-size">
-            <span>Page size:</span>
-            <select id="pageSize">
-              <option>25</option>
-              <option>50</option>
-              <option>100</option>
-            </select>
-          </label>
+          <aside class="panel home-side">
+            <section>
+              <h2>Signed In</h2>
+              <div id="homeUserCard" class="user-card"></div>
+            </section>
+            <section>
+              <h2>Recent Delivery Lists</h2>
+              <div id="homeRecentLists" class="compact-list"></div>
+            </section>
+            <section>
+              <h2>Current Activity</h2>
+              <div id="homeActivity" class="compact-list"></div>
+            </section>
+          </aside>
         </div>
       </section>
 
-      <aside class="scanner-panel" id="scanPanel">
-        <section class="progress-band">
-          <div class="progress-title">
-            <span class="cube-icon"></span>
-            <strong id="progressText">Staged Qty: 0/0 - 0.0% Complete</strong>
+      <section class="page-view scan-page" id="scanPage" hidden>
+        <div class="scan-heading">
+          <div>
+            <h1 id="pageTitle">Delivery List</h1>
+            <p id="stageSubtitle">Select a delivery list</p>
           </div>
-          <div class="progress-track"><span id="progressFill"></span></div>
-        </section>
-
-        <h2 id="stageHeading">Staging - Airport Rd</h2>
-
-        <form class="scan-form" id="scanForm">
-          <label for="scanInput">Scan Barcode</label>
-          <div class="scan-input-wrap">
-            <span class="barcode-icon"></span>
-            <input id="scanInput" type="text" inputmode="text" autocomplete="off" placeholder="Scan or enter barcode...">
+          <div class="scan-heading-controls">
+            <label class="delivery-selector">
+              <span>List</span>
+              <select id="deliveryListSelect"></select>
+            </label>
+            <label class="operator-field">
+              <span>Station</span>
+              <select id="stationSelect"></select>
+            </label>
+            <input id="operatorInput" class="visually-hidden" type="text" autocomplete="off" value="Scanner">
           </div>
-        </form>
+        </div>
 
-        <section class="last-scan">
-          <div class="section-heading">
-            <h3>Last Scan</h3>
-            <span id="lastScanTime">Waiting</span>
-          </div>
-          <div class="last-card" id="lastCard">
-            <div class="last-card-status"></div>
-            <strong id="lastJob">No scans yet</strong>
-            <div class="last-fields">
-              <span><small>Order Nr.</small><b id="lastOrder">-</b></span>
-              <span><small>Item Nr.</small><b id="lastItem">-</b></span>
-              <span><small>Qty</small><b id="lastQty">-</b></span>
-              <span><small>Dimensions</small><b id="lastDims">-</b></span>
-              <span><small>Customer</small><b id="lastCustomer">-</b></span>
+        <main class="workspace">
+          <section class="list-panel" id="listPanel">
+            <div class="list-toolbar">
+              <label class="search-box">
+                <span class="search-icon"></span>
+                <input id="searchInput" type="search" autocomplete="off" placeholder="Search orders, jobs, customers...">
+              </label>
+              <div class="filter-tabs" role="tablist" aria-label="Delivery list filters">
+                <button class="tab is-active" data-filter="all" type="button">All <span id="countAll">(0)</span></button>
+                <button class="tab" data-filter="remaining" type="button">Not Scanned <span id="countRemaining">(0)</span></button>
+                <button class="tab" data-filter="partial" type="button">Partial <span id="countPartial">(0)</span></button>
+                <button class="tab" data-filter="complete" type="button">Complete <span id="countComplete">(0)</span></button>
+                <button class="tab" data-filter="errors" type="button">Needs Review <span id="countErrors">(0)</span></button>
+              </div>
+              <label class="page-size top-page-size">
+                <span>Rows</span>
+                <select id="pageSize">
+                  <option>25</option>
+                  <option>50</option>
+                  <option>100</option>
+                </select>
+              </label>
             </div>
+            <div class="pager-row" id="scanPagerTop"></div>
+
+            <div class="table-wrap">
+              <table class="delivery-table">
+                <thead>
+                  <tr>
+                    <th>Job Nr.</th>
+                    <th>Order Nr.</th>
+                    <th>Item Nr.</th>
+                    <th>Qty.</th>
+                    <th>Dimensions</th>
+                    <th>Customer</th>
+                    <th>RM</th>
+                    <th>Route</th>
+                    <th>Process State</th>
+                  </tr>
+                </thead>
+                <tbody id="listRows"></tbody>
+              </table>
+            </div>
+
+            <div class="list-footer">
+              <span id="totalItemsText">0 total items</span>
+              <div class="pager" id="scanPagerBottom" aria-label="Pagination"></div>
+            </div>
+          </section>
+
+          <aside class="scanner-panel" id="scanPanel">
+            <section class="progress-band">
+              <div class="progress-title">
+                <span class="cube-icon"></span>
+                <strong id="progressText">Staged Qty: 0/0 - 0.0% Complete</strong>
+              </div>
+              <div class="progress-track"><span id="progressFill"></span></div>
+            </section>
+
+            <h2 id="stageHeading">Select a delivery list</h2>
+
+            <form class="scan-form" id="scanForm">
+              <label for="scanInput">Scan Barcode</label>
+              <div class="scan-input-wrap">
+                <span class="barcode-icon"></span>
+                <input id="scanInput" type="text" inputmode="text" autocomplete="off" placeholder="Scan or enter barcode...">
+              </div>
+            </form>
+
+            <section class="last-scan">
+              <div class="section-heading">
+                <h3>Last Scan</h3>
+                <span id="lastScanTime">Waiting</span>
+              </div>
+              <div class="last-card" id="lastCard">
+                <div class="last-card-status"></div>
+                <strong id="lastJob">No scans yet</strong>
+                <div class="last-fields">
+                  <span><small>Order Nr.</small><b id="lastOrder">-</b></span>
+                  <span><small>Item Nr.</small><b id="lastItem">-</b></span>
+                  <span><small>Qty</small><b id="lastQty">-</b></span>
+                  <span><small>Dimensions</small><b id="lastDims">-</b></span>
+                  <span><small>Customer</small><b id="lastCustomer">-</b></span>
+                </div>
+              </div>
+            </section>
+
+            <section class="scan-message-panel">
+              <div>
+                <div class="section-heading">
+                  <h3>Needs Review</h3>
+                  <span id="needsReviewCount">0</span>
+                </div>
+                <div id="needsReviewList" class="message-list"></div>
+              </div>
+              <div>
+                <div class="section-heading">
+                  <h3>Notices</h3>
+                  <span id="noticeCount">0</span>
+                </div>
+                <div id="noticeList" class="message-list"></div>
+              </div>
+            </section>
+
+            <section class="mobile-list-cards" id="mobileListCards"></section>
+
+            <section class="recent-panel">
+              <div class="section-heading">
+                <h3>Recent Scans</h3>
+                <button id="viewAllRecent" type="button">Audit</button>
+              </div>
+              <div class="recent-table-wrap">
+                <table class="recent-table">
+                  <thead>
+                    <tr>
+                      <th>Barcode</th>
+                      <th>Order Nr.</th>
+                      <th>Item Nr.</th>
+                      <th>Qty Scanned</th>
+                      <th>Date & Time Scanned</th>
+                      <th>Check</th>
+                    </tr>
+                  </thead>
+                  <tbody id="recentRows"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="summary-grid" id="summaryPanel">
+              <div class="summary-card remaining">
+                <span class="status-ring"></span>
+                <div><small>Remaining</small><strong id="remainingQty">0</strong><span id="remainingPct">0.0%</span></div>
+              </div>
+              <div class="summary-card partial">
+                <span class="status-ring"></span>
+                <div><small>Partial</small><strong id="partialQty">0</strong><span id="partialPct">0.0%</span></div>
+              </div>
+              <div class="summary-card complete">
+                <span class="status-ring"></span>
+                <div><small>Complete</small><strong id="completeQty">0</strong><span id="completePct">0.0%</span></div>
+              </div>
+              <div class="summary-card errors">
+                <span class="status-ring"></span>
+                <div><small>Needs Review</small><strong id="errorQty">0</strong><span>0.0%</span></div>
+              </div>
+            </section>
+
+            <section class="menu-panel" id="menuPanel">
+              <h3>Actions</h3>
+              <button id="printBtn" type="button">Print current list</button>
+              <button id="exportBtn" type="button">Export CSV</button>
+              <button id="undoBtn" type="button">Undo last scan</button>
+              <button id="resetBtn" type="button">Reset scans</button>
+              <button id="loadExampleBtn" type="button">Load damaged sample</button>
+            </section>
+          </aside>
+        </main>
+      </section>
+
+      <section class="page-view bay-map-page" id="bayMapPage" hidden>
+        <div class="page-heading">
+          <div>
+            <h1>Indian Trail Bay Map</h1>
+            <p>Live bay status by workbook layout</p>
           </div>
+          <div id="bayOverviewStats" class="overview-kpis"></div>
+        </div>
+        <div class="bay-action-bar">
+          <label class="search-box">
+            <span class="search-icon"></span>
+            <input id="bayMapSearch" type="search" autocomplete="off" placeholder="Search bay, order, customer...">
+          </label>
+          <select id="bayStatusFilter">
+            <option value="all">All statuses</option>
+            <option value="occupied">Occupied</option>
+            <option value="empty">Empty</option>
+            <option value="sdi">SDI</option>
+            <option value="manual">Manual hold</option>
+          </select>
+          <button class="tool-button" id="bayCheckBtn" type="button">Bay check</button>
+        </div>
+        <div id="indianTrailSummary" class="bay-summary"></div>
+        <section class="bay-map-shell">
+          <div id="bayMapCanvas" class="excel-bay-map"></div>
+          <aside class="bay-side-panel">
+            <h2>Unmapped / Manual</h2>
+            <div id="bayMapUnmapped" class="compact-list"></div>
+          </aside>
         </section>
+      </section>
 
-        <section class="mobile-list-cards" id="mobileListCards"></section>
+      <section class="page-view admin-page" id="adminPage" hidden>
+        <div class="page-heading">
+          <div>
+            <h1>Admin</h1>
+            <p>Delivery lists, users, stations, exceptions, and manual edits</p>
+          </div>
+          <div id="adminSummary" class="overview-kpis"></div>
+        </div>
 
-        <section class="recent-panel">
-          <div class="section-heading">
-          <h3>Recent Scans</h3>
-            <button id="viewAllRecent" type="button">Audit</button>
-          </div>
-          <div class="recent-table-wrap">
-            <table class="recent-table">
-              <thead>
-                <tr>
-                  <th>Barcode</th>
-                  <th>Order Nr.</th>
-                  <th>Item Nr.</th>
-                  <th>Qty Scanned</th>
-                  <th>Date & Time Scanned</th>
-                  <th>Check</th>
-                </tr>
-              </thead>
-              <tbody id="recentRows"></tbody>
-            </table>
-          </div>
-        </section>
+        <div class="admin-layout">
+          <section class="panel">
+            <h2>Import Delivery List</h2>
+            <button id="importBtn" type="button">Import / update list</button>
+            <input id="importFile" class="visually-hidden" type="file" accept=".json,application/json">
+            <div id="importPreviewBox" class="admin-empty">No import selected.</div>
+          </section>
 
-        <section class="summary-grid" id="summaryPanel">
-          <div class="summary-card remaining">
-            <span class="status-ring"></span>
-            <div><small>Remaining</small><strong id="remainingQty">0</strong><span id="remainingPct">0.0%</span></div>
-          </div>
-          <div class="summary-card partial">
-            <span class="status-ring"></span>
-            <div><small>Partial</small><strong id="partialQty">0</strong><span id="partialPct">0.0%</span></div>
-          </div>
-          <div class="summary-card complete">
-            <span class="status-ring"></span>
-            <div><small>Complete</small><strong id="completeQty">0</strong><span id="completePct">0.0%</span></div>
-          </div>
-          <div class="summary-card errors">
-            <span class="status-ring"></span>
-            <div><small>Errors</small><strong id="errorQty">0</strong><span>0.0%</span></div>
-          </div>
-        </section>
+          <section class="panel">
+            <h2>Users</h2>
+            <form id="createUserForm" class="admin-form">
+              <input id="newUserName" type="text" autocomplete="off" placeholder="Username">
+              <input id="newUserDisplay" type="text" autocomplete="off" placeholder="Display name">
+              <input id="newUserPassword" type="password" autocomplete="new-password" placeholder="Password">
+              <select id="newUserRole">
+                <option>Operator</option>
+                <option>Supervisor</option>
+                <option>Indian Trail Operator</option>
+                <option>Indian Trail Lead</option>
+                <option>Indian Trail Manager</option>
+                <option>Admin</option>
+              </select>
+              <button type="submit">Add user</button>
+            </form>
+            <div id="adminUsers" class="admin-table"></div>
+          </section>
 
-        <section class="bay-panel" id="bayPanel">
-          <div class="section-heading">
-            <h3>Indian Trail Bay Sort</h3>
-            <span id="bayStatus">Ready</span>
-          </div>
-          <div class="bay-grid" id="bayGrid"></div>
-        </section>
-
-        <section class="alerts-panel" id="alertsPanel">
-          <h3>Alerts</h3>
-          <div id="alertsList"></div>
-        </section>
-
-        <section class="menu-panel" id="menuPanel">
-          <h3>Menu</h3>
-          <button id="resetBtn" type="button">Reset scans</button>
-          <button id="undoBtn" type="button">Undo last scan</button>
-          <button id="loadExampleBtn" type="button">Load damaged sample</button>
-          <button id="importBtn" type="button">Import / update list</button>
-          <input id="importFile" class="visually-hidden" type="file" accept=".json,application/json">
-          <button id="printBtn" type="button">Print current list</button>
-          <button id="exportBtn" type="button">Export CSV</button>
-          <div class="station-manager">
-            <h4>Stations</h4>
+          <section class="panel">
+            <h2>Stations</h2>
             <div class="station-add-row">
               <input id="newStationInput" type="text" autocomplete="off" placeholder="New station">
               <button id="addStationBtn" type="button">Add</button>
             </div>
-          </div>
-          <div class="system-note">
-            <strong>Production shape</strong>
-            <span>Database-backed lists, live scan queue, user logins, audit trail, bay sorting, and optional Power Automate sync.</span>
-          </div>
-        </section>
-      </aside>
+            <div id="adminStations" class="compact-list"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Manual Delivery List Edit</h2>
+            <div class="admin-form">
+              <input id="manualEditSearch" type="search" autocomplete="off" placeholder="Search order or customer">
+              <button id="manualEditSearchBtn" type="button">Search</button>
+            </div>
+            <div id="manualEditResults" class="admin-table"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Exceptions</h2>
+            <div id="exceptionCenter"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Logged In Users</h2>
+            <div id="activeSessions" class="compact-list"></div>
+          </section>
+        </div>
+      </section>
     </main>
 
     <footer class="desktop-footer">
       <button class="scanner-select" type="button">Scanner: <strong id="scannerName">Airport Rd</strong></button>
       <div class="footer-actions">
-        <button type="button">Settings</button>
-        <button type="button">Sign out</button>
+        <button data-page-target="home" type="button">Home</button>
+        <button data-page-target="admin" type="button">Settings</button>
       </div>
     </footer>
 
@@ -232,7 +387,7 @@
       <button class="is-active" data-mobile-target="scan" type="button"><span class="nav-icon scan"></span>Scan</button>
       <button data-mobile-target="list" type="button"><span class="nav-icon list"></span>List</button>
       <button data-mobile-target="summary" type="button"><span class="nav-icon summary"></span>Summary</button>
-      <button data-mobile-target="alerts" type="button"><span class="nav-icon alerts"></span>Alerts</button>
+      <button data-mobile-target="alerts" type="button"><span class="nav-icon alerts"></span>Review</button>
       <button data-mobile-target="menu" type="button"><span class="nav-icon menu"></span>Menu</button>
     </nav>
   </div>

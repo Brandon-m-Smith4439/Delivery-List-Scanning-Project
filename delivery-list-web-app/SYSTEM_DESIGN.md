@@ -10,6 +10,59 @@ Yes, this can become a real delivery-list system as a website/web app. The stati
 - Importer: loads new delivery lists from Excel/CSV/SharePoint.
 - Sync jobs: optional Power Automate or scheduled workers for SharePoint snapshots, alerts, and reports.
 
+## Current Pilot Architecture
+
+The pilot now has a backend boundary that can survive a database migration:
+
+- `server.py` is the HTTP/API layer.
+- `scanner_config.py` loads server-side configuration from environment variables.
+- `delivery_store.py` defines the data-access contract and implements `SQLiteDeliveryStore`.
+- Future SQL Server/PostgreSQL/Azure SQL support should be added by creating another store adapter with the same methods.
+- `index.html`, `app.js`, and `styles.css` provide the desktop/mobile scanner UI, login screen, utility panel, admin dashboard, exception center, global search, and Indian Trail bay map.
+
+Important current store methods include:
+
+- `get_delivery_lists()`
+- `get_delivery_list(list_id)`
+- `get_line_items(list_id)`
+- `record_scan(scan_request)`
+- `undo_last_scan(list_id, user, station)`
+- `reset_stage(list_id, user, station)`
+- `import_delivery_list(payload)`
+- `preview_import(payload)`
+- `get_scan_events(list_id, only_errors)`
+- `get_exceptions(filters)`
+- `resolve_exception(data, user)`
+- `get_stations()`
+- `add_station(name)`
+- `export_csv(list_id)`
+- `authenticate_user(username, password)`
+- `get_user_by_session(token)`
+- `create_user(data, created_by)`
+- `admin_summary()`
+- `global_search(query)`
+- `reports_summary()`
+- `receive_indian_trail_scan(data, user)`
+- `assign_bay(data, user)`
+- `clear_bay(data, user)`
+- `mark_sdi(data, user)`
+
+This keeps SQL out of the route handler and gives IT a clear place to integrate the company SQL database later.
+
+## Current Phase 2 Coverage
+
+Phase 2 now has a working local foundation:
+
+- Local username/password login with hashed passwords and server-side sessions.
+- Seeded Admin, Operator, Supervisor, and Indian Trail roles.
+- API permission gates for scans, reset, undo, import, export, reports, stations, users, exceptions, and bay actions.
+- Admin dashboard endpoints for summary stats, recent imports, reports, exceptions, global search, users, permissions, and Indian Trail bay status.
+- Import preview before committing delivery-list updates.
+- Customer Pickup delivery list filtering to CPU orders only.
+- Indian Trail receive scan workflow with automatic bay assignment.
+- Indian Trail bay map seeded from the workbook layout in `Indian Trail Inventory Manager.xlsm`.
+- Repeatable validation scripts for scan workflows and Phase 2 auth/admin/API behavior.
+
 ## Database Options
 
 ### SharePoint Lists
@@ -44,11 +97,13 @@ For IT's existing SQL database, the clean integration is:
 
 - Keep this web UI.
 - Replace the current SQLite data layer with a SQL Server data layer.
-- Use the same core tables: `delivery_lists`, `line_items`, `scan_events`, `stations`, `users`, `bay_rules`, and `imports`.
+- Use the same core tables: `delivery_lists`, `line_items`, `scan_events`, `exceptions`, `stations`, `users`, `roles`, `role_permissions`, `sessions`, `imports`, `bays`, `bay_assignments`, `bay_events`, and `audit_events`.
 - Store the SQL connection string in a server environment variable, not in browser code.
 - Use Windows/Entra authentication if IT supports it; otherwise use a least-privilege SQL login for this app.
 - Keep scan validation server-side so two scanners cannot over-count the same item.
 - Add scheduled backups and a restore test owned by IT.
+
+The intended SQL Server change is not a rewrite of the app. Add something like `SqlServerDeliveryStore` in `delivery_store.py` or a sibling module, implement the same store methods, then switch with `DLS_DATABASE_TYPE=sqlserver` and `DLS_DATABASE_CONNECTION_STRING=...`.
 
 ## Multi-User Scanning
 
@@ -89,6 +144,8 @@ The Indian Trail auto sorting system can be included as a module in the same app
 - Show bay counts live on the Indian Trail screen.
 
 Rules can use dimensions, product type, route, customer, rack/bay capacity, and manual overrides.
+
+The pilot already loads the Indian Trail workbook layout, exposes it as a dedicated bay-map page, and can receive an Indian Trail scan into the first available matching bay type. The next step is to refine the bay assignment rules with production labels, capacity rules, and any floor-specific exceptions.
 
 ## Power Automate
 
