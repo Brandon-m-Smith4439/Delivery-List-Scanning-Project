@@ -58,9 +58,12 @@ Phase 2 now has a working local foundation:
 - API permission gates for scans, reset, undo, import, export, reports, stations, users, exceptions, and bay actions.
 - Admin dashboard endpoints for summary stats, recent imports, reports, exceptions, global search, users, permissions, and Indian Trail bay status.
 - Import preview before committing delivery-list updates.
+- Home overview for the current/latest delivery date, grouped by staged, outbound, received, and pickup progress.
 - Customer Pickup delivery list filtering to CPU orders only.
 - Indian Trail receive scan workflow with automatic bay assignment.
-- Indian Trail bay map seeded from the workbook layout in `Indian Trail Inventory Manager.xlsm`.
+- Outbound scans can auto-stage the matching staging item when staging was missed, while logging a notice and audit event.
+- Indian Trail bay map seeded from a generated workbook-layout snapshot of `Indian Trail Inventory Manager.xlsm`.
+- Indian Trail recent-action feed based on `bay_events`.
 - Repeatable validation scripts for scan workflows and Phase 2 auth/admin/API behavior.
 
 ## Database Options
@@ -145,7 +148,7 @@ The Indian Trail auto sorting system can be included as a module in the same app
 
 Rules can use dimensions, product type, route, customer, rack/bay capacity, and manual overrides.
 
-The pilot already loads the Indian Trail workbook layout, exposes it as a dedicated bay-map page, and can receive an Indian Trail scan into the first available matching bay type. The next step is to refine the bay assignment rules with production labels, capacity rules, and any floor-specific exceptions.
+The pilot already loads a generated snapshot of the Indian Trail workbook layout, exposes it as a dedicated bay-map page, and can receive an Indian Trail scan into the first available matching bay type. The workbook is not live-linked at runtime; layout changes in Excel need the layout export/regeneration step before the web map changes. The next step is to refine the bay assignment rules with production labels, capacity rules, and any floor-specific exceptions.
 
 ## Power Automate
 

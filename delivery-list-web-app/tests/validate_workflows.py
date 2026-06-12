@@ -93,6 +93,21 @@ def main() -> int:
     station_result = store.add_station("Validation Bench")
     results.append(assert_true("station_add", "Validation Bench" in station_result["stations"], {"stations": station_result["stations"]}))
 
+    outbound_id = "2026-04-01-outbound-airport"
+    store.reset_stage(list_id, "Validator", "Test Bench")
+    store.reset_stage(outbound_id, "Validator", "Test Bench")
+    outbound_scan = store.record_scan({"listId": outbound_id, "barcode": "T200231887001000", "user": "Validator", "station": "Outbound Bench"})
+    staging_after = store.get_delivery_list(list_id)
+    staged_item = next(item for item in staging_after["items"] if item["order"] == "231887" and item["item"] == "001")
+    outbound_notices = [entry for entry in outbound_scan["recent"] if entry["eventType"] == "notice"]
+    results.append(
+        assert_true(
+            "outbound_auto_stages_missing_staging_scan",
+            outbound_scan["lastScan"]["ok"] and int(staged_item["scanned"]) == 1 and outbound_notices,
+            {"stagedScanned": staged_item["scanned"], "notice": outbound_notices[0]["message"] if outbound_notices else ""},
+        )
+    )
+
     exceptions = store.get_exceptions({"listId": list_id})
     results.append(assert_true("exceptions_logged", len(exceptions) >= 2, {"count": len(exceptions)}))
 

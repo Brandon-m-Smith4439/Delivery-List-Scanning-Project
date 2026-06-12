@@ -62,6 +62,14 @@
 
         <div class="home-grid">
           <section class="panel">
+            <section class="today-progress-panel">
+              <div class="section-heading">
+                <h2>Today's Delivery Progress</h2>
+                <span id="todayDateLabel">Today</span>
+              </div>
+              <div class="today-stage-grid" id="todayStageGrid"></div>
+            </section>
+
             <div class="section-heading">
               <h2>Find Delivery List</h2>
               <span id="homeListCount">0 lists</span>
@@ -186,6 +194,24 @@
               </div>
             </form>
 
+            <form class="manual-scan-form" id="manualScanForm">
+              <div class="section-heading">
+                <h3>Manual Scan</h3>
+                <span>Order + item</span>
+              </div>
+              <div class="manual-scan-row">
+                <label>
+                  <span>Order Nr.</span>
+                  <input id="manualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="231707">
+                </label>
+                <label>
+                  <span>Item Nr.</span>
+                  <input id="manualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="003">
+                </label>
+                <button type="submit">Submit</button>
+              </div>
+            </form>
+
             <section class="last-scan">
               <div class="section-heading">
                 <h3>Last Scan</h3>
@@ -280,7 +306,7 @@
         <div class="page-heading">
           <div>
             <h1>Indian Trail Bay Map</h1>
-            <p>Live bay status by workbook layout</p>
+            <p>Layout from Indian Trail Inventory Manager workbook snapshot</p>
           </div>
           <div id="bayOverviewStats" class="overview-kpis"></div>
         </div>
@@ -298,12 +324,14 @@
           </select>
           <button class="tool-button" id="bayCheckBtn" type="button">Bay check</button>
         </div>
+        <div id="bayFlowPanel" class="bay-route-flow"></div>
         <div id="indianTrailSummary" class="bay-summary"></div>
+        <div id="bayLegend" class="bay-legend"></div>
         <section class="bay-map-shell">
           <div id="bayMapCanvas" class="excel-bay-map"></div>
           <aside class="bay-side-panel">
-            <h2>Unmapped / Manual</h2>
-            <div id="bayMapUnmapped" class="compact-list"></div>
+            <h2>Recent Actions</h2>
+            <div id="bayRecentActions" class="compact-list"></div>
           </aside>
         </section>
       </section>

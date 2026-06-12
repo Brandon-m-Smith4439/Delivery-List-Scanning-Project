@@ -99,6 +99,7 @@ py -3 .\tests\validate_phase2.py
 - delivery-list seeding
 - Customer Pickup CPU filtering
 - exact scan
+- outbound scan auto-staging when the matching staging scan is missing
 - damaged-label recovery
 - duplicate/over-quantity rejection
 - bad scan rejection
@@ -117,6 +118,7 @@ py -3 .\tests\validate_phase2.py
 - login/session cookie behavior
 - admin summary, reports, global search, and import preview
 - seeded bay map and Indian Trail receive-to-bay assignment
+- Indian Trail recent bay action feed
 - operator scan/export access without admin access
 - stage-filtered delivery lists for Airport Road, Customer Pickup, and Indian Trail accounts
 
@@ -144,15 +146,19 @@ http://127.0.0.1:8765/?reset=1&demoScan=TDEXRTY887001000
 
 - Desktop scanner/table layout based on the provided mockup.
 - Mobile scan-first layout with bottom navigation.
+- Home overview section for the current/latest delivery date with stage progress cards.
 - Delivery-list/stage selector with separate demo scan state per list.
 - Stage-aware filtering; Customer Pickup shows CPU orders only.
 - Station selector with add-station support.
 - Search and status filters.
 - Exact barcode scans.
+- Manual scan entry by order number and item number.
 - Damaged-label recovery when the delivery list has one safe match.
 - Unknown/ambiguous scans reject instead of guessing.
+- Outbound scans automatically stage the matching item when staging was missed, with a non-blocking notice.
 - Highlighted quantity status, progress, last scan, recent scans, and summary counts.
-- Indian Trail bay map based on `Indian Trail Inventory Manager.xlsm`.
+- Indian Trail bay map based on a generated snapshot of `Indian Trail Inventory Manager.xlsm`; regenerate the JSON layout after workbook layout changes.
+- Indian Trail route flow, legend, search-to-bay scroll, and recent bay action feed.
 - SQLite-backed scan state, audit events, undo, import/update JSON, print, and CSV export when launched with `server.py`.
 - Login/session support with role-based permissions.
 - Admin dashboard data for users, imports, exceptions, reports, global search, and bay status.

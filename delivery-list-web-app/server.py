@@ -160,6 +160,13 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(STORE.get_bay_layout())
             return
 
+        if parsed.path == "/api/indian-trail/events":
+            if not self.require_permission("view_bays"):
+                return
+            limit = parse_qs(parsed.query).get("limit", ["20"])[0]
+            self.send_json({"events": STORE.get_bay_events(int(limit or 20))})
+            return
+
         if parsed.path.startswith("/api/delivery-lists/"):
             user = self.require_permission("view_lists")
             if not user:

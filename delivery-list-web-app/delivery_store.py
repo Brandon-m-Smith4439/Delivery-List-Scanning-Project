@@ -452,6 +452,9 @@ class BaseDeliveryStore:
     def get_bay_layout(self) -> dict[str, Any]:
         raise NotImplementedError
 
+    def get_bay_events(self, limit: int = 20) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
     def indian_trail_summary(self) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -1437,11 +1440,100 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 con.commit()
                 return self._get_payload(con, list_id, last)
 
+            auto_staged = self.auto_stage_for_outbound(con, list_id, row, barcode, canonical, user, station)
+            if auto_staged:
+                self.insert_event(
+                    con,
+                    list_id,
+                    row["id"],
+                    barcode,
+                    canonical,
+                    user,
+                    station,
+                    "notice",
+                    "Auto-staged before outbound",
+                    "This item was not scanned on staging, so it was auto-scanned for convenience.",
+                )
+
             con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
             last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", reason, "", 1)
             self.insert_audit(con, "line_item", row["id"], "scan", user, station, reason, {"barcode": barcode, "canonical": canonical})
             con.commit()
             return self._get_payload(con, list_id, last)
+
+    def auto_stage_for_outbound(
+        self,
+        con: sqlite3.Connection,
+        list_id: str,
+        outbound_row: sqlite3.Row,
+        barcode: str,
+        canonical: str,
+        user: str,
+        station: str,
+    ) -> bool:
+        current_list = con.execute("SELECT delivery_date, stage, scanner FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+        if not current_list or "outbound" not in str(current_list["stage"]).lower():
+            return False
+        staging_list = con.execute(
+            """
+            SELECT id FROM delivery_lists
+            WHERE delivery_date = ?
+              AND scanner = ?
+              AND LOWER(stage) LIKE '%staging%'
+              AND id <> ?
+            ORDER BY id
+            LIMIT 1
+            """,
+            (current_list["delivery_date"], current_list["scanner"], list_id),
+        ).fetchone()
+        if not staging_list:
+            return False
+        staging_row = con.execute(
+            """
+            SELECT * FROM line_items
+            WHERE list_id = ?
+              AND (
+                source_id = ?
+                OR (order_no = ? AND item_no = ?)
+              )
+            ORDER BY id
+            LIMIT 1
+            """,
+            (staging_list["id"], outbound_row["source_id"], outbound_row["order_no"], outbound_row["item_no"]),
+        ).fetchone()
+        if not staging_row:
+            return False
+
+        target_qty = min(int(outbound_row["scanned_qty"]) + 1, int(outbound_row["qty"]))
+        delta = min(target_qty - int(staging_row["scanned_qty"]), int(staging_row["qty"]) - int(staging_row["scanned_qty"]))
+        if delta <= 0:
+            return False
+
+        con.execute("UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?", (delta, staging_row["id"]))
+        self.insert_event(
+            con,
+            staging_list["id"],
+            staging_row["id"],
+            barcode,
+            canonical,
+            user,
+            station,
+            "scan",
+            "Auto-staged from outbound scan",
+            "Outbound scan advanced staging automatically.",
+            delta,
+        )
+        self.insert_audit(
+            con,
+            "line_item",
+            staging_row["id"],
+            "auto_stage_from_outbound",
+            user,
+            station,
+            "Outbound scan advanced staging automatically.",
+            {"outboundListId": list_id, "barcode": barcode, "canonical": canonical, "qtyDelta": delta},
+        )
+        return True
 
     def reset_stage(self, list_id: str, user: str, station: str) -> dict[str, Any]:
         with self.connect() as con:
@@ -1851,6 +1943,51 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not layout_path.exists():
             return {"bays": [], "cells": [], "sections": [], "grid": {"minRow": 1, "maxRow": 1, "minCol": 1, "maxCol": 1}}
         return json.loads(layout_path.read_text(encoding="utf-8"))
+
+    def get_bay_events(self, limit: int = 20) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit or 20), 100))
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT be.*,
+                       b.bay_code AS bay_code,
+                       b.display_name AS bay_display,
+                       old_bay.bay_code AS old_bay_code,
+                       old_bay.display_name AS old_bay_display,
+                       new_bay.bay_code AS new_bay_code,
+                       new_bay.display_name AS new_bay_display,
+                       li.order_no, li.item_no, li.customer, li.dimensions, li.product
+                FROM bay_events be
+                LEFT JOIN bays b ON b.id = be.bay_id
+                LEFT JOIN bays old_bay ON old_bay.id = be.old_bay_id
+                LEFT JOIN bays new_bay ON new_bay.id = be.new_bay_id
+                LEFT JOIN line_items li ON li.id = be.line_item_id
+                ORDER BY be.id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "eventType": row["event_type"],
+                "bayCode": row["bay_code"] or "",
+                "bayDisplay": row["bay_display"] or row["bay_code"] or "",
+                "oldBayCode": row["old_bay_code"] or "",
+                "oldBayDisplay": row["old_bay_display"] or row["old_bay_code"] or "",
+                "newBayCode": row["new_bay_code"] or "",
+                "newBayDisplay": row["new_bay_display"] or row["new_bay_code"] or "",
+                "order": row["order_no"] or "",
+                "item": row["item_no"] or "",
+                "customer": row["customer"] or "",
+                "dimensions": row["dimensions"] or "",
+                "product": row["product"] or "",
+                "reason": row["reason"] or "",
+                "user": row["user_name"] or "",
+                "time": row["created_at"],
+            }
+            for row in rows
+        ]
 
     def indian_trail_summary(self) -> dict[str, Any]:
         with self.connect() as con:

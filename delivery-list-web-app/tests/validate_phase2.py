@@ -141,6 +141,14 @@ def main() -> int:
         "admin",
     )
     results.append(assert_true("indian_trail_receive_assigns_bay", receive["ok"] and receive["bayCode"], {"bay": receive["bayCode"]}))
+    bay_events = store.get_bay_events()
+    results.append(
+        assert_true(
+            "indian_trail_recent_actions",
+            len(bay_events) >= 1 and bay_events[0]["eventType"] == "ReceiveAssignBay",
+            {"events": len(bay_events), "latest": bay_events[0]["eventType"] if bay_events else ""},
+        )
+    )
 
     server_mod.CONFIG = config
     server_mod.STORE = store
@@ -186,6 +194,9 @@ def main() -> int:
 
         status, payload, _ = client.request("GET", "/api/indian-trail/layout", cookie=admin_cookie)
         results.append(assert_true("http_bay_layout", status == 200 and len(payload["cells"]) >= 900, {"status": status, "cells": len(payload.get("cells", []))}))
+
+        status, payload, _ = client.request("GET", "/api/indian-trail/events", cookie=admin_cookie)
+        results.append(assert_true("http_bay_events", status == 200 and len(payload["events"]) >= 1, {"status": status, "events": len(payload.get("events", []))}))
 
         http_operator_name = f"operator_http_{os.getpid()}"
         status, payload, _ = client.request(

@@ -22,6 +22,7 @@ const state = {
   bayStatusFilter: "all",
   bayLayout: null,
   bays: [],
+  bayEvents: [],
   activeSessions: [],
   adminUsers: [],
   backend: false,
@@ -56,6 +57,8 @@ const els = {
   homeStageFilter: document.getElementById("homeStageFilter"),
   homeListGrid: document.getElementById("homeListGrid"),
   homeListCount: document.getElementById("homeListCount"),
+  todayDateLabel: document.getElementById("todayDateLabel"),
+  todayStageGrid: document.getElementById("todayStageGrid"),
 
   scanPage: document.getElementById("scanPage"),
   pageTitle: document.getElementById("pageTitle"),
@@ -70,6 +73,9 @@ const els = {
   searchInput: document.getElementById("searchInput"),
   scanForm: document.getElementById("scanForm"),
   scanInput: document.getElementById("scanInput"),
+  manualScanForm: document.getElementById("manualScanForm"),
+  manualOrderInput: document.getElementById("manualOrderInput"),
+  manualItemInput: document.getElementById("manualItemInput"),
   listRows: document.getElementById("listRows"),
   recentRows: document.getElementById("recentRows"),
   mobileListCards: document.getElementById("mobileListCards"),
@@ -112,9 +118,11 @@ const els = {
   bayMapSearch: document.getElementById("bayMapSearch"),
   bayStatusFilter: document.getElementById("bayStatusFilter"),
   bayCheckBtn: document.getElementById("bayCheckBtn"),
+  bayFlowPanel: document.getElementById("bayFlowPanel"),
   indianTrailSummary: document.getElementById("indianTrailSummary"),
+  bayLegend: document.getElementById("bayLegend"),
   bayMapCanvas: document.getElementById("bayMapCanvas"),
-  bayMapUnmapped: document.getElementById("bayMapUnmapped"),
+  bayRecentActions: document.getElementById("bayRecentActions"),
 
   adminPage: document.getElementById("adminPage"),
   adminSummary: document.getElementById("adminSummary"),
@@ -157,6 +165,48 @@ function formatDisplayDate(value) {
   const parts = String(value || "").split("-").map(Number);
   if (parts.length !== 3 || parts.some(Number.isNaN)) return String(value || "");
   return `${parts[1]}/${parts[2]}/${parts[0]}`;
+}
+
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1, 2)}-${pad(now.getDate(), 2)}`;
+}
+
+function latestDeliveryDate(lists = state.lists) {
+  const dates = lists.map((list) => list.deliveryDate).filter(Boolean).sort();
+  return dates[dates.length - 1] || todayKey();
+}
+
+function dashboardDateKey(lists = state.lists) {
+  const today = todayKey();
+  return lists.some((list) => list.deliveryDate === today) ? today : latestDeliveryDate(lists);
+}
+
+function progressPercent(list) {
+  return Number(list?.totalQty || 0) ? (Number(list.scannedQty || 0) / Number(list.totalQty || 1)) * 100 : 0;
+}
+
+function stageCategory(list) {
+  const stage = `${list?.stage || ""} ${list?.scanner || ""}`.toLowerCase();
+  if (stage.includes("outbound")) return "outbound";
+  if (stage.includes("indian trail") || stage.includes("inbound")) return "received";
+  if (stage.includes("customer pickup")) return "pickup";
+  return "staged";
+}
+
+function stageLabel(list) {
+  const category = stageCategory(list);
+  if (category === "outbound") return "Outbound";
+  if (category === "received") return "Received";
+  if (category === "pickup") return "Customer Pickup";
+  return "Staged";
+}
+
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }
 
 function uniqueText(values) {
@@ -820,6 +870,53 @@ function filteredDeliveryLists() {
   });
 }
 
+function deliveryListCard(list, extraClass = "") {
+  const percent = progressPercent(list);
+  const category = stageCategory(list);
+  return `
+    <article class="delivery-list-card ${escapeHtml(category)} ${escapeHtml(extraClass)}" data-open-list="${escapeHtml(list.id)}">
+      <div>
+        <strong>${escapeHtml(list.label)}</strong>
+        <span>${escapeHtml(list.stage)} - ${escapeHtml(list.scanner)}</span>
+      </div>
+      <div class="list-card-progress"><span style="width:${Math.min(percent, 100)}%"></span></div>
+      <small>${escapeHtml(list.itemCount || 0)} lines - ${escapeHtml(list.scannedQty || 0)}/${escapeHtml(list.totalQty || 0)} pieces</small>
+    </article>
+  `;
+}
+
+function renderTodayProgress() {
+  if (!els.todayStageGrid) return;
+  const key = dashboardDateKey();
+  const isActualToday = key === todayKey();
+  const lists = state.lists
+    .filter((list) => list.deliveryDate === key)
+    .sort((a, b) => {
+      const order = { staged: 1, outbound: 2, received: 3, pickup: 4 };
+      return (order[stageCategory(a)] || 9) - (order[stageCategory(b)] || 9) || a.label.localeCompare(b.label);
+    });
+  if (els.todayDateLabel) {
+    els.todayDateLabel.textContent = `${isActualToday ? "Today" : "Latest"} - ${formatDisplayDate(key)}`;
+  }
+  els.todayStageGrid.innerHTML = lists.length
+    ? lists
+        .map((list) => {
+          const percent = progressPercent(list);
+          return `
+            <article class="today-stage-card ${escapeHtml(stageCategory(list))}" data-open-list="${escapeHtml(list.id)}">
+              <div>
+                <span>${escapeHtml(stageLabel(list))}</span>
+                <strong>${escapeHtml(list.scannedQty || 0)} / ${escapeHtml(list.totalQty || 0)}</strong>
+              </div>
+              <div class="list-card-progress"><span style="width:${Math.min(percent, 100)}%"></span></div>
+              <small>${escapeHtml(list.stage)} - ${percent.toFixed(1)}%</small>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="admin-empty">No delivery lists are loaded for ${formatDisplayDate(key)}.</div>`;
+}
+
 function renderHome() {
   if (!els.homePage) return;
   const totalLists = state.lists.length;
@@ -845,24 +942,13 @@ function renderHome() {
       <small>Stages: ${escapeHtml((state.user?.stageAccess || ["All demo stages"]).join(", "))}</small>
     `;
   }
+  renderTodayProgress();
   const filtered = filteredDeliveryLists();
   if (els.homeListCount) els.homeListCount.textContent = `${filtered.length} lists`;
   if (els.homeListGrid) {
     els.homeListGrid.innerHTML = filtered.length
       ? filtered
-          .map((list) => {
-            const percent = Number(list.totalQty || 0) ? (Number(list.scannedQty || 0) / Number(list.totalQty || 1)) * 100 : 0;
-            return `
-              <article class="delivery-list-card" data-open-list="${escapeHtml(list.id)}">
-                <div>
-                  <strong>${escapeHtml(list.label)}</strong>
-                  <span>${escapeHtml(list.stage)} - ${escapeHtml(list.scanner)}</span>
-                </div>
-                <div class="list-card-progress"><span style="width:${Math.min(percent, 100)}%"></span></div>
-                <small>${escapeHtml(list.itemCount || 0)} lines - ${escapeHtml(list.scannedQty || 0)}/${escapeHtml(list.totalQty || 0)} pieces</small>
-              </article>
-            `;
-          })
+          .map((list) => deliveryListCard(list))
           .join("")
       : `<div class="admin-empty">No delivery lists match.</div>`;
   }
@@ -925,6 +1011,19 @@ async function processScan(rawScan) {
     return;
   }
   processLocalScan(scanText);
+}
+
+async function submitManualScan() {
+  const order = digitsOnly(els.manualOrderInput?.value || "");
+  const item = digitsOnly(els.manualItemInput?.value || "");
+  if (!order || !item) {
+    showInlineError("Manual scan needs an order number and item number.", false);
+    return;
+  }
+  await processScan(canonicalBarcode(order, item));
+  if (els.manualOrderInput) els.manualOrderInput.value = "";
+  if (els.manualItemInput) els.manualItemInput.value = "";
+  els.manualOrderInput?.focus();
 }
 
 function processLocalScan(scanText) {
@@ -1069,20 +1168,52 @@ function renderGlobalSearchResults(results) {
 async function refreshBayMapPage() {
   if (!hasAnyPermission(["view_bays", "view_indian_trail"])) return;
   if (state.backend) {
-    const [layout, baysPayload, summary] = await Promise.all([
+    const [layout, baysPayload, summary, eventsPayload] = await Promise.all([
       fetchJson("/api/indian-trail/layout"),
       fetchJson("/api/indian-trail/bays"),
       hasPermission("view_indian_trail") ? fetchJson("/api/indian-trail/summary") : Promise.resolve(null),
+      fetchJson("/api/indian-trail/events"),
     ]);
     state.bayLayout = layout;
     state.bays = baysPayload.bays || [];
+    state.bayEvents = eventsPayload.events || [];
     renderIndianTrailSummary(summary);
+    renderBayRouteFlow(summary);
   } else {
     const response = await fetch("data/indian-trail-bay-layout.json");
     state.bayLayout = await response.json();
     state.bays = (state.bayLayout.bays || []).map((bay) => ({ ...bay, assignedQty: 0, capacityQty: bay.autoAssignable ? 1 : 0, status: bay.autoAssignable ? "Empty" : "ManualHold", assignments: [] }));
+    state.bayEvents = [];
+    renderBayRouteFlow(null);
   }
   renderBayMapPage();
+}
+
+function renderBayRouteFlow(summary) {
+  if (!els.bayFlowPanel) return;
+  const key = dashboardDateKey();
+  const dayLists = state.lists.filter((list) => list.deliveryDate === key);
+  const outbound = dayLists.find((list) => stageCategory(list) === "outbound");
+  const inbound = dayLists.find((list) => stageCategory(list) === "received") || state.lists.find((list) => list.id === summary?.activeInboundListId);
+  const outboundQty = Number(outbound?.scannedQty || 0);
+  const outboundTotal = Number(outbound?.totalQty || 0);
+  const inboundQty = Number(inbound?.scannedQty ?? summary?.receivedQty ?? 0);
+  const inboundTotal = Number(inbound?.totalQty ?? summary?.inboundToday ?? 0);
+  els.bayFlowPanel.innerHTML = `
+    <button class="flow-card outbound" type="button" ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : ""}>
+      <small>Today's Outbound</small>
+      <strong>${escapeHtml(outboundQty)} / ${escapeHtml(outboundTotal)}</strong>
+      <span>${outbound ? escapeHtml(outbound.stage) : "No outbound list"}</span>
+    </button>
+    <div class="flow-lane" aria-hidden="true">
+      <span class="flow-truck"></span>
+    </div>
+    <button class="flow-card inbound" type="button" ${inbound ? `data-open-list="${escapeHtml(inbound.id)}"` : ""}>
+      <small>Indian Trail Delivery List</small>
+      <strong>${escapeHtml(inboundQty)} / ${escapeHtml(inboundTotal)}</strong>
+      <span>${inbound ? escapeHtml(inbound.stage) : "No Indian Trail list"}</span>
+    </button>
+  `;
 }
 
 function renderIndianTrailSummary(summary) {
@@ -1114,11 +1245,25 @@ function bayMatchesFilter(bay, text) {
   return text.toLowerCase().includes(search);
 }
 
+function isWorkbookLegendCell(cell) {
+  return Number(cell.row || 0) >= 11 && Number(cell.row || 0) <= 18 && Number(cell.col || 0) >= 17 && Number(cell.col || 0) <= 20;
+}
+
+function statusAbbreviation(status, bay) {
+  if (!bay) return "";
+  if (!bay.active || String(status).toLowerCase() === "manualhold") return "MAN";
+  if (status === "SDI") return "SDI";
+  if (status === "Full" || status === "Occupied") return "OCC";
+  if (status === "Partial") return "PAR";
+  if (status === "Empty") return "AVL";
+  return "";
+}
+
 function renderBayMapPage() {
   if (!els.bayMapCanvas || !state.bayLayout) return;
   const bayByCode = new Map((state.bays || []).map((bay) => [bay.bayCode, bay]));
   const layout = state.bayLayout;
-  const cells = layout.cells || [];
+  const cells = (layout.cells || []).filter((cell) => !isWorkbookLegendCell(cell));
   const maxRow = layout.grid?.maxRow || 180;
   const maxCol = layout.grid?.maxCol || 24;
   if (els.bayMapCanvas) {
@@ -1131,13 +1276,18 @@ function renderBayMapPage() {
         const label = bay?.displayName || cell.value;
         const status = bay?.status || (bayCodes.length ? "ManualHold" : "");
         const text = [label, status, bay?.mapSection, bay?.bayCategory, ...(bay?.assignments || []).map((a) => `${a.order} ${a.customer}`)].join(" ");
+        const searchMatch = Boolean(state.baySearch.trim()) && text.toLowerCase().includes(state.baySearch.trim().toLowerCase());
         const dimmed = bayCodes.length && !bayMatchesFilter(bay || { status: "ManualHold", sourceStatus: "ManualHold" }, text);
         const assignment = bay?.assignments?.[0];
+        const category = slugify(bay?.bayCategory || bay?.bayType || cell.kind);
+        const abbreviation = statusAbbreviation(status, bay);
         return `
-          <div class="map-cell ${escapeHtml(cell.kind)} ${escapeHtml(String(status).toLowerCase())} ${dimmed ? "is-dimmed" : ""}"
+          <div class="map-cell ${escapeHtml(cell.kind)} ${escapeHtml(String(status).toLowerCase())} category-${escapeHtml(category)} ${dimmed ? "is-dimmed" : ""} ${searchMatch ? "is-search-match" : ""}"
                style="grid-row:${cell.row};grid-column:${cell.col};"
-               data-bay-code="${escapeHtml(bay?.bayCode || "")}">
+               data-bay-code="${escapeHtml(bay?.bayCode || "")}"
+               title="${escapeHtml(text)}">
             <strong>${escapeHtml(label)}</strong>
+            ${abbreviation ? `<em>${escapeHtml(abbreviation)}</em>` : ""}
             ${assignment ? `<span>${escapeHtml(assignment.order)} ${escapeHtml(assignment.customer || "")}</span>` : cell.kind === "bay" ? `<span>${escapeHtml(status)}</span>` : ""}
           </div>
         `;
@@ -1150,12 +1300,67 @@ function renderBayMapPage() {
   if (els.bayOverviewStats) {
     els.bayOverviewStats.innerHTML = [miniStat("Visible Slots", state.bays.length), miniStat("Occupied", occupied), miniStat("Empty", empty), miniStat("Manual Hold", manual)].join("");
   }
-  if (els.bayMapUnmapped) {
-    const unmapped = state.bays.filter((bay) => !bay.layoutRow).slice(0, 50);
-    els.bayMapUnmapped.innerHTML = unmapped.length
-      ? unmapped.map((bay) => `<div><strong>${escapeHtml(bay.displayName || bay.bayCode)}</strong><span>${escapeHtml(bay.mapSection)} - ${escapeHtml(bay.status)}</span></div>`).join("")
-      : `<div><strong>All visible</strong><span>Workbook-visible bays are on the map.</span></div>`;
+  renderBayLegend();
+  renderBayRecentActions();
+}
+
+function renderBayLegend() {
+  if (!els.bayLegend) return;
+  const legend = [
+    ["AVL", "Available bay", "empty"],
+    ["OCC", "Occupied or full", "occupied"],
+    ["PAR", "Partially occupied", "partial"],
+    ["SDI", "Same Day Install", "sdi"],
+    ["MAN", "Manual hold / not auto-assigned", "manual"],
+    ["PRE", "Preassigned note from workbook", "pre"],
+    ["MIR", "Mirror area", "mirror"],
+    ["CPU", "Customer pickup", "cpu"],
+  ];
+  els.bayLegend.innerHTML = legend
+    .map(([abbr, label, kind]) => `<span class="legend-item ${escapeHtml(kind)}"><i></i><strong>${escapeHtml(abbr)}</strong>${escapeHtml(label)}</span>`)
+    .join("");
+}
+
+function formatEventType(value) {
+  return String(value || "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ");
+}
+
+function renderBayRecentActions() {
+  if (!els.bayRecentActions) return;
+  const events = state.bayEvents || [];
+  els.bayRecentActions.innerHTML = events.length
+    ? events
+        .slice(0, 12)
+        .map((event) => {
+          const when = new Date(event.time || event.createdAt || "");
+          const time = Number.isNaN(when.getTime()) ? "" : when.toLocaleString();
+          const bay = event.bayDisplay || event.bayCode || event.newBayCode || event.oldBayCode || "Bay";
+          const order = event.order ? `${event.order}-${event.item || ""}` : "";
+          return `
+            <div>
+              <strong>${escapeHtml(formatEventType(event.eventType))} - ${escapeHtml(bay)}</strong>
+              <span>${escapeHtml([order, event.customer, event.reason].filter(Boolean).join(" - "))}</span>
+              <small>${escapeHtml(event.user || "")}${time ? ` - ${escapeHtml(time)}` : ""}</small>
+            </div>
+          `;
+        })
+        .join("")
+    : `<div><strong>No bay actions yet</strong><span>Receive, move, clear, and SDI actions will appear here.</span></div>`;
+}
+
+function scrollToBaySearchMatch() {
+  if (!els.bayMapCanvas) return;
+  renderBayMapPage();
+  const target = els.bayMapCanvas.querySelector(".map-cell.is-search-match:not(.is-dimmed), .map-cell.is-search-match");
+  if (!target) {
+    showInlineError("No bay map match found for that search.", false);
+    return;
   }
+  target.classList.add("is-found");
+  target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+  window.setTimeout(() => target.classList.remove("is-found"), 1800);
 }
 
 async function refreshAdminPage() {
@@ -1464,6 +1669,14 @@ function wireEvents() {
     els.scanInput.value = "";
     els.scanInput.focus();
   });
+  els.manualScanForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await submitManualScan();
+    } catch (error) {
+      showInlineError(error.message, false);
+    }
+  });
   els.printBtn?.addEventListener("click", () => window.print());
   els.exportBtn?.addEventListener("click", () => {
     if (state.backend) {
@@ -1519,9 +1732,20 @@ function wireEvents() {
     state.baySearch = els.bayMapSearch.value;
     renderBayMapPage();
   });
+  els.bayMapSearch?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      state.baySearch = els.bayMapSearch.value;
+      scrollToBaySearchMatch();
+    }
+  });
   els.bayStatusFilter?.addEventListener("change", () => {
     state.bayStatusFilter = els.bayStatusFilter.value;
     renderBayMapPage();
+  });
+  els.bayCheckBtn?.addEventListener("click", () => {
+    state.baySearch = els.bayMapSearch?.value || "";
+    scrollToBaySearchMatch();
   });
 
   document.addEventListener("click", (event) => {
