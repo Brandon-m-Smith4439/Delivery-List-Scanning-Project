@@ -43,7 +43,7 @@ class ApiClient:
         try:
             connection.request(method, path, payload, headers)
             response = connection.getresponse()
-            raw = response.read().decode("utf-8")
+            raw = response.read().decode("utf-8", errors="replace")
             headers_out = {key.lower(): value for key, value in response.getheaders()}
             try:
                 data = json.loads(raw) if raw else {}
@@ -122,7 +122,7 @@ def main() -> int:
     reports = store.reports_summary()
     search_results = store.global_search("KENT")
     bays = store.get_bays()
-    results.append(assert_true("admin_summary_counts", summary["activeDeliveryLists"] == 4 and summary["activeUsers"] >= 2, summary))
+    results.append(assert_true("admin_summary_counts", summary["activeDeliveryLists"] == 6 and summary["activeUsers"] >= 2, summary))
     results.append(assert_true("reports_summary_shape", "badScanCount" in reports and "scansByOperator" in reports, reports))
     results.append(assert_true("global_search_results", len(search_results) > 0, {"count": len(search_results)}))
     results.append(assert_true("seeded_bays_from_workbook_layout", len(bays) >= 717, {"count": len(bays)}))
@@ -175,7 +175,7 @@ def main() -> int:
         )
 
         status, payload, _ = client.request("GET", "/api/delivery-lists", cookie=admin_cookie)
-        results.append(assert_true("http_delivery_lists", status == 200 and len(payload["lists"]) == 4, {"status": status}))
+        results.append(assert_true("http_delivery_lists", status == 200 and len(payload["lists"]) == 6, {"status": status}))
 
         status, payload, _ = client.request("GET", "/api/admin/summary", cookie=admin_cookie)
         results.append(assert_true("http_admin_summary", status == 200 and payload["activeBays"] >= 300, {"status": status, "activeBays": payload.get("activeBays")}))
@@ -185,6 +185,19 @@ def main() -> int:
 
         status, payload, _ = client.request("POST", "/api/import/preview", {"payload": sample}, cookie=admin_cookie)
         results.append(assert_true("http_import_preview", status == 200 and payload["valid"], {"status": status}))
+
+        status, payload, _ = client.request("POST", "/api/import/folder", {}, cookie=admin_cookie)
+        folder_changed = len(payload.get("importedFiles", [])) + len(payload.get("updatedFiles", []))
+        results.append(
+            assert_true(
+                "http_temp_folder_import",
+                status == 200 and folder_changed >= 1 and not payload.get("failedFiles"),
+                {"status": status, "changed": folder_changed, "printCandidates": len(payload.get("printCandidates", []))},
+            )
+        )
+        first_print_ids = ",".join((payload.get("printCandidates") or [{}])[0].get("listIds", []))
+        status, payload, _ = client.request("GET", f"/api/print/package?listId={first_print_ids}", cookie=admin_cookie)
+        results.append(assert_true("http_print_package", status == 200 and "<table" in payload.get("raw", ""), {"status": status}))
 
         status, payload, _ = client.request("GET", "/api/search?q=KENT", cookie=admin_cookie)
         results.append(assert_true("http_global_search", status == 200 and len(payload["results"]) > 0, {"status": status}))
@@ -242,6 +255,9 @@ def main() -> int:
         status, payload, _ = client.request("GET", "/api/export.csv?listId=2026-04-01-staging-airport", cookie=operator_cookie)
         results.append(assert_true("http_operator_can_export_current_list", status == 200 and "order" in payload.get("raw", "").lower(), {"status": status}))
 
+        status, payload, _ = client.request("GET", "/api/export.xlsx?listId=2026-04-01-staging-airport", cookie=operator_cookie)
+        results.append(assert_true("http_operator_can_export_xlsx", status == 200 and payload.get("raw", "").startswith("PK"), {"status": status}))
+
         indian_trail_operator_name = f"it_operator_{os.getpid()}"
         status, payload, _ = client.request(
             "POST",
@@ -275,10 +291,16 @@ def main() -> int:
         status, _, _ = client.request("GET", "/api/delivery-lists/2026-04-01-staging-airport", cookie=indian_trail_cookie)
         results.append(assert_true("http_indian_trail_forbidden_airport_list", status == 403, {"status": status}))
 
+        receive_list = next(
+            row
+            for row in store.get_delivery_lists()
+            if "Indian Trail" in f"{row['stage']} {row['scanner']}" and int(row.get("itemCount") or 0) > 0
+        )
+        receive_item = store.get_delivery_list(receive_list["id"])["items"][0]
         status, payload, _ = client.request(
             "POST",
             "/api/indian-trail/receive",
-            {"listId": "2026-04-01-inbound-indian-trail", "barcode": "T200231704004000", "station": "Indian Trail"},
+            {"listId": receive_list["id"], "barcode": receive_item["barcode"], "station": "Indian Trail"},
             cookie=indian_trail_cookie,
         )
         results.append(

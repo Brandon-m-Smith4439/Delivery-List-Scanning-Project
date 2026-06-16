@@ -16,6 +16,7 @@ class AppConfig:
     root: Path
     data_dir: Path
     sample_path: Path
+    temp_delivery_lists_dir: Path
     database_type: str
     database_path: Path
     database_connection_string: str
@@ -47,9 +48,13 @@ def load_config(root: Path) -> AppConfig:
     root = root.resolve()
     data_dir = root / "data"
     default_db_path = data_dir / "delivery-scanner-pilot.db"
+    default_temp_delivery_lists = root.parent / "Temp Delivery Lists"
     database_path = Path(os.environ.get("DLS_DATABASE_PATH", str(default_db_path))).expanduser()
+    temp_delivery_lists_dir = Path(os.environ.get("DLS_TEMP_DELIVERY_LISTS_PATH", str(default_temp_delivery_lists))).expanduser()
     if not database_path.is_absolute():
         database_path = root / database_path
+    if not temp_delivery_lists_dir.is_absolute():
+        temp_delivery_lists_dir = root / temp_delivery_lists_dir
 
     host = os.environ.get("DLS_HOST", "127.0.0.1").strip() or "127.0.0.1"
     port = _int_env("DLS_PORT", _int_env("PORT", 8765))
@@ -59,6 +64,7 @@ def load_config(root: Path) -> AppConfig:
         root=root,
         data_dir=data_dir,
         sample_path=Path(os.environ.get("DLS_SAMPLE_PATH", str(data_dir / "sample-delivery-list.json"))),
+        temp_delivery_lists_dir=temp_delivery_lists_dir,
         database_type=os.environ.get("DLS_DATABASE_TYPE", "sqlite").strip().lower() or "sqlite",
         database_path=database_path,
         database_connection_string=os.environ.get("DLS_DATABASE_CONNECTION_STRING", "").strip(),

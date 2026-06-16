@@ -57,7 +57,10 @@
             <h1>Delivery List Overview</h1>
             <p id="homeWelcome">Signed in</p>
           </div>
-          <div class="overview-kpis" id="overviewStats"></div>
+          <div class="page-heading-actions">
+            <button class="tool-button" type="button" data-print-active="home">Print latest list</button>
+            <div class="overview-kpis" id="overviewStats"></div>
+          </div>
         </div>
 
         <div class="home-grid">
@@ -83,7 +86,9 @@
                 <option value="all">All stages</option>
                 <option value="Airport Rd">Airport Rd</option>
                 <option value="Indian Trail">Indian Trail</option>
+                <option value="Greenville">Greenville</option>
                 <option value="Customer Pickup">Customer Pickup</option>
+                <option value="DTC">DTC</option>
               </select>
             </div>
             <div class="delivery-list-grid" id="homeListGrid"></div>
@@ -114,8 +119,12 @@
           </div>
           <div class="scan-heading-controls">
             <label class="delivery-selector">
-              <span>List</span>
-              <select id="deliveryListSelect"></select>
+              <span>Date</span>
+              <select id="deliveryDateSelect"></select>
+            </label>
+            <label class="delivery-selector">
+              <span>Stage</span>
+              <select id="deliveryStageSelect"></select>
             </label>
             <label class="operator-field">
               <span>Station</span>
@@ -293,7 +302,7 @@
             <section class="menu-panel" id="menuPanel">
               <h3>Actions</h3>
               <button id="printBtn" type="button">Print current list</button>
-              <button id="exportBtn" type="button">Export CSV</button>
+              <button id="exportBtn" type="button">Export XLSX</button>
               <button id="undoBtn" type="button">Undo last scan</button>
               <button id="resetBtn" type="button">Reset scans</button>
               <button id="loadExampleBtn" type="button">Load damaged sample</button>
@@ -308,7 +317,10 @@
             <h1>Indian Trail Bay Map</h1>
             <p>Layout from Indian Trail Inventory Manager workbook snapshot</p>
           </div>
-          <div id="bayOverviewStats" class="overview-kpis"></div>
+          <div class="page-heading-actions">
+            <button class="tool-button" type="button" data-print-active="bays">Print delivery list</button>
+            <div id="bayOverviewStats" class="overview-kpis"></div>
+          </div>
         </div>
         <div class="bay-action-bar">
           <label class="search-box">
@@ -317,22 +329,77 @@
           </label>
           <select id="bayStatusFilter">
             <option value="all">All statuses</option>
+            <option value="available">Available</option>
             <option value="occupied">Occupied</option>
-            <option value="empty">Empty</option>
-            <option value="sdi">SDI</option>
+            <option value="preassigned">Pre Assigned</option>
+            <option value="picking">Picking / SDI</option>
+            <option value="blocked">Blocked</option>
             <option value="manual">Manual hold</option>
           </select>
           <button class="tool-button" id="bayCheckBtn" type="button">Bay check</button>
         </div>
         <div id="bayFlowPanel" class="bay-route-flow"></div>
         <div id="indianTrailSummary" class="bay-summary"></div>
-        <div id="bayLegend" class="bay-legend"></div>
+        <div class="bay-action-buttons" id="bayActionButtons">
+          <button type="button" data-bay-action="manual-assign">Manual Assign</button>
+          <button type="button" data-bay-action="clear">Clear Bay</button>
+          <button type="button" data-bay-action="move">Move Items in Bay</button>
+          <button type="button" data-bay-action="sdi">Mark/Clear SDI</button>
+        </div>
         <section class="bay-map-shell">
           <div id="bayMapCanvas" class="excel-bay-map"></div>
-          <aside class="bay-side-panel">
-            <h2>Recent Actions</h2>
-            <div id="bayRecentActions" class="compact-list"></div>
-          </aside>
+          <section class="bay-detail-panel">
+            <section class="bay-side-panel">
+              <div class="section-heading">
+                <h2>Selected Bay</h2>
+                <span id="baySelectedText">No bay selected</span>
+              </div>
+              <div id="baySelectedPanel"></div>
+            </section>
+            <section class="bay-side-panel">
+              <div class="section-heading">
+                <h2>All Bays</h2>
+                <span>Filter by category</span>
+              </div>
+              <div class="filter-tabs bay-category-filters" id="bayCategoryFilters"></div>
+              <div id="bayAllBaysList" class="bay-all-list"></div>
+            </section>
+            <section class="bay-recent-panel">
+              <div class="section-heading">
+                <h2>Recent Actions</h2>
+                <span>Latest bay changes</span>
+              </div>
+              <div id="bayRecentActions" class="compact-list"></div>
+            </section>
+          </section>
+        </section>
+        <section class="sdi-panel" id="sdiPanel" hidden>
+          <div class="section-heading">
+            <h2>SDI / Rush Order</h2>
+            <button id="sdiCloseBtn" type="button">Close</button>
+          </div>
+          <form id="sdiForm" class="sdi-form">
+            <label>
+              <span>SO / Order Nr.</span>
+              <input id="sdiOrderInput" type="text" autocomplete="off" placeholder="231707">
+            </label>
+            <label>
+              <span>Bay Code</span>
+              <input id="sdiBayInput" type="text" autocomplete="off" placeholder="Optional bay">
+            </label>
+            <label class="checkbox-row">
+              <input id="sdiTruckExemptInput" type="checkbox">
+              <span>Send straight to installer truck / skip bay</span>
+            </label>
+            <label class="sdi-reason">
+              <span>Reason</span>
+              <input id="sdiReasonInput" type="text" autocomplete="off" value="Same-day install">
+            </label>
+            <div class="sdi-actions">
+              <button type="submit" data-sdi-action="mark">Mark Rush / SDI</button>
+              <button type="button" id="sdiClearBtn">Clear SDI</button>
+            </div>
+          </form>
         </section>
       </section>
 
@@ -348,9 +415,28 @@
         <div class="admin-layout">
           <section class="panel">
             <h2>Import Delivery List</h2>
-            <button id="importBtn" type="button">Import / update list</button>
-            <input id="importFile" class="visually-hidden" type="file" accept=".json,application/json">
+            <div class="admin-button-row">
+              <button id="folderImportBtn" type="button">Import / update Temp folder</button>
+              <button id="importBtn" type="button">Import single file</button>
+            </div>
+            <label class="admin-wide-field">
+              <span>Temp Delivery Lists folder</span>
+              <input id="tempFolderInput" type="text" autocomplete="off" placeholder="Temp Delivery Lists folder path">
+            </label>
+            <input id="importFile" class="visually-hidden" type="file" accept=".json,.xlsx,.xlsm,.csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,text/csv">
             <div id="importPreviewBox" class="admin-empty">No import selected.</div>
+            <div id="importHistory" class="compact-list"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Delivery List Cleanup</h2>
+            <div class="admin-form cleanup-form">
+              <select id="deleteDateSelect"></select>
+              <select id="deleteListSelect"></select>
+              <button id="deleteListBtn" type="button">Delete stage</button>
+              <button id="deleteDateBtn" type="button">Delete date</button>
+            </div>
+            <div id="deleteListStatus" class="admin-empty">Admin-only delete actions appear here.</div>
           </section>
 
           <section class="panel">
@@ -418,6 +504,34 @@
       <button data-mobile-target="alerts" type="button"><span class="nav-icon alerts"></span>Review</button>
       <button data-mobile-target="menu" type="button"><span class="nav-icon menu"></span>Menu</button>
     </nav>
+
+    <div class="print-options-backdrop" id="printOptionsBackdrop" hidden></div>
+    <section class="print-options-panel" id="printOptionsPanel" hidden>
+      <div class="section-heading">
+        <h2>Print Delivery Lists</h2>
+        <button id="printOptionsClose" type="button">Close</button>
+      </div>
+      <label>
+        <span>Delivery Date</span>
+        <select id="printOptionsDate"></select>
+      </label>
+      <fieldset>
+        <legend>Stages</legend>
+        <div id="printOptionsStages" class="print-stage-options"></div>
+      </fieldset>
+      <label>
+        <span>Glass Type</span>
+        <input id="printOptionsGlassType" type="text" autocomplete="off" placeholder="Any glass type">
+      </label>
+      <div class="print-filter-grid">
+        <label><input id="printUpdatedOnly" type="checkbox"> Updated items only</label>
+        <label><input id="printRushOnly" type="checkbox"> Rush orders</label>
+        <label><input id="printRemakeOnly" type="checkbox"> Remakes</label>
+        <label><input id="printCpuOnly" type="checkbox"> CPU</label>
+        <label><input id="printDtcOnly" type="checkbox"> DTC</label>
+      </div>
+      <button id="printOptionsSubmit" type="button">Print Selected</button>
+    </section>
   </div>
 
   <script src="app.js"></script>

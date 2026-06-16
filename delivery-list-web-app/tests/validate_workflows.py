@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from delivery_store import create_store, is_cpu_item  # noqa: E402
+from delivery_store import create_store, is_cpu_item, load_delivery_source_payload, route_category  # noqa: E402
 from scanner_config import load_config  # noqa: E402
 
 
@@ -37,7 +37,7 @@ def main() -> int:
 
     results = []
     lists = store.get_delivery_lists()
-    results.append(assert_true("delivery_list_count", len(lists) == 4, {"count": len(lists)}))
+    results.append(assert_true("delivery_list_count", len(lists) == 6, {"count": len(lists)}))
 
     customer = store.get_delivery_list("2026-04-01-customer-pickup")
     customer_items = customer["items"]
@@ -47,6 +47,21 @@ def main() -> int:
             "customer_pickup_cpu_filter",
             len(customer_items) == 7 and customer_qty == 9 and all(is_cpu_item(item) for item in customer_items),
             {"items": len(customer_items), "qty": customer_qty},
+        )
+    )
+    indian_trail = store.get_delivery_list("2026-04-01-inbound-indian-trail")
+    greenville = store.get_delivery_list("2026-04-01-bfs-greenville")
+    dtc = store.get_delivery_list("2026-04-01-dtc")
+    results.append(
+        assert_true(
+            "route_stage_filters",
+            indian_trail["items"]
+            and greenville["items"]
+            and dtc["items"]
+            and all(route_category(item) == "indian_trail" for item in indian_trail["items"])
+            and all(route_category(item) == "greenville" for item in greenville["items"])
+            and all(route_category(item) == "dtc" for item in dtc["items"]),
+            {"indianTrail": len(indian_trail["items"]), "greenville": len(greenville["items"]), "dtc": len(dtc["items"])},
         )
     )
 
@@ -117,7 +132,45 @@ def main() -> int:
     sample = json.loads((ROOT / "data" / "sample-delivery-list.json").read_text(encoding="utf-8"))
     sample["deliveryDate"] = "2026-04-02"
     imported = store.import_delivery_list({"payload": sample, "user": "Validator", "fileName": "sample-delivery-list.json"})
-    results.append(assert_true("import_update", imported["importedCount"] == 4, {"importedCount": imported["importedCount"]}))
+    results.append(assert_true("import_update", imported["importedCount"] == 6, {"importedCount": imported["importedCount"]}))
+
+    temp_source = ROOT.parent / "Temp Delivery Lists" / "6.9.26.xlsx"
+    if temp_source.exists():
+        parsed_payload = load_delivery_source_payload(temp_source)
+        parsed_preview = store.preview_import(parsed_payload)
+        results.append(
+            assert_true(
+                "temp_delivery_xlsx_parser",
+                parsed_payload["deliveryDate"] == "2026-06-09" and parsed_preview["valid"] and parsed_preview["rowCount"] >= 50,
+                {"deliveryDate": parsed_payload["deliveryDate"], "rows": parsed_preview["rowCount"]},
+            )
+        )
+
+    folder_result = store.import_delivery_folder({"user": "Validator"})
+    changed_files = len(folder_result["importedFiles"]) + len(folder_result["updatedFiles"])
+    results.append(
+        assert_true(
+            "temp_folder_import_update",
+            changed_files >= 1 and not folder_result["failedFiles"] and folder_result["printCandidates"],
+            {"changed": changed_files, "printCandidates": len(folder_result["printCandidates"])},
+        )
+    )
+    print_package = store.get_print_package(folder_result["printCandidates"][0]["listIds"])
+    results.append(
+        assert_true(
+            "print_package_excludes_regular_mirrors",
+            bool(print_package["lists"]) and all(item for delivery_list in print_package["lists"] for item in delivery_list["items"]),
+            {"lists": len(print_package["lists"])},
+        )
+    )
+    second_folder_result = store.import_delivery_folder({"user": "Validator"})
+    results.append(
+        assert_true(
+            "temp_folder_second_run_skips_unchanged",
+            len(second_folder_result["skippedFiles"]) >= len(folder_result["importedFiles"]) + len(folder_result["updatedFiles"]),
+            {"skipped": len(second_folder_result["skippedFiles"])},
+        )
+    )
 
     print(json.dumps({"ok": True, "results": results}, indent=2))
 

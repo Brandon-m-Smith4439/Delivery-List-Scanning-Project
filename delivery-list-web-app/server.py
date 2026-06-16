@@ -4,19 +4,129 @@
 from __future__ import annotations
 
 import json
+import html
+import base64
+import hashlib
 from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from delivery_store import SESSION_COOKIE_NAME, create_store, request_station, request_user_name
+from delivery_store import SESSION_COOKIE_NAME, create_store, load_delivery_source_payload, request_station, request_user_name
 from scanner_config import load_config
 
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = load_config(ROOT)
 STORE = create_store(CONFIG)
+
+
+def esc(value: object) -> str:
+    return html.escape(str(value if value is not None else ""))
+
+
+def render_item_rows(items: list[dict]) -> str:
+    if not items:
+        return '<tr><td colspan="8">No printable rows.</td></tr>'
+    rows = []
+    current_product = object()
+    for item in sorted(items, key=lambda row: (str(row.get("product") or row.get("job") or ""), int(row.get("order") or 0), int(row.get("item") or 0))):
+        product = item.get("product") or item.get("job") or "Unspecified Glass"
+        if product != current_product:
+            current_product = product
+            rows.append(f'<tr class="glass-group"><td colspan="8">{esc(product)}</td></tr>')
+        rows.append(
+            f"""
+            <tr>
+              <td class="check-cell">□</td>
+              <td>{esc(item.get("job") or item.get("product"))}</td>
+              <td>{esc(item.get("order"))}</td>
+              <td>{esc(item.get("item"))}</td>
+              <td>{esc(item.get("qty"))}</td>
+              <td>{esc(item.get("dimensions"))}</td>
+              <td>{esc(item.get("customer"))}</td>
+              <td>{esc(item.get("route"))}</td>
+            </tr>
+            """
+        )
+    return "".join(rows)
+
+
+def render_sheet(title: str, subtitle: str, items: list[dict], sheet_class: str = "") -> str:
+    return f"""
+    <section class="sheet {sheet_class}">
+      <header>
+        <div>
+          <h1>{esc(title)}</h1>
+          <p>{esc(subtitle)}</p>
+        </div>
+        <div class="copy-box">Checked By: __________ Date: ________</div>
+      </header>
+      <table>
+        <thead>
+          <tr><th>✓</th><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty.</th><th>Dimensions</th><th>Customer</th><th>Route</th></tr>
+        </thead>
+        <tbody>{render_item_rows(items)}</tbody>
+      </table>
+      <div class="notes"><strong>Notes:</strong><span></span></div>
+    </section>
+    """
+
+
+def render_print_package(package: dict) -> str:
+    sections = []
+    filters = package.get("filters", {}) or {}
+    rush_only = str(filters.get("rushOnly") or "").lower() in {"1", "true", "yes"}
+    remake_only = str(filters.get("remakeOnly") or "").lower() in {"1", "true", "yes"}
+    special_only = rush_only or remake_only
+    for delivery_list in package.get("lists", []):
+        remakes = delivery_list.get("remakes", [])
+        rushes = delivery_list.get("rushes", [])
+        normal_items = [item for item in delivery_list.get("items", []) if item not in remakes and item not in rushes]
+        subtitle = f"{delivery_list.get('stage')} | {delivery_list.get('deliveryDate')} | Regular mirror rows excluded: {delivery_list.get('excludedMirrorCount', 0)}"
+        if normal_items and not special_only:
+            sections.append(render_sheet(str(delivery_list.get("label")), f"{subtitle} | Copy 1 of 2", normal_items, "regular"))
+            sections.append(render_sheet(str(delivery_list.get("label")), f"{subtitle} | Copy 2 of 2", normal_items, "regular"))
+        if rushes and not remake_only:
+            sections.append(render_sheet("RUSH ORDER SHEET", str(delivery_list.get("label")), rushes, "rush"))
+        if remakes and not rush_only:
+            sections.append(render_sheet("REMAKE SHEET", str(delivery_list.get("label")), remakes, "remake"))
+    body = "".join(sections) or '<section class="sheet"><h1>No printable rows found</h1></section>'
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Delivery List Print Package</title>
+  <style>
+    body {{ margin: 0; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #f6f8fb; }}
+    .sheet {{ width: min(1120px, calc(100% - 32px)); margin: 16px auto; padding: 18px; background: #fff; border: 1px solid #444; border-radius: 0; }}
+    header {{ display: flex; justify-content: space-between; gap: 16px; align-items: end; border-bottom: 3px solid #072a63; padding-bottom: 10px; margin-bottom: 12px; }}
+    h1 {{ margin: 0; color: #041a3d; font-size: 24px; text-transform: uppercase; }}
+    p {{ margin: 4px 0 0; font-weight: 700; color: #41506c; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+    th, td {{ border: 1px solid #d9e1ee; padding: 7px 8px; text-align: left; vertical-align: top; }}
+    th {{ background: #f1f1f1; color: #041a3d; }}
+    .glass-group td {{ background: #e9e9e9; font-weight: 900; text-transform: uppercase; }}
+    .check-cell {{ width: 28px; text-align: center; font-size: 16px; }}
+    .copy-box {{ border: 1px solid #333; padding: 8px 10px; font-weight: 800; white-space: nowrap; }}
+    .notes {{ margin-top: 12px; min-height: 72px; border: 1px solid #333; display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 8px; }}
+    .rush {{ border: 4px double #000; }}
+    .rush header {{ border-bottom: 6px double #000; }}
+    .rush h1::before, .rush h1::after {{ content: " !!! "; }}
+    .remake {{ border: 3px dashed #000; }}
+    .remake header {{ border-bottom: 3px dashed #000; }}
+    @media print {{
+      body {{ background: #fff; }}
+      .sheet {{ width: auto; margin: 0; border: 0; border-radius: 0; page-break-after: always; }}
+    }}
+  </style>
+</head>
+<body>
+  {body}
+  <script>window.addEventListener("load", () => setTimeout(() => window.print(), 250));</script>
+</body>
+</html>"""
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -27,6 +137,15 @@ class Handler(SimpleHTTPRequestHandler):
         body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_html(self, markup: str, status: HTTPStatus = HTTPStatus.OK) -> None:
+        body = markup.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -197,6 +316,36 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if parsed.path == "/api/export.xlsx":
+            user = self.require_permission("export_reports")
+            if not user:
+                return
+            list_id = parse_qs(parsed.query).get("listId", [""])[0]
+            if not STORE.user_can_access_list(user, list_id):
+                self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
+                return
+            body = STORE.export_xlsx(list_id)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", "attachment; filename=delivery-list-export.xlsx")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if parsed.path == "/api/print/package":
+            user = self.require_permission("export_reports")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            raw_ids = params.get("listId", [])
+            list_ids = []
+            for value in raw_ids:
+                list_ids.extend(part for part in value.split(",") if part)
+            package = STORE.get_print_package(list_ids, user=user, filters={key: values[0] for key, values in params.items()})
+            self.send_html(render_print_package(package))
+            return
+
         super().do_GET()
 
     def do_POST(self) -> None:
@@ -295,6 +444,34 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.import_delivery_list(data))
                 return
 
+            if parsed.path == "/api/import/folder":
+                user = self.require_permission("import_delivery_lists")
+                if not user:
+                    return
+                data["user"] = user["username"]
+                self.send_json(STORE.import_delivery_folder(data))
+                return
+
+            if parsed.path == "/api/import/upload":
+                user = self.require_permission("import_delivery_lists")
+                if not user:
+                    return
+                file_name = Path(str(data.get("fileName") or "delivery-list")).name
+                raw_content = base64.b64decode(str(data.get("contentBase64") or ""))
+                upload_dir = CONFIG.data_dir / "_uploads"
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                upload_path = upload_dir / file_name
+                upload_path.write_bytes(raw_content)
+                payload = load_delivery_source_payload(upload_path)
+                data["payload"] = payload
+                data["fileName"] = file_name
+                data["sourcePath"] = str(upload_path.resolve())
+                data["sourceHash"] = hashlib.sha256(raw_content).hexdigest()
+                data["importKind"] = "single_file"
+                data["user"] = user["username"]
+                self.send_json(STORE.import_delivery_list(data))
+                return
+
             if parsed.path == "/api/import/preview":
                 if not self.require_permission("preview_import"):
                     return
@@ -322,11 +499,32 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.deactivate_user(str(data.get("username") or ""), deactivated_by=user["username"]))
                 return
 
+            if parsed.path == "/api/admin/users/roles":
+                user = self.require_permission("manage_roles")
+                if not user:
+                    return
+                self.send_json(STORE.update_user_roles(str(data.get("username") or ""), data.get("roles") or [], updated_by=user["username"]))
+                return
+
             if parsed.path == "/api/admin/line-item":
                 user = self.require_permission("edit_delivery_lists")
                 if not user:
                     return
                 self.send_json(STORE.update_line_item(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/delete-list":
+                user = self.require_permission("edit_delivery_lists")
+                if not user:
+                    return
+                self.send_json(STORE.delete_delivery_list(str(data.get("listId") or ""), user["username"]))
+                return
+
+            if parsed.path == "/api/admin/delete-date":
+                user = self.require_permission("edit_delivery_lists")
+                if not user:
+                    return
+                self.send_json(STORE.delete_delivery_date(str(data.get("deliveryDate") or ""), user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/receive":

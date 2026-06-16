@@ -15,15 +15,18 @@ import json
 import re
 import secrets
 import sqlite3
+import zipfile
 from datetime import datetime, timedelta, timezone
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
+from xml.sax.saxutils import escape as xml_escape
 
 from scanner_config import AppConfig
 
 
-DEFAULT_STATIONS = ["Airport Rd", "Indian Trail", "Greenville", "Customer Pickup"]
+DEFAULT_STATIONS = ["Airport Rd", "Indian Trail", "Greenville", "Customer Pickup", "DTC"]
 SESSION_COOKIE_NAME = "dls_session"
 PASSWORD_ITERATIONS = 260000
 SESSION_HOURS = 12
@@ -130,7 +133,7 @@ ROLE_PERMISSIONS = {
 ROLE_STAGE_ACCESS = {
     "Admin": ["*"],
     "Supervisor": ["*"],
-    "Operator": ["Airport Rd", "Customer Pickup"],
+    "Operator": ["Airport Rd", "Customer Pickup", "DTC"],
     "Indian Trail Operator": ["Indian Trail"],
     "Indian Trail Lead": ["Indian Trail"],
     "Indian Trail Manager": ["Indian Trail"],
@@ -145,9 +148,15 @@ DUMMY_USERS = [
 LIST_PROFILES = [
     ("staging-airport", "Staging - Airport Rd", "Airport Rd", "all"),
     ("outbound-airport", "Outbound - Airport Rd", "Airport Rd", "all"),
-    ("inbound-indian-trail", "Inbound - Indian Trail", "Indian Trail", "all"),
+    ("inbound-indian-trail", "Inbound - Indian Trail", "Indian Trail", "indian_trail"),
+    ("bfs-greenville", "BFS Greenville", "Greenville", "greenville"),
     ("customer-pickup", "Customer Pickup", "Customer Pickup", "cpu"),
+    ("dtc", "DTC - Deliver to Customer", "DTC", "dtc"),
 ]
+SUPPORTED_IMPORT_EXTENSIONS = {".json", ".xlsx", ".xlsm", ".csv"}
+XLSX_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+XLSX_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+XLSX_PACKAGE_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 
 
 def now_iso() -> str:
@@ -246,15 +255,53 @@ def parse_dimension_number(part: str) -> float:
     return value
 
 
-def is_cpu_item(item: dict[str, Any]) -> bool:
+def route_signal_text(item: dict[str, Any]) -> str:
+    return " ".join(
+        str(item.get(key, ""))
+        for key in ("route", "job", "customer", "product", "processState", "queueState")
+    ).upper()
+
+
+def inferred_route(item: dict[str, Any]) -> str:
     route = str(item.get("route", "")).strip().upper()
-    text = " ".join(str(item.get(key, "")) for key in ("route", "job", "customer", "product", "processState", "queueState"))
-    return route == "CPU" or re.search(r"\bCPU\b", text, flags=re.IGNORECASE) is not None
+    text = route_signal_text(item)
+    if re.search(r"\bCPU[-\s]*(IT|INT)\b", text) or re.search(r"\bIT[-\s]*CPU\b", text):
+        return ""
+    if re.search(r"\bCPU[-\s]*AIR\b", text):
+        return "CPU"
+    if re.search(r"\b(GNV|GREENVILLE)\b", text):
+        return "GNV"
+    if re.search(r"\b(DTC|DELIVER\s+TO\s+CUSTOMER)\b", text):
+        return "DTC"
+    if re.search(r"\b(INT|INDIAN\s+TRAIL)\b", text):
+        return ""
+    if route == "CPU" or re.search(r"\bCPU\b", text):
+        return "CPU"
+    if route in {"INT", "IT", "INDIAN TRAIL"}:
+        return ""
+    return route
+
+
+def route_category(item: dict[str, Any]) -> str:
+    route = inferred_route(item)
+    if route == "CPU":
+        return "cpu"
+    if route == "GNV":
+        return "greenville"
+    if route == "DTC":
+        return "dtc"
+    return "indian_trail"
+
+
+def is_cpu_item(item: dict[str, Any]) -> bool:
+    return route_category(item) == "cpu"
 
 
 def suggested_bay(product: str, dimensions: str, route: str) -> str:
     if str(route).upper() == "CPU":
         return "CPU"
+    if "FRAMED" in str(product).upper() and "MIRROR" in str(product).upper():
+        return "Framed Mirror"
     if "MIRROR" in str(product).upper():
         return "Mirror"
     parts = re.findall(r"\d+(?:\s+\d+/\d+|/\d+)?", str(dimensions))
@@ -269,27 +316,266 @@ def suggested_bay(product: str, dimensions: str, route: str) -> str:
 def items_for_profile(profile: str, base_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if profile == "cpu":
         return [item for item in base_items if is_cpu_item(item)]
+    if profile == "indian_trail":
+        return [item for item in base_items if route_category(item) == "indian_trail"]
+    if profile == "greenville":
+        return [item for item in base_items if route_category(item) == "greenville"]
+    if profile == "dtc":
+        return [item for item in base_items if route_category(item) == "dtc"]
     return list(base_items)
 
 
 def build_delivery_lists(sample: dict[str, Any]) -> list[tuple[str, str, str, str, list[dict[str, Any]]]]:
     delivery_date = str(sample.get("deliveryDate") or now_iso()[:10])
     base_items = sample.get("items") or []
-    return [
-        (
-            f"{delivery_date}-{suffix}",
-            f"{format_display_date(delivery_date)} - {stage}",
-            stage,
-            scanner,
-            items_for_profile(profile, base_items),
+    definitions: list[tuple[str, str, str, str, list[dict[str, Any]]]] = []
+    for suffix, stage, scanner, profile in LIST_PROFILES:
+        items = items_for_profile(profile, base_items)
+        if profile != "all" and not items:
+            continue
+        definitions.append(
+            (
+                f"{delivery_date}-{suffix}",
+                f"{format_display_date(delivery_date)} - {stage}",
+                stage,
+                scanner,
+                items,
+            )
         )
-        for suffix, stage, scanner, profile in LIST_PROFILES
-    ]
+    return definitions
+
+
+def all_profile_list_ids(delivery_date: str) -> list[str]:
+    return [f"{delivery_date}-{suffix}" for suffix, _, _, _ in LIST_PROFILES]
+
+
+def parse_int_text(value: Any) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return int(float(text.replace(",", "")))
+    except ValueError:
+        match = re.search(r"\d+", text)
+        return int(match.group(0)) if match else None
+
+
+def clean_excel_text(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"_x000[dD]_", "\r", text)
+    text = re.sub(r"_x000[aA]_", "\n", text)
+    return re.sub(r"\s+", " ", text.replace("\r", " ").replace("\n", " ")).strip()
+
+
+def format_delivery_date(month: int, day: int, year: int) -> str:
+    if year < 100:
+        year += 2000
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def delivery_date_from_text(text: str) -> str:
+    match = re.search(r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b", text)
+    if not match:
+        return ""
+    month, day, year = (int(part) for part in match.groups())
+    return format_delivery_date(month, day, year)
+
+
+def column_label(ref: str) -> str:
+    match = re.match(r"([A-Z]+)", ref.upper())
+    return match.group(1) if match else ""
+
+
+def first_xlsx_sheet_path(archive: zipfile.ZipFile) -> str:
+    try:
+        workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+        first_sheet = workbook.find(f"{XLSX_MAIN_NS}sheets/{XLSX_MAIN_NS}sheet")
+        rel_id = first_sheet.attrib.get(f"{XLSX_REL_NS}id") if first_sheet is not None else ""
+        relationships = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        for rel in relationships.findall(f"{XLSX_PACKAGE_REL_NS}Relationship"):
+            if rel.attrib.get("Id") == rel_id:
+                target = rel.attrib.get("Target", "").lstrip("/")
+                return target if target.startswith("xl/") else f"xl/{target}"
+    except Exception:
+        pass
+    for name in archive.namelist():
+        if name.startswith("xl/worksheets/") and name.endswith(".xml") and "/_rels/" not in name:
+            return name
+    raise ValueError("Workbook does not contain a worksheet XML file")
+
+
+def read_xlsx_rows(path: Path) -> list[tuple[int, dict[str, str]]]:
+    with zipfile.ZipFile(path) as archive:
+        shared_strings: list[str] = []
+        if "xl/sharedStrings.xml" in archive.namelist():
+            root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+            for item in root.findall(f"{XLSX_MAIN_NS}si"):
+                shared_strings.append(clean_excel_text("".join(node.text or "" for node in item.iter(f"{XLSX_MAIN_NS}t"))))
+        sheet = ET.fromstring(archive.read(first_xlsx_sheet_path(archive)))
+        rows: list[tuple[int, dict[str, str]]] = []
+        for row in sheet.findall(f"{XLSX_MAIN_NS}sheetData/{XLSX_MAIN_NS}row"):
+            row_number = int(row.attrib.get("r") or len(rows) + 1)
+            values: dict[str, str] = {}
+            for cell in row.findall(f"{XLSX_MAIN_NS}c"):
+                col = column_label(cell.attrib.get("r", ""))
+                if not col:
+                    continue
+                cell_type = cell.attrib.get("t")
+                raw_value = ""
+                if cell_type == "inlineStr":
+                    raw_value = "".join(node.text or "" for node in cell.iter(f"{XLSX_MAIN_NS}t"))
+                else:
+                    value_node = cell.find(f"{XLSX_MAIN_NS}v")
+                    raw_value = value_node.text if value_node is not None and value_node.text is not None else ""
+                    if cell_type == "s" and raw_value.isdigit():
+                        index = int(raw_value)
+                        raw_value = shared_strings[index] if index < len(shared_strings) else ""
+                value = clean_excel_text(raw_value)
+                if value:
+                    values[col] = value
+            if values:
+                rows.append((row_number, values))
+        return rows
+
+
+def delivery_date_from_rows_or_name(rows: list[tuple[int, dict[str, str]]], path: Path) -> str:
+    for _, row in rows[:12]:
+        date_text = delivery_date_from_text(" ".join(row.values()))
+        if date_text:
+            return date_text
+    date_text = delivery_date_from_text(path.stem)
+    if date_text:
+        return date_text
+    return now_iso()[:10]
+
+
+def parse_aw_delivery_workbook(path: Path) -> dict[str, Any]:
+    rows = read_xlsx_rows(path)
+    delivery_date = delivery_date_from_rows_or_name(rows, path)
+    current_product = ""
+    items: list[dict[str, Any]] = []
+    for row_number, row in rows:
+        a_value = row.get("A", "")
+        order_col = item_col = qty_col = dims_col = customer_col = remake_col = route_col = ""
+        if parse_int_text(row.get("F")) is not None and parse_int_text(row.get("G")) is not None and parse_int_text(row.get("J")) is not None:
+            order_col, item_col, qty_col, dims_col, customer_col, remake_col, route_col = "F", "G", "J", "L", "N", "V", "X"
+        elif parse_int_text(row.get("E")) is not None and parse_int_text(row.get("F")) is not None and parse_int_text(row.get("G")) is not None:
+            order_col, item_col, qty_col, dims_col, customer_col, remake_col, route_col = "E", "F", "G", "H", "I", "J", "L"
+        else:
+            header_text = " ".join(row.values()).lower()
+            if a_value and "delivery list" not in header_text and "job nr" not in header_text:
+                current_product = a_value
+            continue
+
+        order_no = parse_int_text(row.get(order_col))
+        item_no = parse_int_text(row.get(item_col))
+        qty = parse_int_text(row.get(qty_col))
+        if order_no is None or item_no is None or qty is None:
+            continue
+        remake = row.get(remake_col, "")
+        is_remake = is_remake_item({"processState": remake, "queueState": remake})
+        item = {
+            "id": f"{path.stem}:{row_number}:{order_no}:{item_no}",
+            "order": str(order_no),
+            "item": str(item_no).zfill(3),
+            "qty": qty,
+            "dimensions": row.get(dims_col, ""),
+            "customer": row.get(customer_col, ""),
+            "route": row.get(route_col, ""),
+            "job": a_value,
+            "product": current_product,
+            "processState": "Remake" if is_remake else "",
+            "queueState": remake,
+            "sourceRow": row_number,
+        }
+        item["route"] = inferred_route(item)
+        items.append(item)
+    if not items:
+        raise ValueError(f"No delivery-list rows found in {path.name}")
+    return {"deliveryDate": delivery_date, "sourceName": path.name, "items": items}
+
+
+def parse_delivery_csv(path: Path) -> dict[str, Any]:
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.DictReader(handle))
+    items = []
+    for index, row in enumerate(rows, start=1):
+        order_no = row.get("order") or row.get("Order Nr.") or row.get("Order Nr") or row.get("Order")
+        item_no = row.get("item") or row.get("Item Nr.") or row.get("Item Nr") or row.get("Item")
+        qty = row.get("qty") or row.get("Qty.") or row.get("Qty") or "1"
+        if not order_no or not item_no:
+            continue
+        item = {
+            "id": f"{path.stem}:{index}:{order_no}:{item_no}",
+            "order": str(parse_int_text(order_no) or order_no),
+            "item": str(parse_int_text(item_no) or item_no).zfill(3),
+            "qty": parse_int_text(qty) or 1,
+            "dimensions": row.get("dimensions") or row.get("Dimensions") or "",
+            "customer": row.get("customer") or row.get("Customer") or "",
+            "route": row.get("route") or row.get("Route") or "",
+            "job": row.get("job") or row.get("Job Nr.") or row.get("Job Nr") or "",
+            "product": row.get("product") or row.get("Product") or "",
+            "processState": row.get("processState") or row.get("Process State") or "",
+            "queueState": row.get("queueState") or row.get("Queue State") or "",
+        }
+        item["route"] = inferred_route(item)
+        items.append(item)
+    if not items:
+        raise ValueError(f"No delivery-list rows found in {path.name}")
+    return {"deliveryDate": delivery_date_from_text(path.stem) or now_iso()[:10], "sourceName": path.name, "items": items}
+
+
+def load_delivery_source_payload(path: Path) -> dict[str, Any]:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        return json.loads(path.read_text(encoding="utf-8"))
+    if suffix in {".xlsx", ".xlsm"}:
+        return parse_aw_delivery_workbook(path)
+    if suffix == ".csv":
+        return parse_delivery_csv(path)
+    raise ValueError(f"Unsupported import file type: {path.suffix}")
+
+
+def source_file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def is_remake_item(item: dict[str, Any]) -> bool:
+    text = " ".join(str(item.get(key, "")) for key in ("remake", "processState", "queueState")).upper()
+    return "REMAKE" in text or re.search(r"\bRM\b", text) is not None
+
+
+def is_mirror_item(item: dict[str, Any]) -> bool:
+    text = " ".join(str(item.get(key, "")) for key in ("product", "job", "customer", "route")).upper()
+    return "MIRROR" in text or re.search(r"\bMIR\b", text) is not None
+
+
+def should_print_delivery_item(item: dict[str, Any], exclude_mirrors: bool = True, include_mirror_remakes: bool = True) -> bool:
+    if not exclude_mirrors:
+        return True
+    if not is_mirror_item(item):
+        return True
+    return include_mirror_remakes and is_remake_item(item)
+
+
+def print_counts_for_items(items: list[dict[str, Any]]) -> dict[str, int]:
+    printable = [item for item in items if should_print_delivery_item(item)]
+    return {
+        "rowCount": len(printable),
+        "pieceCount": sum(int(item.get("qty") or 0) for item in printable),
+        "remakeCount": sum(1 for item in printable if is_remake_item(item)),
+        "excludedMirrorCount": sum(1 for item in items if is_mirror_item(item) and not should_print_delivery_item(item)),
+    }
 
 
 def item_from_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
+        "sourceId": row["source_id"],
         "barcode": row["barcode"],
         "order": row["order_no"],
         "item": row["item_no"],
@@ -386,6 +672,12 @@ class BaseDeliveryStore:
     def import_delivery_list(self, data: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
+    def import_delivery_folder(self, data: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get_print_package(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
     def get_scan_events(self, list_id: str, only_errors: bool = False) -> list[dict[str, Any]]:
         raise NotImplementedError
 
@@ -404,6 +696,9 @@ class BaseDeliveryStore:
     def export_csv(self, list_id: str) -> str:
         raise NotImplementedError
 
+    def export_xlsx(self, list_id: str) -> bytes:
+        raise NotImplementedError
+
     def authenticate_user(self, username: str, password: str) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -420,6 +715,9 @@ class BaseDeliveryStore:
         raise NotImplementedError
 
     def deactivate_user(self, username: str, deactivated_by: str = "system") -> dict[str, Any]:
+        raise NotImplementedError
+
+    def update_user_roles(self, username: str, roles: list[str], updated_by: str = "system") -> dict[str, Any]:
         raise NotImplementedError
 
     def list_active_sessions(self) -> list[dict[str, Any]]:
@@ -441,6 +739,12 @@ class BaseDeliveryStore:
         raise NotImplementedError
 
     def update_line_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def delete_delivery_list(self, list_id: str, user: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def delete_delivery_date(self, delivery_date: str, user: str) -> dict[str, Any]:
         raise NotImplementedError
 
     def reports_summary(self) -> dict[str, Any]:
@@ -694,6 +998,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.ensure_column(con, "bays", "layout_row", "INTEGER")
         self.ensure_column(con, "bays", "layout_col", "INTEGER")
         self.ensure_column(con, "bays", "layout_cell", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "imports", "source_path", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "imports", "source_hash", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "imports", "import_kind", "TEXT NOT NULL DEFAULT 'manual'")
         con.commit()
 
     def ensure_column(self, con: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -704,7 +1011,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
     def clone_item_for_list(self, item: dict[str, Any], list_id: str, index: int) -> dict[str, Any]:
         order_no = str(item["order"])
         item_no = str(item["item"]).zfill(3)
-        route = str(item.get("route", ""))
+        route = inferred_route(item)
         product = str(item.get("product", ""))
         dimensions = str(item.get("dimensions", ""))
         return {
@@ -724,9 +1031,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "suggested_bay": suggested_bay(product, dimensions, route),
         }
 
-    def insert_line_items(self, con: sqlite3.Connection, list_id: str, items: list[dict[str, Any]]) -> None:
+    def insert_line_items(self, con: sqlite3.Connection, list_id: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cloned_items = []
         for index, item in enumerate(items, start=1):
             cloned = self.clone_item_for_list(item, list_id, index)
+            cloned_items.append(cloned)
             con.execute(
                 """
                 INSERT INTO line_items (
@@ -754,6 +1063,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     cloned["suggested_bay"],
                 ),
             )
+        return cloned_items
 
     def upsert_delivery_list(
         self,
@@ -783,8 +1093,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             (list_id, label, delivery_date, stage, scanner, revision, created),
         )
         if replace_items:
+            preserved_scans: dict[str, int] = {}
+            for row in con.execute("SELECT source_id, order_no, item_no, scanned_qty FROM line_items WHERE list_id = ?", (list_id,)).fetchall():
+                scanned_qty = int(row["scanned_qty"] or 0)
+                preserved_scans[str(row["source_id"])] = max(preserved_scans.get(str(row["source_id"]), 0), scanned_qty)
+                preserved_scans[f"{row['order_no']}-{str(row['item_no']).zfill(3)}"] = max(
+                    preserved_scans.get(f"{row['order_no']}-{str(row['item_no']).zfill(3)}", 0),
+                    scanned_qty,
+                )
             con.execute("DELETE FROM line_items WHERE list_id = ?", (list_id,))
-            self.insert_line_items(con, list_id, items)
+            cloned_items = self.insert_line_items(con, list_id, items)
+            for cloned in cloned_items:
+                preserved = preserved_scans.get(cloned["source_id"], preserved_scans.get(f"{cloned['order_no']}-{cloned['item_no']}", 0))
+                if preserved:
+                    con.execute(
+                        "UPDATE line_items SET scanned_qty = ? WHERE id = ?",
+                        (min(int(preserved), int(cloned["qty"])), cloned["id"]),
+                    )
 
     def seed_demo_data(self, con: sqlite3.Connection) -> None:
         if not self.sample_path.exists():
@@ -965,6 +1290,37 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ),
             )
 
+    def list_timing_metrics(self, con: sqlite3.Connection, list_id: str, delivery_date: str) -> dict[str, Any]:
+        rows = con.execute(
+            """
+            SELECT li.id, li.qty, li.scanned_qty,
+                   MAX(CASE WHEN se.qty_delta > 0 THEN se.created_at ELSE NULL END) AS last_scanned_at
+            FROM line_items li
+            LEFT JOIN scan_events se ON se.line_item_id = li.id AND se.list_id = li.list_id
+            WHERE li.list_id = ?
+            GROUP BY li.id
+            """,
+            (list_id,),
+        ).fetchall()
+        on_time_qty = 0
+        late_qty = 0
+        delivery_key = str(delivery_date or "")
+        for row in rows:
+            scanned = max(0, min(int(row["scanned_qty"] or 0), int(row["qty"] or 0)))
+            if not scanned:
+                continue
+            scan_key = str(row["last_scanned_at"] or "")[:10]
+            if scan_key and delivery_key and scan_key <= delivery_key:
+                on_time_qty += scanned
+            else:
+                late_qty += scanned
+        scanned_qty = on_time_qty + late_qty
+        return {
+            "onTimeQty": on_time_qty,
+            "lateQty": late_qty,
+            "onTimePercent": (on_time_qty / scanned_qty * 100) if scanned_qty else 0,
+        }
+
     def get_delivery_lists(self, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         with self.connect() as con:
             rows = con.execute(
@@ -975,16 +1331,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                        COUNT(li.id) AS item_count
                 FROM delivery_lists dl
                 LEFT JOIN line_items li ON li.list_id = dl.id
+                WHERE dl.status = 'active'
                 GROUP BY dl.id
+                HAVING COUNT(li.id) > 0
                 ORDER BY dl.delivery_date DESC, dl.label
                 """
             ).fetchall()
-        result = []
-        for row in rows:
-            meta = list_meta(row)
-            meta.update({"totalQty": row["total_qty"], "scannedQty": row["scanned_qty"], "itemCount": row["item_count"]})
-            if user is None or user_can_access_stage(user, meta["stage"], meta["scanner"]):
-                result.append(meta)
+            result = []
+            for row in rows:
+                meta = list_meta(row)
+                total_qty = int(row["total_qty"] or 0)
+                scanned_qty = int(row["scanned_qty"] or 0)
+                meta.update(
+                    {
+                        "totalQty": total_qty,
+                        "scannedQty": scanned_qty,
+                        "itemCount": row["item_count"],
+                        "deliveryPercent": (scanned_qty / total_qty * 100) if total_qty else 0,
+                    }
+                )
+                meta.update(self.list_timing_metrics(con, row["id"], row["delivery_date"]))
+                if user is None or user_can_access_stage(user, meta["stage"], meta["scanner"]):
+                    result.append(meta)
         return result
 
     def get_line_items(self, list_id: str) -> list[dict[str, Any]]:
@@ -1190,6 +1558,30 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"users": self.list_users(), "username": clean_username}
 
+    def update_user_roles(self, username: str, roles: list[str], updated_by: str = "system") -> dict[str, Any]:
+        clean_username = str(username or "").strip()
+        clean_roles = [str(role).strip() for role in roles if str(role).strip()]
+        if not clean_username or not clean_roles:
+            raise ValueError("username and at least one role are required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            user_row = self.get_user_by_username(con, clean_username)
+            if not user_row:
+                raise ValueError("User not found")
+            role_ids = []
+            for role_name in clean_roles:
+                role = con.execute("SELECT id FROM roles WHERE name = ?", (role_name,)).fetchone()
+                if not role:
+                    raise ValueError(f"Unknown role: {role_name}")
+                role_ids.append(role["id"])
+            con.execute("DELETE FROM user_roles WHERE user_id = ?", (user_row["id"],))
+            for role_id in role_ids:
+                con.execute("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)", (user_row["id"], role_id))
+            con.execute("DELETE FROM sessions WHERE user_id = ?", (user_row["id"],))
+            self.insert_audit(con, "user", clean_username, "update_user_roles", updated_by, "", "", {"roles": clean_roles})
+            con.commit()
+        return {"users": self.list_users(), "username": clean_username, "roles": clean_roles}
+
     def list_active_sessions(self) -> list[dict[str, Any]]:
         now = now_iso()
         with self.connect() as con:
@@ -1265,20 +1657,39 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         payload = self.validate_import_payload(data.get("payload") or data)
         user = request_user_name(data)
         source_name = str(data.get("fileName") or data.get("sourceName") or "").strip()[:255]
+        source_path = str(data.get("sourcePath") or "").strip()
+        source_hash = str(data.get("sourceHash") or "").strip()
+        import_kind = str(data.get("importKind") or "manual").strip()[:40]
         definitions = build_delivery_lists(payload)
         base_items = payload.get("items") or []
+        delivery_date = str(payload["deliveryDate"])
+        definition_ids = [definition[0] for definition in definitions]
+        stale_profile_ids = [list_id for list_id in all_profile_list_ids(delivery_date) if list_id not in definition_ids]
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            existing_list_ids = {
+                row["id"]
+                for row in con.execute(
+                    "SELECT id FROM delivery_lists WHERE id IN ({})".format(",".join("?" for _ in definitions)),
+                    definition_ids,
+                ).fetchall()
+            }
+            if stale_profile_ids:
+                con.execute(
+                    "UPDATE delivery_lists SET status = 'inactive' WHERE id IN ({})".format(",".join("?" for _ in stale_profile_ids)),
+                    stale_profile_ids,
+                )
             con.execute(
                 """
                 INSERT INTO imports (
                     delivery_date, source_name, row_count, total_qty, cpu_count,
-                    mirror_count, status, imported_by, imported_at
+                    mirror_count, status, imported_by, imported_at, source_path,
+                    source_hash, import_kind
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?)
                 """,
                 (
-                    str(payload["deliveryDate"]),
+                    delivery_date,
                     source_name,
                     len(base_items),
                     sum(int(item.get("qty") or 0) for item in base_items),
@@ -1286,14 +1697,203 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     sum(1 for item in base_items if "MIRROR" in str(item.get("product", "")).upper()),
                     user,
                     now_iso(),
+                    source_path,
+                    source_hash,
+                    import_kind,
                 ),
             )
+            changed_list_ids: list[str] = []
             for list_id, label, stage, scanner, items in definitions:
                 self.upsert_delivery_list(con, list_id, label, str(payload["deliveryDate"]), stage, scanner, items, replace_items=True)
+                changed_list_ids.append(list_id)
                 self.insert_event(con, list_id, None, "IMPORT", "", user, scanner, "import", "Delivery list imported")
-                self.insert_audit(con, "delivery_list", list_id, "import", user, scanner, "", {"sourceName": source_name})
+                self.insert_audit(con, "delivery_list", list_id, "import", user, scanner, "", {"sourceName": source_name, "sourceHash": source_hash})
             con.commit()
-        return {"lists": self.get_delivery_lists(), "activeListId": definitions[0][0], "importedCount": len(definitions)}
+        created_count = sum(1 for definition in definitions if definition[0] not in existing_list_ids)
+        updated_count = len(definitions) - created_count
+        return {
+            "lists": self.get_delivery_lists(),
+            "activeListId": definitions[0][0],
+            "importedCount": len(definitions),
+            "createdCount": created_count,
+            "updatedCount": updated_count,
+            "changedListIds": changed_list_ids,
+            "printCandidates": self.print_candidates_from_payload(payload, changed_list_ids, source_name),
+        }
+
+    def print_candidates_from_payload(self, payload: dict[str, Any], list_ids: list[str], source_name: str) -> list[dict[str, Any]]:
+        counts = print_counts_for_items(payload.get("items") or [])
+        if not counts["pieceCount"]:
+            return []
+        return [
+            {
+                "sourceName": source_name,
+                "deliveryDate": str(payload.get("deliveryDate") or ""),
+                "listIds": list_ids,
+                **counts,
+            }
+        ]
+
+    def import_delivery_folder(self, data: dict[str, Any]) -> dict[str, Any]:
+        user = request_user_name(data)
+        folder = Path(str(data.get("sourceFolder") or self.config.temp_delivery_lists_dir)).expanduser()
+        if not folder.is_absolute():
+            folder = self.config.root / folder
+        if not folder.exists() or not folder.is_dir():
+            raise ValueError(f"Temp Delivery Lists folder not found: {folder}")
+
+        imported_files: list[dict[str, Any]] = []
+        updated_files: list[dict[str, Any]] = []
+        skipped_files: list[dict[str, Any]] = []
+        failed_files: list[dict[str, Any]] = []
+        print_candidates: list[dict[str, Any]] = []
+        active_list_id = ""
+
+        for path in sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_IMPORT_EXTENSIONS):
+            try:
+                file_hash = source_file_hash(path)
+                source_path = str(path.resolve())
+                with self.connect() as con:
+                    previous = con.execute(
+                        """
+                        SELECT source_hash FROM imports
+                        WHERE source_path = ? OR source_name = ?
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (source_path, path.name),
+                    ).fetchone()
+                if previous and previous["source_hash"] == file_hash:
+                    skipped_files.append({"fileName": path.name, "reason": "No changes detected"})
+                    continue
+
+                payload = load_delivery_source_payload(path)
+                preview = self.preview_import(payload)
+                if not preview["valid"]:
+                    failed_files.append({"fileName": path.name, "errors": preview["errors"]})
+                    continue
+
+                result = self.import_delivery_list(
+                    {
+                        "payload": payload,
+                        "fileName": path.name,
+                        "sourcePath": source_path,
+                        "sourceHash": file_hash,
+                        "importKind": "temp_folder",
+                        "user": user,
+                    }
+                )
+                active_list_id = active_list_id or result.get("activeListId", "")
+                file_result = {
+                    "fileName": path.name,
+                    "deliveryDate": payload["deliveryDate"],
+                    "rowCount": preview["rowCount"],
+                    "totalQty": preview["totalQty"],
+                    "createdCount": result["createdCount"],
+                    "updatedCount": result["updatedCount"],
+                    "listIds": result["changedListIds"],
+                }
+                if result["createdCount"]:
+                    imported_files.append(file_result)
+                else:
+                    updated_files.append(file_result)
+                print_candidates.extend(result.get("printCandidates") or [])
+            except Exception as exc:
+                failed_files.append({"fileName": path.name, "errors": [str(exc)]})
+
+        return {
+            "ok": not failed_files or bool(imported_files or updated_files or skipped_files),
+            "sourceFolder": str(folder),
+            "scannedFiles": len(imported_files) + len(updated_files) + len(skipped_files) + len(failed_files),
+            "importedFiles": imported_files,
+            "updatedFiles": updated_files,
+            "skippedFiles": skipped_files,
+            "failedFiles": failed_files,
+            "printCandidates": print_candidates,
+            "activeListId": active_list_id,
+            "lists": self.get_delivery_lists(),
+        }
+
+    def get_print_package(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        filters = filters or {}
+        rush_only = str(filters.get("rushOnly") or "").lower() in {"1", "true", "yes"}
+        remake_only = str(filters.get("remakeOnly") or "").lower() in {"1", "true", "yes"}
+        cpu_only = str(filters.get("cpuOnly") or "").lower() in {"1", "true", "yes"}
+        dtc_only = str(filters.get("dtcOnly") or "").lower() in {"1", "true", "yes"}
+        updated_only = str(filters.get("updatedOnly") or "").lower() in {"1", "true", "yes"}
+        glass_type = str(filters.get("glassType") or "").strip().lower()
+        package_by_date: dict[str, dict[str, Any]] = {}
+        for list_id in list_ids:
+            try:
+                payload = self.get_delivery_list(list_id, user=user)
+            except (KeyError, PermissionError):
+                continue
+            date_key = payload["meta"]["deliveryDate"]
+            bucket = package_by_date.setdefault(
+                date_key,
+                {
+                    "id": date_key,
+                    "label": f"Delivery List for {format_display_date(date_key)}",
+                    "stage": "All stages",
+                    "deliveryDate": date_key,
+                    "itemsByKey": {},
+                    "stages": [],
+                    "excludedMirrorCount": 0,
+                },
+            )
+            if payload["meta"]["stage"] not in bucket["stages"]:
+                bucket["stages"].append(payload["meta"]["stage"])
+            source_items = payload["items"]
+            printable_items = [item for item in source_items if should_print_delivery_item(item)]
+            if rush_only:
+                printable_items = [item for item in printable_items if re.search(r"\bRush\b", str(item.get("processState", "")), flags=re.IGNORECASE)]
+            if remake_only:
+                printable_items = [item for item in printable_items if is_remake_item(item)]
+            if cpu_only:
+                printable_items = [item for item in printable_items if is_cpu_item(item)]
+            if dtc_only:
+                printable_items = [item for item in printable_items if route_category(item) == "dtc"]
+            if updated_only:
+                printable_items = [
+                    item
+                    for item in printable_items
+                    if re.search(r"\b(update|updated|new|change|changed)\b", f"{item.get('processState', '')} {item.get('queueState', '')}", flags=re.IGNORECASE)
+                ]
+            if glass_type:
+                printable_items = [
+                    item
+                    for item in printable_items
+                    if glass_type in f"{item.get('product', '')} {item.get('job', '')}".lower()
+                ]
+            if not printable_items and not source_items:
+                continue
+            bucket["excludedMirrorCount"] += len([item for item in source_items if is_mirror_item(item) and not should_print_delivery_item(item)])
+            for item in printable_items:
+                key = str(item.get("sourceId") or f"{item.get('order')}-{item.get('item')}-{item.get('dimensions')}")
+                bucket["itemsByKey"].setdefault(key, item)
+
+        package_lists = []
+        for bucket in package_by_date.values():
+            items = sorted(
+                bucket["itemsByKey"].values(),
+                key=lambda item: (str(item.get("product") or item.get("job") or ""), int(item.get("order") or 0), int(item.get("item") or 0)),
+            )
+            if not items:
+                continue
+            package_lists.append(
+                {
+                    "id": bucket["id"],
+                    "label": bucket["label"],
+                    "stage": bucket["stage"],
+                    "stages": bucket["stages"],
+                    "deliveryDate": bucket["deliveryDate"],
+                    "items": items,
+                    "remakes": [item for item in items if is_remake_item(item)],
+                    "rushes": [item for item in items if re.search(r"\bRush\b", str(item.get("processState", "")), flags=re.IGNORECASE)],
+                    "excludedMirrorCount": bucket["excludedMirrorCount"],
+                }
+            )
+        return {"lists": package_lists, "generatedAt": now_iso(), "filters": filters}
 
     def find_unique_suffix_item(self, rows: list[sqlite3.Row], suffix: str, item_no: int) -> sqlite3.Row | None:
         matches = []
@@ -1677,7 +2277,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
     def admin_summary(self) -> dict[str, Any]:
         with self.connect() as con:
-            list_count = con.execute("SELECT COUNT(*) FROM delivery_lists WHERE status = 'active'").fetchone()[0]
+            list_count = con.execute(
+                "SELECT COUNT(*) FROM delivery_lists dl WHERE dl.status = 'active' AND EXISTS (SELECT 1 FROM line_items li WHERE li.list_id = dl.id)"
+            ).fetchone()[0]
             item_count = con.execute("SELECT COUNT(*) FROM line_items").fetchone()[0]
             scan_count = con.execute("SELECT COUNT(*) FROM scan_events").fetchone()[0]
             open_exceptions = con.execute("SELECT COUNT(*) FROM exceptions WHERE status = 'Open'").fetchone()[0]
@@ -1695,6 +2297,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "activeBays": bay_count,
             "databaseType": self.database_type,
             "databasePath": str(self.database_path),
+            "tempDeliveryListsDir": str(self.config.temp_delivery_lists_dir),
             "authMode": self.config.auth_mode,
             "environment": self.config.environment,
             "recentImports": [
@@ -1702,10 +2305,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "id": row["id"],
                     "deliveryDate": row["delivery_date"],
                     "sourceName": row["source_name"],
+                    "sourcePath": row["source_path"],
+                    "importKind": row["import_kind"],
                     "rowCount": row["row_count"],
                     "totalQty": row["total_qty"],
                     "importedBy": row["imported_by"],
                     "importedAt": row["imported_at"],
+                    "listIds": [f"{row['delivery_date']}-{suffix}" for suffix, _, _, _ in LIST_PROFILES],
                 }
                 for row in import_rows
             ],
@@ -1840,6 +2446,38 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 self.insert_audit(con, "line_item", line_item_id, "manual_edit", user, "", "", {"fields": list(data.keys())})
             con.commit()
             return self._get_payload(con, row["list_id"])
+
+    def delete_delivery_list(self, list_id: str, user: str) -> dict[str, Any]:
+        clean_id = str(list_id or "").strip()
+        if not clean_id:
+            raise ValueError("listId is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (clean_id,)).fetchone()
+            if not row:
+                raise ValueError("Delivery list not found")
+            con.execute("UPDATE bay_assignments SET status = 'Cancelled', reason = 'Delivery list deleted' WHERE delivery_list_id = ?", (clean_id,))
+            con.execute("DELETE FROM delivery_lists WHERE id = ?", (clean_id,))
+            self.insert_audit(con, "delivery_list", clean_id, "delete_delivery_list", user, row["scanner"], "Deleted from admin page")
+            con.commit()
+        return {"ok": True, "deletedListId": clean_id, "lists": self.get_delivery_lists()}
+
+    def delete_delivery_date(self, delivery_date: str, user: str) -> dict[str, Any]:
+        clean_date = str(delivery_date or "").strip()
+        if not clean_date:
+            raise ValueError("deliveryDate is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            rows = con.execute("SELECT id FROM delivery_lists WHERE delivery_date = ?", (clean_date,)).fetchall()
+            list_ids = [row["id"] for row in rows]
+            if not list_ids:
+                raise ValueError("No delivery lists found for that date")
+            placeholders = ",".join("?" for _ in list_ids)
+            con.execute(f"UPDATE bay_assignments SET status = 'Cancelled', reason = 'Delivery date deleted' WHERE delivery_list_id IN ({placeholders})", list_ids)
+            con.execute(f"DELETE FROM delivery_lists WHERE id IN ({placeholders})", list_ids)
+            self.insert_audit(con, "delivery_date", clean_date, "delete_delivery_date", user, "", "Deleted from admin page", {"listIds": list_ids})
+            con.commit()
+        return {"ok": True, "deliveryDate": clean_date, "deletedCount": len(list_ids), "lists": self.get_delivery_lists()}
 
     def reports_summary(self) -> dict[str, Any]:
         with self.connect() as con:
@@ -2205,35 +2843,116 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
     def mark_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         assignment_id = int(data.get("assignmentId") or 0)
-        reason = str(data.get("reason") or "").strip()
-        if not assignment_id or not reason:
-            raise ValueError("assignmentId and reason are required")
+        order_no = digits_only(str(data.get("orderNo") or data.get("order") or ""))
+        bay_code = str(data.get("bayCode") or "").strip()
+        truck_exempt = bool(data.get("truckExempt"))
+        reason = str(data.get("reason") or "Same-day install").strip()
+        if not assignment_id and not order_no:
+            raise ValueError("Select a bay assignment or enter an order number")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            assignment = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
-            if not assignment:
-                raise ValueError("Assignment not found")
-            con.execute("UPDATE bay_assignments SET status = 'SDIOverride', reason = ? WHERE id = ?", (reason, assignment_id))
-            self.insert_bay_event(con, assignment["bay_id"], assignment["line_item_id"], "MarkSDI", user, reason)
-            self.insert_audit(con, "bay_assignment", str(assignment_id), "mark_sdi", user, "", reason)
+            affected_rows: list[sqlite3.Row] = []
+            assignment = None
+            if assignment_id:
+                assignment = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
+                if not assignment:
+                    raise ValueError("Assignment not found")
+                row = con.execute("SELECT * FROM line_items WHERE id = ?", (assignment["line_item_id"],)).fetchone()
+                if row:
+                    affected_rows.append(row)
+                con.execute("UPDATE bay_assignments SET status = 'SDIOverride', reason = ? WHERE id = ?", (reason, assignment_id))
+                self.insert_bay_event(con, assignment["bay_id"], assignment["line_item_id"], "MarkSDI", user, reason)
+            elif order_no:
+                affected_rows = con.execute(
+                    """
+                    SELECT li.*
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE li.order_no = ? AND dl.status = 'active'
+                    ORDER BY dl.delivery_date DESC, li.id
+                    """,
+                    (order_no,),
+                ).fetchall()
+                if not affected_rows:
+                    raise ValueError("Order number was not found on active delivery lists")
+                if bay_code and not truck_exempt:
+                    bay = self.get_bay_by_code(con, bay_code)
+                    row = affected_rows[0]
+                    cur = con.execute(
+                        """
+                        INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
+                        VALUES (?, ?, ?, 1, 'SDIOverride', ?, ?, ?)
+                        """,
+                        (row["list_id"], row["id"], bay["id"], user, now_iso(), reason),
+                    )
+                    assignment_id = int(cur.lastrowid)
+                    self.insert_bay_event(con, bay["id"], row["id"], "MarkSDI", user, reason, new_bay_id=bay["id"])
+
+            for row in affected_rows:
+                process_state = str(row["process_state"] or "")
+                next_state = process_state if re.search(r"\bRush\b", process_state, flags=re.IGNORECASE) else " ".join(part for part in [process_state, "Rush"] if part).strip()
+                con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, row["id"]))
+                self.insert_event(con, row["list_id"], row["id"], "SDI", row["barcode"], user, "", "notice", "Rush order marked", reason)
+                self.insert_audit(
+                    con,
+                    "line_item",
+                    row["id"],
+                    "mark_rush_sdi",
+                    user,
+                    "",
+                    reason,
+                    {"truckExempt": truck_exempt, "bayCode": bay_code, "assignmentId": assignment_id},
+                )
+            if assignment_id:
+                self.insert_audit(con, "bay_assignment", str(assignment_id), "mark_sdi", user, "", reason)
             con.commit()
-        return {"ok": True, "assignmentId": assignment_id, "status": "SDIOverride"}
+        return {
+            "ok": True,
+            "assignmentId": assignment_id,
+            "status": "SDIOverride",
+            "rush": True,
+            "affectedItems": len(affected_rows),
+            "message": "A Rush order has been marked. Print rush order?",
+        }
 
     def remove_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         assignment_id = int(data.get("assignmentId") or 0)
-        reason = str(data.get("reason") or "").strip()
-        if not assignment_id or not reason:
-            raise ValueError("assignmentId and reason are required")
+        order_no = digits_only(str(data.get("orderNo") or data.get("order") or ""))
+        reason = str(data.get("reason") or "SDI cleared").strip()
+        if not assignment_id and not order_no:
+            raise ValueError("Select a bay assignment or enter an order number")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            assignment = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
-            if not assignment:
-                raise ValueError("Assignment not found")
-            con.execute("UPDATE bay_assignments SET status = 'Assigned', reason = ? WHERE id = ?", (reason, assignment_id))
-            self.insert_bay_event(con, assignment["bay_id"], assignment["line_item_id"], "RemoveSDI", user, reason)
-            self.insert_audit(con, "bay_assignment", str(assignment_id), "remove_sdi", user, "", reason)
+            rows: list[sqlite3.Row] = []
+            if assignment_id:
+                assignment = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
+                if not assignment:
+                    raise ValueError("Assignment not found")
+                con.execute("UPDATE bay_assignments SET status = 'Assigned', reason = ? WHERE id = ?", (reason, assignment_id))
+                self.insert_bay_event(con, assignment["bay_id"], assignment["line_item_id"], "RemoveSDI", user, reason)
+                row = con.execute("SELECT * FROM line_items WHERE id = ?", (assignment["line_item_id"],)).fetchone()
+                if row:
+                    rows.append(row)
+                self.insert_audit(con, "bay_assignment", str(assignment_id), "remove_sdi", user, "", reason)
+            elif order_no:
+                rows = con.execute(
+                    """
+                    SELECT li.*
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE li.order_no = ? AND dl.status = 'active'
+                    """,
+                    (order_no,),
+                ).fetchall()
+                if not rows:
+                    raise ValueError("Order number was not found on active delivery lists")
+            for row in rows:
+                next_state = re.sub(r"\bRush\b", "", str(row["process_state"] or ""), flags=re.IGNORECASE).strip()
+                next_state = re.sub(r"\s{2,}", " ", next_state)
+                con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, row["id"]))
+                self.insert_audit(con, "line_item", row["id"], "clear_rush_sdi", user, "", reason)
             con.commit()
-        return {"ok": True, "assignmentId": assignment_id, "status": "Assigned"}
+        return {"ok": True, "assignmentId": assignment_id, "status": "Assigned", "affectedItems": len(rows)}
 
     def bay_check(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         bay_code = str(data.get("bayCode") or "")
@@ -2285,6 +3004,98 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "product": row["product"],
                     "suggestedBay": row["suggestedBay"],
                 }
+            )
+        return output.getvalue()
+
+    def export_xlsx(self, list_id: str) -> bytes:
+        rows = self.get_line_items(list_id)
+        headers = [
+            "Barcode",
+            "Order Nr.",
+            "Item Nr.",
+            "Qty.",
+            "Scanned",
+            "Remaining",
+            "Dimensions",
+            "Customer",
+            "Route",
+            "Job Nr.",
+            "Product",
+            "Suggested Bay",
+        ]
+
+        def cell_ref(col: int, row: int) -> str:
+            letters = ""
+            value = col
+            while value:
+                value, remainder = divmod(value - 1, 26)
+                letters = chr(65 + remainder) + letters
+            return f"{letters}{row}"
+
+        def inline_cell(col: int, row: int, value: Any) -> str:
+            text = xml_escape(str(value if value is not None else ""))
+            return f'<c r="{cell_ref(col, row)}" t="inlineStr"><is><t>{text}</t></is></c>'
+
+        sheet_rows = [
+            f'<row r="1">{"".join(inline_cell(index, 1, header) for index, header in enumerate(headers, start=1))}</row>'
+        ]
+        for row_index, item in enumerate(rows, start=2):
+            values = [
+                item["barcode"],
+                item["order"],
+                item["item"],
+                item["qty"],
+                item["scanned"],
+                max(int(item["qty"]) - int(item["scanned"]), 0),
+                item["dimensions"],
+                item["customer"],
+                item["route"],
+                item["job"],
+                item["product"],
+                item["suggestedBay"],
+            ]
+            sheet_rows.append(f'<row r="{row_index}">{"".join(inline_cell(index, row_index, value) for index, value in enumerate(values, start=1))}</row>')
+
+        output = BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>""",
+            )
+            archive.writestr(
+                "_rels/.rels",
+                """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+            )
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Delivery List" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>""",
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                f"""<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <sheetData>{''.join(sheet_rows)}</sheetData>
+</worksheet>""",
             )
         return output.getvalue()
 
