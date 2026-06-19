@@ -44,6 +44,10 @@ if (Test-Path -LiteralPath $bundledPython) {
 }
 
 $env:PORT = [string]$Port
+$env:DLS_PORT = [string]$Port
+$env:DLS_HOST = "127.0.0.1"
+$env:DLS_TEMP_DELIVERY_LISTS_PATH = "I:\BAREFOOT-INSTALL\Glass Production\Brandon\Temp Delivery Lists"
+
 $url = "http://127.0.0.1:$Port/"
 
 Set-Location -LiteralPath $AppRoot

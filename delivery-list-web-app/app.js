@@ -19,16 +19,23 @@ const state = {
   pageSize: 25,
   homeSearch: "",
   homeStageFilter: "all",
+  overviewRange: "30",
+  homePageIndex: 1,
+  homePageSize: 25,
   expandedDeliveryDate: "",
+  collapsedGlassTypes: new Set(),
   baySearch: "",
   bayStatusFilter: "all",
   bayCategoryFilter: "all",
   selectedBayCode: "",
+  bayEditMode: false,
+  pendingBayMove: null,
   printContext: null,
   lastImportResult: null,
   bayLayout: null,
   bays: [],
   bayEvents: [],
+  adminCustomerRouteRules: [],
   activeSessions: [],
   adminUsers: [],
   backend: false,
@@ -52,10 +59,12 @@ const els = {
   headerGlobalSearchInput: document.getElementById("headerGlobalSearchInput"),
   headerGlobalSearchBtn: document.getElementById("headerGlobalSearchBtn"),
   headerGlobalSearchResults: document.getElementById("headerGlobalSearchResults"),
+  globalPrintExportBtn: document.getElementById("globalPrintExportBtn"),
 
   homePage: document.getElementById("homePage"),
   homeWelcome: document.getElementById("homeWelcome"),
   overviewStats: document.getElementById("overviewStats"),
+  overviewRangeSelect: document.getElementById("overviewRangeSelect"),
   homeUserCard: document.getElementById("homeUserCard"),
   homeRecentLists: document.getElementById("homeRecentLists"),
   homeActivity: document.getElementById("homeActivity"),
@@ -63,6 +72,9 @@ const els = {
   homeStageFilter: document.getElementById("homeStageFilter"),
   homeListGrid: document.getElementById("homeListGrid"),
   homeListCount: document.getElementById("homeListCount"),
+  homePageSize: document.getElementById("homePageSize"),
+  homePager: document.getElementById("homePager"),
+  homePagerTop: document.getElementById("homePagerTop"),
   todayDateLabel: document.getElementById("todayDateLabel"),
   todayStageGrid: document.getElementById("todayStageGrid"),
 
@@ -84,6 +96,12 @@ const els = {
   manualScanForm: document.getElementById("manualScanForm"),
   manualOrderInput: document.getElementById("manualOrderInput"),
   manualItemInput: document.getElementById("manualItemInput"),
+  manualAssignPanel: document.getElementById("manualAssignPanel"),
+  manualAssignForm: document.getElementById("manualAssignForm"),
+  manualAssignOrderInput: document.getElementById("manualAssignOrderInput"),
+  manualAssignItemInput: document.getElementById("manualAssignItemInput"),
+  manualAssignQtyInput: document.getElementById("manualAssignQtyInput"),
+  manualAssignStatus: document.getElementById("manualAssignStatus"),
   listRows: document.getElementById("listRows"),
   recentRows: document.getElementById("recentRows"),
   mobileListCards: document.getElementById("mobileListCards"),
@@ -100,6 +118,9 @@ const els = {
   countRemaining: document.getElementById("countRemaining"),
   countPartial: document.getElementById("countPartial"),
   countComplete: document.getElementById("countComplete"),
+  countRemakes: document.getElementById("countRemakes"),
+  countRushes: document.getElementById("countRushes"),
+  countUpdated: document.getElementById("countUpdated"),
   countErrors: document.getElementById("countErrors"),
   remainingQty: document.getElementById("remainingQty"),
   partialQty: document.getElementById("partialQty"),
@@ -108,22 +129,28 @@ const els = {
   remainingPct: document.getElementById("remainingPct"),
   partialPct: document.getElementById("partialPct"),
   completePct: document.getElementById("completePct"),
-  needsReviewList: document.getElementById("needsReviewList"),
-  noticeList: document.getElementById("noticeList"),
-  needsReviewCount: document.getElementById("needsReviewCount"),
-  noticeCount: document.getElementById("noticeCount"),
   pageSize: document.getElementById("pageSize"),
+  pageSizeBottom: document.getElementById("pageSizeBottom"),
   scanPagerTop: document.getElementById("scanPagerTop"),
   scanPagerBottom: document.getElementById("scanPagerBottom"),
-  printBtn: document.getElementById("printBtn"),
-  exportBtn: document.getElementById("exportBtn"),
   undoBtn: document.getElementById("undoBtn"),
-  resetBtn: document.getElementById("resetBtn"),
-  loadExampleBtn: document.getElementById("loadExampleBtn"),
+  redoBtn: document.getElementById("redoBtn"),
 
   bayMapPage: document.getElementById("bayMapPage"),
   bayOverviewStats: document.getElementById("bayOverviewStats"),
   bayMapSearch: document.getElementById("bayMapSearch"),
+  bayScanOutForm: document.getElementById("bayScanOutForm"),
+  bayScanOutInput: document.getElementById("bayScanOutInput"),
+  bayScanBayInput: document.getElementById("bayScanBayInput"),
+  bayScanModeToggle: document.getElementById("bayScanModeToggle"),
+  bayManualOrderInput: document.getElementById("bayManualOrderInput"),
+  bayManualItemInput: document.getElementById("bayManualItemInput"),
+  bayManualQtyInput: document.getElementById("bayManualQtyInput"),
+  bayManualSubmitBtn: document.getElementById("bayManualSubmitBtn"),
+  bayScanOutStatus: document.getElementById("bayScanOutStatus"),
+  bayScanOutRecent: document.getElementById("bayScanOutRecent"),
+  bayUndoBtn: document.getElementById("bayUndoBtn"),
+  bayRedoBtn: document.getElementById("bayRedoBtn"),
   bayStatusFilter: document.getElementById("bayStatusFilter"),
   bayCategoryFilters: document.getElementById("bayCategoryFilters"),
   baySelectedPanel: document.getElementById("baySelectedPanel"),
@@ -133,9 +160,9 @@ const els = {
   indianTrailSummary: document.getElementById("indianTrailSummary"),
   bayActionButtons: document.getElementById("bayActionButtons"),
   bayMapCanvas: document.getElementById("bayMapCanvas"),
-  bayRecentActions: document.getElementById("bayRecentActions"),
   baySelectedText: document.getElementById("baySelectedText"),
   sdiPanel: document.getElementById("sdiPanel"),
+  sdiBackdrop: document.getElementById("sdiBackdrop"),
   sdiForm: document.getElementById("sdiForm"),
   sdiCloseBtn: document.getElementById("sdiCloseBtn"),
   sdiClearBtn: document.getElementById("sdiClearBtn"),
@@ -143,17 +170,23 @@ const els = {
   sdiBayInput: document.getElementById("sdiBayInput"),
   sdiTruckExemptInput: document.getElementById("sdiTruckExemptInput"),
   sdiReasonInput: document.getElementById("sdiReasonInput"),
+  bayLayoutManager: document.getElementById("bayLayoutManager"),
+  bayLayoutCloseBtn: document.getElementById("bayLayoutCloseBtn"),
+  bayLayoutSelect: document.getElementById("bayLayoutSelect"),
+  bayLayoutUndoBtn: document.getElementById("bayLayoutUndoBtn"),
+  bayLayoutRedoBtn: document.getElementById("bayLayoutRedoBtn"),
 
   printOptionsPanel: document.getElementById("printOptionsPanel"),
   printOptionsBackdrop: document.getElementById("printOptionsBackdrop"),
   printOptionsDate: document.getElementById("printOptionsDate"),
   printOptionsStages: document.getElementById("printOptionsStages"),
   printOptionsGlassType: document.getElementById("printOptionsGlassType"),
+  printMirrorMode: document.getElementById("printMirrorMode"),
+  printCustomerFilter: document.getElementById("printCustomerFilter"),
+  printOrderFilter: document.getElementById("printOrderFilter"),
   printUpdatedOnly: document.getElementById("printUpdatedOnly"),
   printRushOnly: document.getElementById("printRushOnly"),
   printRemakeOnly: document.getElementById("printRemakeOnly"),
-  printCpuOnly: document.getElementById("printCpuOnly"),
-  printDtcOnly: document.getElementById("printDtcOnly"),
   printOptionsClose: document.getElementById("printOptionsClose"),
   printOptionsSubmit: document.getElementById("printOptionsSubmit"),
 
@@ -161,15 +194,22 @@ const els = {
   adminSummary: document.getElementById("adminSummary"),
   folderImportBtn: document.getElementById("folderImportBtn"),
   importBtn: document.getElementById("importBtn"),
+  checkUpdatesBtn: document.getElementById("checkUpdatesBtn"),
   importFile: document.getElementById("importFile"),
   tempFolderInput: document.getElementById("tempFolderInput"),
   importPreviewBox: document.getElementById("importPreviewBox"),
   importHistory: document.getElementById("importHistory"),
+  importFromDate: document.getElementById("importFromDate"),
+  importToDate: document.getElementById("importToDate"),
+  importWindowResetBtn: document.getElementById("importWindowResetBtn"),
   deleteDateSelect: document.getElementById("deleteDateSelect"),
   deleteListSelect: document.getElementById("deleteListSelect"),
   deleteListBtn: document.getElementById("deleteListBtn"),
   deleteDateBtn: document.getElementById("deleteDateBtn"),
   deleteListStatus: document.getElementById("deleteListStatus"),
+  resetListSelect: document.getElementById("resetListSelect"),
+  adminResetScansBtn: document.getElementById("adminResetScansBtn"),
+  resetScansStatus: document.getElementById("resetScansStatus"),
   createUserForm: document.getElementById("createUserForm"),
   newUserName: document.getElementById("newUserName"),
   newUserDisplay: document.getElementById("newUserDisplay"),
@@ -179,6 +219,10 @@ const els = {
   newStationInput: document.getElementById("newStationInput"),
   addStationBtn: document.getElementById("addStationBtn"),
   adminStations: document.getElementById("adminStations"),
+  customerRouteRuleForm: document.getElementById("customerRouteRuleForm"),
+  customerRoutePatternInput: document.getElementById("customerRoutePatternInput"),
+  customerRouteSelect: document.getElementById("customerRouteSelect"),
+  customerRouteRules: document.getElementById("customerRouteRules"),
   manualEditSearch: document.getElementById("manualEditSearch"),
   manualEditSearchBtn: document.getElementById("manualEditSearchBtn"),
   manualEditResults: document.getElementById("manualEditResults"),
@@ -213,6 +257,40 @@ function todayKey() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1, 2)}-${pad(now.getDate(), 2)}`;
 }
 
+function dateInputValue(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1, 2)}-${pad(date.getDate(), 2)}`;
+}
+
+function resetImportDateWindow() {
+  const from = new Date();
+  from.setDate(from.getDate() - 7);
+  const to = new Date();
+  to.setFullYear(to.getFullYear() + 1);
+  if (els.importFromDate) els.importFromDate.value = dateInputValue(from);
+  if (els.importToDate) els.importToDate.value = dateInputValue(to);
+}
+
+function parseDateKey(value) {
+  const parts = String(value || "").split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+function filterListsByOverviewRange(lists = state.lists) {
+  if (state.overviewRange === "all") return lists.slice();
+  const days = Number(state.overviewRange || 30);
+  if (!days) return lists.slice();
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setDate(start.getDate() - days + 1);
+  start.setHours(0, 0, 0, 0);
+  return lists.filter((list) => {
+    const date = parseDateKey(list.deliveryDate);
+    return date && date >= start && date <= end;
+  });
+}
+
 function latestDeliveryDate(lists = state.lists) {
   const dates = lists.map((list) => list.deliveryDate).filter(Boolean).sort();
   return dates[dates.length - 1] || todayKey();
@@ -225,6 +303,10 @@ function dashboardDateKey(lists = state.lists) {
 
 function progressPercent(list) {
   return Number(list?.totalQty || 0) ? (Number(list.scannedQty || 0) / Number(list.totalQty || 1)) * 100 : 0;
+}
+
+function formatPercent(value) {
+  return `${Math.round(Number(value || 0))}%`;
 }
 
 function stageCategory(list) {
@@ -243,7 +325,7 @@ function stageLabel(list) {
   if (category === "greenville") return "BFS Greenville";
   if (category === "received") return "Received";
   if (category === "pickup") return "Customer Pickup";
-  if (category === "dtc") return "DTC";
+  if (category === "dtc") return "Delivery to Customer";
   return "Staged";
 }
 
@@ -670,6 +752,46 @@ function itemStatus(item) {
   return "remaining";
 }
 
+function itemText(item) {
+  return [item.product, item.job, item.customer, item.route, item.processState, item.queueState, item.suggestedBay].join(" ");
+}
+
+function isRemakeItem(item) {
+  return /\b(REMAKE|RM)\b/i.test(itemText(item));
+}
+
+function isRushItem(item) {
+  return /\b(RUSH|SDI)\b/i.test(itemText(item));
+}
+
+function isRemakeOrRush(item) {
+  return isRemakeItem(item) || isRushItem(item);
+}
+
+function isNewOrUpdatedItem(item) {
+  return /\b(NEW LINE|NEW|UPDATED|UPDATE|CHANGED|CHANGE)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
+}
+
+function unresolvedPriorityItems(items = state.items) {
+  return items.filter((item) => isRemakeOrRush(item) && itemStatus(item) !== "complete");
+}
+
+function unresolvedRemakeItems(items = state.items) {
+  return items.filter((item) => isRemakeItem(item) && itemStatus(item) !== "complete");
+}
+
+function unresolvedRushItems(items = state.items) {
+  return items.filter((item) => isRushItem(item) && itemStatus(item) !== "complete");
+}
+
+function scanFlash(kind = "notice") {
+  const className = kind === "success" ? "scan-flash-success" : kind === "error" ? "scan-flash-error" : "scan-flash-notice";
+  document.body.classList.remove("scan-flash-success", "scan-flash-error", "scan-flash-notice");
+  void document.body.offsetWidth;
+  document.body.classList.add(className);
+  window.setTimeout(() => document.body.classList.remove(className), 900);
+}
+
 function getStats(items = state.items, errors = state.errors) {
   const totalQty = items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
   const scannedQty = items.reduce((sum, item) => sum + Math.min(Number(item.scanned || 0), Number(item.qty || 0)), 0);
@@ -689,7 +811,11 @@ function filteredItems() {
     const matchesFilter =
       state.filter === "all" ||
       state.filter === status ||
-      (state.filter === "errors" && errorItemIds.has(item.id));
+      (state.filter === "errors" && errorItemIds.has(item.id)) ||
+      (state.filter === "remakes" && isRemakeItem(item)) ||
+      (state.filter === "rushes" && isRushItem(item)) ||
+      (state.filter === "priority" && isRemakeOrRush(item)) ||
+      (state.filter === "updated" && isNewOrUpdatedItem(item));
     if (!matchesFilter) return false;
     if (!search) return true;
     const haystack = [item.order, item.item, item.job, item.customer, item.dimensions, item.product, item.route, item.barcode]
@@ -699,12 +825,38 @@ function filteredItems() {
   });
 }
 
+function groupItemsByGlass(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const label = glassTypeLabel(item);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(item);
+  }
+  return [...groups.entries()].map(([label, items]) => ({ label, items }));
+}
+
 function getPagedItems() {
   const rows = filteredItems();
-  const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
+  const groups = groupItemsByGlass(rows);
+  const groupPages = [];
+  let currentPage = [];
+  let currentCount = 0;
+  for (const group of groups) {
+    const groupCount = group.items.length;
+    if (currentPage.length && currentCount + groupCount > state.pageSize) {
+      groupPages.push(currentPage);
+      currentPage = [];
+      currentCount = 0;
+    }
+    currentPage.push(group);
+    currentCount += groupCount;
+  }
+  if (currentPage.length || !groupPages.length) groupPages.push(currentPage);
+  const totalPages = Math.max(1, groupPages.length);
   state.pageIndex = Math.min(Math.max(state.pageIndex, 1), totalPages);
-  const start = (state.pageIndex - 1) * state.pageSize;
-  return { rows, pageRows: rows.slice(start, start + state.pageSize), totalPages };
+  const pageGroups = groupPages[state.pageIndex - 1] || [];
+  const pageRows = pageGroups.flatMap((group) => group.items);
+  return { rows, pageRows, pageGroups, totalPages };
 }
 
 function stageVerb() {
@@ -724,24 +876,42 @@ function renderProcessState(item) {
 function renderCounts() {
   const stats = getStats();
   const totalItems = state.items.length;
+  const remakeOpen = unresolvedRemakeItems().length;
+  const remakeAll = state.items.filter(isRemakeItem).length;
+  const rushOpen = unresolvedRushItems().length;
+  const rushAll = state.items.filter(isRushItem).length;
+  const updatedCount = state.items.filter(isNewOrUpdatedItem).length;
   if (els.countAll) els.countAll.textContent = `(${totalItems})`;
   if (els.countRemaining) els.countRemaining.textContent = `(${stats.remainingItems})`;
   if (els.countPartial) els.countPartial.textContent = `(${stats.partialItems})`;
   if (els.countComplete) els.countComplete.textContent = `(${stats.completeItems})`;
+  if (els.countRemakes) els.countRemakes.textContent = `(${remakeAll})`;
+  if (els.countRushes) els.countRushes.textContent = `(${rushAll})`;
+  document.querySelectorAll('[data-filter="remakes"]').forEach((button) => {
+    button.classList.toggle("has-alert", Boolean(remakeOpen));
+    button.classList.toggle("is-clear", !remakeOpen);
+  });
+  document.querySelectorAll('[data-filter="rushes"]').forEach((button) => {
+    button.classList.toggle("has-alert", Boolean(rushOpen));
+    button.classList.toggle("is-clear", !rushOpen);
+  });
+  if (els.countUpdated) els.countUpdated.textContent = `(${updatedCount})`;
   if (els.countErrors) els.countErrors.textContent = `(${stats.errorCount})`;
   if (els.totalItemsText) els.totalItemsText.textContent = `${totalItems} total items`;
-  if (els.progressText) els.progressText.textContent = `${stageVerb()} Qty: ${stats.scannedQty}/${stats.totalQty} - ${stats.percent.toFixed(1)}% Complete`;
+  if (els.progressText) els.progressText.textContent = `${stageVerb()} Qty: ${stats.scannedQty}/${stats.totalQty} - ${formatPercent(stats.percent)} Complete`;
   if (els.progressFill) els.progressFill.style.width = `${Math.min(stats.percent, 100)}%`;
   if (els.remainingQty) els.remainingQty.textContent = String(stats.remainingQty);
   if (els.partialQty) els.partialQty.textContent = String(stats.partialItems);
   if (els.completeQty) els.completeQty.textContent = String(stats.completeItems);
   if (els.errorQty) els.errorQty.textContent = String(stats.errorCount);
-  if (els.remainingPct) els.remainingPct.textContent = `${(100 - stats.percent).toFixed(1)}%`;
-  if (els.partialPct) els.partialPct.textContent = `${stats.totalQty ? ((stats.partialItems / Math.max(state.items.length, 1)) * 100).toFixed(1) : "0.0"}%`;
-  if (els.completePct) els.completePct.textContent = `${stats.percent.toFixed(1)}%`;
+  if (els.remainingPct) els.remainingPct.textContent = formatPercent(100 - stats.percent);
+  if (els.partialPct) els.partialPct.textContent = formatPercent(stats.totalQty ? (stats.partialItems / Math.max(state.items.length, 1)) * 100 : 0);
+  if (els.completePct) els.completePct.textContent = formatPercent(stats.percent);
 }
 
 function renderPagers(totalRows, totalPages) {
+  if (els.pageSize && Number(els.pageSize.value) !== state.pageSize) els.pageSize.value = String(state.pageSize);
+  if (els.pageSizeBottom && Number(els.pageSizeBottom.value) !== state.pageSize) els.pageSizeBottom.value = String(state.pageSize);
   const render = () => {
     const buttons = [];
     buttons.push(`<button type="button" data-page-action="prev" ${state.pageIndex <= 1 ? "disabled" : ""}>&lt;</button>`);
@@ -765,33 +935,62 @@ function renderPagers(totalRows, totalPages) {
   if (els.scanPagerBottom) els.scanPagerBottom.innerHTML = render();
 }
 
+function glassTypeLabel(item) {
+  return String(item.product || item.job || item.suggestedBay || "Other Glass").trim() || "Other Glass";
+}
+
+function renderItemRow(item) {
+  const status = itemStatus(item);
+  const selected = item.id === state.selectedId;
+  const route = routeLabel(item);
+  const routeTag = route ? `<span class="route-tag ${escapeHtml(route.toLowerCase())}">${escapeHtml(route)}</span>` : "";
+  const markers = [
+    isRemakeItem(item) ? '<span class="rush-marker remake-marker" title="Remake">RM</span>' : "",
+    isRushItem(item) ? '<span class="rush-marker" title="Rush">!</span>' : "",
+  ].join("");
+  return `
+    <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""}" data-id="${escapeHtml(item.id)}">
+      <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span></td>
+      <td>${escapeHtml(item.order)}</td>
+      <td>${escapeHtml(item.item)}</td>
+      <td><span class="qty-pill ${status}">${item.scanned} / ${item.qty}</span></td>
+      <td>${escapeHtml(item.dimensions)}</td>
+      <td>${escapeHtml(item.customer)}</td>
+      <td>${markers}</td>
+      <td>${routeTag}</td>
+      <td><span class="process-pill ${status}">${escapeHtml(renderProcessState(item))}</span></td>
+    </tr>
+  `;
+}
+
 function renderTable() {
   if (!els.listRows) return;
-  const { rows, pageRows, totalPages } = getPagedItems();
+  const { rows, pageGroups, totalPages } = getPagedItems();
   renderPagers(rows.length, totalPages);
-  els.listRows.innerHTML = pageRows.length
-    ? pageRows
-        .map((item) => {
-          const status = itemStatus(item);
-          const selected = item.id === state.selectedId;
-          const route = routeLabel(item);
-          const routeTag = route ? `<span class="route-tag ${escapeHtml(route.toLowerCase())}">${escapeHtml(route)}</span>` : "";
-          return `
-            <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""}" data-id="${escapeHtml(item.id)}">
-              <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span></td>
-              <td>${escapeHtml(item.order)}</td>
-              <td>${escapeHtml(item.item)}</td>
-              <td><span class="qty-pill ${status}">${item.scanned} / ${item.qty}</span></td>
-              <td>${escapeHtml(item.dimensions)}</td>
-              <td>${escapeHtml(item.customer)}</td>
-              <td></td>
-              <td>${routeTag}</td>
-              <td><span class="process-pill ${status}">${escapeHtml(renderProcessState(item))}</span></td>
-            </tr>
-          `;
-        })
-        .join("")
-    : `<tr><td colspan="9">No rows match the current filters.</td></tr>`;
+  if (!pageGroups.length) {
+    els.listRows.innerHTML = `<tr><td colspan="9">No rows match the current filters.</td></tr>`;
+    return;
+  }
+  els.listRows.innerHTML = pageGroups
+    .map(({ label, items: groupItems }) => {
+      const totalQty = groupItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+      const scannedQty = groupItems.reduce((sum, item) => sum + Math.min(Number(item.scanned || 0), Number(item.qty || 0)), 0);
+      const updatedCount = groupItems.filter(isNewOrUpdatedItem).length;
+      const collapsed = state.collapsedGlassTypes.has(label);
+      return `
+        <tr class="glass-group-row" data-glass-group="${escapeHtml(label)}">
+          <td colspan="9">
+            <button type="button" data-toggle-glass-group="${escapeHtml(label)}">
+              <strong>${escapeHtml(label)}${updatedCount ? ` <span class="new-line-marker group-marker" title="New or updated lines">${escapeHtml(updatedCount)} New</span>` : ""}</strong>
+              <span>${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)} pieces</span>
+              <small>${collapsed ? "Expand" : "Collapse"}</small>
+            </button>
+          </td>
+        </tr>
+        ${collapsed ? "" : groupItems.map(renderItemRow).join("")}
+      `;
+    })
+    .join("");
 }
 
 function renderMobileCards() {
@@ -807,6 +1006,9 @@ function renderMobileCards() {
       <button class="tab ${state.filter === "remaining" ? "is-active" : ""}" data-filter="remaining" type="button">Remaining (${getStats().remainingItems})</button>
       <button class="tab ${state.filter === "partial" ? "is-active" : ""}" data-filter="partial" type="button">Partial (${getStats().partialItems})</button>
       <button class="tab ${state.filter === "complete" ? "is-active" : ""}" data-filter="complete" type="button">Complete (${getStats().completeItems})</button>
+      <button class="tab ${state.filter === "remakes" ? "is-active" : ""}" data-filter="remakes" type="button">Remakes (${state.items.filter(isRemakeItem).length})</button>
+      <button class="tab ${state.filter === "rushes" ? "is-active" : ""}" data-filter="rushes" type="button">Rushes (${state.items.filter(isRushItem).length})</button>
+      <button class="tab ${state.filter === "updated" ? "is-active" : ""}" data-filter="updated" type="button">Updated (${state.items.filter(isNewOrUpdatedItem).length})</button>
       <button class="tab ${state.filter === "errors" ? "is-active" : ""}" data-filter="errors" type="button">Review (${state.errors.length})</button>
     </div>
     ${pageRows
@@ -836,7 +1038,8 @@ function setLastScan(entry) {
   els.lastCard.classList.remove("ok", "error");
   els.lastCard.classList.add(entry.ok ? "ok" : "error");
   if (els.lastScanTime) els.lastScanTime.textContent = entry.ok ? "Just now" : entry.eventType === "duplicate" ? "Notice" : "Needs review";
-  if (els.lastJob) els.lastJob.textContent = entry.item ? entry.item.job : entry.message;
+  const scanMessage = [entry.message, entry.reason].filter(Boolean).join(" - ");
+  if (els.lastJob) els.lastJob.textContent = scanMessage && !entry.ok ? scanMessage : entry.item ? entry.item.job : entry.message;
   if (els.lastOrder) els.lastOrder.textContent = entry.item ? entry.item.order : "-";
   if (els.lastItem) els.lastItem.textContent = entry.item ? entry.item.item : "-";
   if (els.lastQty) els.lastQty.textContent = entry.item ? String(entry.item.scanned) : "-";
@@ -867,9 +1070,10 @@ function renderRecent() {
         .map((entry) => {
           const item = entry.item;
           const time = new Date(entry.time);
+          const note = [entry.message, entry.reason].filter(Boolean).join(" - ");
           return `
             <tr class="${entry.ok ? "ok" : "error"}">
-              <td>${escapeHtml(entry.barcode)}</td>
+              <td><strong>${escapeHtml(entry.barcode)}</strong>${note ? `<small class="scan-row-note">${escapeHtml(note)}</small>` : ""}</td>
               <td>${item ? escapeHtml(item.order) : "-"}</td>
               <td>${item ? escapeHtml(item.item) : "-"}</td>
               <td>${item ? item.scanned : "-"}</td>
@@ -880,28 +1084,6 @@ function renderRecent() {
         })
         .join("")
     : `<tr><td colspan="6">No scans yet</td></tr>`;
-}
-
-function renderScanMessages() {
-  const needsReview = state.errors || [];
-  const notices = (state.recent || []).filter((entry) => !entry.ok && entry.eventType !== "error").slice(0, 6);
-  if (els.needsReviewCount) els.needsReviewCount.textContent = String(needsReview.length);
-  if (els.noticeCount) els.noticeCount.textContent = String(notices.length);
-  if (els.needsReviewList) {
-    els.needsReviewList.innerHTML = needsReview.length
-      ? needsReview
-          .slice(0, 6)
-          .map((entry) => `<article class="message-card review"><strong>${escapeHtml(entry.message)}</strong><span>${escapeHtml(entry.barcode)} - ${escapeHtml(entry.reason)}</span></article>`)
-          .join("")
-      : `<article class="message-card ok"><strong>No review items</strong><span>Resolvable scan issues will appear here.</span></article>`;
-  }
-  if (els.noticeList) {
-    els.noticeList.innerHTML = notices.length
-      ? notices
-          .map((entry) => `<article class="message-card notice"><strong>${escapeHtml(entry.message)}</strong><span>${escapeHtml(entry.reason || entry.barcode)}</span></article>`)
-          .join("")
-      : `<article class="message-card ok"><strong>No notices</strong><span>Duplicate scans and resolved notices appear here.</span></article>`;
-  }
 }
 
 function renderMeta() {
@@ -953,10 +1135,9 @@ function applyPermissionUi() {
   });
   const canScan = hasPermission("scan") || hasPermission("indian_trail_receive");
   setControlAllowed(els.scanInput, canScan);
-  setControlAllowed(els.exportBtn, hasPermission("export_reports"), true);
+  setControlAllowed(els.globalPrintExportBtn, hasPermission("export_reports"), true);
   setControlAllowed(els.undoBtn, hasPermission("undo_scan"), true);
-  setControlAllowed(els.resetBtn, hasPermission("reset_lists"), true);
-  setControlAllowed(els.loadExampleBtn, hasPermission("undo_scan") || hasPermission("view_admin"), true);
+  setControlAllowed(els.redoBtn, hasPermission("undo_scan"), true);
   setControlAllowed(els.importBtn, hasPermission("import_delivery_lists"), true);
   setControlAllowed(els.folderImportBtn, hasPermission("import_delivery_lists"), true);
   setControlAllowed(els.addStationBtn, hasPermission("manage_stations"));
@@ -969,9 +1150,61 @@ function renderScanPage() {
   renderTable();
   renderMobileCards();
   renderRecent();
-  renderScanMessages();
   renderLastScan();
+  renderManualAssignTools();
   applyPermissionUi();
+}
+
+function isIndianTrailScanContext() {
+  return /indian trail|inbound/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
+}
+
+function renderManualAssignTools() {
+  if (!els.manualAssignPanel) return;
+  els.manualAssignPanel.hidden = !(isIndianTrailScanContext() && hasPermission("assign_bay"));
+}
+
+function compatibleBayCandidates(item) {
+  const suggested = String(item?.suggestedBay || item?.product || "").toLowerCase();
+  const targetKind =
+    suggested.includes("mirror") && suggested.includes("framed") ? "framed-mirror" :
+    suggested.includes("mirror") ? "mirror" :
+    suggested.includes("crl") ? "crl" :
+    suggested.includes("shower") || suggested.includes("tempered") ? "showers" :
+    "";
+  return (state.bays || [])
+    .filter((bay) => bayStatusKind(bay) === "available")
+    .filter((bay) => !targetKind || bayCategoryKind(bay) === targetKind || bayCategoryKind(bay) === "standard")
+    .slice(0, 16);
+}
+
+async function submitManualBayAssign() {
+  const order = digitsOnly(els.manualAssignOrderInput?.value || "");
+  const itemNo = digitsOnly(els.manualAssignItemInput?.value || "");
+  const qty = Math.max(1, Number(els.manualAssignQtyInput?.value || 1));
+  if (!order) {
+    showInlineError("Manual bay assign needs an order number.", false);
+    return;
+  }
+  if (!state.bays.length && state.backend) {
+    const payload = await fetchJson("/api/indian-trail/bays");
+    state.bays = payload.bays || [];
+  }
+  const matches = state.items.filter((item) => digitsOnly(item.order) === order && (!itemNo || digitsOnly(item.item) === itemNo));
+  if (matches.length !== 1) {
+    if (els.manualAssignStatus) {
+      els.manualAssignStatus.innerHTML = `<article class="message-card review"><strong>${matches.length ? "Multiple matches" : "No match"}</strong><span>Enter an item number to pick one exact row.</span></article>`;
+    }
+    return;
+  }
+  const item = matches[0];
+  const bays = compatibleBayCandidates(item);
+  if (els.manualAssignStatus) {
+    els.manualAssignStatus.innerHTML = bays.length
+      ? `<article class="message-card notice"><strong>Choose a bay for ${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong><span>${escapeHtml(item.customer)} - Qty ${qty}</span></article>
+         <div class="bay-picker">${bays.map((bay) => `<button type="button" data-manual-assign-bay="${escapeHtml(bay.bayCode)}" data-line-item-id="${escapeHtml(item.id)}" data-assigned-qty="${escapeHtml(qty)}">${escapeHtml(bay.displayName || bay.bayCode)}</button>`).join("")}</div>`
+      : `<article class="message-card review"><strong>No empty compatible bay found</strong><span>Use the Bay Map to free a bay or pick manually.</span></article>`;
+  }
 }
 
 function miniStat(label, value, detail = "") {
@@ -982,14 +1215,18 @@ function aggregateListStats(lists) {
   const totalLists = lists.length;
   const totalItems = lists.reduce((sum, list) => sum + Number(list.itemCount || 0), 0);
   const totalQty = lists.reduce((sum, list) => sum + Number(list.totalQty || 0), 0);
+  const pieceQty = lists.reduce((maxQty, list) => Math.max(maxQty, Number(list.totalQty || 0)), 0);
   const scannedQty = lists.reduce((sum, list) => sum + Number(list.scannedQty || 0), 0);
-  const onTimeQty = lists.reduce((sum, list) => sum + Number(list.onTimeQty || 0), 0);
-  const lateQty = lists.reduce((sum, list) => sum + Number(list.lateQty || 0), 0);
+  const outboundLists = lists.filter((list) => stageCategory(list) === "outbound");
+  const timingLists = outboundLists.length ? outboundLists : lists;
+  const onTimeQty = timingLists.reduce((sum, list) => sum + Number(list.onTimeQty || 0), 0);
+  const lateQty = timingLists.reduce((sum, list) => sum + Number(list.lateQty || 0), 0);
   const timedQty = onTimeQty + lateQty;
   return {
     totalLists,
     totalItems,
     totalQty,
+    pieceQty,
     scannedQty,
     remainingQty: Math.max(totalQty - scannedQty, 0),
     deliveryPercent: totalQty ? (scannedQty / totalQty) * 100 : 0,
@@ -997,6 +1234,36 @@ function aggregateListStats(lists) {
     lateQty,
     onTimePercent: timedQty ? (onTimeQty / timedQty) * 100 : 0,
   };
+}
+
+function stageProgressSegments(lists) {
+  const total = lists.reduce((sum, list) => sum + Number(list.totalQty || 0), 0);
+  if (!total) return [];
+  const order = ["staged", "outbound", "received", "pickup", "greenville", "dtc"];
+  const buckets = new Map();
+  for (const list of lists) {
+    const category = stageCategory(list);
+    const current = buckets.get(category) || { category, label: stageLabel(list), qty: 0 };
+    current.qty += Number(list.scannedQty || 0);
+    buckets.set(category, current);
+  }
+  return [...buckets.values()]
+    .sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category))
+    .map((segment) => ({ ...segment, percent: Math.min((segment.qty / total) * 100, 100) }));
+}
+
+function renderStackedProgress(lists, stats) {
+  const segments = stageProgressSegments(lists);
+  const segmentHtml = segments.length
+    ? segments.map((segment) => `<span class="stage-segment ${escapeHtml(segment.category)}" style="width:${segment.percent}%;" title="${escapeHtml(segment.label)} ${segment.qty}"></span>`).join("")
+    : `<span style="width:0%"></span>`;
+  return `
+    <div class="progress-line">
+      <span>Progress:</span>
+      <div class="list-card-progress stacked">${segmentHtml}</div>
+      <strong>${formatPercent(stats.deliveryPercent)}</strong>
+    </div>
+  `;
 }
 
 function filteredDeliveryLists() {
@@ -1013,14 +1280,15 @@ function deliveryListCard(list, extraClass = "") {
   const percent = progressPercent(list);
   const category = stageCategory(list);
   const onTime = Number(list.onTimePercent || 0);
+  const title = stageLabel(list);
+  const onTimeText = category === "outbound" ? ` - On-time ${formatPercent(onTime)}` : "";
   return `
     <article class="delivery-list-card ${escapeHtml(category)} ${escapeHtml(extraClass)}" data-open-list="${escapeHtml(list.id)}">
-      <div>
-        <strong>${escapeHtml(list.label)}</strong>
-        <span>${escapeHtml(list.stage)} - ${escapeHtml(list.scanner)}</span>
+      <div class="delivery-card-main">
+        <strong>${escapeHtml(title)}</strong>
       </div>
-      <div class="list-card-progress"><span style="width:${Math.min(percent, 100)}%"></span></div>
-      <small>${escapeHtml(list.itemCount || 0)} lines - ${escapeHtml(list.scannedQty || 0)}/${escapeHtml(list.totalQty || 0)} pieces - On-time ${onTime.toFixed(1)}%</small>
+      <small class="delivery-card-meta">${escapeHtml(list.totalQty || 0)} pieces - ${escapeHtml(list.scannedQty || 0)}/${escapeHtml(list.totalQty || 0)} scanned${onTimeText}</small>
+      <div class="progress-line delivery-card-progress"><span>Progress:</span><div class="list-card-progress"><span style="width:${Math.min(percent, 100)}%"></span></div><strong>${formatPercent(percent)}</strong></div>
     </article>
   `;
 }
@@ -1048,7 +1316,7 @@ function renderTodayProgress() {
                 <strong>${escapeHtml(list.scannedQty || 0)} / ${escapeHtml(list.totalQty || 0)}</strong>
               </div>
               <div class="list-card-progress"><span style="width:${Math.min(percent, 100)}%"></span></div>
-              <small>${escapeHtml(list.stage)} - ${percent.toFixed(1)}%</small>
+              <small>${formatPercent(percent)}</small>
             </article>
           `;
         })
@@ -1058,14 +1326,18 @@ function renderTodayProgress() {
 
 function renderHome() {
   if (!els.homePage) return;
-  const overview = aggregateListStats(state.lists);
+  const overviewLists = filterListsByOverviewRange(state.lists);
+  const overview = aggregateListStats(overviewLists);
   if (els.homeWelcome) {
     els.homeWelcome.textContent = `Signed in as ${state.user?.displayName || state.user?.username || "Demo user"}`;
   }
+  if (els.overviewRangeSelect && els.overviewRangeSelect.value !== state.overviewRange) {
+    els.overviewRangeSelect.value = state.overviewRange;
+  }
   if (els.overviewStats) {
     els.overviewStats.innerHTML = [
-      miniStat("Delivery %", `${overview.deliveryPercent.toFixed(1)}%`, `${overview.scannedQty}/${overview.totalQty} scanned`),
-      miniStat("On-Time %", `${overview.onTimePercent.toFixed(1)}%`, `${overview.onTimeQty} on time`),
+      miniStat("Delivery %", formatPercent(overview.deliveryPercent), `${overview.scannedQty}/${overview.totalQty} scanned`),
+      miniStat("On-Time %", formatPercent(overview.onTimePercent), `${overview.onTimeQty} on time`),
       miniStat("Late Items", overview.lateQty),
       miniStat("Delivery Lists", overview.totalLists),
     ].join("");
@@ -1080,13 +1352,17 @@ function renderHome() {
   renderTodayProgress();
   const filtered = filteredDeliveryLists();
   const dateGroups = listsByDeliveryDate(filtered);
+  const totalHomePages = Math.max(1, Math.ceil(dateGroups.length / state.homePageSize));
+  state.homePageIndex = Math.min(Math.max(state.homePageIndex, 1), totalHomePages);
+  const pageStart = (state.homePageIndex - 1) * state.homePageSize;
+  const visibleDateGroups = dateGroups.slice(pageStart, pageStart + state.homePageSize);
   if (!dateGroups.some((group) => group.date === state.expandedDeliveryDate)) {
-    state.expandedDeliveryDate = dateGroups[0]?.date || "";
+    state.expandedDeliveryDate = visibleDateGroups[0]?.date || dateGroups[0]?.date || "";
   }
   if (els.homeListCount) els.homeListCount.textContent = `${dateGroups.length} dates / ${filtered.length} stages`;
   if (els.homeListGrid) {
-    els.homeListGrid.innerHTML = dateGroups.length
-      ? dateGroups
+    els.homeListGrid.innerHTML = visibleDateGroups.length
+      ? visibleDateGroups
           .map((group) => {
             const stats = aggregateListStats(group.lists);
             return `
@@ -1094,10 +1370,10 @@ function renderHome() {
                 <summary>
                   <span>
                     <strong>${escapeHtml(formatDisplayDate(group.date))}</strong>
-                    <small>${escapeHtml(group.lists.length)} stages - Delivery on-time ${stats.onTimePercent.toFixed(1)}%</small>
-                    <span class="list-card-progress date-progress"><span style="width:${Math.min(stats.deliveryPercent, 100)}%"></span></span>
+                    <small>${escapeHtml(group.lists.length)} stages - ${escapeHtml(stats.pieceQty || stats.totalQty)} pieces - Delivery on-time ${formatPercent(stats.onTimePercent)}</small>
+                    ${renderStackedProgress(group.lists, stats)}
                   </span>
-                  <span><strong>${stats.deliveryPercent.toFixed(1)}%</strong><small>${escapeHtml(stats.scannedQty)} / ${escapeHtml(stats.totalQty)} pieces</small></span>
+                  <span class="delivery-date-total"><small>Pieces</small><strong>${escapeHtml(stats.pieceQty || stats.totalQty)}</strong></span>
                 </summary>
                 <div class="delivery-stage-list">
                   ${group.lists.map((list) => deliveryListCard(list, "date-grouped")).join("")}
@@ -1116,6 +1392,15 @@ function renderHome() {
         });
       });
     });
+  }
+  if (els.homePager) {
+    const pagerHtml = `
+      <button type="button" data-home-page-action="prev" ${state.homePageIndex <= 1 ? "disabled" : ""}>&lt;</button>
+      <span class="pager-summary">Page ${state.homePageIndex} of ${totalHomePages}</span>
+      <button type="button" data-home-page-action="next" ${state.homePageIndex >= totalHomePages ? "disabled" : ""}>&gt;</button>
+    `;
+    els.homePager.innerHTML = pagerHtml;
+    if (els.homePagerTop) els.homePagerTop.innerHTML = pagerHtml;
   }
   if (els.homeRecentLists) {
     els.homeRecentLists.innerHTML = state.lists
@@ -1136,6 +1421,7 @@ function showPage(page) {
   if (page === "bays" && !hasAnyPermission(["view_bays", "view_indian_trail"])) page = "home";
   state.page = page;
   document.body.dataset.page = page;
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   document.querySelectorAll(".page-view").forEach((view) => {
     view.hidden = view.id !== `${page === "bays" ? "bayMap" : page}Page`;
   });
@@ -1163,6 +1449,10 @@ async function processScan(rawScan) {
       });
       await activateList(state.activeListId, false);
       state.lastScan = result.lastScan || state.lastScan;
+      scanFlash(result.ok ? "success" : "error");
+      if (result?.message) {
+        showFloatingNotice(result.message, result.ok ? (/\bSDI|Rush\b/i.test(result.message) ? "notice" : "success") : "error");
+      }
       renderScanPage();
       void refreshBayMapPage().catch(() => {});
       return;
@@ -1172,6 +1462,7 @@ async function processScan(rawScan) {
       body: JSON.stringify({ listId: state.activeListId, barcode: scanText, ...requestContext() }),
     });
     applyBackendPayload(payload);
+    scanFlash(payload.lastScan?.ok ? "success" : payload.lastScan?.eventType === "duplicate" || payload.lastScan?.eventType === "notice" ? "notice" : "error");
     renderScanPage();
     return;
   }
@@ -1199,6 +1490,7 @@ function processLocalScan(scanText) {
     state.errors.unshift(entry);
     state.recent.unshift(entry);
     state.lastScan = entry;
+    scanFlash("error");
     saveState();
     renderScanPage();
     return;
@@ -1208,6 +1500,7 @@ function processLocalScan(scanText) {
     const entry = { ok: false, eventType: "duplicate", barcode: recovered.barcode, item, message: "Item already complete", reason: "Quantity already scanned", time: timestamp };
     state.recent.unshift(entry);
     state.lastScan = entry;
+    scanFlash("notice");
     saveState();
     renderScanPage();
     return;
@@ -1217,6 +1510,7 @@ function processLocalScan(scanText) {
   const entry = { ok: true, eventType: "scan", barcode: recovered.barcode, raw: scanText, item, message: recovered.reason, time: timestamp };
   state.recent.unshift(entry);
   state.lastScan = entry;
+  scanFlash("success");
   saveState();
   renderScanPage();
 }
@@ -1294,7 +1588,24 @@ function showInlineError(message, needsReview = false) {
   if (needsReview) state.errors.unshift(entry);
   state.recent.unshift(entry);
   state.lastScan = entry;
+  scanFlash(needsReview ? "error" : "notice");
   renderScanPage();
+}
+
+function showFloatingNotice(message, kind = "notice") {
+  let notice = document.getElementById("floatingScanNotice");
+  if (!notice) {
+    notice = document.createElement("div");
+    notice.id = "floatingScanNotice";
+    notice.className = "floating-scan-notice";
+    document.body.appendChild(notice);
+  }
+  notice.className = `floating-scan-notice ${kind}`;
+  notice.innerHTML = `<strong>${escapeHtml(kind === "success" ? "Scan accepted" : kind === "error" ? "Needs review" : "Notice")}</strong><span>${escapeHtml(message)}</span>`;
+  window.clearTimeout(notice._hideTimer);
+  notice._hideTimer = window.setTimeout(() => {
+    notice.classList.add("is-hiding");
+  }, 5200);
 }
 
 async function runGlobalSearch() {
@@ -1312,8 +1623,8 @@ async function runGlobalSearch() {
 function renderGlobalSearchResults(results) {
   if (!els.headerGlobalSearchResults) return;
   if (!results.length) {
-    els.headerGlobalSearchResults.hidden = true;
-    els.headerGlobalSearchResults.innerHTML = "";
+    els.headerGlobalSearchResults.hidden = false;
+    els.headerGlobalSearchResults.innerHTML = `<div class="no-search-results"><strong>No results</strong><span>No order, item, customer, or bay matched that search.</span></div>`;
     return;
   }
   els.headerGlobalSearchResults.hidden = false;
@@ -1321,9 +1632,10 @@ function renderGlobalSearchResults(results) {
     .slice(0, 8)
     .map(
       (result) => `
-        <button type="button" data-open-list="${escapeHtml(result.deliveryListId)}">
+        <button type="button" ${result.bayCode ? `data-open-bay="${escapeHtml(result.bayCode)}"` : `data-open-list="${escapeHtml(result.deliveryListId)}"`}>
           <strong>${escapeHtml(result.order)}-${escapeHtml(result.item)}</strong>
-          <span>${escapeHtml(result.customer)} ${result.bay ? `- Bay ${escapeHtml(result.bay)}` : ""}</span>
+          <span>${escapeHtml(result.customer)}${result.bay ? ` - Bay ${escapeHtml(result.bay)}` : ""}</span>
+          <small>${escapeHtml(result.locationText || result.stage || "")}</small>
         </button>
       `,
     )
@@ -1349,6 +1661,7 @@ async function refreshBayMapPage() {
     state.bayLayout = await response.json();
     state.bays = (state.bayLayout.bays || []).map((bay) => ({ ...bay, assignedQty: 0, capacityQty: bay.autoAssignable ? 1 : 0, status: bay.autoAssignable ? "Empty" : "ManualHold", assignments: [] }));
     state.bayEvents = [];
+    renderIndianTrailSummary(null);
     renderBayRouteFlow(null);
   }
   renderBayMapPage();
@@ -1364,6 +1677,7 @@ function renderBayRouteFlow(summary) {
   const outboundTotal = Number(outbound?.totalQty || 0);
   const inboundQty = Number(inbound?.scannedQty ?? summary?.receivedQty ?? 0);
   const inboundTotal = Number(inbound?.totalQty ?? summary?.inboundToday ?? 0);
+  const inTransitQty = Math.max(outboundQty - inboundQty, 0);
   els.bayFlowPanel.innerHTML = `
     <button class="flow-card outbound" type="button" ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : ""}>
       <small>Today's Outbound</small>
@@ -1371,7 +1685,7 @@ function renderBayRouteFlow(summary) {
       <span>${outbound ? escapeHtml(outbound.stage) : "No outbound list"}</span>
     </button>
     <div class="flow-lane" aria-hidden="true">
-      <span class="flow-truck"></span>
+      <span class="flow-truck"><b>${escapeHtml(inTransitQty)}</b></span>
     </div>
     <button class="flow-card inbound" type="button" ${inbound ? `data-open-list="${escapeHtml(inbound.id)}"` : ""}>
       <small>Indian Trail Delivery List</small>
@@ -1383,16 +1697,16 @@ function renderBayRouteFlow(summary) {
 
 function renderIndianTrailSummary(summary) {
   if (!els.indianTrailSummary) return;
-  if (!summary) {
-    els.indianTrailSummary.innerHTML = "";
-    return;
-  }
+  const overview = bayOverview();
   els.indianTrailSummary.innerHTML = `
     <div class="mini-stat-grid">
-      ${miniStat("Inbound", summary.inboundToday ?? 0, "qty")}
-      ${miniStat("Received", summary.receivedQty ?? 0)}
-      ${miniStat("Assigned", summary.assignedToBays ?? 0)}
-      ${miniStat("Needs Check", summary.needsCheck ?? 0)}
+      ${miniStat("Total Bays", overview.total)}
+      ${miniStat("Blocked Bays", overview.blocked)}
+      ${miniStat("Available", overview.available)}
+      ${miniStat("Preassigned", overview.preassigned)}
+      ${miniStat("Occupied", overview.occupied)}
+      ${miniStat("SDI", summary?.sdiCount ?? state.bays.filter((bay) => bayStatusKind(bay) === "picking").length)}
+      ${miniStat("Needs Check", summary?.needsCheck ?? 0)}
     </div>
   `;
 }
@@ -1420,7 +1734,9 @@ function isWorkbookLegendCell(cell) {
 
 function statusAbbreviation(status, bay) {
   if (!bay) return "";
+  if (String(status).toLowerCase().includes("hold")) return "HLD";
   if (!bay.active || String(status).toLowerCase() === "manualhold") return "MAN";
+  if (String(status).toLowerCase().includes("block")) return "BLK";
   if (status === "SDI") return "SDI";
   if (/pre|assign/i.test(status)) return "PRE";
   if (status === "Full" || status === "Occupied") return "OCC";
@@ -1480,6 +1796,7 @@ function baySearchText(bay) {
 function bayStatusKind(bay) {
   const status = String(bay?.status || "").toLowerCase();
   const assigned = Number(bay?.assignedQty || 0);
+  if (status.includes("hold")) return "manual";
   if (!bay?.active || status.includes("manual") || status.includes("blocked")) return "blocked";
   if (status.includes("sdi") || status.includes("pick")) return "picking";
   if (status.includes("pre") || status.includes("assign")) return "preassigned";
@@ -1533,6 +1850,7 @@ function renderBaySlotButton(bay, mode = "physical") {
       type="button"
       data-bay-code="${escapeHtml(bay.bayCode)}"
       data-assignment-id="${escapeHtml(assignment?.id || "")}"
+      ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""}
       title="${escapeHtml(text)}">
       <span class="bay-code">${escapeHtml(label)}</span>
       ${abbreviation ? `<span class="bay-state">${escapeHtml(abbreviation)}</span>` : ""}
@@ -1599,12 +1917,12 @@ function renderBayMapPage() {
       const visible = section.bays.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))).length;
       const dimmed = !visible && (state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.baySearch);
       return `
-        <section class="physical-bay-section type-${escapeHtml(section.kind)} ${dimmed ? "is-dimmed" : ""}">
-          <header><strong>${escapeHtml(section.label)}</strong><span>${escapeHtml(visible || section.bays.length)} slots</span></header>
+        <details open class="physical-bay-section type-${escapeHtml(section.kind)} ${state.bayEditMode ? "is-editing" : ""} ${dimmed ? "is-dimmed" : ""}" data-bay-drop-section="${escapeHtml(section.label)}" data-bay-drop-category="${escapeHtml(section.kind)}">
+          <summary ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""} data-bay-group-drag="${escapeHtml(section.label)}"><strong>${escapeHtml(section.label)}</strong><span>${escapeHtml(visible || section.bays.length)} slots</span></summary>
           <div class="physical-slot-grid">
             ${section.bays.map((bay) => renderBaySlotButton(bay, "physical")).join("")}
           </div>
-        </section>
+        </details>
       `;
     })
     .join("");
@@ -1641,6 +1959,13 @@ function renderBaySidePanels() {
           <div><strong>${escapeHtml(bay.displayName || bay.bayCode)}</strong><small>${escapeHtml(bay.mapSection || bay.area || "")}</small></div>
           <span class="status-chip status-${escapeHtml(bayStatusKind(bay))}">${escapeHtml(bay.status || "Available")}</span>
         </div>
+        <div class="selected-bay-actions">
+          <button type="button" data-bay-action="clear">Clear Bay</button>
+          <button type="button" data-bay-action="move">Move Items</button>
+          <button type="button" data-bay-action="hold" data-permission-any="clear_bay,move_bay">Hold Bay</button>
+          <button type="button" data-bay-action="block" data-permission-any="clear_bay,move_bay">Block Bay</button>
+          <button type="button" data-bay-action="unblock" data-permission-any="clear_bay,move_bay">Remove Hold/Block</button>
+        </div>
         <div class="selected-bay-stats">
           ${miniStat("Category", bayCategoryLabel(bayCategoryKind(bay)))}
           ${miniStat("Items", assignments.reduce((sum, item) => sum + Number(item.assignedQty || item.qty || 0), 0))}
@@ -1653,11 +1978,18 @@ function renderBaySidePanels() {
               ? assignments
                   .map(
                     (assignment) => `
-                      <article>
-                        <strong>${escapeHtml(assignment.order)}-${escapeHtml(assignment.item)} <span>${escapeHtml(assignment.customer || "")}</span></strong>
-                        <small>${escapeHtml(assignment.product || assignment.job || "")}</small>
-                        <small>${escapeHtml(assignment.dimensions || "")} - Qty ${escapeHtml(assignment.assignedQty || assignment.qty || 0)}</small>
-                        <small>${escapeHtml(assignment.job || "")}</small>
+                      <article class="selected-assignment" data-assignment-id="${escapeHtml(assignment.id)}">
+                        <div>
+                          <strong>${isNewOrUpdatedItem(assignment) ? '<span class="bay-new-star" title="New or updated line">*</span>' : ""}${escapeHtml(assignment.order)}-${escapeHtml(assignment.item)} <span>${escapeHtml(assignment.customer || "")}</span></strong>
+                          <small>${escapeHtml(assignment.product || assignment.job || "")}</small>
+                          <small>${escapeHtml(assignment.dimensions || "")} - Qty ${escapeHtml(assignment.assignedQty || assignment.qty || 0)}</small>
+                          <small>${escapeHtml(assignment.job || "")}</small>
+                        </div>
+                        <div class="assignment-actions">
+                          <button type="button" title="Clear order from bay" data-assignment-action="clear" data-assignment-id="${escapeHtml(assignment.id)}">X</button>
+                          <button type="button" title="Move order" data-assignment-action="move" data-assignment-id="${escapeHtml(assignment.id)}">Move</button>
+                          <button type="button" title="Mark or clear SDI" data-assignment-action="sdi" data-assignment-id="${escapeHtml(assignment.id)}" data-order-no="${escapeHtml(assignment.order)}">!</button>
+                        </div>
                       </article>
                     `
                   )
@@ -1676,6 +2008,7 @@ function renderBaySidePanels() {
         return `
           <details class="bay-type-section type-${escapeHtml(section.kind)}" ${sectionOpen ? "open" : ""}>
             <summary><span><strong>${escapeHtml(section.label)}</strong><small>${escapeHtml(section.bays.length)} bays</small></span></summary>
+            <div class="bay-section-total"><strong>${escapeHtml(section.bays.reduce((sum, item) => sum + Number(item.assignedQty || 0), 0))} / ${escapeHtml(section.bays.reduce((sum, item) => sum + Number(item.capacityQty || 0), 0) || section.bays.length)}</strong><span>assigned capacity</span></div>
             <div class="bay-rack-list">
               ${section.racks
                 .map((rack) => {
@@ -1684,7 +2017,7 @@ function renderBaySidePanels() {
                   const percent = capacity ? Math.min((assigned / capacity) * 100, 100) : assigned ? 100 : 0;
                   const rackHasSelected = rack.bays.some((item) => item.bayCode === state.selectedBayCode);
                   return `
-                    <details class="bay-rack" ${state.bayCategoryFilter !== "all" || rackHasSelected ? "open" : ""}>
+                    <details class="bay-rack" ${state.bayCategoryFilter !== "all" || rackHasSelected ? "open" : ""} data-bay-drop-section="${escapeHtml(rack.label)}" data-bay-drop-category="${escapeHtml(section.kind)}">
                       <summary>
                         <strong>${escapeHtml(rack.label)}</strong>
                         <span>${escapeHtml(assigned)} / ${escapeHtml(capacity || rack.bays.length)}</span>
@@ -1728,9 +2061,8 @@ function formatEventType(value) {
 }
 
 function renderBayRecentActions() {
-  if (!els.bayRecentActions) return;
   const events = state.bayEvents || [];
-  els.bayRecentActions.innerHTML = events.length
+  const eventCards = events.length
     ? events
         .slice(0, 12)
         .map((event) => {
@@ -1748,6 +2080,17 @@ function renderBayRecentActions() {
         })
         .join("")
     : `<div><strong>No bay actions yet</strong><span>Receive, move, clear, and SDI actions will appear here.</span></div>`;
+  if (els.bayScanOutRecent) {
+    els.bayScanOutRecent.innerHTML = events.length
+      ? events.slice(0, 8)
+          .map((event) => {
+            const bay = event.bayDisplay || event.bayCode || event.newBayCode || event.oldBayCode || "Bay";
+            const order = event.order ? `${event.order}-${event.item || ""}` : "Bay action";
+            return `<div><strong>${escapeHtml(formatEventType(event.eventType))}</strong><span>${escapeHtml(order)} - ${escapeHtml(bay)}</span></div>`;
+          })
+          .join("")
+      : `<div><strong>No recent bay removals</strong><span>Scan-out actions will appear here.</span></div>`;
+  }
 }
 
 function scrollToBaySearchMatch() {
@@ -1794,14 +2137,56 @@ async function postBayAction(path, payload) {
   return result;
 }
 
+async function submitBayScanOut() {
+  const barcode = els.bayScanOutInput?.value.trim() || "";
+  if (!barcode) return;
+  const bayCode = els.bayScanBayInput?.value.trim() || "";
+  const adding = Boolean(els.bayScanModeToggle?.checked);
+  const result = adding
+    ? await postBayAction("/api/indian-trail/receive", { barcode, bayCode, reason: "Scanned into bay map" })
+    : await postBayAction("/api/indian-trail/scan-out", { barcode, bayCode, reason: "Scanned out from bay map" });
+  if (els.bayScanOutInput) els.bayScanOutInput.value = "";
+  if (els.bayScanOutStatus) els.bayScanOutStatus.textContent = adding ? result.message : `Removed ${result.order}-${result.item} from ${result.bayDisplay || result.bayCode}`;
+  scanFlash("success");
+  showFloatingNotice(adding ? result.message : `Removed ${result.order}-${result.item} from ${result.bayDisplay || result.bayCode}`, "success");
+}
+
+function manualBayBarcode() {
+  const order = digitsOnly(els.bayManualOrderInput?.value || "");
+  const item = digitsOnly(els.bayManualItemInput?.value || "");
+  if (!order) throw new Error("Enter an order number.");
+  return item ? `T200${order.padStart(6, "0")}${item.padStart(3, "0")}000` : `T200${order.padStart(6, "0")}`;
+}
+
+async function submitManualBayScan() {
+  const barcode = manualBayBarcode();
+  if (els.bayScanOutInput) els.bayScanOutInput.value = barcode;
+  await submitBayScanOut();
+  if (els.bayManualOrderInput) els.bayManualOrderInput.value = "";
+  if (els.bayManualItemInput) els.bayManualItemInput.value = "";
+}
+
 function selectedBayAssignment() {
   return selectedBay()?.assignments?.[0] || null;
 }
 
-function openSdiPanel() {
+function assignmentById(assignmentId) {
+  const id = String(assignmentId || "");
+  for (const bay of state.bays || []) {
+    const match = (bay.assignments || []).find((assignment) => String(assignment.id) === id);
+    if (match) return { bay, assignment: match };
+  }
+  return { bay: selectedBay(), assignment: selectedBayAssignment() };
+}
+
+function openSdiPanel(assignmentId = "") {
+  const found = assignmentById(assignmentId);
+  if (found.bay?.bayCode) state.selectedBayCode = found.bay.bayCode;
   const bay = selectedBay();
-  const assignment = selectedBayAssignment();
+  const assignment = found.assignment || selectedBayAssignment();
+  if (els.sdiPanel) els.sdiPanel.dataset.assignmentId = assignment?.id || "";
   if (els.sdiPanel) els.sdiPanel.hidden = false;
+  if (els.sdiBackdrop) els.sdiBackdrop.hidden = false;
   if (els.sdiOrderInput && assignment?.order) els.sdiOrderInput.value = assignment.order;
   if (els.sdiBayInput) els.sdiBayInput.value = bay?.bayCode || "";
   if (els.sdiReasonInput && !els.sdiReasonInput.value) els.sdiReasonInput.value = "Same-day install";
@@ -1810,10 +2195,11 @@ function openSdiPanel() {
 
 function closeSdiPanel() {
   if (els.sdiPanel) els.sdiPanel.hidden = true;
+  if (els.sdiBackdrop) els.sdiBackdrop.hidden = true;
 }
 
 async function submitSdi(mark = true) {
-  const assignment = selectedBayAssignment();
+  const assignment = assignmentById(els.sdiPanel?.dataset.assignmentId || "").assignment || selectedBayAssignment();
   const payload = {
     assignmentId: assignment?.id || "",
     orderNo: els.sdiOrderInput?.value || "",
@@ -1834,6 +2220,10 @@ async function runBayAction(action) {
     openSdiPanel();
     return;
   }
+  if (action === "layout") {
+    openBayLayoutManager();
+    return;
+  }
   const bay = requireSelectedBay();
   if (!bay) return;
   const assignment = bay.assignments?.[0];
@@ -1842,23 +2232,188 @@ async function runBayAction(action) {
     await postBayAction("/api/indian-trail/clear", { bayCode: bay.bayCode, reason: "Cleared from bay map" });
     return;
   }
-  if (action === "manual-assign") {
-    if (!state.selectedId) {
-      showInlineError("Select a delivery-list row first, then choose the bay.", false);
-      return;
-    }
-    await postBayAction("/api/indian-trail/assign", { lineItemId: state.selectedId, bayCode: bay.bayCode, reason: "Manual assignment from bay map" });
-    return;
-  }
   if (action === "move") {
     if (!assignment?.id) {
       showInlineError("That bay does not have an assignment to move.", false);
       return;
     }
-    const newBayCode = window.prompt("Move assignment to which bay code?");
-    if (!newBayCode) return;
-    await postBayAction("/api/indian-trail/move", { assignmentId: assignment.id, newBayCode, reason: `Moved from ${bay.displayName || bay.bayCode}` });
+    state.pendingBayMove = { assignmentId: assignment.id, fromBay: bay.bayCode, order: assignment.order, item: assignment.item };
+    showFloatingNotice(`Select a destination bay for ${assignment.order}-${assignment.item}.`, "notice");
+    document.body.classList.add("bay-move-mode");
+    return;
   }
+  if (action === "hold" || action === "block" || action === "unblock") {
+    const status = action === "hold" ? "Hold" : action === "block" ? "Blocked" : "Available";
+    const result = await postBayAction("/api/indian-trail/bay-status", { bayCode: bay.bayCode, status, reason: `${status} from bay map` });
+    state.bays = result.bays || state.bays;
+    showFloatingNotice(`${bay.displayName || bay.bayCode} set to ${status}.`, "success");
+  }
+}
+
+function renderBayLayoutSelect() {
+  if (!els.bayLayoutSelect) return;
+  const current = els.bayLayoutSelect.value || state.selectedBayCode || state.bays[0]?.bayCode || "";
+  els.bayLayoutSelect.innerHTML = (state.bays || [])
+    .map((bay) => `<option value="${escapeHtml(bay.bayCode)}">${escapeHtml(bay.displayName || bay.bayCode)} - ${escapeHtml(bay.mapSection || "")}</option>`)
+    .join("");
+  els.bayLayoutSelect.value = state.bays.some((bay) => bay.bayCode === current) ? current : state.bays[0]?.bayCode || "";
+}
+
+function populateBayLayoutForm() {
+  const bay = state.bays.find((item) => item.bayCode === els.bayLayoutSelect?.value) || selectedBay() || state.bays[0];
+  if (!bay) return;
+  state.selectedBayCode = bay.bayCode;
+  if (els.bayLayoutDisplayInput) els.bayLayoutDisplayInput.value = bay.displayName || bay.bayCode;
+  if (els.bayLayoutSectionInput) els.bayLayoutSectionInput.value = bay.mapSection || "";
+  if (els.bayLayoutCategoryInput) els.bayLayoutCategoryInput.value = bay.bayCategory || "";
+  if (els.bayLayoutRowInput) els.bayLayoutRowInput.value = bay.layoutRow || "";
+  if (els.bayLayoutColInput) els.bayLayoutColInput.value = bay.layoutCol || "";
+  if (els.bayLayoutCapacityInput) els.bayLayoutCapacityInput.value = bay.capacityQty || 0;
+  if (els.bayLayoutActiveInput) els.bayLayoutActiveInput.checked = Boolean(bay.active);
+}
+
+function openBayLayoutManager() {
+  if (!hasPermission("manage_bay_layout")) {
+    showInlineError("Only admins can edit the bay map layout.", false);
+    return;
+  }
+  state.bayEditMode = true;
+  if (els.bayLayoutManager) els.bayLayoutManager.hidden = false;
+  renderBayLayoutSelect();
+  populateBayLayoutForm();
+  renderBayMapPage();
+}
+
+function closeBayLayoutManager() {
+  state.bayEditMode = false;
+  if (els.bayLayoutManager) els.bayLayoutManager.hidden = true;
+  renderBayMapPage();
+}
+
+async function saveBayLayoutForm() {
+  if (!els.bayLayoutSelect?.value) return;
+  const payload = await fetchJson("/api/indian-trail/layout", {
+    method: "POST",
+    body: JSON.stringify({
+      bayCode: els.bayLayoutSelect.value,
+      displayName: els.bayLayoutDisplayInput?.value || "",
+      mapSection: els.bayLayoutSectionInput?.value || "",
+      bayCategory: els.bayLayoutCategoryInput?.value || "",
+      layoutRow: els.bayLayoutRowInput?.value || "",
+      layoutCol: els.bayLayoutColInput?.value || "",
+      capacityQty: els.bayLayoutCapacityInput?.value || 0,
+      active: Boolean(els.bayLayoutActiveInput?.checked),
+      ...requestContext(),
+    }),
+  });
+  state.bays = payload.bays || state.bays;
+  renderBayMapPage();
+}
+
+async function moveBayToGroup(bayCode, mapSection, bayCategory = "", targetBayCode = "") {
+  const bay = state.bays.find((item) => item.bayCode === bayCode);
+  const targetBay = state.bays.find((item) => item.bayCode === targetBayCode);
+  if (!bay || !mapSection) return;
+  const payload = await fetchJson("/api/indian-trail/layout", {
+    method: "POST",
+    body: JSON.stringify({
+      bayCode,
+      displayName: bay.displayName || bay.bayCode,
+      mapSection,
+      bayCategory: bayCategory || bay.bayCategory || bayCategoryKind(bay),
+      layoutRow: targetBay?.layoutRow || bay.layoutRow || "",
+      layoutCol: targetBay?.layoutCol || bay.layoutCol || "",
+      capacityQty: bay.capacityQty || 0,
+      active: Boolean(bay.active),
+      ...requestContext(),
+    }),
+  });
+  state.bays = payload.bays || state.bays;
+  state.selectedBayCode = bayCode;
+  renderBayMapPage();
+  renderBayLayoutSelect();
+  populateBayLayoutForm();
+  showFloatingNotice(`${bayCode} moved to ${mapSection}`, "success");
+}
+
+async function addBaysFromForm() {
+  const result = await fetchJson("/api/indian-trail/bays/add", {
+    method: "POST",
+    body: JSON.stringify({
+      mapSection: els.bayAddGroupInput?.value || "",
+      bayCategory: els.bayAddCategoryInput?.value || "",
+      prefix: els.bayAddPrefixInput?.value || "",
+      count: els.bayAddCountInput?.value || 1,
+      ...requestContext(),
+    }),
+  });
+  state.bays = result.bays || state.bays;
+  if (result.created?.[0]) state.selectedBayCode = result.created[0];
+  renderBayMapPage();
+  renderBayLayoutSelect();
+  populateBayLayoutForm();
+  showFloatingNotice(`Added ${result.created?.length || 0} bay(s)`, "success");
+}
+
+async function deleteSelectedBay() {
+  const bayCode = els.bayLayoutSelect?.value || state.selectedBayCode;
+  if (!bayCode) return;
+  if (!window.confirm(`Delete bay ${bayCode}? Active assignments must be cleared first.`)) return;
+  const result = await fetchJson("/api/indian-trail/bays/delete", {
+    method: "POST",
+    body: JSON.stringify({ bayCode, ...requestContext() }),
+  });
+  state.bays = result.bays || state.bays;
+  state.selectedBayCode = "";
+  renderBayMapPage();
+  renderBayLayoutSelect();
+  populateBayLayoutForm();
+}
+
+async function deleteSelectedBayGroup() {
+  const mapSection = els.bayAddGroupInput?.value || els.bayLayoutSectionInput?.value || selectedBay()?.mapSection || "";
+  if (!mapSection) return;
+  if (!window.confirm(`Delete bay group ${mapSection}? Active assignments must be cleared first.`)) return;
+  const result = await fetchJson("/api/indian-trail/bays/delete-group", {
+    method: "POST",
+    body: JSON.stringify({ mapSection, ...requestContext() }),
+  });
+  state.bays = result.bays || state.bays;
+  state.selectedBayCode = "";
+  renderBayMapPage();
+  renderBayLayoutSelect();
+  populateBayLayoutForm();
+}
+
+async function moveBayGroup(direction) {
+  const section = els.bayLayoutSectionInput?.value || selectedBay()?.mapSection || "";
+  const delta = {
+    up: { rowDelta: -1, colDelta: 0 },
+    down: { rowDelta: 1, colDelta: 0 },
+    left: { rowDelta: 0, colDelta: -1 },
+    right: { rowDelta: 0, colDelta: 1 },
+  }[direction];
+  if (!section || !delta) return;
+  const payload = await fetchJson("/api/indian-trail/layout", {
+    method: "POST",
+    body: JSON.stringify({ moveGroup: true, mapSection: section, ...delta, ...requestContext() }),
+  });
+  state.bays = payload.bays || state.bays;
+  renderBayMapPage();
+  renderBayLayoutSelect();
+  populateBayLayoutForm();
+}
+
+async function swapBayGroups(sourceSection, targetSection) {
+  if (!sourceSection || !targetSection || sourceSection === targetSection) return;
+  const payload = await fetchJson("/api/indian-trail/layout", {
+    method: "POST",
+    body: JSON.stringify({ moveGroup: true, mapSection: sourceSection, targetMapSection: targetSection, ...requestContext() }),
+  });
+  state.bays = payload.bays || state.bays;
+  renderBayMapPage();
+  renderBayLayoutSelect();
+  populateBayLayoutForm();
 }
 
 function openPrintPackage(printCandidates, filters = {}) {
@@ -1871,15 +2426,142 @@ function openPrintPackage(printCandidates, filters = {}) {
   window.open(`/api/print/package?${params.toString()}`, "_blank", "noopener");
 }
 
+function importCandidateSummary(result) {
+  const imported = result.importedFiles || [];
+  const updated = result.updatedFiles || [];
+  const rows = [
+    ...imported.map((entry) => ({ ...entry, kind: "New" })),
+    ...updated.map((entry) => ({ ...entry, kind: "Updated" })),
+  ];
+  if (!rows.length) return `<div class="admin-empty">No new or updated delivery lists were found.</div>`;
+  return rows
+    .map((entry, index) => `
+      <details class="import-result-item">
+        <summary>
+          <label class="checkbox-row"><input class="import-candidate-check" type="checkbox" checked data-import-candidate-listids="${escapeHtml((entry.listIds || []).join(","))}"><span><strong>${escapeHtml(entry.kind)} - ${escapeHtml(entry.fileName)}</strong><small>${escapeHtml(formatDisplayDate(entry.deliveryDate))} - ${escapeHtml(entry.rowCount || 0)} rows / ${escapeHtml(entry.totalQty || 0)} pieces</small></span></label>
+          ${entry.listIds?.length ? `<button type="button" data-print-candidate-index="${index}">Print updated items</button>` : ""}
+        </summary>
+        <div class="compact-list">
+          ${(entry.listIds || []).map((listId) => `<div><strong>${escapeHtml(listId)}</strong><span>Changed stage included in this package.</span></div>`).join("") || "<div><strong>No changed stages reported</strong></div>"}
+        </div>
+      </details>
+    `)
+    .join("");
+}
+
+function showImportResultDialog(result) {
+  let backdrop = document.getElementById("importResultBackdrop");
+  let panel = document.getElementById("importResultPanel");
+  if (!backdrop) {
+    backdrop = document.createElement("div");
+    backdrop.id = "importResultBackdrop";
+    backdrop.className = "modal-backdrop";
+    document.body.appendChild(backdrop);
+  }
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.id = "importResultPanel";
+    panel.className = "modal-panel import-result-panel";
+    document.body.appendChild(panel);
+  }
+  const imported = result.importedFiles?.length || 0;
+  const updated = result.updatedFiles?.length || 0;
+  const skipped = result.skippedFiles?.length || 0;
+  const failed = result.failedFiles?.length || 0;
+  panel.innerHTML = `
+    <div class="section-heading">
+      <h2>Import / Update Complete</h2>
+      <button type="button" data-close-import-result>OK</button>
+    </div>
+    <p class="admin-empty success">${imported} new, ${updated} updated, ${skipped} unchanged, ${failed} failed.</p>
+    <div class="admin-button-row">
+      <button type="button" data-print-import="latest">Print all updated items</button>
+      <button type="button" data-print-selected-imports>Print selected updates</button>
+    </div>
+    <div class="import-result-list">${importCandidateSummary(result)}</div>
+  `;
+  backdrop.hidden = false;
+  panel.hidden = false;
+  backdrop.addEventListener("click", closeImportResultDialog, { once: true });
+}
+
+function closeImportResultDialog() {
+  const backdrop = document.getElementById("importResultBackdrop");
+  const panel = document.getElementById("importResultPanel");
+  if (backdrop) backdrop.hidden = true;
+  if (panel) panel.hidden = true;
+}
+
+async function runAssignmentAction(action, assignmentId) {
+  const found = assignmentById(assignmentId);
+  const assignment = found.assignment;
+  if (!assignment?.id) {
+    showInlineError("Assignment not found.", true);
+    return;
+  }
+  if (found.bay?.bayCode) state.selectedBayCode = found.bay.bayCode;
+  if (action === "sdi") {
+    openSdiPanel(assignment.id);
+    return;
+  }
+  if (action === "clear") {
+    if (!window.confirm(`Clear ${assignment.order}-${assignment.item} from this bay?`)) return;
+    await postBayAction("/api/indian-trail/clear-assignment", { assignmentId: assignment.id, reason: "Cleared selected order from bay map" });
+    return;
+  }
+  if (action === "move") {
+    const newBayCode = window.prompt("Move this order to which bay code?");
+    if (!newBayCode) return;
+    await postBayAction("/api/indian-trail/move", { assignmentId: assignment.id, newBayCode, reason: `Moved selected order from ${found.bay?.displayName || found.bay?.bayCode || "bay"}` });
+  }
+}
+
+function selectedPrintListIds() {
+  return [...(els.printOptionsStages?.querySelectorAll("input:checked") || [])].map((input) => input.value);
+}
+
+function availableGlassTypesForLists(listIds) {
+  const wanted = new Set(listIds);
+  const types = new Set();
+  const sourceLists = state.lists.filter((list) => wanted.has(list.id));
+  for (const list of sourceLists) {
+    for (const label of list.glassTypes || []) {
+      if (label) types.add(label);
+    }
+    for (const item of list.items || []) {
+      const label = glassTypeLabel(item);
+      if (label) types.add(label);
+    }
+  }
+  if (state.activeListId && wanted.has(state.activeListId)) {
+    for (const item of state.items) {
+      const label = glassTypeLabel(item);
+      if (label) types.add(label);
+    }
+  }
+  return [...types].sort((a, b) => a.localeCompare(b));
+}
+
+function renderPrintGlassTypes() {
+  if (!els.printOptionsGlassType) return;
+  const current = els.printOptionsGlassType.value || "";
+  const types = availableGlassTypesForLists(selectedPrintListIds());
+  els.printOptionsGlassType.innerHTML = [
+    `<option value="">All glass types</option>`,
+    ...types.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`),
+  ].join("");
+  els.printOptionsGlassType.value = types.includes(current) ? current : "";
+}
+
 function renderPrintOptionStages() {
   if (!els.printOptionsStages || !els.printOptionsDate) return;
   const date = els.printOptionsDate.value || selectedDeliveryDate() || dashboardDateKey();
   const lists = state.lists.filter((list) => list.deliveryDate === date).sort((a, b) => stageSort(a) - stageSort(b));
   const contextIds = new Set(state.printContext?.listIds || []);
-  const hasContextIds = contextIds.size > 0;
+  const hasContextIds = Boolean(state.printContext?.fixedListIds) && contextIds.size > 0;
   els.printOptionsStages.innerHTML = lists
     .map((list) => {
-      const checked = hasContextIds ? contextIds.has(list.id) : true;
+      const checked = hasContextIds ? contextIds.has(list.id) : false;
       return `
         <label>
           <input type="checkbox" value="${escapeHtml(list.id)}" ${checked ? "checked" : ""}>
@@ -1888,6 +2570,7 @@ function renderPrintOptionStages() {
       `;
     })
     .join("");
+  renderPrintGlassTypes();
 }
 
 function openPrintOptions(context = {}) {
@@ -1902,10 +2585,12 @@ function openPrintOptions(context = {}) {
     els.printOptionsDate.innerHTML = groups.map((group) => `<option value="${escapeHtml(group.date)}">${escapeHtml(formatDisplayDate(group.date))}</option>`).join("");
     els.printOptionsDate.value = groups.some((group) => group.date === requestedDate) ? requestedDate : groups[0].date;
   }
-  for (const input of [els.printUpdatedOnly, els.printRushOnly, els.printRemakeOnly, els.printCpuOnly, els.printDtcOnly]) {
+  for (const input of [els.printUpdatedOnly, els.printRushOnly, els.printRemakeOnly]) {
     if (input) input.checked = false;
   }
-  if (els.printOptionsGlassType) els.printOptionsGlassType.value = "";
+  if (els.printMirrorMode) els.printMirrorMode.value = "exclude";
+  if (els.printCustomerFilter) els.printCustomerFilter.value = "";
+  if (els.printOrderFilter) els.printOrderFilter.value = "";
   renderPrintOptionStages();
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = false;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = false;
@@ -1917,9 +2602,13 @@ function closePrintOptions() {
 }
 
 function submitPrintOptions() {
-  const listIds = [...(els.printOptionsStages?.querySelectorAll("input:checked") || [])].map((input) => input.value);
+  let listIds = state.printContext?.fixedListIds ? [...(state.printContext.listIds || [])] : selectedPrintListIds();
+  if (state.printContext?.useImportCandidates) {
+    const importIds = [...new Set((state.lastImportResult?.printCandidates || []).flatMap((candidate) => candidate.listIds || []))];
+    if (importIds.length) listIds = importIds;
+  }
   if (!listIds.length) {
-    showInlineError("Select at least one stage to print.", false);
+    showInlineError("Select at least one stage to print or export.", false);
     return;
   }
   if (!state.backend) {
@@ -1931,19 +2620,36 @@ function submitPrintOptions() {
     updatedOnly: els.printUpdatedOnly?.checked ? "1" : "",
     rushOnly: els.printRushOnly?.checked ? "1" : "",
     remakeOnly: els.printRemakeOnly?.checked ? "1" : "",
-    cpuOnly: els.printCpuOnly?.checked ? "1" : "",
-    dtcOnly: els.printDtcOnly?.checked ? "1" : "",
     glassType: els.printOptionsGlassType?.value.trim() || "",
+    mirrorMode: els.printMirrorMode?.value || "exclude",
+    customers: els.printCustomerFilter?.value.trim() || "",
+    orders: els.printOrderFilter?.value.trim() || "",
   };
-  openPrintPackage([{ listIds }], filters);
+  const params = new URLSearchParams({ listId: listIds.join(",") });
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value);
+  }
+  const mode = document.querySelector('input[name="printExportMode"]:checked')?.value || "print";
+  if (mode === "export") {
+    window.open(`/api/export/package.xlsx?${params.toString()}`, "_blank", "noopener");
+  } else {
+    window.open(`/api/print/package?${params.toString()}`, "_blank", "noopener");
+  }
   closePrintOptions();
 }
 
 async function importTempDeliveryFolder() {
   const sourceFolder = els.tempFolderInput?.value.trim() || "";
+  const dateFrom = els.importFromDate?.value || "";
+  const dateTo = els.importToDate?.value || "";
+  if (els.importPreviewBox) {
+    els.importPreviewBox.classList.remove("success", "review");
+    els.importPreviewBox.classList.add("loading");
+    els.importPreviewBox.innerHTML = `<strong>Importing Temp folder...</strong><span class="loading-bar"><i></i></span>`;
+  }
   const result = await fetchJson("/api/import/folder", {
     method: "POST",
-    body: JSON.stringify({ ...requestContext(), sourceFolder }),
+    body: JSON.stringify({ ...requestContext(), sourceFolder, dateFrom, dateTo }),
   });
   state.lastImportResult = result;
   state.lists = result.lists || state.lists;
@@ -1956,6 +2662,7 @@ async function importTempDeliveryFolder() {
   const failed = result.failedFiles?.length || 0;
   const printCandidates = result.printCandidates || [];
   if (els.importPreviewBox) {
+    els.importPreviewBox.classList.remove("loading");
     els.importPreviewBox.classList.toggle("success", !failed);
     els.importPreviewBox.classList.toggle("review", Boolean(failed));
     els.importPreviewBox.innerHTML = `
@@ -1963,13 +2670,14 @@ async function importTempDeliveryFolder() {
       <span>${imported} new files, ${updated} updated files, ${skipped} unchanged, ${failed} failed.</span>
       ${result.failedFiles?.length ? `<span>${escapeHtml(result.failedFiles.map((file) => `${file.fileName}: ${(file.errors || []).join("; ")}`).join(" | "))}</span>` : ""}
       ${printCandidates.length ? `<button type="button" data-print-import="latest">Print updated package</button>` : ""}
+      <details class="import-run-details" open>
+        <summary>View imported and updated delivery lists</summary>
+        <div class="import-result-list">${importCandidateSummary(result)}</div>
+      </details>
     `;
   }
   if (printCandidates.length) {
-    const pieces = printCandidates.reduce((sum, candidate) => sum + Number(candidate.pieceCount || 0), 0);
-    if (window.confirm(`${printCandidates.length} new/updated delivery-list package(s) are ready with ${pieces} printable pieces. Print now?`)) {
-      openPrintPackage(printCandidates);
-    }
+    showImportResultDialog(result);
   }
 }
 
@@ -1980,7 +2688,9 @@ async function refreshAdminPage() {
   requests.push(hasPermission("manage_users") ? fetchJson("/api/admin/users") : Promise.resolve(null));
   requests.push(hasPermission("view_active_sessions") ? fetchJson("/api/admin/sessions") : Promise.resolve(null));
   requests.push(hasPermission("view_exceptions") ? fetchJson(`/api/exceptions?listId=${encodeURIComponent(state.activeListId || "")}`) : Promise.resolve(null));
-  const [summary, users, sessions, exceptions] = await Promise.all(requests);
+  requests.push(hasPermission("manage_customer_route_rules") ? fetchJson("/api/admin/customer-route-rules") : Promise.resolve(null));
+  const [summary, users, sessions, exceptions, customerRules] = await Promise.all(requests);
+  if (summary) state.adminSummary = summary;
   if (summary && els.adminSummary) {
     els.adminSummary.innerHTML = [
       miniStat("Lists", summary.activeDeliveryLists ?? 0),
@@ -1993,12 +2703,15 @@ async function refreshAdminPage() {
   if (summary) {
     renderImportHistory(summary.recentImports || []);
     renderAdminDeleteControls();
+    renderAdminResetControls();
     if (els.tempFolderInput && !els.tempFolderInput.value && summary.tempDeliveryListsDir) els.tempFolderInput.value = summary.tempDeliveryListsDir;
   }
   state.adminUsers = users?.users || [];
   state.activeSessions = sessions?.sessions || [];
+  state.adminCustomerRouteRules = customerRules?.rules || [];
   renderAdminUsers();
   renderAdminStations();
+  renderCustomerRouteRules();
   renderExceptionCenter(exceptions?.exceptions || []);
   renderActiveSessions();
 }
@@ -2034,6 +2747,35 @@ function renderAdminDeleteControls() {
     .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(list.stage)} - ${escapeHtml(list.scanner)}</option>`)
     .join("");
   els.deleteListSelect.value = lists.some((list) => list.id === selectedList) ? selectedList : lists[0]?.id || "";
+}
+
+function renderAdminResetControls() {
+  if (!els.resetListSelect) return;
+  const selected = els.resetListSelect.value || state.activeListId || state.lists[0]?.id || "";
+  els.resetListSelect.innerHTML = state.lists
+    .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(formatDisplayDate(list.deliveryDate))} - ${escapeHtml(list.stage)} - ${escapeHtml(list.scanner)}</option>`)
+    .join("");
+  els.resetListSelect.value = state.lists.some((list) => list.id === selected) ? selected : state.lists[0]?.id || "";
+}
+
+async function resetSelectedAdminScans() {
+  const listId = els.resetListSelect?.value || "";
+  const list = state.lists.find((item) => item.id === listId);
+  if (!list) return;
+  const firstConfirm = window.confirm(`Reset all scans for ${list.label}?`);
+  if (!firstConfirm) return;
+  const typed = window.prompt(`Type RESET to delete all scans associated with ${list.label}.`);
+  if (typed !== "RESET") {
+    if (els.resetScansStatus) els.resetScansStatus.innerHTML = `<strong>Reset cancelled</strong><span>The confirmation text did not match.</span>`;
+    return;
+  }
+  const payload = await fetchJson("/api/reset", {
+    method: "POST",
+    body: JSON.stringify({ listId, ...requestContext() }),
+  });
+  if (payload.meta?.id === state.activeListId) applyBackendPayload(payload);
+  await loadDeliveryLists(state.activeListId);
+  if (els.resetScansStatus) els.resetScansStatus.innerHTML = `<strong>Scans reset</strong><span>${escapeHtml(list.label)} is back to zero scanned quantity.</span>`;
 }
 
 async function deleteSelectedDeliveryList(deleteDate = false) {
@@ -2074,7 +2816,7 @@ function renderAdminUsers() {
   }
   els.adminUsers.innerHTML = `
     <table>
-      <thead><tr><th>User</th><th>Roles</th><th>Stages</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>User</th><th>Roles</th><th>Stages</th><th>Password</th><th>Status</th><th></th></tr></thead>
       <tbody>
         ${state.adminUsers
           .map(
@@ -2089,10 +2831,21 @@ function renderAdminUsers() {
                   ` : escapeHtml((user.roles || []).join(", "))}
                 </td>
                 <td>${escapeHtml((user.stageAccess || []).join(", "))}</td>
+                <td>
+                  ${hasPermission("update_user_passwords") ? `
+                    <div class="password-reset-row">
+                      <input data-user-password="${escapeHtml(user.username)}" type="password" placeholder="Reset password">
+                      <button type="button" data-toggle-password="${escapeHtml(user.username)}" title="Show password">Show</button>
+                      <button type="button" data-update-user-password="${escapeHtml(user.username)}">Save</button>
+                    </div>
+                    <small class="password-note">Existing password is securely hashed.</small>
+                  ` : `<span>Protected</span>`}
+                </td>
                 <td>${user.active ? "Active" : "Inactive"}</td>
                 <td>
                   ${hasPermission("manage_roles") ? `<button type="button" data-update-user-role="${escapeHtml(user.username)}">Save role</button>` : ""}
                   ${user.active && hasPermission("deactivate_users") ? `<button type="button" data-deactivate-user="${escapeHtml(user.username)}">Deactivate</button>` : ""}
+                  ${!user.active && hasPermission("reactivate_users") ? `<button type="button" data-reactivate-user="${escapeHtml(user.username)}">Reactivate</button>` : ""}
                 </td>
               </tr>
             `,
@@ -2106,8 +2859,51 @@ function renderAdminUsers() {
 function renderAdminStations() {
   if (!els.adminStations) return;
   els.adminStations.innerHTML = state.stations
-    .map((station) => `<div><strong>${escapeHtml(station)}</strong>${hasPermission("remove_stations") && !DEFAULT_STATIONS.includes(station) ? `<button type="button" data-remove-station="${escapeHtml(station)}">Remove</button>` : ""}</div>`)
+    .map((station) => `
+      <div class="station-row">
+        <input data-station-name="${escapeHtml(station)}" type="text" value="${escapeHtml(station)}">
+        ${hasPermission("manage_stations") ? `<button type="button" data-rename-station="${escapeHtml(station)}">Save</button>` : ""}
+        ${hasPermission("remove_stations") && !DEFAULT_STATIONS.includes(station) ? `<button type="button" data-remove-station="${escapeHtml(station)}">Remove</button>` : ""}
+      </div>
+    `)
     .join("");
+}
+
+function renderCustomerRouteRules() {
+  if (!els.customerRouteRules) return;
+  els.customerRouteRules.innerHTML = state.adminCustomerRouteRules.length
+    ? state.adminCustomerRouteRules
+        .map((rule) => `
+          <div>
+            <strong>${escapeHtml(rule.customerPattern)}</strong>
+            <span>${escapeHtml(rule.route)}</span>
+            <button type="button" data-remove-customer-route-rule="${escapeHtml(rule.id)}">Remove</button>
+          </div>
+        `)
+        .join("")
+    : `<div><strong>No route rules</strong><span>Add CPU, DTC, or GNV customer defaults here.</span></div>`;
+}
+
+async function saveCustomerRouteRule() {
+  const customerPattern = els.customerRoutePatternInput?.value.trim() || "";
+  const route = els.customerRouteSelect?.value || "CPU";
+  if (!customerPattern) return;
+  const payload = await fetchJson("/api/admin/customer-route-rules", {
+    method: "POST",
+    body: JSON.stringify({ customerPattern, route }),
+  });
+  state.adminCustomerRouteRules = payload.rules || [];
+  if (els.customerRoutePatternInput) els.customerRoutePatternInput.value = "";
+  renderCustomerRouteRules();
+}
+
+async function removeCustomerRouteRule(ruleId) {
+  const payload = await fetchJson("/api/admin/customer-route-rules/remove", {
+    method: "POST",
+    body: JSON.stringify({ ruleId }),
+  });
+  state.adminCustomerRouteRules = payload.rules || [];
+  renderCustomerRouteRules();
 }
 
 function renderExceptionCenter(exceptions) {
@@ -2172,6 +2968,11 @@ function arrayBufferToBase64(buffer) {
 
 async function importDeliveryListFile(file) {
   if (state.backend) {
+    if (els.importPreviewBox) {
+      els.importPreviewBox.classList.remove("success", "review");
+      els.importPreviewBox.classList.add("loading");
+      els.importPreviewBox.innerHTML = `<strong>Importing ${escapeHtml(file.name)}...</strong><span class="loading-bar"><i></i></span>`;
+    }
     let result;
     if (file.name.toLowerCase().endsWith(".json")) {
       const text = await file.text();
@@ -2206,20 +3007,31 @@ async function importDeliveryListFile(file) {
     if (els.importPreviewBox) {
       const created = result.createdCount ?? 0;
       const updated = result.updatedCount ?? 0;
+      els.importPreviewBox.classList.remove("loading");
       els.importPreviewBox.classList.add("success");
       els.importPreviewBox.classList.remove("review");
       els.importPreviewBox.innerHTML = `
         <strong>Single file import complete</strong>
         <span>${escapeHtml(file.name)} created ${escapeHtml(created)} stages and updated ${escapeHtml(updated)} stages.</span>
         ${result.printCandidates?.length ? `<button type="button" data-print-import="latest">Print imported updates</button>` : ""}
+        <details class="import-run-details" open>
+          <summary>View imported and updated delivery lists</summary>
+          <div class="import-result-list">${importCandidateSummary({
+            importedFiles: created ? [{ fileName: file.name, deliveryDate: result.printCandidates?.[0]?.deliveryDate || "", rowCount: "", totalQty: "", listIds: result.changedListIds || [] }] : [],
+            updatedFiles: updated ? [{ fileName: file.name, deliveryDate: result.printCandidates?.[0]?.deliveryDate || "", rowCount: "", totalQty: "", listIds: result.changedListIds || [] }] : [],
+          })}</div>
+        </details>
       `;
     }
     const printCandidates = result.printCandidates || [];
     if (printCandidates.length) {
-      const pieces = printCandidates.reduce((sum, candidate) => sum + Number(candidate.pieceCount || 0), 0);
-      if (window.confirm(`${printCandidates.length} delivery-list package(s) are ready with ${pieces} printable pieces. Print now?`)) {
-        openPrintPackage(printCandidates);
-      }
+      showImportResultDialog({
+        ...result,
+        importedFiles: created ? [{ fileName: file.name, deliveryDate: printCandidates[0]?.deliveryDate || "", rowCount: "", totalQty: "", listIds: result.changedListIds || [] }] : [],
+        updatedFiles: updated ? [{ fileName: file.name, deliveryDate: printCandidates[0]?.deliveryDate || "", rowCount: "", totalQty: "", listIds: result.changedListIds || [] }] : [],
+        skippedFiles: [],
+        failedFiles: [],
+      });
     }
   } else {
     const text = await file.text();
@@ -2272,19 +3084,28 @@ function renderManualEditResults(results) {
   els.manualEditResults.innerHTML = results.length
     ? `
       <table>
-        <thead><tr><th>Order</th><th>Customer</th><th>Qty</th><th>Scanned</th><th>Process</th><th></th></tr></thead>
+        <thead><tr><th>Order</th><th>Item</th><th>Customer</th><th>Qty</th><th>Scanned</th><th>Dims</th><th>Route</th><th>Job</th><th>Product</th><th>Process</th><th>Queue</th><th></th></tr></thead>
         <tbody>
           ${results
             .slice(0, 20)
             .map(
               (item) => `
                 <tr data-edit-row="${escapeHtml(item.lineItemId)}">
-                  <td>${escapeHtml(item.order)}-${escapeHtml(item.item)}</td>
-                  <td>${escapeHtml(item.customer)}</td>
+                  <td><input data-edit-field="order" type="text" value="${escapeHtml(item.order)}"></td>
+                  <td><input data-edit-field="item" type="text" value="${escapeHtml(item.item)}"></td>
+                  <td><input data-edit-field="customer" type="text" value="${escapeHtml(item.customer)}"></td>
                   <td><input data-edit-field="qty" type="number" min="0" value="${escapeHtml(item.qty)}"></td>
                   <td><input data-edit-field="scanned" type="number" min="0" value="${escapeHtml(item.scanned)}"></td>
-                  <td><input data-edit-field="processState" type="text" value="${escapeHtml(item.bayStatus || "")}"></td>
-                  <td><button type="button" data-save-line-item="${escapeHtml(item.lineItemId)}">Save</button></td>
+                  <td><input data-edit-field="dimensions" type="text" value="${escapeHtml(item.dimensions || "")}"></td>
+                  <td><input data-edit-field="route" type="text" value="${escapeHtml(item.route || "")}"></td>
+                  <td><input data-edit-field="job" type="text" value="${escapeHtml(item.job || "")}"></td>
+                  <td><input data-edit-field="product" type="text" value="${escapeHtml(item.product || "")}"></td>
+                  <td><input data-edit-field="processState" type="text" value="${escapeHtml(item.processState || "")}"></td>
+                  <td><input data-edit-field="queueState" type="text" value="${escapeHtml(item.queueState || "")}"></td>
+                  <td>
+                    <button type="button" data-save-line-item="${escapeHtml(item.lineItemId)}">Save</button>
+                    <button type="button" data-delete-line-item="${escapeHtml(item.lineItemId)}">Delete</button>
+                  </td>
                 </tr>
               `,
             )
@@ -2307,6 +3128,18 @@ async function saveManualLineItem(lineItemId) {
     body: JSON.stringify(data),
   });
   if (payload.meta?.id === state.activeListId) applyBackendPayload(payload);
+  renderScanPage();
+}
+
+async function deleteManualLineItem(lineItemId) {
+  if (!window.confirm("Delete this line item from its delivery list?")) return;
+  const payload = await fetchJson("/api/admin/line-item/delete", {
+    method: "POST",
+    body: JSON.stringify({ lineItemId }),
+  });
+  if (payload.meta?.id === state.activeListId) applyBackendPayload(payload);
+  await loadDeliveryLists(state.activeListId);
+  await runManualEditSearch();
   renderScanPage();
 }
 
@@ -2358,6 +3191,7 @@ async function loadAuthenticatedApp(params = new URLSearchParams(window.location
 
 async function init() {
   wireEvents();
+  resetImportDateWindow();
   await detectBackend();
   if (state.backend) {
     await loadSession();
@@ -2391,6 +3225,11 @@ function wireEvents() {
   });
 
   els.logoutBtn?.addEventListener("click", () => logout().catch((error) => showInlineError(error.message)));
+  els.globalPrintExportBtn?.addEventListener("click", () => {
+    const date = state.page === "scan" ? state.meta?.deliveryDate : dashboardDateKey();
+    const listIds = state.lists.filter((list) => !date || list.deliveryDate === date).map((list) => list.id);
+    openPrintOptions({ date, listIds });
+  });
   els.headerGlobalSearchBtn?.addEventListener("click", () => runGlobalSearch().catch((error) => showInlineError(error.message)));
   els.headerGlobalSearchInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -2400,10 +3239,21 @@ function wireEvents() {
   });
   els.homeListSearch?.addEventListener("input", () => {
     state.homeSearch = els.homeListSearch.value;
+    state.homePageIndex = 1;
     renderHome();
   });
   els.homeStageFilter?.addEventListener("change", () => {
     state.homeStageFilter = els.homeStageFilter.value;
+    state.homePageIndex = 1;
+    renderHome();
+  });
+  els.overviewRangeSelect?.addEventListener("change", () => {
+    state.overviewRange = els.overviewRangeSelect.value || "30";
+    renderHome();
+  });
+  els.homePageSize?.addEventListener("change", () => {
+    state.homePageSize = Number(els.homePageSize.value) || 25;
+    state.homePageIndex = 1;
     renderHome();
   });
   els.searchInput?.addEventListener("input", () => {
@@ -2413,6 +3263,13 @@ function wireEvents() {
   });
   els.pageSize?.addEventListener("change", () => {
     state.pageSize = Number(els.pageSize.value) || 25;
+    if (els.pageSizeBottom) els.pageSizeBottom.value = String(state.pageSize);
+    state.pageIndex = 1;
+    renderScanPage();
+  });
+  els.pageSizeBottom?.addEventListener("change", () => {
+    state.pageSize = Number(els.pageSizeBottom.value) || 25;
+    if (els.pageSize) els.pageSize.value = String(state.pageSize);
     state.pageIndex = 1;
     renderScanPage();
   });
@@ -2443,41 +3300,39 @@ function wireEvents() {
       showInlineError(error.message, false);
     }
   });
-  els.printBtn?.addEventListener("click", () => {
-    if (state.backend && state.activeListId) {
-      openPrintOptions({ listIds: [state.activeListId], date: state.meta?.deliveryDate });
-    } else {
-      window.print();
+  els.manualAssignForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await submitManualBayAssign();
+    } catch (error) {
+      showInlineError(error.message, true);
     }
   });
   els.printOptionsDate?.addEventListener("change", () => {
     state.printContext = { ...(state.printContext || {}), listIds: [] };
     renderPrintOptionStages();
   });
+  els.printOptionsStages?.addEventListener("change", () => renderPrintGlassTypes());
   els.printOptionsClose?.addEventListener("click", () => closePrintOptions());
   els.printOptionsBackdrop?.addEventListener("click", () => closePrintOptions());
   els.printOptionsSubmit?.addEventListener("click", () => submitPrintOptions());
-  els.exportBtn?.addEventListener("click", () => {
-    if (state.backend) {
-      window.location.href = `/api/export.xlsx?listId=${encodeURIComponent(state.activeListId)}`;
-    } else {
-      exportStaticCsv();
-    }
-  });
   els.undoBtn?.addEventListener("click", async () => {
     const payload = await fetchJson("/api/undo", {
       method: "POST",
       body: JSON.stringify({ listId: state.activeListId, ...requestContext() }),
     });
     applyBackendPayload(payload);
+    scanFlash(payload.lastScan?.ok ? "success" : "notice");
     renderScanPage();
   });
-  els.resetBtn?.addEventListener("click", () => resetState().catch((error) => showInlineError(error.message)));
-  els.loadExampleBtn?.addEventListener("click", () => {
-    const first = state.items[0];
-    if (!first) return;
-    els.scanInput.value = `TDEXRTY${pad(first.order, 6).slice(-3)}${first.item}000`;
-    els.scanInput.focus();
+  els.redoBtn?.addEventListener("click", async () => {
+    const payload = await fetchJson("/api/redo", {
+      method: "POST",
+      body: JSON.stringify({ listId: state.activeListId, ...requestContext() }),
+    });
+    applyBackendPayload(payload);
+    scanFlash(payload.lastScan?.ok ? "success" : "notice");
+    renderScanPage();
   });
   els.importBtn?.addEventListener("click", () => {
     if (!els.importFile) return;
@@ -2487,9 +3342,19 @@ function wireEvents() {
   els.folderImportBtn?.addEventListener("click", () => {
     importTempDeliveryFolder().catch((error) => showInlineError(error.message, true));
   });
+  els.importWindowResetBtn?.addEventListener("click", () => resetImportDateWindow());
+  els.checkUpdatesBtn?.addEventListener("click", () => {
+    const hasRemote = Boolean(state.adminSummary?.updateRemote || "");
+    if (hasRemote && window.confirm("An update check is ready to run. Install updates if a newer version is found?")) {
+      showInlineError("Updater install flow will run from the deployment service in production. No local update was applied.", false);
+    } else {
+      window.alert("No new updates found. You have the latest available version for this local build.");
+    }
+  });
   els.deleteDateSelect?.addEventListener("change", () => renderAdminDeleteControls());
   els.deleteListBtn?.addEventListener("click", () => deleteSelectedDeliveryList(false).catch((error) => showInlineError(error.message, true)));
   els.deleteDateBtn?.addEventListener("click", () => deleteSelectedDeliveryList(true).catch((error) => showInlineError(error.message, true)));
+  els.adminResetScansBtn?.addEventListener("click", () => resetSelectedAdminScans().catch((error) => showInlineError(error.message, true)));
   els.importFile?.addEventListener("change", () => {
     const file = els.importFile.files?.[0];
     if (!file) return;
@@ -2505,6 +3370,10 @@ function wireEvents() {
   els.createUserForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     createUserFromForm().catch((error) => showInlineError(error.message));
+  });
+  els.customerRouteRuleForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveCustomerRouteRule().catch((error) => showInlineError(error.message, true));
   });
   els.manualEditSearchBtn?.addEventListener("click", () => runManualEditSearch().catch((error) => showInlineError(error.message)));
   els.manualEditSearch?.addEventListener("keydown", (event) => {
@@ -2538,9 +3407,38 @@ function wireEvents() {
     state.baySearch = els.bayMapSearch?.value || "";
     scrollToBaySearchMatch();
   });
+  els.bayScanOutForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitBayScanOut().catch((error) => showInlineError(error.message, true));
+  });
+  els.bayManualSubmitBtn?.addEventListener("click", () => submitManualBayScan().catch((error) => showInlineError(error.message, true)));
+  els.bayScanModeToggle?.addEventListener("change", () => {
+    if (els.bayScanOutInput) els.bayScanOutInput.placeholder = els.bayScanModeToggle.checked ? "Scan order to add to bay..." : "Scan order to remove from bay...";
+  });
+  els.bayUndoBtn?.addEventListener("click", () => showInlineError("Bay undo is reserved for the next audit-history pass. Recent bay actions are shown below.", false));
+  els.bayRedoBtn?.addEventListener("click", () => showInlineError("Bay redo is reserved for the next audit-history pass. Recent bay actions are shown below.", false));
   els.bayMapCanvas?.addEventListener("click", (event) => {
     const target = event.target.closest("[data-bay-code]");
     if (!target) return;
+    if (state.pendingBayMove?.assignmentId) {
+      const newBayCode = target.dataset.bayCode || "";
+      const label = `${state.pendingBayMove.order}-${state.pendingBayMove.item}`;
+      if (newBayCode && window.confirm(`Move ${label} to ${newBayCode}?`)) {
+        postBayAction("/api/indian-trail/move", {
+          assignmentId: state.pendingBayMove.assignmentId,
+          newBayCode,
+          reason: `Moved from ${state.pendingBayMove.fromBay}`,
+        })
+          .then(() => {
+            showFloatingNotice(`Moved ${label} to ${newBayCode}.`, "success");
+            scanFlash("success");
+          })
+          .catch((error) => showInlineError(error.message, true));
+      }
+      state.pendingBayMove = null;
+      document.body.classList.remove("bay-move-mode");
+      return;
+    }
     selectBay(target.dataset.bayCode || "");
   });
   els.bayActionButtons?.addEventListener("click", (event) => {
@@ -2549,13 +3447,58 @@ function wireEvents() {
     runBayAction(target.dataset.bayAction).catch((error) => showInlineError(error.message, true));
   });
   els.sdiCloseBtn?.addEventListener("click", () => closeSdiPanel());
+  els.sdiBackdrop?.addEventListener("click", () => closeSdiPanel());
   els.sdiClearBtn?.addEventListener("click", () => submitSdi(false).catch((error) => showInlineError(error.message, true)));
   els.sdiForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     submitSdi(true).catch((error) => showInlineError(error.message, true));
   });
+  els.bayLayoutCloseBtn?.addEventListener("click", () => closeBayLayoutManager());
+  els.bayLayoutSelect?.addEventListener("change", () => populateBayLayoutForm());
+  els.bayLayoutUndoBtn?.addEventListener("click", () => showInlineError("Layout undo will use the next bay-layout history pass. Drag changes are currently saved immediately.", false));
+  els.bayLayoutRedoBtn?.addEventListener("click", () => showInlineError("Layout redo will use the next bay-layout history pass. Drag changes are currently saved immediately.", false));
+  for (const container of [els.bayMapCanvas, els.bayAllBaysList]) {
+    container?.addEventListener("dragstart", (event) => {
+      const groupTarget = event.target.closest("[data-bay-group-drag]");
+      if (groupTarget && state.bayEditMode && hasPermission("manage_bay_layout")) {
+        event.dataTransfer.setData("text/bay-group", groupTarget.dataset.bayGroupDrag || "");
+        event.dataTransfer.effectAllowed = "move";
+        return;
+      }
+      const target = event.target.closest("[data-bay-code]");
+      if (!target || !state.bayEditMode || !hasPermission("manage_bay_layout")) return;
+      event.dataTransfer.setData("text/plain", target.dataset.bayCode || "");
+      event.dataTransfer.effectAllowed = "move";
+    });
+    container?.addEventListener("dragover", (event) => {
+      const target = event.target.closest("[data-bay-drop-section]");
+      if (!target || !state.bayEditMode || !hasPermission("manage_bay_layout")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    });
+    container?.addEventListener("drop", (event) => {
+      const target = event.target.closest("[data-bay-drop-section]");
+      if (!target || !state.bayEditMode || !hasPermission("manage_bay_layout")) return;
+      event.preventDefault();
+      const sourceGroup = event.dataTransfer.getData("text/bay-group");
+      if (sourceGroup) {
+        swapBayGroups(sourceGroup, target.dataset.bayDropSection || "").catch((error) => showInlineError(error.message, true));
+        return;
+      }
+      const bayCode = event.dataTransfer.getData("text/plain");
+      const targetBay = event.target.closest("[data-bay-code]");
+      moveBayToGroup(bayCode, target.dataset.bayDropSection || "", target.dataset.bayDropCategory || "", targetBay?.dataset.bayCode || "").catch((error) => showInlineError(error.message, true));
+    });
+  }
 
   document.addEventListener("click", (event) => {
+    if (
+      els.headerGlobalSearchResults &&
+      !event.target.closest(".global-search") &&
+      !event.target.closest("#headerGlobalSearchResults")
+    ) {
+      els.headerGlobalSearchResults.hidden = true;
+    }
     const pageButton = event.target.closest("[data-page-target]");
     if (pageButton) {
       showPage(pageButton.dataset.pageTarget);
@@ -2565,6 +3508,18 @@ function wireEvents() {
     if (openListButton) {
       activateList(openListButton.dataset.openList).catch((error) => showInlineError(error.message));
       if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
+      return;
+    }
+    const openBayButton = event.target.closest("[data-open-bay]");
+    if (openBayButton) {
+      state.selectedBayCode = openBayButton.dataset.openBay || "";
+      if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
+      showPage("bays");
+      window.setTimeout(() => {
+        if (els.bayMapSearch) els.bayMapSearch.value = state.selectedBayCode;
+        state.baySearch = state.selectedBayCode;
+        scrollToBaySearchMatch();
+      }, 350);
       return;
     }
     const filterButton = event.target.closest("[data-filter]");
@@ -2584,6 +3539,20 @@ function wireEvents() {
     const pageAction = event.target.closest("[data-page-action]");
     if (pageAction) {
       state.pageIndex += pageAction.dataset.pageAction === "next" ? 1 : -1;
+      renderScanPage();
+      return;
+    }
+    const homePageAction = event.target.closest("[data-home-page-action]");
+    if (homePageAction) {
+      state.homePageIndex += homePageAction.dataset.homePageAction === "next" ? 1 : -1;
+      renderHome();
+      return;
+    }
+    const glassToggle = event.target.closest("[data-toggle-glass-group]");
+    if (glassToggle) {
+      const label = glassToggle.dataset.toggleGlassGroup || "";
+      if (state.collapsedGlassTypes.has(label)) state.collapsedGlassTypes.delete(label);
+      else state.collapsedGlassTypes.add(label);
       renderScanPage();
       return;
     }
@@ -2609,6 +3578,22 @@ function wireEvents() {
       removeStation(removeStationButton.dataset.removeStation).catch((error) => showInlineError(error.message));
       return;
     }
+    const renameStationButton = event.target.closest("[data-rename-station]");
+    if (renameStationButton) {
+      const oldName = renameStationButton.dataset.renameStation;
+      const input = document.querySelector(`[data-station-name="${CSS.escape(oldName)}"]`);
+      fetchJson("/api/stations/rename", {
+        method: "POST",
+        body: JSON.stringify({ oldName, newName: input?.value || "" }),
+      })
+        .then((payload) => {
+          state.stations = uniqueText([...(payload.stations || [])]);
+          renderStationOptions();
+          renderAdminStations();
+        })
+        .catch((error) => showInlineError(error.message));
+      return;
+    }
     const deactivateUserButton = event.target.closest("[data-deactivate-user]");
     if (deactivateUserButton) {
       fetchJson("/api/admin/users/deactivate", {
@@ -2616,6 +3601,38 @@ function wireEvents() {
         body: JSON.stringify({ username: deactivateUserButton.dataset.deactivateUser }),
       })
         .then(() => refreshAdminPage())
+        .catch((error) => showInlineError(error.message));
+      return;
+    }
+    const reactivateUserButton = event.target.closest("[data-reactivate-user]");
+    if (reactivateUserButton) {
+      fetchJson("/api/admin/users/reactivate", {
+        method: "POST",
+        body: JSON.stringify({ username: reactivateUserButton.dataset.reactivateUser }),
+      })
+        .then(() => refreshAdminPage())
+        .catch((error) => showInlineError(error.message));
+      return;
+    }
+    const togglePasswordButton = event.target.closest("[data-toggle-password]");
+    if (togglePasswordButton) {
+      const username = togglePasswordButton.dataset.togglePassword;
+      const input = document.querySelector(`[data-user-password="${CSS.escape(username)}"]`);
+      if (input) input.type = input.type === "password" ? "text" : "password";
+      return;
+    }
+    const updatePasswordButton = event.target.closest("[data-update-user-password]");
+    if (updatePasswordButton) {
+      const username = updatePasswordButton.dataset.updateUserPassword;
+      const input = document.querySelector(`[data-user-password="${CSS.escape(username)}"]`);
+      fetchJson("/api/admin/users/password", {
+        method: "POST",
+        body: JSON.stringify({ username, password: input?.value || "" }),
+      })
+        .then(() => {
+          if (input) input.value = "";
+          refreshAdminPage();
+        })
         .catch((error) => showInlineError(error.message));
       return;
     }
@@ -2636,9 +3653,42 @@ function wireEvents() {
       saveManualLineItem(saveLineItemButton.dataset.saveLineItem).catch((error) => showInlineError(error.message));
       return;
     }
+    const deleteLineItemButton = event.target.closest("[data-delete-line-item]");
+    if (deleteLineItemButton) {
+      deleteManualLineItem(deleteLineItemButton.dataset.deleteLineItem).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const removeCustomerRouteButton = event.target.closest("[data-remove-customer-route-rule]");
+    if (removeCustomerRouteButton) {
+      removeCustomerRouteRule(removeCustomerRouteButton.dataset.removeCustomerRouteRule).catch((error) => showInlineError(error.message, true));
+      return;
+    }
     const printImportButton = event.target.closest("[data-print-import]");
     if (printImportButton) {
-      openPrintPackage(state.lastImportResult?.printCandidates || []);
+      const listIds = [...new Set((state.lastImportResult?.printCandidates || []).flatMap((candidate) => candidate.listIds || []))];
+      openPrintOptions({ listIds, date: state.lastImportResult?.printCandidates?.[0]?.deliveryDate || selectedDeliveryDate(), fixedListIds: true });
+      return;
+    }
+    const closeImportButton = event.target.closest("[data-close-import-result]");
+    if (closeImportButton) {
+      closeImportResultDialog();
+      return;
+    }
+    const printSelectedImportsButton = event.target.closest("[data-print-selected-imports]");
+    if (printSelectedImportsButton) {
+      const checkedIds = [...document.querySelectorAll(".import-candidate-check:checked")]
+        .flatMap((input) => String(input.dataset.importCandidateListids || "").split(",").filter(Boolean));
+      const listIds = [...new Set(checkedIds.length ? checkedIds : (state.lastImportResult?.printCandidates || []).flatMap((candidate) => candidate.listIds || []))];
+      openPrintOptions({ listIds, date: state.lastImportResult?.printCandidates?.[0]?.deliveryDate || selectedDeliveryDate(), fixedListIds: true });
+      return;
+    }
+    const printCandidateButton = event.target.closest("[data-print-candidate-index]");
+    if (printCandidateButton) {
+      const rows = [...(state.lastImportResult?.importedFiles || []), ...(state.lastImportResult?.updatedFiles || [])];
+      const entry = rows[Number(printCandidateButton.dataset.printCandidateIndex || 0)];
+      if (entry?.listIds?.length) {
+        openPrintOptions({ listIds: entry.listIds, date: entry.deliveryDate || selectedDeliveryDate(), fixedListIds: true });
+      }
       return;
     }
     const printListsButton = event.target.closest("[data-print-lists]");
@@ -2657,6 +3707,30 @@ function wireEvents() {
     if (bayCell?.dataset.bayCode) {
       if (els.bayMapCanvas?.contains(bayCell)) return;
       selectBay(bayCell.dataset.bayCode || "");
+      return;
+    }
+    const manualAssignBay = event.target.closest("[data-manual-assign-bay]");
+    if (manualAssignBay) {
+      postBayAction("/api/indian-trail/assign", {
+        lineItemId: manualAssignBay.dataset.lineItemId,
+        bayCode: manualAssignBay.dataset.manualAssignBay,
+        assignedQty: manualAssignBay.dataset.assignedQty || 1,
+        reason: "Manual assignment from Indian Trail scan page",
+      })
+        .then(() => {
+          if (els.manualAssignStatus) els.manualAssignStatus.innerHTML = `<article class="message-card ok"><strong>Assigned</strong><span>Bay ${escapeHtml(manualAssignBay.dataset.manualAssignBay)} selected.</span></article>`;
+        })
+        .catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const assignmentAction = event.target.closest("[data-assignment-action]");
+    if (assignmentAction) {
+      runAssignmentAction(assignmentAction.dataset.assignmentAction, assignmentAction.dataset.assignmentId).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const bayAction = event.target.closest("[data-bay-action]");
+    if (bayAction && !els.bayActionButtons?.contains(bayAction)) {
+      runBayAction(bayAction.dataset.bayAction).catch((error) => showInlineError(error.message, true));
       return;
     }
     const navButton = event.target.closest("[data-mobile-target]");

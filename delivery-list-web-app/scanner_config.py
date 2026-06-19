@@ -48,7 +48,7 @@ def load_config(root: Path) -> AppConfig:
     root = root.resolve()
     data_dir = root / "data"
     default_db_path = data_dir / "delivery-scanner-pilot.db"
-    default_temp_delivery_lists = root.parent / "Temp Delivery Lists"
+    default_temp_delivery_lists = Path("I:/BAREFOOT-INSTALL/Glass Production/Brandon/Temp Delivery Lists")
     database_path = Path(os.environ.get("DLS_DATABASE_PATH", str(default_db_path))).expanduser()
     temp_delivery_lists_dir = Path(os.environ.get("DLS_TEMP_DELIVERY_LISTS_PATH", str(default_temp_delivery_lists))).expanduser()
     if not database_path.is_absolute():
