@@ -859,7 +859,13 @@ class BaseDeliveryStore:
     def clear_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    def restore_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        raise NotImplementedError
+
     def update_bay_layout(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def set_bay_group_position(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -3341,6 +3347,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"ok": True, "assignmentId": assignment_id}
 
+    def restore_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        assignment_id = int(data.get("assignmentId") or 0)
+        reason = str(data.get("reason") or "Assignment restored").strip()
+        if not assignment_id:
+            raise ValueError("assignmentId is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
+            if not row:
+                raise ValueError("Assignment not found")
+            bay = con.execute("SELECT * FROM bays WHERE id = ?", (row["bay_id"],)).fetchone()
+            if not bay:
+                raise ValueError("Assignment bay not found")
+            con.execute(
+                "UPDATE bay_assignments SET status = 'Assigned', cleared_by = NULL, cleared_at = NULL, reason = ? WHERE id = ?",
+                (reason, assignment_id),
+            )
+            self.insert_bay_event(con, row["bay_id"], row["line_item_id"], "RestoreAssignment", user, reason, new_bay_id=row["bay_id"])
+            self.insert_audit(con, "bay_assignment", str(assignment_id), "restore_bay_assignment", user, "", reason)
+            con.commit()
+        return {"ok": True, "assignmentId": assignment_id, "bayCode": bay["bay_code"]}
+
     def set_bay_status(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         bay_code = str(data.get("bayCode") or "").strip()
         status = str(data.get("status") or "Available").strip().title()
@@ -3418,11 +3446,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         layout_col = int(data.get("layoutCol") or 0) or None
         capacity = int(data.get("capacityQty") or 0)
         active = 1 if data.get("active") in {True, "1", "true", "yes", 1} else 0
+        insert_before = str(data.get("insertBeforeBayCode") or "").strip()
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute("SELECT * FROM bays WHERE bay_code = ?", (bay_code,)).fetchone()
             if not row:
                 raise ValueError(f"Unknown bay: {bay_code}")
+            if insert_before:
+                target = con.execute("SELECT * FROM bays WHERE bay_code = ?", (insert_before,)).fetchone()
+                if target:
+                    layout_row = int(target["layout_row"] or layout_row or 1)
+                    layout_col = int(target["layout_col"] or layout_col or 1)
+                    con.execute(
+                        """
+                        UPDATE bays
+                        SET layout_col = COALESCE(layout_col, 0) + 1
+                        WHERE id <> ?
+                          AND map_section = ?
+                          AND COALESCE(layout_row, 0) = ?
+                          AND COALESCE(layout_col, 0) >= ?
+                        """,
+                        (row["id"], map_section, layout_row, layout_col),
+                    )
             con.execute(
                 """
                 UPDATE bays
@@ -3437,11 +3482,30 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"ok": True, "bayCode": bay_code, "bays": self.get_bays()}
 
+    def set_bay_group_position(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        map_section = " ".join(str(data.get("mapSection") or "").split())[:120]
+        layout_row = int(data.get("layoutRow") or 0)
+        layout_col = int(data.get("layoutCol") or 0)
+        if not map_section or not layout_row or not layout_col:
+            raise ValueError("mapSection, layoutRow, and layoutCol are required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            rows = con.execute("SELECT * FROM bays WHERE map_section = ?", (map_section,)).fetchall()
+            if not rows:
+                raise ValueError("Bay group not found")
+            con.execute("UPDATE bays SET layout_row = ?, layout_col = ? WHERE map_section = ?", (layout_row, layout_col, map_section))
+            for row in rows:
+                self.insert_bay_event(con, row["id"], "", "UpdateBayLayout", user, "Bay group layout updated")
+            self.insert_audit(con, "bay_group", map_section, "set_bay_group_position", user, "", "", {"layoutRow": layout_row, "layoutCol": layout_col})
+            con.commit()
+        return {"ok": True, "mapSection": map_section, "bays": self.get_bays()}
+
     def create_bays(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         map_section = " ".join(str(data.get("mapSection") or data.get("group") or "").split())[:120]
         bay_category = " ".join(str(data.get("bayCategory") or data.get("category") or "Standard").split())[:120]
         prefix = " ".join(str(data.get("prefix") or map_section or bay_category or "BAY").split())[:60]
         count = max(1, min(int(data.get("count") or 1), 100))
+        spacer = bool(data.get("spacer"))
         if not map_section:
             raise ValueError("Bay group is required")
         safe_prefix = re.sub(r"[^A-Z0-9]+", "-", prefix.upper()).strip("-") or "BAY"
@@ -3463,9 +3527,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         bay_code, area, bay_type, capacity_qty, sort_order, active,
                         display_name, map_section, bay_category, layout_row, layout_col
                     )
-                    VALUES (?, ?, 'Standard', 1, ?, 1, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (bay_code, map_section, next_number, bay_code, map_section, bay_category, next_number, next_number),
+                    (
+                        bay_code,
+                        map_section,
+                        "Spacer" if spacer else "Standard",
+                        0 if spacer else 1,
+                        next_number,
+                        0 if spacer else 1,
+                        "Spacer" if spacer else bay_code,
+                        map_section,
+                        "Spacer" if spacer else bay_category,
+                        next_number,
+                        next_number,
+                    ),
                 )
                 bay_id = con.execute("SELECT last_insert_rowid()").fetchone()[0]
                 self.insert_bay_event(con, bay_id, "", "CreateBay", user, "Bay created")

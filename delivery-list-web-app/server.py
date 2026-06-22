@@ -134,6 +134,12 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
     def send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(status)
@@ -647,6 +653,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.clear_bay_assignment(data, user["username"]))
                 return
 
+            if parsed.path == "/api/indian-trail/restore-assignment":
+                user = self.require_permission("clear_bay")
+                if not user:
+                    return
+                self.send_json(STORE.restore_bay_assignment(data, user["username"]))
+                return
+
             if parsed.path == "/api/indian-trail/bay-status":
                 user = self.require_permission("clear_bay")
                 if not user:
@@ -665,7 +678,9 @@ class Handler(SimpleHTTPRequestHandler):
                 user = self.require_permission("manage_bay_layout")
                 if not user:
                     return
-                if data.get("moveGroup"):
+                if data.get("setGroupPosition"):
+                    self.send_json(STORE.set_bay_group_position(data, user["username"]))
+                elif data.get("moveGroup"):
                     self.send_json(STORE.move_bay_group(data, user["username"]))
                 else:
                     self.send_json(STORE.update_bay_layout(data, user["username"]))

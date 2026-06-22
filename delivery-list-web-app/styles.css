@@ -4490,3 +4490,276 @@ body.bay-move-mode .excel-bay-map {
     grid-template-columns: 1fr;
   }
 }
+
+/* Home and Bay Map polish */
+.delivery-date-group summary .progress-line {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 5px;
+}
+
+.delivery-card-progress {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.delivery-card-progress .list-card-progress,
+.delivery-date-group summary .list-card-progress {
+  min-width: 0;
+  width: 100%;
+}
+
+.delivery-list-card {
+  overflow: hidden;
+}
+
+.progress-line > span {
+  margin-right: 0;
+}
+
+.flow-lane {
+  min-height: 64px;
+  overflow: hidden;
+}
+
+.flow-lane::after {
+  z-index: 1;
+}
+
+.flow-truck {
+  top: 7px;
+  z-index: 3;
+  min-width: 86px;
+  height: 40px;
+  font-size: 17px;
+  animation-duration: 14s;
+}
+
+.flow-truck::before {
+  right: -18px;
+  width: 23px;
+  height: 25px;
+}
+
+.flow-truck::after {
+  left: 9px;
+  right: auto;
+  bottom: -8px;
+  width: 76px;
+  height: 12px;
+  background:
+    conic-gradient(from 0deg, #111827 0 25%, #6b7280 25% 32%, #111827 32% 57%, #6b7280 57% 64%, #111827 64% 100%) 0 0 / 12px 12px no-repeat,
+    conic-gradient(from 0deg, #111827 0 25%, #6b7280 25% 32%, #111827 32% 57%, #6b7280 57% 64%, #111827 64% 100%) 58px 0 / 12px 12px no-repeat;
+  animation: truck-wheel-texture 0.45s linear infinite;
+}
+
+@keyframes truck-wheel-texture {
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+
+@keyframes truck-drive {
+  from {
+    left: 0;
+  }
+  to {
+    left: calc(100% - 104px);
+  }
+}
+
+.undo-redo-icon {
+  width: 46px;
+  min-width: 46px !important;
+  height: 44px !important;
+  padding: 3px 4px !important;
+  display: inline-grid !important;
+  place-items: center;
+  gap: 1px;
+  border-radius: 7px;
+}
+
+.undo-redo-icon small {
+  display: block;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.undo-icon,
+.redo-icon {
+  width: 22px;
+  height: 20px;
+  border: 0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 23px;
+  line-height: 1;
+  font-weight: 950;
+}
+
+.undo-icon {
+  transform: none;
+}
+
+.redo-icon {
+  transform: none;
+}
+
+.undo-icon::after,
+.redo-icon::after {
+  content: none;
+}
+
+.undo-icon::before {
+  content: "←";
+}
+
+.redo-icon::before {
+  content: "→";
+}
+
+.scan-history-actions .undo-redo-icon {
+  width: 44px;
+  min-width: 44px !important;
+  height: 42px !important;
+}
+
+.bay-scan-out-recent {
+  display: block;
+}
+
+.bay-recent-table-wrap {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.bay-recent-table td:first-child small {
+  display: block;
+  margin-top: 2px;
+  color: #526078;
+  font-size: 11px;
+}
+
+.recent-table tr.notice {
+  background: #fffbeb;
+}
+
+.scan-check.notice {
+  color: #a16207;
+}
+
+.scan-check.error {
+  color: var(--red);
+}
+
+.physical-bay-slot.type-spacer,
+.bay-slot.type-spacer {
+  border-style: dashed;
+  background: repeating-linear-gradient(135deg, #f8fafc, #f8fafc 8px, #e5e7eb 8px, #e5e7eb 16px);
+  color: #64748b;
+}
+
+.bay-holding-area {
+  grid-column: 1 / -1;
+  border: 1px dashed #94a3b8;
+  border-radius: 7px;
+  background: #f8fafc;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.bay-holding-area header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--navy-dark);
+}
+
+.bay-holding-list {
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.bay-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(110px, 1fr));
+  grid-auto-rows: minmax(104px, auto);
+  gap: 9px;
+  align-items: start;
+}
+
+.bay-grid-cell {
+  min-height: 104px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  padding: 6px;
+}
+
+.bay-grid-cell.has-section {
+  background: #fff;
+  border-style: solid;
+}
+
+.empty-grid-slot {
+  min-height: 58px;
+  display: grid;
+  place-items: center;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.bay-edit-grid .physical-bay-section {
+  margin: 0;
+}
+
+.bay-edit-grid .physical-slot-grid {
+  grid-template-columns: repeat(auto-fit, minmax(46px, 1fr));
+}
+
+.bay-edit-grid .physical-bay-slot {
+  min-height: 46px;
+  font-size: 10px;
+}
+
+.bay-layout-tools #bayLayoutConfirmBtn {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+
+.bay-layout-tools #bayLayoutCancelBtn {
+  border-color: #ef4444;
+  color: #991b1b;
+}
+
+@media (max-width: 1180px) {
+  .bay-edit-grid {
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .bay-edit-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+}
+
+.bay-edit-grid {
+  grid-template-columns: repeat(7, minmax(96px, 1fr));
+  overflow-x: auto;
+}
+
+@media (max-width: 760px) {
+  .delivery-date-group summary .progress-line,
+  .delivery-card-progress {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+}

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="Delivery_Scanner.ico">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260622-bay-grid">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
@@ -389,8 +389,12 @@
           </div>
           <p class="admin-empty">Drag bay groups or individual bays where they belong. Use Selected Bay to rename, hold, block, or delete a bay.</p>
           <div class="bay-layout-tools">
-            <button class="icon-button undo-redo-icon undo-icon-button" id="bayLayoutUndoBtn" type="button" title="Undo layout change" aria-label="Undo layout change"><span class="undo-icon"></span></button>
-            <button class="icon-button undo-redo-icon redo-icon-button" id="bayLayoutRedoBtn" type="button" title="Redo layout change" aria-label="Redo layout change"><span class="redo-icon"></span></button>
+            <button class="icon-button undo-redo-icon undo-icon-button" id="bayLayoutUndoBtn" type="button" title="Undo layout change" aria-label="Undo layout change"><span class="undo-icon"></span><small>Undo</small></button>
+            <button class="icon-button undo-redo-icon redo-icon-button" id="bayLayoutRedoBtn" type="button" title="Redo layout change" aria-label="Redo layout change"><span class="redo-icon"></span><small>Redo</small></button>
+            <button id="bayCollapseAllBtn" type="button">Collapse All Bays</button>
+            <button id="bayExpandAllBtn" type="button">Expand All Bays</button>
+            <button id="bayLayoutCancelBtn" type="button">Cancel Changes</button>
+            <button id="bayLayoutConfirmBtn" type="button">Confirm Layout</button>
           </div>
         </section>
         <section class="bay-map-shell">
@@ -407,8 +411,8 @@
               </label>
               <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Bay code for add/manual remove">
               <div class="scan-history-actions">
-                <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action"><span class="undo-icon"></span></button>
-                <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action"><span class="redo-icon"></span></button>
+                <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action"><span class="undo-icon"></span><small>Undo</small></button>
+                <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action"><span class="redo-icon"></span><small>Redo</small></button>
               </div>
               <div class="manual-bay-entry">
                 <input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Manual order">
@@ -645,6 +649,6 @@
     </section>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260622-bay-grid"></script>
 </body>
 </html>
