@@ -2997,9 +2997,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         assignments = con.execute(
             """
             SELECT ba.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.customer,
-                   li.dimensions, li.product, li.job, li.process_state, li.queue_state
+                   li.dimensions, li.product, li.job, li.process_state, li.queue_state,
+                   dl.delivery_date, dl.stage,
+                   (
+                    SELECT se.created_at
+                    FROM scan_events se
+                    WHERE se.line_item_id = li.id AND se.qty_delta > 0
+                    ORDER BY se.created_at DESC, se.id DESC
+                    LIMIT 1
+                   ) AS last_scanned_at,
+                   (
+                    SELECT se.station
+                    FROM scan_events se
+                    WHERE se.line_item_id = li.id AND se.qty_delta > 0
+                    ORDER BY se.created_at DESC, se.id DESC
+                    LIMIT 1
+                   ) AS last_scanned_station
             FROM bay_assignments ba
             JOIN line_items li ON li.id = ba.line_item_id
+            JOIN delivery_lists dl ON dl.id = li.list_id
             WHERE ba.bay_id = ? AND ba.status NOT IN ('Cleared', 'Cancelled')
             ORDER BY ba.assigned_at DESC
             """,
@@ -3051,6 +3067,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "job": item["job"],
                     "processState": item["process_state"],
                     "queueState": item["queue_state"],
+                    "deliveryDate": item["delivery_date"],
+                    "lastStage": item["stage"],
+                    "lastScannedAt": item["last_scanned_at"],
+                    "lastScannedStation": item["last_scanned_station"],
                     "status": item["status"],
                 }
                 for item in assignments
@@ -3116,10 +3136,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
     def indian_trail_summary(self) -> dict[str, Any]:
         with self.connect() as con:
             inbound = con.execute(
-                "SELECT id FROM delivery_lists WHERE stage LIKE '%Indian Trail%' AND status = 'active' ORDER BY delivery_date DESC LIMIT 1"
+                "SELECT id, delivery_date FROM delivery_lists WHERE stage LIKE '%Indian Trail%' AND status = 'active' ORDER BY delivery_date DESC LIMIT 1"
             ).fetchone()
             list_id = inbound["id"] if inbound else ""
             totals = {"totalQty": 0, "receivedQty": 0, "unassignedQty": 0}
+            outbound_totals = {"totalQty": 0, "scannedQty": 0}
             if list_id:
                 row = con.execute(
                     "SELECT COALESCE(SUM(qty),0) AS total_qty, COALESCE(SUM(scanned_qty),0) AS received_qty FROM line_items WHERE list_id = ?",
@@ -3135,6 +3156,36 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     (list_id,),
                 ).fetchone()[0]
                 totals = {"totalQty": row["total_qty"], "receivedQty": row["received_qty"], "unassignedQty": unassigned}
+                outbound = con.execute(
+                    """
+                    SELECT dl.id
+                    FROM delivery_lists dl
+                    WHERE dl.delivery_date = ?
+                      AND dl.status = 'active'
+                      AND dl.stage LIKE '%Outbound%'
+                    ORDER BY dl.id
+                    LIMIT 1
+                    """,
+                    (inbound["delivery_date"],),
+                ).fetchone()
+                if outbound:
+                    outbound_row = con.execute(
+                        """
+                        SELECT COALESCE(SUM(out_li.qty),0) AS total_qty,
+                               COALESCE(SUM(out_li.scanned_qty),0) AS scanned_qty
+                        FROM line_items out_li
+                        WHERE out_li.list_id = ?
+                          AND EXISTS (
+                            SELECT 1
+                            FROM line_items in_li
+                            WHERE in_li.list_id = ?
+                              AND in_li.order_no = out_li.order_no
+                              AND in_li.item_no = out_li.item_no
+                          )
+                        """,
+                        (outbound["id"], list_id),
+                    ).fetchone()
+                    outbound_totals = {"totalQty": outbound_row["total_qty"], "scannedQty": outbound_row["scanned_qty"]}
             assigned = con.execute("SELECT COALESCE(SUM(assigned_qty),0) FROM bay_assignments WHERE status NOT IN ('Cleared', 'Cancelled')").fetchone()[0]
             sdi = con.execute("SELECT COUNT(*) FROM bay_assignments WHERE status = 'SDIOverride'").fetchone()[0]
             conflicts = con.execute("SELECT COUNT(*) FROM exceptions WHERE exception_type LIKE '%bay%' AND status = 'Open'").fetchone()[0]
@@ -3142,6 +3193,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             needs_check = con.execute("SELECT COUNT(*) FROM bay_events WHERE event_type = 'NeedsReview' AND created_at >= date('now')").fetchone()[0]
         return {
             "activeInboundListId": list_id,
+            "indianTrailOutboundTotal": outbound_totals["totalQty"],
+            "indianTrailOutboundScanned": outbound_totals["scannedQty"],
             "inboundToday": totals["totalQty"],
             "receivedQty": totals["receivedQty"],
             "assignedToBays": assigned,

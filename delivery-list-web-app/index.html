@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
-  <link rel="icon" href="Delivery_Scanner.ico">
-  <link rel="stylesheet" href="styles.css?v=20260622-bay-grid">
+  <link rel="icon" href="minimalist_panel_rack_icon_v2.ico">
+  <link rel="stylesheet" href="styles.css?v=20260622-bay-layout-2">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
@@ -174,7 +174,11 @@
                 <button class="tab priority-tab" data-filter="remakes" type="button">Remakes <span id="countRemakes">(0)</span></button>
                 <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">(0)</span></button>
                 <button class="tab" data-filter="updated" type="button">New/Updated <span id="countUpdated">(0)</span></button>
-                <button class="tab" data-filter="errors" type="button">Needs Review <span id="countErrors">(0)</span></button>
+                <button class="tab" data-filter="errors" type="button">Errors <span id="countErrors">(0)</span></button>
+                <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button">Indian Trail <span id="countIndianTrailRoute">(0)</span></button>
+                <button class="tab route-filter-tab" data-filter="cpu-route" type="button">CPU <span id="countCpuRoute">(0)</span></button>
+                <button class="tab route-filter-tab" data-filter="dtc-route" type="button">DTC <span id="countDtcRoute">(0)</span></button>
+                <button class="tab route-filter-tab" data-filter="greenville-route" type="button">Greenville <span id="countGreenvilleRoute">(0)</span></button>
               </div>
               <label class="page-size top-page-size">
                 <span>Rows</span>
@@ -235,8 +239,8 @@
               <div class="scan-form-heading">
                 <label for="scanInput">Scan Barcode</label>
                 <div class="scan-history-actions">
-                  <button class="icon-button undo-redo-icon undo-icon-button" id="undoBtn" type="button" title="Undo last scan" aria-label="Undo last scan"><span class="undo-icon"></span></button>
-                  <button class="icon-button undo-redo-icon redo-icon-button" id="redoBtn" type="button" title="Redo last scan" aria-label="Redo last scan"><span class="redo-icon"></span></button>
+                  <button class="icon-button undo-redo-icon undo-icon-button" id="undoBtn" type="button" title="Undo last scan" aria-label="Undo last scan"><span class="undo-icon"></span><small>Undo</small></button>
+                  <button class="icon-button undo-redo-icon redo-icon-button" id="redoBtn" type="button" title="Redo last scan" aria-label="Redo last scan"><span class="redo-icon"></span><small>Redo</small></button>
                 </div>
               </div>
               <div class="scan-input-wrap">
@@ -361,6 +365,36 @@
             <span id="baySelectedText">No bay selected</span>
           </div>
         </div>
+        <div id="indianTrailSummary" class="bay-summary"></div>
+        <div class="bay-action-buttons" id="bayActionButtons">
+          <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout">Edit Map</button>
+          <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi">SDI</button>
+          <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay">Item Management</button>
+        </div>
+        <div id="bayFlowPanel" class="bay-route-flow"></div>
+        <form class="bay-scan-out-panel bay-scanner-wide" id="bayScanOutForm">
+          <div class="bay-scan-heading">
+            <strong>Bay Scanner</strong>
+            <label class="switch-row"><input id="bayScanModeToggle" type="checkbox"> <span>Add to bay</span></label>
+          </div>
+          <label class="search-box">
+            <span class="barcode-icon"></span>
+            <input id="bayScanOutInput" type="text" autocomplete="off" placeholder="Scan order to remove from bay...">
+          </label>
+          <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Bay code for add/manual remove">
+          <div class="scan-history-actions">
+            <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action"><span class="undo-icon"></span><small>Undo</small></button>
+            <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action"><span class="redo-icon"></span><small>Redo</small></button>
+          </div>
+          <div class="manual-bay-entry">
+            <input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Manual order">
+            <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Item">
+            <input id="bayManualQtyInput" type="number" min="1" step="1" value="1" aria-label="Manual quantity">
+            <button id="bayManualSubmitBtn" type="button">Manual</button>
+          </div>
+          <span id="bayScanOutStatus"></span>
+          <div id="bayScanOutRecent" class="compact-list bay-scan-out-recent"></div>
+        </form>
         <div class="bay-action-bar">
           <label class="search-box">
             <span class="search-icon"></span>
@@ -377,11 +411,6 @@
           </select>
           <button class="tool-button" id="bayCheckBtn" type="button">Bay check</button>
         </div>
-        <div id="bayFlowPanel" class="bay-route-flow"></div>
-        <div id="indianTrailSummary" class="bay-summary"></div>
-        <div class="bay-action-buttons" id="bayActionButtons">
-          <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout">Edit Map</button>
-        </div>
         <section class="bay-layout-manager" id="bayLayoutManager" hidden>
           <div class="section-heading">
             <h2>Bay Map Edit Mode</h2>
@@ -393,41 +422,31 @@
             <button class="icon-button undo-redo-icon redo-icon-button" id="bayLayoutRedoBtn" type="button" title="Redo layout change" aria-label="Redo layout change"><span class="redo-icon"></span><small>Redo</small></button>
             <button id="bayCollapseAllBtn" type="button">Collapse All Bays</button>
             <button id="bayExpandAllBtn" type="button">Expand All Bays</button>
+            <button id="bayHoldAllBtn" type="button">Put All Bays In Holding</button>
             <button id="bayLayoutCancelBtn" type="button">Cancel Changes</button>
             <button id="bayLayoutConfirmBtn" type="button">Confirm Layout</button>
+          </div>
+          <div class="bay-layout-editor">
+            <label><span>Bay</span><select id="bayLayoutSelect"></select></label>
+            <label><span>Name</span><input id="bayLayoutDisplayInput" type="text"></label>
+            <label><span>Group</span><input id="bayLayoutSectionInput" type="text"></label>
+            <label><span>Category</span><input id="bayLayoutCategoryInput" type="text"></label>
+            <label><span>Row</span><input id="bayLayoutRowInput" type="number" min="1" max="7"></label>
+            <label><span>Column</span><input id="bayLayoutColInput" type="number" min="1" max="7"></label>
+            <label><span>Capacity</span><input id="bayLayoutCapacityInput" type="number" min="0"></label>
+            <label class="checkbox-row"><input id="bayLayoutActiveInput" type="checkbox"> <span>Active</span></label>
+            <button id="bayLayoutSaveBtn" type="button">Save Bay</button>
+            <button id="bayLayoutDeleteBtn" type="button">Delete Bay</button>
           </div>
         </section>
         <section class="bay-map-shell">
           <div id="bayMapCanvas" class="excel-bay-map"></div>
           <section class="bay-detail-panel">
-            <form class="bay-scan-out-panel" id="bayScanOutForm">
-              <div class="bay-scan-heading">
-                <strong>Bay Scanner</strong>
-                <label class="switch-row"><input id="bayScanModeToggle" type="checkbox"> <span>Add to bay</span></label>
-              </div>
-              <label class="search-box">
-                <span class="barcode-icon"></span>
-                <input id="bayScanOutInput" type="text" autocomplete="off" placeholder="Scan order to remove from bay...">
-              </label>
-              <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Bay code for add/manual remove">
-              <div class="scan-history-actions">
-                <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action"><span class="undo-icon"></span><small>Undo</small></button>
-                <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action"><span class="redo-icon"></span><small>Redo</small></button>
-              </div>
-              <div class="manual-bay-entry">
-                <input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Manual order">
-                <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Item">
-                <input id="bayManualQtyInput" type="number" min="1" step="1" value="1" aria-label="Manual quantity">
-                <button id="bayManualSubmitBtn" type="button">Manual</button>
-              </div>
-              <span id="bayScanOutStatus"></span>
-              <div id="bayScanOutRecent" class="compact-list bay-scan-out-recent"></div>
-            </form>
             <section class="bay-side-panel">
               <div class="section-heading">
                 <h2>Selected Bay</h2>
               </div>
-              <div id="baySelectedPanel"></div>
+              <div class="admin-empty">Select a bay on the map to open details.</div>
             </section>
             <section class="bay-side-panel">
               <div class="section-heading">
@@ -438,6 +457,14 @@
               <div id="bayAllBaysList" class="bay-all-list"></div>
             </section>
           </section>
+        </section>
+        <div class="modal-backdrop" id="baySelectedBackdrop" hidden></div>
+        <section class="modal-panel bay-selected-modal" id="baySelectedModal" hidden>
+          <div class="section-heading">
+            <h2>Selected Bay</h2>
+            <button id="baySelectedCloseBtn" type="button">Close</button>
+          </div>
+          <div id="baySelectedPanel"></div>
         </section>
         <div class="modal-backdrop" id="sdiBackdrop" hidden></div>
         <section class="sdi-panel modal-panel" id="sdiPanel" hidden>
@@ -462,6 +489,15 @@
               <span>Reason</span>
               <input id="sdiReasonInput" type="text" autocomplete="off" value="Same-day install">
             </label>
+            <label>
+              <span>Order Type</span>
+              <select id="sdiTypeInput" required>
+                <option value="">Select Rush or Remake</option>
+                <option value="Rush">Rush</option>
+                <option value="Remake">Remake</option>
+              </select>
+            </label>
+            <div class="sdi-current-list" id="sdiCurrentList"></div>
             <div class="sdi-actions">
               <button type="submit" data-sdi-action="mark">Mark Rush / SDI</button>
               <button type="button" id="sdiClearBtn">Clear SDI</button>
@@ -649,6 +685,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=20260622-bay-grid"></script>
+  <script src="app.js?v=20260622-bay-layout-2"></script>
 </body>
 </html>

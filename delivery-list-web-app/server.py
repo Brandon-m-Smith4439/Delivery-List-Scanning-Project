@@ -7,6 +7,7 @@ import json
 import html
 import base64
 import hashlib
+import subprocess
 from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +21,23 @@ from scanner_config import load_config
 ROOT = Path(__file__).resolve().parent
 CONFIG = load_config(ROOT)
 STORE = create_store(CONFIG)
+
+
+def git_update_status() -> dict:
+    def run_git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=ROOT.parent, text=True, capture_output=True, timeout=20, check=True).stdout.strip()
+
+    try:
+        branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
+        upstream = run_git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+        local = run_git("rev-parse", "HEAD")
+        subprocess.run(["git", "fetch", "--quiet"], cwd=ROOT.parent, text=True, capture_output=True, timeout=45, check=False)
+        remote = run_git("rev-parse", upstream)
+        behind_text = run_git("rev-list", "--count", f"{local}..{remote}")
+        behind = int(behind_text or "0")
+        return {"ok": True, "branch": branch, "upstream": upstream, "local": local[:12], "remote": remote[:12], "behind": behind, "updateAvailable": behind > 0}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "updateAvailable": False}
 
 
 def esc(value: object) -> str:
@@ -98,7 +116,7 @@ def render_print_package(package: dict) -> str:
 <head>
   <meta charset="utf-8">
   <title>Delivery List Print Package</title>
-  <link rel="icon" href="/Delivery_Scanner.ico">
+  <link rel="icon" href="/minimalist_panel_rack_icon_v2.ico">
   <style>
     body {{ margin: 0; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #f6f8fb; }}
     .sheet {{ width: min(1120px, calc(100% - 32px)); margin: 16px auto; padding: 18px; background: #fff; border: 1px solid #444; border-radius: 0; }}
@@ -234,6 +252,12 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_permission("view_admin"):
                 return
             self.send_json(STORE.admin_summary())
+            return
+
+        if parsed.path == "/api/admin/update-check":
+            if not self.require_permission("view_admin"):
+                return
+            self.send_json(git_update_status())
             return
 
         if parsed.path == "/api/admin/users":

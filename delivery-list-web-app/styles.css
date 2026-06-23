@@ -4763,3 +4763,410 @@ body.bay-move-mode .excel-bay-map {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
 }
+
+/* Bay map layout and scan-page refinements */
+.bay-map-shell {
+  grid-template-columns: minmax(720px, 1fr) minmax(320px, 380px);
+  overflow-x: auto;
+}
+
+.excel-bay-map {
+  width: 100%;
+  align-self: stretch;
+}
+
+.excel-bay-map:has(.bay-edit-grid) {
+  display: block;
+  min-width: 1060px;
+}
+
+.bay-edit-grid {
+  grid-template-columns: repeat(7, minmax(130px, 1fr));
+  overflow-x: auto;
+}
+
+.bay-scanner-wide {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 260px) auto minmax(320px, 0.9fr);
+  align-items: start;
+  margin: 12px 0;
+}
+
+.bay-scanner-wide .bay-scan-heading {
+  grid-column: 1 / -1;
+}
+
+.bay-scanner-wide .manual-bay-entry {
+  grid-column: 1 / span 3;
+}
+
+.bay-scanner-wide .bay-scan-out-recent {
+  grid-column: 4;
+  grid-row: 2 / span 3;
+}
+
+.bay-summary {
+  margin: -4px 0 10px;
+}
+
+.bay-summary .mini-stat-grid {
+  grid-template-columns: repeat(7, minmax(84px, 1fr));
+  gap: 6px;
+}
+
+.bay-summary .mini-stat {
+  min-height: 48px;
+  padding: 7px 8px;
+}
+
+.bay-summary .mini-stat strong {
+  font-size: 16px;
+}
+
+.bay-holding-list {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  max-height: 260px;
+  overflow: auto;
+}
+
+.flow-lane::before {
+  top: 31px;
+}
+
+.flow-lane::after {
+  top: 25px;
+}
+
+.flow-truck::after {
+  left: 10px;
+  bottom: -8px;
+  width: 76px;
+  height: 14px;
+  background:
+    radial-gradient(circle at 7px 7px, #0f172a 0 6px, transparent 7px),
+    radial-gradient(circle at 65px 7px, #0f172a 0 6px, transparent 7px),
+    conic-gradient(from 0deg, transparent 0 12%, #cbd5e1 12% 20%, transparent 20% 37%, #cbd5e1 37% 45%, transparent 45% 62%, #cbd5e1 62% 70%, transparent 70% 87%, #cbd5e1 87% 95%, transparent 95%) 1px 1px / 12px 12px no-repeat,
+    conic-gradient(from 0deg, transparent 0 12%, #cbd5e1 12% 20%, transparent 20% 37%, #cbd5e1 37% 45%, transparent 45% 62%, #cbd5e1 62% 70%, transparent 70% 87%, #cbd5e1 87% 95%, transparent 95%) 59px 1px / 12px 12px no-repeat;
+  animation: truck-wheel-shift 0.55s steps(8) infinite;
+}
+
+@keyframes truck-wheel-shift {
+  to {
+    background-position: 0 0, 58px 0, 1px 1px, 59px 1px;
+    filter: brightness(1.2);
+  }
+}
+
+.undo-icon::before {
+  content: "↶" !important;
+}
+
+.redo-icon::before {
+  content: "↷" !important;
+}
+
+.scan-history-actions .undo-redo-icon small {
+  color: #fff;
+}
+
+.scanner-panel {
+  position: sticky;
+  top: 10px;
+  align-self: start;
+  max-height: calc(100vh - 18px);
+  overflow: auto;
+}
+
+.summary-grid,
+.manual-assign-panel {
+  display: none !important;
+}
+
+#adminSummary {
+  grid-template-columns: repeat(5, minmax(132px, 1fr));
+}
+
+.remake-marker {
+  background: var(--red) !important;
+  color: #fff !important;
+}
+
+.sdi-current-list {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px;
+  background: #fbfcfe;
+}
+
+.sdi-current-list > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--navy-dark);
+}
+
+.sdi-current-list > div {
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.sdi-current-list button {
+  border: 1px solid #f2b6bf;
+  border-radius: 7px;
+  background: #fff5f6;
+  color: var(--navy-dark);
+  padding: 8px;
+  text-align: left;
+}
+
+.sdi-current-list button span,
+.sdi-current-list button small {
+  display: block;
+}
+
+@media (max-width: 1100px) {
+  .bay-map-shell {
+    grid-template-columns: minmax(680px, 1fr) minmax(300px, 340px);
+  }
+
+  .bay-scanner-wide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bay-scanner-wide .manual-bay-entry,
+  .bay-scanner-wide .bay-scan-out-recent {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .scanner-panel {
+    position: static;
+  }
+}
+
+/* Bay map grid-as-primary layout */
+.bay-map-shell {
+  display: block;
+  overflow-x: auto;
+}
+
+.bay-detail-panel {
+  display: none !important;
+}
+
+.excel-bay-map {
+  display: block;
+  width: 100%;
+  min-width: 1180px;
+  overflow-x: auto;
+}
+
+.bay-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(150px, 1fr));
+  grid-auto-rows: minmax(118px, auto);
+  gap: 10px;
+}
+
+.physical-bay-section.cols-1 .physical-slot-grid {
+  grid-template-columns: 1fr;
+}
+
+.physical-bay-section.cols-2 .physical-slot-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.physical-bay-section.cols-1 .physical-bay-slot {
+  grid-template-columns: minmax(74px, auto) 1fr;
+  align-items: center;
+}
+
+.physical-bay-section.cols-1 .physical-bay-slot .bay-code {
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.physical-bay-section.cols-1 .physical-bay-slot small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.bay-column-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.bay-column-controls button {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--navy-dark);
+  font-weight: 950;
+}
+
+.bay-column-controls b {
+  font-size: 10px;
+  color: #526078;
+}
+
+.bay-scanner-wide {
+  min-height: 0;
+  padding: 8px;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(150px, 190px) auto minmax(420px, 1.1fr);
+}
+
+.bay-scanner-wide .bay-scan-heading {
+  min-height: 24px;
+}
+
+.bay-scanner-wide .search-box input,
+.bay-scanner-wide #bayScanBayInput {
+  min-height: 34px;
+}
+
+.bay-scanner-wide .manual-bay-entry {
+  display: none;
+}
+
+.bay-scanner-wide .bay-scan-out-recent {
+  max-height: 118px;
+  overflow: auto;
+}
+
+#bayUndoBtn,
+#bayRedoBtn,
+#bayLayoutUndoBtn,
+#bayLayoutRedoBtn {
+  background: var(--navy) !important;
+  color: #fff !important;
+}
+
+#bayUndoBtn small,
+#bayRedoBtn small,
+#bayLayoutUndoBtn small,
+#bayLayoutRedoBtn small {
+  color: #fff !important;
+}
+
+#undoBtn,
+#redoBtn {
+  background: #fff !important;
+  color: var(--navy-dark) !important;
+}
+
+#undoBtn small,
+#redoBtn small {
+  color: var(--navy-dark) !important;
+}
+
+.tab.priority-tab.has-alert.is-active {
+  background: var(--red) !important;
+  color: #fff !important;
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 2px rgba(209, 42, 58, 0.22);
+}
+
+.flow-truck::after {
+  left: 8px !important;
+  right: auto !important;
+  bottom: -8px !important;
+  width: 72px !important;
+  height: 12px !important;
+  background:
+    radial-gradient(circle at 11px 6px, transparent 0 2px, #101827 3px 5px, transparent 6px),
+    radial-gradient(circle at 58px 6px, transparent 0 2px, #101827 3px 5px, transparent 6px),
+    conic-gradient(from var(--wheel-turn, 0deg) at 11px 6px, #101827 0 25%, #dbeafe 0 35%, #101827 0 60%, #dbeafe 0 70%, #101827 0),
+    conic-gradient(from var(--wheel-turn, 0deg) at 58px 6px, #101827 0 25%, #dbeafe 0 35%, #101827 0 60%, #dbeafe 0 70%, #101827 0);
+  background-repeat: no-repeat;
+  background-size: 72px 12px;
+  animation: truck-wheel-spin 0.55s linear infinite !important;
+}
+
+@property --wheel-turn {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes truck-wheel-spin {
+  to {
+    --wheel-turn: 360deg;
+  }
+}
+
+.undo-icon::before {
+  content: "\21b6" !important;
+}
+
+.redo-icon::before {
+  content: "\21b7" !important;
+}
+
+.bay-layout-editor {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.bay-layout-editor label {
+  display: grid;
+  gap: 4px;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.bay-layout-editor input,
+.bay-layout-editor select {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 8px;
+  color: var(--navy-dark);
+  background: #fff;
+}
+
+.bay-layout-editor .checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bay-layout-editor button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 900;
+  padding: 0 10px;
+}
+
+.bay-selected-modal {
+  width: min(760px, calc(100vw - 24px));
+  max-height: min(82vh, 780px);
+  overflow: auto;
+}
+
+.filter-tabs .route-filter-tab {
+  order: 20;
+}
+
+.filter-tabs .route-filter-tab[hidden] {
+  display: none !important;
+}
+}
