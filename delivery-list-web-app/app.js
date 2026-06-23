@@ -1435,7 +1435,7 @@ function renderHome() {
                 <summary>
                   <span>
                     <strong>${escapeHtml(formatDisplayDate(group.date))}</strong>
-                    <small>${escapeHtml(group.lists.length)} stages - ${escapeHtml(stats.pieceQty || stats.totalQty)} pieces - Delivery on-time ${formatPercent(stats.onTimePercent)}</small>
+                    <small>${escapeHtml(group.lists.length)} stages - Delivery on-time ${formatPercent(stats.onTimePercent)}</small>
                     ${renderStackedProgress(group.lists, stats)}
                   </span>
                   <span class="delivery-date-total"><small>Pieces</small><strong>${escapeHtml(stats.pieceQty || stats.totalQty)}</strong></span>

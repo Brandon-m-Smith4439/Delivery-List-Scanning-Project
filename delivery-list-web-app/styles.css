@@ -508,7 +508,7 @@ select:disabled,
   font-weight: 900;
 }
 
-.delivery-date-group summary span:first-child {
+.delivery-date-group summary > span:first-child {
   display: grid;
   grid-template-columns: auto minmax(360px, 1fr) auto;
   align-items: center;
@@ -517,7 +517,7 @@ select:disabled,
   width: 100%;
 }
 
-.delivery-date-group summary span:first-child > small {
+.delivery-date-group summary > span:first-child > small {
   grid-column: 1 / -1;
 }
 
@@ -4512,8 +4512,16 @@ body.bay-move-mode .excel-bay-map {
 
 /* Home and Bay Map polish */
 .delivery-date-group summary .progress-line {
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 5px;
+  grid-template-columns: max-content minmax(520px, 680px) max-content;
+  gap: 8px;
+  justify-self: end;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.delivery-date-group summary .progress-line > strong {
+  min-width: 0;
+  text-align: left;
 }
 
 .delivery-card-progress {
@@ -4527,6 +4535,7 @@ body.bay-move-mode .excel-bay-map {
 .delivery-date-group summary .list-card-progress {
   min-width: 0;
   width: 100%;
+  max-width: none;
 }
 
 .delivery-list-card {
