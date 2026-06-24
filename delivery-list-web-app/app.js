@@ -814,6 +814,22 @@ function hasScanError(item) {
   return Boolean(String(item?.errorReason || item?.lastError || "").trim());
 }
 
+function itemPieceQty(item) {
+  return Math.max(Number(item?.qty || 0), 0);
+}
+
+function itemScannedPieceQty(item) {
+  return Math.min(Math.max(Number(item?.scanned || 0), 0), itemPieceQty(item));
+}
+
+function pieceCount(items) {
+  return items.reduce((sum, item) => sum + itemPieceQty(item), 0);
+}
+
+function unscannedPieceCount(items) {
+  return items.reduce((sum, item) => sum + Math.max(itemPieceQty(item) - itemScannedPieceQty(item), 0), 0);
+}
+
 function unresolvedPriorityItems(items = state.items) {
   return items.filter((item) => isRemakeOrRush(item) && itemStatus(item) !== "complete");
 }
@@ -835,13 +851,15 @@ function scanFlash(kind = "notice") {
 }
 
 function getStats(items = state.items, errors = state.errors) {
-  const totalQty = items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
-  const scannedQty = items.reduce((sum, item) => sum + Math.min(Number(item.scanned || 0), Number(item.qty || 0)), 0);
+  const totalQty = pieceCount(items);
+  const scannedQty = items.reduce((sum, item) => sum + itemScannedPieceQty(item), 0);
   const remainingQty = Math.max(totalQty - scannedQty, 0);
-  const partialItems = items.filter((item) => itemStatus(item) === "partial").length;
-  const completeItems = items.filter((item) => itemStatus(item) === "complete").length;
-  const remainingItems = items.filter((item) => itemStatus(item) === "remaining").length;
-  const errorCount = items.filter(hasScanError).length;
+
+  const remainingItems = pieceCount(items.filter((item) => itemStatus(item) === "remaining"));
+  const partialItems = pieceCount(items.filter((item) => itemStatus(item) === "partial"));
+  const completeItems = pieceCount(items.filter((item) => itemStatus(item) === "complete"));
+  const errorCount = unscannedPieceCount(items.filter(hasScanError));
+
   const percent = totalQty ? (scannedQty / totalQty) * 100 : 0;
 
   return { totalQty, scannedQty, remainingQty, partialItems, completeItems, remainingItems, percent, errorCount };
@@ -937,17 +955,23 @@ function renderProcessState(item) {
 
 function renderCounts() {
   const stats = getStats();
-  const totalItems = state.items.length;
-  const remakeOpen = unresolvedRemakeItems().length;
-  const remakeAll = state.items.filter(isRemakeItem).length;
-  const rushOpen = unresolvedRushItems().length;
-  const rushAll = state.items.filter(isRushItem).length;
-  const updatedCount = state.items.filter(isNewOrUpdatedItem).length;
+  const totalItems = pieceCount(state.items);
+
+  const remakeItems = state.items.filter(isRemakeItem);
+  const rushItems = state.items.filter(isRushItem);
+  const updatedItems = state.items.filter(isNewOrUpdatedItem);
+
+  const remakeOpen = unscannedPieceCount(remakeItems);
+  const remakeAll = pieceCount(remakeItems);
+  const rushOpen = unscannedPieceCount(rushItems);
+  const rushAll = pieceCount(rushItems);
+  const updatedCount = pieceCount(updatedItems);
+
   const routeCounts = {
-    "indian-trail-route": state.items.filter((item) => !/\bCPU\b|\bDTC\b|\bGNV\b|customer pickup|deliver to customer|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`)).length,
-    "cpu-route": state.items.filter((item) => /\bCPU\b|customer pickup/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`)).length,
-    "dtc-route": state.items.filter((item) => /\bDTC\b|deliver to customer/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`)).length,
-    "greenville-route": state.items.filter((item) => /\bGNV\b|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`)).length,
+    "indian-trail-route": pieceCount(state.items.filter((item) => !/\bCPU\b|\bDTC\b|\bGNV\b|customer pickup|deliver to customer|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`))),
+    "cpu-route": pieceCount(state.items.filter((item) => /\bCPU\b|customer pickup/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`))),
+    "dtc-route": pieceCount(state.items.filter((item) => /\bDTC\b|deliver to customer/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`))),
+    "greenville-route": pieceCount(state.items.filter((item) => /\bGNV\b|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`))),
   };
   if (els.countAll) els.countAll.textContent = `(${totalItems})`;
   if (els.countRemaining) els.countRemaining.textContent = `(${stats.remainingItems})`;
@@ -982,7 +1006,7 @@ function renderCounts() {
     state.filter = "all";
     document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.filter === state.filter));
   }
-  if (els.totalItemsText) els.totalItemsText.textContent = `${totalItems} total items`;
+  if (els.totalItemsText) els.totalItemsText.textContent = `${state.items.length} rows / ${totalItems} pieces`;
   if (els.progressText) els.progressText.textContent = `${stageVerb()} Qty: ${stats.scannedQty}/${stats.totalQty} - ${formatPercent(stats.percent)} Complete`;
   if (els.progressFill) els.progressFill.style.width = `${Math.min(stats.percent, 100)}%`;
   if (els.remainingQty) els.remainingQty.textContent = String(stats.remainingQty);
@@ -990,7 +1014,7 @@ function renderCounts() {
   if (els.completeQty) els.completeQty.textContent = String(stats.completeItems);
   if (els.errorQty) els.errorQty.textContent = String(stats.errorCount);
   if (els.remainingPct) els.remainingPct.textContent = formatPercent(100 - stats.percent);
-  if (els.partialPct) els.partialPct.textContent = formatPercent(stats.totalQty ? (stats.partialItems / Math.max(state.items.length, 1)) * 100 : 0);
+  if (els.partialPct) els.partialPct.textContent = formatPercent(stats.totalQty ? (stats.partialItems / stats.totalQty) * 100 : 0);
   if (els.completePct) els.completePct.textContent = formatPercent(stats.percent);
 }
 
@@ -1773,14 +1797,16 @@ function renderBayRouteFlow(summary) {
   const dayLists = state.lists.filter((list) => list.deliveryDate === key);
   const outbound = dayLists.find((list) => stageCategory(list) === "outbound");
   const inbound = dayLists.find((list) => stageCategory(list) === "received") || state.lists.find((list) => list.id === summary?.activeInboundListId);
-  const outboundQty = Number(summary?.indianTrailOutboundScanned ?? outbound?.scannedQty ?? 0);
-  const outboundTotal = Number(summary?.indianTrailOutboundTotal ?? outbound?.totalQty ?? 0);
   const inboundQty = Number(inbound?.scannedQty ?? summary?.receivedQty ?? 0);
-  const inboundTotal = Number(inbound?.totalQty ?? summary?.inboundToday ?? 0);
+  const inboundTotal = Number(inbound?.totalQty ?? summary?.indianTrailOutboundTotal ?? 0);
+
+  const outboundQty = Number(summary?.indianTrailOutboundScanned ?? outbound?.scannedQty ?? 0);
+  const outboundTotal = inboundTotal || Number(summary?.indianTrailOutboundTotal ?? outbound?.totalQty ?? 0);
+
   const inTransitQty = Math.max(outboundQty - inboundQty, 0);
   els.bayFlowPanel.innerHTML = `
     <button class="flow-card outbound" type="button" ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : ""}>
-      <small>Today's Outbound</small>
+      <small>Outbound to Indian Trail</small>
       <strong>${escapeHtml(outboundQty)} / ${escapeHtml(outboundTotal)}</strong>
       <span>${outbound ? escapeHtml(outbound.stage) : "No outbound list"}</span>
     </button>
@@ -1798,14 +1824,15 @@ function renderBayRouteFlow(summary) {
 function renderIndianTrailSummary(summary) {
   if (!els.indianTrailSummary) return;
   const overview = bayOverview();
+
   els.indianTrailSummary.innerHTML = `
     <div class="mini-stat-grid">
-      ${miniStat("Total Bays", overview.total)}
-      ${miniStat("Blocked Bays", overview.blocked)}
+      ${miniStat("Total", overview.total)}
       ${miniStat("Available", overview.available)}
-      ${miniStat("Preassigned", overview.preassigned)}
       ${miniStat("Occupied", overview.occupied)}
-      ${miniStat("SDI", summary?.sdiCount ?? state.bays.filter((bay) => bayStatusKind(bay) === "picking").length)}
+      ${miniStat("Preassigned", overview.preassigned)}
+      ${miniStat("SDI", overview.sdi)}
+      ${miniStat("Hold/Blocked", overview.blocked)}
       ${miniStat("Needs Check", summary?.needsCheck ?? 0)}
     </div>
   `;
@@ -1930,12 +1957,25 @@ function bayCategoryFilterOptions() {
 }
 
 function bayOverview() {
-  const total = state.bays.length;
-  const available = state.bays.filter((bay) => bayStatusKind(bay) === "available").length;
-  const occupied = state.bays.filter((bay) => bayStatusKind(bay) === "occupied").length;
-  const preassigned = state.bays.filter((bay) => bayStatusKind(bay) === "preassigned").length;
-  const blocked = state.bays.filter((bay) => bayStatusKind(bay) === "blocked").length;
-  return { total, available, occupied, preassigned, blocked };
+  const countableBays = state.bays.filter((bay) => bayCategoryKind(bay) !== "spacer");
+
+  const available = countableBays.filter((bay) => bayStatusKind(bay) === "available").length;
+  const occupied = countableBays.filter((bay) => bayStatusKind(bay) === "occupied").length;
+  const preassigned = countableBays.filter((bay) => bayStatusKind(bay) === "preassigned").length;
+  const sdi = countableBays.filter((bay) => bayStatusKind(bay) === "picking").length;
+  const blocked = countableBays.filter((bay) => {
+    const kind = bayStatusKind(bay);
+    return kind === "blocked" || kind === "manual";
+  }).length;
+
+  return {
+    total: countableBays.length,
+    available,
+    occupied,
+    preassigned,
+    sdi,
+    blocked,
+  };
 }
 
 function renderBaySlotButton(bay, mode = "physical") {

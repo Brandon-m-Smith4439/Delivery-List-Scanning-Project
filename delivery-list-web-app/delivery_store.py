@@ -3260,21 +3260,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if outbound:
                     outbound_row = con.execute(
                         """
-                        SELECT COALESCE(SUM(out_li.qty),0) AS total_qty,
-                               COALESCE(SUM(out_li.scanned_qty),0) AS scanned_qty
-                        FROM line_items out_li
-                        WHERE out_li.list_id = ?
-                          AND EXISTS (
-                            SELECT 1
-                            FROM line_items in_li
-                            WHERE in_li.list_id = ?
-                              AND in_li.order_no = out_li.order_no
-                              AND in_li.item_no = out_li.item_no
-                          )
+                        SELECT COALESCE(SUM(out_li.scanned_qty),0) AS scanned_qty
+                        FROM line_items in_li
+                        LEFT JOIN line_items out_li
+                          ON out_li.list_id = ?
+                         AND out_li.order_no = in_li.order_no
+                         AND out_li.item_no = in_li.item_no
+                        WHERE in_li.list_id = ?
                         """,
-                        (outbound["id"], list_id),
-                    ).fetchone()
-                    outbound_totals = {"totalQty": outbound_row["total_qty"], "scannedQty": outbound_row["scanned_qty"]}
+                    (outbound["id"], list_id),
+                ).fetchone()
+
+                outbound_totals = {
+                    "totalQty": totals["totalQty"],
+                    "scannedQty": outbound_row["scanned_qty"],
+                }
             assigned = con.execute("SELECT COALESCE(SUM(assigned_qty),0) FROM bay_assignments WHERE status NOT IN ('Cleared', 'Cancelled')").fetchone()[0]
             sdi = con.execute("SELECT COUNT(*) FROM bay_assignments WHERE status = 'SDIOverride'").fetchone()[0]
             conflicts = con.execute("SELECT COUNT(*) FROM exceptions WHERE exception_type LIKE '%bay%' AND status = 'Open'").fetchone()[0]
