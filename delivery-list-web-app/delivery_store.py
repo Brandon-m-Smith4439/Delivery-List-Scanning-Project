@@ -1477,11 +1477,100 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return self._get_line_items(con, list_id)
 
     def _get_line_items(self, con: sqlite3.Connection, list_id: str) -> list[dict[str, Any]]:
+        list_row = con.execute(
+            "SELECT id, delivery_date, stage, scanner FROM delivery_lists WHERE id = ?",
+            (list_id,),
+        ).fetchone()
+
         rows = con.execute(
             "SELECT * FROM line_items WHERE list_id = ? ORDER BY CAST(order_no AS INTEGER), CAST(item_no AS INTEGER), id",
             (list_id,),
         ).fetchall()
-        return [item_from_row(row) for row in rows]
+
+        items = [item_from_row(row) for row in rows]
+
+        for item in items:
+            item["errorType"] = ""
+            item["errorReason"] = ""
+
+        latest_error_rows = con.execute(
+            """
+            SELECT se.line_item_id, se.event_type, se.message, se.reason
+            FROM scan_events se
+            JOIN (
+                SELECT line_item_id, MAX(id) AS max_id
+                FROM scan_events
+                WHERE list_id = ? AND line_item_id IS NOT NULL
+                GROUP BY line_item_id
+            ) latest ON latest.max_id = se.id
+            WHERE se.event_type = 'error'
+            """,
+            (list_id,),
+        ).fetchall()
+
+        latest_error_by_item = {row["line_item_id"]: row for row in latest_error_rows}
+
+        for item in items:
+            error_row = latest_error_by_item.get(item["id"])
+            if not error_row:
+                continue
+
+            if int(item.get("scanned") or 0) >= int(item.get("qty") or 0):
+                continue
+
+            item["errorType"] = "scan_error"
+            item["errorReason"] = error_row["reason"] or error_row["message"] or "Scan failed before this row was completed."
+
+        if list_row:
+            stage_text = f"{list_row['stage']} {list_row['scanner']}".lower()
+            should_check_prior_stage = "staging" in stage_text or "outbound" in stage_text
+
+            if should_check_prior_stage:
+                inbound_list = con.execute(
+                    """
+                    SELECT id
+                    FROM delivery_lists
+                    WHERE delivery_date = ?
+                      AND status = 'active'
+                      AND id <> ?
+                      AND (
+                        LOWER(stage) LIKE '%indian trail%'
+                        OR LOWER(scanner) LIKE '%indian trail%'
+                        OR LOWER(stage) LIKE '%inbound%'
+                      )
+                    ORDER BY id
+                    LIMIT 1
+                    """,
+                    (list_row["delivery_date"], list_id),
+                ).fetchone()
+
+                if inbound_list:
+                    inbound_rows = con.execute(
+                        """
+                        SELECT order_no, item_no, scanned_qty
+                        FROM line_items
+                        WHERE list_id = ? AND scanned_qty > 0
+                        """,
+                        (inbound_list["id"],),
+                    ).fetchall()
+
+                    inbound_scanned = {
+                        (str(row["order_no"]), str(row["item_no"])): int(row["scanned_qty"] or 0)
+                        for row in inbound_rows
+                    }
+
+                    for item in items:
+                        received_qty = inbound_scanned.get((str(item["order"]), str(item["item"])), 0)
+                        current_qty = int(item.get("scanned") or 0)
+
+                        if received_qty <= current_qty:
+                            continue
+
+                        item["errorType"] = "stage_sequence"
+                        item["errorReason"] = f"IT received {received_qty}; Outbound {current_qty}"
+                        
+
+        return items
 
     def get_scan_events(self, list_id: str, only_errors: bool = False) -> list[dict[str, Any]]:
         with self.connect() as con:

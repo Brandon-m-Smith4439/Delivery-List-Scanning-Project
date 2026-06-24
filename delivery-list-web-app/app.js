@@ -810,6 +810,10 @@ function isNewOrUpdatedItem(item) {
   return /\b(NEW LINE|NEW|UPDATED|UPDATE|CHANGED|CHANGE)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
 }
 
+function hasScanError(item) {
+  return Boolean(String(item?.errorReason || item?.lastError || "").trim());
+}
+
 function unresolvedPriorityItems(items = state.items) {
   return items.filter((item) => isRemakeOrRush(item) && itemStatus(item) !== "complete");
 }
@@ -837,19 +841,21 @@ function getStats(items = state.items, errors = state.errors) {
   const partialItems = items.filter((item) => itemStatus(item) === "partial").length;
   const completeItems = items.filter((item) => itemStatus(item) === "complete").length;
   const remainingItems = items.filter((item) => itemStatus(item) === "remaining").length;
+  const errorCount = items.filter(hasScanError).length;
   const percent = totalQty ? (scannedQty / totalQty) * 100 : 0;
-  return { totalQty, scannedQty, remainingQty, partialItems, completeItems, remainingItems, percent, errorCount: errors.length };
+
+  return { totalQty, scannedQty, remainingQty, partialItems, completeItems, remainingItems, percent, errorCount };
 }
 
 function filteredItems() {
   const search = state.search.trim().toLowerCase();
-  const errorItemIds = new Set((state.errors || []).map((entry) => entry.item?.id).filter(Boolean));
+
   return state.items.filter((item) => {
     const status = itemStatus(item);
     const matchesFilter =
       state.filter === "all" ||
       state.filter === status ||
-      (state.filter === "errors" && errorItemIds.has(item.id)) ||
+      (state.filter === "errors" && hasScanError(item)) ||
       (state.filter === "remakes" && isRemakeItem(item)) ||
       (state.filter === "rushes" && isRushItem(item)) ||
       (state.filter === "priority" && isRemakeOrRush(item)) ||
@@ -858,11 +864,14 @@ function filteredItems() {
       (state.filter === "dtc-route" && /\bDTC\b|deliver to customer/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`)) ||
       (state.filter === "greenville-route" && /\bGNV\b|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`)) ||
       (state.filter === "indian-trail-route" && !/\bCPU\b|\bDTC\b|\bGNV\b|customer pickup|deliver to customer|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`));
+
     if (!matchesFilter) return false;
     if (!search) return true;
+
     const haystack = [item.order, item.item, item.job, item.customer, item.dimensions, item.product, item.route, item.barcode]
       .join(" ")
       .toLowerCase();
+
     return haystack.includes(search);
   });
 }
@@ -880,24 +889,35 @@ function groupItemsByGlass(items) {
 function getPagedItems() {
   const rows = filteredItems();
   const groups = groupItemsByGlass(rows);
-  const groupPages = [];
-  let currentPage = [];
-  let currentCount = 0;
-  for (const group of groups) {
-    const groupCount = group.items.length;
-    if (currentPage.length && currentCount + groupCount > state.pageSize) {
-      groupPages.push(currentPage);
-      currentPage = [];
-      currentCount = 0;
-    }
-    currentPage.push(group);
-    currentCount += groupCount;
-  }
-  if (currentPage.length || !groupPages.length) groupPages.push(currentPage);
-  const totalPages = Math.max(1, groupPages.length);
+
+  const orderedEntries = groups.flatMap((group) =>
+    group.items.map((item) => ({
+      label: group.label,
+      item,
+    })),
+  );
+
+  const totalPages = Math.max(1, Math.ceil(orderedEntries.length / state.pageSize));
   state.pageIndex = Math.min(Math.max(state.pageIndex, 1), totalPages);
-  const pageGroups = groupPages[state.pageIndex - 1] || [];
-  const pageRows = pageGroups.flatMap((group) => group.items);
+
+  const pageStart = (state.pageIndex - 1) * state.pageSize;
+  const pageEntries = orderedEntries.slice(pageStart, pageStart + state.pageSize);
+
+  const pageGroups = [];
+  for (const entry of pageEntries) {
+    const lastGroup = pageGroups[pageGroups.length - 1];
+
+    if (lastGroup && lastGroup.label === entry.label) {
+      lastGroup.items.push(entry.item);
+    } else {
+      pageGroups.push({
+        label: entry.label,
+        items: [entry.item],
+      });
+    }
+  }
+
+  const pageRows = pageEntries.map((entry) => entry.item);
   return { rows, pageRows, pageGroups, totalPages };
 }
 
@@ -945,6 +965,11 @@ function renderCounts() {
   });
   if (els.countUpdated) els.countUpdated.textContent = `(${updatedCount})`;
   if (els.countErrors) els.countErrors.textContent = `(${stats.errorCount})`;
+
+  document.querySelectorAll('[data-filter="errors"]').forEach((button) => {
+    button.classList.toggle("has-alert", Boolean(stats.errorCount));
+  });
+
   if (els.countIndianTrailRoute) els.countIndianTrailRoute.textContent = `(${routeCounts["indian-trail-route"]})`;
   if (els.countCpuRoute) els.countCpuRoute.textContent = `(${routeCounts["cpu-route"]})`;
   if (els.countDtcRoute) els.countDtcRoute.textContent = `(${routeCounts["dtc-route"]})`;
@@ -1005,9 +1030,15 @@ function renderItemRow(item) {
   const route = routeLabel(item);
   const routeTag = route ? `<span class="route-tag ${escapeHtml(route.toLowerCase())}">${escapeHtml(route)}</span>` : "";
   const markers = [
-    isRemakeItem(item) ? '<span class="rush-marker remake-marker" title="Remake">RM</span>' : "",
-    isRushItem(item) ? '<span class="rush-marker" title="Rush">!</span>' : "",
-  ].join("");
+  isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
+  isRushItem(item) ? '<span class="row-marker rush-marker">Rush</span>' : "",
+]
+  .filter(Boolean)
+  .join("");
+
+const rowError = hasScanError(item);
+const processClass = rowError ? "error" : status;
+const processText = rowError ? (item.errorReason || item.lastError || "Scan issue") : renderProcessState(item);
   return `
     <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""}" data-id="${escapeHtml(item.id)}">
       <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span></td>
@@ -1018,7 +1049,7 @@ function renderItemRow(item) {
       <td>${escapeHtml(item.customer)}</td>
       <td>${markers}</td>
       <td>${routeTag}</td>
-      <td><span class="process-pill ${status}">${escapeHtml(renderProcessState(item))}</span></td>
+      <td><span class="process-pill ${processClass}">${escapeHtml(processText)}</span></td>
     </tr>
   `;
 }
@@ -1368,7 +1399,7 @@ function renderTodayProgress() {
       return stageSort(a) - stageSort(b) || a.label.localeCompare(b.label);
     });
   if (els.todayDateLabel) {
-    els.todayDateLabel.textContent = `${isActualToday ? "Today" : "Latest"} - ${formatDisplayDate(key)}`;
+  els.todayDateLabel.textContent = formatDisplayDate(key);
   }
   els.todayStageGrid.innerHTML = lists.length
     ? lists
@@ -1754,7 +1785,7 @@ function renderBayRouteFlow(summary) {
       <span>${outbound ? escapeHtml(outbound.stage) : "No outbound list"}</span>
     </button>
     <div class="flow-lane" aria-hidden="true">
-      <span class="flow-truck"><b>${escapeHtml(inTransitQty)}</b></span>
+      <span class="flow-truck"><b>In Transit: ${escapeHtml(inTransitQty)}</b></span>
     </div>
     <button class="flow-card inbound" type="button" ${inbound ? `data-open-list="${escapeHtml(inbound.id)}"` : ""}>
       <small>Indian Trail Delivery List</small>
