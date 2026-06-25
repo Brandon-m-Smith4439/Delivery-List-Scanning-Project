@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
-  <link rel="icon" href="minimalist_panel_rack_icon_v2.ico">
+  <link rel="icon" type="image/png" href="assets/delivery-list-scanner-icon.png">
   <link rel="stylesheet" href="styles.css?v=20260622-bay-layout-2">
 </head>
 <body data-page="home" data-mobile-view="scan">
@@ -33,6 +33,7 @@
       <nav class="app-nav" aria-label="Main pages">
         <button class="is-active" data-page-target="home" type="button">Home</button>
         <button data-page-target="scan" type="button">Scan</button>
+        <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button">Racks</button>
         <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button">Bay Map</button>
         <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button">Admin</button>
       </nav>
@@ -220,6 +221,7 @@
                     <th>Customer</th>
                     <th>Flags</th>
                     <th>Route</th>
+                    <th>Location</th>
                     <th>Process State</th>
                   </tr>
                 </thead>
@@ -251,6 +253,17 @@
             </section>
 
             <h2 id="stageHeading">Select a delivery list</h2>
+
+            <section class="scan-rack-panel" id="scanRackPanel" hidden>
+              <div class="scan-rack-row">
+                <label>
+                  <span>Rack / Truck Destination</span>
+                  <select id="scanRackSelect"></select>
+                </label>
+                <button id="scanRackCompleteBtn" type="button">Complete & Print</button>
+              </div>
+              <p id="scanRackStatus"></p>
+            </section>
 
             <form class="scan-form" id="scanForm">
               <div class="scan-form-heading">
@@ -370,6 +383,36 @@
 
           </aside>
         </main>
+      </section>
+
+      <section class="page-view racks-page" id="racksPage" hidden>
+        <div class="page-heading">
+          <div>
+            <h1>Rack Overview</h1>
+            <p>Scan staging pieces into racks, close racks, and print rack packing lists.</p>
+          </div>
+          <div class="page-heading-actions rack-summary" id="rackSummary"></div>
+        </div>
+
+        <section class="rack-toolbar panel">
+          <div>
+            <h2>Racks</h2>
+            <p>R1S-R10S are steel racks, R1W-R10W are wood racks, and T is truck/no rack.</p>
+          </div>
+          <div class="rack-admin-actions" data-permission-any="manage_racks">
+            <input id="rackEditCode" type="text" placeholder="Rack code">
+            <input id="rackEditName" type="text" placeholder="Rack name">
+            <select id="rackEditType">
+              <option>Steel</option>
+              <option>Wood</option>
+              <option>Truck</option>
+            </select>
+            <button id="rackSaveBtn" type="button">Create / Edit</button>
+            <button id="rackDeleteBtn" type="button">Delete</button>
+          </div>
+        </section>
+
+        <section class="rack-grid" id="rackGrid"></section>
       </section>
 
       <section class="page-view bay-map-page" id="bayMapPage" hidden>

@@ -22,6 +22,25 @@ function Test-PortAvailable {
     }
 }
 
+function Test-ExistingDeliveryScanner {
+    param([int]$CandidatePort)
+
+    try {
+        $healthUrl = "http://127.0.0.1:$CandidatePort/api/health"
+        $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 1
+        return ($response.StatusCode -eq 200 -and ($response.Content -like '*database*' -and $response.Content -like '*delivery-scanner*'))
+    } catch {
+        return $false
+    }
+}
+
+if (-not (Test-PortAvailable -CandidatePort $Port) -and (Test-ExistingDeliveryScanner -CandidatePort $Port)) {
+    $url = "http://127.0.0.1:$Port/"
+    Write-Host "Delivery List Scanner is already running at $url"
+    Start-Process $url
+    return
+}
+
 while (-not (Test-PortAvailable -CandidatePort $Port)) {
     $Port += 1
 }

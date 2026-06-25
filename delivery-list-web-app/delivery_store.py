@@ -68,9 +68,12 @@ PERMISSIONS = [
     "manage_bay_layout",
     "manage_customer_route_rules",
     "check_updates",
+    "view_racks",
+    "scan_racks",
+    "manage_racks",
 ]
 ROLE_PERMISSIONS = {
-    "Operator": ["scan", "view_lists", "view_stations", "view_own_scans", "export_reports", "global_search"],
+    "Operator": ["scan", "view_lists", "view_stations", "view_own_scans", "export_reports", "global_search", "view_racks", "scan_racks"],
     "Supervisor": [
         "scan",
         "view_lists",
@@ -84,6 +87,8 @@ ROLE_PERMISSIONS = {
         "global_search",
         "view_reports",
         "view_active_sessions",
+        "view_racks",
+        "scan_racks",
     ],
     "Admin": PERMISSIONS,
     "Indian Trail Operator": [
@@ -94,6 +99,7 @@ ROLE_PERMISSIONS = {
         "view_bays",
         "global_search",
         "export_reports",
+        "view_racks",
     ],
     "Indian Trail Lead": [
         "view_lists",
@@ -112,6 +118,7 @@ ROLE_PERMISSIONS = {
         "mark_sdi",
         "remove_sdi",
         "bay_check",
+        "view_racks",
     ],
     "Indian Trail Manager": [
         "view_lists",
@@ -133,6 +140,8 @@ ROLE_PERMISSIONS = {
         "indian_trail_reports",
         "view_reports",
         "view_active_sessions",
+        "view_racks",
+        "manage_racks",
     ],
 }
 ROLE_STAGE_ACCESS = {
@@ -229,6 +238,15 @@ def user_can_access_stage(user: dict[str, Any] | None, stage: str, scanner: str 
 def clean_barcode(value: str) -> str:
     trimmed = str(value or "").replace("*", "").replace("\r", "").replace("\n", "").strip()
     return "".join(ch for ch in trimmed if ch.isalnum()).upper()
+
+
+def normalize_rack_code(value: str) -> str:
+    text = clean_barcode(value)
+    if text.startswith("RACK"):
+        text = text[4:]
+    if text in {"TRUCK", "NORACK"}:
+        return "T"
+    return text
 
 
 def digits_only(value: str) -> str:
@@ -632,6 +650,10 @@ def item_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "processState": row["process_state"],
         "queueState": row["queue_state"],
         "suggestedBay": row["suggested_bay"],
+        "rackCode": row["rack_code"] if "rack_code" in row.keys() else "",
+        "rackName": row["rack_name"] if "rack_name" in row.keys() else "",
+        "rackType": row["rack_type"] if "rack_type" in row.keys() else "",
+        "bayCode": row["bay_code"] if "bay_code" in row.keys() else "",
     }
 
 
@@ -901,6 +923,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             self.seed_demo_data(con)
             self.seed_security_data(con)
             self.seed_bays(con)
+            self.seed_racks(con)
 
     def create_schema(self, con: sqlite3.Connection) -> None:
         con.executescript(
@@ -1084,6 +1107,32 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 user_name TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS racks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rack_code TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL DEFAULT '',
+                rack_type TEXT NOT NULL DEFAULT 'Steel',
+                status TEXT NOT NULL DEFAULT 'Open',
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS rack_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rack_id INTEGER NOT NULL REFERENCES racks(id) ON DELETE CASCADE,
+                line_item_id TEXT NOT NULL REFERENCES line_items(id) ON DELETE CASCADE,
+                qty INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'Active',
+                added_by TEXT NOT NULL DEFAULT '',
+                added_at TEXT NOT NULL,
+                removed_by TEXT NOT NULL DEFAULT '',
+                removed_at TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                UNIQUE(rack_id, line_item_id)
+            );
             """
         )
         self.ensure_column(con, "bays", "display_name", "TEXT NOT NULL DEFAULT ''")
@@ -1191,11 +1240,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if replace_items:
             preserved_scans: dict[str, int] = {}
             existing_keys: set[str] = set()
-            for row in con.execute("SELECT source_id, order_no, item_no, scanned_qty FROM line_items WHERE list_id = ?", (list_id,)).fetchall():
+            previous_items: dict[str, dict[str, Any]] = {}
+            for row in con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall():
                 scanned_qty = int(row["scanned_qty"] or 0)
                 source_key = str(row["source_id"])
                 order_item_key = f"{row['order_no']}-{str(row['item_no']).zfill(3)}"
                 existing_keys.update({source_key, order_item_key})
+                previous_payload = {
+                    "qty": int(row["qty"] or 0),
+                    "dimensions": str(row["dimensions"] or ""),
+                    "customer": str(row["customer"] or ""),
+                    "route": str(row["route"] or ""),
+                    "job": str(row["job"] or ""),
+                    "product": str(row["product"] or ""),
+                    "queue_state": str(row["queue_state"] or ""),
+                }
+                previous_items[source_key] = previous_payload
+                previous_items[order_item_key] = previous_payload
                 preserved_scans[source_key] = max(preserved_scans.get(source_key, 0), scanned_qty)
                 preserved_scans[order_item_key] = max(
                     preserved_scans.get(order_item_key, 0),
@@ -1211,9 +1272,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "UPDATE line_items SET scanned_qty = ? WHERE id = ?",
                         (min(int(preserved), int(cloned["qty"])), cloned["id"]),
                     )
-                elif existing and cloned["source_id"] not in existing_keys and order_item_key not in existing_keys:
+                if existing and cloned["source_id"] not in existing_keys and order_item_key not in existing_keys:
                     next_state = " ".join(part for part in [cloned["process_state"], "New Line"] if part).strip()
                     con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
+                elif existing:
+                    previous = previous_items.get(cloned["source_id"], previous_items.get(order_item_key))
+                    current = {
+                        "qty": int(cloned["qty"] or 0),
+                        "dimensions": str(cloned["dimensions"] or ""),
+                        "customer": str(cloned["customer"] or ""),
+                        "route": str(cloned["route"] or ""),
+                        "job": str(cloned["job"] or ""),
+                        "product": str(cloned["product"] or ""),
+                        "queue_state": str(cloned["queue_state"] or ""),
+                    }
+                    if previous and previous != current:
+                        state_text = str(cloned["process_state"] or "")
+                        next_state = state_text if re.search(r"\bUpdated Line\b", state_text, flags=re.IGNORECASE) else " ".join(part for part in [state_text, "Updated Line"] if part).strip()
+                        con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
 
     def seed_demo_data(self, con: sqlite3.Connection) -> None:
         if not self.sample_path.exists():
@@ -1348,6 +1424,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
         con.commit()
 
+    def seed_racks(self, con: sqlite3.Connection) -> None:
+        created = now_iso()
+        rack_defs: list[tuple[str, str, str, int]] = []
+        for index in range(1, 11):
+            rack_defs.append((f"R{index}S", f"Rack {index} Steel", "Steel", index))
+        for index in range(1, 11):
+            rack_defs.append((f"R{index}W", f"Rack {index} Wood", "Wood", 10 + index))
+        rack_defs.append(("T", "Truck / No Rack", "Truck", 99))
+        for code, name, rack_type, sort_order in rack_defs:
+            con.execute(
+                """
+                INSERT OR IGNORE INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at)
+                VALUES (?, ?, ?, 'Open', 1, ?, ?)
+                """,
+                (code, name, rack_type, sort_order, created),
+            )
+        con.commit()
+
     def seed_layout_bays(self, con: sqlite3.Connection, bays: list[dict[str, Any]]) -> None:
         con.execute(
             """
@@ -1384,9 +1478,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     map_section = excluded.map_section,
                     bay_category = excluded.bay_category,
                     source_cell = excluded.source_cell,
-                    layout_row = excluded.layout_row,
-                    layout_col = excluded.layout_col,
-                    layout_cell = excluded.layout_cell
+                    layout_row = COALESCE(bays.layout_row, excluded.layout_row),
+                    layout_col = COALESCE(bays.layout_col, excluded.layout_col),
+                    layout_cell = CASE
+                        WHEN COALESCE(bays.layout_cell, '') <> '' THEN bays.layout_cell
+                        ELSE excluded.layout_cell
+                    END
                 """,
                 (
                     bay_code,
@@ -1492,6 +1589,47 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         for item in items:
             item["errorType"] = ""
             item["errorReason"] = ""
+
+        if rows:
+            rack_rows = con.execute(
+                """
+                SELECT target.id AS target_id, r.rack_code, r.display_name AS rack_name, r.rack_type
+                FROM rack_items ri
+                JOIN racks r ON r.id = ri.rack_id
+                JOIN line_items src ON src.id = ri.line_item_id
+                JOIN delivery_lists src_dl ON src_dl.id = src.list_id
+                JOIN line_items target
+                  ON target.source_id = src.source_id
+                 AND target.order_no = src.order_no
+                 AND target.item_no = src.item_no
+                JOIN delivery_lists target_dl
+                  ON target_dl.id = target.list_id
+                 AND target_dl.delivery_date = src_dl.delivery_date
+                WHERE target.list_id = ?
+                  AND ri.status = 'Active'
+                  AND r.active = 1
+                """,
+                (list_id,),
+            ).fetchall()
+            rack_by_item = {row["target_id"]: row for row in rack_rows}
+            bay_rows = con.execute(
+                """
+                SELECT ba.line_item_id, b.bay_code
+                FROM bay_assignments ba
+                JOIN bays b ON b.id = ba.bay_id
+                WHERE ba.delivery_list_id = ? AND ba.status NOT IN ('Cleared', 'Cancelled')
+                """,
+                (list_id,),
+            ).fetchall()
+            bay_by_item = {row["line_item_id"]: row["bay_code"] for row in bay_rows}
+            for item in items:
+                rack = rack_by_item.get(item["id"])
+                if rack:
+                    item["rackCode"] = rack["rack_code"]
+                    item["rackName"] = rack["rack_name"] or rack["rack_code"]
+                    item["rackType"] = rack["rack_type"]
+                if item["id"] in bay_by_item:
+                    item["bayCode"] = bay_by_item[item["id"]]
 
         latest_error_rows = con.execute(
             """
@@ -2394,6 +2532,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         station = request_station(scan_request)
         if not list_id or not barcode.strip():
             raise ValueError("listId and barcode are required")
+        rack_code = normalize_rack_code(barcode)
+        if clean_barcode(barcode).startswith("RACK"):
+            return self.scan_rack_outbound(scan_request, rack_code)
 
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -2438,13 +2579,37 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 )
 
             con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
+            rack_code_for_scan = normalize_rack_code(str(scan_request.get("rackCode") or ""))
+            list_row_for_rack = con.execute("SELECT stage FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+            if rack_code_for_scan and list_row_for_rack and "staging" in str(list_row_for_rack["stage"]).lower():
+                rack = self.get_rack_by_code(con, rack_code_for_scan)
+                con.execute(
+                    """
+                    INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
+                    VALUES (?, ?, 1, 'Active', ?, ?, 'Scanned on staging')
+                    ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
+                        qty = qty + 1,
+                        status = 'Active',
+                        removed_by = '',
+                        removed_at = '',
+                        reason = 'Scanned on staging',
+                        added_by = excluded.added_by,
+                        added_at = excluded.added_at
+                    """,
+                    (rack["id"], row["id"], user, now_iso()),
+                )
             preassigned_bay = self.preassign_bay_for_outbound(con, list_id, row, user, station)
             last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", reason, "", 1)
             if preassigned_bay:
                 self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "notice", "Indian Trail bay preassigned", f"Preassigned to Bay {preassigned_bay}")
             self.insert_audit(con, "line_item", row["id"], "scan", user, station, reason, {"barcode": barcode, "canonical": canonical})
             con.commit()
-            return self._get_payload(con, list_id, last)
+            payload = self._get_payload(con, list_id, last)
+            if rack_code_for_scan:
+                racks_payload = self.get_racks()
+                payload["racks"] = racks_payload.get("racks", [])
+                payload["rackSummary"] = racks_payload.get("summary")
+            return payload
 
     def auto_stage_for_outbound(
         self,
@@ -2847,14 +3012,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 JOIN delivery_lists dl ON dl.id = li.list_id
                 LEFT JOIN bay_assignments ba ON ba.line_item_id = li.id AND ba.status NOT IN ('Cleared', 'Cancelled')
                 LEFT JOIN bays b ON b.id = ba.bay_id
-                WHERE li.order_no LIKE ? OR li.item_no LIKE ? OR li.barcode LIKE ?
+                WHERE li.order_no LIKE ? OR li.item_no LIKE ? OR li.source_id LIKE ? OR li.barcode LIKE ?
                    OR li.customer LIKE ? OR li.job LIKE ? OR li.route LIKE ?
                    OR li.product LIKE ? OR li.dimensions LIKE ? OR dl.stage LIKE ?
                    OR b.bay_code LIKE ? OR b.display_name LIKE ?
                 ORDER BY dl.delivery_date DESC, CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER)
                 LIMIT 100
                 """,
-                (like, like, like, like, like, like, like, like, like, like, like),
+                (like, like, like, like, like, like, like, like, like, like, like, like),
             ).fetchall()
         def stage_location_rank(row: sqlite3.Row) -> int:
             scanned = int(row["scanned_qty"] or 0)
@@ -2891,6 +3056,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "stage": row["stage"],
                 "scanner": row["scanner"],
                 "barcode": row["barcode"],
+                "sourceId": row["source_id"],
                 "order": row["order_no"],
                 "item": row["item_no"],
                 "qty": row["qty"],
@@ -3222,6 +3388,246 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             for row in rows
         ]
 
+    def rack_from_row(self, con: sqlite3.Connection, rack: sqlite3.Row) -> dict[str, Any]:
+        rows = con.execute(
+            """
+            SELECT ri.id AS rack_item_id, ri.qty AS rack_qty, ri.status AS rack_item_status,
+                   ri.added_at, ri.added_by, li.*, dl.label AS delivery_label,
+                   dl.delivery_date, dl.stage, dl.scanner
+            FROM rack_items ri
+            JOIN line_items li ON li.id = ri.line_item_id
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            WHERE ri.rack_id = ? AND ri.status = 'Active'
+            ORDER BY ri.added_at DESC, CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER)
+            """,
+            (rack["id"],),
+        ).fetchall()
+        items = []
+        for row in rows:
+            item = item_from_row(row)
+            item.update(
+                {
+                    "rackItemId": row["rack_item_id"],
+                    "rackQty": row["rack_qty"],
+                    "rackItemStatus": row["rack_item_status"],
+                    "rackAddedAt": row["added_at"],
+                    "rackAddedBy": row["added_by"],
+                    "deliveryLabel": row["delivery_label"],
+                    "deliveryDate": row["delivery_date"],
+                    "stage": row["stage"],
+                    "scanner": row["scanner"],
+                }
+            )
+            items.append(item)
+        qty = sum(int(item.get("rackQty") or item.get("qty") or 0) for item in items)
+        return {
+            "id": rack["id"],
+            "code": rack["rack_code"],
+            "barcode": f"RACK-{rack['rack_code']}",
+            "name": rack["display_name"] or rack["rack_code"],
+            "type": rack["rack_type"],
+            "status": rack["status"],
+            "active": bool(rack["active"]),
+            "sortOrder": rack["sort_order"],
+            "qty": qty,
+            "items": items,
+        }
+
+    def rack_summary(self, con: sqlite3.Connection) -> dict[str, Any]:
+        row = con.execute(
+            """
+            SELECT
+              COALESCE(SUM(CASE WHEN r.rack_code = 'T' THEN ri.qty ELSE 0 END),0) AS truck_qty,
+              COALESCE(SUM(CASE WHEN r.rack_code <> 'T' THEN ri.qty ELSE 0 END),0) AS rack_qty,
+              COUNT(DISTINCT CASE WHEN r.rack_code <> 'T' AND ri.status = 'Active' THEN r.id END) AS rack_count
+            FROM racks r
+            LEFT JOIN rack_items ri ON ri.rack_id = r.id AND ri.status = 'Active'
+            WHERE r.active = 1
+            """
+        ).fetchone()
+        return {"truckQty": row["truck_qty"], "rackQty": row["rack_qty"], "rackCount": row["rack_count"]}
+
+    def get_racks(self) -> dict[str, Any]:
+        with self.connect() as con:
+            self.seed_racks(con)
+            racks = [self.rack_from_row(con, row) for row in con.execute("SELECT * FROM racks WHERE active = 1 ORDER BY sort_order, rack_code").fetchall()]
+            return {"racks": racks, "summary": self.rack_summary(con)}
+
+    def get_rack_by_code(self, con: sqlite3.Connection, code: str) -> sqlite3.Row:
+        rack_code = normalize_rack_code(code)
+        row = con.execute("SELECT * FROM racks WHERE rack_code = ? AND active = 1", (rack_code,)).fetchone()
+        if not row:
+            raise ValueError(f"Rack {code} was not found")
+        return row
+
+    def scan_item_to_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        list_id = str(data.get("listId") or "")
+        rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
+        barcode = str(data.get("barcode") or "")
+        station = request_station(data)
+        if not list_id or not rack_code or not barcode.strip():
+            raise ValueError("listId, rackCode, and barcode are required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+            if not list_row or "staging" not in str(list_row["stage"]).lower():
+                raise ValueError("Rack scans must be made from a staging delivery list")
+            rack = self.get_rack_by_code(con, rack_code)
+            rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall()
+            row, canonical, reason = self.recover_scan(barcode, rows)
+            if row is None:
+                last = self.insert_event(con, list_id, None, barcode, canonical, user, station, "error", "BAD RACK SCAN format", reason)
+                con.commit()
+                payload = self.get_racks()
+                payload.update({"ok": False, "message": reason, "lastScan": last})
+                return payload
+            if row["scanned_qty"] < row["qty"]:
+                con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
+            con.execute(
+                """
+                INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
+                VALUES (?, ?, 1, 'Active', ?, ?, 'Scanned into rack')
+                ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
+                    qty = qty + 1,
+                    status = 'Active',
+                    removed_by = '',
+                    removed_at = '',
+                    reason = 'Scanned into rack',
+                    added_by = excluded.added_by,
+                    added_at = excluded.added_at
+                """,
+                (rack["id"], row["id"], user, now_iso()),
+            )
+            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", f"Added to {rack['rack_code']}", reason, 1)
+            self.insert_audit(con, "rack", rack["rack_code"], "rack_scan_in", user, station, reason, {"lineItemId": row["id"]})
+            con.commit()
+        payload = self.get_racks()
+        payload.update({"ok": True, "message": f"Added {row['order_no']}-{row['item_no']} to {rack['rack_code']}", "lastScan": last})
+        return payload
+
+    def move_rack_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        rack_item_id = int(data.get("rackItemId") or 0)
+        target_code = normalize_rack_code(str(data.get("targetRackCode") or data.get("rackCode") or ""))
+        if not rack_item_id or not target_code:
+            raise ValueError("rackItemId and targetRackCode are required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            target = self.get_rack_by_code(con, target_code)
+            item = con.execute("SELECT * FROM rack_items WHERE id = ? AND status = 'Active'", (rack_item_id,)).fetchone()
+            if not item:
+                raise ValueError("Rack item not found")
+            con.execute("UPDATE rack_items SET rack_id = ?, reason = 'Moved between racks' WHERE id = ?", (target["id"], rack_item_id))
+            self.insert_audit(con, "rack_item", str(rack_item_id), "move_rack_item", user, "", "", {"targetRackCode": target["rack_code"]})
+            con.commit()
+        return self.get_racks()
+
+    def clear_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            rack = self.get_rack_by_code(con, rack_code)
+            con.execute("UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Rack cleared' WHERE rack_id = ? AND status = 'Active'", (user, now_iso(), rack["id"]))
+            con.execute("UPDATE racks SET status = 'Open', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
+            self.insert_audit(con, "rack", rack["rack_code"], "clear_rack", user, "", "", {})
+            con.commit()
+        return self.get_racks()
+
+    def complete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            rack = self.get_rack_by_code(con, rack_code)
+            con.execute("UPDATE racks SET status = 'Closed', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
+            self.insert_audit(con, "rack", rack["rack_code"], "complete_rack", user, "", "Rack closed for outbound packing list", {})
+            con.commit()
+        return self.get_racks()
+
+    def update_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        code = normalize_rack_code(str(data.get("rackCode") or data.get("code") or ""))
+        name = str(data.get("name") or data.get("displayName") or code).strip()[:80]
+        rack_type = str(data.get("type") or data.get("rackType") or "Steel").strip()[:40]
+        if not code:
+            raise ValueError("Rack code is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            existing = con.execute("SELECT id FROM racks WHERE rack_code = ?", (code,)).fetchone()
+            if existing:
+                con.execute("UPDATE racks SET display_name = ?, rack_type = ?, active = 1, updated_at = ? WHERE rack_code = ?", (name, rack_type, now_iso(), code))
+            else:
+                sort_order = con.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM racks").fetchone()[0]
+                con.execute("INSERT INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at) VALUES (?, ?, ?, 'Open', 1, ?, ?)", (code, name, rack_type, sort_order, now_iso()))
+            self.insert_audit(con, "rack", code, "upsert_rack", user, "", "", {"name": name, "type": rack_type})
+            con.commit()
+        return self.get_racks()
+
+    def delete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        code = normalize_rack_code(str(data.get("rackCode") or ""))
+        if code == "T":
+            raise ValueError("Truck cannot be deleted")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            rack = self.get_rack_by_code(con, code)
+            active = con.execute("SELECT COUNT(*) FROM rack_items WHERE rack_id = ? AND status = 'Active'", (rack["id"],)).fetchone()[0]
+            if active:
+                raise ValueError("Clear or move the rack contents before deleting this rack")
+            con.execute("UPDATE racks SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
+            self.insert_audit(con, "rack", rack["rack_code"], "delete_rack", user, "", "", {})
+            con.commit()
+        return self.get_racks()
+
+    def rack_packing_list(self, rack_code: str) -> dict[str, Any]:
+        with self.connect() as con:
+            rack = self.get_rack_by_code(con, rack_code)
+            return {"rack": self.rack_from_row(con, rack)}
+
+    def scan_rack_outbound(self, scan_request: dict[str, Any], rack_code: str) -> dict[str, Any]:
+        list_id = str(scan_request.get("listId") or "")
+        barcode = str(scan_request.get("barcode") or "")
+        user = request_user_name(scan_request)
+        station = request_station(scan_request)
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+            if not list_row or "outbound" not in str(list_row["stage"]).lower():
+                raise ValueError("Rack barcodes can only be scanned on the outbound stage")
+            rack = self.get_rack_by_code(con, rack_code)
+            rows = con.execute(
+                """
+                SELECT out_li.*
+                FROM rack_items ri
+                JOIN line_items src ON src.id = ri.line_item_id
+                JOIN delivery_lists src_dl ON src_dl.id = src.list_id
+                JOIN line_items out_li
+                  ON out_li.source_id = src.source_id
+                 AND out_li.order_no = src.order_no
+                 AND out_li.item_no = src.item_no
+                WHERE ri.rack_id = ?
+                  AND ri.status = 'Active'
+                  AND out_li.list_id = ?
+                  AND src_dl.delivery_date = ?
+                """,
+                (rack["id"], list_id, list_row["delivery_date"]),
+            ).fetchall()
+            if not rows:
+                last = self.insert_event(con, list_id, None, barcode, f"RACK-{rack['rack_code']}", user, station, "error", "Rack has no outbound items", "No active rack items matched this outbound list")
+                con.commit()
+                return self._get_payload(con, list_id, last)
+            last = None
+            scanned_count = 0
+            for row in rows:
+                if row["scanned_qty"] >= row["qty"]:
+                    continue
+                con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
+                self.preassign_bay_for_outbound(con, list_id, row, user, station)
+                last = self.insert_event(con, list_id, row["id"], barcode, f"RACK-{rack['rack_code']}", user, station, "scan", f"Outbound rack scan {rack['rack_code']}", "Rack barcode scanned", 1)
+                scanned_count += 1
+            if scanned_count == 0:
+                last = self.insert_event(con, list_id, None, barcode, f"RACK-{rack['rack_code']}", user, station, "duplicate", "Rack already scanned outbound", "All rack items were already complete")
+            con.execute("UPDATE racks SET status = 'In Transit', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
+            self.insert_audit(con, "rack", rack["rack_code"], "rack_outbound_scan", user, station, "", {"scannedCount": scanned_count})
+            con.commit()
+            return self._get_payload(con, list_id, last)
+
     def indian_trail_summary(self) -> dict[str, Any]:
         with self.connect() as con:
             inbound = con.execute(
@@ -3280,6 +3686,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             conflicts = con.execute("SELECT COUNT(*) FROM exceptions WHERE exception_type LIKE '%bay%' AND status = 'Open'").fetchone()[0]
             cleared_today = con.execute("SELECT COUNT(*) FROM bay_events WHERE event_type = 'ClearBay' AND created_at >= date('now')").fetchone()[0]
             needs_check = con.execute("SELECT COUNT(*) FROM bay_events WHERE event_type = 'NeedsReview' AND created_at >= date('now')").fetchone()[0]
+            rack_summary = self.rack_summary(con)
+            rack_rows = con.execute(
+                """
+                SELECT r.rack_code, r.display_name, r.status, COALESCE(SUM(ri.qty),0) AS qty
+                FROM racks r
+                JOIN rack_items ri ON ri.rack_id = r.id AND ri.status = 'Active'
+                WHERE r.active = 1 AND r.rack_code <> 'T'
+                GROUP BY r.id
+                HAVING qty > 0
+                ORDER BY r.sort_order, r.rack_code
+                """
+            ).fetchall()
         return {
             "activeInboundListId": list_id,
             "indianTrailOutboundTotal": outbound_totals["totalQty"],
@@ -3292,6 +3710,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "bayConflicts": conflicts,
             "clearedToday": cleared_today,
             "needsCheck": needs_check,
+            "rackInTransitQty": rack_summary["rackQty"],
+            "truckInTransitQty": rack_summary["truckQty"],
+            "racksInTransit": [
+                {"code": row["rack_code"], "name": row["display_name"] or row["rack_code"], "status": row["status"], "qty": row["qty"]}
+                for row in rack_rows
+            ],
         }
 
     def find_bay_for_assignment(self, con: sqlite3.Connection, bay_type: str) -> sqlite3.Row | None:
@@ -3386,6 +3810,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 con.commit()
                 return {"ok": False, "message": "Quantity already received. Send to supervisor.", "lastScan": last}
             con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
+            con.execute(
+                """
+                UPDATE rack_items
+                SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Received at Indian Trail'
+                WHERE id IN (
+                    SELECT ri.id
+                    FROM rack_items ri
+                    JOIN line_items src ON src.id = ri.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src.list_id
+                    WHERE ri.status = 'Active'
+                      AND src_dl.delivery_date = (SELECT delivery_date FROM delivery_lists WHERE id = ?)
+                      AND src.source_id = ?
+                      AND src.order_no = ?
+                      AND src.item_no = ?
+                    LIMIT 1
+                )
+                """,
+                (user, now_iso(), list_id, row["source_id"], row["order_no"], row["item_no"]),
+            )
             last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", "Indian Trail received", reason, 1)
             assignment = con.execute(
                 """

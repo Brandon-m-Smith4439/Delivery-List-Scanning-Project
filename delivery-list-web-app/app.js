@@ -39,6 +39,10 @@ const state = {
   bayLayoutOriginal: null,
   bayHoldingSections: new Set(),
   bayGroupColumns: {},
+  racks: [],
+  rackSummary: null,
+  selectedRackCode: "T",
+  rackScanListId: "",
   printContext: null,
   lastImportResult: null,
   bayLayout: null,
@@ -102,6 +106,10 @@ const els = {
   searchInput: document.getElementById("searchInput"),
   scanForm: document.getElementById("scanForm"),
   scanInput: document.getElementById("scanInput"),
+  scanRackPanel: document.getElementById("scanRackPanel"),
+  scanRackSelect: document.getElementById("scanRackSelect"),
+  scanRackCompleteBtn: document.getElementById("scanRackCompleteBtn"),
+  scanRackStatus: document.getElementById("scanRackStatus"),
   manualScanForm: document.getElementById("manualScanForm"),
   manualOrderInput: document.getElementById("manualOrderInput"),
   manualItemInput: document.getElementById("manualItemInput"),
@@ -148,6 +156,20 @@ const els = {
   scanPagerBottom: document.getElementById("scanPagerBottom"),
   undoBtn: document.getElementById("undoBtn"),
   redoBtn: document.getElementById("redoBtn"),
+
+  racksPage: document.getElementById("racksPage"),
+  rackSummary: document.getElementById("rackSummary"),
+  rackListSelect: document.getElementById("rackListSelect"),
+  rackSelect: document.getElementById("rackSelect"),
+  rackScanForm: document.getElementById("rackScanForm"),
+  rackScanInput: document.getElementById("rackScanInput"),
+  rackScanStatus: document.getElementById("rackScanStatus"),
+  rackGrid: document.getElementById("rackGrid"),
+  rackEditCode: document.getElementById("rackEditCode"),
+  rackEditName: document.getElementById("rackEditName"),
+  rackEditType: document.getElementById("rackEditType"),
+  rackSaveBtn: document.getElementById("rackSaveBtn"),
+  rackDeleteBtn: document.getElementById("rackDeleteBtn"),
 
   bayMapPage: document.getElementById("bayMapPage"),
   bayOverviewStats: document.getElementById("bayOverviewStats"),
@@ -953,6 +975,14 @@ function renderProcessState(item) {
   return `${stageVerb()}: ${item.scanned}/${item.qty}`;
 }
 
+function locationLabel(item) {
+  const stageText = `${state.meta?.stage || ""} ${state.meta?.scanner || ""}`.toLowerCase();
+  if (stageText.includes("indian trail")) return item.bayCode ? `Bay ${item.bayCode}` : "";
+  if (item.rackCode === "T") return "Truck";
+  if (item.rackCode) return item.rackCode;
+  return "";
+}
+
 function renderCounts() {
   const stats = getStats();
   const totalItems = pieceCount(state.items);
@@ -1073,6 +1103,7 @@ const processText = rowError ? (item.errorReason || item.lastError || "Scan issu
       <td>${escapeHtml(item.customer)}</td>
       <td>${markers}</td>
       <td>${routeTag}</td>
+      <td>${escapeHtml(locationLabel(item))}</td>
       <td><span class="process-pill ${processClass}">${escapeHtml(processText)}</span></td>
     </tr>
   `;
@@ -1083,7 +1114,7 @@ function renderTable() {
   const { rows, pageGroups, totalPages } = getPagedItems();
   renderPagers(rows.length, totalPages);
   if (!pageGroups.length) {
-    els.listRows.innerHTML = `<tr><td colspan="9">No rows match the current filters.</td></tr>`;
+    els.listRows.innerHTML = `<tr><td colspan="10">No rows match the current filters.</td></tr>`;
     return;
   }
   els.listRows.innerHTML = pageGroups
@@ -1094,7 +1125,7 @@ function renderTable() {
       const collapsed = state.collapsedGlassTypes.has(label);
       return `
         <tr class="glass-group-row" data-glass-group="${escapeHtml(label)}">
-          <td colspan="9">
+          <td colspan="10">
             <button type="button" data-toggle-glass-group="${escapeHtml(label)}">
               <strong>${escapeHtml(label)}${updatedCount ? ` <span class="new-line-marker group-marker" title="New or updated lines">${escapeHtml(updatedCount)} New</span>` : ""}</strong>
               <span>${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)} pieces</span>
@@ -1106,6 +1137,174 @@ function renderTable() {
       `;
     })
     .join("");
+}
+
+function stagingLists() {
+  return state.lists.filter((list) => /staging/i.test(`${list.stage || ""} ${list.label || ""}`));
+}
+
+async function refreshRacksPage() {
+  if (!hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) return;
+  if (state.backend) {
+    const payload = await fetchJson("/api/racks");
+    state.racks = payload.racks || [];
+    state.rackSummary = payload.summary || null;
+  }
+  renderRacksPage();
+}
+
+function renderRackSelects() {
+  const stageLists = stagingLists();
+  if (!state.rackScanListId || !stageLists.some((list) => list.id === state.rackScanListId)) {
+    state.rackScanListId = stageLists[0]?.id || "";
+  }
+  if (!state.selectedRackCode || !state.racks.some((rack) => rack.code === state.selectedRackCode)) {
+    state.selectedRackCode = state.racks.find((rack) => rack.code === "T")?.code || state.racks[0]?.code || "";
+  }
+  if (els.rackListSelect) {
+    els.rackListSelect.innerHTML = stageLists
+      .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(formatDisplayDate(list.deliveryDate))} - ${escapeHtml(list.stage)}</option>`)
+      .join("");
+    els.rackListSelect.value = state.rackScanListId;
+  }
+  if (els.rackSelect) {
+    els.rackSelect.innerHTML = state.racks
+      .map((rack) => `<option value="${escapeHtml(rack.code)}">${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(rack.qty)} pcs)</option>`)
+      .join("");
+    els.rackSelect.value = state.selectedRackCode;
+  }
+}
+
+function renderRacksPage() {
+  renderRackSelects();
+  const summary = state.rackSummary || {};
+  if (els.rackSummary) {
+    els.rackSummary.innerHTML = [
+      miniStat("Rack Pieces", summary.rackQty || 0),
+      miniStat("Truck Pieces", summary.truckQty || 0),
+      miniStat("Active Racks", summary.rackCount || 0),
+    ].join("");
+  }
+  if (!els.rackGrid) return;
+  const groups = [
+    ["Steel", state.racks.filter((rack) => /steel/i.test(rack.type) && rack.code !== "T")],
+    ["Wood", state.racks.filter((rack) => /wood/i.test(rack.type) && rack.code !== "T")],
+    ["Truck", state.racks.filter((rack) => rack.code === "T" || /truck/i.test(rack.type))],
+  ];
+  const renderRack = (rack) => {
+      const hasItems = Number(rack.qty || 0) > 0;
+      const adminActions = hasPermission("manage_racks")
+        ? `<button type="button" data-rack-clear="${escapeHtml(rack.code)}">Clear</button>`
+        : "";
+      return `
+        <details class="rack-card ${hasItems ? "has-items" : ""}" ${hasItems ? "open" : ""}>
+          <summary>
+            <span><strong>${escapeHtml(rack.code)}</strong><small>${escapeHtml(rack.name)} - ${escapeHtml(rack.type)}</small></span>
+            <span>${escapeHtml(rack.qty || 0)} pcs</span>
+          </summary>
+          <div class="rack-card-actions">
+            ${hasItems ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">Print Packing List</button><button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>` : ""}
+            ${adminActions}
+          </div>
+          <div class="rack-item-list">
+            ${
+              hasItems
+                ? rack.items
+                    .map(
+                      (item) => `
+                        <article class="rack-item">
+                          <div>
+                            <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} <span>${escapeHtml(item.customer || "")}</span></strong>
+                            <small>${escapeHtml(item.product || item.job || "")} | ${escapeHtml(item.dimensions || "")} | Qty ${escapeHtml(item.rackQty || 1)}</small>
+                            <small>${escapeHtml(item.deliveryLabel || "")}</small>
+                          </div>
+                          ${
+                            hasPermission("manage_racks")
+                              ? `<div class="rack-item-actions"><select data-rack-target="${escapeHtml(item.rackItemId)}">${state.racks.map((target) => `<option value="${escapeHtml(target.code)}">${escapeHtml(target.code)}</option>`).join("")}</select><button type="button" data-rack-move="${escapeHtml(item.rackItemId)}">Move</button></div>`
+                              : ""
+                          }
+                        </article>
+                      `,
+                    )
+                    .join("")
+                : `<p class="admin-empty">No pieces assigned.</p>`
+            }
+          </div>
+        </details>
+      `;
+    };
+  els.rackGrid.innerHTML = groups
+    .map(([label, racks]) => `
+      <section class="rack-column">
+        <header><h2>${escapeHtml(label)}</h2><span>${escapeHtml(racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0))} pcs</span></header>
+        <div>${racks.map(renderRack).join("") || `<p class="admin-empty">No ${escapeHtml(label.toLowerCase())} racks.</p>`}</div>
+      </section>
+    `)
+    .join("");
+}
+
+async function submitRackScan() {
+  const barcode = els.rackScanInput?.value || "";
+  const rackCode = els.rackSelect?.value || state.selectedRackCode;
+  const listId = els.rackListSelect?.value || state.rackScanListId;
+  if (!barcode.trim() || !rackCode || !listId) {
+    if (els.rackScanStatus) els.rackScanStatus.textContent = "Choose a staging list and rack, then scan a piece.";
+    return;
+  }
+  const payload = await fetchJson("/api/racks/scan", {
+    method: "POST",
+    body: JSON.stringify({ listId, rackCode, barcode, ...requestContext() }),
+  });
+  state.racks = payload.racks || state.racks;
+  state.rackSummary = payload.summary || state.rackSummary;
+  if (els.rackScanStatus) els.rackScanStatus.textContent = payload.message || "Rack scan recorded.";
+  if (els.rackScanInput) els.rackScanInput.value = "";
+  renderRacksPage();
+  if (listId === state.activeListId) await activateList(listId, false);
+  els.rackScanInput?.focus();
+}
+
+async function completeRack(code) {
+  const payload = await fetchJson("/api/racks/complete", { method: "POST", body: JSON.stringify({ rackCode: code }) });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+}
+
+async function clearRack(code) {
+  if (!window.confirm(`Clear all active pieces from ${code}?`)) return;
+  const payload = await fetchJson("/api/racks/clear", { method: "POST", body: JSON.stringify({ rackCode: code }) });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+}
+
+async function moveRackItem(rackItemId) {
+  const select = document.querySelector(`[data-rack-target="${CSS.escape(String(rackItemId))}"]`);
+  const targetRackCode = select?.value || "T";
+  const payload = await fetchJson("/api/racks/move-item", { method: "POST", body: JSON.stringify({ rackItemId, targetRackCode }) });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+}
+
+async function saveRackDefinition() {
+  const payload = await fetchJson("/api/racks", {
+    method: "POST",
+    body: JSON.stringify({ rackCode: els.rackEditCode?.value || "", name: els.rackEditName?.value || "", type: els.rackEditType?.value || "Steel" }),
+  });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+}
+
+async function deleteRackDefinition() {
+  const rackCode = els.rackEditCode?.value || state.selectedRackCode;
+  if (!rackCode || !window.confirm(`Delete rack ${rackCode}? Empty racks only.`)) return;
+  const payload = await fetchJson("/api/racks/delete", { method: "POST", body: JSON.stringify({ rackCode }) });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
 }
 
 function renderMobileCards() {
@@ -1267,7 +1466,44 @@ function renderScanPage() {
   renderRecent();
   renderLastScan();
   renderManualAssignTools();
+  renderScanRackTools();
   applyPermissionUi();
+}
+
+function isStagingScanContext() {
+  return /staging/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
+}
+
+async function ensureRacksLoaded() {
+  if (!state.backend || state.racks.length) return;
+  const payload = await fetchJson("/api/racks");
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderScanRackTools();
+}
+
+function renderScanRackTools() {
+  if (!els.scanRackPanel) return;
+  const visible = isStagingScanContext() && hasPermission("scan_racks");
+  els.scanRackPanel.hidden = !visible;
+  if (!visible) return;
+  if (!state.racks.length) {
+    els.scanRackPanel.classList.add("is-loading");
+    void ensureRacksLoaded().catch((error) => showInlineError(error.message, true));
+    return;
+  }
+  els.scanRackPanel.classList.remove("is-loading");
+  if (!state.selectedRackCode || !state.racks.some((rack) => rack.code === state.selectedRackCode)) {
+    state.selectedRackCode = state.racks.find((rack) => rack.code === "T")?.code || state.racks[0]?.code || "";
+  }
+  if (els.scanRackSelect) {
+    els.scanRackSelect.innerHTML = state.racks
+      .map((rack) => `<option value="${escapeHtml(rack.code)}">${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(rack.qty)} pcs)</option>`)
+      .join("");
+    els.scanRackSelect.value = state.selectedRackCode;
+  }
+  const current = state.racks.find((rack) => rack.code === state.selectedRackCode);
+  if (els.scanRackStatus) els.scanRackStatus.textContent = current ? `Current destination: ${current.name} - ${current.qty} pcs` : "";
 }
 
 function isIndianTrailScanContext() {
@@ -1476,9 +1712,7 @@ function renderHome() {
   state.homePageIndex = Math.min(Math.max(state.homePageIndex, 1), totalHomePages);
   const pageStart = (state.homePageIndex - 1) * state.homePageSize;
   const visibleDateGroups = dateGroups.slice(pageStart, pageStart + state.homePageSize);
-  if (!dateGroups.some((group) => group.date === state.expandedDeliveryDate)) {
-    state.expandedDeliveryDate = visibleDateGroups[0]?.date || dateGroups[0]?.date || "";
-  }
+  if (!dateGroups.some((group) => group.date === state.expandedDeliveryDate)) state.expandedDeliveryDate = "";
   if (els.homeListCount) els.homeListCount.textContent = `${dateGroups.length} dates / ${filtered.length} stages`;
   if (els.homeListGrid) {
     els.homeListGrid.innerHTML = visibleDateGroups.length
@@ -1543,6 +1777,8 @@ function showPage(page) {
   }
   if (page === "admin" && !hasAnyPermission(["view_admin", "manage_users", "manage_stations", "edit_delivery_lists"])) page = "home";
   if (page === "bays" && !hasAnyPermission(["view_bays", "view_indian_trail"])) page = "home";
+  if (page === "racks" && !hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) page = "home";
+  if (page === "home") state.expandedDeliveryDate = "";
   state.page = page;
   document.body.dataset.page = page;
   window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -1554,6 +1790,7 @@ function showPage(page) {
   });
   if (page === "home") renderHome();
   if (page === "scan") renderScanPage();
+  if (page === "racks") refreshRacksPage().catch((error) => showInlineError(error.message, true));
   if (page === "bays") refreshBayMapPage().catch((error) => showInlineError(error.message));
   if (page === "admin") refreshAdminPage().catch((error) => showInlineError(error.message));
   if (page === "scan") els.scanInput?.focus();
@@ -1583,9 +1820,20 @@ async function processScan(rawScan) {
     }
     const payload = await fetchJson("/api/scans", {
       method: "POST",
-      body: JSON.stringify({ listId: state.activeListId, barcode: scanText, ...requestContext() }),
+      body: JSON.stringify({
+        listId: state.activeListId,
+        barcode: scanText,
+        rackCode: isStagingScanContext() ? state.selectedRackCode : "",
+        ...requestContext(),
+      }),
     });
     applyBackendPayload(payload);
+    if (payload.racks) {
+      state.racks = payload.racks || state.racks;
+      state.rackSummary = payload.rackSummary || state.rackSummary;
+    } else if (isStagingScanContext() && state.racks.length) {
+      void ensureRacksLoaded().catch(() => {});
+    }
     scanFlash(payload.lastScan?.ok ? "success" : payload.lastScan?.eventType === "duplicate" || payload.lastScan?.eventType === "notice" ? "notice" : "error");
     renderScanPage();
     return;
@@ -1756,9 +2004,9 @@ function renderGlobalSearchResults(results) {
     .slice(0, 8)
     .map(
       (result) => `
-        <button type="button" ${result.bayCode ? `data-open-bay="${escapeHtml(result.bayCode)}"` : `data-open-list="${escapeHtml(result.deliveryListId)}" data-open-search="${escapeHtml([result.order, result.item, result.customer].filter(Boolean).join(" "))}"`}>
+        <button type="button" ${result.bayCode ? `data-open-bay="${escapeHtml(result.bayCode)}"` : `data-open-list="${escapeHtml(result.deliveryListId)}" data-open-search="${escapeHtml([result.order, result.item].filter(Boolean).join(" "))}"`}>
           <strong>${escapeHtml(result.order)}-${escapeHtml(result.item)}</strong>
-          <span>${escapeHtml(result.customer)}${result.bay ? ` - Bay ${escapeHtml(result.bay)}` : ""}</span>
+          <span>${escapeHtml(result.customer)}${result.sourceId ? ` - SO ${escapeHtml(result.sourceId)}` : ""}${result.bay ? ` - Bay ${escapeHtml(result.bay)}` : ""}</span>
           <small>${escapeHtml(result.locationText || result.stage || "")}</small>
         </button>
       `,
@@ -1806,12 +2054,19 @@ function renderBayRouteFlow(summary) {
   const outboundTotal = inboundTotal || Number(summary?.indianTrailOutboundTotal ?? outbound?.totalQty ?? 0);
 
   const inTransitQty = Math.max(outboundQty - inboundQty, 0);
+  const rackLine = (summary?.racksInTransit || [])
+    .slice(0, 5)
+    .map((rack) => `${rack.code}: ${rack.qty}`)
+    .join(" | ");
+  const truckQty = Number(summary?.truckInTransitQty || 0);
+  const rackQty = Number(summary?.rackInTransitQty || 0);
 
   els.bayFlowPanel.innerHTML = `
     <button class="flow-card outbound" type="button" ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : ""}>
       <small>Outbound to Indian Trail</small>
       <strong>${escapeHtml(outboundQty)} / ${escapeHtml(outboundTotal)}</strong>
       <span>${outbound ? escapeHtml(outbound.stage) : "No outbound list"}</span>
+      <em>Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</em>
     </button>
     <div class="flow-lane" aria-hidden="true">
       <span class="flow-truck"><b>In Transit: ${escapeHtml(inTransitQty)}</b></span>
@@ -1821,6 +2076,7 @@ function renderBayRouteFlow(summary) {
       <strong>${escapeHtml(inboundQty)} / ${escapeHtml(inboundTotal)}</strong>
       <span>${inbound ? escapeHtml(inbound.stage) : "No Indian Trail list"}</span>
     </button>
+    ${rackLine ? `<div class="flow-rack-line">In transit racks: ${escapeHtml(rackLine)}</div>` : ""}
   `;
 
   const miniRoute = document.getElementById("bayPanelRouteMini");
@@ -1831,7 +2087,7 @@ function renderBayRouteFlow(summary) {
         <strong>${escapeHtml(outboundQty)} / ${escapeHtml(outboundTotal)}</strong>
       </div>
       <div class="bay-panel-route-lane">
-        <span>In Transit: ${escapeHtml(inTransitQty)}</span>
+        <span>In Transit: ${escapeHtml(inTransitQty)} | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</span>
       </div>
       <div class="bay-panel-route-node inbound">
         <small>Indian Trail</small>
@@ -2976,7 +3232,7 @@ function importCandidateSummary(result) {
       <details class="import-result-item">
         <summary>
           <label class="checkbox-row"><input class="import-candidate-check" type="checkbox" checked data-import-candidate-listids="${escapeHtml((entry.listIds || []).join(","))}"><span><strong>${escapeHtml(entry.kind)} - ${escapeHtml(entry.fileName)}</strong><small>${escapeHtml(formatDisplayDate(entry.deliveryDate))} - ${escapeHtml(entry.rowCount || 0)} rows / ${escapeHtml(entry.totalQty || 0)} pieces</small></span></label>
-          ${entry.listIds?.length ? `<button type="button" data-print-candidate-index="${index}">Print updated items</button>` : ""}
+          ${entry.listIds?.length ? `<button type="button" data-print-candidate-listids="${escapeHtml((entry.listIds || []).join(","))}">Print updated items</button>` : ""}
         </summary>
         <div class="compact-list">
           ${(entry.listIds || []).map((listId) => `<div><strong>${escapeHtml(listId)}</strong><span>Changed stage included in this package.</span></div>`).join("") || "<div><strong>No changed stages reported</strong></div>"}
@@ -3886,6 +4142,58 @@ function wireEvents() {
     scanFlash(payload.lastScan?.ok ? "success" : "notice");
     renderScanPage();
   });
+  els.rackListSelect?.addEventListener("change", () => {
+    state.rackScanListId = els.rackListSelect.value;
+  });
+  els.rackSelect?.addEventListener("change", () => {
+    state.selectedRackCode = els.rackSelect.value;
+  });
+  els.scanRackSelect?.addEventListener("change", () => {
+    state.selectedRackCode = els.scanRackSelect.value;
+    renderScanRackTools();
+  });
+  els.scanRackCompleteBtn?.addEventListener("click", async () => {
+    if (!state.selectedRackCode) return;
+    try {
+      await completeRack(state.selectedRackCode);
+      window.open(`/api/racks/packing-list?rackCode=${encodeURIComponent(state.selectedRackCode)}`, "_blank", "noopener");
+      await ensureRacksLoaded();
+      renderScanRackTools();
+    } catch (error) {
+      showInlineError(error.message, true);
+    }
+  });
+  els.rackScanForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await submitRackScan();
+    } catch (error) {
+      showInlineError(error.message, true);
+    }
+  });
+  els.rackGrid?.addEventListener("click", (event) => {
+    const printButton = event.target.closest("[data-rack-print]");
+    if (printButton) {
+      window.open(`/api/racks/packing-list?rackCode=${encodeURIComponent(printButton.dataset.rackPrint)}`, "_blank", "noopener");
+      return;
+    }
+    const completeButton = event.target.closest("[data-rack-complete]");
+    if (completeButton) {
+      completeRack(completeButton.dataset.rackComplete).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const clearButton = event.target.closest("[data-rack-clear]");
+    if (clearButton) {
+      clearRack(clearButton.dataset.rackClear).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const moveButton = event.target.closest("[data-rack-move]");
+    if (moveButton) {
+      moveRackItem(moveButton.dataset.rackMove).catch((error) => showInlineError(error.message, true));
+    }
+  });
+  els.rackSaveBtn?.addEventListener("click", () => saveRackDefinition().catch((error) => showInlineError(error.message, true)));
+  els.rackDeleteBtn?.addEventListener("click", () => deleteRackDefinition().catch((error) => showInlineError(error.message, true)));
   els.importBtn?.addEventListener("click", () => {
     if (!els.importFile) return;
     els.importFile.value = "";
@@ -3912,7 +4220,17 @@ function wireEvents() {
       }
       if (status.updateAvailable) {
         if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Update available</strong><span>${escapeHtml(status.behind)} commit(s) behind ${escapeHtml(status.upstream)}.</span>`;
-        window.alert(`Update available: ${status.behind} commit(s) behind ${status.upstream}.\n\nLocal: ${status.local}\nRemote: ${status.remote}`);
+        if (window.confirm(`Update available: ${status.behind} commit(s) behind ${status.upstream}.\n\nThe app will back up and restore the SQLite database so scans are preserved.\n\nUpdate now?`)) {
+          if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Updating program...</strong><span class="loading-bar"><i></i></span><span>Preserving database files before pulling code.</span>`;
+          const update = await fetchJson("/api/admin/update-apply", { method: "POST", body: JSON.stringify({}) });
+          if (update.ok) {
+            if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Update complete</strong><span>Database restored from backup. Restart the web app to load the new code.</span>`;
+            window.alert(`Update complete.\n\nDatabase files were restored from backup:\n${(update.restoredDatabaseFiles || []).join("\n") || "No database files needed restore."}\n\nPlease close and restart the web app so the new server code loads.`);
+          } else {
+            if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Update failed</strong><span>${escapeHtml(update.stderr || update.error || "Git pull failed.")}</span>`;
+            window.alert(`Update failed.\n\n${update.stderr || update.error || "Git pull failed."}\n\nDatabase backup folder:\n${update.backupDir || "Not created"}`);
+          }
+        }
       } else {
         if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>No updates found</strong><span>${escapeHtml(status.branch)} is current with ${escapeHtml(status.upstream)}.</span>`;
         window.alert(`No new updates found for ${status.branch}. You have the latest version from ${status.upstream}.`);
@@ -4301,8 +4619,7 @@ function wireEvents() {
     }
     const printImportButton = event.target.closest("[data-print-import]");
     if (printImportButton) {
-      const listIds = [...new Set((state.lastImportResult?.printCandidates || []).flatMap((candidate) => candidate.listIds || []))];
-      openPrintOptions({ listIds, date: state.lastImportResult?.printCandidates?.[0]?.deliveryDate || selectedDeliveryDate(), fixedListIds: true });
+      openPrintPackage(state.lastImportResult?.printCandidates || [], { updatedOnly: "1" });
       return;
     }
     const closeImportButton = event.target.closest("[data-close-import-result]");
@@ -4315,16 +4632,13 @@ function wireEvents() {
       const checkedIds = [...document.querySelectorAll(".import-candidate-check:checked")]
         .flatMap((input) => String(input.dataset.importCandidateListids || "").split(",").filter(Boolean));
       const listIds = [...new Set(checkedIds.length ? checkedIds : (state.lastImportResult?.printCandidates || []).flatMap((candidate) => candidate.listIds || []))];
-      openPrintOptions({ listIds, date: state.lastImportResult?.printCandidates?.[0]?.deliveryDate || selectedDeliveryDate(), fixedListIds: true });
+      openPrintPackage([{ listIds }], { updatedOnly: "1" });
       return;
     }
-    const printCandidateButton = event.target.closest("[data-print-candidate-index]");
+    const printCandidateButton = event.target.closest("[data-print-candidate-listids]");
     if (printCandidateButton) {
-      const rows = [...(state.lastImportResult?.importedFiles || []), ...(state.lastImportResult?.updatedFiles || [])];
-      const entry = rows[Number(printCandidateButton.dataset.printCandidateIndex || 0)];
-      if (entry?.listIds?.length) {
-        openPrintOptions({ listIds: entry.listIds, date: entry.deliveryDate || selectedDeliveryDate(), fixedListIds: true });
-      }
+      const listIds = String(printCandidateButton.dataset.printCandidateListids || "").split(",").filter(Boolean);
+      if (listIds.length) openPrintPackage([{ listIds }], { updatedOnly: "1" });
       return;
     }
     const printListsButton = event.target.closest("[data-print-lists]");

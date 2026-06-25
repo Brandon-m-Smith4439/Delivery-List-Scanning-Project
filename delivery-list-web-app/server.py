@@ -7,7 +7,9 @@ import json
 import html
 import base64
 import hashlib
+import shutil
 import subprocess
+from datetime import datetime
 from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -40,8 +42,90 @@ def git_update_status() -> dict:
         return {"ok": False, "error": str(exc), "updateAvailable": False}
 
 
+def apply_git_update() -> dict:
+    status = git_update_status()
+    if not status.get("ok"):
+        return status
+
+    current_commit = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=ROOT.parent,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    ).stdout.strip() or "unknown"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir = ROOT / "data" / "_update_backups" / f"{timestamp}-{current_commit}-preserve-db"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    database_files = [
+        CONFIG.database_path,
+        CONFIG.database_path.with_name(CONFIG.database_path.name + "-wal"),
+        CONFIG.database_path.with_name(CONFIG.database_path.name + "-shm"),
+    ]
+    backed_up: list[tuple[Path, Path]] = []
+    for path in database_files:
+        if path.exists():
+            target = backup_dir / path.name
+            shutil.copy2(path, target)
+            backed_up.append((path, target))
+
+    pull = subprocess.run(
+        ["git", "pull", "--ff-only", "--autostash"],
+        cwd=ROOT.parent,
+        text=True,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    for original, backup in backed_up:
+        original.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(backup, original)
+    after = git_update_status()
+    return {
+        "ok": pull.returncode == 0,
+        "updated": pull.returncode == 0,
+        "stdout": pull.stdout[-2000:],
+        "stderr": pull.stderr[-2000:],
+        "backupDir": str(backup_dir),
+        "restoredDatabaseFiles": [str(path) for path, _ in backed_up],
+        "status": after,
+    }
+
+
 def esc(value: object) -> str:
     return html.escape(str(value if value is not None else ""))
+
+
+CODE39 = {
+    "0": "nnnwwnwnn", "1": "wnnwnnnnw", "2": "nnwwnnnnw", "3": "wnwwnnnnn", "4": "nnnwwnnnw",
+    "5": "wnnwwnnnn", "6": "nnwwwnnnn", "7": "nnnwnnwnw", "8": "wnnwnnwnn", "9": "nnwwnnwnn",
+    "A": "wnnnnwnnw", "B": "nnwnnwnnw", "C": "wnwnnwnnn", "D": "nnnnwwnnw", "E": "wnnnwwnnn",
+    "F": "nnwnwwnnn", "G": "nnnnnwwnw", "H": "wnnnnwwnn", "I": "nnwnnwwnn", "J": "nnnnwwwnn",
+    "K": "wnnnnnnww", "L": "nnwnnnnww", "M": "wnwnnnnwn", "N": "nnnnwnnww", "O": "wnnnwnnwn",
+    "P": "nnwnwnnwn", "Q": "nnnnnnwww", "R": "wnnnnnwwn", "S": "nnwnnnwwn", "T": "nnnnwnwwn",
+    "U": "wwnnnnnnw", "V": "nwwnnnnnw", "W": "wwwnnnnnn", "X": "nwnnwnnnw", "Y": "wwnnwnnnn",
+    "Z": "nwwnwnnnn", "-": "nwnnnnwnw", ".": "wwnnnnwnn", " ": "nwwnnnwnn", "$": "nwnwnwnnn",
+    "/": "nwnwnnnwn", "+": "nwnnnwnwn", "%": "nnnwnwnwn", "*": "nwnnwnwnn",
+}
+
+
+def code39_svg(value: str) -> str:
+    text = "".join(ch for ch in str(value or "").upper() if ch in CODE39 and ch != "*")
+    encoded = f"*{text}*"
+    narrow, wide, gap, height = 2, 5, 2, 72
+    x = 0
+    rects = []
+    for char in encoded:
+        pattern = CODE39[char]
+        for index, mark in enumerate(pattern):
+            width = wide if mark == "w" else narrow
+            if index % 2 == 0:
+                rects.append(f'<rect x="{x}" y="0" width="{width}" height="{height}"/>')
+            x += width
+        x += gap
+    return f'<svg class="rack-barcode" viewBox="0 0 {x} {height}" role="img" aria-label="{esc(text)}" preserveAspectRatio="none">{"".join(rects)}</svg>'
 
 
 def render_item_rows(items: list[dict]) -> str:
@@ -92,6 +176,74 @@ def render_sheet(title: str, subtitle: str, items: list[dict], sheet_class: str 
     """
 
 
+def render_rack_packing_list(payload: dict) -> str:
+    rack = payload.get("rack") or {}
+    barcode = rack.get("barcode") or f"RACK-{rack.get('code', '')}"
+    rows = []
+    for item in rack.get("items") or []:
+        rows.append(
+            f"""
+            <tr>
+              <td>{esc(item.get("deliveryLabel"))}</td>
+              <td>{esc(item.get("job") or item.get("product"))}</td>
+              <td>{esc(item.get("order"))}</td>
+              <td>{esc(item.get("item"))}</td>
+              <td>{esc(item.get("rackQty") or item.get("qty"))}</td>
+              <td>{esc(item.get("dimensions"))}</td>
+              <td>{esc(item.get("customer"))}</td>
+              <td>{esc(item.get("route"))}</td>
+              <td class="check-cell">&#9744;</td>
+            </tr>
+            """
+        )
+    if not rows:
+        rows.append('<tr><td colspan="9">No pieces are currently assigned to this rack.</td></tr>')
+    return f"""
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>{esc(rack.get("name") or rack.get("code"))} Packing List</title>
+      <link rel="icon" type="image/png" href="/assets/delivery-list-scanner-icon.png">
+      <style>
+        body {{ font-family: Arial, sans-serif; color: #071633; margin: 24px; }}
+        header {{ display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; border-bottom: 3px solid #071633; padding-bottom: 14px; }}
+        h1 {{ margin: 0; font-size: 28px; }}
+        p {{ margin: 4px 0; }}
+        .barcode-box {{ width: 320px; text-align: center; }}
+        .rack-barcode {{ width: 100%; height: 72px; display: block; }}
+        .barcode-text {{ font-size: 18px; font-weight: 900; letter-spacing: 1px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 12px; }}
+        th, td {{ border: 1px solid #222; padding: 6px; text-align: left; }}
+        th {{ background: #efefef; }}
+        .check-cell {{ width: 44px; text-align: center; font-size: 20px; }}
+        .notes {{ margin-top: 24px; border: 1px solid #222; min-height: 80px; padding: 8px; }}
+        @media print {{ body {{ margin: 0.3in; }} button {{ display: none; }} }}
+      </style>
+    </head>
+    <body>
+      <button onclick="window.print()">Print</button>
+      <header>
+        <div>
+          <h1>{esc(rack.get("name") or rack.get("code"))} Packing List</h1>
+          <p>Rack Type: {esc(rack.get("type"))} | Status: {esc(rack.get("status"))} | Qty: {esc(rack.get("qty"))}</p>
+          <p>Scan this rack barcode on the outbound stage to scan all active pieces on this rack.</p>
+        </div>
+        <div class="barcode-box">
+          {code39_svg(str(barcode))}
+          <div class="barcode-text">*{esc(barcode)}*</div>
+        </div>
+      </header>
+      <table>
+        <thead><tr><th>Delivery List</th><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Check</th></tr></thead>
+        <tbody>{''.join(rows)}</tbody>
+      </table>
+      <div class="notes"><strong>Notes:</strong></div>
+    </body>
+    </html>
+    """
+
+
 def render_print_package(package: dict) -> str:
     sections = []
     filters = package.get("filters", {}) or {}
@@ -116,7 +268,7 @@ def render_print_package(package: dict) -> str:
 <head>
   <meta charset="utf-8">
   <title>Delivery List Print Package</title>
-  <link rel="icon" href="/minimalist_panel_rack_icon_v2.ico">
+  <link rel="icon" type="image/png" href="/assets/delivery-list-scanner-icon.png">
   <style>
     body {{ margin: 0; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #f6f8fb; }}
     .sheet {{ width: min(1120px, calc(100% - 32px)); margin: 16px auto; padding: 18px; background: #fff; border: 1px solid #444; border-radius: 0; }}
@@ -321,6 +473,25 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             limit = parse_qs(parsed.query).get("limit", ["20"])[0]
             self.send_json({"events": STORE.get_bay_events(int(limit or 20))})
+            return
+
+        if parsed.path == "/api/racks":
+            if not self.require_permission("view_racks"):
+                return
+            self.send_json(STORE.get_racks())
+            return
+
+        if parsed.path == "/api/racks/packing-list":
+            user = self.require_permission("view_racks")
+            if not user:
+                return
+            rack_code = parse_qs(parsed.query).get("rackCode", [""])[0]
+            body = render_rack_packing_list(STORE.rack_packing_list(rack_code)).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         if parsed.path.startswith("/api/delivery-lists/"):
@@ -597,6 +768,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.update_user_roles(str(data.get("username") or ""), data.get("roles") or [], updated_by=user["username"]))
                 return
 
+            if parsed.path == "/api/admin/update-apply":
+                user = self.require_permission("check_updates")
+                if not user:
+                    return
+                self.send_json(apply_git_update())
+                return
+
             if parsed.path == "/api/admin/line-item":
                 user = self.require_permission("edit_delivery_lists")
                 if not user:
@@ -750,6 +928,51 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.bay_check(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/scan":
+                user = self.require_permission("scan_racks")
+                if not user:
+                    return
+                if not STORE.user_can_access_list(user, str(data.get("listId") or "")):
+                    self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
+                    return
+                self.send_json(STORE.scan_item_to_rack(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/complete":
+                user = self.require_permission("scan_racks")
+                if not user:
+                    return
+                self.send_json(STORE.complete_rack(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/move-item":
+                user = self.require_permission("manage_racks")
+                if not user:
+                    return
+                self.send_json(STORE.move_rack_item(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/clear":
+                user = self.require_permission("manage_racks")
+                if not user:
+                    return
+                self.send_json(STORE.clear_rack(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks":
+                user = self.require_permission("manage_racks")
+                if not user:
+                    return
+                self.send_json(STORE.update_rack(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/delete":
+                user = self.require_permission("manage_racks")
+                if not user:
+                    return
+                self.send_json(STORE.delete_rack(data, user["username"]))
                 return
 
             self.send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)

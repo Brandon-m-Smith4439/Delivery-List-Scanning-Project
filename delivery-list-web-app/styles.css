@@ -1704,8 +1704,9 @@ select:disabled,
 
 .admin-layout {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 12px;
+  align-items: start;
 }
 
 .admin-form {
@@ -1713,7 +1714,19 @@ select:disabled,
   grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 8px;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+}
+
+.admin-page .panel {
+  min-width: 0;
+}
+
+.admin-page .panel h2 {
+  margin-bottom: 8px;
+}
+
+.admin-page .panel p {
+  margin-top: 0;
 }
 
 .admin-wide-field {
@@ -1740,17 +1753,19 @@ select:disabled,
 .admin-page .panel > button,
 .station-add-row button,
 .admin-table button {
-  min-height: 40px;
+  min-height: 34px;
   border: 1px solid var(--navy);
   border-radius: 7px;
   background: var(--navy);
   color: #fff;
   font-weight: 800;
-  padding: 0 12px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .admin-table {
   overflow: auto;
+  max-height: 360px;
 }
 
 .admin-table table {
@@ -1761,7 +1776,7 @@ select:disabled,
 
 .admin-table th,
 .admin-table td {
-  padding: 8px;
+  padding: 7px 8px;
   border-bottom: 1px solid #edf1f6;
   text-align: left;
   vertical-align: middle;
@@ -5629,4 +5644,331 @@ body.bay-move-mode .excel-bay-map {
 
 .filter-tabs .route-filter-tab[hidden] {
   display: none !important;
+}
+
+/* Rack overview */
+.rack-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.rack-scan-panel,
+.rack-toolbar {
+  margin-bottom: 12px;
+}
+
+.rack-scan-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(160px, 220px) minmax(280px, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.rack-scan-grid label:not(.search-box),
+.rack-admin-actions {
+  display: grid;
+  gap: 5px;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.rack-scan-grid select,
+.rack-admin-actions input,
+.rack-admin-actions select {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--navy-dark);
+}
+
+.rack-scan-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.rack-scan-form button,
+.rack-card-actions button,
+.rack-item-actions button,
+.rack-admin-actions button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 900;
+  padding: 0 12px;
+}
+
+.rack-scan-status {
+  min-height: 20px;
+  margin: 8px 0 0;
+  color: #526078;
+  font-weight: 800;
+}
+
+.rack-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.rack-toolbar h2,
+.rack-toolbar p {
+  margin: 0;
+}
+
+.rack-admin-actions {
+  display: grid;
+  grid-template-columns: 96px minmax(150px, 1fr) 110px auto auto;
+  align-items: center;
+}
+
+.rack-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.rack-column {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.rack-column > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--navy);
+  color: #fff;
+}
+
+.rack-column > header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.rack-column > header span {
+  font-weight: 950;
+}
+
+.rack-column > div {
+  display: grid;
+  gap: 8px;
+}
+
+.rack-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(5, 22, 48, 0.06);
+  overflow: hidden;
+}
+
+.rack-card.has-items {
+  border-color: rgba(20, 92, 169, 0.35);
+}
+
+.rack-card summary {
+  min-height: 58px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  background: #f8fbff;
+  color: var(--navy-dark);
+}
+
+.rack-card summary strong {
+  font-size: 18px;
+}
+
+.rack-card summary small {
+  display: block;
+  color: #526078;
+  font-weight: 750;
+}
+
+.rack-card summary > span:last-child {
+  font-weight: 950;
+  color: var(--navy);
+  white-space: nowrap;
+}
+
+.rack-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.rack-item-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+.rack-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px;
+  background: #fff;
+}
+
+.rack-item strong span {
+  color: #526078;
+  font-size: 12px;
+}
+
+.rack-item small {
+  display: block;
+  color: #526078;
+  margin-top: 2px;
+}
+
+.rack-item-actions {
+  display: grid;
+  grid-template-columns: 92px auto;
+  gap: 6px;
+  align-content: start;
+}
+
+.rack-item-actions select {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.flow-card em {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  color: #526078;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.flow-rack-line {
+  grid-column: 1 / -1;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.scan-rack-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: #f8fbff;
+}
+
+.scan-rack-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(112px, auto);
+  gap: 8px;
+  align-items: end;
+}
+
+.scan-rack-row label {
+  display: grid;
+  gap: 4px;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.scan-rack-row select {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--navy-dark);
+}
+
+.scan-rack-row button {
+  min-height: 34px;
+  border: 1px solid var(--navy);
+  border-radius: 7px;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 900;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.scan-rack-panel p {
+  margin: 4px 0 0;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) {
+  max-height: none !important;
+  overflow: visible !important;
+  gap: 10px;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .progress-band,
+.scan-page .scanner-panel:not(.bay-scanner-panel) .scan-form,
+.scan-page .scanner-panel:not(.bay-scanner-panel) .manual-scan-form,
+.scan-page .scanner-panel:not(.bay-scanner-panel) .last-scan,
+.scan-page .scanner-panel:not(.bay-scanner-panel) .recent-panel {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) h2 {
+  margin: 2px 0;
+  font-size: 20px;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .scan-input-wrap input {
+  min-height: 42px;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .manual-scan-form .form-grid {
+  gap: 8px;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .recent-table-wrap {
+  max-height: 220px;
+}
+
+@media (max-width: 860px) {
+  .rack-scan-grid,
+  .rack-toolbar,
+  .rack-admin-actions,
+  .rack-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .rack-item {
+    display: grid;
+  }
 }
