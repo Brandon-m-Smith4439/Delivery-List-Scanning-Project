@@ -1793,17 +1793,20 @@ async function refreshBayMapPage() {
 
 function renderBayRouteFlow(summary) {
   if (!els.bayFlowPanel) return;
+
   const key = dashboardDateKey();
   const dayLists = state.lists.filter((list) => list.deliveryDate === key);
   const outbound = dayLists.find((list) => stageCategory(list) === "outbound");
   const inbound = dayLists.find((list) => stageCategory(list) === "received") || state.lists.find((list) => list.id === summary?.activeInboundListId);
+
   const inboundQty = Number(inbound?.scannedQty ?? summary?.receivedQty ?? 0);
-  const inboundTotal = Number(inbound?.totalQty ?? summary?.indianTrailOutboundTotal ?? 0);
+  const inboundTotal = Number(inbound?.totalQty ?? summary?.indianTrailOutboundTotal ?? summary?.inboundToday ?? 0);
 
   const outboundQty = Number(summary?.indianTrailOutboundScanned ?? outbound?.scannedQty ?? 0);
   const outboundTotal = inboundTotal || Number(summary?.indianTrailOutboundTotal ?? outbound?.totalQty ?? 0);
 
   const inTransitQty = Math.max(outboundQty - inboundQty, 0);
+
   els.bayFlowPanel.innerHTML = `
     <button class="flow-card outbound" type="button" ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : ""}>
       <small>Outbound to Indian Trail</small>
@@ -1819,6 +1822,23 @@ function renderBayRouteFlow(summary) {
       <span>${inbound ? escapeHtml(inbound.stage) : "No Indian Trail list"}</span>
     </button>
   `;
+
+  const miniRoute = document.getElementById("bayPanelRouteMini");
+  if (miniRoute) {
+    miniRoute.innerHTML = `
+      <div class="bay-panel-route-node outbound">
+        <small>Outbound</small>
+        <strong>${escapeHtml(outboundQty)} / ${escapeHtml(outboundTotal)}</strong>
+      </div>
+      <div class="bay-panel-route-lane">
+        <span>In Transit: ${escapeHtml(inTransitQty)}</span>
+      </div>
+      <div class="bay-panel-route-node inbound">
+        <small>Indian Trail</small>
+        <strong>${escapeHtml(inboundQty)} / ${escapeHtml(inboundTotal)}</strong>
+      </div>
+    `;
+  }
 }
 
 function renderIndianTrailSummary(summary) {

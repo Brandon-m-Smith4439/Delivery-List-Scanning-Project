@@ -389,29 +389,6 @@
           <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay">Item Management</button>
         </div>
         <div id="bayFlowPanel" class="bay-route-flow"></div>
-        <form class="bay-scan-out-panel bay-scanner-wide" id="bayScanOutForm">
-          <div class="bay-scan-heading">
-            <strong>Bay Scanner</strong>
-            <label class="switch-row"><input id="bayScanModeToggle" type="checkbox"> <span>Add to bay</span></label>
-          </div>
-          <label class="search-box">
-            <span class="barcode-icon"></span>
-            <input id="bayScanOutInput" type="text" autocomplete="off" placeholder="Scan order to remove from bay...">
-          </label>
-          <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Bay code for add/manual remove">
-          <div class="scan-history-actions">
-            <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action"><span class="undo-icon"></span><small>Undo</small></button>
-            <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action"><span class="redo-icon"></span><small>Redo</small></button>
-          </div>
-          <div class="manual-bay-entry">
-            <input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Manual order">
-            <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Item">
-            <input id="bayManualQtyInput" type="number" min="1" step="1" value="1" aria-label="Manual quantity">
-            <button id="bayManualSubmitBtn" type="button">Manual</button>
-          </div>
-          <span id="bayScanOutStatus"></span>
-          <div id="bayScanOutRecent" class="compact-list bay-scan-out-recent"></div>
-        </form>
         <div class="bay-action-bar">
           <label class="search-box">
             <span class="search-icon"></span>
@@ -458,6 +435,91 @@
         </section>
         <section class="bay-map-shell">
           <div id="bayMapCanvas" class="excel-bay-map"></div>
+
+          <aside class="scanner-panel bay-scanner-panel" aria-label="Indian Trail bay scanner">
+            <div class="progress-band bay-panel-route-band">
+              <div class="progress-title">
+                <span class="cube-icon"></span>
+                <strong>Indian Trail Route</strong>
+              </div>
+
+              <div class="bay-panel-route-mini" id="bayPanelRouteMini">
+                <div class="bay-panel-route-node outbound">
+                  <small>Outbound</small>
+                  <strong>0 / 0</strong>
+                </div>
+                <div class="bay-panel-route-lane">
+                  <span>In Transit: 0</span>
+                </div>
+                <div class="bay-panel-route-node inbound">
+                  <small>Indian Trail</small>
+                  <strong>0 / 0</strong>
+                </div>
+              </div>
+            </div>
+
+            <h2>Bay Scanner</h2>
+
+            <form class="scan-form bay-scan-form" id="bayScanOutForm">
+              <div class="scan-form-heading">
+                <label for="bayScanOutInput">Scan Barcode</label>
+                <div class="scan-history-actions bay-scan-actions">
+                  <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action">
+                    <span class="undo-icon"></span>
+                    <small>Undo</small>
+                  </button>
+                  <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action">
+                    <span class="redo-icon"></span>
+                    <small>Redo</small>
+                  </button>
+                </div>
+              </div>
+
+              <div class="scan-input-wrap">
+                <span class="barcode-icon"></span>
+                <input id="bayScanOutInput" type="text" autocomplete="off" placeholder="Scan order to remove from bay...">
+              </div>
+
+              <div class="bay-add-row">
+                <label class="bay-code-field">
+                  <span>Bay Code</span>
+                  <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Bay code">
+                </label>
+
+                <label class="switch-row bay-mode-toggle">
+                  <input id="bayScanModeToggle" type="checkbox">
+                  <span>Add to bay</span>
+                </label>
+              </div>
+            </form>
+
+            <section class="manual-scan-form bay-manual-card">
+              <div class="section-heading">
+                <h3>Manual Assign</h3>
+                <span>Order + item</span>
+              </div>
+              <div class="manual-bay-entry">
+                <input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Manual order">
+                <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Item">
+                <input id="bayManualQtyInput" type="number" min="1" step="1" value="1" aria-label="Manual quantity">
+                <button id="bayManualSubmitBtn" type="button">Submit</button>
+              </div>
+            </section>
+
+            <section class="last-card bay-last-card">
+              <span class="last-card-status"></span>
+              <strong>Last Bay Action</strong>
+              <span id="bayScanOutStatus">Waiting for scan</span>
+            </section>
+
+            <section class="recent-panel bay-recent-panel">
+              <div class="section-heading">
+                <h3>Recent Bay Actions</h3>
+              </div>
+              <div id="bayScanOutRecent" class="bay-scan-out-recent"></div>
+            </section>
+          </aside>
+
           <section class="bay-detail-panel">
             <section class="bay-side-panel">
               <div class="section-heading">
