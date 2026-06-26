@@ -187,6 +187,11 @@
       <button class="tab route-filter-tab" data-filter="dtc-route" type="button">DTC <span id="countDtcRoute">(0)</span></button>
       <button class="tab route-filter-tab" data-filter="greenville-route" type="button">Greenville <span id="countGreenvilleRoute">(0)</span></button>
     </div>
+
+    <div class="filter-group glass-filter-group" aria-label="Glass type filters">
+      <span class="filter-group-label">Glass Type</span>
+      <div class="glass-filter-tabs" id="glassFilterTabs"></div>
+    </div>
   </div>
 </div>
 
@@ -257,12 +262,12 @@
             <section class="scan-rack-panel" id="scanRackPanel" hidden>
               <div class="scan-rack-row">
                 <label>
-                  <span>Rack / Truck Destination</span>
+                  <span>Transportation Method</span>
                   <select id="scanRackSelect"></select>
                 </label>
                 <button id="scanRackCompleteBtn" type="button">Complete & Print</button>
               </div>
-              <p id="scanRackStatus"></p>
+              <p id="scanRackStatus" hidden></p>
             </section>
 
             <form class="scan-form" id="scanForm">
@@ -638,7 +643,7 @@
         </div>
 
         <div class="admin-layout">
-          <section class="panel">
+          <section class="panel admin-import-panel">
             <h2>Import Delivery List</h2>
             <div class="admin-button-row">
               <button id="folderImportBtn" type="button">Import / update Temp folder</button>
@@ -660,7 +665,7 @@
             <div id="importHistory" class="compact-list"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel admin-maintenance-panel">
             <h2>Delivery List Cleanup</h2>
             <div class="admin-form cleanup-form">
               <select id="deleteDateSelect"></select>
@@ -669,10 +674,7 @@
               <button id="deleteDateBtn" type="button">Delete date</button>
             </div>
             <div id="deleteListStatus" class="admin-empty">Admin-only delete actions appear here.</div>
-          </section>
-
-          <section class="panel">
-            <h2>Reset Scans</h2>
+            <h3 class="admin-subheading">Reset Scans</h3>
             <div class="admin-form cleanup-form">
               <select id="resetListSelect"></select>
               <button id="adminResetScansBtn" type="button">Reset selected list scans</button>
@@ -680,7 +682,7 @@
             <div id="resetScansStatus" class="admin-empty">This deletes scan quantities and keeps the delivery list rows.</div>
           </section>
 
-          <section class="panel">
+          <section class="panel admin-users-panel">
             <h2>Users</h2>
             <form id="createUserForm" class="admin-form">
               <input id="newUserName" type="text" autocomplete="off" placeholder="Username">
@@ -699,7 +701,7 @@
             <div id="adminUsers" class="admin-table"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel admin-compact-panel">
             <h2>Stations</h2>
             <div class="station-add-row">
               <input id="newStationInput" type="text" autocomplete="off" placeholder="New station">
@@ -708,7 +710,7 @@
             <div id="adminStations" class="compact-list"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel admin-compact-panel">
             <h2>Customer Route Rules</h2>
             <form id="customerRouteRuleForm" class="admin-form">
               <input id="customerRoutePatternInput" type="text" autocomplete="off" placeholder="Customer name or pattern">
@@ -722,7 +724,7 @@
             <div id="customerRouteRules" class="compact-list"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel admin-wide-panel">
             <h2>Manual Delivery List Edit</h2>
             <div class="admin-form">
               <input id="manualEditSearch" type="search" autocomplete="off" placeholder="Search order or customer">
@@ -731,7 +733,7 @@
             <div id="manualEditResults" class="admin-table"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel admin-compact-panel">
             <h2>Exceptions</h2>
             <div id="exceptionCenter"></div>
           </section>
@@ -780,7 +782,7 @@
       </fieldset>
       <label>
         <span>Glass Type</span>
-        <select id="printOptionsGlassType"></select>
+        <select id="printOptionsGlassType" multiple size="6"></select>
       </label>
       <label>
         <span>Mirrors</span>

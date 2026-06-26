@@ -2303,7 +2303,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         cpu_only = str(filters.get("cpuOnly") or "").lower() in {"1", "true", "yes"}
         dtc_only = str(filters.get("dtcOnly") or "").lower() in {"1", "true", "yes"}
         updated_only = str(filters.get("updatedOnly") or "").lower() in {"1", "true", "yes"}
-        glass_type = str(filters.get("glassType") or "").strip().lower()
+        glass_types = [term.strip().lower() for term in re.split(r"[,;\n]+", str(filters.get("glassType") or "")) if term.strip()]
         mirror_mode = str(filters.get("mirrorMode") or "exclude").strip().lower()
         customer_filter = str(filters.get("customers") or "").strip().lower()
         order_filter = str(filters.get("orders") or "").strip()
@@ -2351,11 +2351,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     for item in printable_items
                     if re.search(r"\b(update|updated|new|change|changed)\b", f"{item.get('processState', '')} {item.get('queueState', '')}", flags=re.IGNORECASE)
                 ]
-            if glass_type:
+            if glass_types:
                 printable_items = [
                     item
                     for item in printable_items
-                    if glass_type in f"{item.get('product', '')} {item.get('job', '')}".lower()
+                    if any(glass_type in f"{item.get('product', '')} {item.get('job', '')}".lower() for glass_type in glass_types)
                 ]
             if customer_terms:
                 printable_items = [

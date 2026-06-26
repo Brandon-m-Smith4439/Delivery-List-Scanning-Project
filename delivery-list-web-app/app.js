@@ -14,6 +14,7 @@ const state = {
   errors: [],
   selectedId: null,
   filter: "all",
+  glassTypeFilter: "all",
   search: "",
   pageIndex: 1,
   pageSize: 25,
@@ -143,6 +144,7 @@ const els = {
   countCpuRoute: document.getElementById("countCpuRoute"),
   countDtcRoute: document.getElementById("countDtcRoute"),
   countGreenvilleRoute: document.getElementById("countGreenvilleRoute"),
+  glassFilterTabs: document.getElementById("glassFilterTabs"),
   remainingQty: document.getElementById("remainingQty"),
   partialQty: document.getElementById("partialQty"),
   completeQty: document.getElementById("completeQty"),
@@ -766,7 +768,10 @@ async function activateList(listId, navigate = true) {
   } else {
     setActiveList(listId);
   }
-  if (changingList || navigate) state.pageIndex = 1;
+  if (changingList || navigate) {
+    state.pageIndex = 1;
+    state.glassTypeFilter = "all";
+  }
   renderScanPage();
   if (navigate) showPage("scan");
   if (navigate || document.activeElement === els.scanInput) els.scanInput?.focus();
@@ -906,6 +911,7 @@ function filteredItems() {
       (state.filter === "indian-trail-route" && !/\bCPU\b|\bDTC\b|\bGNV\b|customer pickup|deliver to customer|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`));
 
     if (!matchesFilter) return false;
+    if (state.glassTypeFilter !== "all" && glassTypeLabel(item) !== state.glassTypeFilter) return false;
     if (!search) return true;
 
     const haystack = [item.order, item.item, item.job, item.customer, item.dimensions, item.product, item.route, item.barcode]
@@ -986,6 +992,11 @@ function locationLabel(item) {
 function renderCounts() {
   const stats = getStats();
   const totalItems = pieceCount(state.items);
+  const glassCounts = new Map();
+  for (const item of state.items) {
+    const label = glassTypeLabel(item);
+    glassCounts.set(label, (glassCounts.get(label) || 0) + Number(item.qty || 0));
+  }
 
   const remakeItems = state.items.filter(isRemakeItem);
   const rushItems = state.items.filter(isRushItem);
@@ -1036,6 +1047,16 @@ function renderCounts() {
     state.filter = "all";
     document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.filter === state.filter));
   }
+  if (state.glassTypeFilter !== "all" && !glassCounts.has(state.glassTypeFilter)) state.glassTypeFilter = "all";
+  if (els.glassFilterTabs) {
+    const glassButtons = [
+      `<button class="tab glass-filter-tab ${state.glassTypeFilter === "all" ? "is-active" : ""}" data-glass-filter="all" type="button">All Glass <span>(${totalItems})</span></button>`,
+      ...[...glassCounts.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([label, count]) => `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`),
+    ];
+    els.glassFilterTabs.innerHTML = glassButtons.join("");
+  }
   if (els.totalItemsText) els.totalItemsText.textContent = `${state.items.length} rows / ${totalItems} pieces`;
   if (els.progressText) els.progressText.textContent = `${stageVerb()} Qty: ${stats.scannedQty}/${stats.totalQty} - ${formatPercent(stats.percent)} Complete`;
   if (els.progressFill) els.progressFill.style.width = `${Math.min(stats.percent, 100)}%`;
@@ -1083,6 +1104,8 @@ function renderItemRow(item) {
   const selected = item.id === state.selectedId;
   const route = routeLabel(item);
   const routeTag = route ? `<span class="route-tag ${escapeHtml(route.toLowerCase())}">${escapeHtml(route)}</span>` : "";
+  const location = locationLabel(item);
+  const locationClass = location ? `location-badge ${location.toLowerCase().includes("bay") ? "bay" : location.toLowerCase().includes("truck") ? "truck" : "rack"}` : "";
   const markers = [
   isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
   isRushItem(item) ? '<span class="row-marker rush-marker">Rush</span>' : "",
@@ -1103,7 +1126,7 @@ const processText = rowError ? (item.errorReason || item.lastError || "Scan issu
       <td>${escapeHtml(item.customer)}</td>
       <td>${markers}</td>
       <td>${routeTag}</td>
-      <td>${escapeHtml(locationLabel(item))}</td>
+      <td class="location-cell">${location ? `<span class="${escapeHtml(locationClass)}">${escapeHtml(location)}</span>` : ""}</td>
       <td><span class="process-pill ${processClass}">${escapeHtml(processText)}</span></td>
     </tr>
   `;
@@ -1199,7 +1222,7 @@ function renderRacksPage() {
       return `
         <details class="rack-card ${hasItems ? "has-items" : ""}" ${hasItems ? "open" : ""}>
           <summary>
-            <span><strong>${escapeHtml(rack.code)}</strong><small>${escapeHtml(rack.name)} - ${escapeHtml(rack.type)}</small></span>
+            <span><strong>${escapeHtml(rack.code)}</strong><small>${escapeHtml(rack.name)}</small></span>
             <span>${escapeHtml(rack.qty || 0)} pcs</span>
           </summary>
           <div class="rack-card-actions">
@@ -1215,6 +1238,7 @@ function renderRacksPage() {
                         <article class="rack-item">
                           <div>
                             <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} <span>${escapeHtml(item.customer || "")}</span></strong>
+                            <small>${escapeHtml(item.job || item.product || "")}</small>
                             <small>${escapeHtml(item.product || item.job || "")} | ${escapeHtml(item.dimensions || "")} | Qty ${escapeHtml(item.rackQty || 1)}</small>
                             <small>${escapeHtml(item.deliveryLabel || "")}</small>
                           </div>
@@ -1502,8 +1526,7 @@ function renderScanRackTools() {
       .join("");
     els.scanRackSelect.value = state.selectedRackCode;
   }
-  const current = state.racks.find((rack) => rack.code === state.selectedRackCode);
-  if (els.scanRackStatus) els.scanRackStatus.textContent = current ? `Current destination: ${current.name} - ${current.qty} pcs` : "";
+  if (els.scanRackStatus) els.scanRackStatus.textContent = "";
 }
 
 function isIndianTrailScanContext() {
@@ -2003,13 +2026,16 @@ function renderGlobalSearchResults(results) {
   els.headerGlobalSearchResults.innerHTML = results
     .slice(0, 8)
     .map(
-      (result) => `
+      (result) => {
+        return `
         <button type="button" ${result.bayCode ? `data-open-bay="${escapeHtml(result.bayCode)}"` : `data-open-list="${escapeHtml(result.deliveryListId)}" data-open-search="${escapeHtml([result.order, result.item].filter(Boolean).join(" "))}"`}>
           <strong>${escapeHtml(result.order)}-${escapeHtml(result.item)}</strong>
-          <span>${escapeHtml(result.customer)}${result.sourceId ? ` - SO ${escapeHtml(result.sourceId)}` : ""}${result.bay ? ` - Bay ${escapeHtml(result.bay)}` : ""}</span>
+          <span>${escapeHtml(result.job || result.product || "")}</span>
+          <span>${escapeHtml(result.customer)}${result.bay ? ` - Bay ${escapeHtml(result.bay)}` : ""}</span>
           <small>${escapeHtml(result.locationText || result.stage || "")}</small>
         </button>
-      `,
+      `;
+      },
     )
     .join("");
 }
@@ -3348,13 +3374,14 @@ function availableGlassTypesForLists(listIds) {
 
 function renderPrintGlassTypes() {
   if (!els.printOptionsGlassType) return;
-  const current = els.printOptionsGlassType.value || "";
+  const current = new Set([...els.printOptionsGlassType.selectedOptions].map((option) => option.value).filter(Boolean));
   const types = availableGlassTypesForLists(selectedPrintListIds());
   els.printOptionsGlassType.innerHTML = [
-    `<option value="">All glass types</option>`,
     ...types.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`),
   ].join("");
-  els.printOptionsGlassType.value = types.includes(current) ? current : "";
+  for (const option of els.printOptionsGlassType.options) {
+    option.selected = current.has(option.value);
+  }
 }
 
 function renderPrintOptionStages() {
@@ -3396,6 +3423,9 @@ function openPrintOptions(context = {}) {
   if (els.printCustomerFilter) els.printCustomerFilter.value = "";
   if (els.printOrderFilter) els.printOrderFilter.value = "";
   renderPrintOptionStages();
+  if (els.printOptionsGlassType) {
+    for (const option of els.printOptionsGlassType.options) option.selected = false;
+  }
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = false;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = false;
 }
@@ -3424,7 +3454,7 @@ function submitPrintOptions() {
     updatedOnly: els.printUpdatedOnly?.checked ? "1" : "",
     rushOnly: els.printRushOnly?.checked ? "1" : "",
     remakeOnly: els.printRemakeOnly?.checked ? "1" : "",
-    glassType: els.printOptionsGlassType?.value.trim() || "",
+    glassType: [...(els.printOptionsGlassType?.selectedOptions || [])].map((option) => option.value.trim()).filter(Boolean).join(","),
     mirrorMode: els.printMirrorMode?.value || "exclude",
     customers: els.printCustomerFilter?.value.trim() || "",
     orders: els.printOrderFilter?.value.trim() || "",
@@ -4481,6 +4511,13 @@ function wireEvents() {
       state.filter = filterButton.dataset.filter;
       state.pageIndex = 1;
       document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.filter === state.filter));
+      renderScanPage();
+      return;
+    }
+    const glassFilterButton = event.target.closest("[data-glass-filter]");
+    if (glassFilterButton) {
+      state.glassTypeFilter = glassFilterButton.dataset.glassFilter || "all";
+      state.pageIndex = 1;
       renderScanPage();
       return;
     }

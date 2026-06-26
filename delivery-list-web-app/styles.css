@@ -1138,8 +1138,8 @@ select:disabled,
 
 .physical-slot-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
-  gap: 3px;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 4px;
   padding: 6px;
 }
 
@@ -1147,27 +1147,54 @@ select:disabled,
   --bay-bg: #f8fafc;
   --bay-border: #cdd7e7;
   --bay-fg: #07122f;
-  min-height: 34px;
+  min-height: 54px;
   min-width: 0;
   border: 1px solid var(--bay-border);
   border-bottom-width: 3px;
   border-radius: 4px;
   background: var(--bay-bg);
   color: var(--bay-fg);
-  padding: 3px 4px;
+  padding: 5px 6px;
   display: grid;
-  gap: 1px;
-  text-align: left;
+  grid-template-rows: auto auto 1fr;
+  gap: 2px;
+  text-align: center;
   overflow: hidden;
 }
 
 .physical-bay-slot .bay-code {
-  font-size: 10px;
+  display: block;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 950;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.physical-bay-slot .bay-state,
+.physical-bay-slot .bay-state {
+  justify-self: center;
+  min-width: 28px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  color: inherit;
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 1.3;
+}
+
 .physical-bay-slot small {
-  display: none;
+  display: block;
+  min-width: 0;
+  color: inherit;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .physical-bay-slot:hover,
@@ -1704,14 +1731,14 @@ select:disabled,
 
 .admin-layout {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px;
   align-items: start;
 }
 
 .admin-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 8px;
   align-items: center;
   margin-bottom: 10px;
@@ -1719,6 +1746,25 @@ select:disabled,
 
 .admin-page .panel {
   min-width: 0;
+  grid-column: span 4;
+}
+
+.admin-import-panel,
+.admin-wide-panel {
+  grid-column: span 8;
+}
+
+.admin-users-panel,
+.admin-wide-panel {
+  grid-column: 1 / -1;
+}
+
+.admin-maintenance-panel {
+  grid-column: span 4;
+}
+
+.admin-compact-panel {
+  grid-column: span 4;
 }
 
 .admin-page .panel h2 {
@@ -1734,7 +1780,22 @@ select:disabled,
 }
 
 .cleanup-form {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-maintenance-panel .cleanup-form {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.cleanup-form button {
+  width: 100%;
+}
+
+.admin-subheading {
+  margin: 14px 0 8px;
+  color: #41506c;
+  font-size: 13px;
+  text-transform: uppercase;
 }
 
 .admin-empty.success {
@@ -1765,7 +1826,6 @@ select:disabled,
 
 .admin-table {
   overflow: auto;
-  max-height: 360px;
 }
 
 .admin-table table {
@@ -1780,6 +1840,27 @@ select:disabled,
   border-bottom: 1px solid #edf1f6;
   text-align: left;
   vertical-align: middle;
+  white-space: nowrap;
+}
+
+.admin-table td:first-child,
+.admin-table th:first-child {
+  white-space: normal;
+}
+
+.admin-import-panel .admin-empty,
+.admin-import-panel .compact-list {
+  overflow: visible;
+}
+
+.admin-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-button-row button {
+  flex: 1 1 160px;
 }
 
 .admin-table td span {
@@ -2083,6 +2164,11 @@ select:disabled,
   font-weight: 950;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.glass-filter-group .filter-group-label {
+  align-self: center;
+  text-align: center;
 }
 
 .tab {
@@ -3997,6 +4083,15 @@ select:disabled,
     grid-template-columns: 1fr;
   }
 
+  .admin-page .panel,
+  .admin-import-panel,
+  .admin-users-panel,
+  .admin-wide-panel,
+  .admin-maintenance-panel,
+  .admin-compact-panel {
+    grid-column: 1 / -1;
+  }
+
   .overview-kpis {
     min-width: 0;
     grid-template-columns: repeat(2, minmax(120px, 1fr));
@@ -5646,6 +5741,18 @@ body.bay-move-mode .excel-bay-map {
   display: none !important;
 }
 
+.glass-filter-group {
+  align-items: flex-start;
+}
+
+.glass-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 420px;
+}
+
 /* Rack overview */
 .rack-summary {
   display: flex;
@@ -5884,7 +5991,7 @@ body.bay-move-mode .excel-bay-map {
 
 .scan-rack-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(112px, auto);
+  grid-template-columns: minmax(150px, max-content) minmax(0, 1fr);
   gap: 8px;
   align-items: end;
 }
@@ -5898,6 +6005,8 @@ body.bay-move-mode .excel-bay-map {
 }
 
 .scan-rack-row select {
+  width: auto;
+  max-width: 220px;
   min-height: 34px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -5907,6 +6016,7 @@ body.bay-move-mode .excel-bay-map {
 }
 
 .scan-rack-row button {
+  width: 100%;
   min-height: 34px;
   border: 1px solid var(--navy);
   border-radius: 7px;
@@ -5915,6 +6025,62 @@ body.bay-move-mode .excel-bay-map {
   font-weight: 900;
   padding: 0 9px;
   font-size: 12px;
+}
+
+.print-options-panel select[multiple] {
+  min-height: 148px;
+  padding: 8px;
+}
+
+.header-search-results strong span {
+  color: #526078;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.delivery-table th:nth-child(9),
+.delivery-table td.location-cell {
+  text-align: center;
+}
+
+.bay-recent-table th:nth-child(3),
+.bay-recent-table td:nth-child(3) {
+  text-align: center;
+}
+
+.location-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #cdd7e7;
+  background: #f6f8fb;
+  color: #25314a;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.location-badge.bay {
+  border-color: #99d6bd;
+  background: #e9f8ef;
+  color: #176b2d;
+}
+
+.location-badge.rack {
+  border-color: #a7c2ef;
+  background: #edf5ff;
+  color: #0b4e9d;
+}
+
+.location-badge.truck {
+  border-color: #f0c653;
+  background: #fff6da;
+  color: #875c00;
 }
 
 .scan-rack-panel p {
@@ -5960,6 +6126,15 @@ body.bay-move-mode .excel-bay-map {
 }
 
 @media (max-width: 860px) {
+  .admin-page .panel,
+  .admin-import-panel,
+  .admin-users-panel,
+  .admin-wide-panel,
+  .admin-maintenance-panel,
+  .admin-compact-panel {
+    grid-column: 1 / -1;
+  }
+
   .rack-scan-grid,
   .rack-toolbar,
   .rack-admin-actions,
