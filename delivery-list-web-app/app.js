@@ -28,6 +28,10 @@ const state = {
   baySearch: "",
   bayStatusFilter: "all",
   bayCategoryFilter: "all",
+  bayGlassFilter: "all",
+  baySpecialFilter: "all",
+  staleBayOrders: [],
+  staleBayAlertDate: "",
   selectedBayCode: "",
   bayEditMode: false,
   pendingBayMove: null,
@@ -189,6 +193,8 @@ const els = {
   bayUndoBtn: document.getElementById("bayUndoBtn"),
   bayRedoBtn: document.getElementById("bayRedoBtn"),
   bayStatusFilter: document.getElementById("bayStatusFilter"),
+  bayGlassFilter: document.getElementById("bayGlassFilter"),
+  baySpecialFilter: document.getElementById("baySpecialFilter"),
   bayCategoryFilters: document.getElementById("bayCategoryFilters"),
   baySelectedPanel: document.getElementById("baySelectedPanel"),
   baySelectedModal: document.getElementById("baySelectedModal"),
@@ -212,6 +218,14 @@ const els = {
   sdiReasonInput: document.getElementById("sdiReasonInput"),
   sdiTypeInput: document.getElementById("sdiTypeInput"),
   sdiCurrentList: document.getElementById("sdiCurrentList"),
+  staleBayBackdrop: document.getElementById("staleBayBackdrop"),
+  staleBayPanel: document.getElementById("staleBayPanel"),
+  staleBayList: document.getElementById("staleBayList"),
+  staleBayCloseBtn: document.getElementById("staleBayCloseBtn"),
+  staleBayOkBtn: document.getElementById("staleBayOkBtn"),
+  staleBayPrintBtn: document.getElementById("staleBayPrintBtn"),
+  staleBaySnoozeAllBtn: document.getElementById("staleBaySnoozeAllBtn"),
+  staleBaySnoozeAllDays: document.getElementById("staleBaySnoozeAllDays"),
   bayLayoutManager: document.getElementById("bayLayoutManager"),
   bayLayoutCloseBtn: document.getElementById("bayLayoutCloseBtn"),
   bayLayoutSelect: document.getElementById("bayLayoutSelect"),
@@ -1116,9 +1130,10 @@ function renderItemRow(item) {
 const rowError = hasScanError(item);
 const processClass = rowError ? "error" : status;
 const processText = rowError ? (item.errorReason || item.lastError || "Scan issue") : renderProcessState(item);
+const lastScanNote = item.lastScannedAt ? `<span class="last-scan-note">Last: ${escapeHtml(formatDateTime(item.lastScannedAt))}${item.lastScannedStation ? ` - ${escapeHtml(item.lastScannedStation)}` : ""}</span>` : "";
   return `
     <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""}" data-id="${escapeHtml(item.id)}">
-      <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span></td>
+      <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span>${lastScanNote}</td>
       <td>${escapeHtml(item.order)}</td>
       <td>${escapeHtml(item.item)}</td>
       <td><span class="qty-pill ${status}">${item.scanned} / ${item.qty}</span></td>
@@ -1192,8 +1207,11 @@ function renderRackSelects() {
   }
   if (els.rackSelect) {
     els.rackSelect.innerHTML = state.racks
-      .map((rack) => `<option value="${escapeHtml(rack.code)}">${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(rack.qty)} pcs)</option>`)
+      .map((rack) => `<option value="${escapeHtml(rack.code)}" ${String(rack.status).toLowerCase() === "closed" ? "disabled" : ""}>${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(rack.qty)} pcs${String(rack.status).toLowerCase() === "closed" ? ", closed" : ""})</option>`)
       .join("");
+    if (state.racks.find((rack) => rack.code === state.selectedRackCode && String(rack.status).toLowerCase() === "closed")) {
+      state.selectedRackCode = state.racks.find((rack) => String(rack.status).toLowerCase() !== "closed")?.code || "";
+    }
     els.rackSelect.value = state.selectedRackCode;
   }
 }
@@ -1226,7 +1244,7 @@ function renderRacksPage() {
             <span>${escapeHtml(rack.qty || 0)} pcs</span>
           </summary>
           <div class="rack-card-actions">
-            ${hasItems ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">Print Packing List</button><button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>` : ""}
+            ${hasItems ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">Print Packing List</button>${String(rack.status).toLowerCase() === "closed" ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`}` : ""}
             ${adminActions}
           </div>
           <div class="rack-item-list">
@@ -1293,6 +1311,15 @@ async function completeRack(code) {
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
+  renderScanRackTools();
+}
+
+async function uncompleteRack(code) {
+  const payload = await fetchJson("/api/racks/uncomplete", { method: "POST", body: JSON.stringify({ rackCode: code }) });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+  renderScanRackTools();
 }
 
 async function clearRack(code) {
@@ -1517,12 +1544,12 @@ function renderScanRackTools() {
     return;
   }
   els.scanRackPanel.classList.remove("is-loading");
-  if (!state.selectedRackCode || !state.racks.some((rack) => rack.code === state.selectedRackCode)) {
-    state.selectedRackCode = state.racks.find((rack) => rack.code === "T")?.code || state.racks[0]?.code || "";
+  if (!state.selectedRackCode || !state.racks.some((rack) => rack.code === state.selectedRackCode) || state.racks.find((rack) => rack.code === state.selectedRackCode && String(rack.status).toLowerCase() === "closed")) {
+    state.selectedRackCode = state.racks.find((rack) => rack.code === "T" && String(rack.status).toLowerCase() !== "closed")?.code || state.racks.find((rack) => String(rack.status).toLowerCase() !== "closed")?.code || "";
   }
   if (els.scanRackSelect) {
     els.scanRackSelect.innerHTML = state.racks
-      .map((rack) => `<option value="${escapeHtml(rack.code)}">${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(rack.qty)} pcs)</option>`)
+      .map((rack) => `<option value="${escapeHtml(rack.code)}" ${String(rack.status).toLowerCase() === "closed" ? "disabled" : ""}>${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(rack.qty)} pcs${String(rack.status).toLowerCase() === "closed" ? ", closed" : ""})</option>`)
       .join("");
     els.scanRackSelect.value = state.selectedRackCode;
   }
@@ -1851,6 +1878,9 @@ async function processScan(rawScan) {
       }),
     });
     applyBackendPayload(payload);
+    if (payload.message) {
+      showFloatingNotice(payload.message, payload.lastScan?.ok ? "success" : "notice");
+    }
     if (payload.racks) {
       state.racks = payload.racks || state.racks;
       state.rackSummary = payload.rackSummary || state.rackSummary;
@@ -2063,6 +2093,7 @@ async function refreshBayMapPage() {
     renderBayRouteFlow(null);
   }
   renderBayMapPage();
+  maybeShowStaleBayAlert().catch(() => {});
 }
 
 function renderBayRouteFlow(summary) {
@@ -2146,15 +2177,33 @@ function bayMatchesFilter(bay, text) {
   const sourceStatus = String(bay?.sourceStatus || "").toLowerCase();
   const statusKind = bayStatusKind(bay);
   const matchesCategory = state.bayCategoryFilter === "all" || bayCategoryKind(bay) === state.bayCategoryFilter;
+  const matchesGlass =
+    state.bayGlassFilter === "all" ||
+    (bay.assignments || []).some((assignment) => normalizeFilterValue(assignment.product || assignment.job || "Other Glass") === state.bayGlassFilter) ||
+    normalizeFilterValue(bayGlassLabel(bay)) === state.bayGlassFilter;
+  const matchesSpecial =
+    state.baySpecialFilter === "all" ||
+    (state.baySpecialFilter === "old" && Number(bay.staleDays || 0) > 10) ||
+    (state.baySpecialFilter === "sdi" && (statusKind === "picking" || (bay.assignments || []).some((assignment) => String(assignment.status || "").toLowerCase().includes("sdi")))) ||
+    (state.baySpecialFilter === "new" && Boolean(bay.isNewToday || (bay.assignments || []).some((assignment) => assignment.isNewToday)));
   const matchesStatus =
     state.bayStatusFilter === "all" ||
     state.bayStatusFilter === statusKind ||
     (state.bayStatusFilter === "manual" && (!bay?.active || sourceStatus.includes("manual"))) ||
     (state.bayStatusFilter === "empty" && (status.includes("empty") || status.includes("available"))) ||
     status.includes(state.bayStatusFilter);
-  if (!matchesCategory || !matchesStatus) return false;
+  if (!matchesCategory || !matchesStatus || !matchesGlass || !matchesSpecial) return false;
   if (!search) return true;
   return text.toLowerCase().includes(search);
+}
+
+function normalizeFilterValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function bayGlassLabel(bay) {
+  const assignment = (bay?.assignments || [])[0];
+  return String(assignment?.product || assignment?.job || bay?.bayCategory || bay?.bayType || "Other Glass").trim() || "Other Glass";
 }
 
 function isWorkbookLegendCell(cell) {
@@ -2221,7 +2270,7 @@ function baySearchText(bay) {
     bay?.mapSection,
     bay?.bayCategory,
     bay?.bayType,
-    ...(bay?.assignments || []).map((assignment) => `${assignment.order} ${assignment.item} ${assignment.customer} ${assignment.product} ${assignment.job} ${assignment.dimensions}`),
+    ...(bay?.assignments || []).map((assignment) => `${assignment.order} ${assignment.item} ${assignment.customer} ${assignment.product} ${assignment.job} ${assignment.dimensions} ${assignment.deliveryDate}`),
   ].join(" ");
 }
 
@@ -2258,6 +2307,17 @@ function bayCategoryFilterOptions() {
   ];
 }
 
+function bayGlassFilterOptions() {
+  const values = new Map();
+  for (const bay of state.bays || []) {
+    for (const assignment of bay.assignments || []) {
+      const label = String(assignment.product || assignment.job || "Other Glass").trim() || "Other Glass";
+      values.set(normalizeFilterValue(label), label);
+    }
+  }
+  return [["all", "All glass types"], ...[...values.entries()].sort((a, b) => a[1].localeCompare(b[1]))];
+}
+
 function bayOverview() {
   const countableBays = state.bays.filter((bay) => bayCategoryKind(bay) !== "spacer");
 
@@ -2292,6 +2352,10 @@ function renderBaySlotButton(bay, mode = "physical") {
   const statusKind = bayStatusKind(bay);
   const label = bay.displayName || bay.bayCode;
   const stateLine = assignment ? `${abbreviation || statusAbbreviation(status, bay) || statusKind.toUpperCase()}: ${assignment.order}` : `${abbreviation || "AVL"}: Empty`;
+  const ribbons = [
+    Number(bay.staleDays || 0) > 10 ? `<span class="bay-ribbon stale">${escapeHtml(bay.staleDays)}d</span>` : "",
+    bay.isNewToday ? `<span class="bay-ribbon new">NEW</span>` : "",
+  ].filter(Boolean).join("");
   return `
     <button class="${mode === "physical" ? "physical-bay-slot" : "bay-slot"} type-${escapeHtml(kind)} status-${escapeHtml(statusKind)} ${escapeHtml(String(status).toLowerCase())} ${dimmed ? "is-dimmed" : ""} ${searchMatch ? "is-search-match" : ""} ${state.selectedBayCode === bay.bayCode ? "is-selected" : ""}"
       type="button"
@@ -2299,6 +2363,7 @@ function renderBaySlotButton(bay, mode = "physical") {
       data-assignment-id="${escapeHtml(assignment?.id || "")}"
       ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""}
       title="${escapeHtml(text)}">
+      ${ribbons}
       <span class="bay-code">${escapeHtml(label)}</span>
       ${abbreviation ? `<span class="bay-state">${escapeHtml(abbreviation)}</span>` : ""}
       <small>${escapeHtml(stateLine)}</small>
@@ -2391,24 +2456,11 @@ function initializeBayLayoutDraft() {
 }
 
 function normalizedBayGridPositions(sections) {
-  const used = new Set();
   const positions = {};
   sections.forEach((section, index) => {
-    let row = Math.round(Number(section.row || 0));
-    let col = Math.round(Number(section.col || 0));
-    if (row < 1 || row > 7 || col < 1 || col > 7 || used.has(`${row}:${col}`)) {
-      row = Math.floor(index / 7) + 1;
-      col = (index % 7) + 1;
-      while (row <= 7 && used.has(`${row}:${col}`)) {
-        col += 1;
-        if (col > 7) {
-          col = 1;
-          row += 1;
-        }
-      }
-    }
+    const row = Math.floor(index / 7) + 1;
+    const col = (index % 7) + 1;
     if (row <= 7) {
-      used.add(`${row}:${col}`);
       positions[section.label] = { row, col, holding: false };
     } else {
       positions[section.label] = { row: 0, col: 0, holding: true };
@@ -2418,8 +2470,10 @@ function normalizedBayGridPositions(sections) {
 }
 
 function renderBaySection(section) {
-  const visible = section.bays.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))).length;
-  const dimmed = !visible && (state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.baySearch);
+  const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
+  const displayBays = filtersActive ? section.bays.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))) : section.bays;
+  const visible = displayBays.length;
+  const dimmed = !visible && filtersActive;
   const occupied = section.bays.filter((bay) => Number(bay.assignedQty || 0) > 0).length;
   const open = !state.collapsedBaySections.has(section.label);
   const cols = Math.max(1, Math.min(Number(state.bayGroupColumns[section.label] || 1), 2));
@@ -2427,7 +2481,7 @@ function renderBaySection(section) {
     <details ${open ? "open" : ""} class="physical-bay-section type-${escapeHtml(section.kind)} cols-${cols} ${state.bayEditMode ? "is-editing" : ""} ${dimmed ? "is-dimmed" : ""}" data-bay-drop-section="${escapeHtml(section.label)}" data-bay-drop-category="${escapeHtml(section.kind)}">
       <summary ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""} data-bay-group-drag="${escapeHtml(section.label)}"><strong>${escapeHtml(section.label)}</strong><span>${escapeHtml(occupied)} / ${escapeHtml(section.bays.length)}</span>${state.bayEditMode ? `<span class="bay-column-controls"><button type="button" data-bay-col-action="dec" data-bay-section="${escapeHtml(section.label)}">-</button><b>${cols} col</b><button type="button" data-bay-col-action="inc" data-bay-section="${escapeHtml(section.label)}">+</button></span>` : ""}</summary>
       <div class="physical-slot-grid" style="--bay-section-cols:${cols}">
-        ${section.bays.map((bay) => renderBaySlotButton(bay, "physical")).join("")}
+        ${displayBays.map((bay) => renderBaySlotButton(bay, "physical")).join("")}
       </div>
     </details>
   `;
@@ -2470,7 +2524,8 @@ function renderBayGrid(physicalSections) {
 
 function renderBayMapPage() {
   if (!els.bayMapCanvas || !state.bayLayout) return;
-  const physicalSections = bayPhysicalSections();
+  const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
+  const physicalSections = bayPhysicalSections().filter((section) => !filtersActive || section.bays.some((bay) => bayMatchesFilter(bay, baySearchText(bay))));
   els.bayMapCanvas.innerHTML = renderBayGrid(physicalSections);
   els.bayMapCanvas.querySelectorAll(".physical-bay-section").forEach((details) => {
     details.addEventListener("toggle", () => {
@@ -2501,6 +2556,13 @@ function renderBaySidePanels() {
       .map(([value, label]) => `<button class="tab ${state.bayCategoryFilter === value ? "is-active" : ""}" type="button" data-bay-category-filter="${escapeHtml(value)}">${escapeHtml(label)}</button>`)
       .join("");
   }
+  if (els.bayGlassFilter) {
+    const options = bayGlassFilterOptions();
+    if (state.bayGlassFilter !== "all" && !options.some(([value]) => value === state.bayGlassFilter)) state.bayGlassFilter = "all";
+    els.bayGlassFilter.innerHTML = options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("");
+    els.bayGlassFilter.value = state.bayGlassFilter;
+  }
+  if (els.baySpecialFilter) els.baySpecialFilter.value = state.baySpecialFilter;
   const bay = selectedBay();
   if (els.baySelectedPanel) {
     if (!bay) {
@@ -2589,6 +2651,73 @@ function renderBaySidePanels() {
       })
       .join("");
   }
+}
+
+async function loadStaleBayOrders(includeSnoozed = false) {
+  if (!state.backend) {
+    state.staleBayOrders = [];
+    return [];
+  }
+  const payload = await fetchJson(`/api/indian-trail/stale-bays${includeSnoozed ? "?includeSnoozed=1" : ""}`);
+  state.staleBayOrders = payload.orders || [];
+  return state.staleBayOrders;
+}
+
+async function maybeShowStaleBayAlert() {
+  if (state.page !== "bays" || !hasPermission("view_bays")) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const key = `staleBayAlertSeen:${state.user?.username || "user"}:${today}`;
+  if (sessionStorage.getItem(key) === "1") return;
+  const orders = await loadStaleBayOrders(false);
+  if (!orders.length) return;
+  sessionStorage.setItem(key, "1");
+  openStaleBayPanel(orders);
+}
+
+function openStaleBayPanel(orders = state.staleBayOrders) {
+  if (!els.staleBayPanel || !els.staleBayBackdrop) return;
+  renderStaleBayPanel(orders || []);
+  els.staleBayPanel.hidden = false;
+  els.staleBayBackdrop.hidden = false;
+}
+
+function closeStaleBayPanel() {
+  if (els.staleBayPanel) els.staleBayPanel.hidden = true;
+  if (els.staleBayBackdrop) els.staleBayBackdrop.hidden = true;
+}
+
+function renderStaleBayPanel(orders) {
+  if (!els.staleBayList) return;
+  if (!orders.length) {
+    els.staleBayList.innerHTML = `<div class="admin-empty">No bay orders are older than 10 days right now.</div>`;
+    return;
+  }
+  els.staleBayList.innerHTML = orders
+    .map((order) => `
+      <article class="stale-bay-order">
+        <span class="age-ribbon">${escapeHtml(order.daysOld)} days</span>
+        <div>
+          <strong>${escapeHtml(order.order)}-${escapeHtml(order.item)} <span>${escapeHtml(order.customer || "")}</span></strong>
+          <small>Bay ${escapeHtml(order.bayDisplay || order.bayCode)} | ${escapeHtml(order.job || order.product || "")}</small>
+          <small>${escapeHtml(order.dimensions || "")} | Delivery ${escapeHtml(formatDisplayDate(order.deliveryDate || ""))} | Last scanned ${escapeHtml(formatDateTime(order.lastScannedAt) || "Not scanned")}</small>
+        </div>
+        <div class="stale-snooze-row">
+          <input type="number" min="1" max="365" value="1" data-stale-days="${escapeHtml(order.assignmentId)}" aria-label="Snooze days">
+          <button type="button" data-stale-snooze="${escapeHtml(order.assignmentId)}">Snooze</button>
+        </div>
+      </article>
+    `)
+    .join("");
+}
+
+async function snoozeStaleBayOrders(assignmentIds, days) {
+  const payload = await fetchJson("/api/indian-trail/stale-bays/snooze", {
+    method: "POST",
+    body: JSON.stringify({ assignmentIds, days }),
+  });
+  state.staleBayOrders = payload.orders || [];
+  renderStaleBayPanel(state.staleBayOrders);
+  await refreshBayMapPage();
 }
 
 function renderBayLegend() {
@@ -2854,6 +2983,11 @@ async function runBayAction(action) {
   if (action === "item-management") {
     openSdiPanel();
     showFloatingNotice("Use the selected bay order buttons to move, clear, or mark items while the Item Management panel is expanded here.", "notice");
+    return;
+  }
+  if (action === "old-bays") {
+    const orders = await loadStaleBayOrders(false);
+    openStaleBayPanel(orders);
     return;
   }
   const bay = requireSelectedBay();
@@ -4212,6 +4346,11 @@ function wireEvents() {
       completeRack(completeButton.dataset.rackComplete).catch((error) => showInlineError(error.message, true));
       return;
     }
+    const uncompleteButton = event.target.closest("[data-rack-uncomplete]");
+    if (uncompleteButton) {
+      uncompleteRack(uncompleteButton.dataset.rackUncomplete).catch((error) => showInlineError(error.message, true));
+      return;
+    }
     const clearButton = event.target.closest("[data-rack-clear]");
     if (clearButton) {
       clearRack(clearButton.dataset.rackClear).catch((error) => showInlineError(error.message, true));
@@ -4319,6 +4458,14 @@ function wireEvents() {
     state.bayStatusFilter = els.bayStatusFilter.value;
     renderBayMapPage();
   });
+  els.bayGlassFilter?.addEventListener("change", () => {
+    state.bayGlassFilter = els.bayGlassFilter.value;
+    renderBayMapPage();
+  });
+  els.baySpecialFilter?.addEventListener("change", () => {
+    state.baySpecialFilter = els.baySpecialFilter.value;
+    renderBayMapPage();
+  });
   els.bayCategoryFilters?.addEventListener("click", (event) => {
     const target = event.target.closest("[data-bay-category-filter]");
     if (!target) return;
@@ -4390,6 +4537,22 @@ function wireEvents() {
   });
   els.sdiCloseBtn?.addEventListener("click", () => closeSdiPanel());
   els.sdiBackdrop?.addEventListener("click", () => closeSdiPanel());
+  els.staleBayCloseBtn?.addEventListener("click", () => closeStaleBayPanel());
+  els.staleBayOkBtn?.addEventListener("click", () => closeStaleBayPanel());
+  els.staleBayBackdrop?.addEventListener("click", () => closeStaleBayPanel());
+  els.staleBayPrintBtn?.addEventListener("click", () => window.open("/api/indian-trail/stale-bays/print", "_blank", "noopener"));
+  els.staleBaySnoozeAllBtn?.addEventListener("click", () => {
+    const ids = (state.staleBayOrders || []).map((order) => order.assignmentId).filter(Boolean);
+    if (!ids.length) return;
+    snoozeStaleBayOrders(ids, Number(els.staleBaySnoozeAllDays?.value || 1)).catch((error) => showInlineError(error.message, true));
+  });
+  els.staleBayList?.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-stale-snooze]");
+    if (!target) return;
+    const assignmentId = target.dataset.staleSnooze;
+    const days = Number(els.staleBayList.querySelector(`[data-stale-days="${CSS.escape(String(assignmentId))}"]`)?.value || 1);
+    snoozeStaleBayOrders([assignmentId], days).catch((error) => showInlineError(error.message, true));
+  });
   els.sdiClearBtn?.addEventListener("click", () => submitSdi(false).catch((error) => showInlineError(error.message, true)));
   els.sdiForm?.addEventListener("submit", (event) => {
     event.preventDefault();

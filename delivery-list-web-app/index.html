@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" type="image/png" href="assets/delivery-list-scanner-icon.png">
-  <link rel="stylesheet" href="styles.css?v=20260622-bay-layout-2">
+  <link rel="stylesheet" href="styles.css?v=20260626-rack-stale-bays">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
@@ -434,6 +434,7 @@
         <div class="bay-action-buttons" id="bayActionButtons">
           <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout">Edit Map</button>
           <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi">SDI</button>
+          <button type="button" data-bay-action="old-bays" data-permission-any="view_bays">Old Bays Check</button>
           <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay">Item Management</button>
         </div>
         <div id="bayFlowPanel" class="bay-route-flow"></div>
@@ -450,6 +451,15 @@
             <option value="picking">Picking / SDI</option>
             <option value="blocked">Blocked</option>
             <option value="manual">Manual hold</option>
+          </select>
+          <select id="bayGlassFilter">
+            <option value="all">All glass types</option>
+          </select>
+          <select id="baySpecialFilter">
+            <option value="all">All bay orders</option>
+            <option value="old">Old orders</option>
+            <option value="sdi">SDI</option>
+            <option value="new">New today</option>
           </select>
           <button class="tool-button" id="bayCheckBtn" type="button">Bay check</button>
         </div>
@@ -592,6 +602,21 @@
             <button id="baySelectedCloseBtn" type="button">Close</button>
           </div>
           <div id="baySelectedPanel"></div>
+        </section>
+        <div class="modal-backdrop" id="staleBayBackdrop" hidden></div>
+        <section class="modal-panel stale-bay-panel" id="staleBayPanel" hidden>
+          <div class="section-heading">
+            <h2>Old Bay Orders</h2>
+            <button id="staleBayCloseBtn" type="button">Close</button>
+          </div>
+          <p class="admin-empty">Orders below have been assigned to a bay for more than 10 days.</p>
+          <div id="staleBayList" class="stale-bay-list"></div>
+          <div class="stale-bay-actions">
+            <label><span>Snooze all days</span><input id="staleBaySnoozeAllDays" type="number" min="1" max="365" value="1"></label>
+            <button id="staleBaySnoozeAllBtn" type="button">Snooze All</button>
+            <button id="staleBayPrintBtn" type="button">Print Investigation List</button>
+            <button id="staleBayOkBtn" type="button">OK</button>
+          </div>
         </section>
         <div class="modal-backdrop" id="sdiBackdrop" hidden></div>
         <section class="sdi-panel modal-panel" id="sdiPanel" hidden>
@@ -809,6 +834,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=20260622-bay-layout-2"></script>
+  <script src="app.js?v=20260626-rack-stale-bays"></script>
 </body>
 </html>

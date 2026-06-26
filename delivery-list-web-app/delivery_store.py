@@ -654,6 +654,8 @@ def item_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "rackName": row["rack_name"] if "rack_name" in row.keys() else "",
         "rackType": row["rack_type"] if "rack_type" in row.keys() else "",
         "bayCode": row["bay_code"] if "bay_code" in row.keys() else "",
+        "lastScannedAt": row["last_scanned_at"] if "last_scanned_at" in row.keys() else "",
+        "lastScannedStation": row["last_scanned_station"] if "last_scanned_station" in row.keys() else "",
     }
 
 
@@ -1133,6 +1135,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 reason TEXT NOT NULL DEFAULT '',
                 UNIQUE(rack_id, line_item_id)
             );
+
+            CREATE TABLE IF NOT EXISTS bay_stale_snoozes (
+                assignment_id INTEGER PRIMARY KEY REFERENCES bay_assignments(id) ON DELETE CASCADE,
+                snoozed_until TEXT NOT NULL,
+                snoozed_by TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            );
             """
         )
         self.ensure_column(con, "bays", "display_name", "TEXT NOT NULL DEFAULT ''")
@@ -1580,7 +1589,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ).fetchone()
 
         rows = con.execute(
-            "SELECT * FROM line_items WHERE list_id = ? ORDER BY CAST(order_no AS INTEGER), CAST(item_no AS INTEGER), id",
+            """
+            SELECT li.*,
+                   (
+                    SELECT se.created_at
+                    FROM scan_events se
+                    WHERE se.line_item_id = li.id AND se.qty_delta > 0
+                    ORDER BY se.created_at DESC, se.id DESC
+                    LIMIT 1
+                   ) AS last_scanned_at,
+                   (
+                    SELECT se.station
+                    FROM scan_events se
+                    WHERE se.line_item_id = li.id AND se.qty_delta > 0
+                    ORDER BY se.created_at DESC, se.id DESC
+                    LIMIT 1
+                   ) AS last_scanned_station
+            FROM line_items li
+            WHERE li.list_id = ?
+            ORDER BY CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER), li.id
+            """,
             (list_id,),
         ).fetchall()
 
@@ -2578,11 +2606,32 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "This item was not scanned on staging, so it was auto-scanned for convenience.",
                 )
 
-            con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
             rack_code_for_scan = normalize_rack_code(str(scan_request.get("rackCode") or ""))
             list_row_for_rack = con.execute("SELECT stage FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+            rack_for_scan = None
             if rack_code_for_scan and list_row_for_rack and "staging" in str(list_row_for_rack["stage"]).lower():
-                rack = self.get_rack_by_code(con, rack_code_for_scan)
+                rack_for_scan = self.get_rack_by_code(con, rack_code_for_scan)
+                if str(rack_for_scan["status"] or "").lower() == "closed":
+                    last = self.insert_event(
+                        con,
+                        list_id,
+                        row["id"],
+                        barcode,
+                        canonical,
+                        user,
+                        station,
+                        "error",
+                        f"Rack {rack_for_scan['rack_code']} is closed",
+                        "Uncomplete or clear this rack before scanning more pieces into it.",
+                    )
+                    con.commit()
+                    payload = self._get_payload(con, list_id, last)
+                    racks_payload = self.get_racks()
+                    payload["racks"] = racks_payload.get("racks", [])
+                    payload["rackSummary"] = racks_payload.get("summary")
+                    return payload
+            con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
+            if rack_for_scan:
                 con.execute(
                     """
                     INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
@@ -2596,7 +2645,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         added_by = excluded.added_by,
                         added_at = excluded.added_at
                     """,
-                    (rack["id"], row["id"], user, now_iso()),
+                    (rack_for_scan["id"], row["id"], user, now_iso()),
                 )
             preassigned_bay = self.preassign_bay_for_outbound(con, list_id, row, user, station)
             last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", reason, "", 1)
@@ -3253,7 +3302,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             """
             SELECT ba.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.customer,
                    li.dimensions, li.product, li.job, li.process_state, li.queue_state,
-                   dl.delivery_date, dl.stage,
+                   dl.delivery_date, dl.stage, bss.snoozed_until,
                    (
                     SELECT se.created_at
                     FROM scan_events se
@@ -3271,6 +3320,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             FROM bay_assignments ba
             JOIN line_items li ON li.id = ba.line_item_id
             JOIN delivery_lists dl ON dl.id = li.list_id
+            LEFT JOIN bay_stale_snoozes bss ON bss.assignment_id = ba.id
             WHERE ba.bay_id = ? AND ba.status NOT IN ('Cleared', 'Cancelled')
             ORDER BY ba.assigned_at DESC
             """,
@@ -3290,23 +3340,36 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             status = "Partial"
         else:
             status = "Occupied"
-        return {
-            "id": row["id"],
-            "bayCode": row["bay_code"],
-            "displayName": row["display_name"] or row["bay_code"],
-            "area": row["area"],
-            "bayType": row["bay_type"],
-            "mapSection": row["map_section"],
-            "bayCategory": row["bay_category"],
-            "layoutRow": row["layout_row"],
-            "layoutCol": row["layout_col"],
-            "layoutCell": row["layout_cell"],
-            "capacityQty": row["capacity_qty"],
-            "assignedQty": assigned_qty,
-            "status": status,
-            "sourceStatus": bay_status,
-            "active": bool(row["active"]),
-            "assignments": [
+        now = datetime.now(timezone.utc)
+        today_key = now.date().isoformat()
+        assignment_payload = []
+        max_stale_days = 0
+        any_new_today = False
+        for item in assignments:
+            assigned_at = str(item["assigned_at"] or "")
+            try:
+                assigned_dt = parse_iso(assigned_at)
+                if assigned_dt.tzinfo is None:
+                    assigned_dt = assigned_dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                assigned_dt = now
+            days_in_bay = max((now - assigned_dt).days, 0)
+            snoozed_until = str(item["snoozed_until"] or "")
+            snoozed = False
+            if snoozed_until:
+                try:
+                    snooze_dt = parse_iso(snoozed_until)
+                    if snooze_dt.tzinfo is None:
+                        snooze_dt = snooze_dt.replace(tzinfo=timezone.utc)
+                    snoozed = snooze_dt > now
+                except Exception:
+                    snoozed = False
+            is_stale = days_in_bay > 10 and not snoozed
+            is_new_today = assigned_at[:10] == today_key
+            if is_stale:
+                max_stale_days = max(max_stale_days, days_in_bay)
+            any_new_today = any_new_today or is_new_today
+            assignment_payload.append(
                 {
                     "id": item["id"],
                     "deliveryListId": item["delivery_list_id"],
@@ -3326,10 +3389,33 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "lastStage": item["stage"],
                     "lastScannedAt": item["last_scanned_at"],
                     "lastScannedStation": item["last_scanned_station"],
+                    "assignedAt": assigned_at,
+                    "daysInBay": days_in_bay,
+                    "isStale": is_stale,
+                    "snoozedUntil": snoozed_until,
+                    "isNewToday": is_new_today,
                     "status": item["status"],
                 }
-                for item in assignments
-            ],
+            )
+        return {
+            "id": row["id"],
+            "bayCode": row["bay_code"],
+            "displayName": row["display_name"] or row["bay_code"],
+            "area": row["area"],
+            "bayType": row["bay_type"],
+            "mapSection": row["map_section"],
+            "bayCategory": row["bay_category"],
+            "layoutRow": row["layout_row"],
+            "layoutCol": row["layout_col"],
+            "layoutCell": row["layout_cell"],
+            "capacityQty": row["capacity_qty"],
+            "assignedQty": assigned_qty,
+            "status": status,
+            "sourceStatus": bay_status,
+            "active": bool(row["active"]),
+            "staleDays": max_stale_days,
+            "isNewToday": any_new_today,
+            "assignments": assignment_payload,
         }
 
     def get_bays(self) -> list[dict[str, Any]]:
@@ -3387,6 +3473,106 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             }
             for row in rows
         ]
+
+    def get_stale_bay_orders(self, include_snoozed: bool = False) -> list[dict[str, Any]]:
+        now = datetime.now(timezone.utc)
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT ba.id AS assignment_id, ba.assigned_at, ba.assigned_qty, ba.status AS assignment_status,
+                       b.bay_code, b.display_name AS bay_display, b.map_section, b.bay_category,
+                       li.order_no, li.item_no, li.customer, li.dimensions, li.product, li.job,
+                       dl.delivery_date, dl.stage,
+                       bss.snoozed_until,
+                       (
+                        SELECT se.created_at
+                        FROM scan_events se
+                        WHERE se.line_item_id = li.id AND se.qty_delta > 0
+                        ORDER BY se.created_at DESC, se.id DESC
+                        LIMIT 1
+                       ) AS last_scanned_at
+                FROM bay_assignments ba
+                JOIN bays b ON b.id = ba.bay_id
+                JOIN line_items li ON li.id = ba.line_item_id
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                LEFT JOIN bay_stale_snoozes bss ON bss.assignment_id = ba.id
+                WHERE ba.status NOT IN ('Cleared', 'Cancelled')
+                ORDER BY ba.assigned_at ASC, b.bay_code
+                """
+            ).fetchall()
+        result = []
+        for row in rows:
+            assigned_at = str(row["assigned_at"] or "")
+            try:
+                assigned_dt = parse_iso(assigned_at)
+                if assigned_dt.tzinfo is None:
+                    assigned_dt = assigned_dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                assigned_dt = now
+            days_old = max((now - assigned_dt).days, 0)
+            if days_old <= 10:
+                continue
+            snoozed_until = str(row["snoozed_until"] or "")
+            if snoozed_until and not include_snoozed:
+                try:
+                    snooze_dt = parse_iso(snoozed_until)
+                    if snooze_dt.tzinfo is None:
+                        snooze_dt = snooze_dt.replace(tzinfo=timezone.utc)
+                    if snooze_dt > now:
+                        continue
+                except Exception:
+                    pass
+            result.append(
+                {
+                    "assignmentId": row["assignment_id"],
+                    "bayCode": row["bay_code"],
+                    "bayDisplay": row["bay_display"] or row["bay_code"],
+                    "mapSection": row["map_section"],
+                    "bayCategory": row["bay_category"],
+                    "order": row["order_no"],
+                    "item": row["item_no"],
+                    "customer": row["customer"],
+                    "dimensions": row["dimensions"],
+                    "product": row["product"],
+                    "job": row["job"],
+                    "qty": row["assigned_qty"],
+                    "deliveryDate": row["delivery_date"],
+                    "stage": row["stage"],
+                    "assignedAt": assigned_at,
+                    "lastScannedAt": row["last_scanned_at"],
+                    "daysOld": days_old,
+                    "snoozedUntil": snoozed_until,
+                    "status": row["assignment_status"],
+                }
+            )
+        return result
+
+    def snooze_stale_bay_orders(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        ids = data.get("assignmentIds")
+        if ids is None:
+            ids = [data.get("assignmentId")]
+        assignment_ids = [int(value) for value in ids if str(value or "").strip()]
+        days = max(1, min(int(data.get("days") or 1), 365))
+        snoozed_until = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat(timespec="seconds")
+        if not assignment_ids:
+            raise ValueError("At least one stale bay assignment is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            for assignment_id in assignment_ids:
+                con.execute(
+                    """
+                    INSERT INTO bay_stale_snoozes (assignment_id, snoozed_until, snoozed_by, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(assignment_id) DO UPDATE SET
+                        snoozed_until = excluded.snoozed_until,
+                        snoozed_by = excluded.snoozed_by,
+                        updated_at = excluded.updated_at
+                    """,
+                    (assignment_id, snoozed_until, user, now_iso()),
+                )
+            self.insert_audit(con, "bay_assignment", ",".join(str(value) for value in assignment_ids), "snooze_stale_bay", user, "", f"Snoozed {days} day(s)", {"days": days})
+            con.commit()
+        return {"ok": True, "snoozedUntil": snoozed_until, "orders": self.get_stale_bay_orders()}
 
     def rack_from_row(self, con: sqlite3.Connection, rack: sqlite3.Row) -> dict[str, Any]:
         rows = con.execute(
@@ -3473,6 +3659,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not list_row or "staging" not in str(list_row["stage"]).lower():
                 raise ValueError("Rack scans must be made from a staging delivery list")
             rack = self.get_rack_by_code(con, rack_code)
+            if str(rack["status"] or "").lower() == "closed":
+                raise ValueError(f"Rack {rack['rack_code']} is closed. Uncomplete or clear it before scanning more pieces.")
             rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall()
             row, canonical, reason = self.recover_scan(barcode, rows)
             if row is None:
@@ -3542,6 +3730,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return self.get_racks()
 
+    def uncomplete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            rack = self.get_rack_by_code(con, rack_code)
+            con.execute("UPDATE racks SET status = 'Open', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
+            self.insert_audit(con, "rack", rack["rack_code"], "uncomplete_rack", user, "", "Rack reopened for staging scans", {})
+            con.commit()
+        return self.get_racks()
+
     def update_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         code = normalize_rack_code(str(data.get("rackCode") or data.get("code") or ""))
         name = str(data.get("name") or data.get("displayName") or code).strip()[:80]
@@ -3587,10 +3785,38 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         station = request_station(scan_request)
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            rack = self.get_rack_by_code(con, rack_code)
             list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
             if not list_row or "outbound" not in str(list_row["stage"]).lower():
-                raise ValueError("Rack barcodes can only be scanned on the outbound stage")
-            rack = self.get_rack_by_code(con, rack_code)
+                rack_date = con.execute(
+                    """
+                    SELECT src_dl.delivery_date
+                    FROM rack_items ri
+                    JOIN line_items src ON src.id = ri.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src.list_id
+                    WHERE ri.rack_id = ? AND ri.status = 'Active'
+                    ORDER BY src_dl.delivery_date DESC
+                    LIMIT 1
+                    """,
+                    (rack["id"],),
+                ).fetchone()
+                if not rack_date:
+                    raise ValueError("Rack has no active pieces to scan outbound")
+                list_row = con.execute(
+                    """
+                    SELECT *
+                    FROM delivery_lists
+                    WHERE delivery_date = ?
+                      AND status = 'active'
+                      AND LOWER(stage) LIKE '%outbound%'
+                    ORDER BY id
+                    LIMIT 1
+                    """,
+                    (rack_date["delivery_date"],),
+                ).fetchone()
+                if not list_row:
+                    raise ValueError("No outbound delivery list was found for this rack")
+                list_id = list_row["id"]
             rows = con.execute(
                 """
                 SELECT out_li.*
@@ -3626,7 +3852,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("UPDATE racks SET status = 'In Transit', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
             self.insert_audit(con, "rack", rack["rack_code"], "rack_outbound_scan", user, station, "", {"scannedCount": scanned_count})
             con.commit()
-            return self._get_payload(con, list_id, last)
+            payload = self._get_payload(con, list_id, last)
+            payload["redirectListId"] = list_id
+            payload["message"] = f"Rack {rack['rack_code']} scanned outbound for {scanned_count} piece{'s' if scanned_count != 1 else ''}."
+            return payload
 
     def indian_trail_summary(self) -> dict[str, Any]:
         with self.connect() as con:

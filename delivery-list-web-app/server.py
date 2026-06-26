@@ -244,6 +244,65 @@ def render_rack_packing_list(payload: dict) -> str:
     """
 
 
+def render_stale_bay_report(rows: list[dict]) -> str:
+    body_rows = []
+    for row in rows:
+        body_rows.append(
+            f"""
+            <tr>
+              <td>{esc(row.get("daysOld"))} days</td>
+              <td>{esc(row.get("bayDisplay") or row.get("bayCode"))}</td>
+              <td>{esc(row.get("order"))}</td>
+              <td>{esc(row.get("item"))}</td>
+              <td>{esc(row.get("job") or row.get("product"))}</td>
+              <td>{esc(row.get("dimensions"))}</td>
+              <td>{esc(row.get("customer"))}</td>
+              <td>{esc(row.get("deliveryDate"))}</td>
+              <td>{esc(row.get("lastScannedAt"))}</td>
+              <td class="check-cell">&#9744;</td>
+            </tr>
+            """
+        )
+    if not body_rows:
+        body_rows.append('<tr><td colspan="10">No bay orders are older than 10 days.</td></tr>')
+    return f"""
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Old Bay Orders</title>
+      <link rel="icon" type="image/png" href="/assets/delivery-list-scanner-icon.png">
+      <style>
+        body {{ font-family: Arial, sans-serif; color: #071633; margin: 24px; }}
+        header {{ display: flex; justify-content: space-between; border-bottom: 3px solid #071633; padding-bottom: 12px; }}
+        h1 {{ margin: 0; font-size: 26px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }}
+        th, td {{ border: 1px solid #222; padding: 6px; text-align: left; vertical-align: top; }}
+        th {{ background: #efefef; }}
+        .check-cell {{ width: 44px; text-align: center; font-size: 20px; }}
+        @media print {{ body {{ margin: 0.3in; }} button {{ display: none; }} }}
+      </style>
+    </head>
+    <body>
+      <button onclick="window.print()">Print</button>
+      <header>
+        <div>
+          <h1>Old Bay Orders</h1>
+          <p>Orders in Indian Trail bays more than 10 days.</p>
+        </div>
+        <div>Checked By: __________ Date: ________</div>
+      </header>
+      <table>
+        <thead>
+          <tr><th>Age</th><th>Bay</th><th>Order</th><th>Item</th><th>Job Nr.</th><th>Dimensions</th><th>Customer</th><th>Delivery</th><th>Last Scanned</th><th>Check</th></tr>
+        </thead>
+        <tbody>{''.join(body_rows)}</tbody>
+      </table>
+    </body>
+    </html>
+    """
+
+
 def render_print_package(package: dict) -> str:
     sections = []
     filters = package.get("filters", {}) or {}
@@ -473,6 +532,24 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             limit = parse_qs(parsed.query).get("limit", ["20"])[0]
             self.send_json({"events": STORE.get_bay_events(int(limit or 20))})
+            return
+
+        if parsed.path == "/api/indian-trail/stale-bays":
+            if not self.require_permission("view_bays"):
+                return
+            include_snoozed = parse_qs(parsed.query).get("includeSnoozed", ["0"])[0] in {"1", "true", "yes"}
+            self.send_json({"orders": STORE.get_stale_bay_orders(include_snoozed=include_snoozed)})
+            return
+
+        if parsed.path == "/api/indian-trail/stale-bays/print":
+            if not self.require_permission("view_bays"):
+                return
+            body = render_stale_bay_report(STORE.get_stale_bay_orders(include_snoozed=True)).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         if parsed.path == "/api/racks":
@@ -930,6 +1007,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.bay_check(data, user["username"]))
                 return
 
+            if parsed.path == "/api/indian-trail/stale-bays/snooze":
+                user = self.require_permission("view_bays")
+                if not user:
+                    return
+                self.send_json(STORE.snooze_stale_bay_orders(data, user["username"]))
+                return
+
             if parsed.path == "/api/racks/scan":
                 user = self.require_permission("scan_racks")
                 if not user:
@@ -945,6 +1029,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.complete_rack(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/uncomplete":
+                user = self.require_permission("scan_racks")
+                if not user:
+                    return
+                self.send_json(STORE.uncomplete_rack(data, user["username"]))
                 return
 
             if parsed.path == "/api/racks/move-item":
