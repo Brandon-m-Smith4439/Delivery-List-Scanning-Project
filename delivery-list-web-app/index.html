@@ -4,8 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
+  <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
   <link rel="icon" type="image/png" href="assets/delivery-list-scanner-icon.png">
-  <link rel="stylesheet" href="styles.css?v=20260626-rack-stale-bays">
+  <link rel="stylesheet" href="styles.css?v=20260629-admin-rack-icon">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
@@ -28,7 +29,8 @@
   <div class="app">
     <header class="app-header">
       <div class="brand">
-        <img src="assets/barefoot-logo.jpg" alt="Barefoot & Company">
+        <img class="brand-icon" src="assets/delivery-list-scanner-icon.png" alt="">
+        <span><strong>Glass Delivery Scanner</strong><small>Plant Operations</small></span>
       </div>
       <nav class="app-nav" aria-label="Main pages">
         <button class="is-active" data-page-target="home" type="button">Home</button>
@@ -415,6 +417,13 @@
             <button id="rackSaveBtn" type="button">Create / Edit</button>
             <button id="rackDeleteBtn" type="button">Delete</button>
           </div>
+          <div class="rack-admin-actions rack-set-actions" data-permission-any="manage_racks">
+            <input id="rackSetPrefix" type="text" placeholder="Set suffix, e.g. A">
+            <input id="rackSetName" type="text" placeholder="Set name, e.g. Aluminum">
+            <input id="rackSetCount" type="number" min="1" max="100" value="10" aria-label="Rack count">
+            <input id="rackSetStart" type="number" min="1" max="999" value="1" aria-label="Starting rack number">
+            <button id="rackSetCreateBtn" type="button">Create Rack Set</button>
+          </div>
         </section>
 
         <section class="rack-grid" id="rackGrid"></section>
@@ -661,8 +670,8 @@
       <section class="page-view admin-page" id="adminPage" hidden>
         <div class="page-heading">
           <div>
-            <h1>Admin</h1>
-            <p>Delivery lists, users, stations, exceptions, and manual edits</p>
+            <h1>Admin Dashboard</h1>
+            <p>Manage system settings, users, stations, imports, racks, and plant operations.</p>
           </div>
           <div id="adminSummary" class="overview-kpis"></div>
         </div>
@@ -752,6 +761,9 @@
           <section class="panel admin-wide-panel">
             <h2>Manual Delivery List Edit</h2>
             <div class="admin-form">
+              <select id="manualEditStageSelect" aria-label="Manual edit stage">
+                <option value="">All stages</option>
+              </select>
               <input id="manualEditSearch" type="search" autocomplete="off" placeholder="Search order or customer">
               <button id="manualEditSearchBtn" type="button">Search</button>
             </div>
@@ -834,6 +846,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=20260626-rack-stale-bays"></script>
+  <script src="app.js?v=20260629-admin-rack-icon"></script>
 </body>
 </html>

@@ -7,8 +7,13 @@ import json
 import html
 import base64
 import hashlib
+import os
+import tempfile
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
+import zipfile
 from datetime import datetime
 from http.cookies import SimpleCookie
 from http import HTTPStatus
@@ -23,6 +28,64 @@ from scanner_config import load_config
 ROOT = Path(__file__).resolve().parent
 CONFIG = load_config(ROOT)
 STORE = create_store(CONFIG)
+DEFAULT_UPDATE_REPO = "https://github.com/Brandon-m-Smith4439/Delivery-List-Scanning-Project"
+DEFAULT_UPDATE_BRANCH = "main"
+
+
+def update_repo_url() -> str:
+    return os.environ.get("DLS_UPDATE_REPO_URL", DEFAULT_UPDATE_REPO).strip() or DEFAULT_UPDATE_REPO
+
+
+def update_branch() -> str:
+    return os.environ.get("DLS_UPDATE_BRANCH", DEFAULT_UPDATE_BRANCH).strip() or DEFAULT_UPDATE_BRANCH
+
+
+def github_owner_repo(repo_url: str) -> tuple[str, str]:
+    clean = repo_url.strip().rstrip("/")
+    if clean.endswith(".git"):
+        clean = clean[:-4]
+    parts = clean.split("/")
+    if len(parts) < 2:
+        raise ValueError("GitHub repository URL is not configured")
+    return parts[-2], parts[-1]
+
+
+def http_get_bytes(url: str, timeout: int = 60) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": "DeliveryListScannerUpdater/1.0"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def github_update_status(error_prefix: str = "") -> dict:
+    repo_url = update_repo_url()
+    branch = update_branch()
+    try:
+        owner, repo = github_owner_repo(repo_url)
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{branch}"
+        data = json.loads(http_get_bytes(api_url, timeout=30).decode("utf-8"))
+        remote = str(data.get("sha") or "")
+        marker = ROOT / "data" / "update-version.json"
+        local = ""
+        if marker.exists():
+            try:
+                local = str(json.loads(marker.read_text(encoding="utf-8")).get("commit") or "")
+            except Exception:
+                local = ""
+        update_available = bool(remote) and remote != local
+        return {
+            "ok": True,
+            "method": "github_zip",
+            "branch": branch,
+            "upstream": f"{owner}/{repo}/{branch}",
+            "local": local[:12] or "unknown",
+            "remote": remote[:12],
+            "remoteFull": remote,
+            "behind": 1 if update_available else 0,
+            "updateAvailable": update_available,
+            "note": error_prefix or "Git was unavailable; checked GitHub directly.",
+        }
+    except Exception as exc:
+        return {"ok": False, "method": "github_zip", "error": f"{error_prefix} GitHub fallback failed: {exc}".strip(), "updateAvailable": False}
 
 
 def git_update_status() -> dict:
@@ -39,26 +102,13 @@ def git_update_status() -> dict:
         behind = int(behind_text or "0")
         return {"ok": True, "branch": branch, "upstream": upstream, "local": local[:12], "remote": remote[:12], "behind": behind, "updateAvailable": behind > 0}
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "updateAvailable": False}
+        return github_update_status(f"Git unavailable: {exc}.")
 
 
-def apply_git_update() -> dict:
-    status = git_update_status()
-    if not status.get("ok"):
-        return status
-
-    current_commit = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=ROOT.parent,
-        text=True,
-        capture_output=True,
-        timeout=10,
-        check=False,
-    ).stdout.strip() or "unknown"
+def database_backups() -> tuple[Path, list[tuple[Path, Path]]]:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_dir = ROOT / "data" / "_update_backups" / f"{timestamp}-{current_commit}-preserve-db"
+    backup_dir = ROOT / "data" / "_update_backups" / f"{timestamp}-preserve-db"
     backup_dir.mkdir(parents=True, exist_ok=True)
-
     database_files = [
         CONFIG.database_path,
         CONFIG.database_path.with_name(CONFIG.database_path.name + "-wal"),
@@ -70,6 +120,73 @@ def apply_git_update() -> dict:
             target = backup_dir / path.name
             shutil.copy2(path, target)
             backed_up.append((path, target))
+    return backup_dir, backed_up
+
+
+def restore_database_backups(backed_up: list[tuple[Path, Path]]) -> None:
+    for original, backup in backed_up:
+        original.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(backup, original)
+
+
+def apply_github_zip_update(status: dict | None = None) -> dict:
+    status = status or github_update_status()
+    if not status.get("ok"):
+        return status
+    repo_url = update_repo_url()
+    branch = update_branch()
+    owner, repo = github_owner_repo(repo_url)
+    backup_dir, backed_up = database_backups()
+    zip_url = f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch}"
+    try:
+        archive_bytes = http_get_bytes(zip_url, timeout=120)
+        with tempfile.TemporaryDirectory(prefix="dls-update-") as temp_name:
+            temp_dir = Path(temp_name)
+            archive_path = temp_dir / "update.zip"
+            archive_path.write_bytes(archive_bytes)
+            with zipfile.ZipFile(archive_path) as archive:
+                archive.extractall(temp_dir)
+            roots = [path for path in temp_dir.iterdir() if path.is_dir()]
+            if not roots:
+                raise ValueError("GitHub archive did not contain a project folder")
+            source_root = roots[0]
+            target_root = ROOT.parent
+            skip_names = {".git", "data", "_verification", "__pycache__"}
+            for child in source_root.iterdir():
+                if child.name in skip_names:
+                    continue
+                target = target_root / child.name
+                if child.is_dir():
+                    if target.exists():
+                        shutil.rmtree(target)
+                    shutil.copytree(child, target)
+                else:
+                    shutil.copy2(child, target)
+        restore_database_backups(backed_up)
+        marker = ROOT / "data" / "update-version.json"
+        marker.write_text(json.dumps({"commit": status.get("remoteFull") or status.get("remote", ""), "updatedAt": datetime.now().isoformat(timespec="seconds"), "method": "github_zip"}, indent=2), encoding="utf-8")
+        return {"ok": True, "updated": True, "method": "github_zip", "backupDir": str(backup_dir), "restoredDatabaseFiles": [str(path) for path, _ in backed_up], "status": github_update_status()}
+    except Exception as exc:
+        restore_database_backups(backed_up)
+        return {"ok": False, "updated": False, "method": "github_zip", "error": str(exc), "backupDir": str(backup_dir), "restoredDatabaseFiles": [str(path) for path, _ in backed_up]}
+
+
+def apply_git_update() -> dict:
+    status = git_update_status()
+    if not status.get("ok"):
+        return status
+    if status.get("method") == "github_zip":
+        return apply_github_zip_update(status)
+
+    current_commit = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=ROOT.parent,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    ).stdout.strip() or "unknown"
+    backup_dir, backed_up = database_backups()
 
     pull = subprocess.run(
         ["git", "pull", "--ff-only", "--autostash"],
@@ -79,9 +196,7 @@ def apply_git_update() -> dict:
         timeout=120,
         check=False,
     )
-    for original, backup in backed_up:
-        original.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(backup, original)
+    restore_database_backups(backed_up)
     after = git_update_status()
     return {
         "ok": pull.returncode == 0,
@@ -204,6 +319,7 @@ def render_rack_packing_list(payload: dict) -> str:
     <head>
       <meta charset="utf-8">
       <title>{esc(rack.get("name") or rack.get("code"))} Packing List</title>
+      <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
       <link rel="icon" type="image/png" href="/assets/delivery-list-scanner-icon.png">
       <style>
         body {{ font-family: Arial, sans-serif; color: #071633; margin: 24px; }}
@@ -271,6 +387,7 @@ def render_stale_bay_report(rows: list[dict]) -> str:
     <head>
       <meta charset="utf-8">
       <title>Old Bay Orders</title>
+      <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
       <link rel="icon" type="image/png" href="/assets/delivery-list-scanner-icon.png">
       <style>
         body {{ font-family: Arial, sans-serif; color: #071633; margin: 24px; }}
@@ -327,6 +444,7 @@ def render_print_package(package: dict) -> str:
 <head>
   <meta charset="utf-8">
   <title>Delivery List Print Package</title>
+  <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/assets/delivery-list-scanner-icon.png">
   <style>
     body {{ margin: 0; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #f6f8fb; }}
@@ -487,6 +605,14 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_permission("manage_roles"):
                 return
             self.send_json({"permissions": STORE.get_permissions()})
+            return
+
+        if parsed.path == "/api/admin/line-items/search":
+            if not self.require_permission("edit_delivery_lists"):
+                return
+            query = parse_qs(parsed.query).get("q", [""])[0]
+            list_id = parse_qs(parsed.query).get("listId", [""])[0]
+            self.send_json({"results": STORE.admin_search_line_items(query, list_id)})
             return
 
         if parsed.path == "/api/admin/sessions":
@@ -1045,6 +1171,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.move_rack_item(data, user["username"]))
                 return
 
+            if parsed.path == "/api/racks/clear-item":
+                user = self.require_permission("manage_racks")
+                if not user:
+                    return
+                self.send_json(STORE.clear_rack_item(data, user["username"]))
+                return
+
             if parsed.path == "/api/racks/clear":
                 user = self.require_permission("manage_racks")
                 if not user:
@@ -1057,6 +1190,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.update_rack(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/create-set":
+                user = self.require_permission("manage_racks")
+                if not user:
+                    return
+                self.send_json(STORE.create_rack_set(data, user["username"]))
                 return
 
             if parsed.path == "/api/racks/delete":

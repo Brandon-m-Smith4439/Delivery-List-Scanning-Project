@@ -3212,8 +3212,79 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 params.append(line_item_id)
                 con.execute(f"UPDATE line_items SET {', '.join(updates)} WHERE id = ?", params)
                 self.insert_audit(con, "line_item", line_item_id, "manual_edit", user, "", "", {"fields": list(data.keys())})
+            if "location" in data:
+                self.update_line_item_location(con, row, str(data.get("location") or ""), user)
             con.commit()
             return self._get_payload(con, row["list_id"])
+
+    def update_line_item_location(self, con: sqlite3.Connection, row: sqlite3.Row, location: str, user: str) -> None:
+        clean = str(location or "").strip()
+        line_item_id = row["id"]
+        if not clean:
+            con.execute(
+                "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Manual location cleared' WHERE line_item_id = ? AND status = 'Active'",
+                (user, now_iso(), line_item_id),
+            )
+            con.execute(
+                "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = 'Manual location cleared' WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled')",
+                (user, now_iso(), line_item_id),
+            )
+            self.insert_audit(con, "line_item", line_item_id, "manual_location_clear", user, "", "", {})
+            return
+        rack = con.execute("SELECT * FROM racks WHERE UPPER(rack_code) = UPPER(?) AND active = 1", (clean,)).fetchone()
+        if rack:
+            con.execute(
+                "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = 'Moved to rack from manual edit' WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled')",
+                (user, now_iso(), line_item_id),
+            )
+            qty = max(1, min(int(row["qty"] or 1), int(row["scanned_qty"] or row["qty"] or 1)))
+            con.execute(
+                """
+                INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
+                VALUES (?, ?, ?, 'Active', ?, ?, 'Manual location edit')
+                ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
+                    qty = excluded.qty,
+                    status = 'Active',
+                    removed_by = '',
+                    removed_at = '',
+                    reason = 'Manual location edit',
+                    added_by = excluded.added_by,
+                    added_at = excluded.added_at
+                """,
+                (rack["id"], line_item_id, qty, user, now_iso()),
+            )
+            con.execute(
+                "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Moved to another rack from manual edit' WHERE line_item_id = ? AND rack_id <> ? AND status = 'Active'",
+                (user, now_iso(), line_item_id, rack["id"]),
+            )
+            self.insert_audit(con, "line_item", line_item_id, "manual_location_rack", user, "", "", {"rackCode": rack["rack_code"]})
+            return
+        bay = con.execute("SELECT * FROM bays WHERE UPPER(bay_code) = UPPER(?) AND active = 1", (clean,)).fetchone()
+        if not bay:
+            bay = con.execute("SELECT * FROM bays WHERE UPPER(display_name) = UPPER(?) AND active = 1", (clean,)).fetchone()
+        if bay:
+            con.execute(
+                "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Moved to bay from manual edit' WHERE line_item_id = ? AND status = 'Active'",
+                (user, now_iso(), line_item_id),
+            )
+            con.execute(
+                "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = 'Moved to another bay from manual edit' WHERE line_item_id = ? AND bay_id <> ? AND status NOT IN ('Cleared', 'Cancelled')",
+                (user, now_iso(), line_item_id, bay["id"]),
+            )
+            existing = con.execute("SELECT id FROM bay_assignments WHERE line_item_id = ? AND bay_id = ? AND status NOT IN ('Cleared', 'Cancelled')", (line_item_id, bay["id"])).fetchone()
+            if existing:
+                con.execute("UPDATE bay_assignments SET assigned_qty = ?, reason = 'Manual location edit' WHERE id = ?", (int(row["qty"] or 1), existing["id"]))
+            else:
+                con.execute(
+                    """
+                    INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
+                    VALUES (?, ?, ?, ?, 'Assigned', ?, ?, 'Manual location edit')
+                    """,
+                    (row["list_id"], line_item_id, bay["id"], int(row["qty"] or 1), user, now_iso()),
+                )
+            self.insert_audit(con, "line_item", line_item_id, "manual_location_bay", user, "", "", {"bayCode": bay["bay_code"]})
+            return
+        raise ValueError(f"Location '{clean}' was not found as an active rack or bay")
 
     def delete_line_item(self, line_item_id: str, user: str) -> dict[str, Any]:
         clean_id = str(line_item_id or "").strip()
@@ -3709,6 +3780,41 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return self.get_racks()
 
+    def clear_rack_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        rack_item_id = int(data.get("rackItemId") or 0)
+        if not rack_item_id:
+            raise ValueError("rackItemId is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            item = con.execute(
+                """
+                SELECT ri.*, r.rack_code, li.order_no, li.item_no
+                FROM rack_items ri
+                JOIN racks r ON r.id = ri.rack_id
+                JOIN line_items li ON li.id = ri.line_item_id
+                WHERE ri.id = ? AND ri.status = 'Active'
+                """,
+                (rack_item_id,),
+            ).fetchone()
+            if not item:
+                raise ValueError("Rack item not found")
+            con.execute(
+                "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Individually cleared from rack' WHERE id = ?",
+                (user, now_iso(), rack_item_id),
+            )
+            self.insert_audit(
+                con,
+                "rack_item",
+                str(rack_item_id),
+                "clear_rack_item",
+                user,
+                "",
+                "Individually cleared from rack",
+                {"rackCode": item["rack_code"], "order": item["order_no"], "item": item["item_no"]},
+            )
+            con.commit()
+        return self.get_racks()
+
     def clear_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
         with self.connect() as con:
@@ -3757,6 +3863,37 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             self.insert_audit(con, "rack", code, "upsert_rack", user, "", "", {"name": name, "type": rack_type})
             con.commit()
         return self.get_racks()
+
+    def create_rack_set(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        prefix = re.sub(r"[^A-Za-z0-9]", "", str(data.get("prefix") or "")).upper()[:8]
+        rack_type = str(data.get("type") or data.get("rackType") or prefix or "Rack").strip()[:40]
+        name_root = str(data.get("nameRoot") or rack_type or prefix or "Rack").strip()[:60]
+        count = max(1, min(int(data.get("count") or 1), 100))
+        start = max(1, min(int(data.get("start") or 1), 999))
+        if not prefix:
+            raise ValueError("Rack set prefix is required")
+        created_codes: list[str] = []
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            sort_order = int(con.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM racks").fetchone()[0] or 1)
+            for offset in range(count):
+                number = start + offset
+                code = f"R{number}{prefix}" if len(prefix) <= 3 else f"{prefix}{number}"
+                display = f"{name_root} {number}"
+                existing = con.execute("SELECT id FROM racks WHERE rack_code = ?", (code,)).fetchone()
+                if existing:
+                    con.execute("UPDATE racks SET display_name = ?, rack_type = ?, active = 1, updated_at = ? WHERE rack_code = ?", (display, rack_type, now_iso(), code))
+                else:
+                    con.execute(
+                        "INSERT INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at) VALUES (?, ?, ?, 'Open', 1, ?, ?)",
+                        (code, display, rack_type, sort_order + offset, now_iso()),
+                    )
+                created_codes.append(code)
+            self.insert_audit(con, "rack", ",".join(created_codes), "create_rack_set", user, "", "", {"prefix": prefix, "type": rack_type, "count": count, "start": start})
+            con.commit()
+        payload = self.get_racks()
+        payload["created"] = created_codes
+        return payload
 
     def delete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         code = normalize_rack_code(str(data.get("rackCode") or ""))
@@ -3946,6 +4083,58 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 for row in rack_rows
             ],
         }
+
+    def admin_search_line_items(self, query: str, stage_filter: str = "") -> list[dict[str, Any]]:
+        clean = str(query or "").strip()
+        if len(clean) < 2:
+            return []
+        like = f"%{clean}%"
+        stage_filter = str(stage_filter or "").strip()
+        stage_clause = ""
+        params: list[Any] = [like, like, like, like, like, like, like, like, like, like]
+        if stage_filter:
+            stage_clause = " AND dl.id = ?"
+            params.append(stage_filter)
+        with self.connect() as con:
+            rows = con.execute(
+                f"""
+                SELECT li.*, dl.label, dl.delivery_date, dl.stage, dl.scanner,
+                       r.rack_code, r.display_name AS rack_name,
+                       b.bay_code, b.display_name AS bay_name
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                LEFT JOIN rack_items ri ON ri.line_item_id = li.id AND ri.status = 'Active'
+                LEFT JOIN racks r ON r.id = ri.rack_id AND r.active = 1
+                LEFT JOIN bay_assignments ba ON ba.line_item_id = li.id AND ba.status NOT IN ('Cleared', 'Cancelled')
+                LEFT JOIN bays b ON b.id = ba.bay_id
+                WHERE (
+                    li.order_no LIKE ? OR li.item_no LIKE ? OR li.source_id LIKE ? OR li.barcode LIKE ?
+                    OR li.customer LIKE ? OR li.job LIKE ? OR li.route LIKE ? OR li.product LIKE ?
+                    OR li.dimensions LIKE ? OR dl.stage LIKE ?
+                )
+                {stage_clause}
+                ORDER BY dl.delivery_date DESC, dl.stage, CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER)
+                LIMIT 80
+                """,
+                params,
+            ).fetchall()
+        results = []
+        for row in rows:
+            item = item_from_row(row)
+            item.update(
+                {
+                    "lineItemId": row["id"],
+                    "listId": row["list_id"],
+                    "deliveryLabel": row["label"],
+                    "deliveryDate": row["delivery_date"],
+                    "stage": row["stage"],
+                    "scanner": row["scanner"],
+                    "location": row["bay_code"] or row["rack_code"] or "",
+                    "locationDisplay": row["bay_name"] or row["rack_name"] or row["bay_code"] or row["rack_code"] or "",
+                }
+            )
+            results.append(item)
+        return results
 
     def find_bay_for_assignment(self, con: sqlite3.Connection, bay_type: str) -> sqlite3.Row | None:
         rows = con.execute(

@@ -174,6 +174,11 @@ const els = {
   rackEditCode: document.getElementById("rackEditCode"),
   rackEditName: document.getElementById("rackEditName"),
   rackEditType: document.getElementById("rackEditType"),
+  rackSetPrefix: document.getElementById("rackSetPrefix"),
+  rackSetName: document.getElementById("rackSetName"),
+  rackSetCount: document.getElementById("rackSetCount"),
+  rackSetStart: document.getElementById("rackSetStart"),
+  rackSetCreateBtn: document.getElementById("rackSetCreateBtn"),
   rackSaveBtn: document.getElementById("rackSaveBtn"),
   rackDeleteBtn: document.getElementById("rackDeleteBtn"),
 
@@ -294,6 +299,7 @@ const els = {
   customerRouteSelect: document.getElementById("customerRouteSelect"),
   customerRouteRules: document.getElementById("customerRouteRules"),
   manualEditSearch: document.getElementById("manualEditSearch"),
+  manualEditStageSelect: document.getElementById("manualEditStageSelect"),
   manualEditSearchBtn: document.getElementById("manualEditSearchBtn"),
   manualEditResults: document.getElementById("manualEditResults"),
   exceptionCenter: document.getElementById("exceptionCenter"),
@@ -1227,11 +1233,18 @@ function renderRacksPage() {
     ].join("");
   }
   if (!els.rackGrid) return;
-  const groups = [
-    ["Steel", state.racks.filter((rack) => /steel/i.test(rack.type) && rack.code !== "T")],
-    ["Wood", state.racks.filter((rack) => /wood/i.test(rack.type) && rack.code !== "T")],
-    ["Truck", state.racks.filter((rack) => rack.code === "T" || /truck/i.test(rack.type))],
-  ];
+  const rackGroups = new Map();
+  for (const rack of state.racks) {
+    const label = rack.code === "T" || /truck/i.test(rack.type) ? "Truck" : rack.type || "Racks";
+    if (!rackGroups.has(label)) rackGroups.set(label, []);
+    rackGroups.get(label).push(rack);
+  }
+  const groups = [...rackGroups.entries()].sort(([a], [b]) => {
+    if (a === "Truck") return 1;
+    if (b === "Truck") return -1;
+    const order = { Steel: 1, Wood: 2 };
+    return (order[a] || 50) - (order[b] || 50) || a.localeCompare(b);
+  });
   const renderRack = (rack) => {
       const hasItems = Number(rack.qty || 0) > 0;
       const adminActions = hasPermission("manage_racks")
@@ -1262,7 +1275,7 @@ function renderRacksPage() {
                           </div>
                           ${
                             hasPermission("manage_racks")
-                              ? `<div class="rack-item-actions"><select data-rack-target="${escapeHtml(item.rackItemId)}">${state.racks.map((target) => `<option value="${escapeHtml(target.code)}">${escapeHtml(target.code)}</option>`).join("")}</select><button type="button" data-rack-move="${escapeHtml(item.rackItemId)}">Move</button></div>`
+                              ? `<div class="rack-item-actions"><select data-rack-target="${escapeHtml(item.rackItemId)}">${state.racks.map((target) => `<option value="${escapeHtml(target.code)}">${escapeHtml(target.code)}</option>`).join("")}</select><button type="button" data-rack-move="${escapeHtml(item.rackItemId)}">Move</button><button type="button" data-rack-clear-item="${escapeHtml(item.rackItemId)}" data-rack-clear-label="${escapeHtml(`${item.order}-${item.item}`)}">Clear Piece</button></div>`
                               : ""
                           }
                         </article>
@@ -1339,6 +1352,15 @@ async function moveRackItem(rackItemId) {
   renderRacksPage();
 }
 
+async function clearRackItem(rackItemId, label = "this piece") {
+  if (!window.confirm(`Clear ${label} from its rack? This does not change scan quantities.`)) return;
+  const payload = await fetchJson("/api/racks/clear-item", { method: "POST", body: JSON.stringify({ rackItemId }) });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+  renderScanRackTools();
+}
+
 async function saveRackDefinition() {
   const payload = await fetchJson("/api/racks", {
     method: "POST",
@@ -1356,6 +1378,26 @@ async function deleteRackDefinition() {
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
+}
+
+async function createRackSet() {
+  const prefix = els.rackSetPrefix?.value || "";
+  const nameRoot = els.rackSetName?.value || prefix || "Rack";
+  const payload = await fetchJson("/api/racks/create-set", {
+    method: "POST",
+    body: JSON.stringify({
+      prefix,
+      nameRoot,
+      type: nameRoot,
+      count: els.rackSetCount?.value || 10,
+      start: els.rackSetStart?.value || 1,
+    }),
+  });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+  renderScanRackTools();
+  showFloatingNotice(`Created ${payload.created?.length || 0} rack(s).`, "success");
 }
 
 function renderMobileCards() {
@@ -3679,9 +3721,23 @@ async function refreshAdminPage() {
   state.adminCustomerRouteRules = customerRules?.rules || [];
   renderAdminUsers();
   renderAdminStations();
+  renderManualEditStageOptions();
   renderCustomerRouteRules();
   renderExceptionCenter(exceptions?.exceptions || []);
   renderActiveSessions();
+}
+
+function renderManualEditStageOptions() {
+  if (!els.manualEditStageSelect) return;
+  const current = els.manualEditStageSelect.value;
+  const options = [`<option value="">All stages</option>`].concat(
+    state.lists
+      .slice()
+      .sort((a, b) => String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || "")) || String(a.stage || "").localeCompare(String(b.stage || "")))
+      .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(formatDisplayDate(list.deliveryDate))} - ${escapeHtml(list.stage)}${list.scanner ? ` (${escapeHtml(list.scanner)})` : ""}</option>`),
+  );
+  els.manualEditStageSelect.innerHTML = options.join("");
+  els.manualEditStageSelect.value = state.lists.some((list) => list.id === current) ? current : "";
 }
 
 function renderImportHistory(imports) {
@@ -4043,7 +4099,9 @@ async function legacyImportDeliveryListFile(file) {
 async function runManualEditSearch() {
   const query = els.manualEditSearch?.value.trim() || "";
   if (query.length < 2) return;
-  const payload = await fetchJson(`/api/search?q=${encodeURIComponent(query)}`);
+  const params = new URLSearchParams({ q: query });
+  if (els.manualEditStageSelect?.value) params.set("listId", els.manualEditStageSelect.value);
+  const payload = await fetchJson(`/api/admin/line-items/search?${params.toString()}`);
   renderManualEditResults(payload.results || []);
 }
 
@@ -4052,18 +4110,20 @@ function renderManualEditResults(results) {
   els.manualEditResults.innerHTML = results.length
     ? `
       <table>
-        <thead><tr><th>Order</th><th>Item</th><th>Customer</th><th>Qty</th><th>Scanned</th><th>Dims</th><th>Route</th><th>Job</th><th>Product</th><th>Process</th><th>Queue</th><th></th></tr></thead>
+        <thead><tr><th>Stage</th><th>Order</th><th>Item</th><th>Customer</th><th>Qty</th><th>Scanned</th><th>Location</th><th>Dims</th><th>Route</th><th>Job</th><th>Product</th><th>Process</th><th>Queue</th><th></th></tr></thead>
         <tbody>
           ${results
             .slice(0, 20)
             .map(
               (item) => `
                 <tr data-edit-row="${escapeHtml(item.lineItemId)}">
+                  <td><span class="manual-stage-pill">${escapeHtml(item.stage || item.deliveryLabel || "")}</span></td>
                   <td><input data-edit-field="order" type="text" value="${escapeHtml(item.order)}"></td>
                   <td><input data-edit-field="item" type="text" value="${escapeHtml(item.item)}"></td>
                   <td><input data-edit-field="customer" type="text" value="${escapeHtml(item.customer)}"></td>
                   <td><input data-edit-field="qty" type="number" min="0" value="${escapeHtml(item.qty)}"></td>
                   <td><input data-edit-field="scanned" type="number" min="0" value="${escapeHtml(item.scanned)}"></td>
+                  <td><input data-edit-field="location" type="text" value="${escapeHtml(item.location || "")}" title="${escapeHtml(item.locationDisplay || "Rack code, bay code, or blank to clear")}"></td>
                   <td><input data-edit-field="dimensions" type="text" value="${escapeHtml(item.dimensions || "")}"></td>
                   <td><input data-edit-field="route" type="text" value="${escapeHtml(item.route || "")}"></td>
                   <td><input data-edit-field="job" type="text" value="${escapeHtml(item.job || "")}"></td>
@@ -4096,6 +4156,7 @@ async function saveManualLineItem(lineItemId) {
     body: JSON.stringify(data),
   });
   if (payload.meta?.id === state.activeListId) applyBackendPayload(payload);
+  await runManualEditSearch();
   renderScanPage();
 }
 
@@ -4359,10 +4420,16 @@ function wireEvents() {
     const moveButton = event.target.closest("[data-rack-move]");
     if (moveButton) {
       moveRackItem(moveButton.dataset.rackMove).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const clearItemButton = event.target.closest("[data-rack-clear-item]");
+    if (clearItemButton) {
+      clearRackItem(clearItemButton.dataset.rackClearItem, clearItemButton.dataset.rackClearLabel).catch((error) => showInlineError(error.message, true));
     }
   });
   els.rackSaveBtn?.addEventListener("click", () => saveRackDefinition().catch((error) => showInlineError(error.message, true)));
   els.rackDeleteBtn?.addEventListener("click", () => deleteRackDefinition().catch((error) => showInlineError(error.message, true)));
+  els.rackSetCreateBtn?.addEventListener("click", () => createRackSet().catch((error) => showInlineError(error.message, true)));
   els.importBtn?.addEventListener("click", () => {
     if (!els.importFile) return;
     els.importFile.value = "";
@@ -4388,8 +4455,9 @@ function wireEvents() {
         return;
       }
       if (status.updateAvailable) {
-        if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Update available</strong><span>${escapeHtml(status.behind)} commit(s) behind ${escapeHtml(status.upstream)}.</span>`;
-        if (window.confirm(`Update available: ${status.behind} commit(s) behind ${status.upstream}.\n\nThe app will back up and restore the SQLite database so scans are preserved.\n\nUpdate now?`)) {
+        const updateText = status.method === "github_zip" ? `GitHub update available from ${status.upstream}.` : `${status.behind} commit(s) behind ${status.upstream}.`;
+        if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Update available</strong><span>${escapeHtml(updateText)}</span>`;
+        if (window.confirm(`Update available: ${updateText}\n\nThe app will back up and restore the SQLite database so scans are preserved.\n\nUpdate now?`)) {
           if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Updating program...</strong><span class="loading-bar"><i></i></span><span>Preserving database files before pulling code.</span>`;
           const update = await fetchJson("/api/admin/update-apply", { method: "POST", body: JSON.stringify({}) });
           if (update.ok) {
@@ -4401,8 +4469,9 @@ function wireEvents() {
           }
         }
       } else {
-        if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>No updates found</strong><span>${escapeHtml(status.branch)} is current with ${escapeHtml(status.upstream)}.</span>`;
-        window.alert(`No new updates found for ${status.branch}. You have the latest version from ${status.upstream}.`);
+        const currentText = status.method === "github_zip" ? `GitHub fallback checked ${status.upstream}.` : `${status.branch} is current with ${status.upstream}.`;
+        if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>No updates found</strong><span>${escapeHtml(currentText)}</span>`;
+        window.alert(`No new updates found. ${currentText}`);
       }
     } catch (error) {
       showInlineError(error.message, true);
@@ -4437,6 +4506,9 @@ function wireEvents() {
     saveCustomerRouteRule().catch((error) => showInlineError(error.message, true));
   });
   els.manualEditSearchBtn?.addEventListener("click", () => runManualEditSearch().catch((error) => showInlineError(error.message)));
+  els.manualEditStageSelect?.addEventListener("change", () => {
+    if ((els.manualEditSearch?.value.trim() || "").length >= 2) runManualEditSearch().catch((error) => showInlineError(error.message));
+  });
   els.manualEditSearch?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
