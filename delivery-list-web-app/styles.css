@@ -151,12 +151,12 @@ select:disabled,
 }
 
 .app-header {
-  min-height: 78px;
+  min-height: 108px;
   display: grid;
-  grid-template-columns: 150px minmax(360px, auto) minmax(280px, 430px) auto;
+  grid-template-columns: 180px minmax(360px, auto) minmax(280px, 430px) auto;
   align-items: center;
-  gap: 18px;
-  padding: 12px 24px;
+  gap: 5px;
+  padding: 10px 1px;
   background: var(--surface);
   border-top: 3px solid var(--navy);
   border-bottom: 1px solid var(--line);
@@ -1842,15 +1842,22 @@ select:disabled,
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  min-width: 0;
 }
 
 .brand .brand-icon {
-  width: 42px;
-  height: 42px;
+  width: 172px;
+  height: 86px;
   object-fit: contain;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  flex: 0 0 auto;
+  filter:
+    drop-shadow(0 0 1px rgba(0, 0, 0, 0.85))
+    drop-shadow(0 2px 4px rgba(7, 42, 99, 0.28));
 }
 
 .brand span {
@@ -4335,10 +4342,15 @@ select:disabled,
   .app-header {
     position: static;
     min-height: auto;
-    grid-template-columns: 92px 1fr;
+    grid-template-columns: 110px 1fr;
     gap: 10px;
     padding: 10px 12px;
     border-top: 0;
+  }
+
+  .brand .brand-icon {
+  width: 96px;
+  height: 54px;
   }
 
   .app-nav {
