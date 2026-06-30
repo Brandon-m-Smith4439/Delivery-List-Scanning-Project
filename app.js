@@ -48,6 +48,8 @@ const state = {
   rackSummary: null,
   selectedRackCode: "T",
   rackScanListId: "",
+  rackModal: null,
+  rackMoveItemId: "",
   printContext: null,
   lastImportResult: null,
   bayLayout: null,
@@ -179,16 +181,8 @@ const els = {
   rackScanInput: document.getElementById("rackScanInput"),
   rackScanStatus: document.getElementById("rackScanStatus"),
   rackGrid: document.getElementById("rackGrid"),
-  rackEditCode: document.getElementById("rackEditCode"),
-  rackEditName: document.getElementById("rackEditName"),
-  rackEditType: document.getElementById("rackEditType"),
-  rackSetPrefix: document.getElementById("rackSetPrefix"),
-  rackSetName: document.getElementById("rackSetName"),
-  rackSetCount: document.getElementById("rackSetCount"),
-  rackSetStart: document.getElementById("rackSetStart"),
-  rackSetCreateBtn: document.getElementById("rackSetCreateBtn"),
-  rackSaveBtn: document.getElementById("rackSaveBtn"),
-  rackDeleteBtn: document.getElementById("rackDeleteBtn"),
+  rackCreateOpenBtn: document.getElementById("rackCreateOpenBtn"),
+  rackSetCreateOpenBtn: document.getElementById("rackSetCreateOpenBtn"),
 
   bayMapPage: document.getElementById("bayMapPage"),
   bayOverviewStats: document.getElementById("bayOverviewStats"),
@@ -1301,26 +1295,79 @@ function renderRacksPage() {
     const order = { Steel: 1, Wood: 2 };
     return (order[a] || 50) - (order[b] || 50) || a.localeCompare(b);
   });
-  const renderRackItem = (item) => `
-    <article class="rack-item">
+
+const renderRackItem = (item, currentRackCode = "") => {
+  const rackItemId = String(item.rackItemId || "");
+  const moveOpen = state.rackMoveItemId === rackItemId;
+
+  const destinationOptions = state.racks
+    .filter((target) => target.code !== currentRackCode)
+    .map((target) => `<option value="${escapeHtml(target.code)}">${rackOptionLabel(target)}</option>`)
+    .join("");
+
+  return `
+    <article class="rack-item ${moveOpen ? "is-moving" : ""}">
       <div>
         <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} <span>${escapeHtml(item.customer || "")}</span></strong>
         <small>${escapeHtml(item.job || item.product || "")}</small>
         <small>${escapeHtml(item.product || item.job || "")} | ${escapeHtml(item.dimensions || "")} | Qty ${escapeHtml(item.rackQty || 1)}</small>
         <small class="rack-scan-time">${escapeHtml(item.deliveryLabel || "")}${item.rackAddedAt ? ` | Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}` : ""}</small>
       </div>
+
       ${
         hasPermission("manage_racks")
-          ? `<div class="rack-item-actions"><select data-rack-target="${escapeHtml(item.rackItemId)}">${state.racks.map((target) => `<option value="${escapeHtml(target.code)}">${escapeHtml(target.code)}</option>`).join("")}</select><button type="button" data-rack-move="${escapeHtml(item.rackItemId)}">Move</button><button type="button" data-rack-clear-item="${escapeHtml(item.rackItemId)}" data-rack-clear-label="${escapeHtml(`${item.order}-${item.item}`)}">Clear Piece</button></div>`
+          ? `<div class="rack-item-actions">
+              <button
+                type="button"
+                class="icon-only icon-move"
+                data-rack-move-open="${escapeHtml(rackItemId)}"
+                title="Move piece"
+                aria-label="Move ${escapeHtml(item.order)}-${escapeHtml(item.item)}"
+              ></button>
+              <button
+                type="button"
+                class="icon-only icon-trash danger"
+                data-rack-clear-item="${escapeHtml(rackItemId)}"
+                data-rack-clear-label="${escapeHtml(`${item.order}-${item.item}`)}"
+                title="Clear piece"
+                aria-label="Clear ${escapeHtml(item.order)}-${escapeHtml(item.item)}"
+              ></button>
+            </div>
+
+            ${
+              moveOpen
+                ? `<div class="rack-move-popover">
+                    <div class="rack-move-title">
+                      <strong>Move Piece</strong>
+                      <span>${escapeHtml(item.order)}-${escapeHtml(item.item)}</span>
+                    </div>
+
+                    <label>
+                      <span>Move to</span>
+                      <select data-rack-target="${escapeHtml(rackItemId)}">
+                        <option value="">Select destination...</option>
+                        ${destinationOptions}
+                      </select>
+                    </label>
+
+                    <div class="rack-move-actions">
+                      <button type="button" class="rack-move-cancel" data-rack-move-cancel="${escapeHtml(rackItemId)}">Cancel</button>
+                      <button type="button" class="rack-move-confirm" data-rack-move="${escapeHtml(rackItemId)}" ${destinationOptions ? "" : "disabled"}>Confirm Move</button>
+                    </div>
+                  </div>`
+                : ""
+            }`
           : ""
       }
     </article>
   `;
+};
   const renderRackItems = (rack) => {
     const items = rack.items || [];
     if (!items.length) return `<p class="admin-empty">No pieces assigned.</p>`;
     const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
-    if (!isTruck) return items.map(renderRackItem).join("");
+    const isComplete = String(rack.status || "").toLowerCase() === "closed";
+    if (!isTruck) return items.map((item) => renderRackItem(item, rack.code)).join("");
     const byDate = new Map();
     for (const item of items) {
       const key = item.deliveryDate || "No delivery date";
@@ -1329,38 +1376,63 @@ function renderRacksPage() {
     }
     return [...byDate.entries()]
       .sort(([a], [b]) => String(a).localeCompare(String(b)))
-      .map(([date, dateItems]) => `
-        <details class="rack-date-group">
+.map(([date, dateItems]) => {
+  const dateHasMoveOpen = dateItems.some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
+
+  return `
+    <details class="rack-date-group" ${dateHasMoveOpen ? "open" : ""}>
           <summary>
             <strong>${escapeHtml(formatDisplayDate(date))}</strong>
             <span>${escapeHtml(dateItems.reduce((sum, item) => sum + Number(item.rackQty || 1), 0))} pcs</span>
-            <button type="button" data-rack-print="${escapeHtml(rack.code)}" data-rack-print-date="${escapeHtml(date)}">Print Packing List</button>
+            ${isComplete ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}" data-rack-print-date="${escapeHtml(date)}">Print Packing List</button>` : ""}
           </summary>
-          <div>${dateItems.map(renderRackItem).join("")}</div>
+          <div>${dateItems.map((item) => renderRackItem(item, rack.code)).join("")}</div>
         </details>
-      `)
+      `;
+    })
       .join("");
   };
   const renderRack = (rack) => {
       const hasItems = Number(rack.qty || 0) > 0;
       const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
-      const adminActions = hasPermission("manage_racks")
-        ? `<button type="button" data-rack-clear="${escapeHtml(rack.code)}">Clear</button>`
-        : "";
+      const isComplete = String(rack.status || "").toLowerCase() === "closed";
+const adminActions = hasPermission("manage_racks")
+  ? `<span class="rack-summary-actions">
+      <button
+        type="button"
+        class="icon-only icon-pencil"
+        data-rack-edit="${escapeHtml(rack.code)}"
+        title="Edit rack"
+        aria-label="Edit ${escapeHtml(rack.code)}"
+      ></button>
+      <button
+        type="button"
+        class="icon-only icon-trash danger"
+        data-rack-clear="${escapeHtml(rack.code)}"
+        title="Clear rack"
+        aria-label="Clear ${escapeHtml(rack.code)}"
+      ></button>
+    </span>`
+  : "";
       const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
-      const printAction = hasItems
+      const printAction = hasItems && isComplete
         ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">${printLabel}</button>`
         : "";
-      return `
-        <details class="rack-card ${rackVisualClass(rack)}">
-          <summary>
-            <span><strong>${escapeHtml(rack.code)}</strong><small>${escapeHtml(rack.name)}</small></span>
-            <span>${escapeHtml(rack.qty || 0)} pcs</span>
-          </summary>
-          <div class="rack-card-actions">
-            ${hasItems ? `${printAction}${String(rack.status).toLowerCase() === "closed" ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`}` : ""}
-            ${adminActions}
-          </div>
+const rackHasMoveOpen = (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
+
+return `
+  <details class="rack-card ${rackVisualClass(rack)}" ${rackHasMoveOpen ? "open" : ""}>
+    <summary>
+      <span class="rack-summary-main">
+        <strong>${escapeHtml(rack.code)}</strong>
+        <small>${escapeHtml(rack.name)}</small>
+      </span>
+      <span class="rack-summary-qty">${escapeHtml(rack.qty || 0)} pcs</span>
+      ${adminActions}
+    </summary>
+    <div class="rack-card-actions">
+      ${hasItems ? `${printAction}${isComplete ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`}` : ""}
+    </div>
           <div class="rack-item-list">
             ${hasItems ? renderRackItems(rack) : `<p class="admin-empty">No pieces assigned.</p>`}
           </div>
@@ -1370,7 +1442,40 @@ function renderRacksPage() {
   els.rackGrid.innerHTML = groups
     .map(([label, racks]) => `
       <section class="rack-column">
-        <header><h2>${escapeHtml(label)}</h2><span>${escapeHtml(racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0))} pcs</span></header>
+        <header>
+          <h2>${escapeHtml(label)}</h2>
+          <span>${escapeHtml(racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0))} pcs</span>
+${
+  hasPermission("manage_racks")
+    ? label === "Truck"
+      ? `<div class="rack-column-actions">
+          <button
+            type="button"
+            class="icon-only icon-pencil light"
+            data-rack-edit="T"
+            title="Edit truck / no rack"
+            aria-label="Edit truck / no rack"
+          ></button>
+        </div>`
+      : `<div class="rack-column-actions">
+          <button
+            type="button"
+            class="icon-only icon-pencil light"
+            data-rack-set-edit="${escapeHtml(label)}"
+            title="Edit rack set"
+            aria-label="Edit ${escapeHtml(label)} rack set"
+          ></button>
+          <button
+            type="button"
+            class="icon-only icon-trash light"
+            data-rack-set-delete="${escapeHtml(label)}"
+            title="Delete rack set"
+            aria-label="Delete ${escapeHtml(label)} rack set"
+          ></button>
+        </div>`
+    : ""
+}
+        </header>
         <div>${racks.map(renderRack).join("") || `<p class="admin-empty">No ${escapeHtml(label.toLowerCase())} racks.</p>`}</div>
       </section>
     `)
@@ -1424,10 +1529,22 @@ async function clearRack(code) {
 
 async function moveRackItem(rackItemId) {
   const select = document.querySelector(`[data-rack-target="${CSS.escape(String(rackItemId))}"]`);
-  const targetRackCode = select?.value || "T";
-  const payload = await fetchJson("/api/racks/move-item", { method: "POST", body: JSON.stringify({ rackItemId, targetRackCode }) });
+  const targetRackCode = select?.value || "";
+
+  if (!targetRackCode) {
+    showFloatingNotice("Choose a destination rack before confirming the move.", "notice");
+    return;
+  }
+
+  const payload = await fetchJson("/api/racks/move-item", {
+    method: "POST",
+    body: JSON.stringify({ rackItemId, targetRackCode }),
+  });
+
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
+  state.rackMoveItemId = "";
+
   renderRacksPage();
 }
 
@@ -1447,6 +1564,11 @@ function rackPackingListUrl(rackCode, deliveryDate = "") {
 
 function printSelectedRackPackingSlip() {
   if (!state.selectedRackCode) return;
+  const rack = state.racks.find((item) => item.code === state.selectedRackCode);
+  if (!rack || String(rack.status || "").toLowerCase() !== "closed") {
+    showFloatingNotice("Complete this rack before printing its packing list.", "notice");
+    return;
+  }
   const activeList = state.lists.find((list) => list.id === state.activeListId);
   const dateParam = state.selectedRackCode === "T" && activeList?.deliveryDate ? activeList.deliveryDate : "";
   window.open(rackPackingListUrl(state.selectedRackCode, dateParam), "_blank", "noopener");
@@ -1455,15 +1577,19 @@ function printSelectedRackPackingSlip() {
 async function saveRackDefinition() {
   const payload = await fetchJson("/api/racks", {
     method: "POST",
-    body: JSON.stringify({ rackCode: els.rackEditCode?.value || "", name: els.rackEditName?.value || "", type: els.rackEditType?.value || "Steel" }),
+    body: JSON.stringify({
+      rackCode: document.getElementById("rackModalCode")?.value || "",
+      name: document.getElementById("rackModalName")?.value || "",
+      type: document.getElementById("rackModalType")?.value || "Steel",
+    }),
   });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
+  closeAdminModal();
 }
 
-async function deleteRackDefinition() {
-  const rackCode = els.rackEditCode?.value || state.selectedRackCode;
+async function deleteRackDefinition(rackCode = state.selectedRackCode) {
   if (!rackCode || !window.confirm(`Delete rack ${rackCode}? Empty racks only.`)) return;
   const payload = await fetchJson("/api/racks/delete", { method: "POST", body: JSON.stringify({ rackCode }) });
   state.racks = payload.racks || [];
@@ -1472,23 +1598,56 @@ async function deleteRackDefinition() {
 }
 
 async function createRackSet() {
-  const prefix = els.rackSetPrefix?.value || "";
-  const nameRoot = els.rackSetName?.value || prefix || "Rack";
+  const prefix = document.getElementById("rackSetModalPrefix")?.value || "";
+  const nameRoot = document.getElementById("rackSetModalName")?.value || prefix || "Rack";
   const payload = await fetchJson("/api/racks/create-set", {
     method: "POST",
     body: JSON.stringify({
       prefix,
       nameRoot,
       type: nameRoot,
-      count: els.rackSetCount?.value || 10,
-      start: els.rackSetStart?.value || 1,
+      count: document.getElementById("rackSetModalCount")?.value || 10,
+      start: document.getElementById("rackSetModalStart")?.value || 1,
     }),
   });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
   renderScanRackTools();
+  closeAdminModal();
   showFloatingNotice(`Created ${payload.created?.length || 0} rack(s).`, "success");
+}
+
+function openRackForm(rackCode = "") {
+  const rack = state.racks.find((item) => item.code === rackCode) || {};
+  state.rackModal = { rack };
+  openAdminModal("rackForm");
+}
+
+function openRackSetForm(label = "") {
+  const racks = state.racks.filter((rack) => (rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks") === label);
+  state.rackModal = {
+    set: {
+      name: label && label !== "Truck" ? label : "",
+      prefix: "",
+      count: racks.length || 10,
+      start: 1,
+    },
+  };
+  openAdminModal("rackSetForm");
+}
+
+async function deleteRackSet(label) {
+  const racks = state.racks.filter((rack) => (rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks") === label);
+  const deletable = racks.filter((rack) => rack.code !== "T");
+  if (!deletable.length) return;
+  if (!window.confirm(`Delete ${deletable.length} rack(s) in ${label}? Empty racks only.`)) return;
+  for (const rack of deletable) {
+    await fetchJson("/api/racks/delete", { method: "POST", body: JSON.stringify({ rackCode: rack.code }) });
+  }
+  await ensureRacksLoaded();
+  renderRacksPage();
+  renderScanRackTools();
 }
 
 function renderMobileCards() {
@@ -1691,7 +1850,7 @@ function renderScanRackTools() {
     els.scanRackSelect.value = state.selectedRackCode;
   }
   if (els.scanRackCompleteBtn) els.scanRackCompleteBtn.textContent = selectedClosed ? "Uncomplete" : "Complete";
-  if (els.scanRackPrintBtn) els.scanRackPrintBtn.disabled = !selectedRack || Number(selectedRack.qty || 0) <= 0;
+  if (els.scanRackPrintBtn) els.scanRackPrintBtn.disabled = !selectedRack || !selectedClosed || Number(selectedRack.qty || 0) <= 0;
   if (els.scanRackStatus) els.scanRackStatus.textContent = "";
 }
 
@@ -3849,10 +4008,10 @@ function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false)
                 <td>${escapeHtml(list.totalQty ?? list.itemCount ?? "")}</td>
                 <td>${escapeHtml(list.updatedAt ? formatDateTime(list.updatedAt) : "Current")}</td>
                 ${editable ? `<td class="admin-action-cell">
-                  <button type="button" data-admin-list-edit="${escapeHtml(list.id)}">Edit</button>
+                  <button type="button" class="icon-only icon-pencil" data-admin-list-edit="${escapeHtml(list.id)}" title="Edit delivery list" aria-label="Edit ${escapeHtml(list.label || list.id)}"></button>
                   <button type="button" data-admin-list-print="${escapeHtml(list.id)}">Print</button>
                   <button type="button" data-admin-list-reset="${escapeHtml(list.id)}">Reset</button>
-                  <button type="button" data-admin-list-delete="${escapeHtml(list.id)}">Delete</button>
+                  <button type="button" class="icon-only icon-trash danger" data-admin-list-delete="${escapeHtml(list.id)}" title="Delete delivery list" aria-label="Delete ${escapeHtml(list.label || list.id)}"></button>
                 </td>` : ""}
               </tr>
             `,
@@ -3899,6 +4058,8 @@ function openAdminModal(kind) {
     sessions: "Active Sessions",
     stations: "Stations",
     manualEdit: "Manual Delivery List Edit",
+    rackForm: "Rack",
+    rackSetForm: "Rack Set",
   };
   els.adminModalTitle.textContent = titleMap[kind] || "Admin";
   els.adminModalBody.innerHTML = adminModalContent(kind);
@@ -3970,7 +4131,43 @@ function adminModalContent(kind) {
   if (kind === "manualEdit") {
     return manualEditModalHtml();
   }
+  if (kind === "rackForm") {
+    return rackFormModalHtml();
+  }
+  if (kind === "rackSetForm") {
+    return rackSetFormModalHtml();
+  }
   return `<div class="admin-empty">Choose a dashboard section to view details.</div>`;
+}
+
+function rackFormModalHtml() {
+  const rack = state.rackModal?.rack || {};
+  return `
+    <form id="rackFormModal" class="admin-form rack-modal-form">
+      <label><span>Rack code</span><input id="rackModalCode" type="text" autocomplete="off" value="${escapeHtml(rack.code || "")}" ${rack.code ? "readonly" : ""} placeholder="R11S"></label>
+      <label><span>Rack name</span><input id="rackModalName" type="text" autocomplete="off" value="${escapeHtml(rack.name || "")}" placeholder="Rack 11 Steel"></label>
+      <label>
+        <span>Rack type</span>
+        <select id="rackModalType">
+          ${["Steel", "Wood", "Truck", "Aluminum", "Other"].map((type) => `<option ${String(rack.type || "Steel") === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
+        </select>
+      </label>
+      <footer class="modal-actions"><button type="submit">Confirm</button></footer>
+    </form>
+  `;
+}
+
+function rackSetFormModalHtml() {
+  const set = state.rackModal?.set || {};
+  return `
+    <form id="rackSetFormModal" class="admin-form rack-modal-form">
+      <label><span>Set suffix</span><input id="rackSetModalPrefix" type="text" autocomplete="off" value="${escapeHtml(set.prefix || "")}" placeholder="S"></label>
+      <label><span>Set name</span><input id="rackSetModalName" type="text" autocomplete="off" value="${escapeHtml(set.name || "")}" placeholder="Steel"></label>
+      <label><span>Rack count</span><input id="rackSetModalCount" type="number" min="1" max="100" value="${escapeHtml(set.count || 10)}"></label>
+      <label><span>Starting rack number</span><input id="rackSetModalStart" type="number" min="1" max="999" value="${escapeHtml(set.start || 1)}"></label>
+      <footer class="modal-actions"><button type="submit">Confirm</button></footer>
+    </form>
+  `;
 }
 
 function permissionLabel(permission) {
@@ -4898,6 +5095,11 @@ function wireEvents() {
     if (printButton) {
       event.preventDefault();
       event.stopPropagation();
+      const rack = state.racks.find((item) => item.code === printButton.dataset.rackPrint);
+      if (!rack || String(rack.status || "").toLowerCase() !== "closed") {
+        showFloatingNotice("Complete this rack before printing its packing list.", "notice");
+        return;
+      }
       window.open(rackPackingListUrl(printButton.dataset.rackPrint, printButton.dataset.rackPrintDate || ""), "_blank", "noopener");
       return;
     }
@@ -4916,19 +5118,58 @@ function wireEvents() {
       clearRack(clearButton.dataset.rackClear).catch((error) => showInlineError(error.message, true));
       return;
     }
-    const moveButton = event.target.closest("[data-rack-move]");
-    if (moveButton) {
-      moveRackItem(moveButton.dataset.rackMove).catch((error) => showInlineError(error.message, true));
+    const editRackButton = event.target.closest("[data-rack-edit]");
+    if (editRackButton) {
+      openRackForm(editRackButton.dataset.rackEdit || "");
       return;
     }
+    const editRackSetButton = event.target.closest("[data-rack-set-edit]");
+    if (editRackSetButton) {
+      openRackSetForm(editRackSetButton.dataset.rackSetEdit || "");
+      return;
+    }
+    const deleteRackSetButton = event.target.closest("[data-rack-set-delete]");
+    if (deleteRackSetButton) {
+      deleteRackSet(deleteRackSetButton.dataset.rackSetDelete || "").catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const moveOpenButton = event.target.closest("[data-rack-move-open]");
+if (moveOpenButton) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const rackItemId = moveOpenButton.dataset.rackMoveOpen || "";
+  state.rackMoveItemId = state.rackMoveItemId === rackItemId ? "" : rackItemId;
+
+  renderRacksPage();
+  return;
+}
+
+const moveCancelButton = event.target.closest("[data-rack-move-cancel]");
+if (moveCancelButton) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  state.rackMoveItemId = "";
+  renderRacksPage();
+  return;
+}
+
+const moveButton = event.target.closest("[data-rack-move]");
+if (moveButton) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  moveRackItem(moveButton.dataset.rackMove).catch((error) => showInlineError(error.message, true));
+  return;
+}
     const clearItemButton = event.target.closest("[data-rack-clear-item]");
     if (clearItemButton) {
       clearRackItem(clearItemButton.dataset.rackClearItem, clearItemButton.dataset.rackClearLabel).catch((error) => showInlineError(error.message, true));
     }
   });
-  els.rackSaveBtn?.addEventListener("click", () => saveRackDefinition().catch((error) => showInlineError(error.message, true)));
-  els.rackDeleteBtn?.addEventListener("click", () => deleteRackDefinition().catch((error) => showInlineError(error.message, true)));
-  els.rackSetCreateBtn?.addEventListener("click", () => createRackSet().catch((error) => showInlineError(error.message, true)));
+  els.rackCreateOpenBtn?.addEventListener("click", () => openRackForm(""));
+  els.rackSetCreateOpenBtn?.addEventListener("click", () => openRackSetForm(""));
   els.importBtn?.addEventListener("click", () => {
     if (!els.importFile) return;
     els.importFile.value = "";
@@ -5001,9 +5242,20 @@ function wireEvents() {
     createUserFromForm().catch((error) => showInlineError(error.message));
   });
   document.addEventListener("submit", (event) => {
-    if (!event.target.closest("#createUserFormModal")) return;
-    event.preventDefault();
-    createUserFromForm().catch((error) => showInlineError(error.message));
+    if (event.target.closest("#createUserFormModal")) {
+      event.preventDefault();
+      createUserFromForm().catch((error) => showInlineError(error.message));
+      return;
+    }
+    if (event.target.closest("#rackFormModal")) {
+      event.preventDefault();
+      saveRackDefinition().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#rackSetFormModal")) {
+      event.preventDefault();
+      createRackSet().catch((error) => showInlineError(error.message, true));
+    }
   });
   els.customerRouteRuleForm?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -5236,6 +5488,12 @@ function wireEvents() {
     ) {
       els.headerGlobalSearchResults.hidden = true;
     }
+
+    const rackHeaderAction = event.target.closest(".rack-summary-actions button");
+
+if (rackHeaderAction) {
+  event.preventDefault();
+}
 
      const openGlassMenu = event.target.closest(".glass-filter-more");
 

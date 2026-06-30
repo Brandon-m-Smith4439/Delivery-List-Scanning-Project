@@ -399,33 +399,14 @@
             <h1>Rack Overview</h1>
             <p>Scan staging pieces into racks, close racks, and print rack packing lists.</p>
           </div>
-          <div class="page-heading-actions rack-summary" id="rackSummary"></div>
+          <div class="page-heading-actions rack-heading-actions">
+            <div class="rack-summary" id="rackSummary"></div>
+            <div class="rack-create-actions" data-permission-any="manage_racks">
+              <button id="rackCreateOpenBtn" type="button">Create Rack</button>
+              <button id="rackSetCreateOpenBtn" type="button">Create Rack Set</button>
+            </div>
+          </div>
         </div>
-
-        <section class="rack-toolbar panel">
-          <div>
-            <h2>Racks</h2>
-            <p>R1S-R10S are steel racks, R1W-R10W are wood racks, and T is truck/no rack.</p>
-          </div>
-          <div class="rack-admin-actions" data-permission-any="manage_racks">
-            <input id="rackEditCode" type="text" placeholder="Rack code">
-            <input id="rackEditName" type="text" placeholder="Rack name">
-            <select id="rackEditType">
-              <option>Steel</option>
-              <option>Wood</option>
-              <option>Truck</option>
-            </select>
-            <button id="rackSaveBtn" type="button">Create / Edit</button>
-            <button id="rackDeleteBtn" type="button">Delete</button>
-          </div>
-          <div class="rack-admin-actions rack-set-actions" data-permission-any="manage_racks">
-            <input id="rackSetPrefix" type="text" placeholder="Set suffix, e.g. A">
-            <input id="rackSetName" type="text" placeholder="Set name, e.g. Aluminum">
-            <input id="rackSetCount" type="number" min="1" max="100" value="10" aria-label="Rack count">
-            <input id="rackSetStart" type="number" min="1" max="999" value="1" aria-label="Starting rack number">
-            <button id="rackSetCreateBtn" type="button">Create Rack Set</button>
-          </div>
-        </section>
 
         <section class="rack-grid" id="rackGrid"></section>
       </section>
@@ -691,15 +672,18 @@
               <button type="button" data-print-active="admin">Print / Export</button>
               <button id="checkUpdatesBtn" type="button">Check Updates</button>
             </div>
-            <label class="admin-wide-field">
-              <span>Temp Delivery Lists folder</span>
-              <input id="tempFolderInput" type="text" autocomplete="off" placeholder="Temp Delivery Lists folder path">
-            </label>
-            <div class="admin-form import-window-form">
-              <label><span>Check from</span><input id="importFromDate" type="date"></label>
-              <label><span>Check through</span><input id="importToDate" type="date"></label>
-              <button id="importWindowResetBtn" type="button">Default 7 days</button>
-            </div>
+            <details class="admin-import-settings">
+              <summary>Import folder and date settings</summary>
+              <label class="admin-wide-field">
+                <span>Temp Delivery Lists folder</span>
+                <input id="tempFolderInput" type="text" autocomplete="off" placeholder="Temp Delivery Lists folder path">
+              </label>
+              <div class="admin-form import-window-form">
+                <label><span>Check from</span><input id="importFromDate" type="date"></label>
+                <label><span>Check through</span><input id="importToDate" type="date"></label>
+                <button id="importWindowResetBtn" type="button">Default 7 days</button>
+              </div>
+            </details>
             <input id="importFile" class="visually-hidden" type="file" accept=".json,.xlsx,.xlsm,.csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,text/csv">
             <div id="importPreviewBox" class="admin-empty">No import selected.</div>
             <div id="adminDeliveryLists" class="admin-table admin-preview-table"></div>
