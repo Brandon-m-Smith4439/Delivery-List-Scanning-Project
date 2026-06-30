@@ -6980,4 +6980,74 @@ body.bay-move-mode .excel-bay-map {
   .admin-primary-actions {
     grid-template-columns: 1fr !important;
   }
+
+}
+/* Compact glass type filter: show top 3 by quantity, hide rest under More */
+.glass-filter-more {
+  position: relative;
+  display: inline-block;
+}
+
+.glass-filter-more > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.glass-filter-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.glass-filter-more[open] > summary {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(19, 92, 255, 0.1);
+}
+
+.glass-filter-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  width: min(420px, calc(100vw - 48px));
+  max-height: 320px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.glass-filter-menu .tab {
+  width: 100%;
+  justify-content: space-between;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.glass-filter-more-summary {
+  user-select: none;
+}
+
+/* Rack overview print buttons */
+.racks-page button[data-rack-print] {
+  min-height: 36px;
+  border: 1px solid var(--navy);
+  border-radius: 7px;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 900;
+  padding: 0 12px;
+  font-size: 16px;
+}
+
+.racks-page button[data-rack-print]:hover {
+  background: var(--navy-dark);
+  border-color: var(--navy-dark);
+}
+
+.rack-date-group summary button[data-rack-print] {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }

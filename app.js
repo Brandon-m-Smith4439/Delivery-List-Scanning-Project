@@ -1081,15 +1081,47 @@ function renderCounts() {
     document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.filter === state.filter));
   }
   if (state.glassTypeFilter !== "all" && !glassCounts.has(state.glassTypeFilter)) state.glassTypeFilter = "all";
-  if (els.glassFilterTabs) {
-    const glassButtons = [
-      `<button class="tab glass-filter-tab ${state.glassTypeFilter === "all" ? "is-active" : ""}" data-glass-filter="all" type="button">All Glass <span>(${totalItems})</span></button>`,
-      ...[...glassCounts.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([label, count]) => `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`),
-    ];
-    els.glassFilterTabs.innerHTML = glassButtons.join("");
-  }
+if (els.glassFilterTabs) {
+  const sortedGlassEntries = [...glassCounts.entries()]
+    .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0) || a[0].localeCompare(b[0]));
+
+  const visibleGlassEntries = sortedGlassEntries.slice(0, 3);
+  const hiddenGlassEntries = sortedGlassEntries.slice(3);
+  const selectedHiddenGlass = hiddenGlassEntries.find(([label]) => label === state.glassTypeFilter);
+  const selectedHiddenCount = selectedHiddenGlass ? selectedHiddenGlass[1] : 0;
+
+  const visibleGlassButtons = visibleGlassEntries.map(
+    ([label, count]) =>
+      `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
+  );
+
+  const moreGlassButton = hiddenGlassEntries.length
+    ? `
+      <details class="glass-filter-more">
+        <summary class="tab glass-filter-tab glass-filter-more-summary ${selectedHiddenGlass ? "is-active" : ""}">
+          ${selectedHiddenGlass ? escapeHtml(state.glassTypeFilter) : `More Glass Types`}
+          <span>${selectedHiddenGlass ? `(${escapeHtml(selectedHiddenCount)})` : `+${hiddenGlassEntries.length}`}</span>
+        </summary>
+        <div class="glass-filter-menu">
+          ${hiddenGlassEntries
+            .map(
+              ([label, count]) =>
+                `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
+            )
+            .join("")}
+        </div>
+      </details>
+    `
+    : "";
+
+  const glassButtons = [
+    `<button class="tab glass-filter-tab ${state.glassTypeFilter === "all" ? "is-active" : ""}" data-glass-filter="all" type="button">All Glass <span>(${totalItems})</span></button>`,
+    ...visibleGlassButtons,
+    moreGlassButton,
+  ];
+
+  els.glassFilterTabs.innerHTML = glassButtons.join("");
+}
   if (els.totalItemsText) els.totalItemsText.textContent = `${state.items.length} rows / ${totalItems} pieces`;
   if (els.progressText) els.progressText.textContent = `${stageVerb()} Qty: ${stats.scannedQty}/${stats.totalQty} - ${formatPercent(stats.percent)} Complete`;
   if (els.progressFill) els.progressFill.style.width = `${Math.min(stats.percent, 100)}%`;
@@ -1304,7 +1336,10 @@ function renderRacksPage() {
       const adminActions = hasPermission("manage_racks")
         ? `<button type="button" data-rack-clear="${escapeHtml(rack.code)}">Clear</button>`
         : "";
-      const printAction = hasItems && !isTruck ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">Print Packing List</button>` : "";
+      const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
+      const printAction = hasItems
+        ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">${printLabel}</button>`
+        : "";
       return `
         <details class="rack-card ${hasItems ? "has-items" : ""}" ${hasItems ? "open" : ""}>
           <summary>
@@ -5142,6 +5177,15 @@ function wireEvents() {
     ) {
       els.headerGlobalSearchResults.hidden = true;
     }
+
+     const openGlassMenu = event.target.closest(".glass-filter-more");
+
+    document.querySelectorAll(".glass-filter-more[open]").forEach((menu) => {
+      if (menu !== openGlassMenu) {
+        menu.open = false;
+      }
+    });
+
     const pageButton = event.target.closest("[data-page-target]");
     if (pageButton) {
       if (state.manualEditDirty && !window.confirm("You have unsaved manual delivery-list edits. Leave without saving?")) return;
