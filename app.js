@@ -121,6 +121,7 @@ const els = {
   scanRackPanel: document.getElementById("scanRackPanel"),
   scanRackSelect: document.getElementById("scanRackSelect"),
   scanRackCompleteBtn: document.getElementById("scanRackCompleteBtn"),
+  scanRackPrintBtn: document.getElementById("scanRackPrintBtn"),
   scanRackStatus: document.getElementById("scanRackStatus"),
   manualScanForm: document.getElementById("manualScanForm"),
   manualOrderInput: document.getElementById("manualOrderInput"),
@@ -263,7 +264,6 @@ const els = {
   printOptionsDate: document.getElementById("printOptionsDate"),
   printOptionsStages: document.getElementById("printOptionsStages"),
   printOptionsGlassType: document.getElementById("printOptionsGlassType"),
-  printMirrorMode: document.getElementById("printMirrorMode"),
   printCustomerFilter: document.getElementById("printCustomerFilter"),
   printOrderFilter: document.getElementById("printOrderFilter"),
   printUpdatedOnly: document.getElementById("printUpdatedOnly"),
@@ -855,11 +855,11 @@ function itemText(item) {
 }
 
 function isRemakeItem(item) {
-  return /\b(REMAKE|RM)\b/i.test(itemText(item));
+  return /\b(REMAKE|RM)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
 }
 
 function isRushItem(item) {
-  return /\b(RUSH|SDI)\b/i.test(itemText(item));
+  return /\b(RUSH|SDI)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
 }
 
 function isRemakeOrRush(item) {
@@ -1258,13 +1258,24 @@ function renderRackSelects() {
   }
   if (els.rackSelect) {
     els.rackSelect.innerHTML = state.racks
-      .map((rack) => `<option value="${escapeHtml(rack.code)}" ${String(rack.status).toLowerCase() === "closed" ? "disabled" : ""}>${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(rack.qty)} pcs${String(rack.status).toLowerCase() === "closed" ? ", closed" : ""})</option>`)
+      .map((rack) => `<option value="${escapeHtml(rack.code)}">${rackOptionLabel(rack)}</option>`)
       .join("");
-    if (state.racks.find((rack) => rack.code === state.selectedRackCode && String(rack.status).toLowerCase() === "closed")) {
-      state.selectedRackCode = state.racks.find((rack) => String(rack.status).toLowerCase() !== "closed")?.code || "";
-    }
     els.rackSelect.value = state.selectedRackCode;
   }
+}
+
+function rackOptionLabel(rack) {
+  const status = String(rack.status || "Open");
+  const qty = Number(rack.qty || 0);
+  const stateText = status.toLowerCase() === "closed" ? "Complete" : qty ? "Open with items" : "Empty";
+  return `${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(qty)} pcs, ${escapeHtml(stateText)})`;
+}
+
+function rackVisualClass(rack) {
+  const status = String(rack.status || "").toLowerCase();
+  if (status === "closed") return "is-complete";
+  if (Number(rack.qty || 0) > 0) return "has-items";
+  return "is-empty";
 }
 
 function renderRacksPage() {
@@ -1319,7 +1330,7 @@ function renderRacksPage() {
     return [...byDate.entries()]
       .sort(([a], [b]) => String(a).localeCompare(String(b)))
       .map(([date, dateItems]) => `
-        <details class="rack-date-group" open>
+        <details class="rack-date-group">
           <summary>
             <strong>${escapeHtml(formatDisplayDate(date))}</strong>
             <span>${escapeHtml(dateItems.reduce((sum, item) => sum + Number(item.rackQty || 1), 0))} pcs</span>
@@ -1341,7 +1352,7 @@ function renderRacksPage() {
         ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">${printLabel}</button>`
         : "";
       return `
-        <details class="rack-card ${hasItems ? "has-items" : ""}" ${hasItems ? "open" : ""}>
+        <details class="rack-card ${rackVisualClass(rack)}">
           <summary>
             <span><strong>${escapeHtml(rack.code)}</strong><small>${escapeHtml(rack.name)}</small></span>
             <span>${escapeHtml(rack.qty || 0)} pcs</span>
@@ -1427,6 +1438,18 @@ async function clearRackItem(rackItemId, label = "this piece") {
   state.rackSummary = payload.summary || null;
   renderRacksPage();
   renderScanRackTools();
+}
+
+function rackPackingListUrl(rackCode, deliveryDate = "") {
+  const dateParam = deliveryDate ? `&deliveryDate=${encodeURIComponent(deliveryDate)}` : "";
+  return `/api/racks/packing-list?rackCode=${encodeURIComponent(rackCode)}${dateParam}`;
+}
+
+function printSelectedRackPackingSlip() {
+  if (!state.selectedRackCode) return;
+  const activeList = state.lists.find((list) => list.id === state.activeListId);
+  const dateParam = state.selectedRackCode === "T" && activeList?.deliveryDate ? activeList.deliveryDate : "";
+  window.open(rackPackingListUrl(state.selectedRackCode, dateParam), "_blank", "noopener");
 }
 
 async function saveRackDefinition() {
@@ -1654,15 +1677,21 @@ function renderScanRackTools() {
     return;
   }
   els.scanRackPanel.classList.remove("is-loading");
-  if (!state.selectedRackCode || !state.racks.some((rack) => rack.code === state.selectedRackCode) || state.racks.find((rack) => rack.code === state.selectedRackCode && String(rack.status).toLowerCase() === "closed")) {
-    state.selectedRackCode = state.racks.find((rack) => rack.code === "T" && String(rack.status).toLowerCase() !== "closed")?.code || state.racks.find((rack) => String(rack.status).toLowerCase() !== "closed")?.code || "";
+  if (!state.selectedRackCode || !state.racks.some((rack) => rack.code === state.selectedRackCode)) {
+    state.selectedRackCode = state.racks.find((rack) => rack.code === "T")?.code || state.racks[0]?.code || "";
   }
+  const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackCode);
+  const selectedClosed = String(selectedRack?.status || "").toLowerCase() === "closed";
+  els.scanRackPanel.classList.toggle("selected-rack-complete", selectedClosed);
+  els.scanRackPanel.classList.toggle("selected-rack-loaded", Boolean(selectedRack && Number(selectedRack.qty || 0) > 0 && !selectedClosed));
   if (els.scanRackSelect) {
     els.scanRackSelect.innerHTML = state.racks
-      .map((rack) => `<option value="${escapeHtml(rack.code)}" ${String(rack.status).toLowerCase() === "closed" ? "disabled" : ""}>${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(rack.qty)} pcs${String(rack.status).toLowerCase() === "closed" ? ", closed" : ""})</option>`)
+      .map((rack) => `<option value="${escapeHtml(rack.code)}">${rackOptionLabel(rack)}</option>`)
       .join("");
     els.scanRackSelect.value = state.selectedRackCode;
   }
+  if (els.scanRackCompleteBtn) els.scanRackCompleteBtn.textContent = selectedClosed ? "Uncomplete" : "Complete";
+  if (els.scanRackPrintBtn) els.scanRackPrintBtn.disabled = !selectedRack || Number(selectedRack.qty || 0) <= 0;
   if (els.scanRackStatus) els.scanRackStatus.textContent = "";
 }
 
@@ -3618,14 +3647,21 @@ function availableGlassTypesForLists(listIds) {
 
 function renderPrintGlassTypes() {
   if (!els.printOptionsGlassType) return;
-  const current = new Set([...els.printOptionsGlassType.selectedOptions].map((option) => option.value).filter(Boolean));
+  const currentInputs = [...els.printOptionsGlassType.querySelectorAll("input")];
+  const current = new Set(currentInputs.filter((input) => input.checked).map((input) => input.value).filter(Boolean));
+  const hadPrevious = currentInputs.length > 0;
   const types = availableGlassTypesForLists(selectedPrintListIds());
-  els.printOptionsGlassType.innerHTML = [
-    ...types.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`),
-  ].join("");
-  for (const option of els.printOptionsGlassType.options) {
-    option.selected = current.has(option.value);
-  }
+  els.printOptionsGlassType.innerHTML = types
+    .map((type) => {
+      const checked = hadPrevious ? current.has(type) : !/mirror/i.test(type);
+      return `
+        <label>
+          <input type="checkbox" value="${escapeHtml(type)}" ${checked ? "checked" : ""}>
+          <span>${escapeHtml(type)}</span>
+        </label>
+      `;
+    })
+    .join("") || `<div class="admin-empty">No glass types found for the selected stages.</div>`;
 }
 
 function renderPrintOptionStages() {
@@ -3663,13 +3699,9 @@ function openPrintOptions(context = {}) {
   for (const input of [els.printUpdatedOnly, els.printRushOnly, els.printRemakeOnly]) {
     if (input) input.checked = false;
   }
-  if (els.printMirrorMode) els.printMirrorMode.value = "exclude";
   if (els.printCustomerFilter) els.printCustomerFilter.value = "";
   if (els.printOrderFilter) els.printOrderFilter.value = "";
   renderPrintOptionStages();
-  if (els.printOptionsGlassType) {
-    for (const option of els.printOptionsGlassType.options) option.selected = false;
-  }
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = false;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = false;
 }
@@ -3698,8 +3730,8 @@ function submitPrintOptions() {
     updatedOnly: els.printUpdatedOnly?.checked ? "1" : "",
     rushOnly: els.printRushOnly?.checked ? "1" : "",
     remakeOnly: els.printRemakeOnly?.checked ? "1" : "",
-    glassType: [...(els.printOptionsGlassType?.selectedOptions || [])].map((option) => option.value.trim()).filter(Boolean).join(","),
-    mirrorMode: els.printMirrorMode?.value || "exclude",
+    glassType: [...(els.printOptionsGlassType?.querySelectorAll("input:checked") || [])].map((input) => input.value.trim()).filter(Boolean).join(","),
+    mirrorMode: "include",
     customers: els.printCustomerFilter?.value.trim() || "",
     orders: els.printOrderFilter?.value.trim() || "",
   };
@@ -4085,40 +4117,65 @@ function importHistoryRows(imports = []) {
   if (!rows.length) {
     return `<div class="admin-empty">No import history yet. Imports from the temp folder or single files will appear here.</div>`;
   }
-  const stageRows = rows.flatMap((entry) => {
-    const listIds = entry.listIds?.length ? entry.listIds : [""];
-    return listIds.map((listId) => ({ ...entry, listId }));
-  });
-  const rowHtml = stageRows
+  return rows
     .map((entry) => {
-      const listIds = entry.listIds || [];
-      const list = state.lists.find((item) => item.id === entry.listId);
-      const stageName = list?.stage || entry.listId || "Updated stage";
-      const updateCount = Number(entry.updatedCount || 0);
-      const updatedQty = Number(list?.totalQty ?? entry.totalQty ?? 0);
-      const originalQty = Number.isFinite(Number(entry.originalQty)) ? Number(entry.originalQty) : Math.max(updatedQty - updateCount, 0);
+      const stageRows = Array.isArray(entry.stageSummaries) && entry.stageSummaries.length
+        ? entry.stageSummaries
+        : (entry.listIds || []).map((listId) => {
+            const list = state.lists.find((item) => item.id === listId);
+            return {
+              listId,
+              stage: list?.stage || listId,
+              totalQty: list?.totalQty ?? entry.totalQty ?? 0,
+              changedPieceQty: entry.changedPieceQty || entry.addedPieceQty || 0,
+              addedPieceQty: entry.addedPieceQty || 0,
+              created: Boolean(entry.createdCount),
+            };
+          });
+      const printableIds = [...new Set(stageRows.map((row) => row.listId).filter(Boolean))];
+      const batchClass = Number(entry.createdCount || 0) > 0 ? "is-new-batch" : "is-updated-batch";
+      const stageHtml = stageRows
+        .filter((row) => row.created || Number(row.changedLineCount || 0) || Number(row.changedPieceQty || 0) || Number(row.addedPieceQty || 0))
+        .map((row) => {
+          const list = state.lists.find((item) => item.id === row.listId);
+          const totalQty = Number(row.totalQty ?? list?.totalQty ?? 0);
+          const addedQty = Number(row.addedPieceQty || 0);
+          const changedQty = Number(row.changedPieceQty || 0);
+          const originalQty = Math.max(totalQty - addedQty, 0);
+          const kindLabel = row.created ? "New" : "Updated";
+          const rowClass = row.created ? "is-new-row" : "";
+          return `
+            <tr class="${rowClass}">
+              <td><span class="stage-pill-admin">${escapeHtml(row.stage || list?.stage || row.listId || "Updated stage")}</span></td>
+              <td><span class="qty-before">${escapeHtml(originalQty)} pcs</span></td>
+              <td><strong>${escapeHtml(totalQty)} pcs</strong>${addedQty ? ` <span class="qty-delta">+${escapeHtml(addedQty)}</span>` : ""}</td>
+              <td>${escapeHtml(changedQty)} updated pcs</td>
+              <td><span class="status-dot-admin success">${escapeHtml(kindLabel)}</span></td>
+              <td class="admin-icon-cell">${row.listId ? `<button type="button" class="icon-print-btn" data-print-lists="${escapeHtml(row.listId)}" title="Print updated items" aria-label="Print updated items">Print</button>` : ""}</td>
+            </tr>
+          `;
+        })
+        .join("") || `<tr><td colspan="6"><span class="admin-empty">No line changes recorded for this batch.</span></td></tr>`;
       return `
-        <tr>
-          <td>
-            <strong>${escapeHtml(entry.sourceName || "Imported delivery list")}</strong>
-            <span>${escapeHtml(formatDateTime(entry.importedAt || ""))}</span>
-          </td>
-          <td>${escapeHtml(formatDisplayDate(entry.deliveryDate))}</td>
-          <td><span class="stage-pill-admin">${escapeHtml(stageName)}</span></td>
-          <td><span class="qty-before">${escapeHtml(originalQty)} pcs</span></td>
-          <td><strong>${escapeHtml(updatedQty)} pcs</strong>${updateCount ? ` <span class="qty-delta">+${escapeHtml(updateCount)}</span>` : ""}</td>
-          <td><span class="status-dot-admin success">Successful</span></td>
-          <td class="admin-icon-cell">${entry.listId ? `<button type="button" class="icon-print-btn" data-print-lists="${escapeHtml(entry.listId)}" title="Print updated items" aria-label="Print updated items">Print</button>` : ""}</td>
-        </tr>
+        <section class="admin-import-batch ${batchClass}">
+          <header>
+            <div>
+              <strong>${escapeHtml(entry.sourceName || "Imported delivery list")}</strong>
+              <span>${escapeHtml(formatDisplayDate(entry.deliveryDate))} - ${escapeHtml(formatDateTime(entry.importedAt || ""))}</span>
+            </div>
+            <div class="admin-import-batch-actions">
+              <span>${escapeHtml(entry.addedPieceQty || 0)} added pcs</span>
+              ${printableIds.length ? `<button type="button" data-print-lists="${escapeHtml(printableIds.join(","))}">Print all updates</button>` : ""}
+            </div>
+          </header>
+          <table class="admin-import-table">
+            <thead><tr><th>Stage</th><th>Original Qty</th><th>Updated Qty</th><th>Changed</th><th>Status</th><th></th></tr></thead>
+            <tbody>${stageHtml}</tbody>
+          </table>
+        </section>
       `;
     })
     .join("");
-  return `
-    <table class="admin-import-table">
-      <thead><tr><th>Delivery List</th><th>Date</th><th>Updated Stage</th><th>Original Qty</th><th>Updated Qty</th><th>Status</th><th></th></tr></thead>
-      <tbody>${rowHtml}</tbody>
-    </table>
-  `;
 }
 
 function renderAdminDeleteControls() {
@@ -4815,16 +4872,19 @@ function wireEvents() {
   els.scanRackCompleteBtn?.addEventListener("click", async () => {
     if (!state.selectedRackCode) return;
     try {
-      await completeRack(state.selectedRackCode);
-      const activeList = state.lists.find((list) => list.id === state.activeListId);
-      const dateParam = state.selectedRackCode === "T" && activeList?.deliveryDate ? `&deliveryDate=${encodeURIComponent(activeList.deliveryDate)}` : "";
-      window.open(`/api/racks/packing-list?rackCode=${encodeURIComponent(state.selectedRackCode)}${dateParam}`, "_blank", "noopener");
+      const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackCode);
+      if (String(selectedRack?.status || "").toLowerCase() === "closed") {
+        await uncompleteRack(state.selectedRackCode);
+      } else {
+        await completeRack(state.selectedRackCode);
+      }
       await ensureRacksLoaded();
       renderScanRackTools();
     } catch (error) {
       showInlineError(error.message, true);
     }
   });
+  els.scanRackPrintBtn?.addEventListener("click", () => printSelectedRackPackingSlip());
   els.rackScanForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -4838,8 +4898,7 @@ function wireEvents() {
     if (printButton) {
       event.preventDefault();
       event.stopPropagation();
-      const dateParam = printButton.dataset.rackPrintDate ? `&deliveryDate=${encodeURIComponent(printButton.dataset.rackPrintDate)}` : "";
-      window.open(`/api/racks/packing-list?rackCode=${encodeURIComponent(printButton.dataset.rackPrint)}${dateParam}`, "_blank", "noopener");
+      window.open(rackPackingListUrl(printButton.dataset.rackPrint, printButton.dataset.rackPrintDate || ""), "_blank", "noopener");
       return;
     }
     const completeButton = event.target.closest("[data-rack-complete]");
@@ -5440,7 +5499,7 @@ function wireEvents() {
     }
     const printListsButton = event.target.closest("[data-print-lists]");
     if (printListsButton?.dataset.printLists) {
-      window.open(`/api/print/package?listId=${encodeURIComponent(printListsButton.dataset.printLists)}`, "_blank", "noopener");
+      openPrintPackage([{ listIds: String(printListsButton.dataset.printLists).split(",").filter(Boolean) }], { updatedOnly: "1" });
       return;
     }
     const printActiveButton = event.target.closest("[data-print-active]");

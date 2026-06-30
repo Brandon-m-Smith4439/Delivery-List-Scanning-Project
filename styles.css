@@ -2266,6 +2266,10 @@ select:disabled,
   min-height: 0;
 }
 
+.scan-page .workspace {
+  gap: 8px;
+}
+
 .list-panel,
 .scanner-panel {
   background: var(--surface);
@@ -3811,8 +3815,8 @@ select:disabled,
 }
 
 .print-options-panel {
-  max-height: calc(100vh - 44px);
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 .print-mode-toggle,
@@ -6177,6 +6181,41 @@ body.bay-move-mode .excel-bay-map {
   border-color: rgba(20, 92, 169, 0.35);
 }
 
+.rack-card.is-empty {
+  opacity: 0.82;
+}
+
+.rack-card.is-empty summary {
+  background: #f8fafc;
+}
+
+.rack-card.has-items summary {
+  background: #edf6ff;
+  border-left: 5px solid #2f80ed;
+}
+
+.rack-card.is-complete {
+  border-color: #8b93a4;
+  box-shadow: 0 8px 20px rgba(75, 85, 99, 0.1);
+}
+
+.rack-card.is-complete summary {
+  background: #eef1f5;
+  border-left: 5px solid #6b7280;
+}
+
+.rack-card.is-complete summary strong::after {
+  content: " Complete";
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #d9dee7;
+  color: #374151;
+  font-size: 11px;
+  vertical-align: middle;
+}
+
 .rack-card summary {
   min-height: 58px;
   padding: 10px 12px;
@@ -6318,9 +6357,15 @@ body.bay-move-mode .excel-bay-map {
 
 .scan-rack-row {
   display: grid;
-  grid-template-columns: minmax(150px, max-content) minmax(0, 1fr);
+  grid-template-columns: minmax(170px, max-content) minmax(0, 1fr);
   gap: 8px;
   align-items: end;
+}
+
+.scan-rack-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 6px;
 }
 
 .scan-rack-row label {
@@ -6354,9 +6399,23 @@ body.bay-move-mode .excel-bay-map {
   font-size: 12px;
 }
 
-.print-options-panel select[multiple] {
-  min-height: 148px;
-  padding: 8px;
+.scan-rack-panel.selected-rack-complete {
+  border-color: #8b93a4;
+  background: #f1f3f6;
+}
+
+.scan-rack-panel.selected-rack-complete select {
+  color: #4b5563;
+  background: #e8ebef;
+}
+
+.scan-rack-panel.selected-rack-loaded {
+  border-color: #5ca4ef;
+  background: #edf6ff;
+}
+
+.print-glass-options {
+  max-height: none;
 }
 
 .header-search-results strong span {
@@ -6635,6 +6694,56 @@ body.bay-move-mode .excel-bay-map {
   margin-top: 2px;
   color: #5a6880;
   font-size: 11px;
+}
+
+.admin-import-batch {
+  border: 1px solid #dce7f5;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.admin-import-batch > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #f7faff;
+  border-bottom: 1px solid #dce7f5;
+}
+
+.admin-import-batch > header span {
+  display: block;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-import-batch.is-new-batch {
+  border-color: #99d6bd;
+}
+
+.admin-import-batch.is-new-batch > header {
+  background: #eaf8ef;
+}
+
+.admin-import-batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.admin-import-batch-actions > span {
+  color: #16833b;
+  font-weight: 950;
+}
+
+.admin-import-table tr.is-new-row {
+  background: #effaf2;
 }
 
 .qty-delta {

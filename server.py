@@ -32,6 +32,21 @@ DEFAULT_UPDATE_REPO = "https://github.com/Brandon-m-Smith4439/Delivery-List-Scan
 DEFAULT_UPDATE_BRANCH = "main"
 
 
+def local_repo_root() -> Path:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=True,
+        )
+        return Path(result.stdout.strip())
+    except Exception:
+        return ROOT
+
+
 def update_repo_url() -> str:
     return os.environ.get("DLS_UPDATE_REPO_URL", DEFAULT_UPDATE_REPO).strip() or DEFAULT_UPDATE_REPO
 
@@ -92,12 +107,23 @@ def github_update_status(error_prefix: str = "") -> dict:
         remote = str(data.get("sha") or "")
         marker = ROOT / "data" / "update-version.json"
         local = ""
+        try:
+            local = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=local_repo_root(),
+                text=True,
+                capture_output=True,
+                timeout=10,
+                check=True,
+            ).stdout.strip()
+        except Exception:
+            local = ""
         if marker.exists():
             try:
-                local = str(json.loads(marker.read_text(encoding="utf-8")).get("commit") or "")
+                local = local or str(json.loads(marker.read_text(encoding="utf-8")).get("commit") or "")
             except Exception:
-                local = ""
-        update_available = bool(remote) and remote != local
+                pass
+        update_available = bool(remote and local) and remote != local
         return {
             "ok": True,
             "method": "github_zip",
@@ -108,7 +134,7 @@ def github_update_status(error_prefix: str = "") -> dict:
             "remoteFull": remote,
             "behind": 1 if update_available else 0,
             "updateAvailable": update_available,
-            "note": error_prefix or "Git was unavailable; checked GitHub directly.",
+            "note": error_prefix or ("Git was unavailable; checked GitHub directly." if local else "Git was unavailable and no installed version marker was found; update status is unknown."),
         }
     except Exception as exc:
         return {"ok": False, "method": "github_zip", "error": f"{error_prefix} GitHub fallback failed: {exc}".strip(), "updateAvailable": False}
@@ -116,13 +142,13 @@ def github_update_status(error_prefix: str = "") -> dict:
 
 def git_update_status() -> dict:
     def run_git(*args: str) -> str:
-        return subprocess.run(["git", *args], cwd=ROOT.parent, text=True, capture_output=True, timeout=20, check=True).stdout.strip()
+        return subprocess.run(["git", *args], cwd=local_repo_root(), text=True, capture_output=True, timeout=20, check=True).stdout.strip()
 
     try:
         branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
         upstream = run_git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
         local = run_git("rev-parse", "HEAD")
-        subprocess.run(["git", "fetch", "--quiet"], cwd=ROOT.parent, text=True, capture_output=True, timeout=45, check=False)
+        subprocess.run(["git", "fetch", "--quiet"], cwd=local_repo_root(), text=True, capture_output=True, timeout=45, check=False)
         remote = run_git("rev-parse", upstream)
         behind_text = run_git("rev-list", "--count", f"{local}..{remote}")
         behind = int(behind_text or "0")
@@ -176,7 +202,7 @@ def apply_github_zip_update(status: dict | None = None) -> dict:
             if not roots:
                 raise ValueError("GitHub archive did not contain a project folder")
             source_root = roots[0]
-            target_root = ROOT.parent
+            target_root = local_repo_root()
             skip_names = {".git", "data", "_verification", "__pycache__"}
             for child in source_root.iterdir():
                 if child.name in skip_names:
@@ -206,7 +232,7 @@ def apply_git_update() -> dict:
 
     current_commit = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
-        cwd=ROOT.parent,
+        cwd=local_repo_root(),
         text=True,
         capture_output=True,
         timeout=10,
@@ -216,7 +242,7 @@ def apply_git_update() -> dict:
 
     pull = subprocess.run(
         ["git", "pull", "--ff-only", "--autostash"],
-        cwd=ROOT.parent,
+        cwd=local_repo_root(),
         text=True,
         capture_output=True,
         timeout=120,
@@ -364,7 +390,7 @@ def render_rack_packing_list(payload: dict) -> str:
         @media print {{ body {{ margin: 0.3in; }} button {{ display: none; }} }}
       </style>
     </head>
-    <body>
+    <body onload="setTimeout(function(){{ window.print(); }}, 350)">
       <button onclick="window.print()">Print</button>
       <header>
         <div>

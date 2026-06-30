@@ -634,6 +634,11 @@ def is_remake_item(item: dict[str, Any]) -> bool:
     return "REMAKE" in text or re.search(r"\bRM\b", text) is not None
 
 
+def is_rush_item(item: dict[str, Any]) -> bool:
+    text = " ".join(str(item.get(key, "")) for key in ("remake", "processState", "queueState")).upper()
+    return "SDI" in text or re.search(r"\bRUSH\b", text) is not None
+
+
 def is_mirror_item(item: dict[str, Any]) -> bool:
     text = " ".join(str(item.get(key, "")) for key in ("product", "job", "customer", "route")).upper()
     return "MIRROR" in text or re.search(r"\bMIR\b", text) is not None
@@ -1185,6 +1190,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.ensure_column(con, "imports", "source_path", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "imports", "source_hash", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "imports", "import_kind", "TEXT NOT NULL DEFAULT 'manual'")
+        self.ensure_column(con, "imports", "change_summary", "TEXT NOT NULL DEFAULT ''")
         con.commit()
 
     def ensure_column(self, con: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -1259,7 +1265,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         scanner: str,
         items: list[dict[str, Any]],
         replace_items: bool,
-    ) -> None:
+    ) -> dict[str, Any]:
         existing = con.execute("SELECT revision, created_at FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
         created = existing["created_at"] if existing else now_iso()
         revision = int(existing["revision"]) + 1 if existing and replace_items else int(existing["revision"]) if existing else 1
@@ -1276,6 +1282,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             """,
             (list_id, label, delivery_date, stage, scanner, revision, created),
         )
+        summary = {
+            "listId": list_id,
+            "stage": stage,
+            "scanner": scanner,
+            "created": not bool(existing),
+            "newPieceQty": 0,
+            "updatedPieceQty": 0,
+            "addedPieceQty": 0,
+            "changedPieceQty": 0,
+            "changedLineCount": 0,
+            "totalQty": sum(int(item.get("qty") or 0) for item in items),
+        }
         if replace_items:
             preserved_scans: dict[str, int] = {}
             existing_keys: set[str] = set()
@@ -1293,6 +1311,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "route": str(row["route"] or ""),
                     "job": str(row["job"] or ""),
                     "product": str(row["product"] or ""),
+                    "process_state": str(row["process_state"] or ""),
                     "queue_state": str(row["queue_state"] or ""),
                 }
                 previous_items[source_key] = previous_payload
@@ -1324,6 +1343,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ]
             con.execute("DELETE FROM line_items WHERE list_id = ?", (list_id,))
             cloned_items = self.insert_line_items(con, list_id, items)
+            if not existing:
+                summary["newPieceQty"] = summary["totalQty"]
+                summary["addedPieceQty"] = summary["totalQty"]
+                summary["changedPieceQty"] = summary["totalQty"]
+                summary["changedLineCount"] = len(cloned_items)
             cloned_by_key: dict[str, dict[str, Any]] = {}
             for cloned in cloned_items:
                 cloned_by_key[str(cloned["source_id"])] = cloned
@@ -1339,6 +1363,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if existing and cloned["source_id"] not in existing_keys and order_item_key not in existing_keys:
                     next_state = " ".join(part for part in [cloned["process_state"], "New Line"] if part).strip()
                     con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
+                    summary["newPieceQty"] += int(cloned["qty"] or 0)
+                    summary["addedPieceQty"] += int(cloned["qty"] or 0)
+                    summary["changedPieceQty"] += int(cloned["qty"] or 0)
+                    summary["changedLineCount"] += 1
                 elif existing:
                     previous = previous_items.get(cloned["source_id"], previous_items.get(order_item_key))
                     current = {
@@ -1354,6 +1382,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         state_text = str(cloned["process_state"] or "")
                         next_state = state_text if re.search(r"\bUpdated Line\b", state_text, flags=re.IGNORECASE) else " ".join(part for part in [state_text, "Updated Line"] if part).strip()
                         con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
+                        qty_delta = max(int(cloned["qty"] or 0) - int(previous.get("qty") or 0), 0)
+                        summary["updatedPieceQty"] += int(cloned["qty"] or 0)
+                        summary["addedPieceQty"] += qty_delta
+                        summary["changedPieceQty"] += int(cloned["qty"] or 0)
+                        summary["changedLineCount"] += 1
+                    elif previous:
+                        previous_state = str(previous.get("process_state") or "")
+                        preserved_flags = [flag for flag in ("New Line", "Updated Line") if re.search(rf"\b{re.escape(flag)}\b", previous_state, flags=re.IGNORECASE)]
+                        if preserved_flags:
+                            state_text = str(cloned["process_state"] or "")
+                            for flag in preserved_flags:
+                                if not re.search(rf"\b{re.escape(flag)}\b", state_text, flags=re.IGNORECASE):
+                                    state_text = " ".join(part for part in [state_text, flag] if part).strip()
+                            con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (state_text, cloned["id"]))
             for preserved_rack in preserved_rack_items:
                 cloned = cloned_by_key.get(preserved_rack["source_id"]) or cloned_by_key.get(preserved_rack["order_item_key"])
                 if not cloned:
@@ -1380,6 +1422,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         preserved_rack["reason"],
                     ),
                 )
+        return summary
 
     def seed_demo_data(self, con: sqlite3.Connection) -> None:
         if not self.sample_path.exists():
@@ -2308,7 +2351,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "UPDATE delivery_lists SET status = 'inactive' WHERE id IN ({})".format(",".join("?" for _ in stale_profile_ids)),
                     stale_profile_ids,
                 )
-            con.execute(
+            import_cur = con.execute(
                 """
                 INSERT INTO imports (
                     delivery_date, source_name, row_count, total_qty, cpu_count,
@@ -2332,14 +2375,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ),
             )
             changed_list_ids: list[str] = []
+            stage_summaries: list[dict[str, Any]] = []
             for list_id, label, stage, scanner, items in definitions:
-                self.upsert_delivery_list(con, list_id, label, str(payload["deliveryDate"]), stage, scanner, items, replace_items=True)
-                changed_list_ids.append(list_id)
-                self.insert_event(con, list_id, None, "IMPORT", "", user, scanner, "import", "Delivery list imported")
-                self.insert_audit(con, "delivery_list", list_id, "import", user, scanner, "", {"sourceName": source_name, "sourceHash": source_hash})
+                summary = self.upsert_delivery_list(con, list_id, label, str(payload["deliveryDate"]), stage, scanner, items, replace_items=True)
+                stage_summaries.append(summary)
+                if summary["created"] or summary["changedLineCount"] or summary["changedPieceQty"]:
+                    changed_list_ids.append(list_id)
+                    self.insert_event(con, list_id, None, "IMPORT", "", user, scanner, "import", "Delivery list imported")
+                    self.insert_audit(con, "delivery_list", list_id, "import", user, scanner, "", {"sourceName": source_name, "sourceHash": source_hash, "summary": summary})
+            change_summary = {
+                "sourceName": source_name,
+                "deliveryDate": delivery_date,
+                "createdCount": sum(1 for summary in stage_summaries if summary["created"]),
+                "updatedCount": sum(1 for summary in stage_summaries if not summary["created"] and (summary["changedLineCount"] or summary["changedPieceQty"])),
+                "addedPieceQty": sum(int(summary["addedPieceQty"] or 0) for summary in stage_summaries),
+                "changedPieceQty": sum(int(summary["changedPieceQty"] or 0) for summary in stage_summaries),
+                "stages": stage_summaries,
+                "changedListIds": changed_list_ids,
+            }
+            con.execute("UPDATE imports SET change_summary = ? WHERE id = ?", (json.dumps(change_summary, separators=(",", ":")), import_cur.lastrowid))
             con.commit()
         created_count = sum(1 for definition in definitions if definition[0] not in existing_list_ids)
-        updated_count = len(definitions) - created_count
+        updated_count = sum(1 for summary in stage_summaries if not summary["created"] and (summary["changedLineCount"] or summary["changedPieceQty"]))
         return {
             "lists": self.get_delivery_lists(),
             "activeListId": definitions[0][0],
@@ -2347,18 +2404,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "createdCount": created_count,
             "updatedCount": updated_count,
             "changedListIds": changed_list_ids,
-            "printCandidates": self.print_candidates_from_payload(payload, changed_list_ids, source_name),
+            "stageSummaries": stage_summaries,
+            "addedPieceQty": sum(int(summary["addedPieceQty"] or 0) for summary in stage_summaries),
+            "changedPieceQty": sum(int(summary["changedPieceQty"] or 0) for summary in stage_summaries),
+            "printCandidates": self.print_candidates_from_payload(payload, changed_list_ids, source_name, stage_summaries),
         }
 
-    def print_candidates_from_payload(self, payload: dict[str, Any], list_ids: list[str], source_name: str) -> list[dict[str, Any]]:
+    def print_candidates_from_payload(self, payload: dict[str, Any], list_ids: list[str], source_name: str, stage_summaries: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         counts = print_counts_for_items(payload.get("items") or [])
-        if not counts["pieceCount"]:
+        stage_summaries = stage_summaries or []
+        changed_piece_qty = sum(int(summary.get("changedPieceQty") or 0) for summary in stage_summaries if summary.get("listId") in set(list_ids))
+        added_piece_qty = sum(int(summary.get("addedPieceQty") or 0) for summary in stage_summaries if summary.get("listId") in set(list_ids))
+        if not counts["pieceCount"] or not list_ids:
             return []
         return [
             {
                 "sourceName": source_name,
                 "deliveryDate": str(payload.get("deliveryDate") or ""),
                 "listIds": list_ids,
+                "stageSummaries": [summary for summary in stage_summaries if summary.get("listId") in set(list_ids)],
+                "changedPieceQty": changed_piece_qty,
+                "addedPieceQty": added_piece_qty,
                 **counts,
             }
         ]
@@ -2430,7 +2496,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "createdCount": result["createdCount"],
                     "updatedCount": result["updatedCount"],
                     "listIds": result["changedListIds"],
+                    "stageSummaries": result.get("stageSummaries") or [],
+                    "addedPieceQty": result.get("addedPieceQty", 0),
+                    "changedPieceQty": result.get("changedPieceQty", 0),
                 }
+                if not result["createdCount"] and not result["updatedCount"] and not result.get("changedListIds"):
+                    skipped_files.append({"fileName": path.name, "reason": "No delivery-list line changes detected"})
+                    continue
                 if result["createdCount"]:
                     imported_files.append(file_result)
                 else:
@@ -2494,7 +2566,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             else:
                 printable_items = [item for item in source_items if should_print_delivery_item(item)]
             if rush_only:
-                printable_items = [item for item in printable_items if re.search(r"\bRush\b", str(item.get("processState", "")), flags=re.IGNORECASE)]
+                printable_items = [item for item in printable_items if is_rush_item(item)]
             if remake_only:
                 printable_items = [item for item in printable_items if is_remake_item(item)]
             if cpu_only:
@@ -2549,7 +2621,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "deliveryDate": bucket["deliveryDate"],
                     "items": items,
                     "remakes": [item for item in items if is_remake_item(item)],
-                    "rushes": [item for item in items if re.search(r"\bRush\b", str(item.get("processState", "")), flags=re.IGNORECASE)],
+                    "rushes": [item for item in items if is_rush_item(item)],
                     "excludedMirrorCount": bucket["excludedMirrorCount"],
                 }
             )
@@ -3122,11 +3194,39 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             today = datetime.now().date().isoformat()
             scan_count = con.execute("SELECT COUNT(*) FROM scan_events WHERE event_type = 'scan' AND substr(created_at, 1, 10) = ?", (today,)).fetchone()[0]
             open_exceptions = con.execute("SELECT COUNT(*) FROM exceptions WHERE status = 'Open'").fetchone()[0]
-            user_count = con.execute("SELECT COUNT(*) FROM users WHERE active = 1").fetchone()[0]
+            user_count = con.execute("SELECT COUNT(DISTINCT user_id) FROM sessions WHERE expires_at > ?", (now_iso(),)).fetchone()[0]
             bay_count = con.execute("SELECT COUNT(*) FROM bays WHERE active = 1").fetchone()[0]
             import_rows = con.execute(
                 "SELECT * FROM imports ORDER BY id DESC LIMIT 5"
             ).fetchall()
+            recent_imports: list[dict[str, Any]] = []
+            for row in import_rows:
+                try:
+                    change_summary = json.loads(row["change_summary"] or "{}")
+                except Exception:
+                    change_summary = {}
+                stage_summaries = change_summary.get("stages") if isinstance(change_summary, dict) else []
+                changed_list_ids = change_summary.get("changedListIds") if isinstance(change_summary, dict) else []
+                recent_imports.append(
+                    {
+                        "id": row["id"],
+                        "batchId": row["id"],
+                        "deliveryDate": row["delivery_date"],
+                        "sourceName": row["source_name"],
+                        "sourcePath": row["source_path"],
+                        "importKind": row["import_kind"],
+                        "rowCount": row["row_count"],
+                        "totalQty": row["total_qty"],
+                        "importedBy": row["imported_by"],
+                        "importedAt": row["imported_at"],
+                        "createdCount": change_summary.get("createdCount", 0) if isinstance(change_summary, dict) else 0,
+                        "updatedCount": change_summary.get("updatedCount", 0) if isinstance(change_summary, dict) else 0,
+                        "addedPieceQty": change_summary.get("addedPieceQty", 0) if isinstance(change_summary, dict) else 0,
+                        "changedPieceQty": change_summary.get("changedPieceQty", 0) if isinstance(change_summary, dict) else 0,
+                        "stageSummaries": stage_summaries if isinstance(stage_summaries, list) else [],
+                        "listIds": changed_list_ids if isinstance(changed_list_ids, list) and changed_list_ids else [f"{row['delivery_date']}-{suffix}" for suffix, _, _, _ in LIST_PROFILES],
+                    }
+                )
         return {
             "activeDeliveryLists": list_count,
             "activeDeliveryDates": date_count,
@@ -3141,21 +3241,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "tempDeliveryListsDir": str(self.config.temp_delivery_lists_dir),
             "authMode": self.config.auth_mode,
             "environment": self.config.environment,
-            "recentImports": [
-                {
-                    "id": row["id"],
-                    "deliveryDate": row["delivery_date"],
-                    "sourceName": row["source_name"],
-                    "sourcePath": row["source_path"],
-                    "importKind": row["import_kind"],
-                    "rowCount": row["row_count"],
-                    "totalQty": row["total_qty"],
-                    "importedBy": row["imported_by"],
-                    "importedAt": row["imported_at"],
-                    "listIds": [f"{row['delivery_date']}-{suffix}" for suffix, _, _, _ in LIST_PROFILES],
-                }
-                for row in import_rows
-            ],
+            "recentImports": recent_imports,
         }
 
     def resolve_exception(self, data: dict[str, Any], user: str) -> dict[str, Any]:

@@ -9,16 +9,16 @@
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
-    <form class="login-card" id="loginForm">
+    <form class="login-card" id="loginForm" autocomplete="off">
       <img src="assets/barefoot-logo.jpg" alt="Barefoot & Company">
       <h1>Delivery List Scanner</h1>
       <label>
         <span>Username</span>
-        <input id="loginUsername" type="text" autocomplete="username" value="admin">
+        <input id="loginUsername" name="dls_login_user" type="text" autocomplete="username" value="admin">
       </label>
       <label>
         <span>Password</span>
-        <input id="loginPassword" type="password" autocomplete="current-password">
+        <input id="loginPassword" name="dls_login_password" type="password" autocomplete="current-password">
       </label>
       <button type="submit">Sign in</button>
       <p id="loginError" class="login-error"></p>
@@ -266,7 +266,10 @@
                   <span>Transportation Method</span>
                   <select id="scanRackSelect"></select>
                 </label>
-                <button id="scanRackCompleteBtn" type="button">Complete & Print</button>
+                <div class="scan-rack-actions">
+                  <button id="scanRackCompleteBtn" type="button">Complete</button>
+                  <button id="scanRackPrintBtn" type="button">Print Packing Slip</button>
+                </div>
               </div>
               <p id="scanRackStatus" hidden></p>
             </section>
@@ -788,15 +791,7 @@
       </fieldset>
       <label>
         <span>Glass Type</span>
-        <select id="printOptionsGlassType" multiple size="6"></select>
-      </label>
-      <label>
-        <span>Mirrors</span>
-        <select id="printMirrorMode">
-          <option value="exclude">Exclude regular mirrors</option>
-          <option value="include">Include mirrors</option>
-          <option value="only">Mirrors only</option>
-        </select>
+        <div id="printOptionsGlassType" class="print-stage-options print-glass-options"></div>
       </label>
       <label>
         <span>Specific customers</span>
