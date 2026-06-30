@@ -320,6 +320,8 @@ def render_sheet(title: str, subtitle: str, items: list[dict], sheet_class: str 
 def render_rack_packing_list(payload: dict) -> str:
     rack = payload.get("rack") or {}
     barcode = rack.get("barcode") or f"RACK-{rack.get('code', '')}"
+    delivery_label = rack.get("deliveryLabel") or ""
+    delivery_suffix = f" - {esc(delivery_label)}" if delivery_label else ""
     rows = []
     for item in rack.get("items") or []:
         rows.append(
@@ -366,7 +368,7 @@ def render_rack_packing_list(payload: dict) -> str:
       <button onclick="window.print()">Print</button>
       <header>
         <div>
-          <h1>{esc(rack.get("name") or rack.get("code"))} Packing List</h1>
+          <h1>{esc(rack.get("name") or rack.get("code"))} Packing List{delivery_suffix}</h1>
           <p>Rack Type: {esc(rack.get("type"))} | Status: {esc(rack.get("status"))} | Qty: {esc(rack.get("qty"))}</p>
           <p>Scan this rack barcode on the outbound stage to scan all active pieces on this rack.</p>
         </div>
@@ -630,6 +632,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"permissions": STORE.get_permissions()})
             return
 
+        if parsed.path == "/api/admin/roles":
+            if not self.require_permission("manage_roles"):
+                return
+            self.send_json({"roles": STORE.list_roles(), "permissions": STORE.get_permissions()})
+            return
+
         if parsed.path == "/api/admin/line-items/search":
             if not self.require_permission("edit_delivery_lists"):
                 return
@@ -718,8 +726,10 @@ class Handler(SimpleHTTPRequestHandler):
             user = self.require_permission("view_racks")
             if not user:
                 return
-            rack_code = parse_qs(parsed.query).get("rackCode", [""])[0]
-            body = render_rack_packing_list(STORE.rack_packing_list(rack_code)).encode("utf-8")
+            params = parse_qs(parsed.query)
+            rack_code = params.get("rackCode", [""])[0]
+            delivery_date = params.get("deliveryDate", [""])[0]
+            body = render_rack_packing_list(STORE.rack_packing_list(rack_code, delivery_date)).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -999,6 +1009,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.update_user_roles(str(data.get("username") or ""), data.get("roles") or [], updated_by=user["username"]))
+                return
+
+            if parsed.path == "/api/admin/roles/permissions":
+                user = self.require_permission("manage_roles")
+                if not user:
+                    return
+                self.send_json(STORE.update_role_permissions(str(data.get("role") or ""), data.get("permissions") or [], updated_by=user["username"]))
                 return
 
             if parsed.path == "/api/admin/update-apply":

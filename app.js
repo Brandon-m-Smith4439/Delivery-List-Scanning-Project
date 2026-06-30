@@ -56,6 +56,10 @@ const state = {
   adminCustomerRouteRules: [],
   activeSessions: [],
   adminUsers: [],
+  adminRoles: [],
+  allPermissions: [],
+  adminRecentImports: [],
+  adminListSearchTimer: null,
   manualEditDirty: false,
   manualEditListId: "",
   manualEditQuery: "",
@@ -1145,7 +1149,7 @@ function renderItemRow(item) {
 const rowError = hasScanError(item);
 const processClass = rowError ? "error" : status;
 const processText = rowError ? (item.errorReason || item.lastError || "Scan issue") : renderProcessState(item);
-const lastScanNote = item.lastScannedAt ? `<span class="last-scan-note">Last: ${escapeHtml(formatDateTime(item.lastScannedAt))}${item.lastScannedStation ? ` - ${escapeHtml(item.lastScannedStation)}` : ""}</span>` : "";
+const lastScanNote = item.lastScannedAt ? `<span class="last-scan-note">Scanned: ${escapeHtml(formatDateTime(item.lastScannedAt))}${item.lastScannedStation ? ` - ${escapeHtml(item.lastScannedStation)}` : ""}</span>` : "";
   return `
     <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""}" data-id="${escapeHtml(item.id)}">
       <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span>${lastScanNote}</td>
@@ -1272,7 +1276,8 @@ function renderRacksPage() {
   const renderRackItems = (rack) => {
     const items = rack.items || [];
     if (!items.length) return `<p class="admin-empty">No pieces assigned.</p>`;
-    if (rack.code !== "T" && !/truck/i.test(rack.type || "")) return items.map(renderRackItem).join("");
+    const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
+    if (!isTruck) return items.map(renderRackItem).join("");
     const byDate = new Map();
     for (const item of items) {
       const key = item.deliveryDate || "No delivery date";
@@ -1283,7 +1288,11 @@ function renderRacksPage() {
       .sort(([a], [b]) => String(a).localeCompare(String(b)))
       .map(([date, dateItems]) => `
         <details class="rack-date-group" open>
-          <summary><strong>${escapeHtml(formatDisplayDate(date))}</strong><span>${escapeHtml(dateItems.reduce((sum, item) => sum + Number(item.rackQty || 1), 0))} pcs</span></summary>
+          <summary>
+            <strong>${escapeHtml(formatDisplayDate(date))}</strong>
+            <span>${escapeHtml(dateItems.reduce((sum, item) => sum + Number(item.rackQty || 1), 0))} pcs</span>
+            <button type="button" data-rack-print="${escapeHtml(rack.code)}" data-rack-print-date="${escapeHtml(date)}">Print Packing List</button>
+          </summary>
           <div>${dateItems.map(renderRackItem).join("")}</div>
         </details>
       `)
@@ -1291,9 +1300,11 @@ function renderRacksPage() {
   };
   const renderRack = (rack) => {
       const hasItems = Number(rack.qty || 0) > 0;
+      const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
       const adminActions = hasPermission("manage_racks")
         ? `<button type="button" data-rack-clear="${escapeHtml(rack.code)}">Clear</button>`
         : "";
+      const printAction = hasItems && !isTruck ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">Print Packing List</button>` : "";
       return `
         <details class="rack-card ${hasItems ? "has-items" : ""}" ${hasItems ? "open" : ""}>
           <summary>
@@ -1301,7 +1312,7 @@ function renderRacksPage() {
             <span>${escapeHtml(rack.qty || 0)} pcs</span>
           </summary>
           <div class="rack-card-actions">
-            ${hasItems ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">Print Packing List</button>${String(rack.status).toLowerCase() === "closed" ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`}` : ""}
+            ${hasItems ? `${printAction}${String(rack.status).toLowerCase() === "closed" ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`}` : ""}
             ${adminActions}
           </div>
           <div class="rack-item-list">
@@ -3720,7 +3731,8 @@ async function refreshAdminPage() {
   requests.push(hasPermission("manage_users") ? fetchJson("/api/admin/users") : Promise.resolve(null));
   requests.push(hasPermission("view_active_sessions") ? fetchJson("/api/admin/sessions") : Promise.resolve(null));
   requests.push(hasPermission("manage_customer_route_rules") ? fetchJson("/api/admin/customer-route-rules") : Promise.resolve(null));
-  const [summary, users, sessions, customerRules] = await Promise.all(requests);
+  requests.push(hasPermission("manage_roles") ? fetchJson("/api/admin/roles") : Promise.resolve(null));
+  const [summary, users, sessions, customerRules, roles] = await Promise.all(requests);
   if (summary) state.adminSummary = summary;
   if (summary && els.adminSummary) {
     els.adminSummary.innerHTML = [
@@ -3732,15 +3744,17 @@ async function refreshAdminPage() {
   }
   if (els.adminLastUpdated) els.adminLastUpdated.textContent = `Last updated: ${new Date().toLocaleString()}`;
   if (summary) {
+    state.adminRecentImports = summary.recentImports || [];
     renderImportHistory(summary.recentImports || []);
     renderAdminDeleteControls();
     renderAdminResetControls();
-    renderAdminDeliveryLists();
     if (els.tempFolderInput && !els.tempFolderInput.value && summary.tempDeliveryListsDir) els.tempFolderInput.value = summary.tempDeliveryListsDir;
   }
   state.adminUsers = users?.users || [];
   state.activeSessions = sessions?.sessions || [];
   state.adminCustomerRouteRules = customerRules?.rules || [];
+  state.adminRoles = roles?.roles || state.adminRoles || [];
+  state.allPermissions = roles?.permissions || state.allPermissions || [];
   renderAdminUsers();
   renderAdminStations();
   renderManualEditStageOptions();
@@ -3782,9 +3796,30 @@ function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false)
   `;
 }
 
+async function searchAdminDeliveryLists(query) {
+  const clean = String(query || "").trim();
+  const local = state.lists.filter((list) =>
+    [list.label, list.deliveryDate, formatDisplayDate(list.deliveryDate), list.stage, list.scanner]
+      .some((value) => String(value || "").toLowerCase().includes(clean.toLowerCase())),
+  );
+  if (!state.backend || clean.length < 2) return local;
+  try {
+    const payload = await fetchJson(`/api/admin/line-items/search?q=${encodeURIComponent(clean)}`);
+    const matchingIds = new Set((payload.results || []).map((item) => item.listId).filter(Boolean));
+    const merged = [...local];
+    for (const list of state.lists) {
+      if (matchingIds.has(list.id) && !merged.some((existing) => existing.id === list.id)) merged.push(list);
+    }
+    return merged;
+  } catch (error) {
+    console.warn("Admin delivery-list search failed", error);
+    return local;
+  }
+}
+
 function renderAdminDeliveryLists() {
   if (!els.adminDeliveryLists) return;
-  els.adminDeliveryLists.innerHTML = deliveryListAdminRows(state.lists, 5, false);
+  els.adminDeliveryLists.innerHTML = importHistoryRows(state.adminRecentImports || []);
 }
 
 function openAdminModal(kind) {
@@ -3793,6 +3828,7 @@ function openAdminModal(kind) {
     deliveryLists: "All Delivery Lists",
     deliveryActions: "Delivery List Actions",
     users: "All Users",
+    roles: "Edit Role Permissions",
     sessions: "Active Sessions",
     stations: "Stations",
     manualEdit: "Manual Delivery List Edit",
@@ -3801,6 +3837,15 @@ function openAdminModal(kind) {
   els.adminModalBody.innerHTML = adminModalContent(kind);
   els.adminModal.hidden = false;
   if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = false;
+  if (kind === "roles" && (!state.adminRoles.length || !state.allPermissions.length) && hasPermission("manage_roles")) {
+    fetchJson("/api/admin/roles")
+      .then((payload) => {
+        state.adminRoles = payload.roles || [];
+        state.allPermissions = payload.permissions || [];
+        if (!els.adminModal.hidden) els.adminModalBody.innerHTML = adminModalContent("roles");
+      })
+      .catch((error) => showInlineError(error.message, true));
+  }
 }
 
 function closeAdminModal() {
@@ -3815,7 +3860,7 @@ function adminModalContent(kind) {
     return `
       <label class="search-box admin-modal-search">
         <span class="search-icon"></span>
-        <input id="adminDeliveryListModalSearch" type="search" autocomplete="off" placeholder="Search delivery lists, dates, stages...">
+        <input id="adminDeliveryListModalSearch" type="search" autocomplete="off" placeholder="Search date, Job Nr., order number, stage...">
       </label>
       <div class="admin-table" id="adminDeliveryListModalResults">${deliveryListAdminRows(state.lists, state.lists.length || 1, true)}</div>
     `;
@@ -3828,7 +3873,7 @@ function adminModalContent(kind) {
   }
   if (kind === "users") {
     return `
-      <form id="createUserFormModal" class="admin-form">
+      <form id="createUserFormModal" class="admin-form admin-modal-create-user">
         <input id="newUserNameModal" type="text" autocomplete="off" placeholder="Username">
         <input id="newUserDisplayModal" type="text" autocomplete="off" placeholder="Display name">
         <input id="newUserPasswordModal" type="password" autocomplete="new-password" placeholder="Password">
@@ -3839,6 +3884,9 @@ function adminModalContent(kind) {
       </form>
       <div class="admin-table">${renderAdminUsersTable(true, state.adminUsers.length || 1)}</div>
     `;
+  }
+  if (kind === "roles") {
+    return rolePermissionsModalHtml();
   }
   if (kind === "sessions") {
     return `<div class="compact-list modal-list">${state.activeSessions.length ? state.activeSessions.map((session) => `<div><strong>${escapeHtml(session.displayName)}</strong><span>${escapeHtml(session.role || "")} - ${escapeHtml(session.station || "No station")}</span><small>Last seen ${escapeHtml(session.lastSeenAt)}</small></div>`).join("") : `<div><strong>No active sessions</strong><span>Users appear here after login.</span></div>`}</div>`;
@@ -3856,6 +3904,73 @@ function adminModalContent(kind) {
     return manualEditModalHtml();
   }
   return `<div class="admin-empty">Choose a dashboard section to view details.</div>`;
+}
+
+function permissionLabel(permission) {
+  return String(permission || "")
+    .split("_")
+    .map((part) => part ? part[0].toUpperCase() + part.slice(1) : "")
+    .join(" ");
+}
+
+function rolePermissionsModalHtml() {
+  const roles = state.adminRoles || [];
+  const permissions = state.allPermissions || [];
+  if (!roles.length || !permissions.length) {
+    return `<div class="admin-empty">Role permissions are loading. Close and reopen this panel if they do not appear.</div>`;
+  }
+  return `
+    <div class="role-permission-editor">
+      ${roles.map((role) => {
+        const selected = new Set(role.permissions || []);
+        return `
+          <section class="role-permission-card" data-role-card="${escapeHtml(role.name)}">
+            <header>
+              <div>
+                <h3>${escapeHtml(role.name)}</h3>
+                <p>${escapeHtml(role.description || permissionSummaryFromPermissions(role.permissions || []))}</p>
+              </div>
+              <button type="button" data-save-role-permissions="${escapeHtml(role.name)}">Save</button>
+            </header>
+            <div class="role-permission-grid">
+              ${permissions.map((permission) => `
+                <label>
+                  <input type="checkbox" value="${escapeHtml(permission)}" ${selected.has(permission) ? "checked" : ""}>
+                  <span>${escapeHtml(permissionLabel(permission))}</span>
+                </label>
+              `).join("")}
+            </div>
+          </section>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function permissionSummaryFromPermissions(permissions) {
+  const list = permissions || [];
+  if (list.includes("view_admin")) return "Full admin access";
+  if (list.includes("manage_users")) return "User and system management";
+  if (list.includes("manage_racks")) return "Rack and scan management";
+  if (list.includes("view_bays")) return "Indian Trail bay access";
+  if (list.includes("scan")) return "Scanning and list access";
+  return "Custom access";
+}
+
+async function saveRolePermissions(roleName) {
+  const card = document.querySelector(`[data-role-card="${CSS.escape(roleName)}"]`);
+  if (!card) return;
+  const permissions = [...card.querySelectorAll("input[type='checkbox']:checked")].map((input) => input.value);
+  if (!permissions.length && !window.confirm(`Save ${roleName} with no permissions?`)) return;
+  const payload = await fetchJson("/api/admin/roles/permissions", {
+    method: "POST",
+    body: JSON.stringify({ role: roleName, permissions }),
+  });
+  state.adminRoles = payload.roles || [];
+  state.allPermissions = payload.permissions || state.allPermissions;
+  if (els.adminModalBody) els.adminModalBody.innerHTML = adminModalContent("roles");
+  await refreshAdminPage();
+  showInlineError(`${roleName} permissions saved. Users with that role will sign in again to refresh access.`, false);
 }
 
 function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a delivery list to load editable rows.</div>`) {
@@ -3924,20 +4039,51 @@ function renderManualEditStageOptions() {
 }
 
 function renderImportHistory(imports) {
+  state.adminRecentImports = imports || [];
+  if (els.adminDeliveryLists) els.adminDeliveryLists.innerHTML = importHistoryRows(state.adminRecentImports);
   if (!els.importHistory) return;
-  els.importHistory.innerHTML = imports.length
-    ? imports
-        .map(
-          (entry) => `
-            <button type="button" data-print-lists="${escapeHtml((entry.listIds || []).join(","))}">
-              <strong>${escapeHtml(entry.sourceName || "Imported delivery list")}</strong>
-              <span>${escapeHtml(formatDisplayDate(entry.deliveryDate))} - ${escapeHtml(entry.rowCount)} rows / ${escapeHtml(entry.totalQty)} pieces</span>
-              <small>${escapeHtml(entry.importKind || "manual")} by ${escapeHtml(entry.importedBy || "")}</small>
-            </button>
-          `,
-        )
-        .join("")
-    : `<div><strong>No import history yet</strong><span>Imports from the temp folder or single files will appear here.</span></div>`;
+  els.importHistory.innerHTML = importHistoryRows(state.adminRecentImports);
+}
+
+function importHistoryRows(imports = []) {
+  const rows = imports.slice(0, 7);
+  if (!rows.length) {
+    return `<div class="admin-empty">No import history yet. Imports from the temp folder or single files will appear here.</div>`;
+  }
+  const stageRows = rows.flatMap((entry) => {
+    const listIds = entry.listIds?.length ? entry.listIds : [""];
+    return listIds.map((listId) => ({ ...entry, listId }));
+  });
+  const rowHtml = stageRows
+    .map((entry) => {
+      const listIds = entry.listIds || [];
+      const list = state.lists.find((item) => item.id === entry.listId);
+      const stageName = list?.stage || entry.listId || "Updated stage";
+      const updateCount = Number(entry.updatedCount || 0);
+      const updatedQty = Number(list?.totalQty ?? entry.totalQty ?? 0);
+      const originalQty = Number.isFinite(Number(entry.originalQty)) ? Number(entry.originalQty) : Math.max(updatedQty - updateCount, 0);
+      return `
+        <tr>
+          <td>
+            <strong>${escapeHtml(entry.sourceName || "Imported delivery list")}</strong>
+            <span>${escapeHtml(formatDateTime(entry.importedAt || ""))}</span>
+          </td>
+          <td>${escapeHtml(formatDisplayDate(entry.deliveryDate))}</td>
+          <td><span class="stage-pill-admin">${escapeHtml(stageName)}</span></td>
+          <td><span class="qty-before">${escapeHtml(originalQty)} pcs</span></td>
+          <td><strong>${escapeHtml(updatedQty)} pcs</strong>${updateCount ? ` <span class="qty-delta">+${escapeHtml(updateCount)}</span>` : ""}</td>
+          <td><span class="status-dot-admin success">Successful</span></td>
+          <td class="admin-icon-cell">${entry.listId ? `<button type="button" class="icon-print-btn" data-print-lists="${escapeHtml(entry.listId)}" title="Print updated items" aria-label="Print updated items">Print</button>` : ""}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  return `
+    <table class="admin-import-table">
+      <thead><tr><th>Delivery List</th><th>Date</th><th>Updated Stage</th><th>Original Qty</th><th>Updated Qty</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rowHtml}</tbody>
+    </table>
+  `;
 }
 
 function renderAdminDeleteControls() {
@@ -4049,9 +4195,42 @@ function renderAdminUsers() {
   els.adminUsers.innerHTML = renderAdminUsersTable(false, state.adminUsers.length || 1);
 }
 
+function permissionSummaryForUser(user) {
+  const roles = user.roles || [];
+  const permissions = user.permissions || [];
+  if (permissions.includes("view_admin")) return "Full admin access";
+  if (roles.some((role) => /manager/i.test(role))) return "Manage scans, bays, users, and reports";
+  if (roles.some((role) => /lead|supervisor/i.test(role))) return "Scan, undo, manage exceptions, and reports";
+  if (roles.some((role) => /indian trail/i.test(role))) return "Indian Trail scanning and bay access";
+  if (permissions.includes("scan_items")) return "Scan and view assigned stages";
+  return "View assigned delivery lists";
+}
+
 function renderAdminUsersTable(editable = false, limit = 5) {
   const users = state.adminUsers.slice(0, limit);
   if (!users.length) return `<div class="admin-empty">No users loaded.</div>`;
+  const activeSessionUsers = new Set((state.activeSessions || []).map((session) => String(session.username || "").toLowerCase()));
+  if (!editable) {
+    return `
+      <div class="admin-user-preview-list">
+        ${users
+          .map((user) => {
+            const loggedIn = activeSessionUsers.has(String(user.username || "").toLowerCase());
+            return `
+              <article class="admin-user-preview-row">
+                <div>
+                  <strong>${escapeHtml(user.displayName)}</strong>
+                  <span>${escapeHtml(user.username)} · ${escapeHtml((user.roles || []).join(", ") || "No role")}</span>
+                  <small>${escapeHtml(permissionSummaryForUser(user))}</small>
+                </div>
+                <span class="user-session-pill ${loggedIn ? "is-online" : "is-offline"}">${loggedIn ? "Active" : "Inactive"}</span>
+              </article>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
   return `
     <table>
       <thead><tr><th>User</th><th>Roles</th><th>Permissions</th>${editable ? "<th>Stages</th><th>Password</th>" : ""}<th>Status</th>${editable ? "<th></th>" : ""}</tr></thead>
@@ -4068,7 +4247,7 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                     </select>
                   ` : escapeHtml((user.roles || []).join(", "))}
                 </td>
-                <td>${escapeHtml(user.permissions?.includes("view_admin") ? "All Permissions" : (user.permissions || []).join(", ") || "View lists")}</td>
+                <td>${escapeHtml(permissionSummaryForUser(user))}</td>
                 ${editable ? `<td>${escapeHtml((user.stageAccess || []).join(", "))}</td>` : ""}
                 ${editable ? `<td>
                   ${editable && hasPermission("update_user_passwords") ? `
@@ -4481,13 +4660,20 @@ function wireEvents() {
   document.addEventListener("input", (event) => {
     const modalSearch = event.target.closest("#adminDeliveryListModalSearch");
     if (!modalSearch) return;
-    const query = modalSearch.value.trim().toLowerCase();
-    const filtered = state.lists.filter((list) =>
-      [list.label, list.deliveryDate, formatDisplayDate(list.deliveryDate), list.stage, list.scanner]
-        .some((value) => String(value || "").toLowerCase().includes(query)),
-    );
     const target = document.getElementById("adminDeliveryListModalResults");
-    if (target) target.innerHTML = deliveryListAdminRows(filtered, filtered.length || 1, true);
+    const query = modalSearch.value.trim();
+    window.clearTimeout(state.adminListSearchTimer);
+    if (target) target.innerHTML = `<div class="admin-empty loading"><strong>Searching delivery lists...</strong><span class="loading-bar"><i></i></span></div>`;
+    state.adminListSearchTimer = window.setTimeout(() => {
+      searchAdminDeliveryLists(query)
+        .then((filtered) => {
+          const stillCurrent = document.getElementById("adminDeliveryListModalSearch")?.value.trim() === query;
+          if (target && stillCurrent) target.innerHTML = deliveryListAdminRows(filtered, filtered.length || 1, true);
+        })
+        .catch((error) => {
+          if (target) target.innerHTML = `<div class="admin-empty">Search failed: ${escapeHtml(error.message)}</div>`;
+        });
+    }, 180);
   });
   els.homeStageFilter?.addEventListener("change", () => {
     state.homeStageFilter = els.homeStageFilter.value;
@@ -4595,7 +4781,9 @@ function wireEvents() {
     if (!state.selectedRackCode) return;
     try {
       await completeRack(state.selectedRackCode);
-      window.open(`/api/racks/packing-list?rackCode=${encodeURIComponent(state.selectedRackCode)}`, "_blank", "noopener");
+      const activeList = state.lists.find((list) => list.id === state.activeListId);
+      const dateParam = state.selectedRackCode === "T" && activeList?.deliveryDate ? `&deliveryDate=${encodeURIComponent(activeList.deliveryDate)}` : "";
+      window.open(`/api/racks/packing-list?rackCode=${encodeURIComponent(state.selectedRackCode)}${dateParam}`, "_blank", "noopener");
       await ensureRacksLoaded();
       renderScanRackTools();
     } catch (error) {
@@ -4613,7 +4801,10 @@ function wireEvents() {
   els.rackGrid?.addEventListener("click", (event) => {
     const printButton = event.target.closest("[data-rack-print]");
     if (printButton) {
-      window.open(`/api/racks/packing-list?rackCode=${encodeURIComponent(printButton.dataset.rackPrint)}`, "_blank", "noopener");
+      event.preventDefault();
+      event.stopPropagation();
+      const dateParam = printButton.dataset.rackPrintDate ? `&deliveryDate=${encodeURIComponent(printButton.dataset.rackPrintDate)}` : "";
+      window.open(`/api/racks/packing-list?rackCode=${encodeURIComponent(printButton.dataset.rackPrint)}${dateParam}`, "_blank", "noopener");
       return;
     }
     const completeButton = event.target.closest("[data-rack-complete]");
@@ -5157,6 +5348,11 @@ function wireEvents() {
       })
         .then(() => refreshAdminPage())
         .catch((error) => showInlineError(error.message));
+      return;
+    }
+    const saveRolePermissionsButton = event.target.closest("[data-save-role-permissions]");
+    if (saveRolePermissionsButton) {
+      saveRolePermissions(saveRolePermissionsButton.dataset.saveRolePermissions).catch((error) => showInlineError(error.message, true));
       return;
     }
     const saveLineItemButton = event.target.closest("[data-save-line-item]");

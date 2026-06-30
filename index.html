@@ -288,7 +288,6 @@
             <form class="manual-scan-form" id="manualScanForm">
               <div class="section-heading">
                 <h3>Manual Scan</h3>
-                <span>Order + item</span>
               </div>
               <div class="manual-scan-row">
                 <label>
@@ -607,7 +606,7 @@
         <section class="modal-panel bay-selected-modal" id="baySelectedModal" hidden>
           <div class="section-heading">
             <h2>Selected Bay</h2>
-            <button id="baySelectedCloseBtn" type="button">Close</button>
+            <button id="baySelectedCloseBtn" class="modal-close-x" type="button" aria-label="Close selected bay">×</button>
           </div>
           <div id="baySelectedPanel"></div>
         </section>
@@ -615,7 +614,7 @@
         <section class="modal-panel stale-bay-panel" id="staleBayPanel" hidden>
           <div class="section-heading">
             <h2>Old Bay Orders</h2>
-            <button id="staleBayCloseBtn" type="button">Close</button>
+            <button id="staleBayCloseBtn" class="modal-close-x" type="button" aria-label="Close old bay orders">×</button>
           </div>
           <p class="admin-empty">Orders below have been assigned to a bay for more than 10 days.</p>
           <div id="staleBayList" class="stale-bay-list"></div>
@@ -630,7 +629,7 @@
         <section class="sdi-panel modal-panel" id="sdiPanel" hidden>
           <div class="section-heading">
             <h2>SDI / Rush Order</h2>
-            <button id="sdiCloseBtn" type="button">Close</button>
+            <button id="sdiCloseBtn" class="modal-close-x" type="button" aria-label="Close SDI window">×</button>
           </div>
           <form id="sdiForm" class="sdi-form">
             <label>
@@ -701,57 +700,18 @@
             <input id="importFile" class="visually-hidden" type="file" accept=".json,.xlsx,.xlsm,.csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,text/csv">
             <div id="importPreviewBox" class="admin-empty">No import selected.</div>
             <div id="adminDeliveryLists" class="admin-table admin-preview-table"></div>
-            <div id="importHistory" class="compact-list"></div>
+            <div id="importHistory" class="compact-list" hidden></div>
           </section>
 
           <section class="panel admin-users-panel admin-dashboard-card">
             <div class="section-heading">
               <h2>Users & Permissions</h2>
-              <button class="link-button" type="button" data-admin-modal="users">Edit users</button>
+              <div class="section-actions">
+                <button class="link-button" type="button" data-admin-modal="roles">Edit permissions</button>
+                <button class="link-button" type="button" data-admin-modal="users">Edit users</button>
+              </div>
             </div>
-            <form id="createUserForm" class="admin-form">
-              <input id="newUserName" type="text" autocomplete="off" placeholder="Username">
-              <input id="newUserDisplay" type="text" autocomplete="off" placeholder="Display name">
-              <input id="newUserPassword" type="password" autocomplete="new-password" placeholder="Password">
-              <select id="newUserRole">
-                <option>Operator</option>
-                <option>Supervisor</option>
-                <option>Indian Trail Operator</option>
-                <option>Indian Trail Lead</option>
-                <option>Indian Trail Manager</option>
-                <option>Admin</option>
-              </select>
-              <button type="submit">Add user</button>
-            </form>
             <div id="adminUsers" class="admin-table"></div>
-          </section>
-
-          <section class="panel admin-sessions-panel admin-dashboard-card">
-            <div class="section-heading">
-              <h2>Logged-In Users</h2>
-              <button class="link-button" type="button" data-admin-modal="sessions">Edit sessions</button>
-            </div>
-            <div id="activeSessions" class="compact-list"></div>
-          </section>
-
-          <section class="panel admin-maintenance-panel admin-dashboard-card">
-            <div class="section-heading">
-              <h2>Delivery List Actions</h2>
-              <button class="link-button" type="button" data-admin-modal="deliveryActions">Open action UI</button>
-            </div>
-            <div class="admin-form cleanup-form">
-              <select id="deleteDateSelect"></select>
-              <select id="deleteListSelect"></select>
-              <button id="deleteListBtn" type="button">Delete stage</button>
-              <button id="deleteDateBtn" type="button">Delete date</button>
-            </div>
-            <div id="deleteListStatus" class="admin-empty">Admin-only delete actions appear here.</div>
-            <h3 class="admin-subheading">Reset Scans</h3>
-            <div class="admin-form cleanup-form">
-              <select id="resetListSelect"></select>
-              <button id="adminResetScansBtn" type="button">Reset selected list scans</button>
-            </div>
-            <div id="resetScansStatus" class="admin-empty">This deletes scan quantities and keeps the delivery list rows.</div>
           </section>
 
           <section class="panel admin-compact-panel admin-dashboard-card">
@@ -812,7 +772,7 @@
     <section class="print-options-panel" id="printOptionsPanel" hidden>
       <div class="section-heading">
         <h2>Print / Export Delivery Lists</h2>
-        <button id="printOptionsClose" type="button">Close</button>
+        <button id="printOptionsClose" class="modal-close-x" type="button" aria-label="Close print/export">×</button>
       </div>
       <div class="mode-toggle">
         <label><input type="radio" name="printExportMode" value="print" checked> Print</label>
@@ -858,7 +818,7 @@
     <section class="modal-panel admin-modal-panel" id="adminModal" hidden>
       <div class="section-heading">
         <h2 id="adminModalTitle">Admin</h2>
-        <button id="adminModalClose" type="button">Close</button>
+        <button id="adminModalClose" class="modal-close-x" type="button" aria-label="Close admin window">×</button>
       </div>
       <div id="adminModalBody"></div>
     </section>

@@ -249,6 +249,30 @@ def normalize_rack_code(value: str) -> str:
     return text
 
 
+def parse_rack_barcode(value: str) -> tuple[str, str]:
+    text = clean_barcode(value)
+    if not text.startswith("RACK"):
+        return "", ""
+    payload = text[4:]
+    if payload.startswith("TRUCK"):
+        payload = "T" + payload[5:]
+    if payload.startswith("NORACK"):
+        payload = "T" + payload[6:]
+    if payload.startswith("T") and len(payload) >= 9 and payload[1:9].isdigit():
+        return "T", f"{payload[1:5]}-{payload[5:7]}-{payload[7:9]}"
+    match = re.match(r"^([A-Z0-9]+?)(20\d{6})$", payload)
+    if match:
+        date_text = match.group(2)
+        return normalize_rack_code(match.group(1)), f"{date_text[:4]}-{date_text[4:6]}-{date_text[6:8]}"
+    return normalize_rack_code(payload), ""
+
+
+def rack_barcode_text(rack_code: str, delivery_date: str = "") -> str:
+    clean_rack = normalize_rack_code(rack_code)
+    date_digits = digits_only(delivery_date)[:8]
+    return f"RACK-{clean_rack}-{date_digits}" if date_digits else f"RACK-{clean_rack}"
+
+
 def digits_only(value: str) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
@@ -808,6 +832,12 @@ class BaseDeliveryStore:
     def get_permissions(self) -> list[str]:
         raise NotImplementedError
 
+    def list_roles(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def update_role_permissions(self, role_name: str, permissions: list[str], updated_by: str = "system") -> dict[str, Any]:
+        raise NotImplementedError
+
     def preview_import(self, payload: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -1250,6 +1280,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             preserved_scans: dict[str, int] = {}
             existing_keys: set[str] = set()
             previous_items: dict[str, dict[str, Any]] = {}
+            preserved_rack_items: list[dict[str, Any]] = []
             for row in con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall():
                 scanned_qty = int(row["scanned_qty"] or 0)
                 source_key = str(row["source_id"])
@@ -1271,8 +1302,32 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     preserved_scans.get(order_item_key, 0),
                     scanned_qty,
                 )
+            preserved_rack_items = [
+                {
+                    "rack_id": row["rack_id"],
+                    "source_id": str(row["source_id"] or ""),
+                    "order_item_key": f"{row['order_no']}-{str(row['item_no']).zfill(3)}",
+                    "qty": int(row["qty"] or 1),
+                    "added_by": str(row["added_by"] or ""),
+                    "added_at": str(row["added_at"] or now_iso()),
+                    "reason": str(row["reason"] or "Preserved during delivery-list refresh"),
+                }
+                for row in con.execute(
+                    """
+                    SELECT ri.*, li.source_id, li.order_no, li.item_no
+                    FROM rack_items ri
+                    JOIN line_items li ON li.id = ri.line_item_id
+                    WHERE li.list_id = ? AND ri.status = 'Active'
+                    """,
+                    (list_id,),
+                ).fetchall()
+            ]
             con.execute("DELETE FROM line_items WHERE list_id = ?", (list_id,))
             cloned_items = self.insert_line_items(con, list_id, items)
+            cloned_by_key: dict[str, dict[str, Any]] = {}
+            for cloned in cloned_items:
+                cloned_by_key[str(cloned["source_id"])] = cloned
+                cloned_by_key[f"{cloned['order_no']}-{str(cloned['item_no']).zfill(3)}"] = cloned
             for cloned in cloned_items:
                 order_item_key = f"{cloned['order_no']}-{cloned['item_no']}"
                 preserved = preserved_scans.get(cloned["source_id"], preserved_scans.get(order_item_key, 0))
@@ -1299,6 +1354,32 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         state_text = str(cloned["process_state"] or "")
                         next_state = state_text if re.search(r"\bUpdated Line\b", state_text, flags=re.IGNORECASE) else " ".join(part for part in [state_text, "Updated Line"] if part).strip()
                         con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
+            for preserved_rack in preserved_rack_items:
+                cloned = cloned_by_key.get(preserved_rack["source_id"]) or cloned_by_key.get(preserved_rack["order_item_key"])
+                if not cloned:
+                    continue
+                con.execute(
+                    """
+                    INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
+                    VALUES (?, ?, ?, 'Active', ?, ?, ?)
+                    ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
+                        qty = MAX(qty, excluded.qty),
+                        status = 'Active',
+                        removed_by = '',
+                        removed_at = '',
+                        reason = excluded.reason,
+                        added_by = excluded.added_by,
+                        added_at = excluded.added_at
+                    """,
+                    (
+                        preserved_rack["rack_id"],
+                        cloned["id"],
+                        preserved_rack["qty"],
+                        preserved_rack["added_by"],
+                        preserved_rack["added_at"],
+                        preserved_rack["reason"],
+                    ),
+                )
 
     def seed_demo_data(self, con: sqlite3.Connection) -> None:
         if not self.sample_path.exists():
@@ -1830,6 +1911,53 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
     def get_permissions(self) -> list[str]:
         return list(PERMISSIONS)
+
+    def list_roles(self) -> list[dict[str, Any]]:
+        with self.connect() as con:
+            rows = con.execute("SELECT * FROM roles ORDER BY name").fetchall()
+            roles: list[dict[str, Any]] = []
+            for row in rows:
+                permission_rows = con.execute(
+                    "SELECT permission_name FROM role_permissions WHERE role_id = ? ORDER BY permission_name",
+                    (row["id"],),
+                ).fetchall()
+                roles.append(
+                    {
+                        "name": row["name"],
+                        "description": row["description"] or "",
+                        "permissions": [permission["permission_name"] for permission in permission_rows],
+                    }
+                )
+            return roles
+
+    def update_role_permissions(self, role_name: str, permissions: list[str], updated_by: str = "system") -> dict[str, Any]:
+        clean_role = str(role_name or "").strip()
+        clean_permissions = sorted({str(permission).strip() for permission in permissions if str(permission).strip()})
+        unknown = [permission for permission in clean_permissions if permission not in PERMISSIONS]
+        if not clean_role:
+            raise ValueError("role is required")
+        if unknown:
+            raise ValueError(f"Unknown permission: {unknown[0]}")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            role = con.execute("SELECT id FROM roles WHERE name = ?", (clean_role,)).fetchone()
+            if not role:
+                raise ValueError("Role not found")
+            con.execute("DELETE FROM role_permissions WHERE role_id = ?", (role["id"],))
+            for permission in clean_permissions:
+                con.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_name) VALUES (?, ?)", (role["id"], permission))
+            con.execute(
+                """
+                DELETE FROM sessions
+                WHERE user_id IN (
+                    SELECT user_id FROM user_roles WHERE role_id = ?
+                )
+                """,
+                (role["id"],),
+            )
+            self.insert_audit(con, "role", clean_role, "update_role_permissions", updated_by, "", "", {"permissions": clean_permissions})
+            con.commit()
+        return {"roles": self.list_roles(), "permissions": self.get_permissions()}
 
     def user_from_row(self, con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         role_rows = con.execute(
@@ -2560,8 +2688,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         station = request_station(scan_request)
         if not list_id or not barcode.strip():
             raise ValueError("listId and barcode are required")
-        rack_code = normalize_rack_code(barcode)
-        if clean_barcode(barcode).startswith("RACK"):
+        rack_code, _rack_delivery_date = parse_rack_barcode(barcode)
+        if rack_code:
             return self.scan_rack_outbound(scan_request, rack_code)
 
         with self.connect() as con:
@@ -2637,7 +2765,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
                     VALUES (?, ?, 1, 'Active', ?, ?, 'Scanned on staging')
                     ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
-                        qty = qty + 1,
+                        qty = CASE
+                            WHEN rack_items.status = 'Active' THEN MIN(rack_items.qty + 1, (SELECT qty FROM line_items WHERE id = excluded.line_item_id))
+                            ELSE excluded.qty
+                        END,
                         status = 'Active',
                         removed_by = '',
                         removed_at = '',
@@ -3798,7 +3929,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
                 VALUES (?, ?, 1, 'Active', ?, ?, 'Scanned into rack')
                 ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
-                    qty = qty + 1,
+                    qty = CASE
+                        WHEN rack_items.status = 'Active' THEN MIN(rack_items.qty + 1, (SELECT qty FROM line_items WHERE id = excluded.line_item_id))
+                        ELSE excluded.qty
+                    END,
                     status = 'Active',
                     removed_by = '',
                     removed_at = '',
@@ -3961,21 +4095,33 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return self.get_racks()
 
-    def rack_packing_list(self, rack_code: str) -> dict[str, Any]:
+    def rack_packing_list(self, rack_code: str, delivery_date: str = "") -> dict[str, Any]:
         with self.connect() as con:
             rack = self.get_rack_by_code(con, rack_code)
-            return {"rack": self.rack_from_row(con, rack)}
+            rack_payload = self.rack_from_row(con, rack)
+            clean_date = str(delivery_date or "").strip()
+            if clean_date:
+                rack_payload["items"] = [item for item in rack_payload["items"] if str(item.get("deliveryDate") or "") == clean_date]
+                rack_payload["qty"] = sum(int(item.get("rackQty") or item.get("qty") or 0) for item in rack_payload["items"])
+                rack_payload["deliveryDate"] = clean_date
+                rack_payload["deliveryLabel"] = format_display_date(clean_date)
+                rack_payload["barcode"] = rack_barcode_text(rack_payload["code"], clean_date)
+            return {"rack": rack_payload}
 
     def scan_rack_outbound(self, scan_request: dict[str, Any], rack_code: str) -> dict[str, Any]:
         list_id = str(scan_request.get("listId") or "")
         barcode = str(scan_request.get("barcode") or "")
+        parsed_rack_code, barcode_delivery_date = parse_rack_barcode(barcode)
+        if parsed_rack_code:
+            rack_code = parsed_rack_code
+        requested_delivery_date = str(scan_request.get("deliveryDate") or barcode_delivery_date or "").strip()
         user = request_user_name(scan_request)
         station = request_station(scan_request)
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rack = self.get_rack_by_code(con, rack_code)
             list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
-            if not list_row or "outbound" not in str(list_row["stage"]).lower():
+            if requested_delivery_date or not list_row or "outbound" not in str(list_row["stage"]).lower():
                 rack_date = con.execute(
                     """
                     SELECT src_dl.delivery_date
@@ -3983,10 +4129,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     JOIN line_items src ON src.id = ri.line_item_id
                     JOIN delivery_lists src_dl ON src_dl.id = src.list_id
                     WHERE ri.rack_id = ? AND ri.status = 'Active'
+                      AND (? = '' OR src_dl.delivery_date = ?)
                     ORDER BY src_dl.delivery_date DESC
                     LIMIT 1
                     """,
-                    (rack["id"],),
+                    (rack["id"], requested_delivery_date, requested_delivery_date),
                 ).fetchone()
                 if not rack_date:
                     raise ValueError("Rack has no active pieces to scan outbound")
@@ -4000,7 +4147,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     ORDER BY id
                     LIMIT 1
                     """,
-                    (rack_date["delivery_date"],),
+                    (requested_delivery_date or rack_date["delivery_date"],),
                 ).fetchone()
                 if not list_row:
                     raise ValueError("No outbound delivery list was found for this rack")
