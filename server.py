@@ -30,6 +30,21 @@ CONFIG = load_config(ROOT)
 STORE = create_store(CONFIG)
 DEFAULT_UPDATE_REPO = "https://github.com/Brandon-m-Smith4439/Delivery-List-Scanning-Project"
 DEFAULT_UPDATE_BRANCH = "main"
+APP_SENTINELS = ("server.py", "index.html", "app.js", "styles.css")
+
+
+def is_app_root(path: Path) -> bool:
+    return all((path / name).exists() for name in APP_SENTINELS)
+
+
+def find_app_root(path: Path) -> Path:
+    if is_app_root(path):
+        return path
+    for child in path.rglob("server.py"):
+        candidate = child.parent
+        if is_app_root(candidate):
+            return candidate
+    raise ValueError("Update archive did not contain the delivery scanner web app files")
 
 
 def local_repo_root() -> Path:
@@ -42,7 +57,8 @@ def local_repo_root() -> Path:
             timeout=10,
             check=True,
         )
-        return Path(result.stdout.strip())
+        repo_root = Path(result.stdout.strip())
+        return repo_root if is_app_root(repo_root) else ROOT
     except Exception:
         return ROOT
 
@@ -201,8 +217,8 @@ def apply_github_zip_update(status: dict | None = None) -> dict:
             roots = [path for path in temp_dir.iterdir() if path.is_dir()]
             if not roots:
                 raise ValueError("GitHub archive did not contain a project folder")
-            source_root = roots[0]
-            target_root = local_repo_root()
+            source_root = find_app_root(roots[0])
+            target_root = ROOT
             skip_names = {".git", "data", "_verification", "__pycache__"}
             for child in source_root.iterdir():
                 if child.name in skip_names:

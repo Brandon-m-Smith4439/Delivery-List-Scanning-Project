@@ -51,7 +51,6 @@ const state = {
   rackModal: null,
   rackMoveItemId: "",
   printContext: null,
-  lastImportResult: null,
   bayLayout: null,
   bays: [],
   bayEvents: [],
@@ -1075,47 +1074,48 @@ function renderCounts() {
     document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.filter === state.filter));
   }
   if (state.glassTypeFilter !== "all" && !glassCounts.has(state.glassTypeFilter)) state.glassTypeFilter = "all";
-if (els.glassFilterTabs) {
-  const sortedGlassEntries = [...glassCounts.entries()]
-    .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0) || a[0].localeCompare(b[0]));
+  if (els.glassFilterTabs) {
+    const sortedGlassEntries = [...glassCounts.entries()].sort(
+      (a, b) => Number(b[1] || 0) - Number(a[1] || 0) || a[0].localeCompare(b[0]),
+    );
 
-  const visibleGlassEntries = sortedGlassEntries.slice(0, 3);
-  const hiddenGlassEntries = sortedGlassEntries.slice(3);
-  const selectedHiddenGlass = hiddenGlassEntries.find(([label]) => label === state.glassTypeFilter);
-  const selectedHiddenCount = selectedHiddenGlass ? selectedHiddenGlass[1] : 0;
+    const visibleGlassEntries = sortedGlassEntries.slice(0, 3);
+    const hiddenGlassEntries = sortedGlassEntries.slice(3);
+    const selectedHiddenGlass = hiddenGlassEntries.find(([label]) => label === state.glassTypeFilter);
+    const selectedHiddenCount = selectedHiddenGlass ? selectedHiddenGlass[1] : 0;
 
-  const visibleGlassButtons = visibleGlassEntries.map(
-    ([label, count]) =>
-      `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
-  );
+    const visibleGlassButtons = visibleGlassEntries.map(
+      ([label, count]) =>
+        `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
+    );
 
-  const moreGlassButton = hiddenGlassEntries.length
-    ? `
-      <details class="glass-filter-more">
-        <summary class="tab glass-filter-tab glass-filter-more-summary ${selectedHiddenGlass ? "is-active" : ""}">
-          ${selectedHiddenGlass ? escapeHtml(state.glassTypeFilter) : `More Glass Types`}
-          <span>${selectedHiddenGlass ? `(${escapeHtml(selectedHiddenCount)})` : `+${hiddenGlassEntries.length}`}</span>
-        </summary>
-        <div class="glass-filter-menu">
-          ${hiddenGlassEntries
-            .map(
-              ([label, count]) =>
-                `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
-            )
-            .join("")}
-        </div>
-      </details>
-    `
-    : "";
+    const moreGlassButton = hiddenGlassEntries.length
+      ? `
+        <details class="glass-filter-more">
+          <summary class="tab glass-filter-tab glass-filter-more-summary ${selectedHiddenGlass ? "is-active" : ""}">
+            ${selectedHiddenGlass ? escapeHtml(state.glassTypeFilter) : "More Glass Types"}
+            <span>${selectedHiddenGlass ? `(${escapeHtml(selectedHiddenCount)})` : `+${hiddenGlassEntries.length}`}</span>
+          </summary>
+          <div class="glass-filter-menu">
+            ${hiddenGlassEntries
+              .map(
+                ([label, count]) =>
+                  `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
+              )
+              .join("")}
+          </div>
+        </details>
+      `
+      : "";
 
-  const glassButtons = [
-    `<button class="tab glass-filter-tab ${state.glassTypeFilter === "all" ? "is-active" : ""}" data-glass-filter="all" type="button">All Glass <span>(${totalItems})</span></button>`,
-    ...visibleGlassButtons,
-    moreGlassButton,
-  ];
+    const glassButtons = [
+      `<button class="tab glass-filter-tab ${state.glassTypeFilter === "all" ? "is-active" : ""}" data-glass-filter="all" type="button">All Glass <span>(${totalItems})</span></button>`,
+      ...visibleGlassButtons,
+      moreGlassButton,
+    ];
 
-  els.glassFilterTabs.innerHTML = glassButtons.join("");
-}
+    els.glassFilterTabs.innerHTML = glassButtons.join("");
+  }
   if (els.totalItemsText) els.totalItemsText.textContent = `${state.items.length} rows / ${totalItems} pieces`;
   if (els.progressText) els.progressText.textContent = `${stageVerb()} Qty: ${stats.scannedQty}/${stats.totalQty} - ${formatPercent(stats.percent)} Complete`;
   if (els.progressFill) els.progressFill.style.width = `${Math.min(stats.percent, 100)}%`;
@@ -1162,20 +1162,34 @@ function renderItemRow(item) {
   const status = itemStatus(item);
   const selected = item.id === state.selectedId;
   const route = routeLabel(item);
-  const routeTag = route ? `<span class="route-tag ${escapeHtml(route.toLowerCase())}">${escapeHtml(route)}</span>` : "";
+  const routeTag = route
+    ? `<span class="route-tag ${escapeHtml(route.toLowerCase())}">${escapeHtml(route)}</span>`
+    : "";
   const location = locationLabel(item);
-  const locationClass = location ? `location-badge ${location.toLowerCase().includes("bay") ? "bay" : location.toLowerCase().includes("truck") ? "truck" : "rack"}` : "";
-  const markers = [
-  isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
-  isRushItem(item) ? '<span class="row-marker rush-marker">Rush</span>' : "",
-]
-  .filter(Boolean)
-  .join("");
+  const locationClass = location
+    ? `location-badge ${
+        location.toLowerCase().includes("bay")
+          ? "bay"
+          : location.toLowerCase().includes("truck")
+            ? "truck"
+            : "rack"
+      }`
+    : "";
 
-const rowError = hasScanError(item);
-const processClass = rowError ? "error" : status;
-const processText = rowError ? (item.errorReason || item.lastError || "Scan issue") : renderProcessState(item);
-const lastScanNote = item.lastScannedAt ? `<span class="last-scan-note">Scanned: ${escapeHtml(formatDateTime(item.lastScannedAt))}${item.lastScannedStation ? ` - ${escapeHtml(item.lastScannedStation)}` : ""}</span>` : "";
+  const markers = [
+    isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
+    isRushItem(item) ? '<span class="row-marker rush-marker">Rush</span>' : "",
+  ]
+    .filter(Boolean)
+    .join("");
+
+  const rowError = hasScanError(item);
+  const processClass = rowError ? "error" : status;
+  const processText = rowError ? item.errorReason || item.lastError || "Scan issue" : renderProcessState(item);
+  const lastScanNote = item.lastScannedAt
+    ? `<span class="last-scan-note">Scanned: ${escapeHtml(formatDateTime(item.lastScannedAt))}${item.lastScannedStation ? ` - ${escapeHtml(item.lastScannedStation)}` : ""}</span>`
+    : "";
+
   return `
     <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""}" data-id="${escapeHtml(item.id)}">
       <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span>${lastScanNote}</td>
@@ -1274,7 +1288,9 @@ function rackVisualClass(rack) {
 
 function renderRacksPage() {
   renderRackSelects();
+
   const summary = state.rackSummary || {};
+
   if (els.rackSummary) {
     els.rackSummary.innerHTML = [
       miniStat("Rack Pieces", summary.rackQty || 0),
@@ -1282,173 +1298,207 @@ function renderRacksPage() {
       miniStat("Active Racks", summary.rackCount || 0),
     ].join("");
   }
+
   if (!els.rackGrid) return;
+
   const rackGroups = new Map();
+
   for (const rack of state.racks) {
     const label = rack.code === "T" || /truck/i.test(rack.type) ? "Truck" : rack.type || "Racks";
-    if (!rackGroups.has(label)) rackGroups.set(label, []);
+
+    if (!rackGroups.has(label)) {
+      rackGroups.set(label, []);
+    }
+
     rackGroups.get(label).push(rack);
   }
+
   const groups = [...rackGroups.entries()].sort(([a], [b]) => {
     if (a === "Truck") return 1;
     if (b === "Truck") return -1;
+
     const order = { Steel: 1, Wood: 2 };
     return (order[a] || 50) - (order[b] || 50) || a.localeCompare(b);
   });
 
-const renderRackItem = (item, currentRackCode = "") => {
-  const rackItemId = String(item.rackItemId || "");
-  const moveOpen = state.rackMoveItemId === rackItemId;
+  const renderRackItem = (item, currentRackCode = "") => {
+    const rackItemId = String(item.rackItemId || "");
+    const moveOpen = state.rackMoveItemId === rackItemId;
 
-  const destinationOptions = state.racks
-    .filter((target) => target.code !== currentRackCode)
-    .map((target) => `<option value="${escapeHtml(target.code)}">${rackOptionLabel(target)}</option>`)
-    .join("");
+    const destinationOptions = state.racks
+      .filter((target) => target.code !== currentRackCode)
+      .map((target) => `<option value="${escapeHtml(target.code)}">${rackOptionLabel(target)}</option>`)
+      .join("");
 
-  return `
-    <article class="rack-item ${moveOpen ? "is-moving" : ""}">
-      <div>
-        <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} <span>${escapeHtml(item.customer || "")}</span></strong>
-        <small>${escapeHtml(item.job || item.product || "")}</small>
-        <small>${escapeHtml(item.product || item.job || "")} | ${escapeHtml(item.dimensions || "")} | Qty ${escapeHtml(item.rackQty || 1)}</small>
-        <small class="rack-scan-time">${escapeHtml(item.deliveryLabel || "")}${item.rackAddedAt ? ` | Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}` : ""}</small>
-      </div>
+    return `
+      <article class="rack-item ${moveOpen ? "is-moving" : ""}">
+        <div>
+          <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} <span>${escapeHtml(item.customer || "")}</span></strong>
+          <small>${escapeHtml(item.job || item.product || "")}</small>
+          <small>${escapeHtml(item.product || item.job || "")} | ${escapeHtml(item.dimensions || "")} | Qty ${escapeHtml(item.rackQty || 1)}</small>
+          <small class="rack-scan-time">${escapeHtml(item.deliveryLabel || "")}${item.rackAddedAt ? ` | Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}` : ""}</small>
+        </div>
 
-      ${
-        hasPermission("manage_racks")
-          ? `<div class="rack-item-actions">
-              <button
-                type="button"
-                class="icon-only icon-move"
-                data-rack-move-open="${escapeHtml(rackItemId)}"
-                title="Move piece"
-                aria-label="Move ${escapeHtml(item.order)}-${escapeHtml(item.item)}"
-              ></button>
-              <button
-                type="button"
-                class="icon-only icon-trash danger"
-                data-rack-clear-item="${escapeHtml(rackItemId)}"
-                data-rack-clear-label="${escapeHtml(`${item.order}-${item.item}`)}"
-                title="Clear piece"
-                aria-label="Clear ${escapeHtml(item.order)}-${escapeHtml(item.item)}"
-              ></button>
-            </div>
+        ${
+          hasPermission("manage_racks")
+            ? `<div class="rack-item-actions">
+                <button
+                  type="button"
+                  class="icon-only icon-move"
+                  data-rack-move-open="${escapeHtml(rackItemId)}"
+                  title="Move piece"
+                  aria-label="Move ${escapeHtml(item.order)}-${escapeHtml(item.item)}"
+                ></button>
+                <button
+                  type="button"
+                  class="icon-only icon-trash danger"
+                  data-rack-clear-item="${escapeHtml(rackItemId)}"
+                  data-rack-clear-label="${escapeHtml(`${item.order}-${item.item}`)}"
+                  title="Clear piece"
+                  aria-label="Clear ${escapeHtml(item.order)}-${escapeHtml(item.item)}"
+                ></button>
+              </div>
 
-            ${
-              moveOpen
-                ? `<div class="rack-move-popover">
-                    <div class="rack-move-title">
-                      <strong>Move Piece</strong>
-                      <span>${escapeHtml(item.order)}-${escapeHtml(item.item)}</span>
-                    </div>
+              ${
+                moveOpen
+                  ? `<div class="rack-move-popover">
+                      <div class="rack-move-title">
+                        <strong>Move Piece</strong>
+                        <span>${escapeHtml(item.order)}-${escapeHtml(item.item)}</span>
+                      </div>
 
-                    <label>
-                      <span>Move to</span>
-                      <select data-rack-target="${escapeHtml(rackItemId)}">
-                        <option value="">Select destination...</option>
-                        ${destinationOptions}
-                      </select>
-                    </label>
+                      <label>
+                        <span>Move to</span>
+                        <select data-rack-target="${escapeHtml(rackItemId)}">
+                          <option value="">Select destination...</option>
+                          ${destinationOptions}
+                        </select>
+                      </label>
 
-                    <div class="rack-move-actions">
-                      <button type="button" class="rack-move-cancel" data-rack-move-cancel="${escapeHtml(rackItemId)}">Cancel</button>
-                      <button type="button" class="rack-move-confirm" data-rack-move="${escapeHtml(rackItemId)}" ${destinationOptions ? "" : "disabled"}>Confirm Move</button>
-                    </div>
-                  </div>`
-                : ""
-            }`
-          : ""
-      }
-    </article>
-  `;
-};
+                      <div class="rack-move-actions">
+                        <button type="button" class="rack-move-cancel" data-rack-move-cancel="${escapeHtml(rackItemId)}">Cancel</button>
+                        <button type="button" class="rack-move-confirm" data-rack-move="${escapeHtml(rackItemId)}" ${destinationOptions ? "" : "disabled"}>Confirm Move</button>
+                      </div>
+                    </div>`
+                  : ""
+              }`
+            : ""
+        }
+      </article>
+    `;
+  };
+
   const renderRackItems = (rack) => {
     const items = rack.items || [];
-    if (!items.length) return `<p class="admin-empty">No pieces assigned.</p>`;
+
+    if (!items.length) {
+      return `<p class="admin-empty">No pieces assigned.</p>`;
+    }
+
     const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
     const isComplete = String(rack.status || "").toLowerCase() === "closed";
-    if (!isTruck) return items.map((item) => renderRackItem(item, rack.code)).join("");
+
+    if (!isTruck) {
+      return items.map((item) => renderRackItem(item, rack.code)).join("");
+    }
+
     const byDate = new Map();
+
     for (const item of items) {
       const key = item.deliveryDate || "No delivery date";
-      if (!byDate.has(key)) byDate.set(key, []);
+
+      if (!byDate.has(key)) {
+        byDate.set(key, []);
+      }
+
       byDate.get(key).push(item);
     }
+
     return [...byDate.entries()]
       .sort(([a], [b]) => String(a).localeCompare(String(b)))
-.map(([date, dateItems]) => {
-  const dateHasMoveOpen = dateItems.some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
+      .map(([date, dateItems]) => {
+        const dateHasMoveOpen = dateItems.some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
+        const dateQty = dateItems.reduce((sum, item) => sum + Number(item.rackQty || 1), 0);
 
-  return `
-    <details class="rack-date-group" ${dateHasMoveOpen ? "open" : ""}>
-          <summary>
-            <strong>${escapeHtml(formatDisplayDate(date))}</strong>
-            <span>${escapeHtml(dateItems.reduce((sum, item) => sum + Number(item.rackQty || 1), 0))} pcs</span>
-            ${isComplete ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}" data-rack-print-date="${escapeHtml(date)}">Print Packing List</button>` : ""}
-          </summary>
-          <div>${dateItems.map((item) => renderRackItem(item, rack.code)).join("")}</div>
-        </details>
-      `;
-    })
+        return `
+          <details class="rack-date-group" ${dateHasMoveOpen ? "open" : ""}>
+            <summary>
+              <strong>${escapeHtml(formatDisplayDate(date))}</strong>
+              <span>${escapeHtml(dateQty)} pcs</span>
+              ${isComplete ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}" data-rack-print-date="${escapeHtml(date)}">Print This Date</button>` : ""}
+            </summary>
+            <div>${dateItems.map((item) => renderRackItem(item, rack.code)).join("")}</div>
+          </details>
+        `;
+      })
       .join("");
   };
+
   const renderRack = (rack) => {
-      const hasItems = Number(rack.qty || 0) > 0;
-      const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
-      const isComplete = String(rack.status || "").toLowerCase() === "closed";
-const adminActions = hasPermission("manage_racks")
-  ? `<span class="rack-summary-actions">
-      <button
-        type="button"
-        class="icon-only icon-pencil"
-        data-rack-edit="${escapeHtml(rack.code)}"
-        title="Edit rack"
-        aria-label="Edit ${escapeHtml(rack.code)}"
-      ></button>
-      <button
-        type="button"
-        class="icon-only icon-trash danger"
-        data-rack-clear="${escapeHtml(rack.code)}"
-        title="Clear rack"
-        aria-label="Clear ${escapeHtml(rack.code)}"
-      ></button>
-    </span>`
-  : "";
-      const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
-      const printAction = hasItems && isComplete
+    const hasItems = Number(rack.qty || 0) > 0;
+    const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
+    const isComplete = String(rack.status || "").toLowerCase() === "closed";
+    const rackHasMoveOpen = (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
+
+    const adminActions = hasPermission("manage_racks")
+      ? `<span class="rack-summary-actions">
+          <button
+            type="button"
+            class="icon-only icon-pencil"
+            data-rack-edit="${escapeHtml(rack.code)}"
+            title="Edit rack"
+            aria-label="Edit ${escapeHtml(rack.code)}"
+          ></button>
+          <button
+            type="button"
+            class="icon-only icon-trash danger"
+            data-rack-clear="${escapeHtml(rack.code)}"
+            title="Clear rack"
+            aria-label="Clear ${escapeHtml(rack.code)}"
+          ></button>
+        </span>`
+      : "";
+
+    const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
+    const printAction =
+      hasItems && isComplete
         ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">${printLabel}</button>`
         : "";
-const rackHasMoveOpen = (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
 
-return `
-  <details class="rack-card ${rackVisualClass(rack)}" ${rackHasMoveOpen ? "open" : ""}>
-    <summary>
-      <span class="rack-summary-main">
-        <strong>${escapeHtml(rack.code)}</strong>
-        <small>${escapeHtml(rack.name)}</small>
-      </span>
-      <span class="rack-summary-qty">${escapeHtml(rack.qty || 0)} pcs</span>
-      ${adminActions}
-    </summary>
-    <div class="rack-card-actions">
-      ${hasItems ? `${printAction}${isComplete ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`}` : ""}
-    </div>
-          <div class="rack-item-list">
-            ${hasItems ? renderRackItems(rack) : `<p class="admin-empty">No pieces assigned.</p>`}
-          </div>
-        </details>
-      `;
-    };
-  els.rackGrid.innerHTML = groups
-    .map(([label, racks]) => `
-      <section class="rack-column">
-        <header>
-          <h2>${escapeHtml(label)}</h2>
-          <span>${escapeHtml(racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0))} pcs</span>
-${
-  hasPermission("manage_racks")
-    ? label === "Truck"
-      ? `<div class="rack-column-actions">
+    return `
+      <details class="rack-card ${rackVisualClass(rack)}" ${rackHasMoveOpen ? "open" : ""}>
+        <summary>
+          <span class="rack-summary-main">
+            <strong>${escapeHtml(rack.code)}</strong>
+            <small>${escapeHtml(rack.name)}</small>
+          </span>
+          <span class="rack-summary-qty">${escapeHtml(rack.qty || 0)} pcs</span>
+          ${adminActions}
+        </summary>
+        <div class="rack-card-actions">
+          ${
+            hasItems
+              ? `${printAction}${
+                  isComplete
+                    ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
+                    : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
+                }`
+              : ""
+          }
+        </div>
+        <div class="rack-item-list">
+          ${hasItems ? renderRackItems(rack) : `<p class="admin-empty">No pieces assigned.</p>`}
+        </div>
+      </details>
+    `;
+  };
+
+  const renderRackColumnActions = (label) => {
+    if (!hasPermission("manage_racks")) return "";
+
+    if (label === "Truck") {
+      return `
+        <div class="rack-column-actions">
           <button
             type="button"
             class="icon-only icon-pencil light"
@@ -1456,29 +1506,36 @@ ${
             title="Edit truck / no rack"
             aria-label="Edit truck / no rack"
           ></button>
-        </div>`
-      : `<div class="rack-column-actions">
-          <button
-            type="button"
-            class="icon-only icon-pencil light"
-            data-rack-set-edit="${escapeHtml(label)}"
-            title="Edit rack set"
-            aria-label="Edit ${escapeHtml(label)} rack set"
-          ></button>
-          <button
-            type="button"
-            class="icon-only icon-trash light"
-            data-rack-set-delete="${escapeHtml(label)}"
-            title="Delete rack set"
-            aria-label="Delete ${escapeHtml(label)} rack set"
-          ></button>
-        </div>`
-    : ""
-}
-        </header>
-        <div>${racks.map(renderRack).join("") || `<p class="admin-empty">No ${escapeHtml(label.toLowerCase())} racks.</p>`}</div>
-      </section>
-    `)
+        </div>
+      `;
+    }
+
+    return `
+      <div class="rack-column-actions">
+        <button
+          type="button"
+          class="icon-only icon-pencil light"
+          data-rack-set-edit="${escapeHtml(label)}"
+          title="Edit rack set"
+          aria-label="Edit ${escapeHtml(label)} rack set"
+        ></button>
+      </div>
+    `;
+  };
+
+  els.rackGrid.innerHTML = groups
+    .map(
+      ([label, racks]) => `
+        <section class="rack-column">
+          <header>
+            <h2>${escapeHtml(label)}</h2>
+            <span>${escapeHtml(racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0))} pcs</span>
+            ${renderRackColumnActions(label)}
+          </header>
+          <div>${racks.map(renderRack).join("") || `<p class="admin-empty">No ${escapeHtml(label.toLowerCase())} racks.</p>`}</div>
+        </section>
+      `,
+    )
     .join("");
 }
 
@@ -3677,72 +3734,6 @@ function openPrintPackage(printCandidates, filters = {}) {
   window.open(`/api/print/package?${params.toString()}`, "_blank", "noopener");
 }
 
-function importCandidateSummary(result) {
-  const imported = result.importedFiles || [];
-  const updated = result.updatedFiles || [];
-  const rows = [
-    ...imported.map((entry) => ({ ...entry, kind: "New" })),
-    ...updated.map((entry) => ({ ...entry, kind: "Updated" })),
-  ];
-  if (!rows.length) return `<div class="admin-empty">No new or updated delivery lists were found.</div>`;
-  return rows
-    .map((entry, index) => `
-      <details class="import-result-item">
-        <summary>
-          <label class="checkbox-row"><input class="import-candidate-check" type="checkbox" checked data-import-candidate-listids="${escapeHtml((entry.listIds || []).join(","))}"><span><strong>${escapeHtml(entry.kind)} - ${escapeHtml(entry.fileName)}</strong><small>${escapeHtml(formatDisplayDate(entry.deliveryDate))} - ${escapeHtml(entry.rowCount || 0)} rows / ${escapeHtml(entry.totalQty || 0)} pieces</small></span></label>
-          ${entry.listIds?.length ? `<button type="button" data-print-candidate-listids="${escapeHtml((entry.listIds || []).join(","))}">Print updated items</button>` : ""}
-        </summary>
-        <div class="compact-list">
-          ${(entry.listIds || []).map((listId) => `<div><strong>${escapeHtml(listId)}</strong><span>Changed stage included in this package.</span></div>`).join("") || "<div><strong>No changed stages reported</strong></div>"}
-        </div>
-      </details>
-    `)
-    .join("");
-}
-
-function showImportResultDialog(result) {
-  let backdrop = document.getElementById("importResultBackdrop");
-  let panel = document.getElementById("importResultPanel");
-  if (!backdrop) {
-    backdrop = document.createElement("div");
-    backdrop.id = "importResultBackdrop";
-    backdrop.className = "modal-backdrop";
-    document.body.appendChild(backdrop);
-  }
-  if (!panel) {
-    panel = document.createElement("section");
-    panel.id = "importResultPanel";
-    panel.className = "modal-panel import-result-panel";
-    document.body.appendChild(panel);
-  }
-  const imported = result.importedFiles?.length || 0;
-  const updated = result.updatedFiles?.length || 0;
-  const skipped = result.skippedFiles?.length || 0;
-  const failed = result.failedFiles?.length || 0;
-  panel.innerHTML = `
-    <div class="section-heading">
-      <h2>Import / Update Complete</h2>
-      <button type="button" data-close-import-result>OK</button>
-    </div>
-    <p class="admin-empty success">${imported} new, ${updated} updated, ${skipped} unchanged, ${failed} failed.</p>
-    <div class="admin-button-row">
-      <button type="button" data-print-import="latest">Print all updated items</button>
-      <button type="button" data-print-selected-imports>Print selected updates</button>
-    </div>
-    <div class="import-result-list">${importCandidateSummary(result)}</div>
-  `;
-  backdrop.hidden = false;
-  panel.hidden = false;
-  backdrop.addEventListener("click", closeImportResultDialog, { once: true });
-}
-
-function closeImportResultDialog() {
-  const backdrop = document.getElementById("importResultBackdrop");
-  const panel = document.getElementById("importResultPanel");
-  if (backdrop) backdrop.hidden = true;
-  if (panel) panel.hidden = true;
-}
-
 async function runAssignmentAction(action, assignmentId) {
   const found = assignmentById(assignmentId);
   const assignment = found.assignment;
@@ -3872,10 +3863,6 @@ function closePrintOptions() {
 
 function submitPrintOptions() {
   let listIds = state.printContext?.fixedListIds ? [...(state.printContext.listIds || [])] : selectedPrintListIds();
-  if (state.printContext?.useImportCandidates) {
-    const importIds = [...new Set((state.lastImportResult?.printCandidates || []).flatMap((candidate) => candidate.listIds || []))];
-    if (importIds.length) listIds = importIds;
-  }
   if (!listIds.length) {
     showInlineError("Select at least one stage to print or export.", false);
     return;
@@ -3920,7 +3907,6 @@ async function importTempDeliveryFolder() {
     method: "POST",
     body: JSON.stringify({ ...requestContext(), sourceFolder, dateFrom, dateTo }),
   });
-  state.lastImportResult = result;
   state.lists = result.lists || state.lists;
   if (result.activeListId) await activateList(result.activeListId, false);
   renderHome();
@@ -3929,25 +3915,23 @@ async function importTempDeliveryFolder() {
   const updated = result.updatedFiles?.length || 0;
   const skipped = result.skippedFiles?.length || 0;
   const failed = result.failedFiles?.length || 0;
-  const printCandidates = result.printCandidates || [];
   if (els.importPreviewBox) {
-    els.importPreviewBox.classList.remove("loading");
-    els.importPreviewBox.classList.toggle("success", !failed);
-    els.importPreviewBox.classList.toggle("review", Boolean(failed));
-    els.importPreviewBox.innerHTML = `
-      <strong>Temp folder import complete</strong>
-      <span>${imported} new files, ${updated} updated files, ${skipped} unchanged, ${failed} failed.</span>
-      ${result.failedFiles?.length ? `<span>${escapeHtml(result.failedFiles.map((file) => `${file.fileName}: ${(file.errors || []).join("; ")}`).join(" | "))}</span>` : ""}
-      ${printCandidates.length ? `<button type="button" data-print-import="latest">Print updated package</button>` : ""}
-      <details class="import-run-details" open>
-        <summary>View imported and updated delivery lists</summary>
-        <div class="import-result-list">${importCandidateSummary(result)}</div>
-      </details>
+  els.importPreviewBox.classList.remove("loading");
+  els.importPreviewBox.classList.add("import-status-compact");
+  els.importPreviewBox.classList.toggle("success", !failed);
+  els.importPreviewBox.classList.toggle("review", Boolean(failed));
+
+  els.importPreviewBox.innerHTML = failed
+    ? `
+      <strong>Import completed with issues.</strong>
+      <span>${imported} new, ${updated} updated, ${skipped} unchanged, ${failed} failed.</span>
+      ${result.failedFiles?.length ? `<small>${escapeHtml(result.failedFiles.map((file) => `${file.fileName}: ${(file.errors || []).join("; ")}`).join(" | "))}</small>` : ""}
+    `
+    : `
+      <strong>Import complete.</strong>
+      <span>${imported} new, ${updated} updated, ${skipped} unchanged.</span>
     `;
-  }
-  if (printCandidates.length) {
-    showImportResultDialog(result);
-  }
+}
 }
 
 async function refreshAdminPage() {
@@ -4657,78 +4641,71 @@ function arrayBufferToBase64(buffer) {
 }
 
 async function importDeliveryListFile(file) {
-  if (state.backend) {
-    if (els.importPreviewBox) {
-      els.importPreviewBox.classList.remove("success", "review");
-      els.importPreviewBox.classList.add("loading");
-      els.importPreviewBox.innerHTML = `<strong>Importing ${escapeHtml(file.name)}...</strong><span class="loading-bar"><i></i></span>`;
-    }
-    let result;
-    if (file.name.toLowerCase().endsWith(".json")) {
-      const text = await file.text();
-      const payload = JSON.parse(text);
-      if (hasPermission("preview_import")) {
-        const preview = await fetchJson("/api/import/preview", {
-          method: "POST",
-          body: JSON.stringify({ payload }),
-        });
-        if (els.importPreviewBox) {
-          els.importPreviewBox.innerHTML = `${preview.valid ? "Ready" : "Blocked"}: ${preview.rowCount} rows, ${preview.totalQty} pieces`;
-        }
-        if (!preview.valid) throw new Error(`Import blocked: ${preview.errors.join("; ")}`);
-        if (preview.warnings.length && !window.confirm(`Import preview has warnings:\n${preview.warnings.join("\n")}\n\nContinue?`)) return;
-      }
-      result = await fetchJson("/api/import", {
-        method: "POST",
-        body: JSON.stringify({ payload, fileName: file.name, ...requestContext() }),
-      });
-    } else {
-      const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
-      result = await fetchJson("/api/import/upload", {
-        method: "POST",
-        body: JSON.stringify({ fileName: file.name, contentBase64, ...requestContext() }),
-      });
-    }
-    state.lastImportResult = result;
-    state.lists = result.lists || [];
-    await activateList(result.activeListId || state.lists[0]?.id, false);
-    renderHome();
-    await refreshAdminPage();
-    if (els.importPreviewBox) {
-      const created = result.createdCount ?? 0;
-      const updated = result.updatedCount ?? 0;
-      els.importPreviewBox.classList.remove("loading");
-      els.importPreviewBox.classList.add("success");
-      els.importPreviewBox.classList.remove("review");
-      els.importPreviewBox.innerHTML = `
-        <strong>Single file import complete</strong>
-        <span>${escapeHtml(file.name)} created ${escapeHtml(created)} stages and updated ${escapeHtml(updated)} stages.</span>
-        ${result.printCandidates?.length ? `<button type="button" data-print-import="latest">Print imported updates</button>` : ""}
-        <details class="import-run-details" open>
-          <summary>View imported and updated delivery lists</summary>
-          <div class="import-result-list">${importCandidateSummary({
-            importedFiles: created ? [{ fileName: file.name, deliveryDate: result.printCandidates?.[0]?.deliveryDate || "", rowCount: "", totalQty: "", listIds: result.changedListIds || [] }] : [],
-            updatedFiles: updated ? [{ fileName: file.name, deliveryDate: result.printCandidates?.[0]?.deliveryDate || "", rowCount: "", totalQty: "", listIds: result.changedListIds || [] }] : [],
-          })}</div>
-        </details>
-      `;
-    }
-    const printCandidates = result.printCandidates || [];
-    if (printCandidates.length) {
-      showImportResultDialog({
-        ...result,
-        importedFiles: created ? [{ fileName: file.name, deliveryDate: printCandidates[0]?.deliveryDate || "", rowCount: "", totalQty: "", listIds: result.changedListIds || [] }] : [],
-        updatedFiles: updated ? [{ fileName: file.name, deliveryDate: printCandidates[0]?.deliveryDate || "", rowCount: "", totalQty: "", listIds: result.changedListIds || [] }] : [],
-        skippedFiles: [],
-        failedFiles: [],
-      });
-    }
-  } else {
+  if (!state.backend) {
+    await legacyImportDeliveryListFile(file);
+    return;
+  }
+
+  if (els.importPreviewBox) {
+    els.importPreviewBox.classList.remove("success", "review");
+    els.importPreviewBox.classList.add("loading");
+    els.importPreviewBox.innerHTML = `<strong>Importing ${escapeHtml(file.name)}...</strong><span class="loading-bar"><i></i></span>`;
+  }
+
+  let result;
+
+  if (file.name.toLowerCase().endsWith(".json")) {
     const text = await file.text();
     const payload = JSON.parse(text);
-    state.lists = createDemoLists(payload);
-    setActiveList(state.lists[0]?.id);
-    renderHome();
+
+    if (hasPermission("preview_import")) {
+      const preview = await fetchJson("/api/import/preview", {
+        method: "POST",
+        body: JSON.stringify({ payload }),
+      });
+
+      if (els.importPreviewBox) {
+        els.importPreviewBox.innerHTML = `${preview.valid ? "Ready" : "Blocked"}: ${preview.rowCount} rows, ${preview.totalQty} pieces`;
+      }
+
+      if (!preview.valid) {
+        throw new Error(`Import blocked: ${preview.errors.join("; ")}`);
+      }
+
+      if (preview.warnings.length && !window.confirm(`Import preview has warnings:\n${preview.warnings.join("\n")}\n\nContinue?`)) {
+        return;
+      }
+    }
+
+    result = await fetchJson("/api/import", {
+      method: "POST",
+      body: JSON.stringify({ payload, fileName: file.name, ...requestContext() }),
+    });
+  } else {
+    const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
+
+    result = await fetchJson("/api/import/upload", {
+      method: "POST",
+      body: JSON.stringify({ fileName: file.name, contentBase64, ...requestContext() }),
+    });
+  }
+
+  state.lists = result.lists || [];
+  await activateList(result.activeListId || state.lists[0]?.id, false);
+  renderHome();
+  await refreshAdminPage();
+
+  if (els.importPreviewBox) {
+    const created = result.createdCount ?? 0;
+    const updated = result.updatedCount ?? 0;
+
+    els.importPreviewBox.classList.remove("loading", "review");
+    els.importPreviewBox.classList.add("success", "import-status-compact");
+
+    els.importPreviewBox.innerHTML = `
+      <strong>Single file import complete.</strong>
+      <span>${escapeHtml(file.name)}: ${escapeHtml(created)} created, ${escapeHtml(updated)} updated.</span>
+    `;
   }
 }
 
@@ -5731,30 +5708,7 @@ if (rackHeaderAction) {
       removeCustomerRouteRule(removeCustomerRouteButton.dataset.removeCustomerRouteRule).catch((error) => showInlineError(error.message, true));
       return;
     }
-    const printImportButton = event.target.closest("[data-print-import]");
-    if (printImportButton) {
-      openPrintPackage(state.lastImportResult?.printCandidates || [], { updatedOnly: "1" });
-      return;
-    }
-    const closeImportButton = event.target.closest("[data-close-import-result]");
-    if (closeImportButton) {
-      closeImportResultDialog();
-      return;
-    }
-    const printSelectedImportsButton = event.target.closest("[data-print-selected-imports]");
-    if (printSelectedImportsButton) {
-      const checkedIds = [...document.querySelectorAll(".import-candidate-check:checked")]
-        .flatMap((input) => String(input.dataset.importCandidateListids || "").split(",").filter(Boolean));
-      const listIds = [...new Set(checkedIds.length ? checkedIds : (state.lastImportResult?.printCandidates || []).flatMap((candidate) => candidate.listIds || []))];
-      openPrintPackage([{ listIds }], { updatedOnly: "1" });
-      return;
-    }
-    const printCandidateButton = event.target.closest("[data-print-candidate-listids]");
-    if (printCandidateButton) {
-      const listIds = String(printCandidateButton.dataset.printCandidateListids || "").split(",").filter(Boolean);
-      if (listIds.length) openPrintPackage([{ listIds }], { updatedOnly: "1" });
-      return;
-    }
+    
     const printListsButton = event.target.closest("[data-print-lists]");
     if (printListsButton?.dataset.printLists) {
       openPrintPackage([{ listIds: String(printListsButton.dataset.printLists).split(",").filter(Boolean) }], { updatedOnly: "1" });

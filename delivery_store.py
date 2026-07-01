@@ -4240,7 +4240,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 list_id = list_row["id"]
             rows = con.execute(
                 """
-                SELECT out_li.*
+                SELECT out_li.*, ri.qty AS rack_qty
                 FROM rack_items ri
                 JOIN line_items src ON src.id = ri.line_item_id
                 JOIN delivery_lists src_dl ON src_dl.id = src.list_id
@@ -4261,21 +4261,33 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return self._get_payload(con, list_id, last)
             last = None
             scanned_count = 0
+            capped_count = 0
             for row in rows:
-                if row["scanned_qty"] >= row["qty"]:
+                remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
+                if remaining_qty <= 0:
                     continue
-                con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
+                rack_qty = max(int(row["rack_qty"] or 1), 1)
+                delta = min(rack_qty, remaining_qty)
+                if delta < rack_qty:
+                    capped_count += 1
+                con.execute("UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?", (delta, row["id"]))
                 self.preassign_bay_for_outbound(con, list_id, row, user, station)
-                last = self.insert_event(con, list_id, row["id"], barcode, f"RACK-{rack['rack_code']}", user, station, "scan", f"Outbound rack scan {rack['rack_code']}", "Rack barcode scanned", 1)
-                scanned_count += 1
+                reason = "Rack barcode scanned"
+                message = f"Outbound rack scan {rack['rack_code']}"
+                if delta < rack_qty:
+                    message = f"Partial outbound rack scan {rack['rack_code']}"
+                    reason = f"Rack row quantity {rack_qty} capped to remaining quantity {remaining_qty}"
+                last = self.insert_event(con, list_id, row["id"], barcode, f"RACK-{rack['rack_code']}", user, station, "scan", message, reason, delta)
+                scanned_count += delta
             if scanned_count == 0:
                 last = self.insert_event(con, list_id, None, barcode, f"RACK-{rack['rack_code']}", user, station, "duplicate", "Rack already scanned outbound", "All rack items were already complete")
             con.execute("UPDATE racks SET status = 'In Transit', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
-            self.insert_audit(con, "rack", rack["rack_code"], "rack_outbound_scan", user, station, "", {"scannedCount": scanned_count})
+            self.insert_audit(con, "rack", rack["rack_code"], "rack_outbound_scan", user, station, "", {"scannedCount": scanned_count, "cappedRows": capped_count})
             con.commit()
             payload = self._get_payload(con, list_id, last)
             payload["redirectListId"] = list_id
-            payload["message"] = f"Rack {rack['rack_code']} scanned outbound for {scanned_count} piece{'s' if scanned_count != 1 else ''}."
+            cap_message = f" {capped_count} row{'s' if capped_count != 1 else ''} capped at remaining quantity." if capped_count else ""
+            payload["message"] = f"Rack {rack['rack_code']} scanned outbound for {scanned_count} piece{'s' if scanned_count != 1 else ''}.{cap_message}"
             return payload
 
     def indian_trail_summary(self) -> dict[str, Any]:

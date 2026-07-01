@@ -4196,56 +4196,6 @@ select:disabled,
   cursor: grabbing;
 }
 
-.import-result-panel {
-  width: min(760px, calc(100vw - 28px));
-}
-
-.import-result-list {
-  display: grid;
-  gap: 8px;
-  max-height: 56vh;
-  overflow: auto;
-}
-
-.import-result-item {
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #fff;
-  overflow: hidden;
-}
-
-.import-result-item summary {
-  min-height: 46px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 10px;
-  cursor: pointer;
-}
-
-.import-result-item summary strong,
-.import-result-item summary small {
-  display: block;
-}
-
-.import-result-item summary small {
-  color: #526078;
-}
-
-.import-result-item summary button {
-  min-height: 32px;
-  border: 1px solid var(--navy);
-  border-radius: 7px;
-  background: var(--navy);
-  color: #fff;
-  font-weight: 850;
-  padding: 0 10px;
-}
-
-.import-run-details {
-  margin-top: 10px;
-}
 
 .password-reset-row {
   grid-template-columns: minmax(130px, 1fr) 58px 58px;
@@ -4455,7 +4405,6 @@ select:disabled,
 
   .home-pager-row,
   .delivery-date-group summary,
-  .import-result-item summary,
   .bay-scan-out-panel {
     display: grid;
     grid-template-columns: 1fr;
@@ -7464,4 +7413,41 @@ body.bay-move-mode .excel-bay-map {
 .rack-date-group summary button[data-rack-print] {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+#importPreviewBox.import-status-compact {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+#importPreviewBox.import-status-compact strong,
+#importPreviewBox.import-status-compact span,
+#importPreviewBox.import-status-compact small {
+  display: inline;
+  margin: 0;
+}
+
+#importPreviewBox.import-status-compact small {
+  color: inherit;
+  opacity: 0.85;
+}
+
+#importPreviewBox.import-status-compact.success {
+  border: 1px solid #9ad7aa;
+  background: var(--green-soft);
+  color: #176b2d;
+}
+
+#importPreviewBox.import-status-compact.review {
+  border: 1px solid #efb7bf;
+  background: var(--red-soft);
+  color: #7c1827;
 }

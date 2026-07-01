@@ -123,6 +123,73 @@ def main() -> int:
         )
     )
 
+    store.reset_stage(list_id, "Validator", "Test Bench")
+    store.reset_stage(outbound_id, "Validator", "Test Bench")
+    rack_barcode_item = "T200231715002000"
+    store.clear_rack({"rackCode": "R1S"}, "Validator")
+    store.record_scan({"listId": list_id, "barcode": rack_barcode_item, "rackCode": "R1S", "user": "Validator", "station": "Staging Bench"})
+    store.record_scan({"listId": list_id, "barcode": rack_barcode_item, "rackCode": "R1S", "user": "Validator", "station": "Staging Bench"})
+    store.complete_rack({"rackCode": "R1S"}, "Validator")
+    rack_packing = store.rack_packing_list("R1S", "2026-04-01")
+    rack_barcode = rack_packing["rack"]["barcode"]
+    first_rack_scan = store.record_scan({"listId": outbound_id, "barcode": rack_barcode, "user": "Validator", "station": "Outbound Bench"})
+    outbound_after_first = store.get_delivery_list(outbound_id)
+    outbound_rack_item = next(item for item in outbound_after_first["items"] if item["order"] == "231715" and item["item"] == "002")
+    with sqlite3.connect(validation_db) as con:
+        first_delta = con.execute(
+            """
+            SELECT qty_delta
+            FROM scan_events
+            WHERE list_id = ? AND line_item_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (outbound_id, outbound_rack_item["id"]),
+        ).fetchone()[0]
+    results.append(
+        assert_true(
+            "rack_packing_barcode_uses_rack_qty",
+            first_rack_scan["lastScan"]["ok"] and int(outbound_rack_item["scanned"]) == 2 and int(first_delta) == 2,
+            {"scanned": outbound_rack_item["scanned"], "eventQtyDelta": first_delta, "message": first_rack_scan["message"]},
+        )
+    )
+
+    second_rack_scan = store.record_scan({"listId": outbound_id, "barcode": rack_barcode, "user": "Validator", "station": "Outbound Bench"})
+    outbound_after_second = store.get_delivery_list(outbound_id)
+    capped_item = next(item for item in outbound_after_second["items"] if item["order"] == "231715" and item["item"] == "002")
+    with sqlite3.connect(validation_db) as con:
+        second_delta = con.execute(
+            """
+            SELECT qty_delta
+            FROM scan_events
+            WHERE list_id = ? AND line_item_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (outbound_id, capped_item["id"]),
+        ).fetchone()[0]
+    results.append(
+        assert_true(
+            "rack_packing_barcode_caps_at_remaining_qty",
+            second_rack_scan["lastScan"]["ok"]
+            and int(capped_item["scanned"]) == int(capped_item["qty"]) == 3
+            and int(second_delta) == 1
+            and "capped" in second_rack_scan["message"].lower(),
+            {"scanned": capped_item["scanned"], "qty": capped_item["qty"], "eventQtyDelta": second_delta, "message": second_rack_scan["message"]},
+        )
+    )
+
+    third_rack_scan = store.record_scan({"listId": outbound_id, "barcode": rack_barcode, "user": "Validator", "station": "Outbound Bench"})
+    over_scan_check = store.get_delivery_list(outbound_id)
+    complete_item = next(item for item in over_scan_check["items"] if item["order"] == "231715" and item["item"] == "002")
+    results.append(
+        assert_true(
+            "rack_packing_barcode_rejects_over_scan",
+            third_rack_scan["lastScan"]["eventType"] == "duplicate" and int(complete_item["scanned"]) == int(complete_item["qty"]) == 3,
+            {"eventType": third_rack_scan["lastScan"]["eventType"], "scanned": complete_item["scanned"], "qty": complete_item["qty"]},
+        )
+    )
+
     exceptions = store.get_exceptions({"listId": list_id})
     results.append(assert_true("exceptions_logged", len(exceptions) >= 2, {"count": len(exceptions)}))
 
