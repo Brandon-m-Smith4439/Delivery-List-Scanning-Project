@@ -1,4 +1,4 @@
-# Delivery List Web App Prototype
+# Delivery List Web App Prototype.
 
 This is a static prototype for a future independent delivery-list scanning system. It uses the Version 3 master workbook data exported to `data/sample-delivery-list.json` and runs without Excel.
 
