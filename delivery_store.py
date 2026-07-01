@@ -2457,6 +2457,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     continue
                 file_hash = source_file_hash(path)
                 source_path = str(path.resolve())
+                payload = load_delivery_source_payload(path)
+                definitions = build_delivery_lists(payload)
+                definition_ids = [definition[0] for definition in definitions]
+
                 with self.connect() as con:
                     previous = con.execute(
                         """
@@ -2467,11 +2471,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         """,
                         (source_path, path.name),
                     ).fetchone()
-                if previous and previous["source_hash"] == file_hash:
+
+                    active_definition_ids = set()
+                    if definition_ids:
+                        placeholders = ",".join("?" for _ in definition_ids)
+                        active_definition_ids = {
+                            row["id"]
+                            for row in con.execute(
+                                f"""
+                                SELECT id
+                                FROM delivery_lists
+                                WHERE status = 'active'
+                                  AND id IN ({placeholders})
+                                """,
+                                definition_ids,
+                            ).fetchall()
+                        }
+
+                if previous and previous["source_hash"] == file_hash and set(definition_ids).issubset(active_definition_ids):
                     skipped_files.append({"fileName": path.name, "reason": "No changes detected"})
                     continue
 
-                payload = load_delivery_source_payload(path)
                 preview = self.preview_import(payload)
                 if not preview["valid"]:
                     failed_files.append({"fileName": path.name, "errors": preview["errors"]})

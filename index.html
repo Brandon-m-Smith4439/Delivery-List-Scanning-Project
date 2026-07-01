@@ -668,8 +668,6 @@
             </div>
             <div class="admin-button-row admin-primary-actions">
               <button id="folderImportBtn" type="button">Import / Update Delivery List</button>
-              <button id="importBtn" type="button">Import Single File</button>
-              <button type="button" data-print-active="admin">Print / Export</button>
               <button id="checkUpdatesBtn" type="button">Check Updates</button>
             </div>
             <details class="admin-import-settings">
@@ -684,8 +682,7 @@
                 <button id="importWindowResetBtn" type="button">Default 7 days</button>
               </div>
             </details>
-            <input id="importFile" class="visually-hidden" type="file" accept=".json,.xlsx,.xlsm,.csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,text/csv">
-            <div id="importPreviewBox" class="admin-empty">No import selected.</div>
+            <div id="importPreviewBox" class="admin-empty import-status-compact" hidden></div>
             <div id="adminDeliveryLists" class="admin-table admin-preview-table"></div>
             <div id="importHistory" class="compact-list" hidden></div>
           </section>

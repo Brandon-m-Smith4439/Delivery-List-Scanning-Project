@@ -275,9 +275,7 @@ const els = {
   adminModalBody: document.getElementById("adminModalBody"),
   adminModalClose: document.getElementById("adminModalClose"),
   folderImportBtn: document.getElementById("folderImportBtn"),
-  importBtn: document.getElementById("importBtn"),
   checkUpdatesBtn: document.getElementById("checkUpdatesBtn"),
-  importFile: document.getElementById("importFile"),
   tempFolderInput: document.getElementById("tempFolderInput"),
   importPreviewBox: document.getElementById("importPreviewBox"),
   importHistory: document.getElementById("importHistory"),
@@ -480,6 +478,75 @@ function requestContext() {
     user: state.user?.username || els.operatorInput?.value || "Scanner",
     station: els.stationSelect?.value || state.meta?.scanner || "",
   };
+}
+
+function showImportStatusLoading(message, detail = "") {
+  if (!els.importPreviewBox) return;
+
+  els.importPreviewBox.hidden = false;
+  els.importPreviewBox.classList.remove("success", "review", "notice", "import-status-compact");
+  els.importPreviewBox.classList.add("loading");
+
+  els.importPreviewBox.innerHTML = `
+    <strong>${escapeHtml(message)}</strong>
+    <span class="loading-bar"><i></i></span>
+    ${detail ? `<span>${escapeHtml(detail)}</span>` : ""}
+  `;
+}
+
+function showImportStatusResult(kind, title, detail = "", actionsHtml = "") {
+  if (!els.importPreviewBox) return;
+
+  const statusClass = kind === "review" ? "review" : kind === "notice" ? "notice" : "success";
+
+  els.importPreviewBox.hidden = false;
+  els.importPreviewBox.classList.remove("loading", "success", "review", "notice");
+  els.importPreviewBox.classList.add(statusClass, "import-status-compact");
+
+  els.importPreviewBox.innerHTML = `
+    <strong>${escapeHtml(title)}</strong>
+    ${detail ? `<span>${escapeHtml(detail)}</span>` : ""}
+    ${actionsHtml ? `<div class="import-status-actions">${actionsHtml}</div>` : ""}
+  `;
+}
+
+function waitForNextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(resolve);
+    });
+  });
+}
+
+async function applyProgramUpdate() {
+  showImportStatusLoading("Updating program...", "Preserving database files before pulling code.");
+  await waitForNextPaint();
+
+  const update = await fetchJson("/api/admin/update-apply", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+
+  if (update.ok) {
+    const restoredFiles = (update.restoredDatabaseFiles || []).filter(Boolean);
+    const restoredText = restoredFiles.length
+      ? ` Database restored from backup: ${restoredFiles.join(", ")}.`
+      : " Database backup checked. No database files needed restore.";
+
+    showImportStatusResult(
+      "success",
+      "Update complete.",
+      `Restart the web app to load the new code.${restoredText}`,
+    );
+
+    return;
+  }
+
+  showImportStatusResult(
+    "review",
+    "Update failed.",
+    update.stderr || update.error || "Git pull failed.",
+  );
 }
 
 async function fetchJson(url, options = {}) {
@@ -1852,7 +1919,6 @@ function applyPermissionUi() {
   setControlAllowed(els.globalPrintExportBtn, hasPermission("export_reports"), true);
   setControlAllowed(els.undoBtn, hasPermission("undo_scan"), true);
   setControlAllowed(els.redoBtn, hasPermission("undo_scan"), true);
-  setControlAllowed(els.importBtn, hasPermission("import_delivery_lists"), true);
   setControlAllowed(els.folderImportBtn, hasPermission("import_delivery_lists"), true);
   setControlAllowed(els.addStationBtn, hasPermission("manage_stations"));
   setControlAllowed(els.newStationInput, hasPermission("manage_stations"));
@@ -2064,7 +2130,7 @@ function renderTodayProgress() {
       return stageSort(a) - stageSort(b) || a.label.localeCompare(b.label);
     });
   if (els.todayDateLabel) {
-  els.todayDateLabel.textContent = formatDisplayDate(key);
+    els.todayDateLabel.textContent = formatDisplayDate(key);
   }
   els.todayStageGrid.innerHTML = lists.length
     ? lists
@@ -3898,11 +3964,10 @@ async function importTempDeliveryFolder() {
   const sourceFolder = els.tempFolderInput?.value.trim() || "";
   const dateFrom = els.importFromDate?.value || "";
   const dateTo = els.importToDate?.value || "";
-  if (els.importPreviewBox) {
-    els.importPreviewBox.classList.remove("success", "review");
-    els.importPreviewBox.classList.add("loading");
-    els.importPreviewBox.innerHTML = `<strong>Importing Temp folder...</strong><span class="loading-bar"><i></i></span>`;
-  }
+
+  showImportStatusLoading("Importing Temp folder...");
+  await waitForNextPaint();
+
   const result = await fetchJson("/api/import/folder", {
     method: "POST",
     body: JSON.stringify({ ...requestContext(), sourceFolder, dateFrom, dateTo }),
@@ -3916,22 +3981,23 @@ async function importTempDeliveryFolder() {
   const skipped = result.skippedFiles?.length || 0;
   const failed = result.failedFiles?.length || 0;
   if (els.importPreviewBox) {
-  els.importPreviewBox.classList.remove("loading");
-  els.importPreviewBox.classList.add("import-status-compact");
-  els.importPreviewBox.classList.toggle("success", !failed);
-  els.importPreviewBox.classList.toggle("review", Boolean(failed));
+    els.importPreviewBox.hidden = false;
+    els.importPreviewBox.classList.remove("loading");
+    els.importPreviewBox.classList.add("import-status-compact");
+    els.importPreviewBox.classList.toggle("success", !failed);
+    els.importPreviewBox.classList.toggle("review", Boolean(failed));
 
-  els.importPreviewBox.innerHTML = failed
-    ? `
-      <strong>Import completed with issues.</strong>
-      <span>${imported} new, ${updated} updated, ${skipped} unchanged, ${failed} failed.</span>
-      ${result.failedFiles?.length ? `<small>${escapeHtml(result.failedFiles.map((file) => `${file.fileName}: ${(file.errors || []).join("; ")}`).join(" | "))}</small>` : ""}
-    `
-    : `
-      <strong>Import complete.</strong>
-      <span>${imported} new, ${updated} updated, ${skipped} unchanged.</span>
-    `;
-}
+    els.importPreviewBox.innerHTML = failed
+      ? `
+        <strong>Import completed with issues.</strong>
+        <span>${imported} new, ${updated} updated, ${skipped} unchanged, ${failed} failed.</span>
+        ${result.failedFiles?.length ? `<small>${escapeHtml(result.failedFiles.map((file) => `${file.fileName}: ${(file.errors || []).join("; ")}`).join(" | "))}</small>` : ""}
+      `
+      : `
+        <strong>Import complete.</strong>
+        <span>${imported} new, ${updated} updated, ${skipped} unchanged.</span>
+      `;
+  }
 }
 
 async function refreshAdminPage() {
@@ -3975,34 +4041,114 @@ async function refreshAdminPage() {
 function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false) {
   const rows = lists
     .slice()
-    .sort((a, b) => String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || "")) || String(a.stage || "").localeCompare(String(b.stage || "")))
-    .slice(0, limit);
-  if (!rows.length) return `<div class="admin-empty">No delivery lists loaded.</div>`;
+    .sort((a, b) => String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || "")) || stageSort(a) - stageSort(b));
+
+  const limitedRows = limit ? rows.slice(0, limit) : rows;
+
+  if (!limitedRows.length) {
+    return `<div class="admin-empty">No delivery lists loaded.</div>`;
+  }
+
+  const groups = listsByDeliveryDate(limitedRows);
+
   return `
-    <table>
-      <thead><tr><th>List Name</th><th>Delivery Date</th><th>Stage</th><th>Items</th><th>Updated</th>${editable ? "<th>Actions</th>" : ""}</tr></thead>
-      <tbody>
-        ${rows
-          .map(
-            (list) => `
-              <tr>
-                <td><strong>${escapeHtml(list.label || list.id)}</strong><span>${escapeHtml(list.scanner || "")}</span></td>
-                <td>${escapeHtml(formatDisplayDate(list.deliveryDate))}</td>
-                <td><span class="stage-pill-admin">${escapeHtml(list.stage || "")}</span></td>
-                <td>${escapeHtml(list.totalQty ?? list.itemCount ?? "")}</td>
-                <td>${escapeHtml(list.updatedAt ? formatDateTime(list.updatedAt) : "Current")}</td>
-                ${editable ? `<td class="admin-action-cell">
-                  <button type="button" class="icon-only icon-pencil" data-admin-list-edit="${escapeHtml(list.id)}" title="Edit delivery list" aria-label="Edit ${escapeHtml(list.label || list.id)}"></button>
-                  <button type="button" data-admin-list-print="${escapeHtml(list.id)}">Print</button>
-                  <button type="button" data-admin-list-reset="${escapeHtml(list.id)}">Reset</button>
-                  <button type="button" class="icon-only icon-trash danger" data-admin-list-delete="${escapeHtml(list.id)}" title="Delete delivery list" aria-label="Delete ${escapeHtml(list.label || list.id)}"></button>
-                </td>` : ""}
-              </tr>
-            `,
-          )
-          .join("")}
-      </tbody>
-    </table>
+    <div class="admin-delivery-edit-list">
+      ${groups
+        .map((group, index) => {
+          const totalQty = group.lists.reduce((sum, list) => sum + Number(list.totalQty ?? list.itemCount ?? 0), 0);
+          const scannedQty = group.lists.reduce((sum, list) => sum + Number(list.scannedQty || 0), 0);
+          const percent = totalQty ? Math.round((scannedQty / totalQty) * 100) : 0;
+
+          return `
+            <details class="admin-delivery-date-group" ${index === 0 ? "open" : ""}>
+              <summary class="admin-delivery-date-summary">
+                <span class="admin-delivery-date-main">
+                  <strong>${escapeHtml(formatDisplayDate(group.date))}</strong>
+                  <small>${escapeHtml(group.lists.length)} stage${group.lists.length === 1 ? "" : "s"} | ${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)} pcs | ${escapeHtml(percent)}%</small>
+                </span>
+
+                <span class="admin-delivery-date-progress">
+                  <span class="progress-line"><i style="width: ${Math.min(percent, 100)}%"></i></span>
+                </span>
+
+                ${
+                  editable
+                    ? `<span class="admin-date-action-row">
+                        <button
+                          type="button"
+                          class="icon-only icon-reset"
+                          data-admin-date-reset="${escapeHtml(group.date)}"
+                          title="Reset all stages for ${escapeHtml(formatDisplayDate(group.date))}"
+                          aria-label="Reset all stages for ${escapeHtml(formatDisplayDate(group.date))}"
+                        ></button>
+                        <button
+                          type="button"
+                          class="icon-only icon-trash danger"
+                          data-admin-date-delete="${escapeHtml(group.date)}"
+                          title="Delete all stages for ${escapeHtml(formatDisplayDate(group.date))}"
+                          aria-label="Delete all stages for ${escapeHtml(formatDisplayDate(group.date))}"
+                        ></button>
+                      </span>`
+                    : ""
+                }
+              </summary>
+
+              <div class="admin-delivery-stage-list">
+                ${group.lists
+                  .map((list) => {
+                    const listTotalQty = Number(list.totalQty ?? list.itemCount ?? 0);
+                    const listScannedQty = Number(list.scannedQty || 0);
+                    const listPercent = listTotalQty ? Math.round((listScannedQty / listTotalQty) * 100) : 0;
+
+                    return `
+                      <article class="admin-delivery-stage-row">
+                        <span class="admin-delivery-stage-main">
+                          <strong>${escapeHtml(list.stage || list.label || list.id)}</strong>
+                          <small>${escapeHtml(list.scanner || "")}</small>
+                        </span>
+
+                        <span class="admin-delivery-stage-qty">
+                          ${escapeHtml(listScannedQty)} / ${escapeHtml(listTotalQty)} pcs
+                          <span class="progress-line"><i style="width: ${Math.min(listPercent, 100)}%"></i></span>
+                        </span>
+
+                        ${
+                          editable
+                            ? `<span class="admin-action-cell">
+                                <button
+                                  type="button"
+                                  class="icon-only icon-pencil"
+                                  data-admin-list-edit="${escapeHtml(list.id)}"
+                                  title="Edit ${escapeHtml(list.label || list.id)}"
+                                  aria-label="Edit ${escapeHtml(list.label || list.id)}"
+                                ></button>
+                                <button
+                                  type="button"
+                                  class="icon-only icon-reset"
+                                  data-admin-list-reset="${escapeHtml(list.id)}"
+                                  title="Reset scans for ${escapeHtml(list.label || list.id)}"
+                                  aria-label="Reset scans for ${escapeHtml(list.label || list.id)}"
+                                ></button>
+                                <button
+                                  type="button"
+                                  class="icon-only icon-trash danger"
+                                  data-admin-list-delete="${escapeHtml(list.id)}"
+                                  title="Delete ${escapeHtml(list.label || list.id)}"
+                                  aria-label="Delete ${escapeHtml(list.label || list.id)}"
+                                ></button>
+                              </span>`
+                            : ""
+                        }
+                      </article>
+                    `;
+                  })
+                  .join("")}
+              </div>
+            </details>
+          `;
+        })
+        .join("")}
+    </div>
   `;
 }
 
@@ -4027,9 +4173,36 @@ async function searchAdminDeliveryLists(query) {
   }
 }
 
+function activeRecentImports(imports = state.adminRecentImports || []) {
+  const activeListIds = new Set(state.lists.map((list) => list.id));
+
+  return imports
+    .map((entry) => {
+      const listIds = Array.isArray(entry.listIds)
+        ? entry.listIds.filter((listId) => activeListIds.has(listId))
+        : [];
+
+      const stageSummaries = Array.isArray(entry.stageSummaries)
+        ? entry.stageSummaries.filter((row) => row.listId && activeListIds.has(row.listId))
+        : [];
+
+      return {
+        ...entry,
+        listIds,
+        stageSummaries,
+      };
+    })
+    .filter((entry) => {
+      const hasActiveListIds = Array.isArray(entry.listIds) && entry.listIds.length > 0;
+      const hasActiveStageSummaries = Array.isArray(entry.stageSummaries) && entry.stageSummaries.length > 0;
+
+      return hasActiveListIds || hasActiveStageSummaries;
+    });
+}
+
 function renderAdminDeliveryLists() {
   if (!els.adminDeliveryLists) return;
-  els.adminDeliveryLists.innerHTML = importHistoryRows(state.adminRecentImports || []);
+  els.adminDeliveryLists.innerHTML = importHistoryRows(activeRecentImports());
 }
 
 function openAdminModal(kind) {
@@ -4079,8 +4252,11 @@ function adminModalContent(kind) {
   }
   if (kind === "deliveryActions") {
     return `
-      <p class="admin-empty">Select a delivery list, then choose the action you need. Delete and reset actions still require confirmation.</p>
-      <div class="admin-table">${deliveryListAdminRows(state.lists, state.lists.length || 1, true)}</div>
+      <label class="search-box admin-modal-search">
+        <span class="search-icon"></span>
+        <input id="adminDeliveryListModalSearch" type="search" autocomplete="off" placeholder="Search date, Job Nr., order number, stage...">
+      </label>
+      <div class="admin-table" id="adminDeliveryListModalResults">${deliveryListAdminRows(state.lists, state.lists.length || 1, true)}</div>
     `;
   }
   if (kind === "users") {
@@ -4221,33 +4397,105 @@ async function saveRolePermissions(roleName) {
   showInlineError(`${roleName} permissions saved. Users with that role will sign in again to refresh access.`, false);
 }
 
+function manualEditDeliveryDateForList(listId) {
+  const selectedList = state.lists.find((item) => item.id === listId);
+
+  return selectedList?.deliveryDate || state.lists[0]?.deliveryDate || "";
+}
+
+function manualEditStageListsForCurrentDelivery(selectedListId) {
+  const deliveryDate = manualEditDeliveryDateForList(selectedListId);
+  const stageLists = state.lists
+    .filter((list) => list.deliveryDate === deliveryDate)
+    .sort((a, b) => stageSort(a) - stageSort(b) || String(a.label || "").localeCompare(String(b.label || "")));
+
+  return stageLists.length ? stageLists : state.lists.slice();
+}
+
+function manualEditStageSummary(listId) {
+  const list = state.lists.find((item) => item.id === listId) || state.lists[0] || {};
+
+  if (!list.id) {
+    return "No stage selected";
+  }
+
+  return `${formatDisplayDate(list.deliveryDate)} - ${list.stage || "Stage"} - ${list.scanner || ""}`;
+}
+
 function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a delivery list to load editable rows.</div>`) {
   const selected = state.manualEditListId || state.activeListId || state.lists[0]?.id || "";
+  const stageLists = manualEditStageListsForCurrentDelivery(selected);
+
   return `
-    <div class="manual-edit-modal-tools">
-      <label>
-        <span>Delivery list stage</span>
-        <select id="manualEditModalStage">
-          ${state.lists.map((list) => `<option value="${escapeHtml(list.id)}" ${list.id === selected ? "selected" : ""}>${escapeHtml(formatDisplayDate(list.deliveryDate))} - ${escapeHtml(list.stage)} - ${escapeHtml(list.scanner || "")}</option>`).join("")}
-        </select>
-      </label>
-      <label>
-        <span>Search within stage</span>
-        <input id="manualEditModalSearch" type="search" autocomplete="off" value="${escapeHtml(state.manualEditQuery || "")}" placeholder="Order, customer, job, route...">
-      </label>
-      <button id="manualEditModalSearchBtn" type="button">Search</button>
-      <button id="manualEditModalReloadBtn" type="button">Load All</button>
+    <div class="manual-edit-shell">
+      <div class="manual-edit-nav-row">
+        <button class="manual-edit-back-button" type="button" data-manual-edit-back>
+          <span aria-hidden="true">&larr;</span>
+          Back to delivery lists
+        </button>
+        <span class="manual-edit-current-stage">${escapeHtml(manualEditStageSummary(selected))}</span>
+      </div>
+
+      <div class="manual-edit-modal-tools">
+        <label class="manual-edit-control stage-control">
+          <span>Delivery list stage</span>
+          <select id="manualEditModalStage">
+            ${stageLists
+              .map(
+                (list) =>
+                  `<option value="${escapeHtml(list.id)}" ${list.id === selected ? "selected" : ""}>${escapeHtml(formatDisplayDate(list.deliveryDate))} - ${escapeHtml(list.stage)} - ${escapeHtml(list.scanner || "")}</option>`,
+              )
+              .join("")}
+          </select>
+        </label>
+
+        <label class="manual-edit-control search-control">
+          <span>Search within stage</span>
+          <input id="manualEditModalSearch" type="search" autocomplete="off" value="${escapeHtml(state.manualEditQuery || "")}" placeholder="Order, customer, job, route...">
+        </label>
+
+        <div class="manual-edit-tool-actions">
+          <button id="manualEditModalSearchBtn" type="button">Search</button>
+          <button id="manualEditModalReloadBtn" class="secondary" type="button">Load All</button>
+        </div>
+      </div>
+
+      <div id="manualEditModalResults" class="admin-table manual-edit-modal-results">${resultsHtml}</div>
     </div>
-    <p class="admin-empty manual-edit-warning">Save changed rows before closing. Unsaved manual edits will ask for confirmation before you leave.</p>
-    <div id="manualEditModalResults" class="admin-table manual-edit-modal-results">${resultsHtml}</div>
   `;
+}
+
+async function ensureManualEditLookupsLoaded() {
+  if (!state.backend) return;
+
+  const lookups = await Promise.allSettled([
+    fetchJson("/api/racks"),
+    fetchJson("/api/indian-trail/bays"),
+  ]);
+
+  const rackResult = lookups[0];
+
+  if (rackResult.status === "fulfilled") {
+    state.racks = rackResult.value.racks || [];
+    state.rackSummary = rackResult.value.summary || null;
+  }
+
+  const bayResult = lookups[1];
+
+  if (bayResult.status === "fulfilled") {
+    state.bays = bayResult.value.bays || [];
+    state.bayEvents = bayResult.value.events || state.bayEvents || [];
+  }
 }
 
 async function openManualEditForList(listId) {
   state.manualEditDirty = false;
   state.manualEditListId = listId || state.activeListId || state.lists[0]?.id || "";
   state.manualEditQuery = "";
+
   openAdminModal("manualEdit");
+
+  await ensureManualEditLookupsLoaded();
   await runManualEditModalSearch(true);
 }
 
@@ -4262,14 +4510,39 @@ async function fetchManualEditResults(query, listId) {
 async function runManualEditModalSearch(loadAll = false) {
   const stage = document.getElementById("manualEditModalStage")?.value || state.manualEditListId || "";
   const query = loadAll ? "" : (document.getElementById("manualEditModalSearch")?.value.trim() || "");
+
   state.manualEditListId = stage;
   state.manualEditQuery = query;
+
+  const currentStageLabel = document.querySelector(".manual-edit-current-stage");
+  if (currentStageLabel) {
+    currentStageLabel.textContent = manualEditStageSummary(stage);
+  }
+
   const target = document.getElementById("manualEditModalResults");
-  if (target) target.innerHTML = `<div class="admin-empty loading"><strong>Loading editable rows...</strong><span class="loading-bar"><i></i></span></div>`;
+
+  if (target) {
+    target.innerHTML = `
+      <div class="manual-edit-loading">
+        <div class="admin-empty loading">
+          <strong>Loading editable rows...</strong>
+          <span class="loading-bar"><i></i></span>
+        </div>
+      </div>
+    `;
+  }
+
   const results = await fetchManualEditResults(query, stage);
   const html = manualEditResultsHtml(results);
-  if (target) target.innerHTML = html;
-  if (els.manualEditResults) els.manualEditResults.innerHTML = html;
+
+  if (target) {
+    target.innerHTML = html;
+  }
+
+  if (els.manualEditResults) {
+    els.manualEditResults.innerHTML = html;
+  }
+
   state.manualEditDirty = false;
 }
 
@@ -4288,75 +4561,316 @@ function renderManualEditStageOptions() {
 
 function renderImportHistory(imports) {
   state.adminRecentImports = imports || [];
-  if (els.adminDeliveryLists) els.adminDeliveryLists.innerHTML = importHistoryRows(state.adminRecentImports);
+
+  const activeImports = activeRecentImports(state.adminRecentImports);
+
+  if (els.adminDeliveryLists) {
+    els.adminDeliveryLists.innerHTML = importHistoryRows(activeImports);
+  }
+
   if (!els.importHistory) return;
-  els.importHistory.innerHTML = importHistoryRows(state.adminRecentImports);
+
+  els.importHistory.innerHTML = importHistoryRows(activeImports);
 }
 
 function importHistoryRows(imports = []) {
-  const rows = imports.slice(0, 7);
+  const rows = imports.slice(0, 12);
+
   if (!rows.length) {
     return `<div class="admin-empty">No import history yet. Imports from the temp folder or single files will appear here.</div>`;
   }
-  return rows
-    .map((entry) => {
-      const stageRows = Array.isArray(entry.stageSummaries) && entry.stageSummaries.length
-        ? entry.stageSummaries
-        : (entry.listIds || []).map((listId) => {
-            const list = state.lists.find((item) => item.id === listId);
-            return {
-              listId,
-              stage: list?.stage || listId,
-              totalQty: list?.totalQty ?? entry.totalQty ?? 0,
-              changedPieceQty: entry.changedPieceQty || entry.addedPieceQty || 0,
-              addedPieceQty: entry.addedPieceQty || 0,
-              created: Boolean(entry.createdCount),
-            };
+
+  const stageNameForRow = (row, list) =>
+    String(row.stage || row.stageProfile || row.stageSheetName || list?.stage || list?.label || row.listId || "Updated stage");
+
+  const isStagingRow = (row, list) => /staging/i.test(stageNameForRow(row, list));
+
+  const updatedQtyForRow = (row, list) =>
+    Number(row.totalQty ?? row.updatedQty ?? row.newQty ?? list?.totalQty ?? 0);
+
+  const changedQtyForRow = (row, list) => {
+    const updatedQty = updatedQtyForRow(row, list);
+    const explicitAddedQty = Number(row.addedPieceQty ?? row.addedQty ?? 0);
+    const explicitChangedQty = Number(row.changedPieceQty ?? row.changedQty ?? 0);
+
+    if (row.created) {
+      return updatedQty;
+    }
+
+    if (!explicitAddedQty && !explicitChangedQty) {
+      const explicitOriginalQty = row.originalQty ?? row.previousQty ?? row.oldQty ?? row.beforeQty;
+
+      if (Number(explicitOriginalQty || 0) <= 0 && updatedQty > 0) {
+        return updatedQty;
+      }
+    }
+
+    return explicitAddedQty || explicitChangedQty || 0;
+  };
+
+  const originalQtyForRow = (row, list) => {
+    const updatedQty = updatedQtyForRow(row, list);
+    const changedQty = changedQtyForRow(row, list);
+    const explicitOriginalQty = row.originalQty ?? row.previousQty ?? row.oldQty ?? row.beforeQty;
+
+    if (explicitOriginalQty !== undefined && explicitOriginalQty !== null && explicitOriginalQty !== "") {
+      return Number(explicitOriginalQty);
+    }
+
+    if (row.created) {
+      return 0;
+    }
+
+    return Math.max(updatedQty - changedQty, 0);
+  };
+
+  const isNewStageRow = (row, list) => {
+    const originalQty = originalQtyForRow(row, list);
+    const updatedQty = updatedQtyForRow(row, list);
+
+    return Boolean(row.created) || (originalQty <= 0 && updatedQty > 0);
+  };
+
+  const stageRowsForEntry = (entry) => {
+    if (Array.isArray(entry.stageSummaries) && entry.stageSummaries.length) {
+      return entry.stageSummaries;
+    }
+
+    return (entry.listIds || []).map((listId) => {
+      const list = state.lists.find((item) => item.id === listId);
+
+      return {
+        listId,
+        stage: list?.stage || listId,
+        totalQty: list?.totalQty ?? entry.totalQty ?? 0,
+        changedLineCount: entry.changedLineCount || 0,
+        changedPieceQty: entry.changedPieceQty || entry.addedPieceQty || 0,
+        addedPieceQty: entry.addedPieceQty || 0,
+        created: Boolean(entry.createdCount),
+      };
+    });
+  };
+
+  const hasStageChanges = (row) =>
+    row.created ||
+    Number(row.changedLineCount || 0) ||
+    Number(row.changedPieceQty || 0) ||
+    Number(row.addedPieceQty || 0);
+
+  const stageRowKey = (row) => {
+    const list = state.lists.find((item) => item.id === row.listId);
+
+    return String(row.listId || stageNameForRow(row, list))
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+  };
+
+  const stageRowPriority = (row) => {
+    const list = state.lists.find((item) => item.id === row.listId);
+    const originalQty = originalQtyForRow(row, list);
+    const updatedQty = updatedQtyForRow(row, list);
+    const changedQty = changedQtyForRow(row, list);
+    const changedLineCount = Number(row.changedLineCount || 0);
+    const isNewStage = isNewStageRow(row, list);
+
+    return (
+      (originalQty > 0 ? 100000000 : 0) +
+      (!isNewStage ? 10000000 : 0) +
+      (changedLineCount * 100000) +
+      (changedQty * 1000) +
+      updatedQty
+    );
+  };
+
+  const collapseDuplicateStageRows = (stageRows) => {
+    const byStage = new Map();
+
+    for (const row of stageRows) {
+      const key = stageRowKey(row);
+
+      if (!key) continue;
+
+      const existing = byStage.get(key);
+
+      if (!existing || stageRowPriority(row) > stageRowPriority(existing)) {
+        byStage.set(key, row);
+      }
+    }
+
+    return [...byStage.values()];
+  };
+
+  const groups = new Map();
+
+  for (const entry of rows) {
+    const groupKey = entry.deliveryDate || entry.sourceName || entry.fileName || entry.importedAt || "unknown";
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        deliveryDate: entry.deliveryDate || "",
+        sourceName: entry.sourceName || entry.fileName || "Imported delivery list",
+        importedAt: entry.importedAt || entry.updatedAt || entry.createdAt || "",
+        entries: [],
+        stageRows: [],
+        printableIds: new Set(),
+      });
+    }
+
+    const group = groups.get(groupKey);
+    const entryStageRows = stageRowsForEntry(entry);
+
+    group.entries.push(entry);
+    group.stageRows.push(...entryStageRows);
+
+    for (const row of entryStageRows) {
+      if (row.listId) {
+        group.printableIds.add(row.listId);
+      }
+    }
+
+    if (entry.importedAt || entry.updatedAt || entry.createdAt) {
+      group.importedAt = entry.importedAt || entry.updatedAt || entry.createdAt;
+    }
+  }
+
+  return `
+    <div class="admin-import-date-list">
+      ${[...groups.values()]
+        .map((group, index) => {
+          const changedStageRows = collapseDuplicateStageRows(group.stageRows.filter(hasStageChanges));
+          const stagingRows = changedStageRows.filter((row) => {
+            const list = state.lists.find((item) => item.id === row.listId);
+            return isStagingRow(row, list);
           });
-      const printableIds = [...new Set(stageRows.map((row) => row.listId).filter(Boolean))];
-      const batchClass = Number(entry.createdCount || 0) > 0 ? "is-new-batch" : "is-updated-batch";
-      const stageHtml = stageRows
-        .filter((row) => row.created || Number(row.changedLineCount || 0) || Number(row.changedPieceQty || 0) || Number(row.addedPieceQty || 0))
-        .map((row) => {
-          const list = state.lists.find((item) => item.id === row.listId);
-          const totalQty = Number(row.totalQty ?? list?.totalQty ?? 0);
-          const addedQty = Number(row.addedPieceQty || 0);
-          const changedQty = Number(row.changedPieceQty || 0);
-          const originalQty = Math.max(totalQty - addedQty, 0);
-          const kindLabel = row.created ? "New" : "Updated";
-          const rowClass = row.created ? "is-new-row" : "";
+
+          const stagingOriginalQty = stagingRows.reduce((sum, row) => {
+            const list = state.lists.find((item) => item.id === row.listId);
+            return sum + originalQtyForRow(row, list);
+          }, 0);
+
+          const stagingChangedQty = stagingRows.reduce((sum, row) => {
+            const list = state.lists.find((item) => item.id === row.listId);
+            return sum + changedQtyForRow(row, list);
+          }, 0);
+
+          const stagingUpdatedQty = stagingRows.reduce((sum, row) => {
+            const list = state.lists.find((item) => item.id === row.listId);
+            return sum + updatedQtyForRow(row, list);
+          }, 0);
+
+          const newStageRows = changedStageRows.filter((row) => {
+            const list = state.lists.find((item) => item.id === row.listId);
+            return isNewStageRow(row, list);
+          });
+
+          const updatedStageRows = changedStageRows.filter((row) => {
+            const list = state.lists.find((item) => item.id === row.listId);
+            return !isNewStageRow(row, list);
+          });
+
+          const hasNewStages = newStageRows.length > 0;
+          const hasUpdatedStages = updatedStageRows.length > 0;
+          const isBrandNewDeliveryList = hasNewStages && !hasUpdatedStages;
+
+          const printableIds = [...group.printableIds].filter(Boolean);
+          const groupClass = isBrandNewDeliveryList
+            ? "is-new-delivery-list"
+            : hasNewStages && hasUpdatedStages
+              ? "is-mixed-batch"
+              : "is-updated-batch";
+          const importedText = group.importedAt ? ` - ${formatDateTime(group.importedAt)}` : "";
+          
+          const stageHtml = changedStageRows.length
+            ? changedStageRows
+                .map((row) => {
+                  const list = state.lists.find((item) => item.id === row.listId);
+                  const stageName = stageNameForRow(row, list);
+                  const originalQty = originalQtyForRow(row, list);
+                  const changedQty = changedQtyForRow(row, list);
+                  const updatedQty = updatedQtyForRow(row, list);
+                  const rowIsNew = isNewStageRow(row, list);
+                  const rowClass = rowIsNew ? "is-new-row" : "";
+                  const kindLabel = rowIsNew ? "New Stage" : "Updated";
+                  const kindClass = rowIsNew ? "new-stage" : "updated";
+
+                  return `
+                    <tr class="${rowClass}">
+                      <td><span class="stage-pill-admin">${escapeHtml(stageName)}</span></td>
+                      <td><span class="qty-before">${escapeHtml(originalQty)} pcs</span></td>
+                      <td><span class="qty-change">+${escapeHtml(changedQty)} pcs</span></td>
+                      <td><strong>${escapeHtml(updatedQty)} pcs</strong></td>
+                      <td><span class="import-status-pill ${kindClass}">${escapeHtml(kindLabel)}</span></td>
+                      <td>
+                        ${
+                          row.listId
+                            ? `<button type="button" data-print-lists="${escapeHtml(row.listId)}">Print</button>`
+                            : ""
+                        }
+                      </td>
+                    </tr>
+                  `;
+                })
+                .join("")
+            : `
+              <tr>
+                <td colspan="6">No stage-level changes were found for this import.</td>
+              </tr>
+            `;
+
           return `
-            <tr class="${rowClass}">
-              <td><span class="stage-pill-admin">${escapeHtml(row.stage || list?.stage || row.listId || "Updated stage")}</span></td>
-              <td><span class="qty-before">${escapeHtml(originalQty)} pcs</span></td>
-              <td><strong>${escapeHtml(totalQty)} pcs</strong>${addedQty ? ` <span class="qty-delta">+${escapeHtml(addedQty)}</span>` : ""}</td>
-              <td>${escapeHtml(changedQty)} updated pcs</td>
-              <td><span class="status-dot-admin success">${escapeHtml(kindLabel)}</span></td>
-              <td class="admin-icon-cell">${row.listId ? `<button type="button" class="icon-print-btn" data-print-lists="${escapeHtml(row.listId)}" title="Print updated items" aria-label="Print updated items">Print</button>` : ""}</td>
-            </tr>
+            <details class="admin-import-date-group ${groupClass}" ${index === 0 ? "open" : ""}>
+<summary class="admin-import-date-summary">
+  <span class="admin-import-date-main">
+    <strong>${escapeHtml(group.sourceName)}</strong>
+    <span class="admin-import-date-meta">
+      <small>${escapeHtml(formatDisplayDate(group.deliveryDate))}${escapeHtml(importedText)}</small>
+      <span class="admin-import-status-pills">
+      ${hasUpdatedStages ? `<span class="import-status-pill updated">Updated</span>` : ""}
+      ${isBrandNewDeliveryList ? `<span class="import-status-pill new">New</span>` : ""}
+      ${hasNewStages && hasUpdatedStages ? `<span class="import-status-pill new-stage">New Stage</span>` : ""}
+      </span>
+    </span>
+  </span>
+
+  <span class="admin-import-date-qty">
+    <span class="admin-import-qty-flow">
+      <span class="qty-before">${escapeHtml(stagingOriginalQty)} pcs</span>
+      <span class="qty-change">+${escapeHtml(stagingChangedQty)} pcs</span>
+      <strong>${escapeHtml(stagingUpdatedQty)} pcs</strong>
+    </span>
+  </span>
+
+  ${
+    printableIds.length
+      ? `<button type="button" data-print-lists="${escapeHtml(printableIds.join(","))}">Print all updates</button>`
+      : ""
+  }
+</summary>
+
+              <div class="admin-import-stage-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Stage</th>
+                      <th>Original Qty</th>
+                      <th>Changed Qty</th>
+                      <th>Updated Qty</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${stageHtml}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           `;
         })
-        .join("") || `<tr><td colspan="6"><span class="admin-empty">No line changes recorded for this batch.</span></td></tr>`;
-      return `
-        <section class="admin-import-batch ${batchClass}">
-          <header>
-            <div>
-              <strong>${escapeHtml(entry.sourceName || "Imported delivery list")}</strong>
-              <span>${escapeHtml(formatDisplayDate(entry.deliveryDate))} - ${escapeHtml(formatDateTime(entry.importedAt || ""))}</span>
-            </div>
-            <div class="admin-import-batch-actions">
-              <span>${escapeHtml(entry.addedPieceQty || 0)} added pcs</span>
-              ${printableIds.length ? `<button type="button" data-print-lists="${escapeHtml(printableIds.join(","))}">Print all updates</button>` : ""}
-            </div>
-          </header>
-          <table class="admin-import-table">
-            <thead><tr><th>Stage</th><th>Original Qty</th><th>Updated Qty</th><th>Changed</th><th>Status</th><th></th></tr></thead>
-            <tbody>${stageHtml}</tbody>
-          </table>
-        </section>
-      `;
-    })
-    .join("");
+        .join("")}
+    </div>
+  `;
 }
 
 function renderAdminDeleteControls() {
@@ -4409,6 +4923,94 @@ async function resetAdminScansForList(listId) {
   renderAdminDeliveryLists();
 }
 
+async function resetAdminScansForDate(deliveryDate) {
+  const lists = state.lists.filter((list) => list.deliveryDate === deliveryDate);
+
+  if (!lists.length) return;
+
+  const firstConfirm = window.confirm(`Reset all scans for every stage on ${formatDisplayDate(deliveryDate)}?`);
+  if (!firstConfirm) return;
+
+  const typed = window.prompt(`Type RESET DATE to reset every stage for ${formatDisplayDate(deliveryDate)}.`);
+  if (typed !== "RESET DATE") {
+    if (els.resetScansStatus) {
+      els.resetScansStatus.innerHTML = `<strong>Reset cancelled</strong><span>The confirmation text did not match.</span>`;
+    }
+
+    return;
+  }
+
+  for (const list of lists) {
+    await fetchJson("/api/reset", {
+      method: "POST",
+      body: JSON.stringify({ listId: list.id, ...requestContext() }),
+    });
+  }
+
+  await loadDeliveryLists(state.activeListId);
+  await refreshAdminPage();
+
+  renderHome();
+  renderScanPage();
+  renderDeliveryListSelect();
+  renderAdminDeleteControls();
+  renderAdminResetControls();
+  renderAdminDeliveryLists();
+
+  const target = document.getElementById("adminDeliveryListModalResults");
+  if (target) {
+    target.innerHTML = deliveryListAdminRows(state.lists, state.lists.length || 1, true);
+  }
+
+  if (els.resetScansStatus) {
+    els.resetScansStatus.innerHTML = `<strong>Scans reset</strong><span>Every stage for ${escapeHtml(formatDisplayDate(deliveryDate))} is back to zero scanned quantity.</span>`;
+  }
+}
+
+async function deleteAdminDeliveryDateByDate(deliveryDate) {
+  if (!deliveryDate || !window.confirm(`Delete every stage for ${formatDisplayDate(deliveryDate)}?`)) return;
+
+  const result = await fetchJson("/api/admin/delete-date", {
+    method: "POST",
+    body: JSON.stringify({ deliveryDate, ...requestContext() }),
+  });
+
+  state.lists = result.lists || [];
+
+  if (!state.lists.some((list) => list.id === state.activeListId)) {
+    state.activeListId = state.lists[0]?.id || "";
+
+    if (state.activeListId) {
+      await activateList(state.activeListId, false);
+    } else {
+      state.meta = null;
+      state.items = [];
+      state.recent = [];
+      state.errors = [];
+      state.lastScan = null;
+    }
+  }
+
+  await loadDeliveryLists(state.activeListId);
+  await refreshAdminPage();
+
+  renderHome();
+  renderScanPage();
+  renderDeliveryListSelect();
+  renderAdminDeleteControls();
+  renderAdminResetControls();
+  renderAdminDeliveryLists();
+
+  const target = document.getElementById("adminDeliveryListModalResults");
+  if (target) {
+    target.innerHTML = deliveryListAdminRows(state.lists, state.lists.length || 1, true);
+  }
+
+  if (els.deleteListStatus) {
+    els.deleteListStatus.innerHTML = `<strong>Deleted date</strong><span>${escapeHtml(result.deletedCount || 0)} stages removed.</span>`;
+  }
+}
+
 async function deleteSelectedDeliveryList(deleteDate = false) {
   if (!state.backend) return;
   const deliveryDate = els.deleteDateSelect?.value || "";
@@ -4432,9 +5034,23 @@ async function deleteSelectedDeliveryList(deleteDate = false) {
   }
   if (!state.lists.some((list) => list.id === state.activeListId)) {
     state.activeListId = state.lists[0]?.id || "";
-    if (state.activeListId) await activateList(state.activeListId, false);
+
+    if (state.activeListId) {
+      await activateList(state.activeListId, false);
+    } else {
+      state.meta = null;
+      state.items = [];
+      state.recent = [];
+      state.errors = [];
+      state.lastScan = null;
+    }
   }
+
+  await loadDeliveryLists(state.activeListId);
+  await refreshAdminPage();
+
   renderHome();
+  renderScanPage();
   renderDeliveryListSelect();
   renderAdminDeleteControls();
   renderAdminDeliveryLists();
@@ -4450,9 +5066,23 @@ async function deleteAdminDeliveryListById(listId) {
   state.lists = result.lists || [];
   if (!state.lists.some((item) => item.id === state.activeListId)) {
     state.activeListId = state.lists[0]?.id || "";
-    if (state.activeListId) await activateList(state.activeListId, false);
+
+    if (state.activeListId) {
+      await activateList(state.activeListId, false);
+    } else {
+      state.meta = null;
+      state.items = [];
+      state.recent = [];
+      state.errors = [];
+      state.lastScan = null;
+    }
   }
+
+  await loadDeliveryLists(state.activeListId);
+  await refreshAdminPage();
+
   renderHome();
+  renderScanPage();
   renderDeliveryListSelect();
   renderAdminDeleteControls();
   renderAdminDeliveryLists();
@@ -4630,114 +5260,6 @@ async function createUserFromForm() {
   if (!els.adminModal?.hidden) openAdminModal("users");
 }
 
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  const chunks = [];
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    chunks.push(String.fromCharCode(...bytes.subarray(index, index + chunkSize)));
-  }
-  return btoa(chunks.join(""));
-}
-
-async function importDeliveryListFile(file) {
-  if (!state.backend) {
-    await legacyImportDeliveryListFile(file);
-    return;
-  }
-
-  if (els.importPreviewBox) {
-    els.importPreviewBox.classList.remove("success", "review");
-    els.importPreviewBox.classList.add("loading");
-    els.importPreviewBox.innerHTML = `<strong>Importing ${escapeHtml(file.name)}...</strong><span class="loading-bar"><i></i></span>`;
-  }
-
-  let result;
-
-  if (file.name.toLowerCase().endsWith(".json")) {
-    const text = await file.text();
-    const payload = JSON.parse(text);
-
-    if (hasPermission("preview_import")) {
-      const preview = await fetchJson("/api/import/preview", {
-        method: "POST",
-        body: JSON.stringify({ payload }),
-      });
-
-      if (els.importPreviewBox) {
-        els.importPreviewBox.innerHTML = `${preview.valid ? "Ready" : "Blocked"}: ${preview.rowCount} rows, ${preview.totalQty} pieces`;
-      }
-
-      if (!preview.valid) {
-        throw new Error(`Import blocked: ${preview.errors.join("; ")}`);
-      }
-
-      if (preview.warnings.length && !window.confirm(`Import preview has warnings:\n${preview.warnings.join("\n")}\n\nContinue?`)) {
-        return;
-      }
-    }
-
-    result = await fetchJson("/api/import", {
-      method: "POST",
-      body: JSON.stringify({ payload, fileName: file.name, ...requestContext() }),
-    });
-  } else {
-    const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
-
-    result = await fetchJson("/api/import/upload", {
-      method: "POST",
-      body: JSON.stringify({ fileName: file.name, contentBase64, ...requestContext() }),
-    });
-  }
-
-  state.lists = result.lists || [];
-  await activateList(result.activeListId || state.lists[0]?.id, false);
-  renderHome();
-  await refreshAdminPage();
-
-  if (els.importPreviewBox) {
-    const created = result.createdCount ?? 0;
-    const updated = result.updatedCount ?? 0;
-
-    els.importPreviewBox.classList.remove("loading", "review");
-    els.importPreviewBox.classList.add("success", "import-status-compact");
-
-    els.importPreviewBox.innerHTML = `
-      <strong>Single file import complete.</strong>
-      <span>${escapeHtml(file.name)}: ${escapeHtml(created)} created, ${escapeHtml(updated)} updated.</span>
-    `;
-  }
-}
-
-async function legacyImportDeliveryListFile(file) {
-  const text = await file.text();
-  const payload = JSON.parse(text);
-  if (state.backend) {
-    if (hasPermission("preview_import")) {
-      const preview = await fetchJson("/api/import/preview", {
-        method: "POST",
-        body: JSON.stringify({ payload }),
-      });
-      if (els.importPreviewBox) {
-        els.importPreviewBox.innerHTML = `${preview.valid ? "Ready" : "Blocked"}: ${preview.rowCount} rows, ${preview.totalQty} pieces`;
-      }
-      if (!preview.valid) throw new Error(`Import blocked: ${preview.errors.join("; ")}`);
-      if (preview.warnings.length && !window.confirm(`Import preview has warnings:\n${preview.warnings.join("\n")}\n\nContinue?`)) return;
-    }
-    const result = await fetchJson("/api/import", {
-      method: "POST",
-      body: JSON.stringify({ payload, fileName: file.name, ...requestContext() }),
-    });
-    state.lists = result.lists || [];
-    await activateList(result.activeListId || state.lists[0]?.id, false);
-    renderHome();
-    await refreshAdminPage();
-  } else {
-    state.lists = createDemoLists(payload);
-    setActiveList(state.lists[0]?.id);
-    renderHome();
-  }
-}
 
 async function runManualEditSearch() {
   const query = els.manualEditSearch?.value.trim() || "";
@@ -4750,58 +5272,520 @@ function renderManualEditResults(results) {
   els.manualEditResults.innerHTML = manualEditResultsHtml(results);
 }
 
+const MANUAL_EDIT_CUSTOM_VALUE = "__manual_edit_custom__";
+
+function manualEditOptionHasValue(options, value) {
+  const cleanValue = String(value ?? "");
+
+  return options.some(([optionValue]) => String(optionValue ?? "") === cleanValue);
+}
+
+function manualEditIsCustomChoice(options, value) {
+  const cleanValue = String(value ?? "").trim();
+
+  return Boolean(cleanValue) && !manualEditOptionHasValue(options, cleanValue);
+}
+
+function manualEditSelectOptions(options, selectedValue = "", customLabel = "Custom value...") {
+  const selected = String(selectedValue ?? "");
+  const selectedIsCustom = manualEditIsCustomChoice(options, selected);
+  const seen = new Set();
+
+  const optionHtml = options
+    .filter(([value]) => {
+      const key = String(value ?? "");
+
+      if (seen.has(key)) return false;
+
+      seen.add(key);
+      return true;
+    })
+    .map(([value, label]) => {
+      const cleanValue = String(value ?? "");
+      const isSelected = !selectedIsCustom && cleanValue === selected;
+
+      return `<option value="${escapeHtml(cleanValue)}" ${isSelected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+
+  return `
+    ${optionHtml}
+    <option value="${MANUAL_EDIT_CUSTOM_VALUE}" ${selectedIsCustom ? "selected" : ""}>${escapeHtml(customLabel)}</option>
+  `;
+}
+
+function manualEditChoiceFieldHtml({ field, label, value = "", options = [], customLabel = "", wide = false }) {
+  const cleanField = String(field || "");
+  const cleanLabel = String(label || cleanField);
+  const cleanValue = String(value ?? "");
+  const customText = customLabel || `Custom ${cleanLabel.toLowerCase()}...`;
+  const isCustom = manualEditIsCustomChoice(options, cleanValue);
+
+  return `
+    <label class="manual-field has-custom ${wide ? "wide" : ""}">
+      <span>${escapeHtml(cleanLabel)}</span>
+
+      <div class="manual-choice-control ${isCustom ? "is-custom" : ""}" data-choice-control data-choice-field="${escapeHtml(cleanField)}">
+        <select
+          class="manual-edit-select manual-edit-choice-select"
+          data-choice-field="${escapeHtml(cleanField)}"
+          aria-label="${escapeHtml(cleanLabel)} dropdown"
+          title="${escapeHtml(cleanValue || cleanLabel)}"
+          ${isCustom ? "hidden" : ""}
+        >
+          ${manualEditSelectOptions(options, cleanValue, customText)}
+        </select>
+
+        <div class="manual-custom-control" ${isCustom ? "" : "hidden"}>
+          <input
+            class="manual-edit-input manual-edit-custom-input"
+            data-custom-field="${escapeHtml(cleanField)}"
+            type="text"
+            value="${escapeHtml(isCustom ? cleanValue : "")}"
+            placeholder="${escapeHtml(customText.replace("...", ""))}"
+            aria-label="Custom ${escapeHtml(cleanLabel)}"
+          >
+          <button
+            type="button"
+            class="manual-custom-clear"
+            data-manual-custom-clear="${escapeHtml(cleanField)}"
+            title="Back to ${escapeHtml(cleanLabel)} dropdown"
+            aria-label="Back to ${escapeHtml(cleanLabel)} dropdown"
+          >×</button>
+        </div>
+
+        <input data-edit-field="${escapeHtml(cleanField)}" type="hidden" value="${escapeHtml(cleanValue)}">
+      </div>
+    </label>
+  `;
+}
+
+function manualEditChoiceHiddenInput(control) {
+  const field = control?.dataset?.choiceField || "";
+
+  return control?.querySelector(`[data-edit-field="${CSS.escape(field)}"]`) || null;
+}
+
+function manualEditSetChoiceValue(control, value, markDirty = true) {
+  const hiddenInput = manualEditChoiceHiddenInput(control);
+
+  if (!hiddenInput) return;
+
+  hiddenInput.value = value;
+
+  if (markDirty) {
+    state.manualEditDirty = true;
+    hiddenInput.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
+function manualEditShowCustomChoice(control, startingValue = "") {
+  if (!control) return;
+
+  const select = control.querySelector(".manual-edit-choice-select");
+  const customWrap = control.querySelector(".manual-custom-control");
+  const customInput = control.querySelector(".manual-edit-custom-input");
+
+  control.classList.add("is-custom");
+
+  if (select) {
+    select.hidden = true;
+    select.value = MANUAL_EDIT_CUSTOM_VALUE;
+  }
+
+  if (customWrap) customWrap.hidden = false;
+
+  if (customInput) {
+    customInput.value = startingValue;
+    manualEditSetChoiceValue(control, startingValue, false);
+    window.setTimeout(() => customInput.focus(), 20);
+  }
+}
+
+function manualEditShowSelectChoice(control) {
+  if (!control) return;
+
+  const select = control.querySelector(".manual-edit-choice-select");
+  const customWrap = control.querySelector(".manual-custom-control");
+  const customInput = control.querySelector(".manual-edit-custom-input");
+
+  control.classList.remove("is-custom");
+
+  if (customInput) customInput.value = "";
+  if (customWrap) customWrap.hidden = true;
+
+  if (select) {
+    select.hidden = false;
+
+    if (select.value === MANUAL_EDIT_CUSTOM_VALUE) {
+      select.value = "";
+    }
+
+    manualEditSetChoiceValue(control, select.value, true);
+    window.setTimeout(() => select.focus(), 20);
+  }
+}
+
+function manualEditApplyChoiceSelect(select) {
+  const control = select?.closest("[data-choice-control]");
+
+  if (!control) return;
+
+  if (select.value === MANUAL_EDIT_CUSTOM_VALUE) {
+    manualEditShowCustomChoice(control, "");
+    state.manualEditDirty = true;
+    return;
+  }
+
+  manualEditSetChoiceValue(control, select.value, true);
+}
+
+function manualEditApplyCustomInput(customInput) {
+  const control = customInput?.closest("[data-choice-control]");
+
+  if (!control) return;
+
+  manualEditSetChoiceValue(control, customInput.value, false);
+  state.manualEditDirty = true;
+}
+
+function manualEditClearCustomChoice(button) {
+  const control = button?.closest("[data-choice-control]");
+
+  if (!control) return;
+
+  manualEditShowSelectChoice(control);
+  state.manualEditDirty = true;
+}
+
+function manualEditSyncChoiceSelect(input) {
+  const field = input?.dataset?.editField || "";
+  const row = input?.closest("[data-edit-row]");
+  const control = row?.querySelector(`[data-choice-control][data-choice-field="${CSS.escape(field)}"]`);
+  const select = control?.querySelector(".manual-edit-choice-select");
+
+  if (!control || !select) return;
+
+  const value = String(input.value ?? "");
+  const hasMatchingOption = [...select.options].some((option) => option.value === value);
+
+  if (value && !hasMatchingOption) {
+    manualEditShowCustomChoice(control, value);
+    return;
+  }
+
+  manualEditShowSelectChoice(control);
+  select.value = hasMatchingOption ? value : "";
+}
+
+function manualEditCurrentLocationValue(item) {
+  return String(item.location || item.rackCode || item.bayCode || "").trim();
+}
+
+function manualEditLocationOptions(item) {
+  const options = [
+    ["", "No location / clear"],
+    ["T", "Truck / no rack"],
+  ];
+
+  const racks = (state.racks || [])
+    .slice()
+    .sort((a, b) => {
+      if (a.code === "T") return -1;
+      if (b.code === "T") return 1;
+
+      return String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true });
+    });
+
+  for (const rack of racks) {
+    const code = String(rack.code || "").trim();
+
+    if (!code) continue;
+
+    const name = rack.name || rack.type || "Rack";
+    const qty = Number(rack.qty || 0);
+    const status = String(rack.status || "Open");
+
+    options.push([
+      code,
+      code === "T"
+        ? `T - Truck / no rack (${qty} pcs)`
+        : `${code} - ${name} (${qty} pcs, ${status})`,
+    ]);
+  }
+
+  const bays = (state.bays || [])
+    .slice()
+    .sort((a, b) => String(a.bayCode || a.code || "").localeCompare(String(b.bayCode || b.code || ""), undefined, { numeric: true }));
+
+  for (const bay of bays) {
+    const bayCode = String(bay.bayCode || bay.code || "").trim();
+
+    if (!bayCode) continue;
+
+    options.push([
+      bayCode,
+      `Bay ${bay.displayName || bayCode}`,
+    ]);
+  }
+
+  return options;
+}
+
+function manualEditRouteOptions() {
+  return [
+    ["", "Indian Trail / Standard"],
+    ["CPU", "Customer Pickup"],
+    ["GNV", "Greenville"],
+    ["DTC", "Deliver to Customer"],
+  ];
+}
+
+function manualEditProcessOptions() {
+  return [
+    ["", "Normal / blank"],
+    ["New", "New"],
+    ["Updated", "Updated"],
+    ["Rush", "Rush"],
+    ["Remake", "Remake"],
+    ["SDI", "SDI"],
+    ["Review", "Needs Review"],
+  ];
+}
+
+function manualEditProductOptions(results = []) {
+  const productValues = uniqueText([
+    ...results.map((item) => item.product),
+    ...state.items.map((item) => item.product),
+    ...state.lists.flatMap((list) => list.items || []).map((item) => item.product),
+  ]).sort((a, b) => a.localeCompare(b));
+
+  return [
+    ["", "Blank product"],
+    ...productValues.map((value) => [value, value]),
+  ];
+}
+
+function manualEditSetRowError(row, message = "") {
+  if (!row) return;
+
+  const errorBox = row.querySelector(".manual-edit-row-error");
+
+  row.classList.toggle("is-invalid", Boolean(message));
+
+  row.querySelectorAll(".manual-edit-input.is-invalid, .manual-edit-select.is-invalid").forEach((field) => {
+    field.classList.remove("is-invalid");
+  });
+
+  if (errorBox) {
+    errorBox.hidden = !message;
+    errorBox.textContent = message;
+  }
+}
+
+function manualEditValidateRow(row) {
+  if (!row) return false;
+
+  const qtyInput = row.querySelector('[data-edit-field="qty"]');
+  const scannedInput = row.querySelector('[data-edit-field="scanned"]');
+
+  if (!qtyInput || !scannedInput) {
+    manualEditSetRowError(row, "");
+    return true;
+  }
+
+  const qty = Number(qtyInput.value || 0);
+  const scanned = Number(scannedInput.value || 0);
+
+  scannedInput.max = String(Math.max(qty, 0));
+
+  if (!Number.isFinite(qty) || qty < 0) {
+    qtyInput.classList.add("is-invalid");
+    manualEditSetRowError(row, "Qty must be zero or greater.");
+    return false;
+  }
+
+  if (!Number.isFinite(scanned) || scanned < 0) {
+    scannedInput.classList.add("is-invalid");
+    manualEditSetRowError(row, "Scanned quantity must be zero or greater.");
+    return false;
+  }
+
+  if (scanned > qty) {
+    scannedInput.classList.add("is-invalid");
+    manualEditSetRowError(row, "Scanned quantity cannot be greater than Qty.");
+    return false;
+  }
+
+  manualEditSetRowError(row, "");
+
+  return true;
+}
+
 function manualEditResultsHtml(results) {
+  const visibleRows = results.slice(0, 100);
+
   return results.length
     ? `
-      <table>
-        <thead><tr><th>Stage</th><th>Order</th><th>Item</th><th>Customer</th><th>Qty</th><th>Scanned</th><th>Location</th><th>Dims</th><th>Route</th><th>Job</th><th>Product</th><th>Process</th><th>Queue</th><th></th></tr></thead>
-        <tbody>
-          ${results
-            .slice(0, 20)
-            .map(
-              (item) => `
-                <tr data-edit-row="${escapeHtml(item.lineItemId)}">
-                  <td><span class="manual-stage-pill">${escapeHtml(item.stage || item.deliveryLabel || "")}</span></td>
-                  <td><input data-edit-field="order" type="text" value="${escapeHtml(item.order)}"></td>
-                  <td><input data-edit-field="item" type="text" value="${escapeHtml(item.item)}"></td>
-                  <td><input data-edit-field="customer" type="text" value="${escapeHtml(item.customer)}"></td>
-                  <td><input data-edit-field="qty" type="number" min="0" value="${escapeHtml(item.qty)}"></td>
-                  <td><input data-edit-field="scanned" type="number" min="0" value="${escapeHtml(item.scanned)}"></td>
-                  <td><input data-edit-field="location" type="text" value="${escapeHtml(item.location || "")}" title="${escapeHtml(item.locationDisplay || "Rack code, bay code, or blank to clear")}"></td>
-                  <td><input data-edit-field="dimensions" type="text" value="${escapeHtml(item.dimensions || "")}"></td>
-                  <td><input data-edit-field="route" type="text" value="${escapeHtml(item.route || "")}"></td>
-                  <td><input data-edit-field="job" type="text" value="${escapeHtml(item.job || "")}"></td>
-                  <td><input data-edit-field="product" type="text" value="${escapeHtml(item.product || "")}"></td>
-                  <td><input data-edit-field="processState" type="text" value="${escapeHtml(item.processState || "")}"></td>
-                  <td><input data-edit-field="queueState" type="text" value="${escapeHtml(item.queueState || "")}"></td>
-                  <td>
-                    <button type="button" data-save-line-item="${escapeHtml(item.lineItemId)}">Save</button>
-                    <button type="button" data-delete-line-item="${escapeHtml(item.lineItemId)}">Delete</button>
-                  </td>
-                </tr>
-              `,
-            )
-            .join("")}
-        </tbody>
-      </table>
+      <div class="manual-edit-result-summary">
+        <span>Showing ${escapeHtml(visibleRows.length)} of ${escapeHtml(results.length)} row${results.length === 1 ? "" : "s"}</span>
+        <small>Choose from dropdowns or type a custom value.</small>
+      </div>
+
+      <div class="manual-edit-card-list">
+        ${visibleRows
+          .map((item) => {
+            const rowLabel = `${item.order || ""}-${item.item || ""}`;
+            const stageText = item.stage || item.deliveryLabel || "";
+            const qtyValue = Math.max(Number(item.qty || 0), 0);
+            const scannedValue = Math.min(Math.max(Number(item.scanned || 0), 0), qtyValue);
+            const locationValue = manualEditCurrentLocationValue(item);
+
+            return `
+              <article class="manual-edit-card" data-edit-row="${escapeHtml(item.lineItemId)}">
+                <header class="manual-edit-card-header">
+                  <div class="manual-edit-card-title">
+                    <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
+                    <span>${escapeHtml(item.customer || "")}</span>
+                  </div>
+
+                  <div class="manual-edit-card-stage" title="${escapeHtml(stageText)}">
+                    <span>Stage</span>
+                    <strong>${escapeHtml(stageText || "No stage")}</strong>
+                  </div>
+
+                  <div class="manual-edit-row-actions">
+                    <button
+                      type="button"
+                      class="icon-only icon-save manual-edit-action-button"
+                      data-save-line-item="${escapeHtml(item.lineItemId)}"
+                      title="Save ${escapeHtml(rowLabel)}"
+                      aria-label="Save ${escapeHtml(rowLabel)}"
+                    ></button>
+                    <button
+                      type="button"
+                      class="icon-only icon-trash danger manual-edit-action-button"
+                      data-delete-line-item="${escapeHtml(item.lineItemId)}"
+                      title="Delete ${escapeHtml(rowLabel)}"
+                      aria-label="Delete ${escapeHtml(rowLabel)}"
+                    ></button>
+                  </div>
+                </header>
+
+                <div class="manual-edit-card-grid">
+
+                  <label class="manual-field">
+                    <span>Order</span>
+                    <input class="manual-edit-input" data-edit-field="order" type="text" value="${escapeHtml(item.order)}">
+                  </label>
+
+                  <label class="manual-field small">
+                    <span>Item</span>
+                    <input class="manual-edit-input" data-edit-field="item" type="text" value="${escapeHtml(item.item)}">
+                  </label>
+
+                  <label class="manual-field wide">
+                    <span>Customer</span>
+                    <input class="manual-edit-input" data-edit-field="customer" type="text" value="${escapeHtml(item.customer)}">
+                  </label>
+
+                  <label class="manual-field small">
+                    <span>Qty</span>
+                    <input class="manual-edit-input" data-edit-field="qty" type="number" min="0" value="${escapeHtml(qtyValue)}">
+                  </label>
+
+                  <label class="manual-field small">
+                    <span>Scanned</span>
+                    <input class="manual-edit-input" data-edit-field="scanned" type="number" min="0" max="${escapeHtml(qtyValue)}" value="${escapeHtml(scannedValue)}">
+                  </label>
+
+                  ${manualEditChoiceFieldHtml({
+                    field: "location",
+                    label: "Location",
+                    value: locationValue,
+                    options: manualEditLocationOptions(item),
+                    customLabel: "Custom location...",
+                  })}
+
+                  ${manualEditChoiceFieldHtml({
+                    field: "route",
+                    label: "Route",
+                    value: item.route || "",
+                    options: manualEditRouteOptions(),
+                    customLabel: "Custom route...",
+                  })}
+
+                  ${manualEditChoiceFieldHtml({
+                    field: "processState",
+                    label: "Process",
+                    value: item.processState || "",
+                    options: manualEditProcessOptions(),
+                    customLabel: "Custom process...",
+                  })}
+
+                  ${manualEditChoiceFieldHtml({
+                    field: "product",
+                    label: "Product",
+                    value: item.product || "",
+                    options: manualEditProductOptions(visibleRows),
+                    customLabel: "Custom product...",
+                    wide: true,
+                  })}
+
+                  <label class="manual-field wide">
+                    <span>Dimensions</span>
+                    <input class="manual-edit-input" data-edit-field="dimensions" type="text" value="${escapeHtml(item.dimensions || "")}">
+                  </label>
+
+                  <label class="manual-field wide">
+                    <span>Job</span>
+                    <input class="manual-edit-input" data-edit-field="job" type="text" value="${escapeHtml(item.job || "")}">
+                  </label>
+
+                  <input data-edit-field="queueState" type="hidden" value="${escapeHtml(item.queueState || "")}">
+                </div>
+
+                <div class="manual-edit-row-error" hidden aria-live="polite"></div>
+              </article>
+            `;
+          })
+          .join("")}
+      </div>
     `
     : `<div class="admin-empty">No editable rows found.</div>`;
 }
 
 async function saveManualLineItem(lineItemId) {
   const row = document.querySelector(`[data-edit-row="${CSS.escape(lineItemId)}"]`);
+
   if (!row) return;
+
+  if (!manualEditValidateRow(row)) {
+    row.querySelector(".is-invalid")?.focus();
+    return;
+  }
+
   const data = { lineItemId };
+
   row.querySelectorAll("[data-edit-field]").forEach((input) => {
     data[input.dataset.editField] = input.value;
   });
+
   const payload = await fetchJson("/api/admin/line-item", {
     method: "POST",
     body: JSON.stringify(data),
   });
-  if (payload.meta?.id === state.activeListId) applyBackendPayload(payload);
-  if (!els.adminModal?.hidden && state.manualEditListId) await runManualEditModalSearch(!state.manualEditQuery);
-  else await runManualEditSearch();
+
+  if (payload.meta?.id === state.activeListId) {
+    applyBackendPayload(payload);
+  }
+
+  if (!els.adminModal?.hidden && state.manualEditListId) {
+    await runManualEditModalSearch(!state.manualEditQuery);
+  } else {
+    await runManualEditSearch();
+  }
+
   state.manualEditDirty = false;
   renderScanPage();
 }
@@ -4926,18 +5910,37 @@ function wireEvents() {
   document.addEventListener("input", (event) => {
     const modalSearch = event.target.closest("#adminDeliveryListModalSearch");
     if (!modalSearch) return;
+
     const target = document.getElementById("adminDeliveryListModalResults");
+    const searchBox = modalSearch.closest(".admin-modal-search");
     const query = modalSearch.value.trim();
+
     window.clearTimeout(state.adminListSearchTimer);
-    if (target) target.innerHTML = `<div class="admin-empty loading"><strong>Searching delivery lists...</strong><span class="loading-bar"><i></i></span></div>`;
+
+    searchBox?.classList.add("is-searching");
+    target?.classList.add("is-searching");
+
     state.adminListSearchTimer = window.setTimeout(() => {
       searchAdminDeliveryLists(query)
         .then((filtered) => {
           const stillCurrent = document.getElementById("adminDeliveryListModalSearch")?.value.trim() === query;
-          if (target && stillCurrent) target.innerHTML = deliveryListAdminRows(filtered, filtered.length || 1, true);
+
+          if (target && stillCurrent) {
+            target.innerHTML = deliveryListAdminRows(filtered, filtered.length || 1, true);
+          }
         })
         .catch((error) => {
-          if (target) target.innerHTML = `<div class="admin-empty">Search failed: ${escapeHtml(error.message)}</div>`;
+          if (target) {
+            target.innerHTML = `<div class="admin-empty">Search failed: ${escapeHtml(error.message)}</div>`;
+          }
+        })
+        .finally(() => {
+          const stillCurrent = document.getElementById("adminDeliveryListModalSearch")?.value.trim() === query;
+
+          if (stillCurrent) {
+            searchBox?.classList.remove("is-searching");
+            target?.classList.remove("is-searching");
+          }
         });
     }, 180);
   });
@@ -5147,66 +6150,68 @@ if (moveButton) {
   });
   els.rackCreateOpenBtn?.addEventListener("click", () => openRackForm(""));
   els.rackSetCreateOpenBtn?.addEventListener("click", () => openRackSetForm(""));
-  els.importBtn?.addEventListener("click", () => {
-    if (!els.importFile) return;
-    els.importFile.value = "";
-    els.importFile.click();
-  });
+
   els.folderImportBtn?.addEventListener("click", () => {
     importTempDeliveryFolder().catch((error) => showInlineError(error.message, true));
   });
+
   els.importWindowResetBtn?.addEventListener("click", () => resetImportDateWindow());
+
   els.checkUpdatesBtn?.addEventListener("click", async () => {
     const oldText = els.checkUpdatesBtn.textContent;
+
     try {
       els.checkUpdatesBtn.disabled = true;
       els.checkUpdatesBtn.textContent = "Checking...";
-      if (els.importPreviewBox) {
-        els.importPreviewBox.classList.add("loading");
-        els.importPreviewBox.innerHTML = `<strong>Checking GitHub for updates...</strong><span class="loading-bar"><i></i></span>`;
-      }
+
+      showImportStatusLoading("Checking GitHub for updates...");
+      await waitForNextPaint();
+
       const status = await fetchJson("/api/admin/update-check");
+
       if (!status.ok) {
-        if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Update check unavailable</strong><span>${escapeHtml(status.error || "Git upstream is not configured.")}</span>`;
-        window.alert(`Could not check GitHub updates from this local copy.\n\n${status.error || "Git upstream is not configured."}`);
+        showImportStatusResult(
+          "review",
+          "Update check unavailable.",
+          status.error || "Git upstream is not configured.",
+        );
+
         return;
       }
+
       if (status.updateAvailable) {
-        const updateText = status.method === "github_zip" ? `GitHub update available from ${status.upstream}.` : `${status.behind} commit(s) behind ${status.upstream}.`;
-        if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Update available</strong><span>${escapeHtml(updateText)}</span>`;
-        if (window.confirm(`Update available: ${updateText}\n\nThe app will back up and restore the SQLite database so scans are preserved.\n\nUpdate now?`)) {
-          if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Updating program...</strong><span class="loading-bar"><i></i></span><span>Preserving database files before pulling code.</span>`;
-          const update = await fetchJson("/api/admin/update-apply", { method: "POST", body: JSON.stringify({}) });
-          if (update.ok) {
-            if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Update complete</strong><span>Database restored from backup. Restart the web app to load the new code.</span>`;
-            window.alert(`Update complete.\n\nDatabase files were restored from backup:\n${(update.restoredDatabaseFiles || []).join("\n") || "No database files needed restore."}\n\nPlease close and restart the web app so the new server code loads.`);
-          } else {
-            if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>Update failed</strong><span>${escapeHtml(update.stderr || update.error || "Git pull failed.")}</span>`;
-            window.alert(`Update failed.\n\n${update.stderr || update.error || "Git pull failed."}\n\nDatabase backup folder:\n${update.backupDir || "Not created"}`);
-          }
-        }
-      } else {
-        const currentText = status.method === "github_zip" ? `GitHub fallback checked ${status.upstream}.` : `${status.branch} is current with ${status.upstream}.`;
-        if (els.importPreviewBox) els.importPreviewBox.innerHTML = `<strong>No updates found</strong><span>${escapeHtml(currentText)}</span>`;
-        window.alert(`No new updates found. ${currentText}`);
+        const updateText = status.method === "github_zip"
+          ? `GitHub update available from ${status.upstream}.`
+          : `${status.behind} commit(s) behind ${status.upstream}.`;
+
+        showImportStatusResult(
+          "notice",
+          "Update available.",
+          `${updateText} The app will back up and restore the SQLite database so scans are preserved.`,
+          `<button type="button" data-apply-program-update>Apply update now</button>`,
+        );
+
+        return;
       }
+
+      const currentText = status.method === "github_zip"
+        ? `GitHub fallback checked ${status.upstream}.`
+        : `${status.branch} is current with ${status.upstream}.`;
+
+      showImportStatusResult("success", "No updates found.", currentText);
     } catch (error) {
-      showInlineError(error.message, true);
+      showImportStatusResult("review", "Update check failed.", error.message);
     } finally {
       els.checkUpdatesBtn.disabled = false;
       els.checkUpdatesBtn.textContent = oldText || "Check updates";
-      if (els.importPreviewBox) els.importPreviewBox.classList.remove("loading");
+      els.importPreviewBox?.classList.remove("loading");
     }
   });
+
   els.deleteDateSelect?.addEventListener("change", () => renderAdminDeleteControls());
   els.deleteListBtn?.addEventListener("click", () => deleteSelectedDeliveryList(false).catch((error) => showInlineError(error.message, true)));
   els.deleteDateBtn?.addEventListener("click", () => deleteSelectedDeliveryList(true).catch((error) => showInlineError(error.message, true)));
   els.adminResetScansBtn?.addEventListener("click", () => resetSelectedAdminScans().catch((error) => showInlineError(error.message, true)));
-  els.importFile?.addEventListener("change", () => {
-    const file = els.importFile.files?.[0];
-    if (!file) return;
-    importDeliveryListFile(file).catch((error) => showInlineError(error.message, true));
-  });
   els.addStationBtn?.addEventListener("click", () => addStationFromInput().catch((error) => showInlineError(error.message)));
   els.newStationInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -5249,16 +6254,63 @@ if (moveButton) {
     }
   });
   document.addEventListener("input", (event) => {
-    if (event.target.closest("#manualEditModalResults [data-edit-field]")) {
-      state.manualEditDirty = true;
+    const customField = event.target.closest("#manualEditModalResults [data-custom-field]");
+
+    if (customField) {
+      manualEditApplyCustomInput(customField);
+      return;
+    }
+
+    const editField = event.target.closest("#manualEditModalResults [data-edit-field]");
+
+    if (!editField) return;
+
+    state.manualEditDirty = true;
+
+    const row = editField.closest("[data-edit-row]");
+
+    if (editField.type !== "hidden") {
+      manualEditSyncChoiceSelect(editField);
+    }
+
+    if (row && ["qty", "scanned"].includes(editField.dataset.editField)) {
+      manualEditValidateRow(row);
     }
   });
+
   document.addEventListener("change", (event) => {
+    const choiceSelect = event.target.closest("#manualEditModalResults .manual-edit-choice-select");
+
+    if (choiceSelect) {
+      manualEditApplyChoiceSelect(choiceSelect);
+      state.manualEditDirty = true;
+      return;
+    }
+
+    const editField = event.target.closest("#manualEditModalResults [data-edit-field]");
+
+    if (editField) {
+      state.manualEditDirty = true;
+
+      const row = editField.closest("[data-edit-row]");
+
+      if (editField.type !== "hidden") {
+        manualEditSyncChoiceSelect(editField);
+      }
+
+      if (row && ["qty", "scanned"].includes(editField.dataset.editField)) {
+        manualEditValidateRow(row);
+      }
+
+      return;
+    }
+
     if (event.target.closest("#manualEditModalStage")) {
       if (state.manualEditDirty && !window.confirm("You have unsaved manual delivery-list edits. Load another stage without saving?")) {
         event.target.value = state.manualEditListId || "";
         return;
       }
+
       state.manualEditDirty = false;
       runManualEditModalSearch(true).catch((error) => showInlineError(error.message, true));
     }
@@ -5468,9 +6520,9 @@ if (moveButton) {
 
     const rackHeaderAction = event.target.closest(".rack-summary-actions button");
 
-if (rackHeaderAction) {
-  event.preventDefault();
-}
+    if (rackHeaderAction) {
+      event.preventDefault();
+    }
 
      const openGlassMenu = event.target.closest(".glass-filter-more");
 
@@ -5501,6 +6553,25 @@ if (rackHeaderAction) {
         .catch((error) => showInlineError(error.message));
       return;
     }
+    const manualCustomClearButton = event.target.closest("[data-manual-custom-clear]");
+    if (manualCustomClearButton) {
+      event.preventDefault();
+      manualEditClearCustomChoice(manualCustomClearButton);
+      return;
+    }
+    const manualEditBackButton = event.target.closest("[data-manual-edit-back]");
+    if (manualEditBackButton) {
+      event.preventDefault();
+
+      if (state.manualEditDirty && !window.confirm("You have unsaved manual delivery-list edits. Go back without saving?")) {
+        return;
+      }
+
+      state.manualEditDirty = false;
+      openAdminModal("deliveryLists");
+
+      return;
+    }
     const manualModalSearchButton = event.target.closest("#manualEditModalSearchBtn");
     if (manualModalSearchButton) {
       runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
@@ -5516,6 +6587,17 @@ if (rackHeaderAction) {
       openPrintOptions({ date: dashboardDateKey(), listIds: state.lists.map((list) => list.id) });
       return;
     }
+    const applyUpdateButton = event.target.closest("[data-apply-program-update]");
+    if (applyUpdateButton) {
+      event.preventDefault();
+
+      applyUpdateButton.disabled = true;
+      applyProgramUpdate().catch((error) => {
+        showImportStatusResult("review", "Update failed.", error.message);
+      });
+
+      return;
+    }
     const adminListEditButton = event.target.closest("[data-admin-list-edit]");
     if (adminListEditButton) {
       const listId = adminListEditButton.dataset.adminListEdit || "";
@@ -5523,9 +6605,23 @@ if (rackHeaderAction) {
       openManualEditForList(listId).catch((error) => showInlineError(error.message, true));
       return;
     }
-    const adminListPrintButton = event.target.closest("[data-admin-list-print]");
-    if (adminListPrintButton) {
-      openPrintOptions({ listIds: [adminListPrintButton.dataset.adminListPrint], fixedListIds: true });
+    const adminDateResetButton = event.target.closest("[data-admin-date-reset]");
+    if (adminDateResetButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      resetAdminScansForDate(adminDateResetButton.dataset.adminDateReset).catch((error) => showInlineError(error.message, true));
+
+      return;
+    }
+
+    const adminDateDeleteButton = event.target.closest("[data-admin-date-delete]");
+    if (adminDateDeleteButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      deleteAdminDeliveryDateByDate(adminDateDeleteButton.dataset.adminDateDelete).catch((error) => showInlineError(error.message, true));
+
       return;
     }
     const adminListResetButton = event.target.closest("[data-admin-list-reset]");
@@ -5710,8 +6806,18 @@ if (rackHeaderAction) {
     }
     
     const printListsButton = event.target.closest("[data-print-lists]");
-    if (printListsButton?.dataset.printLists) {
-      openPrintPackage([{ listIds: String(printListsButton.dataset.printLists).split(",").filter(Boolean) }], { updatedOnly: "1" });
+    if (printListsButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const listIds = String(printListsButton.dataset.printLists || "")
+        .split(",")
+        .filter(Boolean);
+
+      if (listIds.length) {
+        openPrintPackage([{ listIds }], { updatedOnly: "1" });
+      }
+
       return;
     }
     const printActiveButton = event.target.closest("[data-print-active]");

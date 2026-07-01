@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import json
 import html
-import base64
-import hashlib
 import os
 import tempfile
 import shutil
@@ -21,7 +19,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from delivery_store import SESSION_COOKIE_NAME, create_store, load_delivery_source_payload, request_station, request_user_name
+from delivery_store import SESSION_COOKIE_NAME, create_store, request_station, request_user_name
 from scanner_config import load_config
 
 
@@ -983,26 +981,6 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 data["user"] = user["username"]
                 self.send_json(STORE.import_delivery_folder(data))
-                return
-
-            if parsed.path == "/api/import/upload":
-                user = self.require_permission("import_delivery_lists")
-                if not user:
-                    return
-                file_name = Path(str(data.get("fileName") or "delivery-list")).name
-                raw_content = base64.b64decode(str(data.get("contentBase64") or ""))
-                upload_dir = CONFIG.data_dir / "_uploads"
-                upload_dir.mkdir(parents=True, exist_ok=True)
-                upload_path = upload_dir / file_name
-                upload_path.write_bytes(raw_content)
-                payload = load_delivery_source_payload(upload_path)
-                data["payload"] = payload
-                data["fileName"] = file_name
-                data["sourcePath"] = str(upload_path.resolve())
-                data["sourceHash"] = hashlib.sha256(raw_content).hexdigest()
-                data["importKind"] = "single_file"
-                data["user"] = user["username"]
-                self.send_json(STORE.import_delivery_list(data))
                 return
 
             if parsed.path == "/api/import/preview":
