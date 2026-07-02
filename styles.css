@@ -6349,7 +6349,7 @@ body.bay-move-mode .excel-bay-map {
   align-content: start;
 }
 
-.rack-column > header {
+.rack-column > .rack-column-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -6359,14 +6359,30 @@ body.bay-move-mode .excel-bay-map {
   border-radius: 8px;
   background: var(--navy);
   color: #fff;
+  cursor: pointer;
+  list-style: none;
 }
 
-.rack-column > header h2 {
+.rack-column > .rack-column-header::-webkit-details-marker {
+  display: none;
+}
+
+.rack-column > .rack-column-header::before {
+  content: ">";
+  font-weight: 950;
+  transition: transform 0.16s ease;
+}
+
+.rack-column[open] > .rack-column-header::before {
+  transform: rotate(90deg);
+}
+
+.rack-column > .rack-column-header h2 {
   margin: 0;
   font-size: 16px;
 }
 
-.rack-column > header span {
+.rack-column > .rack-column-header span {
   font-weight: 950;
 }
 
@@ -7059,6 +7075,94 @@ body.bay-move-mode .excel-bay-map {
 .admin-import-settings .admin-wide-field,
 .admin-import-settings .admin-form {
   margin-inline: 12px;
+}
+
+.lookup-summary-list div {
+  min-height: 54px;
+}
+
+.lookup-manager-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.lookup-manager-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) repeat(2, minmax(160px, 1fr)) minmax(140px, 0.9fr);
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid #dbe5f2;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.lookup-manager-form label {
+  display: grid;
+  gap: 5px;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.lookup-manager-form .wide {
+  grid-column: span 2;
+}
+
+.lookup-manager-form input,
+.lookup-manager-form select {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #fff;
+}
+
+.lookup-manager-form button {
+  min-height: 38px;
+  border: 1px solid var(--navy);
+  border-radius: 7px;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 900;
+}
+
+.lookup-manager-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.lookup-manager-list {
+  display: grid;
+  gap: 8px;
+}
+
+.lookup-manager-list h3 {
+  margin: 0;
+  color: var(--navy-dark);
+}
+
+.lookup-row {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid #dbe5f2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.lookup-row span,
+.lookup-row small {
+  color: #526078;
+}
+
+.lookup-row em {
+  color: #6d7890;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 850;
+  text-transform: uppercase;
 }
 
 .admin-primary-actions {

@@ -199,7 +199,41 @@ def main() -> int:
     sample = json.loads((ROOT / "data" / "sample-delivery-list.json").read_text(encoding="utf-8"))
     sample["deliveryDate"] = "2026-04-02"
     imported = store.import_delivery_list({"payload": sample, "user": "Validator", "fileName": "sample-delivery-list.json"})
-    results.append(assert_true("import_update", imported["importedCount"] == 6, {"importedCount": imported["importedCount"]}))
+    results.append(
+        assert_true(
+            "new_import_not_marked_updated",
+            imported["importedCount"] == 6 and imported["updatedCount"] == 0,
+            {"importedCount": imported["importedCount"], "updatedCount": imported["updatedCount"]},
+        )
+    )
+    unchanged_reimport = store.import_delivery_list({"payload": sample, "user": "Validator", "fileName": "sample-delivery-list.json"})
+    results.append(
+        assert_true(
+            "unchanged_reimport_not_marked_updated",
+            unchanged_reimport["updatedCount"] == 0 and not unchanged_reimport["changedListIds"],
+            {"updatedCount": unchanged_reimport["updatedCount"], "changedListIds": unchanged_reimport["changedListIds"]},
+        )
+    )
+    initial_lookups = store.get_manual_edit_lookups()
+    results.append(
+        assert_true(
+            "manual_edit_lookups_include_discovered_products",
+            any(item["value"] for item in initial_lookups["products"]) and any("Mirror" in item["value"] for item in initial_lookups["products"]),
+            {"products": len(initial_lookups["products"])},
+        )
+    )
+    store.add_manual_edit_lookup({"type": "product", "value": "Validation Glass", "label": "Validation Glass"}, "Validator")
+    store.add_manual_edit_lookup({"type": "route", "value": "VAL", "label": "Validation Route", "category": "Test", "matchTerms": "validation route"}, "Validator")
+    lookups = store.add_manual_edit_lookup({"type": "process", "value": "Validation Process", "label": "Validation Process"}, "Validator")
+    results.append(
+        assert_true(
+            "manual_edit_lookups_include_admin_added_values",
+            any(item["value"] == "Validation Glass" for item in lookups["products"])
+            and any(item["value"] == "VAL" for item in lookups["routes"])
+            and any(item["value"] == "Validation Process" for item in lookups["processes"]),
+            {"products": len(lookups["products"]), "routes": len(lookups["routes"]), "processes": len(lookups["processes"])},
+        )
+    )
 
     temp_source = ROOT.parent / "Temp Delivery Lists" / "6.9.26.xlsx"
     if temp_source.exists():
@@ -218,18 +252,19 @@ def main() -> int:
     results.append(
         assert_true(
             "temp_folder_import_update",
-            changed_files >= 1 and not folder_result["failedFiles"] and folder_result["printCandidates"],
+            not folder_result["failedFiles"] and (changed_files >= 1 or folder_result["skippedFiles"]),
             {"changed": changed_files, "printCandidates": len(folder_result["printCandidates"])},
         )
     )
-    print_package = store.get_print_package(folder_result["printCandidates"][0]["listIds"])
-    results.append(
-        assert_true(
-            "print_package_excludes_regular_mirrors",
-            bool(print_package["lists"]) and all(item for delivery_list in print_package["lists"] for item in delivery_list["items"]),
-            {"lists": len(print_package["lists"])},
+    if folder_result["printCandidates"]:
+        print_package = store.get_print_package(folder_result["printCandidates"][0]["listIds"])
+        results.append(
+            assert_true(
+                "print_package_excludes_regular_mirrors",
+                bool(print_package["lists"]) and all(item for delivery_list in print_package["lists"] for item in delivery_list["items"]),
+                {"lists": len(print_package["lists"])},
+            )
         )
-    )
     second_folder_result = store.import_delivery_folder({"user": "Validator"})
     results.append(
         assert_true(

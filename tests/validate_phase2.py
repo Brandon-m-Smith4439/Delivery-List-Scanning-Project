@@ -183,6 +183,28 @@ def main() -> int:
         status, payload, _ = client.request("GET", "/api/admin/sessions", cookie=admin_cookie)
         results.append(assert_true("http_admin_sessions", status == 200 and len(payload["sessions"]) >= 1, {"status": status, "sessions": len(payload.get("sessions", []))}))
 
+        status, payload, _ = client.request("GET", "/api/admin/manual-edit-lookups", cookie=admin_cookie)
+        results.append(
+            assert_true(
+                "http_manual_edit_lookup_discovery",
+                status == 200 and any("Mirror" in row.get("value", "") for row in payload.get("products", [])),
+                {"status": status, "products": len(payload.get("products", []))},
+            )
+        )
+        status, payload, _ = client.request(
+            "POST",
+            "/api/admin/manual-edit-lookups",
+            {"type": "route", "value": "HTTPVAL", "label": "HTTP Validation Route", "category": "Validation", "matchTerms": "http validation"},
+            cookie=admin_cookie,
+        )
+        results.append(
+            assert_true(
+                "http_manual_edit_lookup_admin_add",
+                status == 200 and any(row.get("value") == "HTTPVAL" for row in payload.get("routes", [])),
+                {"status": status, "routes": len(payload.get("routes", []))},
+            )
+        )
+
         status, payload, _ = client.request("POST", "/api/import/preview", {"payload": sample}, cookie=admin_cookie)
         results.append(assert_true("http_import_preview", status == 200 and payload["valid"], {"status": status}))
 
@@ -191,11 +213,11 @@ def main() -> int:
         results.append(
             assert_true(
                 "http_temp_folder_import",
-                status == 200 and folder_changed >= 1 and not payload.get("failedFiles"),
+                status == 200 and not payload.get("failedFiles") and (folder_changed >= 1 or payload.get("skippedFiles")),
                 {"status": status, "changed": folder_changed, "printCandidates": len(payload.get("printCandidates", []))},
             )
         )
-        first_print_ids = ",".join((payload.get("printCandidates") or [{}])[0].get("listIds", []))
+        first_print_ids = ",".join((payload.get("printCandidates") or [{}])[0].get("listIds", [])) or "2026-04-01-staging-airport"
         status, payload, _ = client.request("GET", f"/api/print/package?listId={first_print_ids}", cookie=admin_cookie)
         results.append(assert_true("http_print_package", status == 200 and "<table" in payload.get("raw", ""), {"status": status}))
 

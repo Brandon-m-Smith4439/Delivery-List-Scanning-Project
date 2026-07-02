@@ -61,9 +61,12 @@ const state = {
   allPermissions: [],
   adminRecentImports: [],
   adminListSearchTimer: null,
+  manualEditLookups: { products: [], routes: [], processes: [] },
   manualEditDirty: false,
   manualEditListId: "",
   manualEditQuery: "",
+  expandedRackGroups: new Set(),
+  expandedRackCodes: new Set(),
   backend: false,
   authenticated: false,
   user: null,
@@ -1506,6 +1509,7 @@ function renderRacksPage() {
     const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
     const isComplete = String(rack.status || "").toLowerCase() === "closed";
     const rackHasMoveOpen = (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
+    const rackOpen = state.expandedRackCodes.has(rack.code) || rackHasMoveOpen;
 
     const adminActions = hasPermission("manage_racks")
       ? `<span class="rack-summary-actions">
@@ -1533,7 +1537,7 @@ function renderRacksPage() {
         : "";
 
     return `
-      <details class="rack-card ${rackVisualClass(rack)}" ${rackHasMoveOpen ? "open" : ""}>
+      <details class="rack-card ${rackVisualClass(rack)}" data-rack-code="${escapeHtml(rack.code)}" ${rackOpen ? "open" : ""}>
         <summary>
           <span class="rack-summary-main">
             <strong>${escapeHtml(rack.code)}</strong>
@@ -1592,16 +1596,20 @@ function renderRacksPage() {
 
   els.rackGrid.innerHTML = groups
     .map(
-      ([label, racks]) => `
-        <section class="rack-column">
-          <header>
+      ([label, racks]) => {
+        const groupHasMoveOpen = racks.some((rack) => (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId));
+        const groupOpen = state.expandedRackGroups.has(label) || groupHasMoveOpen;
+        return `
+        <details class="rack-column" data-rack-group="${escapeHtml(label)}" ${groupOpen ? "open" : ""}>
+          <summary class="rack-column-header">
             <h2>${escapeHtml(label)}</h2>
             <span>${escapeHtml(racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0))} pcs</span>
             ${renderRackColumnActions(label)}
-          </header>
+          </summary>
           <div>${racks.map(renderRack).join("") || `<p class="admin-empty">No ${escapeHtml(label.toLowerCase())} racks.</p>`}</div>
-        </section>
-      `,
+        </details>
+      `;
+      },
     )
     .join("");
 }
@@ -4215,6 +4223,7 @@ function openAdminModal(kind) {
     sessions: "Active Sessions",
     stations: "Stations",
     manualEdit: "Manual Delivery List Edit",
+    lookups: "Lookup Manager",
     rackForm: "Rack",
     rackSetForm: "Rack Set",
   };
@@ -4291,6 +4300,9 @@ function adminModalContent(kind) {
   if (kind === "manualEdit") {
     return manualEditModalHtml();
   }
+  if (kind === "lookups") {
+    return lookupManagerModalHtml();
+  }
   if (kind === "rackForm") {
     return rackFormModalHtml();
   }
@@ -4298,6 +4310,68 @@ function adminModalContent(kind) {
     return rackSetFormModalHtml();
   }
   return `<div class="admin-empty">Choose a dashboard section to view details.</div>`;
+}
+
+function lookupListHtml(title, items = []) {
+  return `
+    <section class="lookup-manager-list">
+      <h3>${escapeHtml(title)}</h3>
+      ${
+        items.length
+          ? items
+              .map((item) => `
+                <div class="lookup-row">
+                  <strong>${escapeHtml(item.label || item.value)}</strong>
+                  <span>${escapeHtml(item.value || "")}${item.category ? ` - ${escapeHtml(item.category)}` : ""}</span>
+                  ${item.matchTerms ? `<small>${escapeHtml(item.matchTerms)}</small>` : ""}
+                  <em>${escapeHtml(item.source || "discovered")}</em>
+                </div>
+              `)
+              .join("")
+          : `<div class="admin-empty">No ${escapeHtml(title.toLowerCase())} yet.</div>`
+      }
+    </section>
+  `;
+}
+
+function lookupManagerModalHtml() {
+  const lookups = state.manualEditLookups || { products: [], routes: [], processes: [] };
+  return `
+    <div class="lookup-manager-shell">
+      <form id="manualLookupForm" class="lookup-manager-form">
+        <label>
+          <span>Type</span>
+          <select id="lookupTypeInput">
+            <option value="product">Product</option>
+            <option value="route">Route</option>
+            <option value="process">Process</option>
+          </select>
+        </label>
+        <label>
+          <span>Value / code</span>
+          <input id="lookupValueInput" type="text" autocomplete="off" placeholder="CPU, 1/4 Mirror, Rush">
+        </label>
+        <label>
+          <span>Label</span>
+          <input id="lookupLabelInput" type="text" autocomplete="off" placeholder="Customer Pickup">
+        </label>
+        <label class="lookup-route-only">
+          <span>Category</span>
+          <input id="lookupCategoryInput" type="text" autocomplete="off" placeholder="Pickup, delivery, branch">
+        </label>
+        <label class="lookup-route-only wide">
+          <span>Match terms</span>
+          <input id="lookupMatchTermsInput" type="text" autocomplete="off" placeholder="CPU-Air, customer pickup, will call">
+        </label>
+        <button type="submit">Add Lookup</button>
+      </form>
+      <div class="lookup-manager-grid">
+        ${lookupListHtml("Products", lookups.products || [])}
+        ${lookupListHtml("Routes", lookups.routes || [])}
+        ${lookupListHtml("Processes", lookups.processes || [])}
+      </div>
+    </div>
+  `;
 }
 
 function rackFormModalHtml() {
@@ -4471,6 +4545,7 @@ async function ensureManualEditLookupsLoaded() {
   const lookups = await Promise.allSettled([
     fetchJson("/api/racks"),
     fetchJson("/api/indian-trail/bays"),
+    fetchJson("/api/admin/manual-edit-lookups"),
   ]);
 
   const rackResult = lookups[0];
@@ -4485,6 +4560,16 @@ async function ensureManualEditLookupsLoaded() {
   if (bayResult.status === "fulfilled") {
     state.bays = bayResult.value.bays || [];
     state.bayEvents = bayResult.value.events || state.bayEvents || [];
+  }
+
+  const manualLookupResult = lookups[2];
+
+  if (manualLookupResult.status === "fulfilled") {
+    state.manualEditLookups = {
+      products: manualLookupResult.value.products || [],
+      routes: manualLookupResult.value.routes || [],
+      processes: manualLookupResult.value.processes || [],
+    };
   }
 }
 
@@ -5232,6 +5317,25 @@ async function removeCustomerRouteRule(ruleId) {
   renderCustomerRouteRules();
 }
 
+async function saveManualEditLookup() {
+  const lookupType = document.getElementById("lookupTypeInput")?.value || "product";
+  const value = document.getElementById("lookupValueInput")?.value.trim() || "";
+  const label = document.getElementById("lookupLabelInput")?.value.trim() || value;
+  const category = document.getElementById("lookupCategoryInput")?.value.trim() || "";
+  const matchTerms = document.getElementById("lookupMatchTermsInput")?.value.trim() || "";
+  if (!value) throw new Error("Lookup value is required");
+  const payload = await fetchJson("/api/admin/manual-edit-lookups", {
+    method: "POST",
+    body: JSON.stringify({ type: lookupType, value, label, category, matchTerms }),
+  });
+  state.manualEditLookups = {
+    products: payload.products || [],
+    routes: payload.routes || [],
+    processes: payload.processes || [],
+  };
+  openAdminModal("lookups");
+}
+
 function renderActiveSessions() {
   if (!els.activeSessions) return;
   els.activeSessions.innerHTML = state.activeSessions.length
@@ -5278,6 +5382,18 @@ function manualEditOptionHasValue(options, value) {
   const cleanValue = String(value ?? "");
 
   return options.some(([optionValue]) => String(optionValue ?? "") === cleanValue);
+}
+
+function lookupOptions(items = [], blankLabel = "Blank") {
+  const seen = new Set();
+  const options = [["", blankLabel]];
+  for (const item of items || []) {
+    const value = String(item.value ?? "").trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    options.push([value, item.label || value]);
+  }
+  return options;
 }
 
 function manualEditIsCustomChoice(options, value) {
@@ -5533,6 +5649,8 @@ function manualEditLocationOptions(item) {
 }
 
 function manualEditRouteOptions() {
+  const lookupRoutes = lookupOptions(state.manualEditLookups?.routes || [], "Indian Trail / Standard");
+  if (lookupRoutes.length > 1) return lookupRoutes;
   return [
     ["", "Indian Trail / Standard"],
     ["CPU", "Customer Pickup"],
@@ -5542,6 +5660,8 @@ function manualEditRouteOptions() {
 }
 
 function manualEditProcessOptions() {
+  const lookupProcesses = lookupOptions(state.manualEditLookups?.processes || [], "Normal / blank");
+  if (lookupProcesses.length > 1) return lookupProcesses;
   return [
     ["", "Normal / blank"],
     ["New", "New"],
@@ -5555,6 +5675,7 @@ function manualEditProcessOptions() {
 
 function manualEditProductOptions(results = []) {
   const productValues = uniqueText([
+    ...(state.manualEditLookups?.products || []).map((item) => item.value),
     ...results.map((item) => item.product),
     ...state.items.map((item) => item.product),
     ...state.lists.flatMap((list) => list.items || []).map((item) => item.product),
@@ -5562,7 +5683,10 @@ function manualEditProductOptions(results = []) {
 
   return [
     ["", "Blank product"],
-    ...productValues.map((value) => [value, value]),
+    ...productValues.map((value) => {
+      const lookup = (state.manualEditLookups?.products || []).find((item) => String(item.value) === String(value));
+      return [value, lookup?.label || value];
+    }),
   ];
 }
 
@@ -6070,6 +6194,21 @@ function wireEvents() {
       showInlineError(error.message, true);
     }
   });
+  els.rackGrid?.addEventListener("toggle", (event) => {
+    const group = event.target.closest?.("[data-rack-group]");
+    if (group && event.target === group) {
+      const label = group.dataset.rackGroup || "";
+      if (group.open) state.expandedRackGroups.add(label);
+      else state.expandedRackGroups.delete(label);
+      return;
+    }
+    const rack = event.target.closest?.("[data-rack-code]");
+    if (rack && event.target === rack) {
+      const code = rack.dataset.rackCode || "";
+      if (rack.open) state.expandedRackCodes.add(code);
+      else state.expandedRackCodes.delete(code);
+    }
+  }, true);
   els.rackGrid?.addEventListener("click", (event) => {
     const printButton = event.target.closest("[data-rack-print]");
     if (printButton) {
@@ -6095,16 +6234,22 @@ function wireEvents() {
     }
     const clearButton = event.target.closest("[data-rack-clear]");
     if (clearButton) {
+      event.preventDefault();
+      event.stopPropagation();
       clearRack(clearButton.dataset.rackClear).catch((error) => showInlineError(error.message, true));
       return;
     }
     const editRackButton = event.target.closest("[data-rack-edit]");
     if (editRackButton) {
+      event.preventDefault();
+      event.stopPropagation();
       openRackForm(editRackButton.dataset.rackEdit || "");
       return;
     }
     const editRackSetButton = event.target.closest("[data-rack-set-edit]");
     if (editRackSetButton) {
+      event.preventDefault();
+      event.stopPropagation();
       openRackSetForm(editRackSetButton.dataset.rackSetEdit || "");
       return;
     }
@@ -6237,6 +6382,11 @@ if (moveButton) {
     if (event.target.closest("#rackSetFormModal")) {
       event.preventDefault();
       createRackSet().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#manualLookupForm")) {
+      event.preventDefault();
+      saveManualEditLookup().catch((error) => showInlineError(error.message, true));
     }
   });
   els.customerRouteRuleForm?.addEventListener("submit", (event) => {
@@ -6541,7 +6691,14 @@ if (moveButton) {
     }
     const adminModalButton = event.target.closest("[data-admin-modal]");
     if (adminModalButton) {
-      openAdminModal(adminModalButton.dataset.adminModal || "");
+      const modalKind = adminModalButton.dataset.adminModal || "";
+      if (modalKind === "lookups") {
+        ensureManualEditLookupsLoaded()
+          .then(() => openAdminModal("lookups"))
+          .catch((error) => showInlineError(error.message, true));
+      } else {
+        openAdminModal(modalKind);
+      }
       return;
     }
     const modalStationButton = event.target.closest("#addStationBtnModal");

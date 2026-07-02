@@ -876,6 +876,12 @@ class BaseDeliveryStore:
     def remove_customer_route_rule(self, rule_id: int, user: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    def get_manual_edit_lookups(self) -> dict[str, list[dict[str, Any]]]:
+        raise NotImplementedError
+
+    def add_manual_edit_lookup(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        raise NotImplementedError
+
     def reports_summary(self) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -1025,6 +1031,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS admin_lookup_values (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                value TEXT NOT NULL,
+                label TEXT NOT NULL,
+                category TEXT,
+                match_terms TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                source TEXT NOT NULL DEFAULT 'manual',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(type, value)
             );
 
             CREATE TABLE IF NOT EXISTS imports (
@@ -1303,7 +1323,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 scanned_qty = int(row["scanned_qty"] or 0)
                 source_key = str(row["source_id"])
                 order_item_key = f"{row['order_no']}-{str(row['item_no']).zfill(3)}"
-                existing_keys.update({source_key, order_item_key})
+                line_key = str(row["id"])
+                existing_keys.update({line_key, source_key, order_item_key})
                 previous_payload = {
                     "qty": int(row["qty"] or 0),
                     "dimensions": str(row["dimensions"] or ""),
@@ -1314,6 +1335,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "process_state": str(row["process_state"] or ""),
                     "queue_state": str(row["queue_state"] or ""),
                 }
+                previous_items[line_key] = previous_payload
                 previous_items[source_key] = previous_payload
                 previous_items[order_item_key] = previous_payload
                 preserved_scans[source_key] = max(preserved_scans.get(source_key, 0), scanned_qty)
@@ -1360,7 +1382,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "UPDATE line_items SET scanned_qty = ? WHERE id = ?",
                         (min(int(preserved), int(cloned["qty"])), cloned["id"]),
                     )
-                if existing and cloned["source_id"] not in existing_keys and order_item_key not in existing_keys:
+                cloned_line_key = str(cloned["id"])
+                if existing and cloned_line_key not in existing_keys:
                     next_state = " ".join(part for part in [cloned["process_state"], "New Line"] if part).strip()
                     con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
                     summary["newPieceQty"] += int(cloned["qty"] or 0)
@@ -1368,7 +1391,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     summary["changedPieceQty"] += int(cloned["qty"] or 0)
                     summary["changedLineCount"] += 1
                 elif existing:
-                    previous = previous_items.get(cloned["source_id"], previous_items.get(order_item_key))
+                    previous = previous_items.get(cloned_line_key)
                     current = {
                         "qty": int(cloned["qty"] or 0),
                         "dimensions": str(cloned["dimensions"] or ""),
@@ -1378,7 +1401,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "product": str(cloned["product"] or ""),
                         "queue_state": str(cloned["queue_state"] or ""),
                     }
-                    if previous and previous != current:
+                    previous_comparable = {key: previous.get(key, "") for key in current} if previous else {}
+                    if previous and previous_comparable != current:
                         state_text = str(cloned["process_state"] or "")
                         next_state = state_text if re.search(r"\bUpdated Line\b", state_text, flags=re.IGNORECASE) else " ".join(part for part in [state_text, "Updated Line"] if part).strip()
                         con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
@@ -2282,6 +2306,92 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             self.insert_audit(con, "customer_route_rule", str(rule_id), "remove_customer_route_rule", user, "", "", {"customer": row["customer_pattern"]})
             con.commit()
         return {"rules": self.get_customer_route_rules()}
+
+    def get_manual_edit_lookups(self) -> dict[str, list[dict[str, Any]]]:
+        buckets: dict[str, dict[str, dict[str, Any]]] = {
+            "product": {},
+            "route": {},
+            "process": {},
+        }
+
+        def add_lookup(kind: str, value: Any, label: Any = "", category: Any = "", match_terms: Any = "", source: str = "discovered", lookup_id: int | None = None) -> None:
+            clean_kind = str(kind or "").strip().lower()
+            clean_value = str(value or "").strip()
+            if clean_kind not in buckets or not clean_value:
+                return
+            key = clean_value.upper() if clean_kind == "route" else clean_value.lower()
+            existing = buckets[clean_kind].get(key)
+            next_item = {
+                "id": lookup_id,
+                "type": clean_kind,
+                "value": clean_value,
+                "label": str(label or clean_value).strip() or clean_value,
+                "category": str(category or "").strip(),
+                "matchTerms": str(match_terms or "").strip(),
+                "source": source,
+            }
+            if not existing or existing.get("source") == "discovered":
+                buckets[clean_kind][key] = next_item
+
+        with self.connect() as con:
+            for row in con.execute("SELECT DISTINCT product FROM line_items WHERE TRIM(product) <> '' ORDER BY product").fetchall():
+                add_lookup("product", row["product"])
+            for row in con.execute("SELECT DISTINCT route FROM line_items WHERE TRIM(route) <> '' ORDER BY route").fetchall():
+                add_lookup("route", row["route"])
+            for row in con.execute("SELECT DISTINCT process_state FROM line_items WHERE TRIM(process_state) <> '' ORDER BY process_state").fetchall():
+                add_lookup("process", row["process_state"])
+            for row in con.execute(
+                """
+                SELECT id, type, value, label, category, match_terms, source
+                FROM admin_lookup_values
+                WHERE is_active = 1
+                ORDER BY type, label, value
+                """
+            ).fetchall():
+                add_lookup(row["type"], row["value"], row["label"], row["category"], row["match_terms"], row["source"] or "manual", row["id"])
+
+        return {
+            "products": sorted(buckets["product"].values(), key=lambda item: item["label"].lower()),
+            "routes": sorted(buckets["route"].values(), key=lambda item: (item["category"].lower(), item["label"].lower())),
+            "processes": sorted(buckets["process"].values(), key=lambda item: item["label"].lower()),
+        }
+
+    def add_manual_edit_lookup(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        lookup_type = str(data.get("type") or "").strip().lower()
+        if lookup_type not in {"product", "route", "process"}:
+            raise ValueError("Lookup type must be product, route, or process")
+        value = str(data.get("value") or "").strip()
+        label = str(data.get("label") or value).strip()
+        category = str(data.get("category") or "").strip() if lookup_type == "route" else ""
+        match_terms = str(data.get("matchTerms") or data.get("match_terms") or "").strip() if lookup_type == "route" else ""
+        if not value:
+            raise ValueError("Lookup value is required")
+        if not label:
+            label = value
+        value = (value.upper() if lookup_type == "route" else value)[:255]
+        label = label[:255]
+        category = category[:80]
+        match_terms = match_terms[:500]
+        created = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                """
+                INSERT INTO admin_lookup_values (type, value, label, category, match_terms, is_active, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 1, 'manual', ?, ?)
+                ON CONFLICT(type, value) DO UPDATE SET
+                    label = excluded.label,
+                    category = excluded.category,
+                    match_terms = excluded.match_terms,
+                    is_active = 1,
+                    source = 'manual',
+                    updated_at = excluded.updated_at
+                """,
+                (lookup_type, value, label, category, match_terms, created, created),
+            )
+            self.insert_audit(con, "admin_lookup_value", f"{lookup_type}:{value}", "upsert_manual_edit_lookup", user, "", "", {"label": label, "category": category})
+            con.commit()
+        return self.get_manual_edit_lookups()
 
     def route_from_customer_rules(self, item: dict[str, Any], rules: list[dict[str, Any]]) -> str:
         signal = " ".join(str(item.get(key, "")) for key in ("customer", "job", "product", "route"))

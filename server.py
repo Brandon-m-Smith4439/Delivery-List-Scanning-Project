@@ -666,6 +666,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"rules": STORE.get_customer_route_rules()})
             return
 
+        if parsed.path == "/api/admin/manual-edit-lookups":
+            if not self.require_permission("edit_delivery_lists"):
+                return
+            self.send_json(STORE.get_manual_edit_lookups())
+            return
+
         if parsed.path == "/api/admin/permissions":
             if not self.require_permission("manage_roles"):
                 return
@@ -1071,6 +1077,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.remove_customer_route_rule(int(data.get("ruleId") or 0), user["username"]))
+                return
+
+            if parsed.path == "/api/admin/manual-edit-lookups":
+                user = self.require_permission("edit_delivery_lists")
+                if not user:
+                    return
+                self.send_json(STORE.add_manual_edit_lookup(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/delete-list":
