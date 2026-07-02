@@ -1617,11 +1617,22 @@ function renderRacksPage() {
         return `
         <details class="rack-column" data-rack-group="${escapeHtml(label)}" ${groupOpen ? "open" : ""}>
           <summary class="rack-column-header">
-            <h2>${escapeHtml(label)}</h2>
-            <span>${escapeHtml(racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0))} pcs</span>
+            <span class="rack-column-main">
+              <span class="rack-column-chevron" aria-hidden="true"></span>
+              <span>
+                <h2>${escapeHtml(label)}</h2>
+                <small>${escapeHtml(racks.length)} ${racks.length === 1 ? "rack" : "racks"}</small>
+              </span>
+            </span>
+
+            <span class="rack-column-qty">${escapeHtml(racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0))} pcs</span>
+
             ${renderRackColumnActions(label)}
           </summary>
-          <div>${racks.map(renderRack).join("") || `<p class="admin-empty">No ${escapeHtml(label.toLowerCase())} racks.</p>`}</div>
+
+          <div class="rack-group-body">
+            ${racks.map(renderRack).join("") || `<p class="admin-empty">No ${escapeHtml(label.toLowerCase())} racks.</p>`}
+          </div>
         </details>
       `;
       },
