@@ -61,6 +61,9 @@ const state = {
   allPermissions: [],
   adminRecentImports: [],
   adminListSearchTimer: null,
+  rolePermissionOpenRoles: new Set(),
+  rolePermissionOpenCategories: new Set(),
+  rolePermissionScrollTop: 0,
   manualEditLookups: { products: [], routes: [], processes: [] },
   manualEditDirty: false,
   manualEditListId: "",
@@ -519,6 +522,18 @@ function waitForNextPaint() {
       requestAnimationFrame(resolve);
     });
   });
+}
+
+function updateModalScrollLock() {
+  const modalIsOpen = [
+    els.adminModal,
+    els.printOptionsPanel,
+    els.baySelectedModal,
+    els.staleBayPanel,
+    els.sdiPanel,
+  ].some((panel) => panel && !panel.hidden);
+
+  document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
 }
 
 async function applyProgramUpdate() {
@@ -3108,11 +3123,13 @@ function openStaleBayPanel(orders = state.staleBayOrders) {
   renderStaleBayPanel(orders || []);
   els.staleBayPanel.hidden = false;
   els.staleBayBackdrop.hidden = false;
+  updateModalScrollLock();
 }
 
 function closeStaleBayPanel() {
   if (els.staleBayPanel) els.staleBayPanel.hidden = true;
   if (els.staleBayBackdrop) els.staleBayBackdrop.hidden = true;
+  updateModalScrollLock();
 }
 
 function renderStaleBayPanel(orders) {
@@ -3244,12 +3261,14 @@ function selectBay(bayCode) {
   if (bayCode && els.baySelectedModal) {
     els.baySelectedModal.hidden = false;
     if (els.baySelectedBackdrop) els.baySelectedBackdrop.hidden = false;
+    updateModalScrollLock();
   }
 }
 
 function closeSelectedBayModal() {
   if (els.baySelectedModal) els.baySelectedModal.hidden = true;
   if (els.baySelectedBackdrop) els.baySelectedBackdrop.hidden = true;
+  updateModalScrollLock();
 }
 
 function requireSelectedBay() {
@@ -3347,6 +3366,7 @@ function openSdiPanel(assignmentId = "") {
   if (els.sdiPanel) els.sdiPanel.dataset.assignmentId = assignment?.id || "";
   if (els.sdiPanel) els.sdiPanel.hidden = false;
   if (els.sdiBackdrop) els.sdiBackdrop.hidden = false;
+  updateModalScrollLock();
   if (els.sdiOrderInput && assignment?.order) els.sdiOrderInput.value = assignment.order;
   if (els.sdiBayInput) els.sdiBayInput.value = bay?.bayCode || "";
   if (els.sdiReasonInput && !els.sdiReasonInput.value) els.sdiReasonInput.value = "Same-day install";
@@ -3377,6 +3397,7 @@ function renderSdiCurrentList() {
 function closeSdiPanel() {
   if (els.sdiPanel) els.sdiPanel.hidden = true;
   if (els.sdiBackdrop) els.sdiBackdrop.hidden = true;
+  updateModalScrollLock();
 }
 
 async function submitSdi(mark = true) {
@@ -3928,11 +3949,13 @@ function openPrintOptions(context = {}) {
   renderPrintOptionStages();
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = false;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = false;
+  updateModalScrollLock();
 }
 
 function closePrintOptions() {
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = true;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = true;
+  updateModalScrollLock();
 }
 
 function submitPrintOptions() {
@@ -4214,6 +4237,9 @@ function renderAdminDeliveryLists() {
 }
 
 function openAdminModal(kind) {
+  if (kind === "roles") {
+  resetRolePermissionUiSession();
+  }
   if (!els.adminModal || !els.adminModalBody || !els.adminModalTitle) return;
   const titleMap = {
     deliveryLists: "All Delivery Lists",
@@ -4231,6 +4257,7 @@ function openAdminModal(kind) {
   els.adminModalBody.innerHTML = adminModalContent(kind);
   els.adminModal.hidden = false;
   if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = false;
+  updateModalScrollLock();
   if (kind === "roles" && (!state.adminRoles.length || !state.allPermissions.length) && hasPermission("manage_roles")) {
     fetchJson("/api/admin/roles")
       .then((payload) => {
@@ -4244,9 +4271,16 @@ function openAdminModal(kind) {
 
 function closeAdminModal() {
   if (state.manualEditDirty && !window.confirm("You have unsaved manual delivery-list edits. Close without saving?")) return;
+
+  if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".role-permission-editor")) {
+    resetRolePermissionUiSession();
+  }
+
   state.manualEditDirty = false;
+
   if (els.adminModal) els.adminModal.hidden = true;
   if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = true;
+  updateModalScrollLock();
 }
 
 function adminModalContent(kind) {
@@ -4411,36 +4445,227 @@ function permissionLabel(permission) {
     .join(" ");
 }
 
+const PERMISSION_CATEGORIES = [
+  {
+    title: "Scanning",
+    description: "Main scanner access, scan visibility, undo, and reset controls.",
+    permissions: ["scan", "view_lists", "view_stations", "view_own_scans", "undo_scan", "reset_lists"],
+  },
+  {
+    title: "Delivery Lists",
+    description: "Importing, previewing, editing, printing, reports, and global search.",
+    permissions: ["import_delivery_lists", "preview_import", "edit_delivery_lists", "export_reports", "view_reports", "global_search"],
+  },
+  {
+    title: "Exceptions & Manual Fixes",
+    description: "Manual adjustments and exception review/resolution.",
+    permissions: ["manual_adjust", "view_exceptions", "resolve_exceptions"],
+  },
+  {
+    title: "Admin & Users",
+    description: "Admin dashboard, users, roles, active sessions, passwords, and updates.",
+    permissions: [
+      "view_admin",
+      "manage_users",
+      "manage_roles",
+      "deactivate_users",
+      "reactivate_users",
+      "update_user_passwords",
+      "view_active_sessions",
+      "check_updates",
+    ],
+  },
+  {
+    title: "Stations & Rules",
+    description: "Station setup and customer route rule management.",
+    permissions: ["manage_stations", "remove_stations", "manage_customer_route_rules"],
+  },
+  {
+    title: "Indian Trail / Bays",
+    description: "Indian Trail receiving, bay map, bay actions, SDI, reports, and layout.",
+    permissions: [
+      "view_indian_trail",
+      "indian_trail_receive",
+      "view_bays",
+      "assign_bay",
+      "move_bay",
+      "clear_bay",
+      "mark_sdi",
+      "remove_sdi",
+      "bay_check",
+      "indian_trail_reports",
+      "manage_bay_layout",
+    ],
+  },
+  {
+    title: "Racks",
+    description: "Rack overview, rack scanning, and rack management.",
+    permissions: ["view_racks", "scan_racks", "manage_racks"],
+  },
+];
+
+function categorizedPermissions(permissions = []) {
+  const allPermissions = permissions || [];
+  const assigned = new Set(PERMISSION_CATEGORIES.flatMap((category) => category.permissions));
+
+  const categories = PERMISSION_CATEGORIES
+    .map((category) => ({
+      ...category,
+      permissions: category.permissions.filter((permission) => allPermissions.includes(permission)),
+    }))
+    .filter((category) => category.permissions.length);
+
+  const uncategorized = allPermissions.filter((permission) => !assigned.has(permission));
+
+  if (uncategorized.length) {
+    categories.push({
+      title: "Other",
+      description: "New or uncategorized permissions.",
+      permissions: uncategorized,
+    });
+  }
+
+  return categories;
+}
+
+function rolePermissionCategoryKey(roleName, categoryTitle) {
+  return `${String(roleName || "").trim()}::${String(categoryTitle || "").trim()}`;
+}
+
+function resetRolePermissionUiSession() {
+  state.rolePermissionOpenRoles = new Set();
+  state.rolePermissionOpenCategories = new Set();
+  state.rolePermissionScrollTop = 0;
+}
+
+function rememberRolePermissionUiState() {
+  const editor = document.querySelector(".role-permission-editor");
+
+  if (els.adminModalBody?.contains(editor)) {
+    state.rolePermissionScrollTop = els.adminModalBody.scrollTop || 0;
+  }
+
+  document.querySelectorAll(".role-permission-card[data-role-card]").forEach((details) => {
+    const roleName = details.dataset.roleCard || "";
+
+    if (details.open) {
+      state.rolePermissionOpenRoles.add(roleName);
+    } else {
+      state.rolePermissionOpenRoles.delete(roleName);
+    }
+  });
+
+  document.querySelectorAll(".permission-category[data-role-name][data-category-title]").forEach((details) => {
+    const key = rolePermissionCategoryKey(details.dataset.roleName, details.dataset.categoryTitle);
+
+    if (details.open) {
+      state.rolePermissionOpenCategories.add(key);
+    } else {
+      state.rolePermissionOpenCategories.delete(key);
+    }
+  });
+}
+
+function restoreRolePermissionUiScroll() {
+  window.requestAnimationFrame(() => {
+    if (els.adminModalBody) {
+      els.adminModalBody.scrollTop = state.rolePermissionScrollTop || 0;
+    }
+  });
+}
+
+function rolePermissionCategoryHtml(roleName, category, selected) {
+  const checkedCount = category.permissions.filter((permission) => selected.has(permission)).length;
+  const categoryKey = rolePermissionCategoryKey(roleName, category.title);
+  const open = state.rolePermissionOpenCategories.has(categoryKey);
+
+  return `
+    <details
+      class="permission-category"
+      data-role-name="${escapeHtml(roleName)}"
+      data-category-title="${escapeHtml(category.title)}"
+      ${open ? "open" : ""}
+    >
+      <summary>
+        <span>
+          <strong>${escapeHtml(category.title)}</strong>
+          <small>${escapeHtml(category.description)}</small>
+        </span>
+        <b>${escapeHtml(checkedCount)} / ${escapeHtml(category.permissions.length)}</b>
+      </summary>
+
+      <div class="role-permission-grid">
+        ${category.permissions
+          .map(
+            (permission) => `
+              <label class="${selected.has(permission) ? "is-checked" : ""}">
+                <input type="checkbox" value="${escapeHtml(permission)}" ${selected.has(permission) ? "checked" : ""}>
+                <span>${escapeHtml(permissionLabel(permission))}</span>
+              </label>
+            `,
+          )
+          .join("")}
+      </div>
+    </details>
+  `;
+}
+
+function rolePermissionCountText(role, permissions) {
+  const selectedCount = Array.isArray(role.permissions) ? role.permissions.length : 0;
+  const totalCount = Array.isArray(permissions) ? permissions.length : 0;
+
+  return `${selectedCount} of ${totalCount} permissions`;
+}
+
 function rolePermissionsModalHtml() {
   const roles = state.adminRoles || [];
   const permissions = state.allPermissions || [];
+
   if (!roles.length || !permissions.length) {
     return `<div class="admin-empty">Role permissions are loading. Close and reopen this panel if they do not appear.</div>`;
   }
+
+  const categories = categorizedPermissions(permissions);
+
   return `
     <div class="role-permission-editor">
-      ${roles.map((role) => {
-        const selected = new Set(role.permissions || []);
-        return `
-          <section class="role-permission-card" data-role-card="${escapeHtml(role.name)}">
-            <header>
-              <div>
-                <h3>${escapeHtml(role.name)}</h3>
-                <p>${escapeHtml(role.description || permissionSummaryFromPermissions(role.permissions || []))}</p>
+      <div class="role-permission-intro">
+        <strong>Role Permissions</strong>
+        <span>Open a role, review permissions by page/action group, then save that role.</span>
+      </div>
+
+      ${roles
+        .map((role) => {
+          const selected = new Set(role.permissions || []);
+          const roleOpen = state.rolePermissionOpenRoles.has(role.name);
+
+          return `
+            <details class="role-permission-card" data-role-card="${escapeHtml(role.name)}" ${roleOpen ? "open" : ""}>
+              <summary class="role-permission-summary">
+                <span class="role-collapse-icon" aria-hidden="true"></span>
+
+                <span class="role-permission-title">
+                  <strong>${escapeHtml(role.name)}</strong>
+                  <small>${escapeHtml(role.description || permissionSummaryFromPermissions(role.permissions || []))}</small>
+                </span>
+
+                <span class="role-permission-count">${escapeHtml(rolePermissionCountText(role, permissions))}</span>
+
+                <button
+                  type="button"
+                  class="role-permission-save"
+                  data-save-role-permissions="${escapeHtml(role.name)}"
+                  title="Save ${escapeHtml(role.name)} permissions"
+                >Save</button>
+              </summary>
+
+              <div class="role-permission-body">
+                ${categories.map((category) => rolePermissionCategoryHtml(role.name, category, selected)).join("")}
               </div>
-              <button type="button" data-save-role-permissions="${escapeHtml(role.name)}">Save</button>
-            </header>
-            <div class="role-permission-grid">
-              ${permissions.map((permission) => `
-                <label>
-                  <input type="checkbox" value="${escapeHtml(permission)}" ${selected.has(permission) ? "checked" : ""}>
-                  <span>${escapeHtml(permissionLabel(permission))}</span>
-                </label>
-              `).join("")}
-            </div>
-          </section>
-        `;
-      }).join("")}
+            </details>
+          `;
+        })
+        .join("")}
     </div>
   `;
 }
@@ -4456,19 +4681,32 @@ function permissionSummaryFromPermissions(permissions) {
 }
 
 async function saveRolePermissions(roleName) {
+  rememberRolePermissionUiState();
+
   const card = document.querySelector(`[data-role-card="${CSS.escape(roleName)}"]`);
+
   if (!card) return;
+
   const permissions = [...card.querySelectorAll("input[type='checkbox']:checked")].map((input) => input.value);
+
   if (!permissions.length && !window.confirm(`Save ${roleName} with no permissions?`)) return;
+
   const payload = await fetchJson("/api/admin/roles/permissions", {
     method: "POST",
     body: JSON.stringify({ role: roleName, permissions }),
   });
+
   state.adminRoles = payload.roles || [];
   state.allPermissions = payload.permissions || state.allPermissions;
-  if (els.adminModalBody) els.adminModalBody.innerHTML = adminModalContent("roles");
+
+  if (els.adminModalBody) {
+    els.adminModalBody.innerHTML = adminModalContent("roles");
+    restoreRolePermissionUiScroll();
+  }
+
   await refreshAdminPage();
-  showInlineError(`${roleName} permissions saved. Users with that role will sign in again to refresh access.`, false);
+
+  showFloatingNotice(`${roleName} permissions saved. Users with that role will sign in again to refresh access.`, "success");
 }
 
 function manualEditDeliveryDateForList(listId) {
@@ -6326,8 +6564,8 @@ if (moveButton) {
 
       if (status.updateAvailable) {
         const updateText = status.method === "github_zip"
-          ? `GitHub update available from ${status.upstream}.`
-          : `${status.behind} commit(s) behind ${status.upstream}.`;
+          ? `GitHub update available from ${status.upstream}. Local ${status.local || "unknown"} -> Remote ${status.remote || "unknown"}.`
+          : `${status.behind} commit(s) behind ${status.upstream}. Local ${status.local || "unknown"} -> Remote ${status.remote || "unknown"}.`;
 
         showImportStatusResult(
           "notice",
@@ -6340,8 +6578,8 @@ if (moveButton) {
       }
 
       const currentText = status.method === "github_zip"
-        ? `GitHub fallback checked ${status.upstream}.`
-        : `${status.branch} is current with ${status.upstream}.`;
+        ? `GitHub fallback checked ${status.upstream}. Local ${status.local || "unknown"} / Remote ${status.remote || "unknown"}.`
+        : `${status.branch} is current with ${status.upstream}. Local ${status.local || "unknown"} / Remote ${status.remote || "unknown"}.`;
 
       showImportStatusResult("success", "No updates found.", currentText);
     } catch (error) {
@@ -6682,6 +6920,34 @@ if (moveButton) {
       }
     });
 
+    document.addEventListener("toggle", (event) => {
+    const roleCard = event.target.closest?.(".role-permission-card[data-role-card]");
+
+    if (roleCard && els.adminModalBody?.contains(roleCard)) {
+      const roleName = roleCard.dataset.roleCard || "";
+
+      if (roleCard.open) {
+        state.rolePermissionOpenRoles.add(roleName);
+      } else {
+        state.rolePermissionOpenRoles.delete(roleName);
+      }
+
+      return;
+    }
+
+    const category = event.target.closest?.(".permission-category[data-role-name][data-category-title]");
+
+    if (category && els.adminModalBody?.contains(category)) {
+      const key = rolePermissionCategoryKey(category.dataset.roleName, category.dataset.categoryTitle);
+
+      if (category.open) {
+        state.rolePermissionOpenCategories.add(key);
+      } else {
+        state.rolePermissionOpenCategories.delete(key);
+      }
+    }
+  }, true);
+
     const pageButton = event.target.closest("[data-page-target]");
     if (pageButton) {
       if (state.manualEditDirty && !window.confirm("You have unsaved manual delivery-list edits. Leave without saving?")) return;
@@ -6943,7 +7209,11 @@ if (moveButton) {
     }
     const saveRolePermissionsButton = event.target.closest("[data-save-role-permissions]");
     if (saveRolePermissionsButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
       saveRolePermissions(saveRolePermissionsButton.dataset.saveRolePermissions).catch((error) => showInlineError(error.message, true));
+
       return;
     }
     const saveLineItemButton = event.target.closest("[data-save-line-item]");

@@ -38,6 +38,10 @@ body {
   letter-spacing: 0;
 }
 
+body.modal-scroll-locked {
+  overflow: hidden;
+}
+
 button,
 input,
 select {
@@ -8180,52 +8184,277 @@ body.bay-move-mode .excel-bay-map {
 
 .role-permission-editor {
   display: grid;
-  gap: 14px;
+  gap: 12px;
+}
+
+.role-permission-intro {
+  display: grid;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid #dce7f5;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fc 100%);
+}
+
+.role-permission-intro strong {
+  color: var(--navy-dark);
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.role-permission-intro span {
+  color: #61708a;
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .role-permission-card {
   border: 1px solid #dce7f5;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 8px 18px rgba(5, 22, 48, 0.04);
+}
+
+.role-permission-card[open] {
+  border-color: #b8c8e4;
+  box-shadow: 0 10px 24px rgba(5, 22, 48, 0.07);
+}
+
+.role-permission-card > summary {
+  list-style: none;
+}
+
+.role-permission-card > summary::-webkit-details-marker,
+.permission-category > summary::-webkit-details-marker {
+  display: none;
+}
+
+.role-permission-summary {
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #f9fbff 0%, #f2f6fc 100%);
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+}
+
+.role-permission-card[open] > .role-permission-summary {
+  border-bottom-color: #e4edf8;
+}
+
+.role-collapse-icon {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #c9d7ea;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--navy);
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+
+.role-collapse-icon::before {
+  content: "›";
+  font-size: 22px;
+  font-weight: 950;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+.role-permission-card[open] .role-collapse-icon {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  transform: rotate(90deg);
+}
+
+.role-permission-title {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.role-permission-title strong {
+  min-width: 0;
+  color: var(--navy-dark);
+  font-size: 16px;
+  font-weight: 950;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role-permission-title small {
+  min-width: 0;
+  color: #61708a;
+  font-size: 12px;
+  font-weight: 750;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role-permission-count {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c7d7ee;
+  border-radius: 999px;
+  background: #fff;
+  color: #37557c;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.role-permission-save {
+  min-height: 36px;
+  border: 1px solid var(--navy);
   border-radius: 8px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 0 14px;
+}
+
+.role-permission-save:hover {
+  border-color: var(--blue);
+  background: var(--blue);
+  box-shadow: 0 8px 16px rgba(19, 92, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.role-permission-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: #fbfdff;
+}
+
+.permission-category {
+  border: 1px solid #e0e8f4;
+  border-radius: 9px;
   background: #fff;
   overflow: hidden;
 }
 
-.role-permission-card header {
-  display: flex;
+.permission-category[open] {
+  border-color: #c7d7ee;
+}
+
+.permission-category > summary {
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 12px 14px;
-  background: #f7faff;
-  border-bottom: 1px solid #e4edf8;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  cursor: pointer;
 }
 
-.role-permission-card h3 {
-  margin: 0;
-  font-size: 16px;
+.permission-category > summary:hover {
+  background: #f6f9fe;
 }
 
-.role-permission-card p {
-  margin: 3px 0 0;
+.permission-category > summary span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.permission-category > summary strong {
+  color: var(--navy-dark);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.permission-category > summary small {
   color: #61708a;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.permission-category > summary b {
+  border: 1px solid #d3e0f1;
+  border-radius: 999px;
+  background: #f6f9fe;
+  color: #37557c;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
 }
 
 .role-permission-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
   gap: 8px;
-  padding: 12px 14px 14px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid #edf2f8;
+  background: #fbfdff;
 }
 
 .role-permission-grid label {
+  min-height: 38px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  font-size: 13px;
-  font-weight: 750;
+  gap: 9px;
+  border: 1px solid #e2e9f4;
+  border-radius: 8px;
+  background: #fff;
   color: #14213b;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.role-permission-grid label:hover {
+  border-color: #b8c8e4;
+  background: #f6f9fe;
+}
+
+.role-permission-grid label.is-checked {
+  border-color: #9fc0ff;
+  background: #eef5ff;
+}
+
+.role-permission-grid input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  accent-color: var(--blue);
+}
+
+.role-permission-grid span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 860px) {
+  .role-permission-summary {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .role-permission-count,
+  .role-permission-save {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .role-permission-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .admin-modal-panel {

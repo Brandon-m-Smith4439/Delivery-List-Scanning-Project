@@ -162,7 +162,10 @@ def git_update_status() -> dict:
         branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
         upstream = run_git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
         local = run_git("rev-parse", "HEAD")
-        subprocess.run(["git", "fetch", "--quiet"], cwd=local_repo_root(), text=True, capture_output=True, timeout=45, check=False)
+        fetch = subprocess.run(["git", "fetch", "--quiet"], cwd=local_repo_root(), text=True, capture_output=True, timeout=45, check=False)
+        if fetch.returncode != 0:
+            detail = (fetch.stderr or fetch.stdout or "Git fetch failed").strip()
+            return github_update_status(f"Git fetch failed, so stale local refs were ignored: {detail}.")
         remote = run_git("rev-parse", upstream)
         behind_text = run_git("rev-list", "--count", f"{local}..{remote}")
         behind = int(behind_text or "0")
