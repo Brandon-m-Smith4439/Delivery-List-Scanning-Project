@@ -5,14 +5,6 @@ from __future__ import annotations
 
 import json
 import html
-import os
-import tempfile
-import shutil
-import subprocess
-import urllib.error
-import urllib.request
-import zipfile
-from datetime import datetime
 from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -26,256 +18,6 @@ from scanner_config import load_config
 ROOT = Path(__file__).resolve().parent
 CONFIG = load_config(ROOT)
 STORE = create_store(CONFIG)
-DEFAULT_UPDATE_REPO = "https://github.com/Brandon-m-Smith4439/Delivery-List-Scanning-Project"
-DEFAULT_UPDATE_BRANCH = "main"
-APP_SENTINELS = ("server.py", "index.html", "app.js", "styles.css")
-
-
-def is_app_root(path: Path) -> bool:
-    return all((path / name).exists() for name in APP_SENTINELS)
-
-
-def find_app_root(path: Path) -> Path:
-    if is_app_root(path):
-        return path
-    for child in path.rglob("server.py"):
-        candidate = child.parent
-        if is_app_root(candidate):
-            return candidate
-    raise ValueError("Update archive did not contain the delivery scanner web app files")
-
-
-def local_repo_root() -> Path:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            timeout=10,
-            check=True,
-        )
-        repo_root = Path(result.stdout.strip())
-        return repo_root if is_app_root(repo_root) else ROOT
-    except Exception:
-        return ROOT
-
-
-def update_repo_url() -> str:
-    return os.environ.get("DLS_UPDATE_REPO_URL", DEFAULT_UPDATE_REPO).strip() or DEFAULT_UPDATE_REPO
-
-
-def update_branch() -> str:
-    return os.environ.get("DLS_UPDATE_BRANCH", DEFAULT_UPDATE_BRANCH).strip() or DEFAULT_UPDATE_BRANCH
-
-
-def github_owner_repo(repo_url: str) -> tuple[str, str]:
-    clean = repo_url.strip().rstrip("/")
-    if clean.endswith(".git"):
-        clean = clean[:-4]
-    parts = clean.split("/")
-    if len(parts) < 2:
-        raise ValueError("GitHub repository URL is not configured")
-    return parts[-2], parts[-1]
-
-
-def http_get_bytes(url: str, timeout: int = 60) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "DeliveryListScannerUpdater/1.0"})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.read()
-    except Exception as urllib_error:
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".download") as handle:
-                temp_path = Path(handle.name)
-            ps_command = (
-                "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
-                "$ProgressPreference = 'SilentlyContinue'; "
-                "Invoke-WebRequest -UseBasicParsing "
-                f"-Uri {json.dumps(url)} -OutFile {json.dumps(str(temp_path))}"
-            )
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_command],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                timeout=timeout + 20,
-                check=False,
-            )
-            if result.returncode != 0:
-                raise RuntimeError((result.stderr or result.stdout or "PowerShell download failed").strip())
-            data = temp_path.read_bytes()
-            temp_path.unlink(missing_ok=True)
-            return data
-        except Exception as powershell_error:
-            raise RuntimeError(f"Python download failed: {urllib_error}; PowerShell fallback failed: {powershell_error}") from powershell_error
-
-
-def github_update_status(error_prefix: str = "") -> dict:
-    repo_url = update_repo_url()
-    branch = update_branch()
-    try:
-        owner, repo = github_owner_repo(repo_url)
-        api_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{branch}"
-        data = json.loads(http_get_bytes(api_url, timeout=30).decode("utf-8"))
-        remote = str(data.get("sha") or "")
-        marker = ROOT / "data" / "update-version.json"
-        local = ""
-        try:
-            local = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=local_repo_root(),
-                text=True,
-                capture_output=True,
-                timeout=10,
-                check=True,
-            ).stdout.strip()
-        except Exception:
-            local = ""
-        if marker.exists():
-            try:
-                local = local or str(json.loads(marker.read_text(encoding="utf-8")).get("commit") or "")
-            except Exception:
-                pass
-        update_available = bool(remote and local) and remote != local
-        return {
-            "ok": True,
-            "method": "github_zip",
-            "branch": branch,
-            "upstream": f"{owner}/{repo}/{branch}",
-            "local": local[:12] or "unknown",
-            "remote": remote[:12],
-            "remoteFull": remote,
-            "behind": 1 if update_available else 0,
-            "updateAvailable": update_available,
-            "note": error_prefix or ("Git was unavailable; checked GitHub directly." if local else "Git was unavailable and no installed version marker was found; update status is unknown."),
-        }
-    except Exception as exc:
-        return {"ok": False, "method": "github_zip", "error": f"{error_prefix} GitHub fallback failed: {exc}".strip(), "updateAvailable": False}
-
-
-def git_update_status() -> dict:
-    def run_git(*args: str) -> str:
-        return subprocess.run(["git", *args], cwd=local_repo_root(), text=True, capture_output=True, timeout=20, check=True).stdout.strip()
-
-    try:
-        branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
-        upstream = run_git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-        local = run_git("rev-parse", "HEAD")
-        fetch = subprocess.run(["git", "fetch", "--quiet"], cwd=local_repo_root(), text=True, capture_output=True, timeout=45, check=False)
-        if fetch.returncode != 0:
-            detail = (fetch.stderr or fetch.stdout or "Git fetch failed").strip()
-            return github_update_status(f"Git fetch failed, so stale local refs were ignored: {detail}.")
-        remote = run_git("rev-parse", upstream)
-        behind_text = run_git("rev-list", "--count", f"{local}..{remote}")
-        behind = int(behind_text or "0")
-        return {"ok": True, "branch": branch, "upstream": upstream, "local": local[:12], "remote": remote[:12], "behind": behind, "updateAvailable": behind > 0}
-    except Exception as exc:
-        return github_update_status(f"Git unavailable: {exc}.")
-
-
-def database_backups() -> tuple[Path, list[tuple[Path, Path]]]:
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_dir = ROOT / "data" / "_update_backups" / f"{timestamp}-preserve-db"
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    database_files = [
-        CONFIG.database_path,
-        CONFIG.database_path.with_name(CONFIG.database_path.name + "-wal"),
-        CONFIG.database_path.with_name(CONFIG.database_path.name + "-shm"),
-    ]
-    backed_up: list[tuple[Path, Path]] = []
-    for path in database_files:
-        if path.exists():
-            target = backup_dir / path.name
-            shutil.copy2(path, target)
-            backed_up.append((path, target))
-    return backup_dir, backed_up
-
-
-def restore_database_backups(backed_up: list[tuple[Path, Path]]) -> None:
-    for original, backup in backed_up:
-        original.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(backup, original)
-
-
-def apply_github_zip_update(status: dict | None = None) -> dict:
-    status = status or github_update_status()
-    if not status.get("ok"):
-        return status
-    repo_url = update_repo_url()
-    branch = update_branch()
-    owner, repo = github_owner_repo(repo_url)
-    backup_dir, backed_up = database_backups()
-    zip_url = f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch}"
-    try:
-        archive_bytes = http_get_bytes(zip_url, timeout=120)
-        with tempfile.TemporaryDirectory(prefix="dls-update-") as temp_name:
-            temp_dir = Path(temp_name)
-            archive_path = temp_dir / "update.zip"
-            archive_path.write_bytes(archive_bytes)
-            with zipfile.ZipFile(archive_path) as archive:
-                archive.extractall(temp_dir)
-            roots = [path for path in temp_dir.iterdir() if path.is_dir()]
-            if not roots:
-                raise ValueError("GitHub archive did not contain a project folder")
-            source_root = find_app_root(roots[0])
-            target_root = ROOT
-            skip_names = {".git", "data", "_verification", "__pycache__"}
-            for child in source_root.iterdir():
-                if child.name in skip_names:
-                    continue
-                target = target_root / child.name
-                if child.is_dir():
-                    if target.exists():
-                        shutil.rmtree(target)
-                    shutil.copytree(child, target)
-                else:
-                    shutil.copy2(child, target)
-        restore_database_backups(backed_up)
-        marker = ROOT / "data" / "update-version.json"
-        marker.write_text(json.dumps({"commit": status.get("remoteFull") or status.get("remote", ""), "updatedAt": datetime.now().isoformat(timespec="seconds"), "method": "github_zip"}, indent=2), encoding="utf-8")
-        return {"ok": True, "updated": True, "method": "github_zip", "backupDir": str(backup_dir), "restoredDatabaseFiles": [str(path) for path, _ in backed_up], "status": github_update_status()}
-    except Exception as exc:
-        restore_database_backups(backed_up)
-        return {"ok": False, "updated": False, "method": "github_zip", "error": str(exc), "backupDir": str(backup_dir), "restoredDatabaseFiles": [str(path) for path, _ in backed_up]}
-
-
-def apply_git_update() -> dict:
-    status = git_update_status()
-    if not status.get("ok"):
-        return status
-    if status.get("method") == "github_zip":
-        return apply_github_zip_update(status)
-
-    current_commit = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=local_repo_root(),
-        text=True,
-        capture_output=True,
-        timeout=10,
-        check=False,
-    ).stdout.strip() or "unknown"
-    backup_dir, backed_up = database_backups()
-
-    pull = subprocess.run(
-        ["git", "pull", "--ff-only", "--autostash"],
-        cwd=local_repo_root(),
-        text=True,
-        capture_output=True,
-        timeout=120,
-        check=False,
-    )
-    restore_database_backups(backed_up)
-    after = git_update_status()
-    return {
-        "ok": pull.returncode == 0,
-        "updated": pull.returncode == 0,
-        "stdout": pull.stdout[-2000:],
-        "stderr": pull.stderr[-2000:],
-        "backupDir": str(backup_dir),
-        "restoredDatabaseFiles": [str(path) for path, _ in backed_up],
-        "status": after,
-    }
 
 
 def esc(value: object) -> str:
@@ -649,12 +391,6 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_permission("view_admin"):
                 return
             self.send_json(STORE.admin_summary())
-            return
-
-        if parsed.path == "/api/admin/update-check":
-            if not self.require_permission("view_admin"):
-                return
-            self.send_json(git_update_status())
             return
 
         if parsed.path == "/api/admin/users":
@@ -1037,7 +773,14 @@ class Handler(SimpleHTTPRequestHandler):
                 user = self.require_permission("manage_roles")
                 if not user:
                     return
-                self.send_json(STORE.update_user_roles(str(data.get("username") or ""), data.get("roles") or [], updated_by=user["username"]))
+                self.send_json(
+                    STORE.update_user_roles(
+                        str(data.get("username") or ""),
+                        data.get("roles") or [],
+                        station=data.get("station"),
+                        updated_by=user["username"],
+                    )
+                )
                 return
 
             if parsed.path == "/api/admin/roles/permissions":
@@ -1045,13 +788,6 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.update_role_permissions(str(data.get("role") or ""), data.get("permissions") or [], updated_by=user["username"]))
-                return
-
-            if parsed.path == "/api/admin/update-apply":
-                user = self.require_permission("check_updates")
-                if not user:
-                    return
-                self.send_json(apply_git_update())
                 return
 
             if parsed.path == "/api/admin/line-item":

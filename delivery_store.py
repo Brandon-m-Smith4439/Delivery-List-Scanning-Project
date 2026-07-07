@@ -67,7 +67,6 @@ PERMISSIONS = [
     "indian_trail_reports",
     "manage_bay_layout",
     "manage_customer_route_rules",
-    "check_updates",
     "view_racks",
     "scan_racks",
     "manage_racks",
@@ -828,7 +827,7 @@ class BaseDeliveryStore:
     def update_user_password(self, username: str, password: str, updated_by: str = "system") -> dict[str, Any]:
         raise NotImplementedError
 
-    def update_user_roles(self, username: str, roles: list[str], updated_by: str = "system") -> dict[str, Any]:
+    def update_user_roles(self, username: str, roles: list[str], station: str | None = None, updated_by: str = "system") -> dict[str, Any]:
         raise NotImplementedError
 
     def list_active_sessions(self) -> list[dict[str, Any]]:
@@ -1211,6 +1210,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.ensure_column(con, "imports", "source_hash", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "imports", "import_kind", "TEXT NOT NULL DEFAULT 'manual'")
         self.ensure_column(con, "imports", "change_summary", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "users", "station", "TEXT NOT NULL DEFAULT ''")
         con.commit()
 
     def ensure_column(self, con: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -2106,6 +2106,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "id": row["id"],
             "username": row["username"],
             "displayName": row["display_name"] or row["username"],
+            "station": row["station"] if "station" in row.keys() else "",
             "active": bool(row["active"]),
             "roles": roles,
             "permissions": [permission["permission_name"] for permission in permission_rows],
@@ -2227,29 +2228,67 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"users": self.list_users(), "username": clean_username}
 
-    def update_user_roles(self, username: str, roles: list[str], updated_by: str = "system") -> dict[str, Any]:
+    def update_user_roles(self, username: str, roles: list[str], station: str | None = None, updated_by: str = "system") -> dict[str, Any]:
         clean_username = str(username or "").strip()
         clean_roles = [str(role).strip() for role in roles if str(role).strip()]
+        station_supplied = station is not None
+        clean_station = " ".join(str(station or "").split())[:80]
+
         if not clean_username or not clean_roles:
             raise ValueError("username and at least one role are required")
+
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+
             user_row = self.get_user_by_username(con, clean_username)
             if not user_row:
                 raise ValueError("User not found")
+
             role_ids = []
             for role_name in clean_roles:
                 role = con.execute("SELECT id FROM roles WHERE name = ?", (role_name,)).fetchone()
                 if not role:
                     raise ValueError(f"Unknown role: {role_name}")
                 role_ids.append(role["id"])
-            con.execute("DELETE FROM user_roles WHERE user_id = ?", (user_row["id"],))
-            for role_id in role_ids:
-                con.execute("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)", (user_row["id"], role_id))
-            con.execute("DELETE FROM sessions WHERE user_id = ?", (user_row["id"],))
-            self.insert_audit(con, "user", clean_username, "update_user_roles", updated_by, "", "", {"roles": clean_roles})
+
+            existing_roles = [
+                row["name"]
+                for row in con.execute(
+                    """
+                    SELECT r.name
+                    FROM roles r
+                    JOIN user_roles ur ON ur.role_id = r.id
+                    WHERE ur.user_id = ?
+                    ORDER BY r.name
+                    """,
+                    (user_row["id"],),
+                ).fetchall()
+            ]
+
+            roles_changed = sorted(existing_roles) != sorted(clean_roles)
+
+            if roles_changed:
+                con.execute("DELETE FROM user_roles WHERE user_id = ?", (user_row["id"],))
+                for role_id in role_ids:
+                    con.execute("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)", (user_row["id"], role_id))
+                con.execute("DELETE FROM sessions WHERE user_id = ?", (user_row["id"],))
+
+            if station_supplied:
+                con.execute("UPDATE users SET station = ? WHERE id = ?", (clean_station, user_row["id"]))
+
+            self.insert_audit(
+                con,
+                "user",
+                clean_username,
+                "update_user_profile",
+                updated_by,
+                clean_station,
+                "",
+                {"roles": clean_roles, "station": clean_station},
+            )
             con.commit()
-        return {"users": self.list_users(), "username": clean_username, "roles": clean_roles}
+
+        return {"users": self.list_users(), "username": clean_username, "roles": clean_roles, "station": clean_station}
 
     def list_active_sessions(self) -> list[dict[str, Any]]:
         now = now_iso()
@@ -2281,6 +2320,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
     def create_user(self, data: dict[str, Any], created_by: str = "system") -> dict[str, Any]:
         username = " ".join(str(data.get("username") or "").split())[:80]
         display_name = " ".join(str(data.get("displayName") or username).split())[:120]
+        station = " ".join(str(data.get("station") or "").split())[:80]
         password = str(data.get("password") or "")
         roles = data.get("roles") or ["Operator"]
         if not username or not password:
@@ -2292,17 +2332,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 raise ValueError("User already exists")
             cur = con.execute(
                 """
-                INSERT INTO users (username, display_name, password_hash, active, created_at)
-                VALUES (?, ?, ?, 1, ?)
+                INSERT INTO users (username, display_name, station, password_hash, active, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
                 """,
-                (username, display_name, hash_password(password), now_iso()),
+                (username, display_name, station, hash_password(password), now_iso()),
             )
             for role_name in roles:
                 role = con.execute("SELECT id FROM roles WHERE name = ?", (str(role_name),)).fetchone()
                 if not role:
                     raise ValueError(f"Unknown role: {role_name}")
                 con.execute("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)", (cur.lastrowid, role["id"]))
-            self.insert_audit(con, "user", username, "create_user", created_by, "", "", {"roles": roles})
+            self.insert_audit(con, "user", username, "create_user", created_by, station, "", {"roles": roles, "station": station})
             con.commit()
             user_row = con.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone()
             return self.user_from_row(con, user_row)
@@ -2612,16 +2652,31 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         for path in sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_IMPORT_EXTENSIONS):
             try:
-                file_date = delivery_date_from_text(path.stem)
-                if file_date and date_from and file_date < date_from:
-                    skipped_files.append({"fileName": path.name, "reason": f"Outside import window before {date_from}"})
-                    continue
-                if file_date and date_to and file_date > date_to:
-                    skipped_files.append({"fileName": path.name, "reason": f"Outside import window after {date_to}"})
-                    continue
                 file_hash = source_file_hash(path)
                 source_path = str(path.resolve())
                 payload = load_delivery_source_payload(path)
+                payload_date = str(payload.get("deliveryDate") or "").strip()
+                file_date = delivery_date_from_text(path.stem)
+                if payload_date and date_from and payload_date < date_from:
+                    skipped_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": payload_date,
+                            "fileNameDate": file_date,
+                            "reason": f"Workbook delivery date is outside import window before {date_from}",
+                        }
+                    )
+                    continue
+                if payload_date and date_to and payload_date > date_to:
+                    skipped_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": payload_date,
+                            "fileNameDate": file_date,
+                            "reason": f"Workbook delivery date is outside import window after {date_to}",
+                        }
+                    )
+                    continue
                 definitions = build_delivery_lists(payload)
                 definition_ids = [definition[0] for definition in definitions]
 
@@ -2652,9 +2707,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                             ).fetchall()
                         }
 
-                if previous and previous["source_hash"] == file_hash and set(definition_ids).issubset(active_definition_ids):
-                    skipped_files.append({"fileName": path.name, "reason": "No changes detected"})
-                    continue
+                same_active_file = (
+                    previous
+                    and previous["source_hash"] == file_hash
+                    and set(definition_ids).issubset(active_definition_ids)
+                )
 
                 preview = self.preview_import(payload)
                 if not preview["valid"]:
@@ -2685,7 +2742,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "changedPieceQty": result.get("changedPieceQty", 0),
                 }
                 if not result["createdCount"] and not result["updatedCount"] and not result.get("changedListIds"):
-                    skipped_files.append({"fileName": path.name, "reason": "No delivery-list line changes detected"})
+                    skipped_files.append({
+                        "fileName": path.name,
+                        "reason": "No updates" if same_active_file else "No delivery-list line changes detected",
+                    })
                     continue
                 if result["createdCount"]:
                     imported_files.append(file_result)
@@ -3379,6 +3439,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             scan_count = con.execute("SELECT COUNT(*) FROM scan_events WHERE event_type = 'scan' AND substr(created_at, 1, 10) = ?", (today,)).fetchone()[0]
             open_exceptions = con.execute("SELECT COUNT(*) FROM exceptions WHERE status = 'Open'").fetchone()[0]
             user_count = con.execute("SELECT COUNT(DISTINCT user_id) FROM sessions WHERE expires_at > ?", (now_iso(),)).fetchone()[0]
+            assigned_station_count = con.execute(
+                "SELECT COUNT(DISTINCT station) FROM users WHERE active = 1 AND station <> ''"
+            ).fetchone()[0]
             bay_count = con.execute("SELECT COUNT(*) FROM bays WHERE active = 1").fetchone()[0]
             import_rows = con.execute(
                 "SELECT * FROM imports ORDER BY id DESC LIMIT 5"
@@ -3419,6 +3482,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "scanEvents": scan_count,
             "openExceptions": open_exceptions,
             "activeUsers": user_count,
+            "assignedStations": assigned_station_count,
             "activeBays": bay_count,
             "databaseType": self.database_type,
             "databasePath": str(self.database_path),
@@ -3850,6 +3914,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             (row["id"],),
         ).fetchall()
         assigned_qty = sum(int(item["assigned_qty"] or 0) for item in assignments)
+        has_physical_assignment = any(str(item["status"] or "") not in {"PreAssigned"} for item in assignments)
+        all_preassigned = bool(assignments) and not has_physical_assignment
         bay_status = str(row["status"] or "Available")
         if bay_status in {"Blocked", "Hold"}:
             status = bay_status
@@ -3857,6 +3923,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             status = "SDI"
         elif assigned_qty == 0:
             status = "Empty"
+        elif all_preassigned:
+            status = "PreAssigned"
         elif row["capacity_qty"] and assigned_qty >= row["capacity_qty"]:
             status = "Full"
         elif len(assignments) > 1:
@@ -4749,6 +4817,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             existing = bool(assignment)
             if assignment:
                 bay_code = assignment["bay_code"]
+                if str(assignment["status"] or "") == "PreAssigned":
+                    con.execute(
+                        """
+                        UPDATE bay_assignments
+                        SET status = 'Received',
+                            reason = 'Received at Indian Trail',
+                            assigned_by = ?,
+                            assigned_at = ?
+                        WHERE id = ?
+                        """,
+                        (user, now_iso(), assignment["id"]),
+                    )
+                    self.insert_bay_event(con, assignment["bay_id"], row["id"], "ReceivePreAssignedBay", user, "Received at Indian Trail", new_bay_id=assignment["bay_id"])
             else:
                 row_item = {
                     "route": row["route"],

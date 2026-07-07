@@ -2,6 +2,11 @@ const STORAGE_KEY = "delivery-list-scanner-demo-v1";
 const STATIONS_KEY = "delivery-list-scanner-stations-v1";
 const DEFAULT_STATIONS = ["Airport Rd", "Indian Trail", "Greenville", "Customer Pickup", "DTC"];
 const ROLE_OPTIONS = ["Operator", "Supervisor", "Indian Trail Operator", "Indian Trail Lead", "Indian Trail Manager", "Admin"];
+const CUSTOMER_ROUTE_OPTIONS = [
+  { value: "CPU", label: "CPU / Customer Pickup" },
+  { value: "DTC", label: "DTC / Deliver to Customer" },
+  { value: "GNV", label: "GNV / Greenville" },
+];
 
 const state = {
   page: "home",
@@ -26,6 +31,7 @@ const state = {
   expandedDeliveryDate: "",
   collapsedGlassTypes: new Set(),
   baySearch: "",
+  bayQuickFilter: "all",
   bayStatusFilter: "all",
   bayCategoryFilter: "all",
   bayGlassFilter: "all",
@@ -47,6 +53,7 @@ const state = {
   racks: [],
   rackSummary: null,
   selectedRackCode: "T",
+  selectedRackOverviewCode: "",
   rackScanListId: "",
   rackModal: null,
   rackMoveItemId: "",
@@ -191,6 +198,7 @@ const els = {
 
   bayMapPage: document.getElementById("bayMapPage"),
   bayOverviewStats: document.getElementById("bayOverviewStats"),
+  bayQuickFilters: document.getElementById("bayQuickFilters"),
   bayMapSearch: document.getElementById("bayMapSearch"),
   bayScanOutForm: document.getElementById("bayScanOutForm"),
   bayScanOutInput: document.getElementById("bayScanOutInput"),
@@ -281,7 +289,6 @@ const els = {
   adminModalBody: document.getElementById("adminModalBody"),
   adminModalClose: document.getElementById("adminModalClose"),
   folderImportBtn: document.getElementById("folderImportBtn"),
-  checkUpdatesBtn: document.getElementById("checkUpdatesBtn"),
   tempFolderInput: document.getElementById("tempFolderInput"),
   importPreviewBox: document.getElementById("importPreviewBox"),
   importHistory: document.getElementById("importHistory"),
@@ -353,13 +360,27 @@ function dateInputValue(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1, 2)}-${pad(date.getDate(), 2)}`;
 }
 
-function resetImportDateWindow() {
+const IMPORT_MAX_DATE = "9999-12-31";
+
+function defaultImportFromDate() {
   const from = new Date();
   from.setDate(from.getDate() - 7);
-  const to = new Date();
-  to.setFullYear(to.getFullYear() + 1);
-  if (els.importFromDate) els.importFromDate.value = dateInputValue(from);
-  if (els.importToDate) els.importToDate.value = dateInputValue(to);
+  return dateInputValue(from);
+}
+
+function resetImportDateWindow() {
+  if (els.importFromDate) els.importFromDate.value = defaultImportFromDate();
+  if (els.importToDate) els.importToDate.value = IMPORT_MAX_DATE;
+}
+
+function currentImportDateWindow() {
+  const dateFrom = (els.importFromDate?.value || defaultImportFromDate()).trim();
+  const dateTo = (els.importToDate?.value || IMPORT_MAX_DATE).trim();
+
+  if (els.importFromDate && !els.importFromDate.value) els.importFromDate.value = dateFrom;
+  if (els.importToDate && !els.importToDate.value) els.importToDate.value = dateTo;
+
+  return { dateFrom, dateTo };
 }
 
 function parseDateKey(value) {
@@ -479,10 +500,18 @@ function setControlAllowed(element, allowed, hide = false) {
   element.classList.toggle("is-disabled", !allowed);
 }
 
+function userAssignedStation(user = state.user) {
+  return String(user?.station || user?.assignedStation || "").trim();
+}
+
+function currentScanStation() {
+  return userAssignedStation() || els.stationSelect?.value || state.meta?.scanner || DEFAULT_STATIONS[0] || "";
+}
+
 function requestContext() {
   return {
     user: state.user?.username || els.operatorInput?.value || "Scanner",
-    station: els.stationSelect?.value || state.meta?.scanner || "",
+    station: currentScanStation(),
   };
 }
 
@@ -534,37 +563,6 @@ function updateModalScrollLock() {
   ].some((panel) => panel && !panel.hidden);
 
   document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
-}
-
-async function applyProgramUpdate() {
-  showImportStatusLoading("Updating program...", "Preserving database files before pulling code.");
-  await waitForNextPaint();
-
-  const update = await fetchJson("/api/admin/update-apply", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-
-  if (update.ok) {
-    const restoredFiles = (update.restoredDatabaseFiles || []).filter(Boolean);
-    const restoredText = restoredFiles.length
-      ? ` Database restored from backup: ${restoredFiles.join(", ")}.`
-      : " Database backup checked. No database files needed restore.";
-
-    showImportStatusResult(
-      "success",
-      "Update complete.",
-      `Restart the web app to load the new code.${restoredText}`,
-    );
-
-    return;
-  }
-
-  showImportStatusResult(
-    "review",
-    "Update failed.",
-    update.stderr || update.error || "Git pull failed.",
-  );
 }
 
 async function fetchJson(url, options = {}) {
@@ -778,12 +776,17 @@ function saveLocalStations() {
 
 function renderStationOptions(preferredStation = "") {
   if (!els.stationSelect) return;
-  const current = preferredStation || els.stationSelect.value || state.meta?.scanner || DEFAULT_STATIONS[0];
+
+  const assignedStation = userAssignedStation();
+  const current = assignedStation || preferredStation || els.stationSelect.value || state.meta?.scanner || DEFAULT_STATIONS[0];
+
   state.stations = uniqueText([...DEFAULT_STATIONS, ...state.stations, current]);
   els.stationSelect.innerHTML = state.stations
     .map((station) => `<option value="${escapeHtml(station)}">${escapeHtml(station)}</option>`)
     .join("");
   els.stationSelect.value = state.stations.includes(current) ? current : state.stations[0];
+  els.stationSelect.disabled = Boolean(assignedStation);
+  els.stationSelect.title = assignedStation ? "Station is assigned to your login by an admin." : "Station defaults to the selected delivery list.";
 }
 
 async function loadStations() {
@@ -1609,35 +1612,158 @@ function renderRacksPage() {
     `;
   };
 
-  els.rackGrid.innerHTML = groups
-    .map(
-      ([label, racks]) => {
-        const groupHasMoveOpen = racks.some((rack) => (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId));
-        const groupOpen = state.expandedRackGroups.has(label) || groupHasMoveOpen;
-        return `
-        <details class="rack-column" data-rack-group="${escapeHtml(label)}" ${groupOpen ? "open" : ""}>
-          <summary class="rack-column-header">
-            <span class="rack-column-main">
-              <span class="rack-column-chevron" aria-hidden="true"></span>
-              <span>
-                <h2>${escapeHtml(label)}</h2>
-                <small>${escapeHtml(racks.length)} ${racks.length === 1 ? "rack" : "racks"}</small>
-              </span>
-            </span>
+  const rackStatusText = (rack) => {
+    const status = String(rack.status || "").toLowerCase();
+    const qty = Number(rack.qty || 0);
 
-            <span class="rack-column-qty">${escapeHtml(racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0))} pcs</span>
+    if (status === "closed") return "Complete";
+    if (qty > 0) return "Open";
+    return "Empty";
+  };
 
-            ${renderRackColumnActions(label)}
-          </summary>
+  const rackStatusClass = (rack) => {
+    const status = String(rack.status || "").toLowerCase();
+    const qty = Number(rack.qty || 0);
 
-          <div class="rack-group-body">
-            ${racks.map(renderRack).join("") || `<p class="admin-empty">No ${escapeHtml(label.toLowerCase())} racks.</p>`}
+    if (status === "closed") return "complete";
+    if (qty > 0) return "open";
+    return "empty";
+  };
+
+  const renderRackBoardCard = (rack) => {
+    const selected = state.selectedRackOverviewCode === rack.code;
+    const statusText = rackStatusText(rack);
+    const statusClass = rackStatusClass(rack);
+    const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
+
+    return `
+      <article
+        class="rack-board-card ${rackVisualClass(rack)} ${selected ? "is-selected" : ""}"
+        data-rack-select="${escapeHtml(rack.code)}"
+        tabindex="0"
+        role="button"
+        aria-label="View ${escapeHtml(isTruck ? "Truck" : rack.code)} details"
+      >
+        <div class="rack-board-card-main">
+          <strong>${escapeHtml(isTruck ? "Truck" : rack.code)}</strong>
+          <span>${escapeHtml(rack.name || rack.type || "")}</span>
+        </div>
+
+        <div class="rack-board-card-meta">
+          <b>${escapeHtml(rack.qty || 0)} pcs</b>
+          <small class="rack-status-badge ${escapeHtml(statusClass)}">${escapeHtml(statusText)}</small>
+        </div>
+      </article>
+    `;
+  };
+
+  const renderRackBoardGroup = ([label, racks]) => {
+    const totalQty = racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
+    const activeCount = racks.filter((rack) => Number(rack.qty || 0) > 0).length;
+    const completeCount = racks.filter((rack) => String(rack.status || "").toLowerCase() === "closed").length;
+
+    return `
+      <section class="rack-board-group" data-rack-group="${escapeHtml(label)}">
+        <header class="rack-board-group-header">
+          <div>
+            <h2>${escapeHtml(label)}</h2>
+            <span>${escapeHtml(racks.length)} ${racks.length === 1 ? "rack" : "racks"} | ${escapeHtml(activeCount)} active | ${escapeHtml(completeCount)} complete</span>
           </div>
-        </details>
+
+          <strong>${escapeHtml(totalQty)} pcs</strong>
+
+          ${renderRackColumnActions(label)}
+        </header>
+
+        <div class="rack-board-card-list">
+          ${racks.map(renderRackBoardCard).join("") || `<p class="admin-empty">No ${escapeHtml(label.toLowerCase())} racks.</p>`}
+        </div>
+      </section>
+    `;
+  };
+
+  if (!state.selectedRackOverviewCode || !state.racks.some((rack) => rack.code === state.selectedRackOverviewCode)) {
+    state.selectedRackOverviewCode =
+      state.racks.find((rack) => Number(rack.qty || 0) > 0)?.code ||
+      state.racks[0]?.code ||
+      "";
+  }
+
+  const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackOverviewCode) || state.racks[0] || null;
+
+  const renderSelectedRackDetails = (rack) => {
+    if (!rack) {
+      return `
+        <section class="rack-detail-panel">
+          <div class="admin-empty">No racks available. Create a rack to get started.</div>
+        </section>
       `;
-      },
-    )
-    .join("");
+    }
+
+    const hasItems = Number(rack.qty || 0) > 0;
+    const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
+    const isComplete = String(rack.status || "").toLowerCase() === "closed";
+    const statusText = rackStatusText(rack);
+    const statusClass = rackStatusClass(rack);
+    const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
+
+    return `
+      <section class="rack-detail-panel ${escapeHtml(statusClass)}">
+        <header class="rack-detail-header">
+          <div>
+            <span class="rack-detail-eyebrow">Selected Rack</span>
+            <h2>${escapeHtml(isTruck ? "Truck / No Rack" : rack.code)}</h2>
+            <p>${escapeHtml(rack.name || rack.type || "")}</p>
+          </div>
+
+          <div class="rack-detail-stats">
+            <span><small>Pieces</small><strong>${escapeHtml(rack.qty || 0)}</strong></span>
+            <span><small>Status</small><strong>${escapeHtml(statusText)}</strong></span>
+          </div>
+        </header>
+
+        <div class="rack-detail-actions">
+          ${
+            hasItems
+              ? isComplete
+                ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
+                : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
+              : ""
+          }
+
+          <button type="button" data-rack-print="${escapeHtml(rack.code)}" ${hasItems && isComplete ? "" : "disabled"}>${printLabel}</button>
+
+          ${
+            hasPermission("manage_racks")
+              ? `
+                <button type="button" data-rack-edit="${escapeHtml(rack.code)}">Edit Rack</button>
+                <button type="button" class="danger" data-rack-clear="${escapeHtml(rack.code)}" ${hasItems ? "" : "disabled"}>Clear Rack</button>
+              `
+              : ""
+          }
+        </div>
+
+        <div class="rack-detail-pieces">
+          <div class="rack-detail-subheading">
+            <strong>Pieces in ${escapeHtml(isTruck ? "Truck" : rack.code)}</strong>
+            <span>${escapeHtml(rack.qty || 0)} pcs</span>
+          </div>
+
+          <div class="rack-item-list">
+            ${hasItems ? renderRackItems(rack) : `<p class="admin-empty">No pieces assigned.</p>`}
+          </div>
+        </div>
+      </section>
+    `;
+  };
+
+  els.rackGrid.innerHTML = `
+    <div class="rack-board">
+      ${groups.map(renderRackBoardGroup).join("")}
+    </div>
+
+    ${renderSelectedRackDetails(selectedRack)}
+  `;
 }
 
 async function submitRackScan() {
@@ -2307,7 +2433,7 @@ async function processScan(rawScan) {
   if (state.backend) {
     const indianTrailReceive =
       hasPermission("indian_trail_receive") &&
-      /indian trail/i.test(`${state.meta?.stage || ""} ${els.stationSelect?.value || ""}`);
+      /indian trail/i.test(`${state.meta?.stage || ""} ${currentScanStation()}`);
     if (indianTrailReceive) {
       const result = await fetchJson("/api/indian-trail/receive", {
         method: "POST",
@@ -2317,7 +2443,11 @@ async function processScan(rawScan) {
       state.lastScan = result.lastScan || state.lastScan;
       scanFlash(result.ok ? "success" : "error");
       if (result?.message) {
-        showFloatingNotice(result.message, result.ok ? (/\bSDI|Rush\b/i.test(result.message) ? "notice" : "success") : "error");
+        const lastItem = result.lastScan?.item || {};
+        const bayPrompt = result.ok && result.bayCode
+          ? `Place order ${lastItem.order || ""}${lastItem.item ? `-${lastItem.item}` : ""} in Bay ${result.bayCode}.`
+          : result.message;
+        showFloatingNotice(bayPrompt, result.ok ? (/\bSDI|Rush\b/i.test(result.message) ? "notice" : "success") : "error");
       }
       renderScanPage();
       void refreshBayMapPage().catch(() => {});
@@ -2371,6 +2501,7 @@ function processLocalScan(scanText) {
     state.recent.unshift(entry);
     state.lastScan = entry;
     scanFlash("error");
+    showFloatingNotice(`${entry.message}: ${entry.reason}`, "error");
     saveState();
     renderScanPage();
     return;
@@ -2381,6 +2512,7 @@ function processLocalScan(scanText) {
     state.recent.unshift(entry);
     state.lastScan = entry;
     scanFlash("notice");
+    showFloatingNotice(entry.reason, "notice");
     saveState();
     renderScanPage();
     return;
@@ -2469,6 +2601,7 @@ function showInlineError(message, needsReview = false) {
   state.recent.unshift(entry);
   state.lastScan = entry;
   scanFlash(needsReview ? "error" : "notice");
+  showFloatingNotice(message, needsReview ? "error" : "notice");
   renderScanPage();
 }
 
@@ -2482,6 +2615,7 @@ function showFloatingNotice(message, kind = "notice") {
   }
   notice.className = `floating-scan-notice ${kind}`;
   notice.innerHTML = `<strong>${escapeHtml(kind === "success" ? "Scan accepted" : kind === "error" ? "Needs review" : "Notice")}</strong><span>${escapeHtml(message)}</span>`;
+  notice.classList.remove("is-hiding");
   window.clearTimeout(notice._hideTimer);
   notice._hideTimer = window.setTimeout(() => {
     notice.classList.add("is-hiding");
@@ -2631,6 +2765,7 @@ function bayMatchesFilter(bay, text) {
   const status = String(bay?.status || "").toLowerCase();
   const sourceStatus = String(bay?.sourceStatus || "").toLowerCase();
   const statusKind = bayStatusKind(bay);
+  const matchesQuick = bayMatchesQuickFilter(bay);
   const matchesCategory = state.bayCategoryFilter === "all" || bayCategoryKind(bay) === state.bayCategoryFilter;
   const matchesGlass =
     state.bayGlassFilter === "all" ||
@@ -2647,9 +2782,73 @@ function bayMatchesFilter(bay, text) {
     (state.bayStatusFilter === "manual" && (!bay?.active || sourceStatus.includes("manual"))) ||
     (state.bayStatusFilter === "empty" && (status.includes("empty") || status.includes("available"))) ||
     status.includes(state.bayStatusFilter);
-  if (!matchesCategory || !matchesStatus || !matchesGlass || !matchesSpecial) return false;
+  if (!matchesQuick || !matchesCategory || !matchesStatus || !matchesGlass || !matchesSpecial) return false;
   if (!search) return true;
   return text.toLowerCase().includes(search);
+}
+
+function bayHasErrorState(bay) {
+  const haystack = [
+    bay?.status,
+    bay?.sourceStatus,
+    bay?.reason,
+    ...(bay?.assignments || []).flatMap((assignment) => [
+      assignment.status,
+      assignment.processState,
+      assignment.queueState,
+      assignment.reason,
+      assignment.lastStage,
+    ]),
+  ].join(" ").toLowerCase();
+  return /error|exception|conflict|needs\s*check|bad|blocked|hold/.test(haystack);
+}
+
+function bayMatchesQuickFilter(bay) {
+  const filter = state.bayQuickFilter || "all";
+  const kind = bayStatusKind(bay);
+  if (filter === "all") return true;
+  if (filter === "occupied") return kind === "occupied";
+  if (filter === "preassigned") return kind === "preassigned";
+  if (filter === "available") return kind === "available";
+  if (filter === "blocked") return kind === "blocked" || kind === "manual";
+  if (filter === "error") return bayHasErrorState(bay);
+  if (filter === "old") return Number(bay?.staleDays || 0) > 10 || (bay?.assignments || []).some((assignment) => assignment.isStale);
+  if (filter === "sdi") return kind === "picking" || (bay?.assignments || []).some((assignment) => String(assignment.status || "").toLowerCase().includes("sdi"));
+  if (filter === "new") return Boolean(bay?.isNewToday || (bay?.assignments || []).some((assignment) => assignment.isNewToday));
+  return true;
+}
+
+function bayQuickFilterOptions() {
+  return [
+    ["all", "All"],
+    ["occupied", "Occupied"],
+    ["preassigned", "Pre Assigned"],
+    ["error", "Errors"],
+    ["old", "Old Orders"],
+    ["sdi", "SDI"],
+    ["new", "New Today"],
+    ["blocked", "Blocked"],
+    ["available", "Available"],
+  ];
+}
+
+function renderBayQuickFilters() {
+  if (!els.bayQuickFilters) return;
+  const countable = (state.bays || []).filter((bay) => bayCategoryKind(bay) !== "spacer");
+  els.bayQuickFilters.innerHTML = bayQuickFilterOptions()
+    .map(([value, label]) => {
+      const count = value === "all" ? countable.length : countable.filter((bay) => bayMatchesQuickFilterForCount(bay, value)).length;
+      return `<button class="bay-filter-chip ${state.bayQuickFilter === value ? "is-active" : ""}" type="button" data-bay-quick-filter="${escapeHtml(value)}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(count)}</strong></button>`;
+    })
+    .join("");
+}
+
+function bayMatchesQuickFilterForCount(bay, value) {
+  const previous = state.bayQuickFilter;
+  state.bayQuickFilter = value;
+  const matches = bayMatchesQuickFilter(bay);
+  state.bayQuickFilter = previous;
+  return matches;
 }
 
 function normalizeFilterValue(value) {
@@ -2925,12 +3124,12 @@ function normalizedBayGridPositions(sections) {
 }
 
 function renderBaySection(section) {
-  const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
+  const filtersActive = state.baySearch.trim() || state.bayQuickFilter !== "all" || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
   const displayBays = filtersActive ? section.bays.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))) : section.bays;
   const visible = displayBays.length;
   const dimmed = !visible && filtersActive;
   const occupied = section.bays.filter((bay) => Number(bay.assignedQty || 0) > 0).length;
-  const open = !state.collapsedBaySections.has(section.label);
+  const open = Boolean(filtersActive) || !state.collapsedBaySections.has(section.label);
   const cols = Math.max(1, Math.min(Number(state.bayGroupColumns[section.label] || 1), 2));
   return `
     <details ${open ? "open" : ""} class="physical-bay-section type-${escapeHtml(section.kind)} cols-${cols} ${state.bayEditMode ? "is-editing" : ""} ${dimmed ? "is-dimmed" : ""}" data-bay-drop-section="${escapeHtml(section.label)}" data-bay-drop-category="${escapeHtml(section.kind)}">
@@ -2944,13 +3143,19 @@ function renderBaySection(section) {
 
 function renderBayGrid(physicalSections) {
   if (state.bayEditMode && !state.bayLayoutDraft) initializeBayLayoutDraft();
+  if (!state.bayEditMode) {
+    return `
+      <section class="bay-dense-grid">
+        ${physicalSections.length ? physicalSections.map((section) => renderBaySection(section)).join("") : `<div class="admin-empty">No bays match those filters.</div>`}
+      </section>
+    `;
+  }
   const sectionByLabel = new Map(physicalSections.map((section) => [section.label, section]));
-  const normalPositions = state.bayEditMode ? null : normalizedBayGridPositions(physicalSections);
   const cells = [];
   for (let row = 1; row <= 7; row += 1) {
     for (let col = 1; col <= 7; col += 1) {
       const section = physicalSections.find((item) => {
-        const draft = state.bayEditMode ? state.bayLayoutDraft?.[item.label] : normalPositions?.[item.label];
+        const draft = state.bayLayoutDraft?.[item.label];
         const sectionRow = draft ? draft.row : Math.round(Number(item.row || 0));
         const sectionCol = draft ? draft.col : Math.round(Number(item.col || 0));
         const holding = draft?.holding;
@@ -2979,7 +3184,7 @@ function renderBayGrid(physicalSections) {
 
 function renderBayMapPage() {
   if (!els.bayMapCanvas || !state.bayLayout) return;
-  const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
+  const filtersActive = state.baySearch.trim() || state.bayQuickFilter !== "all" || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
   const physicalSections = bayPhysicalSections().filter((section) => !filtersActive || section.bays.some((bay) => bayMatchesFilter(bay, baySearchText(bay))));
   els.bayMapCanvas.innerHTML = renderBayGrid(physicalSections);
   els.bayMapCanvas.querySelectorAll(".physical-bay-section").forEach((details) => {
@@ -3002,6 +3207,7 @@ function renderBayMapPage() {
   }
   if (els.baySelectedText) els.baySelectedText.textContent = state.selectedBayCode ? `Selected: ${state.selectedBayCode}` : "No bay selected";
   renderBaySidePanels();
+  renderBayQuickFilters();
   renderBayRecentActions();
 }
 
@@ -3875,69 +4081,421 @@ async function runAssignmentAction(action, assignmentId) {
   }
 }
 
+function selectedPrintStageInputs() {
+  return [...(els.printOptionsStages?.querySelectorAll('.print-stage-choice:not(.print-stage-all-choice) input[type="checkbox"]') || [])];
+}
+
 function selectedPrintListIds() {
-  return [...(els.printOptionsStages?.querySelectorAll("input:checked") || [])].map((input) => input.value);
+  return selectedPrintStageInputs().filter((input) => input.checked).map((input) => input.value);
+}
+
+function updatePrintStageSelectState() {
+  if (!els.printOptionsStages) return;
+
+  const stageInputs = selectedPrintStageInputs();
+  const checkedInputs = stageInputs.filter((input) => input.checked);
+  const allInput = els.printOptionsStages.querySelector("[data-print-stage-select-all]");
+
+  if (allInput) {
+    allInput.checked = stageInputs.length > 0 && checkedInputs.length === stageInputs.length;
+    allInput.indeterminate = checkedInputs.length > 0 && checkedInputs.length < stageInputs.length;
+  }
+}
+
+function printGlassCategory(label) {
+  const text = String(label || "").toLowerCase();
+
+  if (/mirror|mirr|\bmir\b/.test(text)) return "Mirror";
+  if (/tempered|temp\b|shower/.test(text)) return "Tempered";
+  if (/annealed|anneal|\bann\b|plate|float/.test(text)) return "Annealed";
+
+  return "Other";
+}
+
+function printGlassCategorySort(category) {
+  return { Mirror: 1, Annealed: 2, Tempered: 3, Other: 4 }[category] || 9;
+}
+
+function selectedPrintGlassInputs() {
+  return [...(els.printOptionsGlassType?.querySelectorAll('.print-glass-choice:not(.print-glass-all-choice) input[type="checkbox"]') || [])];
+}
+
+function updatePrintGlassSelectState() {
+  if (!els.printOptionsGlassType) return;
+
+  const glassInputs = selectedPrintGlassInputs();
+  const checkedInputs = glassInputs.filter((input) => input.checked);
+  const allInput = els.printOptionsGlassType.querySelector("[data-print-glass-select-all]");
+
+  if (allInput) {
+    allInput.checked = glassInputs.length > 0 && checkedInputs.length === glassInputs.length;
+    allInput.indeterminate = checkedInputs.length > 0 && checkedInputs.length < glassInputs.length;
+  }
+
+  els.printOptionsGlassType.querySelectorAll("[data-print-glass-category]").forEach((categoryInput) => {
+    const category = categoryInput.dataset.printGlassCategory || "";
+    const categoryInputs = glassInputs.filter((input) => input.dataset.printGlassCategory === category);
+    const checkedCategoryInputs = categoryInputs.filter((input) => input.checked);
+
+    categoryInput.checked = categoryInputs.length > 0 && checkedCategoryInputs.length === categoryInputs.length;
+    categoryInput.indeterminate = checkedCategoryInputs.length > 0 && checkedCategoryInputs.length < categoryInputs.length;
+  });
+}
+
+async function ensurePrintListDetails(listIds) {
+  if (!state.backend) return;
+
+  const wanted = new Set(listIds);
+  const listsToLoad = state.lists.filter((list) => {
+    if (!wanted.has(list.id)) return false;
+    if (list._printItemsLoaded) return false;
+    return !Array.isArray(list.items) || !list.items.length;
+  });
+
+  if (!listsToLoad.length) return;
+
+  await Promise.all(
+    listsToLoad.map(async (list) => {
+      const payload = await fetchJson(`/api/delivery-lists/${encodeURIComponent(list.id)}`);
+      const items = cloneItems(payload.items || []);
+
+      Object.assign(list, {
+        items,
+        itemCount: items.length || list.itemCount || 0,
+        totalQty: items.length ? pieceCount(items) : list.totalQty,
+        scannedQty: items.length ? items.reduce((sum, item) => sum + itemScannedPieceQty(item), 0) : list.scannedQty,
+        _printItemsLoaded: true,
+      });
+    }),
+  );
+}
+
+function printListIsFullCoverage(list) {
+  const category = stageCategory(list);
+  return category === "staged" || category === "outbound";
+}
+
+function printCountSourceLists(listIds) {
+  const wanted = new Set(listIds);
+  const selectedLists = state.lists.filter((list) => wanted.has(list.id));
+  const fullCoverageLists = selectedLists
+    .filter(printListIsFullCoverage)
+    .sort((a, b) => stageSort(a) - stageSort(b));
+
+  if (fullCoverageLists.length) {
+    return [fullCoverageLists[0]];
+  }
+
+  return selectedLists;
+}
+
+function printItemsForCountList(list) {
+  if (Array.isArray(list?.items) && list.items.length) {
+    return list.items;
+  }
+
+  if (list?.id && list.id === state.activeListId) {
+    return state.items;
+  }
+
+  return [];
+}
+
+function printGlassEntriesForLists(listIds) {
+  const entries = new Map();
+  const sourceLists = printCountSourceLists(listIds);
+
+  const addEntry = (label, qty = 0) => {
+    const cleanLabel = String(label || "").trim();
+
+    if (!cleanLabel) return;
+
+    const key = cleanLabel.toLowerCase();
+    const existing = entries.get(key) || {
+      label: cleanLabel,
+      qty: 0,
+      category: printGlassCategory(cleanLabel),
+    };
+
+    existing.qty += Math.max(Number(qty || 0), 0);
+    entries.set(key, existing);
+  };
+
+  for (const list of sourceLists) {
+    const items = printItemsForCountList(list);
+
+    if (items.length) {
+      for (const item of items) {
+        addEntry(glassTypeLabel(item), itemPieceQty(item));
+      }
+    } else {
+      for (const label of list.glassTypes || []) {
+        addEntry(label, 0);
+      }
+    }
+  }
+
+  return [...entries.values()].sort((a, b) => {
+    const categoryDiff = printGlassCategorySort(a.category) - printGlassCategorySort(b.category);
+    if (categoryDiff) return categoryDiff;
+
+    const qtyDiff = Number(b.qty || 0) - Number(a.qty || 0);
+    if (qtyDiff) return qtyDiff;
+
+    return a.label.localeCompare(b.label);
+  });
 }
 
 function availableGlassTypesForLists(listIds) {
-  const wanted = new Set(listIds);
-  const types = new Set();
-  const sourceLists = state.lists.filter((list) => wanted.has(list.id));
-  for (const list of sourceLists) {
-    for (const label of list.glassTypes || []) {
-      if (label) types.add(label);
-    }
-    for (const item of list.items || []) {
-      const label = glassTypeLabel(item);
-      if (label) types.add(label);
-    }
-  }
-  if (state.activeListId && wanted.has(state.activeListId)) {
-    for (const item of state.items) {
-      const label = glassTypeLabel(item);
-      if (label) types.add(label);
-    }
-  }
-  return [...types].sort((a, b) => a.localeCompare(b));
+  return printGlassEntriesForLists(listIds).map((entry) => entry.label);
 }
 
-function renderPrintGlassTypes() {
+function ensurePrintGlassFieldWrapper() {
+  if (!els.printOptionsGlassType) return null;
+
+  const glassField = els.printOptionsGlassType.closest("label");
+
+  if (!glassField) {
+    return els.printOptionsGlassType.closest(".print-glass-field");
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = `${glassField.className} print-glass-field`.trim();
+
+  while (glassField.firstChild) {
+    wrapper.appendChild(glassField.firstChild);
+  }
+
+  glassField.replaceWith(wrapper);
+  return wrapper;
+}
+
+async function renderPrintGlassTypes() {
   if (!els.printOptionsGlassType) return;
-  const currentInputs = [...els.printOptionsGlassType.querySelectorAll("input")];
+
+  ensurePrintGlassFieldWrapper();
+
+  const listIds = selectedPrintListIds();
+  const renderToken = Symbol("print-glass-render");
+  state.printGlassRenderToken = renderToken;
+
+  const countSourceListIds = printCountSourceLists(listIds).map((list) => list.id);
+  const detailIds = [...new Set([...listIds, ...countSourceListIds])];
+  const needsDetails = state.backend && detailIds.some((listId) => {
+    const list = state.lists.find((item) => item.id === listId);
+    return list && !list._printItemsLoaded && (!Array.isArray(list.items) || !list.items.length);
+  });
+
+  if (needsDetails) {
+    els.printOptionsGlassType.innerHTML = `<div class="admin-empty">Loading glass types...</div>`;
+
+    try {
+      await ensurePrintListDetails(detailIds);
+    } catch (error) {
+      els.printOptionsGlassType.innerHTML = `<div class="admin-empty review">Could not load glass type quantities. ${escapeHtml(error.message)}</div>`;
+      return;
+    }
+
+    if (state.printGlassRenderToken === renderToken) {
+      await renderPrintGlassTypes();
+    }
+
+    return;
+  }
+
+  const previousGroups = [...els.printOptionsGlassType.querySelectorAll(".print-glass-group[data-print-glass-group]")];
+  const previousOpenCategories = new Set(previousGroups.filter((group) => group.open).map((group) => group.dataset.printGlassGroup));
+  const hadPreviousGroups = previousGroups.length > 0;
+  const currentInputs = selectedPrintGlassInputs();
   const current = new Set(currentInputs.filter((input) => input.checked).map((input) => input.value).filter(Boolean));
   const hadPrevious = currentInputs.length > 0;
-  const types = availableGlassTypesForLists(selectedPrintListIds());
-  els.printOptionsGlassType.innerHTML = types
-    .map((type) => {
-      const checked = hadPrevious ? current.has(type) : !/mirror/i.test(type);
-      return `
-        <label>
-          <input type="checkbox" value="${escapeHtml(type)}" ${checked ? "checked" : ""}>
-          <span>${escapeHtml(type)}</span>
-        </label>
-      `;
-    })
-    .join("") || `<div class="admin-empty">No glass types found for the selected stages.</div>`;
+  const entries = printGlassEntriesForLists(listIds);
+  const groups = new Map();
+  const checkedForEntry = (entry) => (hadPrevious ? current.has(entry.label) : !/mirror/i.test(entry.label));
+
+  for (const entry of entries) {
+    if (!groups.has(entry.category)) {
+      groups.set(entry.category, []);
+    }
+
+    groups.get(entry.category).push(entry);
+  }
+
+  const selectedCount = entries.filter(checkedForEntry).length;
+  const totalQty = entries.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
+
+  els.printOptionsGlassType.innerHTML = entries.length
+    ? `
+        <div class="print-glass-toolbar">
+          <span class="print-glass-choice print-glass-all-choice" data-print-glass-all-toggle>
+            <input type="checkbox" data-print-glass-select-all ${selectedCount === entries.length ? "checked" : ""}>
+            <span>All Glass Types</span>
+            <small>${escapeHtml(selectedCount)} / ${escapeHtml(entries.length)} selected | ${escapeHtml(totalQty)} pcs</small>
+          </span>
+        </div>
+
+        ${[...groups.entries()]
+          .map(([category, groupEntries]) => {
+            const groupQty = groupEntries.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
+            const checkedGroupEntries = groupEntries.filter(checkedForEntry);
+            const groupOpen = hadPreviousGroups ? previousOpenCategories.has(category) : false;
+
+            return `
+              <details
+                class="print-glass-group print-glass-group-${escapeHtml(slugify(category))}"
+                data-print-glass-group="${escapeHtml(category)}"
+                ${groupOpen ? "open" : ""}
+              >
+                <summary>
+                  <span class="print-glass-group-main">
+                    <input
+                      type="checkbox"
+                      data-print-glass-category="${escapeHtml(category)}"
+                      aria-label="Select all ${escapeHtml(category)} glass types"
+                      ${checkedGroupEntries.length === groupEntries.length ? "checked" : ""}
+                    >
+                    <strong>${escapeHtml(category)}</strong>
+                    <small>${escapeHtml(checkedGroupEntries.length)} / ${escapeHtml(groupEntries.length)} selected | ${escapeHtml(groupQty)} pcs</small>
+                  </span>
+                  <span class="print-glass-collapse-label">Expand / collapse</span>
+                </summary>
+
+                <div class="print-glass-group-options">
+                  ${groupEntries
+                    .map((entry) => {
+                      const checked = checkedForEntry(entry);
+
+                      return `
+                        <span class="print-glass-choice">
+                          <input
+                            type="checkbox"
+                            value="${escapeHtml(entry.label)}"
+                            data-print-glass-category="${escapeHtml(category)}"
+                            aria-label="Select ${escapeHtml(entry.label)}"
+                            ${checked ? "checked" : ""}
+                          >
+                          <span title="${escapeHtml(entry.label)}">${escapeHtml(entry.label)}</span>
+                          <small>${escapeHtml(entry.qty || 0)}</small>
+                        </span>
+                      `;
+                    })
+                    .join("")}
+                </div>
+              </details>
+            `;
+          })
+          .join("")}
+      `
+    : `<div class="admin-empty">No glass types found for the selected stages.</div>`;
+
+  updatePrintGlassSelectState();
+
+  els.printOptionsGlassType.onclick = (event) => {
+    const targetInput = event.target.closest('input[type="checkbox"]');
+
+    if (targetInput && els.printOptionsGlassType.contains(targetInput)) {
+      event.stopPropagation();
+
+      window.setTimeout(() => {
+        if (targetInput.matches("[data-print-glass-select-all]")) {
+          selectedPrintGlassInputs().forEach((glassInput) => {
+            glassInput.checked = targetInput.checked;
+          });
+        }
+
+        if (targetInput.matches("[data-print-glass-category]")) {
+          const category = targetInput.dataset.printGlassCategory || "";
+
+          selectedPrintGlassInputs()
+            .filter((input) => input.dataset.printGlassCategory === category)
+            .forEach((input) => {
+              input.checked = targetInput.checked;
+            });
+        }
+
+        updatePrintGlassSelectState();
+      }, 0);
+
+      return;
+    }
+
+    const allToggle = event.target.closest("[data-print-glass-all-toggle]");
+
+    if (allToggle && els.printOptionsGlassType.contains(allToggle)) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const glassInputs = selectedPrintGlassInputs();
+      const nextChecked = !glassInputs.length || glassInputs.some((input) => !input.checked);
+
+      glassInputs.forEach((glassInput) => {
+        glassInput.checked = nextChecked;
+      });
+
+      updatePrintGlassSelectState();
+      return;
+    }
+
+    const choice = event.target.closest(".print-glass-choice:not(.print-glass-all-choice)");
+
+    if (choice && els.printOptionsGlassType.contains(choice)) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const input = choice.querySelector('input[type="checkbox"]');
+
+      if (!input) return;
+
+      input.checked = !input.checked;
+      updatePrintGlassSelectState();
+    }
+  };
+}
+
+function printStageOptionLabel(list) {
+  const category = stageCategory(list);
+
+  if (category === "outbound") return "Outbound Airport";
+  if (category === "received") return "Inbound IT";
+  if (category === "greenville") return "BFS Greenville";
+  if (category === "pickup") return "CPU";
+  if (category === "dtc") return "DTC";
+
+  return "Staging Airport";
 }
 
 function renderPrintOptionStages() {
   if (!els.printOptionsStages || !els.printOptionsDate) return;
+
   const date = els.printOptionsDate.value || selectedDeliveryDate() || dashboardDateKey();
   const lists = state.lists.filter((list) => list.deliveryDate === date).sort((a, b) => stageSort(a) - stageSort(b));
   const contextIds = new Set(state.printContext?.listIds || []);
-  const hasContextIds = Boolean(state.printContext?.fixedListIds) && contextIds.size > 0;
-  els.printOptionsStages.innerHTML = lists
-    .map((list) => {
-      const checked = hasContextIds ? contextIds.has(list.id) : false;
-      return `
-        <label>
-          <input type="checkbox" value="${escapeHtml(list.id)}" ${checked ? "checked" : ""}>
-          <span>${escapeHtml(list.stage)} <small>${escapeHtml(list.scannedQty || 0)} / ${escapeHtml(list.totalQty || 0)}</small></span>
-        </label>
-      `;
-    })
-    .join("");
-  renderPrintGlassTypes();
+  const hasContextIds = contextIds.size > 0;
+  const checkedCount = lists.filter((list) => (hasContextIds ? contextIds.has(list.id) : false)).length;
+  const fullCoverageList = lists.find(printListIsFullCoverage);
+  const listQty = fullCoverageList?.totalQty || lists.reduce((maxQty, list) => Math.max(maxQty, Number(list.totalQty || 0)), 0);
+
+  els.printOptionsStages.innerHTML = `
+    <label class="print-stage-choice print-stage-all-choice">
+      <input type="checkbox" data-print-stage-select-all ${lists.length && checkedCount === lists.length ? "checked" : ""}>
+      <span>All Stages <small>${escapeHtml(lists.length)} stage${lists.length === 1 ? "" : "s"}${listQty ? ` | ${escapeHtml(listQty)} pcs` : ""}</small></span>
+    </label>
+    ${lists
+      .map((list) => {
+        const checked = hasContextIds ? contextIds.has(list.id) : false;
+
+        return `
+          <label class="print-stage-choice print-stage-${escapeHtml(stageCategory(list))}">
+            <input type="checkbox" value="${escapeHtml(list.id)}" ${checked ? "checked" : ""}>
+            <span>${escapeHtml(printStageOptionLabel(list))} <small>${escapeHtml(list.scannedQty || 0)} / ${escapeHtml(list.totalQty || 0)}</small></span>
+          </label>
+        `;
+      })
+      .join("")}
+  `;
+
+  updatePrintStageSelectState();
+  void renderPrintGlassTypes();
 }
 
 function openPrintOptions(context = {}) {
@@ -3954,6 +4512,9 @@ function openPrintOptions(context = {}) {
   }
   for (const input of [els.printUpdatedOnly, els.printRushOnly, els.printRemakeOnly]) {
     if (input) input.checked = false;
+  }
+  if (els.printUpdatedOnly) {
+    els.printUpdatedOnly.checked = Boolean(context.updatedOnly);
   }
   if (els.printCustomerFilter) els.printCustomerFilter.value = "";
   if (els.printOrderFilter) els.printOrderFilter.value = "";
@@ -3984,7 +4545,7 @@ function submitPrintOptions() {
     updatedOnly: els.printUpdatedOnly?.checked ? "1" : "",
     rushOnly: els.printRushOnly?.checked ? "1" : "",
     remakeOnly: els.printRemakeOnly?.checked ? "1" : "",
-    glassType: [...(els.printOptionsGlassType?.querySelectorAll("input:checked") || [])].map((input) => input.value.trim()).filter(Boolean).join(","),
+    glassType: [...(els.printOptionsGlassType?.querySelectorAll('.print-glass-choice:not(.print-glass-all-choice) input[type="checkbox"]:checked') || [])].map((input) => input.value.trim()).filter(Boolean).join(","),
     mirrorMode: "include",
     customers: els.printCustomerFilter?.value.trim() || "",
     orders: els.printOrderFilter?.value.trim() || "",
@@ -4004,8 +4565,7 @@ function submitPrintOptions() {
 
 async function importTempDeliveryFolder() {
   const sourceFolder = els.tempFolderInput?.value.trim() || "";
-  const dateFrom = els.importFromDate?.value || "";
-  const dateTo = els.importToDate?.value || "";
+  const { dateFrom, dateTo } = currentImportDateWindow();
 
   showImportStatusLoading("Importing Temp folder...");
   await waitForNextPaint();
@@ -4029,16 +4589,23 @@ async function importTempDeliveryFolder() {
     els.importPreviewBox.classList.toggle("success", !failed);
     els.importPreviewBox.classList.toggle("review", Boolean(failed));
 
+    const noUpdates = !imported && !updated && skipped && !failed;
+
     els.importPreviewBox.innerHTML = failed
       ? `
         <strong>Import completed with issues.</strong>
         <span>${imported} new, ${updated} updated, ${skipped} unchanged, ${failed} failed.</span>
         ${result.failedFiles?.length ? `<small>${escapeHtml(result.failedFiles.map((file) => `${file.fileName}: ${(file.errors || []).join("; ")}`).join(" | "))}</small>` : ""}
       `
-      : `
-        <strong>Import complete.</strong>
-        <span>${imported} new, ${updated} updated, ${skipped} unchanged.</span>
-      `;
+      : noUpdates
+        ? `
+          <strong>No updates found.</strong>
+          <span>${skipped} delivery list file${skipped === 1 ? "" : "s"} checked. Existing New/Updated markers were refreshed where applicable.</span>
+        `
+        : `
+          <strong>Import complete.</strong>
+          <span>${imported} new, ${updated} updated, ${skipped} unchanged.</span>
+        `;
   }
 }
 
@@ -4259,6 +4826,7 @@ function openAdminModal(kind) {
     roles: "Edit Role Permissions",
     sessions: "Active Sessions",
     stations: "Stations",
+    customerRoutes: "Edit Customer Routes",
     manualEdit: "Manual Delivery List Edit",
     lookups: "Lookup Manager",
     rackForm: "Rack",
@@ -4315,16 +4883,48 @@ function adminModalContent(kind) {
   }
   if (kind === "users") {
     return `
-      <form id="createUserFormModal" class="admin-form admin-modal-create-user">
-        <input id="newUserNameModal" type="text" autocomplete="off" placeholder="Username">
-        <input id="newUserDisplayModal" type="text" autocomplete="off" placeholder="Display name">
-        <input id="newUserPasswordModal" type="password" autocomplete="new-password" placeholder="Password">
-        <select id="newUserRoleModal">
-          ${ROLE_OPTIONS.map((role) => `<option>${escapeHtml(role)}</option>`).join("")}
-        </select>
-        <button type="submit">Add user</button>
-      </form>
-      <div class="admin-table">${renderAdminUsersTable(true, state.adminUsers.length || 1)}</div>
+      <section class="users-modal-shell">
+        <form id="createUserFormModal" class="admin-form admin-modal-create-user users-create-card">
+          <label>
+            <span>Username</span>
+            <input id="newUserNameModal" type="text" autocomplete="off" placeholder="Enter username">
+          </label>
+
+          <label>
+            <span>Display Name</span>
+            <input id="newUserDisplayModal" type="text" autocomplete="off" placeholder="Enter display name">
+          </label>
+
+          <label>
+            <span>Password</span>
+            <input id="newUserPasswordModal" type="password" autocomplete="new-password" placeholder="Enter password">
+          </label>
+
+          <label>
+            <span>Role</span>
+            <select id="newUserRoleModal">
+              ${ROLE_OPTIONS.map((role) => `<option>${escapeHtml(role)}</option>`).join("")}
+            </select>
+          </label>
+
+          <label>
+            <span>Station</span>
+            <select id="newUserStationModal">
+              <option value="">No assigned station</option>
+              ${state.stations.map((station) => `<option value="${escapeHtml(station)}">${escapeHtml(station)}</option>`).join("")}
+            </select>
+          </label>
+
+          <button type="submit" class="users-add-button">
+            <span class="user-action-icon icon-user-add" aria-hidden="true"></span>
+            <strong>Add user</strong>
+          </button>
+        </form>
+
+        <div class="users-table-wrap">
+          ${renderAdminUsersTable(true, state.adminUsers.length || 1)}
+        </div>
+      </section>
     `;
   }
   if (kind === "roles") {
@@ -4341,6 +4941,9 @@ function adminModalContent(kind) {
       </div>
       <div class="compact-list modal-list">${renderAdminStationsList(true, state.stations.length || 1)}</div>
     `;
+  }
+  if (kind === "customerRoutes") {
+    return customerRouteRulesModalHtml();
   }
   if (kind === "manualEdit") {
     return manualEditModalHtml();
@@ -4483,7 +5086,6 @@ const PERMISSION_CATEGORIES = [
       "reactivate_users",
       "update_user_passwords",
       "view_active_sessions",
-      "check_updates",
     ],
   },
   {
@@ -4909,7 +5511,14 @@ function renderImportHistory(imports) {
 
 function importHistoryRows(imports = []) {
   const seenImportGroups = new Set();
-  const rows = imports.filter((entry) => {
+  const rows = imports
+    .slice()
+    .sort((a, b) =>
+      String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || "")) ||
+      String(b.importedAt || "").localeCompare(String(a.importedAt || "")) ||
+      String(a.stage || "").localeCompare(String(b.stage || "")),
+    )
+    .filter((entry) => {
     const key = entry.deliveryDate || entry.sourceName || entry.fileName || entry.importedAt || "unknown";
     if (seenImportGroups.has(key)) return false;
     seenImportGroups.add(key);
@@ -4924,6 +5533,12 @@ function importHistoryRows(imports = []) {
     String(row.stage || row.stageProfile || row.stageSheetName || list?.stage || list?.label || row.listId || "Updated stage");
 
   const isStagingRow = (row, list) => /staging/i.test(stageNameForRow(row, list));
+
+  const stageCategoryForImportRow = (row, list) =>
+    stageCategory({
+      stage: stageNameForRow(row, list),
+      scanner: row.stageProfile || row.scanner || list?.scanner || "",
+    });
 
   const updatedQtyForRow = (row, list) =>
     Number(row.totalQty ?? row.updatedQty ?? row.newQty ?? list?.totalQty ?? 0);
@@ -5041,6 +5656,51 @@ function importHistoryRows(imports = []) {
     return [...byStage.values()];
   };
 
+  const stageSortForRow = (row) => {
+    const list = state.lists.find((item) => item.id === row.listId);
+
+    return stageSort(list || { stage: stageNameForRow(row, list), scanner: row.stageProfile || "" });
+  };
+
+  const allStageRowsForGroup = (group, changedStageRows) => {
+    const byStage = new Map();
+
+    const addRow = (row) => {
+      const key = stageRowKey(row);
+
+      if (!key || byStage.has(key)) return;
+
+      byStage.set(key, row);
+    };
+
+    changedStageRows.forEach(addRow);
+
+    state.lists
+      .filter((list) => String(list.deliveryDate || "") === String(group.deliveryDate || ""))
+      .forEach((list) => {
+        addRow({
+          listId: list.id,
+          stage: list.stage,
+          stageProfile: list.scanner,
+          totalQty: list.totalQty || 0,
+          changedLineCount: 0,
+          changedPieceQty: 0,
+          addedPieceQty: 0,
+          created: false,
+        });
+      });
+
+    return [...byStage.values()].sort((a, b) => {
+      const sortDiff = stageSortForRow(a) - stageSortForRow(b);
+      if (sortDiff) return sortDiff;
+
+      const listA = state.lists.find((item) => item.id === a.listId);
+      const listB = state.lists.find((item) => item.id === b.listId);
+
+      return stageNameForRow(a, listA).localeCompare(stageNameForRow(b, listB));
+    });
+  };
+
   const groups = new Map();
 
   for (const entry of rows) {
@@ -5079,7 +5739,13 @@ function importHistoryRows(imports = []) {
       ${[...groups.values()]
         .map((group, index) => {
           const changedStageRows = collapseDuplicateStageRows(group.stageRows.filter(hasStageChanges));
-          const stagingRows = changedStageRows.filter((row) => {
+          const allStageRows = allStageRowsForGroup(group, changedStageRows);
+          const stagingRows = allStageRows.filter((row) => {
+            const list = state.lists.find((item) => item.id === row.listId);
+            return isStagingRow(row, list);
+          });
+
+          const changedStagingRows = changedStageRows.filter((row) => {
             const list = state.lists.find((item) => item.id === row.listId);
             return isStagingRow(row, list);
           });
@@ -5089,7 +5755,7 @@ function importHistoryRows(imports = []) {
             return sum + originalQtyForRow(row, list);
           }, 0);
 
-          const stagingChangedQty = stagingRows.reduce((sum, row) => {
+          const stagingChangedQty = changedStagingRows.reduce((sum, row) => {
             const list = state.lists.find((item) => item.id === row.listId);
             return sum + changedQtyForRow(row, list);
           }, 0);
@@ -5113,38 +5779,67 @@ function importHistoryRows(imports = []) {
           const hasUpdatedStages = updatedStageRows.length > 0;
           const isBrandNewDeliveryList = hasNewStages && !hasUpdatedStages;
 
-          const printableIds = [...group.printableIds].filter(Boolean);
-          const groupClass = isBrandNewDeliveryList
-            ? "is-new-delivery-list"
+          const newPrintableIds = [...new Set(newStageRows.map((row) => row.listId).filter(Boolean))];
+          const updatedPrintableIds = [...new Set(updatedStageRows.map((row) => row.listId).filter(Boolean))];
+          const printableIds = [...new Set([...updatedPrintableIds, ...newPrintableIds])];
+          const printButtonLabel = isBrandNewDeliveryList
+            ? "Print / Export New Delivery List"
             : hasNewStages && hasUpdatedStages
-              ? "is-mixed-batch"
-              : "is-updated-batch";
-          const importedText = group.importedAt ? ` - ${formatDateTime(group.importedAt)}` : "";
+              ? "Print / Export Changed Stages"
+              : "Print / Export Changed Stages";
+          const hasAnyChanges = hasNewStages || hasUpdatedStages;
+          const groupClass = !hasAnyChanges
+            ? "is-no-update-batch"
+            : isBrandNewDeliveryList
+              ? "is-new-delivery-list"
+              : hasNewStages && hasUpdatedStages
+                ? "is-mixed-batch"
+                : "is-updated-batch";
+          const importedText = group.importedAt ? `Updated at: ${formatDateTime(group.importedAt)}` : "Updated at: --";
+          const sourceFileText = group.sourceName ? `File: ${group.sourceName}` : "";
+          const groupStatusHtml = hasAnyChanges
+            ? `
+              ${hasUpdatedStages ? `<span class="import-status-pill updated">Updated</span>` : ""}
+              ${isBrandNewDeliveryList ? `<span class="import-status-pill new">New</span>` : ""}
+              ${hasNewStages && hasUpdatedStages ? `<span class="import-status-pill new-stage">New Stage</span>` : ""}
+            `
+            : `<span class="import-status-pill no-change">No Updates</span>`;
           
-          const stageHtml = changedStageRows.length
-            ? changedStageRows
+          const stageHtml = allStageRows.length
+            ? allStageRows
                 .map((row) => {
                   const list = state.lists.find((item) => item.id === row.listId);
                   const stageName = stageNameForRow(row, list);
                   const originalQty = originalQtyForRow(row, list);
                   const changedQty = changedQtyForRow(row, list);
                   const updatedQty = updatedQtyForRow(row, list);
-                  const rowIsNew = isNewStageRow(row, list);
-                  const rowClass = rowIsNew ? "is-new-row" : "";
-                  const kindLabel = rowIsNew ? "New Stage" : "Updated";
-                  const kindClass = rowIsNew ? "new-stage" : "updated";
+                  const rowHasChanges = hasStageChanges(row);
+                  const rowIsNew = rowHasChanges && isNewStageRow(row, list);
+                  const stageCategoryClass = `stage-row-${stageCategoryForImportRow(row, list)}`;
+                  const rowChangeClass = rowIsNew ? "is-new-row" : rowHasChanges ? "is-updated-row" : "is-unchanged-row";
+                  const rowClass = `${stageCategoryClass} ${rowChangeClass}`;
+                  const kindLabel = rowIsNew ? "New Stage" : rowHasChanges ? "Updated" : "No Updates";
+                  const kindClass = rowIsNew ? "new-stage" : rowHasChanges ? "updated" : "no-change";
 
                   return `
                     <tr class="${rowClass}">
                       <td><span class="stage-pill-admin">${escapeHtml(stageName)}</span></td>
                       <td><span class="qty-before">${escapeHtml(originalQty)} pcs</span></td>
-                      <td><span class="qty-change">+${escapeHtml(changedQty)} pcs</span></td>
+                      <td><span class="qty-change ${rowHasChanges ? "" : "is-zero"}">${rowHasChanges ? `+${escapeHtml(changedQty)} pcs` : "0 pcs"}</span></td>
                       <td><strong>${escapeHtml(updatedQty)} pcs</strong></td>
                       <td><span class="import-status-pill ${kindClass}">${escapeHtml(kindLabel)}</span></td>
                       <td>
                         ${
                           row.listId
-                            ? `<button type="button" data-print-lists="${escapeHtml(row.listId)}">Print</button>`
+                            ? `<button
+                                type="button"
+                                class="admin-import-icon-button"
+                                data-print-lists="${escapeHtml(row.listId)}"
+                                data-print-date="${escapeHtml(group.deliveryDate)}"
+                                data-print-updated-only="${rowHasChanges && !rowIsNew ? "1" : ""}"
+                                aria-label="${rowIsNew ? "Print / Export New Stage" : rowHasChanges ? "Print / Export Stage" : "Print / Export Stage"}"
+                                title="${rowIsNew ? "Print / Export New Stage" : rowHasChanges ? "Print / Export Stage" : "Print / Export Stage"}"
+                              ><span class="admin-import-print-icon" aria-hidden="true"></span></button>`
                             : ""
                         }
                       </td>
@@ -5154,36 +5849,46 @@ function importHistoryRows(imports = []) {
                 .join("")
             : `
               <tr>
-                <td colspan="6">No stage-level changes were found for this import.</td>
+                <td colspan="6">No stages were found for this delivery date.</td>
               </tr>
             `;
 
           return `
-            <details class="admin-import-date-group ${groupClass}" ${index === 0 ? "open" : ""}>
+            <details class="admin-import-date-group ${groupClass}">
 <summary class="admin-import-date-summary">
   <span class="admin-import-date-main">
-    <strong>${escapeHtml(group.sourceName)}</strong>
-    <span class="admin-import-date-meta">
-      <small>${escapeHtml(formatDisplayDate(group.deliveryDate))}${escapeHtml(importedText)}</small>
+    <span class="admin-import-date-title">
+      <strong>${escapeHtml(formatDisplayDate(group.deliveryDate))}</strong>
       <span class="admin-import-status-pills">
-      ${hasUpdatedStages ? `<span class="import-status-pill updated">Updated</span>` : ""}
-      ${isBrandNewDeliveryList ? `<span class="import-status-pill new">New</span>` : ""}
-      ${hasNewStages && hasUpdatedStages ? `<span class="import-status-pill new-stage">New Stage</span>` : ""}
+        ${groupStatusHtml}
       </span>
+    </span>
+
+    <span class="admin-import-date-meta">
+      <small class="admin-import-updated-at">${escapeHtml(importedText)}</small>
+      ${sourceFileText ? `<small class="admin-import-source-file">${escapeHtml(sourceFileText)}</small>` : ""}
     </span>
   </span>
 
   <span class="admin-import-date-qty">
     <span class="admin-import-qty-flow">
       <span class="qty-before">${escapeHtml(stagingOriginalQty)} pcs</span>
-      <span class="qty-change">+${escapeHtml(stagingChangedQty)} pcs</span>
+      <span class="qty-change ${stagingChangedQty ? "" : "is-zero"}">${stagingChangedQty ? `+${escapeHtml(stagingChangedQty)} pcs` : "0 pcs"}</span>
       <strong>${escapeHtml(stagingUpdatedQty)} pcs</strong>
     </span>
   </span>
 
   ${
     printableIds.length
-      ? `<button type="button" data-print-lists="${escapeHtml(printableIds.join(","))}">Print all updates</button>`
+      ? `<button
+          type="button"
+          class="admin-import-icon-button"
+          data-print-lists="${escapeHtml(printableIds.join(","))}"
+          data-print-date="${escapeHtml(group.deliveryDate)}"
+          data-print-updated-only="${hasUpdatedStages && !isBrandNewDeliveryList ? "1" : ""}"
+          aria-label="${escapeHtml(printButtonLabel)}"
+          title="${escapeHtml(printButtonLabel)}"
+        ><span class="admin-import-print-icon" aria-hidden="true"></span></button>`
       : ""
   }
 </summary>
@@ -5449,23 +6154,154 @@ function permissionSummaryForUser(user) {
   return "View assigned delivery lists";
 }
 
+function userInitials(user) {
+  const display = String(user?.displayName || user?.username || "?").trim();
+
+  const parts = display
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter(Boolean);
+
+  if (parts.length >= 2) return `${parts[0]}${parts[1]}`.toUpperCase();
+
+  return display.slice(0, 2).toUpperCase() || "?";
+}
+
+function userAccentClass(user) {
+  const text = String(user?.username || user?.displayName || "").toLowerCase();
+
+  if (/admin/.test(text)) return "accent-admin";
+  if (/lead|supervisor/.test(text)) return "accent-lead";
+  if (/manager/.test(text)) return "accent-manager";
+  if (/operator/.test(text)) return "accent-operator";
+  if (/trail|it/.test(text)) return "accent-trail";
+
+  return "accent-default";
+}
+
+function userActionButtonHtml({ className = "", attr = "", label = "", icon = "", disabled = false }) {
+  const safeLabel = escapeHtml(label);
+
+  return `
+    <button
+      type="button"
+      class="user-icon-action ${className}"
+      ${attr}
+      ${disabled ? "disabled" : ""}
+      aria-label="${safeLabel}"
+      title="${safeLabel}"
+    >
+      <span class="user-action-icon ${escapeHtml(icon)}" aria-hidden="true"></span>
+    </button>
+  `;
+}
+
+function generateTemporaryPassword(length = 12) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const values = new Uint32Array(length);
+
+  if (window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(values);
+  }
+
+  return Array.from({ length }, (_, index) => {
+    const value = values[index] || Math.floor(Math.random() * alphabet.length);
+    return alphabet[value % alphabet.length];
+  }).join("");
+}
+
+async function refreshAdminUsersUi() {
+  const usersModalOpen = Boolean(els.adminModal && !els.adminModal.hidden && els.adminModalBody?.querySelector(".users-modal-shell"));
+
+  await refreshAdminPage();
+
+  if (usersModalOpen && els.adminModalBody) {
+    els.adminModalBody.innerHTML = adminModalContent("users");
+  }
+}
+
+function confirmDeactivateUser(username) {
+  return new Promise((resolve) => {
+    const existingDialog = document.querySelector(".user-deactivate-backdrop");
+    if (existingDialog) existingDialog.remove();
+
+    const dialog = document.createElement("div");
+    let keyHandler = () => {};
+
+    dialog.className = "user-deactivate-backdrop";
+    dialog.innerHTML = `
+      <section class="user-deactivate-dialog" role="dialog" aria-modal="true" aria-labelledby="deactivateUserTitle">
+        <button type="button" class="user-deactivate-close" data-user-deactivate-cancel aria-label="Close deactivate user confirmation">&times;</button>
+
+        <span class="user-deactivate-icon" aria-hidden="true"></span>
+
+        <div class="user-deactivate-copy">
+          <h2 id="deactivateUserTitle">Deactivate user?</h2>
+          <p>Deactivate <strong>${escapeHtml(username)}</strong>? This keeps the profile and history, but the user will no longer be able to sign in until reactivated.</p>
+        </div>
+
+        <div class="user-deactivate-actions">
+          <button type="button" class="user-deactivate-cancel" data-user-deactivate-cancel>Cancel</button>
+          <button type="button" class="user-deactivate-confirm" data-user-deactivate-confirm>Deactivate User</button>
+        </div>
+      </section>
+    `;
+
+    const close = (confirmed) => {
+      document.removeEventListener("keydown", keyHandler);
+      dialog.remove();
+      document.body.classList.remove("modal-scroll-locked");
+      resolve(Boolean(confirmed));
+    };
+
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-user-deactivate-cancel]")) {
+        close(false);
+        return;
+      }
+
+      if (event.target.closest("[data-user-deactivate-confirm]")) {
+        close(true);
+      }
+    });
+
+    keyHandler = (event) => {
+      if (event.key !== "Escape") return;
+      close(false);
+    };
+
+    document.addEventListener("keydown", keyHandler);
+    document.body.appendChild(dialog);
+    document.body.classList.add("modal-scroll-locked");
+    dialog.querySelector("[data-user-deactivate-cancel]")?.focus();
+  });
+}
+
 function renderAdminUsersTable(editable = false, limit = 5) {
   const users = state.adminUsers.slice(0, limit);
+
   if (!users.length) return `<div class="admin-empty">No users loaded.</div>`;
+
   const activeSessionUsers = new Set((state.activeSessions || []).map((session) => String(session.username || "").toLowerCase()));
+
   if (!editable) {
     return `
       <div class="admin-user-preview-list">
         ${users
           .map((user) => {
             const loggedIn = activeSessionUsers.has(String(user.username || "").toLowerCase());
+
             return `
               <article class="admin-user-preview-row">
+                <span class="user-avatar ${escapeHtml(userAccentClass(user))}">${escapeHtml(userInitials(user))}</span>
+
                 <div>
                   <strong>${escapeHtml(user.displayName)}</strong>
                   <span>${escapeHtml(user.username)} · ${escapeHtml((user.roles || []).join(", ") || "No role")}</span>
                   <small>${escapeHtml(permissionSummaryForUser(user))}</small>
+                  <small>Station: ${escapeHtml(userAssignedStation(user) || "No assigned station")}</small>
                 </div>
+
                 <span class="user-session-pill ${loggedIn ? "is-online" : "is-offline"}">${loggedIn ? "Active" : "Inactive"}</span>
               </article>
             `;
@@ -5474,46 +6310,155 @@ function renderAdminUsersTable(editable = false, limit = 5) {
       </div>
     `;
   }
+
   return `
-    <table>
-      <thead><tr><th>User</th><th>Roles</th><th>Permissions</th>${editable ? "<th>Stages</th><th>Password</th>" : ""}<th>Status</th>${editable ? "<th></th>" : ""}</tr></thead>
-      <tbody>
+    <div class="users-table">
+      <div class="users-table-head">
+        <span>User</span>
+        <span>Role</span>
+        <span>Station</span>
+        <span>Permissions / Notes</span>
+        <span>Password</span>
+        <span>Status</span>
+        <span>Actions</span>
+      </div>
+
+      <div class="users-table-body">
         ${users
-          .map(
-            (user) => `
-              <tr>
-                <td><strong>${escapeHtml(user.displayName)}</strong><span>${escapeHtml(user.username)}</span></td>
-                <td>
-                  ${editable && hasPermission("manage_roles") ? `
-                    <select data-user-role-select="${escapeHtml(user.username)}">
-                      ${ROLE_OPTIONS.map((role) => `<option value="${escapeHtml(role)}" ${(user.roles || []).includes(role) ? "selected" : ""}>${escapeHtml(role)}</option>`).join("")}
-                    </select>
-                  ` : escapeHtml((user.roles || []).join(", "))}
-                </td>
-                <td>${escapeHtml(permissionSummaryForUser(user))}</td>
-                ${editable ? `<td>${escapeHtml((user.stageAccess || []).join(", "))}</td>` : ""}
-                ${editable ? `<td>
-                  ${editable && hasPermission("update_user_passwords") ? `
-                    <div class="password-reset-row">
-                      <input data-user-password="${escapeHtml(user.username)}" type="password" placeholder="Reset password">
-                      <button type="button" data-toggle-password="${escapeHtml(user.username)}" title="Show password">Show</button>
-                      <button type="button" data-update-user-password="${escapeHtml(user.username)}">Save</button>
-                    </div>
-                    <small class="password-note">Existing password is securely hashed.</small>
-                  ` : `<span>Protected</span>`}
-                </td>` : ""}
-                <td>${user.active ? "Active" : "Inactive"}</td>
-                ${editable ? `<td>
-                  ${hasPermission("manage_roles") ? `<button type="button" data-update-user-role="${escapeHtml(user.username)}">Save role</button>` : ""}
-                  ${user.active && hasPermission("deactivate_users") ? `<button type="button" data-deactivate-user="${escapeHtml(user.username)}">Deactivate</button>` : ""}
-                  ${!user.active && hasPermission("reactivate_users") ? `<button type="button" data-reactivate-user="${escapeHtml(user.username)}">Reactivate</button>` : ""}
-                </td>` : ""}
-              </tr>
-            `,
-          )
+          .map((user) => {
+            const active = Boolean(user.active);
+            const username = String(user.username || "");
+            const roles = user.roles || [];
+            const stageAccess = user.stageAccess || [];
+            const assignedStation = userAssignedStation(user);
+            const loggedIn = activeSessionUsers.has(username.toLowerCase());
+
+            return `
+              <article class="user-admin-row ${active ? "is-active-user" : "is-inactive-user"}">
+                <div class="user-admin-main">
+                  <span class="user-avatar ${escapeHtml(userAccentClass(user))}">${escapeHtml(userInitials(user))}</span>
+
+                  <span class="user-admin-name">
+                    <strong>${escapeHtml(user.displayName || username)}</strong>
+                    <small>${escapeHtml(username)}</small>
+                  </span>
+                </div>
+
+                <div class="user-admin-role">
+                  ${
+                    hasPermission("manage_roles")
+                      ? `
+                        <select data-user-role-select="${escapeHtml(username)}">
+                          ${ROLE_OPTIONS.map((role) => `<option value="${escapeHtml(role)}" ${roles.includes(role) ? "selected" : ""}>${escapeHtml(role)}</option>`).join("")}
+                        </select>
+                      `
+                      : `<span>${escapeHtml(roles.join(", ") || "No role")}</span>`
+                  }
+                </div>
+
+                <div class="user-admin-station">
+                  ${
+                    hasPermission("manage_roles")
+                      ? `
+                        <select data-user-station-select="${escapeHtml(username)}">
+                          <option value="">No assigned station</option>
+                          ${state.stations
+                            .map((station) => `<option value="${escapeHtml(station)}" ${assignedStation === station ? "selected" : ""}>${escapeHtml(station)}</option>`)
+                            .join("")}
+                        </select>
+                      `
+                      : `<span>${escapeHtml(assignedStation || "No assigned station")}</span>`
+                  }
+                </div>
+
+                <div class="user-admin-permissions">
+                  <strong>${escapeHtml(permissionSummaryForUser(user))}</strong>
+                  <small>Stages: ${escapeHtml(stageAccess.join(", ") || "No stage access")}</small>
+                </div>
+
+                <div class="user-admin-password">
+                  ${
+                    hasPermission("update_user_passwords")
+                      ? `
+                        <div class="password-reset-row polished">
+  <input data-user-password="${escapeHtml(username)}" type="password" placeholder="New password">
+  ${userActionButtonHtml({
+    className: "secondary",
+    attr: `data-generate-user-password="${escapeHtml(username)}"`,
+    label: "Generate temporary password",
+    icon: "icon-key",
+  })}
+  ${userActionButtonHtml({
+    className: "secondary",
+    attr: `data-toggle-password="${escapeHtml(username)}"`,
+    label: "Show password",
+    icon: "icon-eye",
+  })}
+  ${userActionButtonHtml({
+    className: "primary",
+    attr: `data-update-user-password="${escapeHtml(username)}"`,
+    label: "Save password",
+    icon: "icon-save-user",
+  })}
+</div>
+<small class="password-note">
+  Existing password cannot be viewed.<br>
+  Generate or enter a new one, then save it.
+</small>
+                      `
+                      : `<span class="protected-pill">Protected</span>`
+                  }
+                </div>
+
+                <div class="user-admin-status">
+                  <span class="user-status-pill ${active ? "active" : "inactive"}">
+                    <i></i>
+                    ${active ? "Active" : "Inactive"}
+                  </span>
+
+                  ${loggedIn ? `<small class="logged-in-note">Signed in</small>` : ""}
+                </div>
+
+                <div class="user-admin-actions">
+                  ${
+                    hasPermission("manage_roles")
+                      ? userActionButtonHtml({
+                          className: "secondary",
+                          attr: `data-update-user-role="${escapeHtml(username)}"`,
+                          label: "Save role",
+                          icon: "icon-shield",
+                        })
+                      : ""
+                  }
+
+                  ${
+                    active && hasPermission("deactivate_users")
+                      ? userActionButtonHtml({
+                          className: "danger",
+                          attr: `data-deactivate-user="${escapeHtml(username)}"`,
+                          label: "Deactivate",
+                          icon: "icon-power",
+                        })
+                      : ""
+                  }
+
+                  ${
+                    !active && hasPermission("reactivate_users")
+                      ? userActionButtonHtml({
+                          className: "success",
+                          attr: `data-reactivate-user="${escapeHtml(username)}"`,
+                          label: "Activate",
+                          icon: "icon-power",
+                        })
+                      : ""
+                  }
+                </div>
+              </article>
+            `;
+          })
           .join("")}
-      </tbody>
-    </table>
+      </div>
+    </div>
   `;
 }
 
@@ -5535,32 +6480,209 @@ function renderAdminStationsList(editable = false, limit = 6) {
     .join("") || `<div class="admin-empty">No stations loaded.</div>`;
 }
 
-function renderCustomerRouteRules() {
-  if (!els.customerRouteRules) return;
-  els.customerRouteRules.innerHTML = state.adminCustomerRouteRules.length
-    ? state.adminCustomerRouteRules
-        .map((rule) => `
-          <div>
-            <strong>${escapeHtml(rule.customerPattern)}</strong>
-            <span>${escapeHtml(rule.route)}</span>
-            <button type="button" data-remove-customer-route-rule="${escapeHtml(rule.id)}">Remove</button>
-          </div>
-        `)
-        .join("")
-    : `<div><strong>No route rules</strong><span>Add CPU, DTC, or GRN / Greenville customer defaults here.</span></div>`;
+function customerRouteValue(route) {
+  const clean = String(route || "").trim().toUpperCase();
+
+  if (["GRN", "GNV", "GREENVILLE"].includes(clean)) return "GNV";
+  if (clean === "DTC") return "DTC";
+  if (clean === "CUSTOMER PICKUP") return "CPU";
+
+  return clean || "CPU";
 }
 
+function customerRouteDisplay(route) {
+  const clean = customerRouteValue(route);
+
+  if (clean === "CPU") return "CPU / Customer Pickup";
+  if (clean === "DTC") return "DTC / Deliver to Customer";
+  if (clean === "GNV") return "GNV / Greenville";
+
+  return clean;
+}
+
+function customerRouteOptionsHtml(selectedRoute = "CPU") {
+  const selected = customerRouteValue(selectedRoute);
+
+  return CUSTOMER_ROUTE_OPTIONS
+    .map((option) => `
+      <option value="${escapeHtml(option.value)}" ${selected === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>
+    `)
+    .join("");
+}
+
+function customerRouteRuleRowsHtml(editable = false, limit = 0) {
+  const rules = limit ? state.adminCustomerRouteRules.slice(0, limit) : state.adminCustomerRouteRules;
+
+  if (!rules.length) {
+    return `
+      <div class="customer-route-empty">
+        <strong>No customer route rules</strong>
+        <span>Add CPU, DTC, or GNV / Greenville customer defaults here.</span>
+      </div>
+    `;
+  }
+
+  return rules
+    .map((rule) => `
+      <div class="customer-route-rule-row">
+        <div>
+          <strong>${escapeHtml(rule.customerPattern)}</strong>
+          <span>${escapeHtml(customerRouteDisplay(rule.route))}</span>
+        </div>
+
+        ${
+          editable
+            ? `<div class="customer-route-row-actions">
+                <button type="button" data-edit-customer-route-rule="${escapeHtml(rule.id)}">Edit</button>
+                <button type="button" class="danger" data-remove-customer-route-rule="${escapeHtml(rule.id)}">Remove</button>
+              </div>`
+            : ""
+        }
+      </div>
+    `)
+    .join("");
+}
+
+function customerRouteRulesModalHtml() {
+  return `
+    <div class="customer-route-modal-shell">
+      <form id="customerRouteRuleFormModal" class="customer-route-modal-form">
+        <input id="customerRouteEditIdModal" type="hidden">
+        <input id="customerRouteEditOriginalPatternModal" type="hidden">
+
+        <label>
+          <span>Customer / Job match text</span>
+          <input id="customerRoutePatternInputModal" type="text" autocomplete="off" placeholder="Example: Lowe's, CPU AIR, Greenville">
+        </label>
+
+        <label>
+          <span>Route</span>
+          <select id="customerRouteSelectModal">
+            ${customerRouteOptionsHtml("CPU")}
+          </select>
+        </label>
+
+        <div class="customer-route-modal-actions">
+          <button id="customerRouteSubmitBtnModal" type="submit">Add Rule</button>
+          <button type="button" class="secondary" data-clear-customer-route-edit>Clear</button>
+        </div>
+      </form>
+
+      <div class="customer-route-modal-list">
+        <div class="customer-route-modal-list-heading">
+          <strong>Current Rules</strong>
+          <span>${escapeHtml(state.adminCustomerRouteRules.length)} active</span>
+        </div>
+
+        ${customerRouteRuleRowsHtml(true)}
+      </div>
+    </div>
+  `;
+}
+
+function setCustomerRouteEditForm(ruleId = "") {
+  const form = document.getElementById("customerRouteRuleFormModal");
+  if (!form) return;
+
+  const rule = state.adminCustomerRouteRules.find((item) => String(item.id) === String(ruleId)) || null;
+  const idInput = document.getElementById("customerRouteEditIdModal");
+  const originalPatternInput = document.getElementById("customerRouteEditOriginalPatternModal");
+  const patternInput = document.getElementById("customerRoutePatternInputModal");
+  const routeInput = document.getElementById("customerRouteSelectModal");
+  const submitButton = document.getElementById("customerRouteSubmitBtnModal");
+
+  if (idInput) idInput.value = rule?.id || "";
+  if (originalPatternInput) originalPatternInput.value = rule?.customerPattern || "";
+  if (patternInput) patternInput.value = rule?.customerPattern || "";
+  if (routeInput) routeInput.value = customerRouteValue(rule?.route || "CPU");
+  if (submitButton) submitButton.textContent = rule ? "Save Rule" : "Add Rule";
+
+  patternInput?.focus();
+}
+
+function renderCustomerRouteRules() {
+function renderCustomerRouteRules() {
+  if (!els.customerRouteRules) return;
+
+  const rules = state.adminCustomerRouteRules || [];
+  const previewLimit = 5;
+  const hiddenCount = Math.max(rules.length - previewLimit, 0);
+
+  const routeStats = CUSTOMER_ROUTE_OPTIONS
+    .map((option) => {
+      const count = rules.filter((rule) => customerRouteValue(rule.route) === option.value).length;
+
+      return `
+        <div class="customer-route-stat">
+          <small>${escapeHtml(option.label)}</small>
+          <strong>${escapeHtml(count)}</strong>
+        </div>
+      `;
+    })
+    .join("");
+
+  els.customerRouteRules.innerHTML = `
+    <div class="customer-route-overview">
+      <div class="customer-route-stat-grid">
+        ${routeStats}
+      </div>
+
+      <div class="customer-route-preview-list">
+        ${customerRouteRuleRowsHtml(false, previewLimit)}
+      </div>
+
+      ${
+        hiddenCount
+          ? `<button type="button" class="link-button customer-route-more-button" data-admin-modal="customerRoutes">View ${escapeHtml(hiddenCount)} more rule${hiddenCount === 1 ? "" : "s"}</button>`
+          : ""
+      }
+    </div>
+  `;
+    }
+  }
+
 async function saveCustomerRouteRule() {
-  const customerPattern = els.customerRoutePatternInput?.value.trim() || "";
-  const route = els.customerRouteSelect?.value || "CPU";
-  if (!customerPattern) return;
+  const modalForm = document.getElementById("customerRouteRuleFormModal");
+  const patternInput = modalForm?.querySelector("#customerRoutePatternInputModal") || els.customerRoutePatternInput;
+  const routeInput = modalForm?.querySelector("#customerRouteSelectModal") || els.customerRouteSelect;
+  const editIdInput = modalForm?.querySelector("#customerRouteEditIdModal");
+  const originalPatternInput = modalForm?.querySelector("#customerRouteEditOriginalPatternModal");
+
+  const customerPattern = patternInput?.value.trim() || "";
+  const route = customerRouteValue(routeInput?.value || "CPU");
+  const editRuleId = editIdInput?.value || "";
+  const originalPattern = originalPatternInput?.value.trim() || "";
+
+  if (!customerPattern) {
+    patternInput?.focus();
+    return;
+  }
+
   const payload = await fetchJson("/api/admin/customer-route-rules", {
     method: "POST",
     body: JSON.stringify({ customerPattern, route }),
   });
+
   state.adminCustomerRouteRules = payload.rules || [];
-  if (els.customerRoutePatternInput) els.customerRoutePatternInput.value = "";
+
+  if (editRuleId && originalPattern && originalPattern.toLowerCase() !== customerPattern.toLowerCase()) {
+    const removePayload = await fetchJson("/api/admin/customer-route-rules/remove", {
+      method: "POST",
+      body: JSON.stringify({ ruleId: editRuleId }),
+    });
+
+    state.adminCustomerRouteRules = removePayload.rules || [];
+  }
+
+  if (patternInput) patternInput.value = "";
+  if (editIdInput) editIdInput.value = "";
+  if (originalPatternInput) originalPatternInput.value = "";
+
   renderCustomerRouteRules();
+
+  if (els.adminModalBody?.querySelector(".customer-route-modal-shell")) {
+    els.adminModalBody.innerHTML = adminModalContent("customerRoutes");
+  }
 }
 
 async function removeCustomerRouteRule(ruleId) {
@@ -5568,8 +6690,14 @@ async function removeCustomerRouteRule(ruleId) {
     method: "POST",
     body: JSON.stringify({ ruleId }),
   });
+
   state.adminCustomerRouteRules = payload.rules || [];
+
   renderCustomerRouteRules();
+
+  if (els.adminModalBody?.querySelector(".customer-route-modal-shell")) {
+    els.adminModalBody.innerHTML = adminModalContent("customerRoutes");
+  }
 }
 
 async function saveManualEditLookup() {
@@ -5603,18 +6731,21 @@ async function createUserFromForm() {
   const displayInput = document.getElementById("newUserDisplayModal") || els.newUserDisplay;
   const passwordInput = document.getElementById("newUserPasswordModal") || els.newUserPassword;
   const roleInput = document.getElementById("newUserRoleModal") || els.newUserRole;
+  const stationInput = document.getElementById("newUserStationModal");
   const username = usernameInput?.value.trim() || "";
   const displayName = displayInput?.value.trim() || username;
   const password = passwordInput?.value || "";
   const role = roleInput?.value || "Operator";
+  const station = stationInput?.value || "";
   if (!username || !password) throw new Error("Username and password are required");
   await fetchJson("/api/admin/users", {
     method: "POST",
-    body: JSON.stringify({ username, displayName, password, roles: [role] }),
+    body: JSON.stringify({ username, displayName, password, roles: [role], station }),
   });
   if (usernameInput) usernameInput.value = "";
   if (displayInput) displayInput.value = "";
   if (passwordInput) passwordInput.value = "";
+  if (stationInput) stationInput.value = "";
   await refreshAdminPage();
   if (!els.adminModal?.hidden) openAdminModal("users");
 }
@@ -6393,7 +7524,18 @@ function wireEvents() {
     state.printContext = { ...(state.printContext || {}), listIds: [] };
     renderPrintOptionStages();
   });
-  els.printOptionsStages?.addEventListener("change", () => renderPrintGlassTypes());
+  els.printOptionsStages?.addEventListener("change", (event) => {
+    const allInput = event.target.closest("[data-print-stage-select-all]");
+
+    if (allInput && els.printOptionsStages.contains(allInput)) {
+      selectedPrintStageInputs().forEach((stageInput) => {
+        stageInput.checked = allInput.checked;
+      });
+    }
+
+    updatePrintStageSelectState();
+    void renderPrintGlassTypes();
+  });
   els.printOptionsClose?.addEventListener("click", () => closePrintOptions());
   els.printOptionsBackdrop?.addEventListener("click", () => closePrintOptions());
   els.printOptionsSubmit?.addEventListener("click", () => submitPrintOptions());
@@ -6469,85 +7611,151 @@ function wireEvents() {
     if (printButton) {
       event.preventDefault();
       event.stopPropagation();
+
       const rack = state.racks.find((item) => item.code === printButton.dataset.rackPrint);
+
       if (!rack || String(rack.status || "").toLowerCase() !== "closed") {
         showFloatingNotice("Complete this rack before printing its packing list.", "notice");
         return;
       }
+
       window.open(rackPackingListUrl(printButton.dataset.rackPrint, printButton.dataset.rackPrintDate || ""), "_blank", "noopener");
+
       return;
     }
+
     const completeButton = event.target.closest("[data-rack-complete]");
     if (completeButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
       completeRack(completeButton.dataset.rackComplete).catch((error) => showInlineError(error.message, true));
+
       return;
     }
+
     const uncompleteButton = event.target.closest("[data-rack-uncomplete]");
     if (uncompleteButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
       uncompleteRack(uncompleteButton.dataset.rackUncomplete).catch((error) => showInlineError(error.message, true));
+
       return;
     }
+
     const clearButton = event.target.closest("[data-rack-clear]");
     if (clearButton) {
       event.preventDefault();
       event.stopPropagation();
+
       clearRack(clearButton.dataset.rackClear).catch((error) => showInlineError(error.message, true));
+
       return;
     }
+
     const editRackButton = event.target.closest("[data-rack-edit]");
     if (editRackButton) {
       event.preventDefault();
       event.stopPropagation();
+
       openRackForm(editRackButton.dataset.rackEdit || "");
+
       return;
     }
+
     const editRackSetButton = event.target.closest("[data-rack-set-edit]");
     if (editRackSetButton) {
       event.preventDefault();
       event.stopPropagation();
+
       openRackSetForm(editRackSetButton.dataset.rackSetEdit || "");
+
       return;
     }
+
     const deleteRackSetButton = event.target.closest("[data-rack-set-delete]");
     if (deleteRackSetButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
       deleteRackSet(deleteRackSetButton.dataset.rackSetDelete || "").catch((error) => showInlineError(error.message, true));
+
       return;
     }
+
     const moveOpenButton = event.target.closest("[data-rack-move-open]");
-if (moveOpenButton) {
-  event.preventDefault();
-  event.stopPropagation();
+    if (moveOpenButton) {
+      event.preventDefault();
+      event.stopPropagation();
 
-  const rackItemId = moveOpenButton.dataset.rackMoveOpen || "";
-  state.rackMoveItemId = state.rackMoveItemId === rackItemId ? "" : rackItemId;
+      const rackItemId = moveOpenButton.dataset.rackMoveOpen || "";
+      state.rackMoveItemId = state.rackMoveItemId === rackItemId ? "" : rackItemId;
 
-  renderRacksPage();
-  return;
-}
+      renderRacksPage();
 
-const moveCancelButton = event.target.closest("[data-rack-move-cancel]");
-if (moveCancelButton) {
-  event.preventDefault();
-  event.stopPropagation();
+      return;
+    }
 
-  state.rackMoveItemId = "";
-  renderRacksPage();
-  return;
-}
+    const moveCancelButton = event.target.closest("[data-rack-move-cancel]");
+    if (moveCancelButton) {
+      event.preventDefault();
+      event.stopPropagation();
 
-const moveButton = event.target.closest("[data-rack-move]");
-if (moveButton) {
-  event.preventDefault();
-  event.stopPropagation();
+      state.rackMoveItemId = "";
 
-  moveRackItem(moveButton.dataset.rackMove).catch((error) => showInlineError(error.message, true));
-  return;
-}
+      renderRacksPage();
+
+      return;
+    }
+
+    const moveButton = event.target.closest("[data-rack-move]");
+    if (moveButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      moveRackItem(moveButton.dataset.rackMove).catch((error) => showInlineError(error.message, true));
+
+      return;
+    }
+
     const clearItemButton = event.target.closest("[data-rack-clear-item]");
     if (clearItemButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
       clearRackItem(clearItemButton.dataset.rackClearItem, clearItemButton.dataset.rackClearLabel).catch((error) => showInlineError(error.message, true));
+
+      return;
+    }
+
+    const rackSelectCard = event.target.closest("[data-rack-select]");
+    if (rackSelectCard) {
+      event.preventDefault();
+
+      state.selectedRackOverviewCode = rackSelectCard.dataset.rackSelect || "";
+      state.rackMoveItemId = "";
+
+      renderRacksPage();
+
+      return;
     }
   });
+
+  els.rackGrid?.addEventListener("keydown", (event) => {
+    const rackSelectCard = event.target.closest("[data-rack-select]");
+
+    if (!rackSelectCard) return;
+    if (!["Enter", " "].includes(event.key)) return;
+
+    event.preventDefault();
+
+    state.selectedRackOverviewCode = rackSelectCard.dataset.rackSelect || "";
+    state.rackMoveItemId = "";
+
+    renderRacksPage();
+  });
+
   els.rackCreateOpenBtn?.addEventListener("click", () => openRackForm(""));
   els.rackSetCreateOpenBtn?.addEventListener("click", () => openRackSetForm(""));
 
@@ -6556,57 +7764,6 @@ if (moveButton) {
   });
 
   els.importWindowResetBtn?.addEventListener("click", () => resetImportDateWindow());
-
-  els.checkUpdatesBtn?.addEventListener("click", async () => {
-    const oldText = els.checkUpdatesBtn.textContent;
-
-    try {
-      els.checkUpdatesBtn.disabled = true;
-      els.checkUpdatesBtn.textContent = "Checking...";
-
-      showImportStatusLoading("Checking GitHub for updates...");
-      await waitForNextPaint();
-
-      const status = await fetchJson("/api/admin/update-check");
-
-      if (!status.ok) {
-        showImportStatusResult(
-          "review",
-          "Update check unavailable.",
-          status.error || "Git upstream is not configured.",
-        );
-
-        return;
-      }
-
-      if (status.updateAvailable) {
-        const updateText = status.method === "github_zip"
-          ? `GitHub update available from ${status.upstream}. Local ${status.local || "unknown"} -> Remote ${status.remote || "unknown"}.`
-          : `${status.behind} commit(s) behind ${status.upstream}. Local ${status.local || "unknown"} -> Remote ${status.remote || "unknown"}.`;
-
-        showImportStatusResult(
-          "notice",
-          "Update available.",
-          `${updateText} The app will back up and restore the SQLite database so scans are preserved.`,
-          `<button type="button" data-apply-program-update>Apply update now</button>`,
-        );
-
-        return;
-      }
-
-      const currentText = status.method === "github_zip"
-        ? `GitHub fallback checked ${status.upstream}. Local ${status.local || "unknown"} / Remote ${status.remote || "unknown"}.`
-        : `${status.branch} is current with ${status.upstream}. Local ${status.local || "unknown"} / Remote ${status.remote || "unknown"}.`;
-
-      showImportStatusResult("success", "No updates found.", currentText);
-    } catch (error) {
-      showImportStatusResult("review", "Update check failed.", error.message);
-    } finally {
-      els.checkUpdatesBtn.disabled = false;
-      els.checkUpdatesBtn.textContent = oldText || "Check updates";
-      els.importPreviewBox?.classList.remove("loading");
-    }
-  });
 
   els.deleteDateSelect?.addEventListener("change", () => renderAdminDeleteControls());
   els.deleteListBtn?.addEventListener("click", () => deleteSelectedDeliveryList(false).catch((error) => showInlineError(error.message, true)));
@@ -6642,6 +7799,13 @@ if (moveButton) {
     if (event.target.closest("#manualLookupForm")) {
       event.preventDefault();
       saveManualEditLookup().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    if (event.target.closest("#customerRouteRuleFormModal")) {
+      event.preventDefault();
+      saveCustomerRouteRule().catch((error) => showInlineError(error.message, true));
+      return;
     }
   });
   els.customerRouteRuleForm?.addEventListener("submit", (event) => {
@@ -6747,6 +7911,12 @@ if (moveButton) {
   });
   els.baySpecialFilter?.addEventListener("change", () => {
     state.baySpecialFilter = els.baySpecialFilter.value;
+    renderBayMapPage();
+  });
+  els.bayQuickFilters?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-bay-quick-filter]");
+    if (!button) return;
+    state.bayQuickFilter = button.dataset.bayQuickFilter || "all";
     renderBayMapPage();
   });
   els.bayCategoryFilters?.addEventListener("click", (event) => {
@@ -6975,13 +8145,22 @@ if (moveButton) {
     const adminModalButton = event.target.closest("[data-admin-modal]");
     if (adminModalButton) {
       const modalKind = adminModalButton.dataset.adminModal || "";
+
       if (modalKind === "lookups") {
         ensureManualEditLookupsLoaded()
           .then(() => openAdminModal("lookups"))
           .catch((error) => showInlineError(error.message, true));
+      } else if (modalKind === "customerRoutes") {
+        fetchJson("/api/admin/customer-route-rules")
+          .then((payload) => {
+            state.adminCustomerRouteRules = payload.rules || [];
+            openAdminModal("customerRoutes");
+          })
+          .catch((error) => showInlineError(error.message, true));
       } else {
         openAdminModal(modalKind);
       }
+
       return;
     }
     const modalStationButton = event.target.closest("#addStationBtnModal");
@@ -7025,17 +8204,6 @@ if (moveButton) {
     const adminReportButton = event.target.closest("[data-admin-report]");
     if (adminReportButton) {
       openPrintOptions({ date: dashboardDateKey(), listIds: state.lists.map((list) => list.id) });
-      return;
-    }
-    const applyUpdateButton = event.target.closest("[data-apply-program-update]");
-    if (applyUpdateButton) {
-      event.preventDefault();
-
-      applyUpdateButton.disabled = true;
-      applyProgramUpdate().catch((error) => {
-        showImportStatusResult("review", "Update failed.", error.message);
-      });
-
       return;
     }
     const adminListEditButton = event.target.closest("[data-admin-list-edit]");
@@ -7172,58 +8340,109 @@ if (moveButton) {
     }
     const deactivateUserButton = event.target.closest("[data-deactivate-user]");
     if (deactivateUserButton) {
-      fetchJson("/api/admin/users/deactivate", {
-        method: "POST",
-        body: JSON.stringify({ username: deactivateUserButton.dataset.deactivateUser }),
-      })
-        .then(() => refreshAdminPage())
-        .catch((error) => showInlineError(error.message));
+      const username = deactivateUserButton.dataset.deactivateUser || "";
+
+      confirmDeactivateUser(username).then((confirmed) => {
+        if (!confirmed) return;
+
+        fetchJson("/api/admin/users/deactivate", {
+          method: "POST",
+          body: JSON.stringify({ username }),
+        })
+          .then(() => refreshAdminUsersUi())
+          .catch((error) => showInlineError(error.message));
+      });
+
       return;
     }
+
     const reactivateUserButton = event.target.closest("[data-reactivate-user]");
     if (reactivateUserButton) {
+      const username = reactivateUserButton.dataset.reactivateUser || "";
+
       fetchJson("/api/admin/users/reactivate", {
         method: "POST",
-        body: JSON.stringify({ username: reactivateUserButton.dataset.reactivateUser }),
+        body: JSON.stringify({ username }),
       })
-        .then(() => refreshAdminPage())
+        .then(() => refreshAdminUsersUi())
         .catch((error) => showInlineError(error.message));
+
       return;
     }
+
+    const generatePasswordButton = event.target.closest("[data-generate-user-password]");
+    if (generatePasswordButton) {
+      const username = generatePasswordButton.dataset.generateUserPassword;
+      const input = document.querySelector(`[data-user-password="${CSS.escape(username)}"]`);
+
+      if (input) {
+        input.value = generateTemporaryPassword();
+        input.type = "text";
+        input.focus();
+        input.select();
+      }
+
+      showFloatingNotice("Temporary password generated. Save it, then give it to the user.", "notice");
+
+      return;
+    }
+
     const togglePasswordButton = event.target.closest("[data-toggle-password]");
     if (togglePasswordButton) {
       const username = togglePasswordButton.dataset.togglePassword;
       const input = document.querySelector(`[data-user-password="${CSS.escape(username)}"]`);
+
       if (input) input.type = input.type === "password" ? "text" : "password";
+
       return;
     }
+
     const updatePasswordButton = event.target.closest("[data-update-user-password]");
     if (updatePasswordButton) {
       const username = updatePasswordButton.dataset.updateUserPassword;
       const input = document.querySelector(`[data-user-password="${CSS.escape(username)}"]`);
+      const password = input?.value || "";
+
+      if (!password.trim()) {
+        showFloatingNotice("Enter or generate a new password before saving.", "notice");
+        input?.focus();
+        return;
+      }
+
       fetchJson("/api/admin/users/password", {
         method: "POST",
-        body: JSON.stringify({ username, password: input?.value || "" }),
+        body: JSON.stringify({ username, password }),
       })
         .then(() => {
           if (input) input.value = "";
-          refreshAdminPage();
+          showFloatingNotice(`Password updated for ${username}.`, "success");
+          return refreshAdminUsersUi();
         })
         .catch((error) => showInlineError(error.message));
+
       return;
     }
+
     const updateUserRoleButton = event.target.closest("[data-update-user-role]");
     if (updateUserRoleButton) {
       const username = updateUserRoleButton.dataset.updateUserRole;
       const select = document.querySelector(`[data-user-role-select="${CSS.escape(username)}"]`);
+      const stationSelect = document.querySelector(`[data-user-station-select="${CSS.escape(username)}"]`);
+
       fetchJson("/api/admin/users/roles", {
         method: "POST",
-        body: JSON.stringify({ username, roles: [select?.value || "Operator"] }),
+        body: JSON.stringify({
+          username,
+          roles: [select?.value || "Operator"],
+          station: stationSelect?.value || "",
+        }),
       })
-        .then(() => refreshAdminPage())
+        .then(() => refreshAdminUsersUi())
         .catch((error) => showInlineError(error.message));
+
       return;
     }
+
     const saveRolePermissionsButton = event.target.closest("[data-save-role-permissions]");
     if (saveRolePermissionsButton) {
       event.preventDefault();
@@ -7243,6 +8462,18 @@ if (moveButton) {
       deleteManualLineItem(deleteLineItemButton.dataset.deleteLineItem).catch((error) => showInlineError(error.message, true));
       return;
     }
+    const editCustomerRouteButton = event.target.closest("[data-edit-customer-route-rule]");
+    if (editCustomerRouteButton) {
+      setCustomerRouteEditForm(editCustomerRouteButton.dataset.editCustomerRouteRule);
+      return;
+    }
+
+    const clearCustomerRouteEditButton = event.target.closest("[data-clear-customer-route-edit]");
+    if (clearCustomerRouteEditButton) {
+      setCustomerRouteEditForm("");
+      return;
+    }
+
     const removeCustomerRouteButton = event.target.closest("[data-remove-customer-route-rule]");
     if (removeCustomerRouteButton) {
       removeCustomerRouteRule(removeCustomerRouteButton.dataset.removeCustomerRouteRule).catch((error) => showInlineError(error.message, true));
@@ -7257,9 +8488,12 @@ if (moveButton) {
       const listIds = String(printListsButton.dataset.printLists || "")
         .split(",")
         .filter(Boolean);
+      const firstList = state.lists.find((list) => list.id === listIds[0]);
+      const date = printListsButton.dataset.printDate || firstList?.deliveryDate || selectedDeliveryDate();
+      const updatedOnly = printListsButton.dataset.printUpdatedOnly === "1";
 
       if (listIds.length) {
-        openPrintPackage([{ listIds }], { updatedOnly: "1" });
+        openPrintOptions({ date, listIds, updatedOnly });
       }
 
       return;

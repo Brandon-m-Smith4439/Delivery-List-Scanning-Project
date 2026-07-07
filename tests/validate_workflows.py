@@ -285,6 +285,37 @@ def main() -> int:
             )
         )
 
+    misnamed_source = ROOT / "data" / "_uploads" / "7.7.26.xlsx"
+    if misnamed_source.exists():
+        misnamed_folder = ROOT / "_verification" / f"misnamed-import-{os.getpid()}"
+        misnamed_folder.mkdir(exist_ok=True)
+        misnamed_file = misnamed_folder / "7.9.26.xlsx"
+        misnamed_file.write_bytes(misnamed_source.read_bytes())
+        misnamed_result = store.import_delivery_folder(
+            {
+                "user": "Validator",
+                "sourceFolder": str(misnamed_folder),
+                "dateFrom": "2026-07-07",
+                "dateTo": "2026-07-07",
+            }
+        )
+        changed_misnamed = misnamed_result["importedFiles"] + misnamed_result["updatedFiles"]
+        results.append(
+            assert_true(
+                "misnamed_xlsx_import_uses_workbook_date",
+                bool(changed_misnamed)
+                and not misnamed_result["failedFiles"]
+                and all(row["deliveryDate"] == "2026-07-07" for row in changed_misnamed),
+                {
+                    "changed": len(changed_misnamed),
+                    "deliveryDates": sorted({row["deliveryDate"] for row in changed_misnamed}),
+                    "skipped": misnamed_result["skippedFiles"],
+                },
+            )
+        )
+        misnamed_file.unlink(missing_ok=True)
+        misnamed_folder.rmdir()
+
     folder_result = store.import_delivery_folder({"user": "Validator"})
     changed_files = len(folder_result["importedFiles"]) + len(folder_result["updatedFiles"])
     results.append(

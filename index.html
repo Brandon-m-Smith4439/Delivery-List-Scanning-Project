@@ -429,6 +429,7 @@
           <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay">Item Management</button>
         </div>
         <div id="bayFlowPanel" class="bay-route-flow"></div>
+        <div class="bay-quick-filters" id="bayQuickFilters" aria-label="Bay map quick filters"></div>
         <div class="bay-action-bar">
           <label class="search-box">
             <span class="search-icon"></span>
@@ -668,7 +669,6 @@
             </div>
             <div class="admin-button-row admin-primary-actions">
               <button id="folderImportBtn" type="button">Import / Update Delivery List</button>
-              <button id="checkUpdatesBtn" type="button">Check Updates</button>
             </div>
             <details class="admin-import-settings">
               <summary>Import folder and date settings</summary>
@@ -691,7 +691,7 @@
             <div class="section-heading">
               <h2>Users & Permissions</h2>
               <div class="section-actions">
-                <button class="link-button" type="button" data-admin-modal="roles">Edit permissions</button>
+                <button class="link-button" type="button" data-admin-modal="roles">Edit role permissions</button>
                 <button class="link-button" type="button" data-admin-modal="users">Edit users</button>
               </div>
             </div>
@@ -700,28 +700,11 @@
 
           <section class="panel admin-compact-panel admin-dashboard-card">
             <div class="section-heading">
-              <h2>Stations</h2>
-              <button class="link-button" type="button" data-admin-modal="stations">Edit stations</button>
+              <h2>Customer Route Rules</h2>
+              <button class="link-button" type="button" data-admin-modal="customerRoutes">Edit customer routes</button>
             </div>
-            <div class="station-add-row">
-              <input id="newStationInput" type="text" autocomplete="off" placeholder="New station">
-              <button id="addStationBtn" type="button">Add</button>
-            </div>
-            <div id="adminStations" class="compact-list"></div>
-          </section>
 
-          <section class="panel admin-compact-panel admin-dashboard-card">
-            <h2>Customer Route Rules</h2>
-            <form id="customerRouteRuleForm" class="admin-form">
-              <input id="customerRoutePatternInput" type="text" autocomplete="off" placeholder="Customer name or pattern">
-              <select id="customerRouteSelect">
-                <option value="CPU">CPU</option>
-                <option value="DTC">DTC</option>
-                <option value="GNV">GRN / Greenville</option>
-              </select>
-              <button type="submit">Save rule</button>
-            </form>
-            <div id="customerRouteRules" class="compact-list"></div>
+            <div id="customerRouteRules" class="customer-route-rules-overview"></div>
           </section>
 
           <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="edit_delivery_lists">
