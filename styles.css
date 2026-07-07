@@ -6340,19 +6340,20 @@ body.bay-move-mode .excel-bay-map {
 }
 
 .rack-grid {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(280px, 1fr));
-  gap: 14px;
-  align-items: start;
+  display: block;
+  column-count: 3;
+  column-gap: 14px;
   margin-bottom: 24px;
-  padding-bottom: 360px;
 }
 
 .rack-column {
-  position: relative;
+  display: block;
+  width: 100%;
   min-width: 0;
-  align-content: start;
+  margin: 0 0 14px;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .rack-column > .rack-column-header {
@@ -6374,8 +6375,7 @@ body.bay-move-mode .excel-bay-map {
   transition:
     transform 140ms ease,
     box-shadow 140ms ease,
-    border-color 140ms ease,
-    background-color 140ms ease;
+    border-color 140ms ease;
 }
 
 .rack-column > .rack-column-header::-webkit-details-marker {
@@ -6390,9 +6390,9 @@ body.bay-move-mode .excel-bay-map {
 
 .rack-column[open] > .rack-column-header {
   border-color: #9fc0ff;
-  border-radius: 10px 10px 8px 8px;
+  border-radius: 10px 10px 0 0;
   box-shadow:
-    0 16px 32px rgba(5, 22, 48, 0.22),
+    0 14px 28px rgba(5, 22, 48, 0.18),
     0 0 0 3px rgba(19, 92, 255, 0.12);
 }
 
@@ -6431,15 +6431,18 @@ body.bay-move-mode .excel-bay-map {
   border: 1px solid rgba(255, 255, 255, 0.26);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
+  color: #fff;
 }
 
 .rack-column-chevron::before {
-  content: "›";
-  color: #fff;
-  font-size: 24px;
-  font-weight: 950;
-  line-height: 1;
-  transform: translateY(-1px);
+  content: "";
+  width: 0;
+  height: 0;
+  display: block;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid currentColor;
+  transform: translateX(1px);
   transition: transform 140ms ease;
 }
 
@@ -6449,7 +6452,7 @@ body.bay-move-mode .excel-bay-map {
 }
 
 .rack-column[open] .rack-column-chevron::before {
-  transform: rotate(90deg) translateY(-1px);
+  transform: rotate(90deg) translateX(1px);
 }
 
 .rack-column-qty {
@@ -6491,42 +6494,28 @@ body.bay-move-mode .excel-bay-map {
 }
 
 .rack-group-body {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 8px);
-  left: 0;
-  right: 0;
-  display: none;
-  max-height: min(560px, calc(100vh - 250px));
-  overflow: auto;
-  padding: 10px;
-  border: 1px solid #b8c8e4;
-  border-radius: 10px;
-  background: #f8fbff;
-  box-shadow: 0 24px 54px rgba(5, 22, 48, 0.28);
-}
-
-.rack-column[open] {
-  z-index: 40;
-}
-
-.rack-column[open] > .rack-group-body {
   display: grid;
   gap: 8px;
+  padding: 10px;
+  border: 1px solid #b8c8e4;
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  background: #f8fbff;
+  box-shadow: 0 14px 28px rgba(5, 22, 48, 0.12);
 }
 
-.rack-group-body::-webkit-scrollbar {
-  width: 11px;
+.rack-column:not([open]) > .rack-group-body {
+  display: none;
 }
 
-.rack-group-body::-webkit-scrollbar-thumb {
-  border: 3px solid #f8fbff;
-  border-radius: 999px;
-  background: #9aa8bd;
+.rack-group-body .rack-card {
+  box-shadow: 0 8px 18px rgba(5, 22, 48, 0.08);
 }
 
-.rack-group-body::-webkit-scrollbar-track {
-  background: transparent;
+.rack-group-body .admin-empty {
+  margin: 0;
+  border-style: solid;
+  background: #fff;
 }
 
 .rack-group-body .rack-card {
@@ -9114,4 +9103,25 @@ body.bay-move-mode .excel-bay-map {
   display: inline-flex;
   color: #15803d;
   font-weight: 950;
+}
+
+@media (max-width: 1100px) {
+  .rack-grid {
+    column-count: 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .rack-grid {
+    column-count: 1;
+  }
+
+  .rack-column > .rack-column-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .rack-column-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
 }

@@ -1275,6 +1275,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
         return cloned_items
 
+    def import_order_item_key(self, value: Any, order_no: Any, item_no: Any) -> str:
+        source_text = str(value or "").strip()
+        parts = source_text.split(":")
+        if len(parts) >= 2 and parts[-2].strip().isdigit() and parts[-1].strip().isdigit():
+            return f"{parts[-2].strip()}-{parts[-1].strip().zfill(3)}"
+        return f"{str(order_no or '').strip()}-{str(item_no or '').strip().zfill(3)}"
+
+    def import_business_key(self, values: dict[str, Any]) -> str:
+        def field(name: str) -> Any:
+            if hasattr(values, "keys") and name in values.keys():
+                return values[name]
+            return values.get(name) if isinstance(values, dict) else ""
+
+        parts = [
+            str(field("order_no") or "").strip(),
+            str(field("item_no") or "").strip().zfill(3),
+            str(field("dimensions") or "").strip().upper(),
+            str(field("customer") or "").strip().upper(),
+            str(field("product") or "").strip().upper(),
+        ]
+        return "\x1f".join(parts)
+
     def upsert_delivery_list(
         self,
         con: sqlite3.Connection,
@@ -1312,19 +1334,30 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "addedPieceQty": 0,
             "changedPieceQty": 0,
             "changedLineCount": 0,
+            "originalQty": 0,
             "totalQty": sum(int(item.get("qty") or 0) for item in items),
         }
         if replace_items:
-            preserved_scans: dict[str, int] = {}
-            existing_keys: set[str] = set()
-            previous_items: dict[str, dict[str, Any]] = {}
+            previous_by_id: dict[str, dict[str, Any]] = {}
+            previous_pools: dict[str, dict[str, list[dict[str, Any]]]] = {
+                "source": {},
+                "order_item": {},
+                "business": {},
+            }
             preserved_rack_items: list[dict[str, Any]] = []
+            original_total_qty = 0
+
+            def add_previous_to_pool(pool_name: str, key: str, record: dict[str, Any]) -> None:
+                if not key:
+                    return
+                previous_pools[pool_name].setdefault(key, []).append(record)
+
             for row in con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall():
                 scanned_qty = int(row["scanned_qty"] or 0)
                 source_key = str(row["source_id"])
                 order_item_key = f"{row['order_no']}-{str(row['item_no']).zfill(3)}"
                 line_key = str(row["id"])
-                existing_keys.update({line_key, source_key, order_item_key})
+                source_match_key = self.import_order_item_key(source_key, row["order_no"], row["item_no"])
                 previous_payload = {
                     "qty": int(row["qty"] or 0),
                     "dimensions": str(row["dimensions"] or ""),
@@ -1335,14 +1368,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "process_state": str(row["process_state"] or ""),
                     "queue_state": str(row["queue_state"] or ""),
                 }
-                previous_items[line_key] = previous_payload
-                previous_items[source_key] = previous_payload
-                previous_items[order_item_key] = previous_payload
-                preserved_scans[source_key] = max(preserved_scans.get(source_key, 0), scanned_qty)
-                preserved_scans[order_item_key] = max(
-                    preserved_scans.get(order_item_key, 0),
-                    scanned_qty,
-                )
+                record = {
+                    "id": line_key,
+                    "source_id": source_key,
+                    "order_item_key": order_item_key,
+                    "source_match_key": source_match_key,
+                    "business_key": self.import_business_key(row),
+                    "payload": previous_payload,
+                    "scanned_qty": scanned_qty,
+                }
+                original_total_qty += int(row["qty"] or 0)
+                previous_by_id[line_key] = record
+                add_previous_to_pool("source", source_match_key, record)
+                add_previous_to_pool("order_item", order_item_key, record)
+                add_previous_to_pool("business", record["business_key"], record)
             preserved_rack_items = [
                 {
                     "rack_id": row["rack_id"],
@@ -1365,6 +1404,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ]
             con.execute("DELETE FROM line_items WHERE list_id = ?", (list_id,))
             cloned_items = self.insert_line_items(con, list_id, items)
+            summary["originalQty"] = original_total_qty
             if not existing:
                 summary["newPieceQty"] = summary["totalQty"]
                 summary["addedPieceQty"] = summary["totalQty"]
@@ -1374,16 +1414,40 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             for cloned in cloned_items:
                 cloned_by_key[str(cloned["source_id"])] = cloned
                 cloned_by_key[f"{cloned['order_no']}-{str(cloned['item_no']).zfill(3)}"] = cloned
+            used_previous_ids: set[str] = set()
+
+            def pop_previous(pool_name: str, key: str) -> dict[str, Any] | None:
+                pool = previous_pools[pool_name].get(key) or []
+                while pool:
+                    candidate = pool.pop(0)
+                    if candidate["id"] not in used_previous_ids:
+                        used_previous_ids.add(candidate["id"])
+                        return candidate
+                return None
+
+            def match_previous(cloned: dict[str, Any]) -> dict[str, Any] | None:
+                cloned_line_key = str(cloned["id"])
+                exact = previous_by_id.get(cloned_line_key)
+                if exact and exact["id"] not in used_previous_ids:
+                    used_previous_ids.add(exact["id"])
+                    return exact
+                source_match_key = self.import_order_item_key(cloned["source_id"], cloned["order_no"], cloned["item_no"])
+                return (
+                    pop_previous("source", source_match_key)
+                    or pop_previous("business", self.import_business_key(cloned))
+                    or pop_previous("order_item", f"{cloned['order_no']}-{str(cloned['item_no']).zfill(3)}")
+                )
+
             for cloned in cloned_items:
-                order_item_key = f"{cloned['order_no']}-{cloned['item_no']}"
-                preserved = preserved_scans.get(cloned["source_id"], preserved_scans.get(order_item_key, 0))
+                previous_record = match_previous(cloned) if existing else None
+                previous = previous_record["payload"] if previous_record else None
+                preserved = previous_record["scanned_qty"] if previous_record else 0
                 if preserved:
                     con.execute(
                         "UPDATE line_items SET scanned_qty = ? WHERE id = ?",
                         (min(int(preserved), int(cloned["qty"])), cloned["id"]),
                     )
-                cloned_line_key = str(cloned["id"])
-                if existing and cloned_line_key not in existing_keys:
+                if existing and not previous:
                     next_state = " ".join(part for part in [cloned["process_state"], "New Line"] if part).strip()
                     con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
                     summary["newPieceQty"] += int(cloned["qty"] or 0)
@@ -1391,7 +1455,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     summary["changedPieceQty"] += int(cloned["qty"] or 0)
                     summary["changedLineCount"] += 1
                 elif existing:
-                    previous = previous_items.get(cloned_line_key)
                     current = {
                         "qty": int(cloned["qty"] or 0),
                         "dimensions": str(cloned["dimensions"] or ""),
@@ -1411,15 +1474,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         summary["addedPieceQty"] += qty_delta
                         summary["changedPieceQty"] += int(cloned["qty"] or 0)
                         summary["changedLineCount"] += 1
-                    elif previous:
-                        previous_state = str(previous.get("process_state") or "")
-                        preserved_flags = [flag for flag in ("New Line", "Updated Line") if re.search(rf"\b{re.escape(flag)}\b", previous_state, flags=re.IGNORECASE)]
-                        if preserved_flags:
-                            state_text = str(cloned["process_state"] or "")
-                            for flag in preserved_flags:
-                                if not re.search(rf"\b{re.escape(flag)}\b", state_text, flags=re.IGNORECASE):
-                                    state_text = " ".join(part for part in [state_text, flag] if part).strip()
-                            con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (state_text, cloned["id"]))
             for preserved_rack in preserved_rack_items:
                 cloned = cloned_by_key.get(preserved_rack["source_id"]) or cloned_by_key.get(preserved_rack["order_item_key"])
                 if not cloned:

@@ -214,6 +214,44 @@ def main() -> int:
             {"updatedCount": unchanged_reimport["updatedCount"], "changedListIds": unchanged_reimport["changedListIds"]},
         )
     )
+    shifted_sample = json.loads(json.dumps(sample))
+    shifted_sample["deliveryDate"] = "2026-04-03"
+    first_shift_import = store.import_delivery_list({"payload": shifted_sample, "user": "Validator", "fileName": "sample-delivery-list.json"})
+    shifted_sample["items"].insert(
+        0,
+        {
+            "id": "validation-new-row-001",
+            "barcode": "T200999991001000",
+            "order": "999991",
+            "item": "001",
+            "qty": 2,
+            "scanned": 0,
+            "dimensions": '40" x 40"',
+            "customer": "VALIDATION CUSTOMER",
+            "route": "",
+            "job": "99999999 VALIDATION",
+            "product": '3/8" Clear Tempered',
+            "processState": "",
+            "queueState": "",
+        },
+    )
+    shifted_reimport = store.import_delivery_list({"payload": shifted_sample, "user": "Validator", "fileName": "sample-delivery-list.json"})
+    shifted_staging = next(row for row in shifted_reimport["stageSummaries"] if row["listId"] == "2026-04-03-staging-airport")
+    results.append(
+        assert_true(
+            "row_position_shift_only_marks_inserted_lines_new",
+            first_shift_import["createdCount"] == 6
+            and shifted_reimport["updatedCount"] >= 1
+            and shifted_staging["newPieceQty"] == 2
+            and shifted_staging["changedLineCount"] == 1,
+            {
+                "createdCount": first_shift_import["createdCount"],
+                "updatedCount": shifted_reimport["updatedCount"],
+                "stagingNewPieceQty": shifted_staging["newPieceQty"],
+                "stagingChangedLineCount": shifted_staging["changedLineCount"],
+            },
+        )
+    )
     initial_lookups = store.get_manual_edit_lookups()
     results.append(
         assert_true(

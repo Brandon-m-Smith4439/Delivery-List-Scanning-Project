@@ -4908,7 +4908,13 @@ function renderImportHistory(imports) {
 }
 
 function importHistoryRows(imports = []) {
-  const rows = imports.slice(0, 12);
+  const seenImportGroups = new Set();
+  const rows = imports.filter((entry) => {
+    const key = entry.deliveryDate || entry.sourceName || entry.fileName || entry.importedAt || "unknown";
+    if (seenImportGroups.has(key)) return false;
+    seenImportGroups.add(key);
+    return true;
+  }).slice(0, 12);
 
   if (!rows.length) {
     return `<div class="admin-empty">No import history yet. Imports from the temp folder or single files will appear here.</div>`;
@@ -4945,7 +4951,7 @@ function importHistoryRows(imports = []) {
   const originalQtyForRow = (row, list) => {
     const updatedQty = updatedQtyForRow(row, list);
     const changedQty = changedQtyForRow(row, list);
-    const explicitOriginalQty = row.originalQty ?? row.previousQty ?? row.oldQty ?? row.beforeQty;
+    const explicitOriginalQty = row.originalQty ?? row.originalPieceQty ?? row.previousQty ?? row.oldQty ?? row.beforeQty;
 
     if (explicitOriginalQty !== undefined && explicitOriginalQty !== null && explicitOriginalQty !== "") {
       return Number(explicitOriginalQty);
