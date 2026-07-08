@@ -59,6 +59,7 @@ const state = {
   rackModal: null,
   rackMoveItemId: "",
   rackManagerSelectedCode: "",
+  rackManagerEditingRackCode: "",
   rackManagerEditingSetLabel: "",
   rackStatusFilter: "all",
   rackSort: "code-asc",
@@ -370,7 +371,7 @@ function dateInputValue(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1, 2)}-${pad(date.getDate(), 2)}`;
 }
 
-const IMPORT_MAX_DATE = "9999-12-31";
+const IMPORT_MAX_DATE = "";
 
 function defaultImportFromDate() {
   const from = new Date();
@@ -380,15 +381,18 @@ function defaultImportFromDate() {
 
 function resetImportDateWindow() {
   if (els.importFromDate) els.importFromDate.value = defaultImportFromDate();
-  if (els.importToDate) els.importToDate.value = IMPORT_MAX_DATE;
+  if (els.importToDate) {
+    els.importToDate.value = "";
+    els.importToDate.placeholder = "Newest future list";
+  }
 }
 
 function currentImportDateWindow() {
   const dateFrom = (els.importFromDate?.value || defaultImportFromDate()).trim();
-  const dateTo = (els.importToDate?.value || IMPORT_MAX_DATE).trim();
+  const dateTo = (els.importToDate?.value || "").trim();
 
   if (els.importFromDate && !els.importFromDate.value) els.importFromDate.value = dateFrom;
-  if (els.importToDate && !els.importToDate.value) els.importToDate.value = dateTo;
+  if (els.importToDate && !els.importToDate.value) els.importToDate.placeholder = "Newest future list";
 
   return { dateFrom, dateTo };
 }
@@ -4861,7 +4865,7 @@ function submitPrintOptions() {
     rushOnly: els.printRushOnly?.checked ? "1" : "",
     remakeOnly: els.printRemakeOnly?.checked ? "1" : "",
     glassType: [...(els.printOptionsGlassType?.querySelectorAll('.print-glass-choice:not(.print-glass-all-choice) input[type="checkbox"]:checked') || [])].map((input) => input.value.trim()).filter(Boolean).join(","),
-    mirrorMode: "include",
+    mirrorMode: "exclude",
     customers: els.printCustomerFilter?.value.trim() || "",
     orders: els.printOrderFilter?.value.trim() || "",
   };
@@ -4882,7 +4886,7 @@ async function importTempDeliveryFolder() {
   const sourceFolder = els.tempFolderInput?.value.trim() || "";
   const { dateFrom, dateTo } = currentImportDateWindow();
 
-  showImportStatusLoading("Importing Temp folder...", `Checking delivery dates from ${formatDisplayDate(dateFrom)} forward.`);
+  showImportStatusLoading("Importing Temp folder...", `Checking delivery dates from ${formatDisplayDate(dateFrom)} through the newest future list.`);
   await waitForNextPaint();
 
   const result = await fetchJson("/api/import/folder", {
@@ -5106,8 +5110,12 @@ async function searchAdminDeliveryLists(query) {
 
 function activeRecentImports(imports = state.adminRecentImports || []) {
   const activeListIds = new Set(state.lists.map((list) => list.id));
+  const activeByDate = listsByDeliveryDate(state.lists);
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(0, 0, 0, 0);
 
-  return imports
+  const cleanedImports = imports
     .map((entry) => {
       const listIds = Array.isArray(entry.listIds)
         ? entry.listIds.filter((listId) => activeListIds.has(listId))
@@ -5129,6 +5137,40 @@ function activeRecentImports(imports = state.adminRecentImports || []) {
 
       return hasActiveListIds || hasActiveStageSummaries;
     });
+
+  const importedDateKeys = new Set(cleanedImports.map((entry) => String(entry.deliveryDate || "")).filter(Boolean));
+  const liveDateEntries = activeByDate
+    .filter((group) => {
+      const date = parseDateKey(group.date);
+      return date && date >= yesterday && !importedDateKeys.has(group.date);
+    })
+    .map((group) => ({
+      id: `active-${group.date}`,
+      batchId: `active-${group.date}`,
+      deliveryDate: group.date,
+      sourceName: "Active delivery lists",
+      importKind: "active_window",
+      rowCount: group.lists.reduce((sum, list) => sum + Number(list.itemCount || 0), 0),
+      totalQty: group.lists.reduce((sum, list) => sum + Number(list.totalQty || 0), 0),
+      importedAt: "",
+      createdCount: 0,
+      updatedCount: 0,
+      addedPieceQty: 0,
+      changedPieceQty: 0,
+      stageSummaries: group.lists.map((list) => ({
+        listId: list.id,
+        stage: list.stage,
+        stageProfile: list.scanner,
+        totalQty: list.totalQty || 0,
+        changedLineCount: 0,
+        changedPieceQty: 0,
+        addedPieceQty: 0,
+        created: false,
+      })),
+      listIds: group.lists.map((list) => list.id),
+    }));
+
+  return [...cleanedImports, ...liveDateEntries];
 }
 
 function renderAdminDeliveryLists() {
@@ -5455,18 +5497,48 @@ function rackManagerSetEditHtml() {
 }
 
 function focusRackManagerRackEdit(code) {
+  openRackManagerRackInlineEdit(code);
+}
+
+function openRackManagerRackInlineEdit(code) {
+  state.rackManagerEditingRackCode = code || "";
   state.rackManagerSelectedCode = code || state.rackManagerSelectedCode || "";
-  populateRackManagerQuickEdit(state.rackManagerSelectedCode);
 
-  const form = document.getElementById("rackManagerQuickEditForm");
-  const input = document.getElementById("rackManagerQuickName");
+  if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
+    els.adminModalBody.innerHTML = adminModalContent("racks");
+    window.setTimeout(() => {
+      const input = document.getElementById("rackManagerInlineName");
+      input?.focus();
+      input?.select?.();
+    }, 30);
+  }
+}
 
-  form?.classList.remove("is-highlighted");
-  void form?.offsetWidth;
-  form?.classList.add("is-highlighted");
-  input?.focus();
-  input?.select?.();
-  form?.scrollIntoView({ behavior: "smooth", block: "center" });
+async function saveRackInlineEdit() {
+  const code = state.rackManagerEditingRackCode || document.getElementById("rackManagerInlineCode")?.value || "";
+  if (!code) return;
+
+  const payload = await fetchJson("/api/racks", {
+    method: "POST",
+    body: JSON.stringify({
+      rackCode: code,
+      name: document.getElementById("rackManagerInlineName")?.value || code,
+      type: document.getElementById("rackManagerInlineType")?.value || "Steel",
+    }),
+  });
+
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  state.rackManagerSelectedCode = code;
+  state.rackManagerEditingRackCode = "";
+  renderRacksPage();
+  renderScanRackTools();
+
+  if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
+    els.adminModalBody.innerHTML = adminModalContent("racks");
+  }
+
+  showFloatingNotice(`Saved rack ${code}.`, "success");
 }
 
 function openRackManagerSetEdit(label) {
@@ -5615,8 +5687,10 @@ function rackManagerModalHtml() {
                             const canDelete = !isTruck && qty === 0;
                             const status = String(rack.status || "Open").toLowerCase() === "closed" ? "Complete" : qty ? "Open" : "Empty";
 
+                            const isEditing = state.rackManagerEditingRackCode === rack.code;
+
                             return `
-                              <article class="rack-manager-row">
+                              <article class="rack-manager-row ${isEditing ? "is-editing" : ""}">
                                 <div>
                                   <strong>${escapeHtml(isTruck ? "Truck / No Rack" : rack.code)}</strong>
                                   <span>${escapeHtml(rack.name || rack.type || "")}</span>
@@ -5626,6 +5700,25 @@ function rackManagerModalHtml() {
                                 <button type="button" class="icon-only icon-pencil" data-rack-edit="${escapeHtml(rack.code)}" title="Edit rack" aria-label="Edit ${escapeHtml(rack.code)}"></button>
                                 <button type="button" class="icon-only icon-trash danger" data-rack-delete="${escapeHtml(rack.code)}" ${canDelete ? "" : "disabled"} title="Delete empty rack" aria-label="Delete ${escapeHtml(rack.code)}"></button>
                               </article>
+                              ${
+                                isEditing
+                                  ? `<form id="rackManagerInlineEditForm" class="rack-manager-inline-edit">
+                                      <input id="rackManagerInlineCode" type="hidden" value="${escapeHtml(rack.code)}">
+                                      <label>
+                                        <span>Rack name</span>
+                                        <input id="rackManagerInlineName" type="text" autocomplete="off" value="${escapeHtml(rack.name || rack.type || rack.code || "")}" placeholder="Rack display name">
+                                      </label>
+                                      <label>
+                                        <span>Rack set / type</span>
+                                        <input id="rackManagerInlineType" type="text" list="rackManagerRackTypes" autocomplete="off" value="${escapeHtml(rack.type || "Steel")}" placeholder="Steel, Wood, Coral, Truck">
+                                      </label>
+                                      <div class="rack-manager-inline-actions">
+                                        <button type="button" class="secondary" data-rack-inline-cancel>Cancel</button>
+                                        <button type="submit">Save</button>
+                                      </div>
+                                    </form>`
+                                  : ""
+                              }
                             `;
                           })
                           .join("")}
@@ -6142,7 +6235,7 @@ function importHistoryRows(imports = []) {
     if (seenImportGroups.has(key)) return false;
     seenImportGroups.add(key);
     return true;
-  }).slice(0, 12);
+  }).slice(0, 30);
 
   if (!rows.length) {
     return `<div class="admin-empty">No import history yet. Imports from the temp folder or single files will appear here.</div>`;
@@ -8537,6 +8630,11 @@ function wireEvents() {
       saveRackSetQuickEdit().catch((error) => showInlineError(error.message, true));
       return;
     }
+    if (event.target.closest("#rackManagerInlineEditForm")) {
+      event.preventDefault();
+      saveRackInlineEdit().catch((error) => showInlineError(error.message, true));
+      return;
+    }
     if (event.target.closest("#manualLookupForm")) {
       event.preventDefault();
       saveManualEditLookup().catch((error) => showInlineError(error.message, true));
@@ -8976,6 +9074,14 @@ function wireEvents() {
       if (rackManagerSetCancelButton) {
         event.preventDefault();
         state.rackManagerEditingSetLabel = "";
+        els.adminModalBody.innerHTML = adminModalContent("racks");
+        return;
+      }
+
+      const rackManagerInlineCancelButton = event.target.closest("[data-rack-inline-cancel]");
+      if (rackManagerInlineCancelButton) {
+        event.preventDefault();
+        state.rackManagerEditingRackCode = "";
         els.adminModalBody.innerHTML = adminModalContent("racks");
         return;
       }

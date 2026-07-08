@@ -3125,94 +3125,121 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         order_filter = str(filters.get("orders") or "").strip()
         customer_terms = [term.strip() for term in re.split(r"[,;\n]+", customer_filter) if term.strip()]
         order_terms = [digits_only(term) for term in re.split(r"[,;\s\n]+", order_filter) if digits_only(term)]
-        package_by_date: dict[str, dict[str, Any]] = {}
+
+        def has_update_marker(item: dict[str, Any]) -> bool:
+            text = f"{item.get('processState', '')} {item.get('queueState', '')}"
+            return re.search(r"\b(update|updated|new|change|changed|added|add)\b", text, flags=re.IGNORECASE) is not None
+
+        def route_matches(item: dict[str, Any]) -> bool:
+            if cpu_only and not is_cpu_item(item):
+                return False
+            if dtc_only and route_category(item) != "dtc":
+                return False
+            return True
+
+        def search_filters_match(item: dict[str, Any]) -> bool:
+            if glass_types and not any(glass_type in f"{item.get('product', '')} {item.get('job', '')}".lower() for glass_type in glass_types):
+                return False
+            if customer_terms and not any(term in str(item.get("customer", "")).lower() for term in customer_terms):
+                return False
+            if order_terms and digits_only(str(item.get("order", ""))) not in order_terms:
+                return False
+            return True
+
+        def normal_printable(item: dict[str, Any]) -> bool:
+            if is_remake_item(item):
+                return False
+            if mirror_mode == "only":
+                return is_mirror_item(item)
+            if mirror_mode == "include" and not updated_only:
+                return True
+            return should_print_delivery_item(item, exclude_mirrors=True, include_mirror_remakes=False)
+
+        def stage_sheet_kind(meta: dict[str, Any]) -> str:
+            text = f"{meta.get('stage', '')} {meta.get('scanner', '')} {meta.get('label', '')}".lower()
+            if "customer pickup" in text or " cpu" in f" {text}" or "cpu" in text:
+                return "cpu"
+            if "dtc" in text or "deliver to customer" in text:
+                return "dtc"
+            if "indian trail" in text or "inbound" in text:
+                return "indian-trail"
+            if "greenville" in text or "gnv" in text:
+                return "greenville"
+            if "outbound" in text:
+                return "outbound"
+            if "staging" in text:
+                return "staging"
+            return "regular"
+
+        package_lists: list[dict[str, Any]] = []
+        seen_list_ids: set[str] = set()
+
         for list_id in list_ids:
+            if list_id in seen_list_ids:
+                continue
+            seen_list_ids.add(list_id)
             try:
                 payload = self.get_delivery_list(list_id, user=user)
             except (KeyError, PermissionError):
                 continue
-            date_key = payload["meta"]["deliveryDate"]
-            bucket = package_by_date.setdefault(
-                date_key,
-                {
-                    "id": date_key,
-                    "label": f"Delivery List for {format_display_date(date_key)}",
-                    "stage": "All stages",
-                    "deliveryDate": date_key,
-                    "itemsByKey": {},
-                    "stages": [],
-                    "excludedMirrorCount": 0,
-                },
-            )
-            if payload["meta"]["stage"] not in bucket["stages"]:
-                bucket["stages"].append(payload["meta"]["stage"])
-            source_items = payload["items"]
-            if mirror_mode == "include":
-                printable_items = list(source_items)
-            elif mirror_mode == "only":
-                printable_items = [item for item in source_items if is_mirror_item(item)]
-            else:
-                printable_items = [item for item in source_items if should_print_delivery_item(item)]
-            if rush_only:
-                printable_items = [item for item in printable_items if is_rush_item(item)]
-            if remake_only:
-                printable_items = [item for item in printable_items if is_remake_item(item)]
-            if cpu_only:
-                printable_items = [item for item in printable_items if is_cpu_item(item)]
-            if dtc_only:
-                printable_items = [item for item in printable_items if route_category(item) == "dtc"]
-            if updated_only:
-                printable_items = [
-                    item
-                    for item in printable_items
-                    if re.search(r"\b(update|updated|new|change|changed)\b", f"{item.get('processState', '')} {item.get('queueState', '')}", flags=re.IGNORECASE)
-                ]
-            if glass_types:
-                printable_items = [
-                    item
-                    for item in printable_items
-                    if any(glass_type in f"{item.get('product', '')} {item.get('job', '')}".lower() for glass_type in glass_types)
-                ]
-            if customer_terms:
-                printable_items = [
-                    item
-                    for item in printable_items
-                    if any(term in str(item.get("customer", "")).lower() for term in customer_terms)
-                ]
-            if order_terms:
-                printable_items = [
-                    item
-                    for item in printable_items
-                    if digits_only(str(item.get("order", ""))) in order_terms
-                ]
-            if not printable_items and not source_items:
-                continue
-            bucket["excludedMirrorCount"] += len([item for item in source_items if is_mirror_item(item) and not should_print_delivery_item(item)])
-            for item in printable_items:
-                key = str(item.get("sourceId") or f"{item.get('order')}-{item.get('item')}-{item.get('dimensions')}")
-                bucket["itemsByKey"].setdefault(key, item)
 
-        package_lists = []
-        for bucket in package_by_date.values():
-            items = sorted(
-                bucket["itemsByKey"].values(),
+            meta = payload["meta"]
+            source_items = list(payload.get("items") or [])
+            filtered_source = [item for item in source_items if route_matches(item) and search_filters_match(item)]
+            remakes = [item for item in filtered_source if is_remake_item(item)]
+            rushes = [item for item in filtered_source if is_rush_item(item) and not is_remake_item(item)]
+
+            if rush_only:
+                normal_items: list[dict[str, Any]] = []
+                remake_items: list[dict[str, Any]] = []
+                rush_items = rushes
+            elif remake_only:
+                normal_items = []
+                remake_items = remakes
+                rush_items = []
+            else:
+                normal_items = [
+                    item
+                    for item in filtered_source
+                    if normal_printable(item)
+                    and not is_rush_item(item)
+                    and (not updated_only or has_update_marker(item))
+                ]
+                remake_items = remakes
+                rush_items = rushes if not updated_only else [item for item in rushes if has_update_marker(item)]
+
+            package_items = sorted(
+                [*normal_items, *remake_items, *rush_items],
                 key=lambda item: (str(item.get("product") or item.get("job") or ""), int(item.get("order") or 0), int(item.get("item") or 0)),
             )
-            if not items:
+            if not package_items:
                 continue
+
+            excluded_regular_mirrors = [
+                item
+                for item in source_items
+                if is_mirror_item(item) and not is_remake_item(item) and route_matches(item) and search_filters_match(item)
+            ]
+
+            stage_kind = stage_sheet_kind(meta)
             package_lists.append(
                 {
-                    "id": bucket["id"],
-                    "label": bucket["label"],
-                    "stage": bucket["stage"],
-                    "stages": bucket["stages"],
-                    "deliveryDate": bucket["deliveryDate"],
-                    "items": items,
-                    "remakes": [item for item in items if is_remake_item(item)],
-                    "rushes": [item for item in items if is_rush_item(item)],
-                    "excludedMirrorCount": bucket["excludedMirrorCount"],
+                    "id": meta["id"],
+                    "label": meta["label"],
+                    "stage": meta["stage"],
+                    "scanner": meta.get("scanner", ""),
+                    "stages": [meta["stage"]],
+                    "deliveryDate": meta["deliveryDate"],
+                    "items": package_items,
+                    "normalItems": normal_items,
+                    "remakes": remake_items,
+                    "rushes": rush_items,
+                    "sheetKind": "updated" if updated_only else stage_kind,
+                    "stageKind": stage_kind,
+                    "excludedMirrorCount": len(excluded_regular_mirrors),
                 }
             )
+
         return {"lists": package_lists, "generatedAt": now_iso(), "filters": filters}
 
     def find_unique_suffix_item(self, rows: list[sqlite3.Row], suffix: str, item_no: int) -> sqlite3.Row | None:
@@ -3788,7 +3815,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchone()[0]
             bay_count = con.execute("SELECT COUNT(*) FROM bays WHERE active = 1").fetchone()[0]
             import_rows = con.execute(
-                "SELECT * FROM imports ORDER BY id DESC LIMIT 5"
+                "SELECT * FROM imports ORDER BY id DESC LIMIT 50"
             ).fetchall()
             recent_imports: list[dict[str, Any]] = []
             for row in import_rows:

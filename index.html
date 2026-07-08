@@ -65,7 +65,10 @@
                 <span id="userMenuDetails">Local demo</span>
               </div>
             </div>
-            <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
+            <div class="user-menu-actions">
+              <button class="tool-button" data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button">Open Admin</button>
+              <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
+            </div>
           </div>
         </details>
       </div>
@@ -695,8 +698,8 @@
               </label>
               <div class="admin-form import-window-form">
                 <label><span>Check from</span><input id="importFromDate" type="date"></label>
-                <label><span>Check through</span><input id="importToDate" type="date"></label>
-                <button id="importWindowResetBtn" type="button">Default 7 days</button>
+                <label><span>Check through</span><input id="importToDate" type="date" placeholder="Newest future list"></label>
+                <button id="importWindowResetBtn" type="button">Default: last week + future</button>
               </div>
             </details>
             <div id="importPreviewBox" class="admin-empty import-status-compact" hidden></div>

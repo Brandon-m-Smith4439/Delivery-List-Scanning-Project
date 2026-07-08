@@ -1,45 +1,32 @@
-Scanning Project UI Polish v3 - 2026-07-08
+Scanning Project UI/Print Polish - 2026-07-08 v5
 
-Replacement files included:
+Files included:
 - server.py
 - delivery_store.py
 - index.html
 - app.js
 - styles.css
 
-Changes in this pass:
-- Replaced the Admin top-page selector icon with a cleaner cog icon.
-- Replaced the Scan top-page selector icon with a sharper barcode icon.
-- Polished the top-right signed-in user menu with initials, role/station details, and a cleaner dropdown.
-- Re-centered the save/delete icons in the Customer Route Rules editor.
-- Reworked Active/Inactive and Signed in/Logged out user pills so they sit side by side, centered in their status area.
-- Updated the delete-user icon to read as a user-delete action instead of a generic trash icon.
-- Removed Create Rack and Create Rack Set from the main Rack page header; those actions remain inside Edit Racks.
-- Added a Quick rack edit form inside Edit Racks so rack name/type can be edited without opening a separate rack form.
-- Added full-card gradient status coloring to rack cards: green for complete, gold for open/loaded, soft gray for empty.
-- Made Complete Rack and Print Packing List action buttons consistent and slightly smaller.
-- Enlarged the rack selector in the staging scan panel.
-- Moved All scans to the top-right of the scan history heading.
-- Tightened the scan history card to better handle long customer names and avoid the scanning panel's own vertical scrollbar.
-- Added additional polish to the Edit Lookups UI for readability.
+Updates in this pass:
+- Squashed the Scan page barcode icon so it is shorter and sharper.
+- Refined the Admin top navigation cog icon.
+- Polished the signed-in user selector in the top right and added an in-app dropdown action area.
+- Kept the import window quick by checking from last week forward, with no upper-date cutoff by default.
+- Updated the import history view so active delivery-list dates from yesterday through the newest future list remain visible, while older dates only surface when there are actual changes.
+- Reworked print package behavior so remakes are automatically split to their own remake sheet for any selected stage.
+- Updated print output headings/badges so sheets clearly show Updated, Remake, Indian Trail, CPU, DTC, Greenville, Outbound, or Staging.
+- Updated print logic so updated-list sheets exclude remake rows and regular mirror rows, while remake sheets still include mirror remakes.
+- Remake sheets now print two copies, matching the regular delivery-list copy behavior.
+- Improved the Edit Racks modal so it fits without horizontal scrolling.
+- Added inline rack editing from the pencil icons inside Edit Racks.
+- Added a clearer inline edit row for rack name and rack set/type.
+- Made Complete Rack and Print Packing List buttons slightly larger and equal sized.
 
 Validation performed:
 - app.js passed node --check.
 - server.py and delivery_store.py passed Python compile checks.
 
-Install:
-1. Back up your current project folder.
-2. Replace the matching files in your project with these files.
-3. Restart the local server.
-4. Hard refresh the browser if the old CSS is cached.
-
-2026-07-08 v4 UI polish
-- Reduced the Scan page selector barcode icon height so it reads cleaner in the top navigation.
-- Centered the Customer Route save/delete icons and added a clear green hover state for saving.
-- Replaced the typed browser prompts for reset scans and delete user with an in-app confirmation dialog.
-- Made the rack manager pencil icons functional inside Edit Racks: rack pencils now load the quick rack editor, and set pencils open a set editor.
-- Added rack set filter and sort controls for status and rack order/piece count.
-- Removed the extra Edit Rack / Clear Rack buttons from the selected rack detail panel; rack editing now stays in Edit Racks and clearing stays on the reset icons.
-- Expanded the All Scans modal to a wider full table with Customer and Message columns and internal scrolling.
-- Slightly enlarged the Complete Rack and Print Packing List controls while keeping both the same size.
-- Added polish to the signed-in user menu and the user status/session pills.
+Before replacing files:
+- Back up the current project folder.
+- Replace the matching files in the web app folder.
+- Restart the local server so Python and static files refresh.

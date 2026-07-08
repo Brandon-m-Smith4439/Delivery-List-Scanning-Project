@@ -81,11 +81,13 @@ def render_item_rows(items: list[dict]) -> str:
     return "".join(rows)
 
 
-def render_sheet(title: str, subtitle: str, items: list[dict], sheet_class: str = "") -> str:
+def render_sheet(title: str, subtitle: str, items: list[dict], sheet_class: str = "", badge: str = "") -> str:
+    badge_html = f'<span class="sheet-badge">{esc(badge)}</span>' if badge else ""
     return f"""
     <section class="sheet {sheet_class}">
       <header>
         <div>
+          {badge_html}
           <h1>{esc(title)}</h1>
           <p>{esc(subtitle)}</p>
         </div>
@@ -100,7 +102,6 @@ def render_sheet(title: str, subtitle: str, items: list[dict], sheet_class: str 
       <div class="notes"><strong>Notes:</strong><span></span></div>
     </section>
     """
-
 
 def render_rack_packing_list(payload: dict) -> str:
     rack = payload.get("rack") or {}
@@ -236,19 +237,63 @@ def render_print_package(package: dict) -> str:
     filters = package.get("filters", {}) or {}
     rush_only = str(filters.get("rushOnly") or "").lower() in {"1", "true", "yes"}
     remake_only = str(filters.get("remakeOnly") or "").lower() in {"1", "true", "yes"}
+    updated_only = str(filters.get("updatedOnly") or "").lower() in {"1", "true", "yes"}
     special_only = rush_only or remake_only
+
+    def stage_badge(delivery_list: dict, mode: str = "") -> str:
+        if mode == "remake":
+            return "REMAKE"
+        if mode == "rush":
+            return "RUSH"
+        if updated_only or delivery_list.get("sheetKind") == "updated":
+            return "UPDATED LIST"
+        kind = str(delivery_list.get("stageKind") or delivery_list.get("sheetKind") or "").lower()
+        return {
+            "indian-trail": "INDIAN TRAIL",
+            "cpu": "CPU",
+            "dtc": "DTC",
+            "greenville": "GREENVILLE",
+            "outbound": "OUTBOUND",
+            "staging": "STAGING",
+        }.get(kind, "DELIVERY LIST")
+
+    def stage_title(delivery_list: dict, mode: str = "") -> str:
+        stage = str(delivery_list.get("stage") or "Delivery List")
+        if mode == "remake":
+            return f"REMAKE SHEET - {stage}"
+        if mode == "rush":
+            return f"RUSH ORDER SHEET - {stage}"
+        if updated_only or delivery_list.get("sheetKind") == "updated":
+            return f"UPDATED {stage} DELIVERY LIST"
+        kind = str(delivery_list.get("stageKind") or delivery_list.get("sheetKind") or "").lower()
+        prefix = {
+            "indian-trail": "INDIAN TRAIL",
+            "cpu": "CPU / CUSTOMER PICKUP",
+            "dtc": "DTC",
+            "greenville": "BFS GREENVILLE",
+            "outbound": "OUTBOUND",
+            "staging": "STAGING",
+        }.get(kind, stage.upper())
+        return f"{prefix} DELIVERY LIST"
+
     for delivery_list in package.get("lists", []):
         remakes = delivery_list.get("remakes", [])
         rushes = delivery_list.get("rushes", [])
-        normal_items = [item for item in delivery_list.get("items", []) if item not in remakes and item not in rushes]
+        normal_items = delivery_list.get("normalItems")
+        if normal_items is None:
+            normal_items = [item for item in delivery_list.get("items", []) if item not in remakes and item not in rushes]
         subtitle = f"{delivery_list.get('stage')} | {delivery_list.get('deliveryDate')} | Regular mirror rows excluded: {delivery_list.get('excludedMirrorCount', 0)}"
         if normal_items and not special_only:
-            sections.append(render_sheet(str(delivery_list.get("label")), f"{subtitle} | Copy 1 of 2", normal_items, "regular"))
-            sections.append(render_sheet(str(delivery_list.get("label")), f"{subtitle} | Copy 2 of 2", normal_items, "regular"))
+            title = stage_title(delivery_list)
+            badge = stage_badge(delivery_list)
+            sections.append(render_sheet(title, f"{subtitle} | Copy 1 of 2", normal_items, f"regular {esc(str(delivery_list.get('stageKind') or ''))} {'updated' if updated_only else ''}", badge))
+            sections.append(render_sheet(title, f"{subtitle} | Copy 2 of 2", normal_items, f"regular {esc(str(delivery_list.get('stageKind') or ''))} {'updated' if updated_only else ''}", badge))
         if rushes and not remake_only:
-            sections.append(render_sheet("RUSH ORDER SHEET", str(delivery_list.get("label")), rushes, "rush"))
+            sections.append(render_sheet(stage_title(delivery_list, "rush"), f"{delivery_list.get('label')} | Copy 1 of 1", rushes, "rush", stage_badge(delivery_list, "rush")))
         if remakes and not rush_only:
-            sections.append(render_sheet("REMAKE SHEET", str(delivery_list.get("label")), remakes, "remake"))
+            title = stage_title(delivery_list, "remake")
+            sections.append(render_sheet(title, f"{delivery_list.get('label')} | Copy 1 of 2", remakes, "remake", stage_badge(delivery_list, "remake")))
+            sections.append(render_sheet(title, f"{delivery_list.get('label')} | Copy 2 of 2", remakes, "remake", stage_badge(delivery_list, "remake")))
     body = "".join(sections) or '<section class="sheet"><h1>No printable rows found</h1></section>'
     return f"""<!doctype html>
 <html>
@@ -260,8 +305,9 @@ def render_print_package(package: dict) -> str:
     body {{ margin: 0; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #f6f8fb; }}
     .sheet {{ width: min(1120px, calc(100% - 32px)); margin: 16px auto; padding: 18px; background: #fff; border: 1px solid #444; border-radius: 0; }}
     header {{ display: flex; justify-content: space-between; gap: 16px; align-items: end; border-bottom: 3px solid #072a63; padding-bottom: 10px; margin-bottom: 12px; }}
-    h1 {{ margin: 0; color: #041a3d; font-size: 24px; text-transform: uppercase; }}
+    h1 {{ margin: 5px 0 0; color: #041a3d; font-size: 24px; text-transform: uppercase; }}
     p {{ margin: 4px 0 0; font-weight: 700; color: #41506c; }}
+    .sheet-badge {{ display: inline-flex; min-height: 26px; align-items: center; border: 1px solid #072a63; border-radius: 999px; background: #eaf2ff; color: #041a3d; padding: 0 12px; font-size: 12px; font-weight: 900; letter-spacing: .08em; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
     th, td {{ border: 1px solid #d9e1ee; padding: 7px 8px; text-align: left; vertical-align: top; }}
     th {{ background: #f1f1f1; color: #041a3d; }}
@@ -269,10 +315,15 @@ def render_print_package(package: dict) -> str:
     .check-cell {{ width: 28px; text-align: center; font-size: 16px; }}
     .copy-box {{ border: 1px solid #333; padding: 8px 10px; font-weight: 800; white-space: nowrap; }}
     .notes {{ margin-top: 12px; min-height: 72px; border: 1px solid #333; display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 8px; }}
+    .updated .sheet-badge {{ border-color: #135cff; background: #eaf2ff; color: #072a63; }}
+    .indian-trail .sheet-badge {{ border-color: #2fa84f; background: #ecf8ef; color: #176b2d; }}
+    .cpu .sheet-badge {{ border-color: #8a63d2; background: #f4ecff; color: #57359a; }}
+    .dtc .sheet-badge {{ border-color: #d9468f; background: #fff0f7; color: #9d1f60; }}
     .rush {{ border: 4px double #000; }}
     .rush header {{ border-bottom: 6px double #000; }}
     .rush h1::before, .rush h1::after {{ content: " !!! "; }}
     .remake {{ border: 3px dashed #000; }}
+    .remake .sheet-badge {{ border-color: #c92f42; background: #fff0f1; color: #9f1f31; }}
     .remake header {{ border-bottom: 3px dashed #000; }}
     @media print {{
       body {{ background: #fff; }}
