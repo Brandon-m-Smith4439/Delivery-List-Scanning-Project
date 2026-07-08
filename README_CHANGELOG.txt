@@ -32,3 +32,14 @@ Install:
 2. Replace the matching files in your project with these files.
 3. Restart the local server.
 4. Hard refresh the browser if the old CSS is cached.
+
+2026-07-08 v4 UI polish
+- Reduced the Scan page selector barcode icon height so it reads cleaner in the top navigation.
+- Centered the Customer Route save/delete icons and added a clear green hover state for saving.
+- Replaced the typed browser prompts for reset scans and delete user with an in-app confirmation dialog.
+- Made the rack manager pencil icons functional inside Edit Racks: rack pencils now load the quick rack editor, and set pencils open a set editor.
+- Added rack set filter and sort controls for status and rack order/piece count.
+- Removed the extra Edit Rack / Clear Rack buttons from the selected rack detail panel; rack editing now stays in Edit Racks and clearing stays on the reset icons.
+- Expanded the All Scans modal to a wider full table with Customer and Message columns and internal scrolling.
+- Slightly enlarged the Complete Rack and Print Packing List controls while keeping both the same size.
+- Added polish to the signed-in user menu and the user status/session pills.

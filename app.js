@@ -59,6 +59,9 @@ const state = {
   rackModal: null,
   rackMoveItemId: "",
   rackManagerSelectedCode: "",
+  rackManagerEditingSetLabel: "",
+  rackStatusFilter: "all",
+  rackSort: "code-asc",
   printContext: null,
   bayLayout: null,
   bays: [],
@@ -1385,6 +1388,44 @@ function rackVisualClass(rack) {
   return "is-empty";
 }
 
+function rackComputedStatus(rack) {
+  const status = String(rack?.status || "").toLowerCase();
+  const qty = Number(rack?.qty || 0);
+
+  if (status === "closed") return "complete";
+  if (qty > 0) return "open";
+  return "empty";
+}
+
+function rackSortNumber(value) {
+  const match = String(value || "").match(/\d+/);
+  return match ? Number(match[0]) : 0;
+}
+
+function filteredSortedRacks(racks = []) {
+  const statusFilter = state.rackStatusFilter || "all";
+  const sortMode = state.rackSort || "code-asc";
+
+  const filtered = racks.filter((rack) => statusFilter === "all" || rackComputedStatus(rack) === statusFilter);
+
+  return filtered.slice().sort((a, b) => {
+    if (sortMode === "code-desc") {
+      return String(b.code || "").localeCompare(String(a.code || ""), undefined, { numeric: true });
+    }
+
+    if (sortMode === "pieces-desc") {
+      return Number(b.qty || 0) - Number(a.qty || 0) || String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true });
+    }
+
+    if (sortMode === "status") {
+      const order = { open: 1, complete: 2, empty: 3 };
+      return (order[rackComputedStatus(a)] || 9) - (order[rackComputedStatus(b)] || 9) || String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true });
+    }
+
+    return String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true });
+  });
+}
+
 function renderRacksPage() {
   renderRackSelects();
 
@@ -1710,18 +1751,21 @@ function renderRacksPage() {
 
   const selectedGroup = groups.find(([label]) => label === state.selectedRackSetLabel) || groups[0] || ["", []];
   const selectedGroupLabel = selectedGroup[0];
-  const selectedGroupRacks = selectedGroup[1] || [];
+  const selectedGroupAllRacks = selectedGroup[1] || [];
+  const selectedGroupRacks = filteredSortedRacks(selectedGroupAllRacks);
 
-  if (!state.selectedRackOverviewCode || !selectedGroupRacks.some((rack) => rack.code === state.selectedRackOverviewCode)) {
+  if (!state.selectedRackOverviewCode || !selectedGroupAllRacks.some((rack) => rack.code === state.selectedRackOverviewCode)) {
     state.selectedRackOverviewCode =
       selectedGroupRacks.find((rack) => Number(rack.qty || 0) > 0)?.code ||
       selectedGroupRacks[0]?.code ||
+      selectedGroupAllRacks.find((rack) => Number(rack.qty || 0) > 0)?.code ||
+      selectedGroupAllRacks[0]?.code ||
       state.racks.find((rack) => Number(rack.qty || 0) > 0)?.code ||
       state.racks[0]?.code ||
       "";
   }
 
-  const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackOverviewCode) || state.racks[0] || null;
+  const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackOverviewCode) || selectedGroupRacks[0] || state.racks[0] || null;
 
   const renderRackSetCard = ([label, racks]) => {
     const selected = label === selectedGroupLabel;
@@ -1790,15 +1834,6 @@ function renderRacksPage() {
           }
 
           <button type="button" data-rack-print="${escapeHtml(rack.code)}" ${hasItems && isComplete ? "" : "disabled"}>${printLabel}</button>
-
-          ${
-            hasPermission("manage_racks")
-              ? `
-                <button type="button" data-rack-edit="${escapeHtml(rack.code)}">Edit Rack</button>
-                <button type="button" class="danger" data-rack-clear="${escapeHtml(rack.code)}" ${hasItems ? "" : "disabled"}>Clear Rack</button>
-              `
-              : ""
-          }
         </div>
 
         <div class="rack-detail-pieces">
@@ -1815,7 +1850,8 @@ function renderRacksPage() {
     `;
   };
 
-  const selectedSetQty = selectedGroupRacks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
+  const selectedSetQty = selectedGroupAllRacks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
+  const visibleSetQty = selectedGroupRacks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
 
   els.rackGrid.innerHTML = `
     <aside class="rack-sets-sidebar">
@@ -1832,11 +1868,27 @@ function renderRacksPage() {
       <div class="rack-center-heading">
         <div>
           <h2>${escapeHtml(selectedGroupLabel || "Racks")}</h2>
-          <span>${escapeHtml(selectedGroupRacks.length)} rack${selectedGroupRacks.length === 1 ? "" : "s"} | ${escapeHtml(selectedSetQty)} pieces</span>
+          <span>${escapeHtml(selectedGroupAllRacks.length)} rack${selectedGroupAllRacks.length === 1 ? "" : "s"} | ${escapeHtml(selectedSetQty)} pieces${selectedGroupRacks.length !== selectedGroupAllRacks.length ? ` | Showing ${escapeHtml(selectedGroupRacks.length)} racks / ${escapeHtml(visibleSetQty)} pieces` : ""}</span>
         </div>
         <div class="rack-center-controls">
-          <button type="button" class="rack-filter-button" disabled>Status: All</button>
-          <button type="button" class="rack-filter-button" disabled>Sort: Rack ID (A-Z)</button>
+          <label class="rack-filter-control">
+            <span>Status</span>
+            <select data-rack-status-filter>
+              <option value="all" ${state.rackStatusFilter === "all" ? "selected" : ""}>All</option>
+              <option value="open" ${state.rackStatusFilter === "open" ? "selected" : ""}>Open</option>
+              <option value="complete" ${state.rackStatusFilter === "complete" ? "selected" : ""}>Complete</option>
+              <option value="empty" ${state.rackStatusFilter === "empty" ? "selected" : ""}>Empty</option>
+            </select>
+          </label>
+          <label class="rack-filter-control">
+            <span>Sort</span>
+            <select data-rack-sort>
+              <option value="code-asc" ${state.rackSort === "code-asc" ? "selected" : ""}>Rack ID (A-Z)</option>
+              <option value="code-desc" ${state.rackSort === "code-desc" ? "selected" : ""}>Rack ID (Z-A)</option>
+              <option value="pieces-desc" ${state.rackSort === "pieces-desc" ? "selected" : ""}>Pieces (High-Low)</option>
+              <option value="status" ${state.rackSort === "status" ? "selected" : ""}>Status</option>
+            </select>
+          </label>
           <button type="button" class="icon-only icon-reset" data-rack-set-clear="${escapeHtml(selectedGroupLabel)}" ${hasPermission("manage_racks") ? "" : "hidden"} title="Clear selected rack set" aria-label="Clear selected rack set"></button>
         </div>
       </div>
@@ -2183,7 +2235,7 @@ function renderRecent() {
 function recentScansModalHtml() {
   const rows = state.recent || [];
   return `
-    <div class="recent-scans-modal">
+    <div class="recent-scans-modal full-scans-modal">
       <div class="modal-list-heading">
         <strong>${escapeHtml(state.meta?.label || state.meta?.stage || "Current stage")}</strong>
         <span>${escapeHtml(rows.length)} recent scan${rows.length === 1 ? "" : "s"}</span>
@@ -2196,6 +2248,8 @@ function recentScansModalHtml() {
               <th>Order Nr.</th>
               <th>Item Nr.</th>
               <th>Qty Scanned</th>
+              <th>Customer</th>
+              <th>Message</th>
               <th>Date & Time Scanned</th>
               <th>Check</th>
             </tr>
@@ -2214,13 +2268,15 @@ function recentScansModalHtml() {
                           <td>${item ? escapeHtml(item.order) : "-"}</td>
                           <td>${item ? escapeHtml(item.item) : "-"}</td>
                           <td>${item ? item.scanned : "-"}</td>
+                          <td>${item ? escapeHtml(item.customer || "") : "-"}</td>
+                          <td>${note ? escapeHtml(note) : escapeHtml(entry.message || "")}</td>
                           <td>${Number.isNaN(time.getTime()) ? "" : time.toLocaleString()}</td>
                           <td><span class="check-dot ${entry.ok ? "" : "error"}">${entry.ok ? "&#10003;" : "!"}</span></td>
                         </tr>
                       `;
                     })
                     .join("")
-                : `<tr><td colspan="6">No scans yet</td></tr>`
+                : `<tr><td colspan="8">No scans yet</td></tr>`
             }
           </tbody>
         </table>
@@ -5361,6 +5417,111 @@ function lookupManagerModalHtml() {
   `;
 }
 
+function rackManagerSetEditHtml() {
+  const label = state.rackManagerEditingSetLabel || "";
+  if (!label) return "";
+
+  const racks = (state.racks || []).filter((rack) => rackGroupLabel(rack) === label);
+  if (!racks.length) return "";
+
+  const firstRack = racks[0] || {};
+  const sampleName = String(firstRack.name || "");
+  const firstNumber = rackSortNumber(firstRack.code);
+  const nameRoot = firstNumber ? sampleName.replace(new RegExp(`\\s*${firstNumber}\\s*$`), "").trim() : sampleName || label;
+
+  return `
+    <form id="rackManagerSetEditForm" class="rack-manager-set-edit">
+      <div class="rack-manager-quick-copy">
+        <strong>Edit ${escapeHtml(label)} set</strong>
+        <span>Rename the rack set/type and optionally rebuild each rack display name from one shared name root.</span>
+      </div>
+
+      <label>
+        <span>New rack set / type</span>
+        <input id="rackManagerSetTypeInput" type="text" autocomplete="off" value="${escapeHtml(label === "Truck" ? "Truck" : label)}" ${label === "Truck" ? "readonly" : ""}>
+      </label>
+
+      <label>
+        <span>Name root</span>
+        <input id="rackManagerSetNameRootInput" type="text" autocomplete="off" value="${escapeHtml(nameRoot || label)}" placeholder="Example: Rack Steel">
+      </label>
+
+      <div class="rack-manager-set-actions">
+        <button type="button" class="secondary" data-rack-manager-set-cancel>Cancel</button>
+        <button type="submit">Save Set</button>
+      </div>
+    </form>
+  `;
+}
+
+function focusRackManagerRackEdit(code) {
+  state.rackManagerSelectedCode = code || state.rackManagerSelectedCode || "";
+  populateRackManagerQuickEdit(state.rackManagerSelectedCode);
+
+  const form = document.getElementById("rackManagerQuickEditForm");
+  const input = document.getElementById("rackManagerQuickName");
+
+  form?.classList.remove("is-highlighted");
+  void form?.offsetWidth;
+  form?.classList.add("is-highlighted");
+  input?.focus();
+  input?.select?.();
+  form?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function openRackManagerSetEdit(label) {
+  state.rackManagerEditingSetLabel = label || "";
+
+  if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
+    els.adminModalBody.innerHTML = adminModalContent("racks");
+    window.setTimeout(() => {
+      const input = document.getElementById("rackManagerSetTypeInput");
+      input?.focus();
+      input?.select?.();
+    }, 30);
+  }
+}
+
+async function saveRackSetQuickEdit() {
+  const oldLabel = state.rackManagerEditingSetLabel || "";
+  const newType = String(document.getElementById("rackManagerSetTypeInput")?.value || oldLabel).trim() || oldLabel;
+  const nameRoot = String(document.getElementById("rackManagerSetNameRootInput")?.value || newType).trim() || newType;
+  const racks = (state.racks || []).filter((rack) => rackGroupLabel(rack) === oldLabel);
+
+  if (!oldLabel || !racks.length) return;
+
+  let latestPayload = null;
+
+  for (const rack of racks) {
+    const number = rackSortNumber(rack.code);
+    const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
+    const nextType = isTruck ? "Truck" : newType;
+    const nextName = isTruck ? (document.getElementById("rackManagerSetNameRootInput")?.value || rack.name || "Truck / No Rack") : `${nameRoot}${number ? ` ${number}` : ""}`;
+
+    latestPayload = await fetchJson("/api/racks", {
+      method: "POST",
+      body: JSON.stringify({
+        rackCode: rack.code,
+        name: nextName,
+        type: nextType,
+      }),
+    });
+  }
+
+  state.racks = latestPayload?.racks || state.racks || [];
+  state.rackSummary = latestPayload?.summary || state.rackSummary || null;
+  state.rackManagerEditingSetLabel = "";
+  state.selectedRackSetLabel = newType;
+  renderRacksPage();
+  renderScanRackTools();
+
+  if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
+    els.adminModalBody.innerHTML = adminModalContent("racks");
+  }
+
+  showFloatingNotice(`Saved ${oldLabel} rack set.`, "success");
+}
+
 function rackManagerModalHtml() {
   const groups = new Map();
   for (const rack of state.racks || []) {
@@ -5391,6 +5552,8 @@ function rackManagerModalHtml() {
           <button type="button" data-rack-manager-new-set>Create Rack Set</button>
         </div>
       </div>
+
+      ${rackManagerSetEditHtml()}
 
       <form id="rackManagerQuickEditForm" class="rack-manager-quick-edit">
         <div class="rack-manager-quick-copy">
@@ -6407,11 +6570,15 @@ async function resetSelectedAdminScans() {
 async function resetAdminScansForList(listId) {
   const list = state.lists.find((item) => item.id === listId);
   if (!list) return;
-  const firstConfirm = window.confirm(`Reset all scans for ${list.label}?`);
-  if (!firstConfirm) return;
-  const typed = window.prompt(`Type RESET to delete all scans associated with ${list.label}.`);
-  if (typed !== "RESET") {
-    if (els.resetScansStatus) els.resetScansStatus.innerHTML = `<strong>Reset cancelled</strong><span>The confirmation text did not match.</span>`;
+  const confirmed = await confirmWebAppAction({
+    title: "Reset scans?",
+    message: `Reset all scan quantities and scan history for <strong>${escapeHtml(list.label)}</strong>.`,
+    details: "This keeps the delivery-list rows but returns this stage to zero scanned quantity.",
+    confirmLabel: "Reset scans",
+  });
+
+  if (!confirmed) {
+    if (els.resetScansStatus) els.resetScansStatus.innerHTML = `<strong>Reset cancelled</strong><span>No scan data was changed.</span>`;
     return;
   }
   const payload = await fetchJson("/api/reset", {
@@ -6429,13 +6596,16 @@ async function resetAdminScansForDate(deliveryDate) {
 
   if (!lists.length) return;
 
-  const firstConfirm = window.confirm(`Reset all scans for every stage on ${formatDisplayDate(deliveryDate)}?`);
-  if (!firstConfirm) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Reset every stage for this date?",
+    message: `Reset all scan quantities and scan history for every stage on <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
+    details: `${lists.length} stage${lists.length === 1 ? "" : "s"} will be reset. Delivery-list rows will stay in place.`,
+    confirmLabel: "Reset all stages",
+  });
 
-  const typed = window.prompt(`Type RESET DATE to reset every stage for ${formatDisplayDate(deliveryDate)}.`);
-  if (typed !== "RESET DATE") {
+  if (!confirmed) {
     if (els.resetScansStatus) {
-      els.resetScansStatus.innerHTML = `<strong>Reset cancelled</strong><span>The confirmation text did not match.</span>`;
+      els.resetScansStatus.innerHTML = `<strong>Reset cancelled</strong><span>No scan data was changed.</span>`;
     }
 
     return;
@@ -6677,6 +6847,65 @@ async function refreshAdminUsersUi() {
   if (usersModalOpen && els.adminModalBody) {
     els.adminModalBody.innerHTML = adminModalContent("users");
   }
+}
+
+function confirmWebAppAction({ title, message, details = "", confirmLabel = "Confirm", cancelLabel = "Cancel", danger = true } = {}) {
+  return new Promise((resolve) => {
+    const existingDialog = document.querySelector(".action-confirm-backdrop");
+    if (existingDialog) existingDialog.remove();
+
+    const dialog = document.createElement("div");
+    let keyHandler = () => {};
+
+    dialog.className = "action-confirm-backdrop";
+    dialog.innerHTML = `
+      <section class="action-confirm-dialog ${danger ? "is-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="actionConfirmTitle">
+        <button type="button" class="action-confirm-close" data-action-confirm-cancel aria-label="Close confirmation">&times;</button>
+
+        <span class="action-confirm-icon" aria-hidden="true"></span>
+
+        <div class="action-confirm-copy">
+          <h2 id="actionConfirmTitle">${escapeHtml(title || "Confirm action")}</h2>
+          <p>${message || "Are you sure you want to continue?"}</p>
+          ${details ? `<small>${escapeHtml(details)}</small>` : ""}
+        </div>
+
+        <div class="action-confirm-actions">
+          <button type="button" class="action-confirm-cancel" data-action-confirm-cancel>${escapeHtml(cancelLabel)}</button>
+          <button type="button" class="action-confirm-confirm" data-action-confirm-confirm>${escapeHtml(confirmLabel)}</button>
+        </div>
+      </section>
+    `;
+
+    const close = (confirmed) => {
+      document.removeEventListener("keydown", keyHandler);
+      dialog.remove();
+      document.body.classList.remove("modal-scroll-locked");
+      updateModalScrollLock();
+      resolve(Boolean(confirmed));
+    };
+
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-action-confirm-cancel]")) {
+        close(false);
+        return;
+      }
+
+      if (event.target.closest("[data-action-confirm-confirm]")) {
+        close(true);
+      }
+    });
+
+    keyHandler = (event) => {
+      if (event.key !== "Escape") return;
+      close(false);
+    };
+
+    document.addEventListener("keydown", keyHandler);
+    document.body.appendChild(dialog);
+    document.body.classList.add("modal-scroll-locked");
+    dialog.querySelector("[data-action-confirm-cancel]")?.focus();
+  });
 }
 
 function confirmDeactivateUser(username) {
@@ -8303,6 +8532,11 @@ function wireEvents() {
       saveRackQuickEdit().catch((error) => showInlineError(error.message, true));
       return;
     }
+    if (event.target.closest("#rackManagerSetEditForm")) {
+      event.preventDefault();
+      saveRackSetQuickEdit().catch((error) => showInlineError(error.message, true));
+      return;
+    }
     if (event.target.closest("#manualLookupForm")) {
       event.preventDefault();
       saveManualEditLookup().catch((error) => showInlineError(error.message, true));
@@ -8359,6 +8593,22 @@ function wireEvents() {
 
     if (rackQuickSelect) {
       populateRackManagerQuickEdit(rackQuickSelect.value);
+      return;
+    }
+
+    const rackStatusFilter = event.target.closest("[data-rack-status-filter]");
+
+    if (rackStatusFilter) {
+      state.rackStatusFilter = rackStatusFilter.value || "all";
+      renderRacksPage();
+      return;
+    }
+
+    const rackSortSelect = event.target.closest("[data-rack-sort]");
+
+    if (rackSortSelect) {
+      state.rackSort = rackSortSelect.value || "code-asc";
+      renderRacksPage();
       return;
     }
 
@@ -8690,6 +8940,60 @@ function wireEvents() {
         .catch((error) => showInlineError(error.message));
       return;
     }
+
+    const rackManagerShell = event.target.closest(".rack-manager-shell");
+
+    if (rackManagerShell) {
+      const rackManagerNewRackButton = event.target.closest("[data-rack-manager-new-rack]");
+      if (rackManagerNewRackButton) {
+        event.preventDefault();
+        openRackForm("");
+        return;
+      }
+
+      const rackManagerNewSetButton = event.target.closest("[data-rack-manager-new-set]");
+      if (rackManagerNewSetButton) {
+        event.preventDefault();
+        openRackSetForm("");
+        return;
+      }
+
+      const rackManagerEditButton = event.target.closest("[data-rack-edit]");
+      if (rackManagerEditButton) {
+        event.preventDefault();
+        focusRackManagerRackEdit(rackManagerEditButton.dataset.rackEdit || "");
+        return;
+      }
+
+      const rackManagerSetEditButton = event.target.closest("[data-rack-set-edit]");
+      if (rackManagerSetEditButton) {
+        event.preventDefault();
+        openRackManagerSetEdit(rackManagerSetEditButton.dataset.rackSetEdit || "");
+        return;
+      }
+
+      const rackManagerSetCancelButton = event.target.closest("[data-rack-manager-set-cancel]");
+      if (rackManagerSetCancelButton) {
+        event.preventDefault();
+        state.rackManagerEditingSetLabel = "";
+        els.adminModalBody.innerHTML = adminModalContent("racks");
+        return;
+      }
+
+      const rackManagerDeleteButton = event.target.closest("[data-rack-delete]");
+      if (rackManagerDeleteButton) {
+        event.preventDefault();
+        deleteRackDefinition(rackManagerDeleteButton.dataset.rackDelete || "").catch((error) => showInlineError(error.message, true));
+        return;
+      }
+
+      const rackManagerSetDeleteButton = event.target.closest("[data-rack-set-delete]");
+      if (rackManagerSetDeleteButton) {
+        event.preventDefault();
+        deleteRackSet(rackManagerSetDeleteButton.dataset.rackSetDelete || "").catch((error) => showInlineError(error.message, true));
+        return;
+      }
+    }
     const manualCustomClearButton = event.target.closest("[data-manual-custom-clear]");
     if (manualCustomClearButton) {
       event.preventDefault();
@@ -8891,15 +9195,22 @@ function wireEvents() {
     const deleteUserButton = event.target.closest("[data-delete-user]");
     if (deleteUserButton) {
       const username = deleteUserButton.dataset.deleteUser || "";
-      const typed = window.prompt(`Delete user ${username}? Type DELETE USER to confirm.`);
-      if (typed !== "DELETE USER") return;
 
-      fetchJson("/api/admin/users/delete", {
-        method: "POST",
-        body: JSON.stringify({ username }),
-      })
-        .then(() => refreshAdminUsersUi())
-        .catch((error) => showInlineError(error.message));
+      confirmWebAppAction({
+        title: "Delete user?",
+        message: `Delete <strong>${escapeHtml(username)}</strong> from the scanner app.`,
+        details: "This removes the login profile. Audit history stays attached to the saved username text.",
+        confirmLabel: "Delete user",
+      }).then((confirmed) => {
+        if (!confirmed) return;
+
+        fetchJson("/api/admin/users/delete", {
+          method: "POST",
+          body: JSON.stringify({ username }),
+        })
+          .then(() => refreshAdminUsersUi())
+          .catch((error) => showInlineError(error.message));
+      });
 
       return;
     }
