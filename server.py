@@ -762,6 +762,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.reactivate_user(str(data.get("username") or ""), activated_by=user["username"]))
                 return
 
+            if parsed.path == "/api/admin/users/delete":
+                user = self.require_permission("manage_users")
+                if not user:
+                    return
+                self.send_json(STORE.delete_user(str(data.get("username") or ""), deleted_by=user["username"]))
+                return
+
             if parsed.path == "/api/admin/users/password":
                 user = self.require_permission("update_user_passwords")
                 if not user:

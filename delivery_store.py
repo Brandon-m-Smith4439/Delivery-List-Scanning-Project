@@ -374,7 +374,29 @@ def route_category(item: dict[str, Any]) -> str:
         return "greenville"
     if route == "DTC":
         return "dtc"
+    if route:
+        return f"custom:{route}"
     return "indian_trail"
+
+
+def custom_route_codes(base_items: list[dict[str, Any]]) -> list[str]:
+    codes = {
+        inferred_route(item)
+        for item in base_items
+        if route_category(item).startswith("custom:")
+    }
+    return sorted(code for code in codes if code)
+
+
+def route_stage_label(route: str) -> str:
+    clean = str(route or "").strip().upper()
+    if clean == "CPU":
+        return "Customer Pickup"
+    if clean == "DTC":
+        return "Delivery to Customer"
+    if clean in {"GNV", "GRN", "GREENVILLE"}:
+        return "BFS Greenville"
+    return clean
 
 
 def is_cpu_item(item: dict[str, Any]) -> bool:
@@ -406,6 +428,9 @@ def items_for_profile(profile: str, base_items: list[dict[str, Any]]) -> list[di
         return [item for item in base_items if route_category(item) == "greenville"]
     if profile == "dtc":
         return [item for item in base_items if route_category(item) == "dtc"]
+    if profile.startswith("route:"):
+        route = profile.split(":", 1)[1].upper()
+        return [item for item in base_items if inferred_route(item) == route]
     return list(base_items)
 
 
@@ -423,6 +448,21 @@ def build_delivery_lists(sample: dict[str, Any]) -> list[tuple[str, str, str, st
                 f"{format_display_date(delivery_date)} - {stage}",
                 stage,
                 scanner,
+                items,
+            )
+        )
+    for route in custom_route_codes(base_items):
+        suffix = f"route-{re.sub(r'[^a-z0-9]+', '-', route.lower()).strip('-')}"
+        stage = route_stage_label(route)
+        items = items_for_profile(f"route:{route}", base_items)
+        if not items:
+            continue
+        definitions.append(
+            (
+                f"{delivery_date}-{suffix}",
+                f"{format_display_date(delivery_date)} - {stage}",
+                stage,
+                stage,
                 items,
             )
         )
@@ -488,7 +528,7 @@ def first_xlsx_sheet_path(archive: zipfile.ZipFile) -> str:
     raise ValueError("Workbook does not contain a worksheet XML file")
 
 
-def read_xlsx_rows(path: Path) -> list[tuple[int, dict[str, str]]]:
+def read_xlsx_rows(path: Path, max_rows: int | None = None) -> list[tuple[int, dict[str, str]]]:
     with zipfile.ZipFile(path) as archive:
         shared_strings: list[str] = []
         if "xl/sharedStrings.xml" in archive.namelist():
@@ -499,6 +539,8 @@ def read_xlsx_rows(path: Path) -> list[tuple[int, dict[str, str]]]:
         rows: list[tuple[int, dict[str, str]]] = []
         for row in sheet.findall(f"{XLSX_MAIN_NS}sheetData/{XLSX_MAIN_NS}row"):
             row_number = int(row.attrib.get("r") or len(rows) + 1)
+            if max_rows is not None and row_number > max_rows:
+                break
             values: dict[str, str] = {}
             for cell in row.findall(f"{XLSX_MAIN_NS}c"):
                 col = column_label(cell.attrib.get("r", ""))
@@ -531,6 +573,23 @@ def delivery_date_from_rows_or_name(rows: list[tuple[int, dict[str, str]]], path
     if date_text:
         return date_text
     return now_iso()[:10]
+
+
+def delivery_date_from_source_header(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".xlsx", ".xlsm"}:
+        try:
+            rows = read_xlsx_rows(path, max_rows=12)
+            return delivery_date_from_rows_or_name(rows, path)
+        except Exception:
+            return delivery_date_from_text(path.stem)
+    if suffix == ".json":
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return str(payload.get("deliveryDate") or "").strip() or delivery_date_from_text(path.stem)
+        except Exception:
+            return delivery_date_from_text(path.stem)
+    return delivery_date_from_text(path.stem)
 
 
 def parse_aw_delivery_workbook(path: Path) -> dict[str, Any]:
@@ -771,7 +830,227 @@ class BaseDeliveryStore:
         raise NotImplementedError
 
     def import_delivery_folder(self, data: dict[str, Any]) -> dict[str, Any]:
-        raise NotImplementedError
+        user = request_user_name(data)
+        folder = Path(str(data.get("sourceFolder") or self.config.temp_delivery_lists_dir)).expanduser()
+        date_from = str(data.get("dateFrom") or "").strip()
+        date_to = str(data.get("dateTo") or "").strip() or "9999-12-31"
+        if not date_from:
+            date_from = (datetime.now(timezone.utc).date() - timedelta(days=7)).isoformat()
+        if not folder.is_absolute():
+            folder = self.config.root / folder
+        if not folder.exists() or not folder.is_dir():
+            raise ValueError(f"Temp Delivery Lists folder not found: {folder}")
+
+        imported_files: list[dict[str, Any]] = []
+        updated_files: list[dict[str, Any]] = []
+        skipped_files: list[dict[str, Any]] = []
+        ignored_files: list[dict[str, Any]] = []
+        failed_files: list[dict[str, Any]] = []
+        print_candidates: list[dict[str, Any]] = []
+        active_list_id = ""
+
+        all_paths = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_IMPORT_EXTENSIONS)
+        candidate_paths: list[tuple[Path, str, str]] = []
+
+        for path in all_paths:
+            file_date = delivery_date_from_text(path.stem)
+            modified_date = ""
+            try:
+                modified_date = datetime.fromtimestamp(path.stat().st_mtime).date().isoformat()
+            except OSError:
+                pass
+
+            if file_date:
+                if date_from and file_date < date_from:
+                    ignored_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": file_date,
+                            "fileNameDate": file_date,
+                            "modifiedDate": modified_date,
+                            "reason": f"Filename delivery date is before the import window start {date_from}",
+                        }
+                    )
+                    continue
+                if date_to and file_date > date_to:
+                    ignored_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": file_date,
+                            "fileNameDate": file_date,
+                            "modifiedDate": modified_date,
+                            "reason": f"Filename delivery date is after the import window end {date_to}",
+                        }
+                    )
+                    continue
+            elif date_from and modified_date and modified_date < date_from:
+                ignored_files.append(
+                    {
+                        "fileName": path.name,
+                        "deliveryDate": "",
+                        "fileNameDate": "",
+                        "modifiedDate": modified_date,
+                        "reason": f"No filename date found and the file was last modified before {date_from}",
+                    }
+                )
+                continue
+
+            candidate_paths.append((path, file_date, modified_date))
+
+        for path, file_date, modified_date in candidate_paths:
+            try:
+                header_date = delivery_date_from_source_header(path)
+                if header_date and date_from and header_date < date_from:
+                    ignored_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": header_date,
+                            "fileNameDate": file_date,
+                            "modifiedDate": modified_date,
+                            "reason": f"Workbook delivery date is outside import window before {date_from}",
+                        }
+                    )
+                    continue
+                if header_date and date_to and header_date > date_to:
+                    ignored_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": header_date,
+                            "fileNameDate": file_date,
+                            "modifiedDate": modified_date,
+                            "reason": f"Workbook delivery date is outside import window after {date_to}",
+                        }
+                    )
+                    continue
+
+                source_path = str(path.resolve())
+                file_hash = source_file_hash(path)
+                payload = load_delivery_source_payload(path)
+                payload_date = str(payload.get("deliveryDate") or "").strip()
+                if payload_date and payload_date != header_date and date_from and payload_date < date_from:
+                    ignored_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": payload_date,
+                            "fileNameDate": file_date,
+                            "modifiedDate": modified_date,
+                            "reason": f"Workbook delivery date is outside import window before {date_from}",
+                        }
+                    )
+                    continue
+                if payload_date and payload_date != header_date and date_to and payload_date > date_to:
+                    ignored_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": payload_date,
+                            "fileNameDate": file_date,
+                            "modifiedDate": modified_date,
+                            "reason": f"Workbook delivery date is outside import window after {date_to}",
+                        }
+                    )
+                    continue
+
+                definitions = build_delivery_lists(payload)
+                definition_ids = [definition[0] for definition in definitions]
+
+                with self.connect() as con:
+                    previous = con.execute(
+                        """
+                        SELECT source_hash FROM imports
+                        WHERE source_path = ? OR source_name = ?
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (source_path, path.name),
+                    ).fetchone()
+
+                    active_definition_ids = set()
+                    if definition_ids:
+                        placeholders = ",".join("?" for _ in definition_ids)
+                        active_definition_ids = {
+                            row["id"]
+                            for row in con.execute(
+                                f"""
+                                SELECT id
+                                FROM delivery_lists
+                                WHERE status = 'active'
+                                  AND id IN ({placeholders})
+                                """,
+                                definition_ids,
+                            ).fetchall()
+                        }
+
+                same_active_file = (
+                    previous
+                    and previous["source_hash"] == file_hash
+                    and set(definition_ids).issubset(active_definition_ids)
+                )
+
+                preview = self.preview_import(payload)
+                if not preview["valid"]:
+                    failed_files.append({"fileName": path.name, "errors": preview["errors"]})
+                    continue
+
+                result = self.import_delivery_list(
+                    {
+                        "payload": payload,
+                        "fileName": path.name,
+                        "sourcePath": source_path,
+                        "sourceHash": file_hash,
+                        "importKind": "temp_folder",
+                        "user": user,
+                    }
+                )
+                active_list_id = active_list_id or result.get("activeListId", "")
+                file_result = {
+                    "fileName": path.name,
+                    "deliveryDate": payload["deliveryDate"],
+                    "rowCount": preview["rowCount"],
+                    "totalQty": preview["totalQty"],
+                    "createdCount": result["createdCount"],
+                    "updatedCount": result["updatedCount"],
+                    "listIds": result["changedListIds"],
+                    "stageSummaries": result.get("stageSummaries") or [],
+                    "addedPieceQty": result.get("addedPieceQty", 0),
+                    "changedPieceQty": result.get("changedPieceQty", 0),
+                }
+                if not result["createdCount"] and not result["updatedCount"] and not result.get("changedListIds"):
+                    skipped_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": payload.get("deliveryDate", header_date),
+                            "reason": "No updates" if same_active_file else "No delivery-list line changes detected",
+                        }
+                    )
+                    continue
+                if result["createdCount"]:
+                    imported_files.append(file_result)
+                else:
+                    updated_files.append(file_result)
+                print_candidates.extend(result.get("printCandidates") or [])
+            except Exception as exc:
+                failed_files.append({"fileName": path.name, "errors": [str(exc)]})
+
+        checked_count = len(imported_files) + len(updated_files) + len(skipped_files) + len(failed_files)
+
+        return {
+            "ok": not failed_files or bool(imported_files or updated_files or skipped_files or ignored_files),
+            "sourceFolder": str(folder),
+            "dateFrom": date_from,
+            "dateTo": date_to,
+            "totalFolderFiles": len(all_paths),
+            "candidateFiles": len(candidate_paths),
+            "checkedFiles": checked_count,
+            "scannedFiles": checked_count,
+            "ignoredFiles": ignored_files,
+            "importedFiles": imported_files,
+            "updatedFiles": updated_files,
+            "skippedFiles": skipped_files,
+            "failedFiles": failed_files,
+            "printCandidates": print_candidates,
+            "activeListId": active_list_id,
+            "lists": self.get_delivery_lists(),
+        }
 
     def get_print_package(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         raise NotImplementedError
@@ -822,6 +1101,9 @@ class BaseDeliveryStore:
         raise NotImplementedError
 
     def reactivate_user(self, username: str, activated_by: str = "system") -> dict[str, Any]:
+        raise NotImplementedError
+
+    def delete_user(self, username: str, deleted_by: str = "system") -> dict[str, Any]:
         raise NotImplementedError
 
     def update_user_password(self, username: str, password: str, updated_by: str = "system") -> dict[str, Any]:
@@ -2211,6 +2493,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"users": self.list_users(), "username": clean_username}
 
+    def delete_user(self, username: str, deleted_by: str = "system") -> dict[str, Any]:
+        clean_username = str(username or "").strip()
+        if not clean_username:
+            raise ValueError("username is required")
+        if clean_username.lower() == str(deleted_by or "").strip().lower():
+            raise ValueError("You cannot delete the user you are currently signed in as")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = self.get_user_by_username(con, clean_username)
+            if not row:
+                raise ValueError("User not found")
+            con.execute("DELETE FROM sessions WHERE user_id = ?", (row["id"],))
+            con.execute("DELETE FROM user_roles WHERE user_id = ?", (row["id"],))
+            con.execute("DELETE FROM users WHERE id = ?", (row["id"],))
+            self.insert_audit(con, "user", clean_username, "delete_user", deleted_by, "", "")
+            con.commit()
+        return {"users": self.list_users(), "username": clean_username}
+
     def update_user_password(self, username: str, password: str, updated_by: str = "system") -> dict[str, Any]:
         clean_username = str(username or "").strip()
         if not clean_username or not password:
@@ -2364,11 +2664,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
     def add_customer_route_rule(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         customer = " ".join(str(data.get("customerPattern") or data.get("customer") or "").split())[:160]
-        route = str(data.get("route") or "").strip().upper()[:12]
-        if route == "CUSTOMER PICKUP":
+        raw_route = str(data.get("route") or "").strip().upper()
+        if raw_route in {"CPU", "CUSTOMER PICKUP"}:
             route = "CPU"
-        if route not in {"CPU", "DTC", "GNV"}:
-            raise ValueError("Route rule must be CPU, DTC, or GNV")
+        elif raw_route in {"DTC", "DELIVER TO CUSTOMER"}:
+            route = "DTC"
+        elif raw_route in {"GRN", "GNV", "GREENVILLE"}:
+            route = "GNV"
+        else:
+            route = re.sub(r"[^A-Z0-9_-]+", "-", raw_route).strip("-")[:24]
+        if route == "CUSTOMER-PICKUP":
+            route = "CPU"
+        if not route:
+            raise ValueError("Route is required")
         if not customer:
             raise ValueError("Customer pattern is required")
         with self.connect() as con:
@@ -2652,12 +2960,48 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         for path in sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_IMPORT_EXTENSIONS):
             try:
+                file_date = delivery_date_from_text(path.stem)
+                if file_date and date_from and file_date < date_from:
+                    try:
+                        modified_date = datetime.fromtimestamp(path.stat().st_mtime).date().isoformat()
+                    except OSError:
+                        modified_date = ""
+                    if modified_date and modified_date < date_from:
+                        skipped_files.append(
+                            {
+                                "fileName": path.name,
+                                "deliveryDate": file_date,
+                                "fileNameDate": file_date,
+                                "reason": f"Filename date and file modified date are outside import window before {date_from}",
+                            }
+                        )
+                        continue
+                header_date = delivery_date_from_source_header(path)
+                if header_date and date_from and header_date < date_from:
+                    skipped_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": header_date,
+                            "fileNameDate": file_date,
+                            "reason": f"Workbook delivery date is outside import window before {date_from}",
+                        }
+                    )
+                    continue
+                if header_date and date_to and header_date > date_to:
+                    skipped_files.append(
+                        {
+                            "fileName": path.name,
+                            "deliveryDate": header_date,
+                            "fileNameDate": file_date,
+                            "reason": f"Workbook delivery date is outside import window after {date_to}",
+                        }
+                    )
+                    continue
                 file_hash = source_file_hash(path)
                 source_path = str(path.resolve())
                 payload = load_delivery_source_payload(path)
                 payload_date = str(payload.get("deliveryDate") or "").strip()
-                file_date = delivery_date_from_text(path.stem)
-                if payload_date and date_from and payload_date < date_from:
+                if payload_date and payload_date != header_date and date_from and payload_date < date_from:
                     skipped_files.append(
                         {
                             "fileName": path.name,
@@ -2667,7 +3011,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         }
                     )
                     continue
-                if payload_date and date_to and payload_date > date_to:
+                if payload_date and payload_date != header_date and date_to and payload_date > date_to:
                     skipped_files.append(
                         {
                             "fileName": path.name,

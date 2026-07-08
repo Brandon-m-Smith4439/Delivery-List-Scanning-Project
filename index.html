@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-  <link rel="stylesheet" href="styles.css?v=20260630-compact-glass-filters">
+  <link rel="stylesheet" href="styles.css?v=20260707-admin-racks-routes">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
@@ -32,11 +32,11 @@
         <span><strong>Glass Delivery Scanner</strong><small>Plant Operations</small></span>
       </div>
       <nav class="app-nav" aria-label="Main pages">
-        <button class="is-active" data-page-target="home" type="button">Home</button>
-        <button data-page-target="scan" type="button">Scan</button>
-        <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button">Racks</button>
-        <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button">Bay Map</button>
-        <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button">Admin</button>
+        <button class="is-active" data-page-target="home" type="button"><span class="top-nav-icon home"></span>Home</button>
+        <button data-page-target="scan" type="button"><span class="top-nav-icon scan"></span>Scan</button>
+        <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button"><span class="top-nav-icon racks"></span>Racks</button>
+        <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button"><span class="top-nav-icon bays"></span>Bay Map</button>
+        <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button"><span class="top-nav-icon admin"></span>Admin</button>
       </nav>
       <div class="header-search">
         <label class="search-box">
@@ -48,9 +48,26 @@
       </div>
       <div class="header-actions">
         <button class="tool-button primary-tool" id="globalPrintExportBtn" type="button">Print/Export</button>
-        <span class="signed-in-user" id="signedInUser"></span>
         <span class="backend-status" id="backendStatus">Local demo</span>
-        <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
+        <details class="user-menu">
+          <summary>
+            <span class="user-avatar"></span>
+            <span class="user-menu-summary-copy">
+              <span class="signed-in-user" id="signedInUser"></span>
+              <small id="signedInRole">Signed in</small>
+            </span>
+          </summary>
+          <div class="user-menu-panel">
+            <div class="user-menu-profile-card">
+              <span class="user-avatar user-menu-large-avatar"></span>
+              <div>
+                <strong id="userMenuDisplayName">Demo User</strong>
+                <span id="userMenuDetails">Local demo</span>
+              </div>
+            </div>
+            <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
+          </div>
+        </details>
       </div>
     </header>
 
@@ -328,10 +345,11 @@
               <div id="manualAssignStatus" class="message-list"></div>
             </section>
 
-            <section class="last-scan">
-              <div class="section-heading">
-                <h3>Last Scan</h3>
+            <section class="last-scan compact-scan-history">
+              <div class="section-heading scan-history-heading">
+                <h3>Scan History</h3>
                 <span id="lastScanTime">Waiting</span>
+                <button id="viewAllRecent" type="button">All scans</button>
               </div>
               <div class="last-card" id="lastCard">
                 <div class="last-card-status"></div>
@@ -344,27 +362,27 @@
                   <span><small>Customer</small><b id="lastCustomer">-</b></span>
                 </div>
               </div>
-            </section>
 
-            <section class="recent-panel">
-              <div class="section-heading">
-                <h3>Recent Scans</h3>
-                <button id="viewAllRecent" type="button">Audit</button>
-              </div>
-              <div class="recent-table-wrap">
-                <table class="recent-table">
-                  <thead>
-                    <tr>
-                      <th>Barcode</th>
-                      <th>Order Nr.</th>
-                      <th>Item Nr.</th>
-                      <th>Qty Scanned</th>
-                      <th>Date & Time Scanned</th>
-                      <th>Check</th>
-                    </tr>
-                  </thead>
-                  <tbody id="recentRows"></tbody>
-                </table>
+              <div class="recent-inline-block">
+                <div class="recent-inline-heading">
+                  <h4>Recent scans</h4>
+                  <span>Latest 2</span>
+                </div>
+                <div class="recent-table-wrap compact">
+                  <table class="recent-table">
+                    <thead>
+                      <tr>
+                        <th>Barcode</th>
+                        <th>Order</th>
+                        <th>Item</th>
+                        <th>Qty</th>
+                        <th>Time</th>
+                        <th>Check</th>
+                      </tr>
+                    </thead>
+                    <tbody id="recentRows"></tbody>
+                  </table>
+                </div>
               </div>
             </section>
 
@@ -402,8 +420,7 @@
           <div class="page-heading-actions rack-heading-actions">
             <div class="rack-summary" id="rackSummary"></div>
             <div class="rack-create-actions" data-permission-any="manage_racks">
-              <button id="rackCreateOpenBtn" type="button">Create Rack</button>
-              <button id="rackSetCreateOpenBtn" type="button">Create Rack Set</button>
+              <button id="rackEditOpenBtn" type="button">Edit Racks</button>
             </div>
           </div>
         </div>

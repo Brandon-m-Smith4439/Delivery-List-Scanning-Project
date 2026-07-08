@@ -54,9 +54,11 @@ const state = {
   rackSummary: null,
   selectedRackCode: "T",
   selectedRackOverviewCode: "",
+  selectedRackSetLabel: "",
   rackScanListId: "",
   rackModal: null,
   rackMoveItemId: "",
+  rackManagerSelectedCode: "",
   printContext: null,
   bayLayout: null,
   bays: [],
@@ -93,6 +95,9 @@ const els = {
   loginPassword: document.getElementById("loginPassword"),
   loginError: document.getElementById("loginError"),
   signedInUser: document.getElementById("signedInUser"),
+  signedInRole: document.getElementById("signedInRole"),
+  userMenuDisplayName: document.getElementById("userMenuDisplayName"),
+  userMenuDetails: document.getElementById("userMenuDetails"),
   backendStatus: document.getElementById("backendStatus"),
   logoutBtn: document.getElementById("logoutBtn"),
   headerGlobalSearchInput: document.getElementById("headerGlobalSearchInput"),
@@ -148,6 +153,7 @@ const els = {
   manualAssignStatus: document.getElementById("manualAssignStatus"),
   listRows: document.getElementById("listRows"),
   recentRows: document.getElementById("recentRows"),
+  viewAllRecent: document.getElementById("viewAllRecent"),
   mobileListCards: document.getElementById("mobileListCards"),
   lastCard: document.getElementById("lastCard"),
   lastScanTime: document.getElementById("lastScanTime"),
@@ -195,6 +201,7 @@ const els = {
   rackGrid: document.getElementById("rackGrid"),
   rackCreateOpenBtn: document.getElementById("rackCreateOpenBtn"),
   rackSetCreateOpenBtn: document.getElementById("rackSetCreateOpenBtn"),
+  rackEditOpenBtn: document.getElementById("rackEditOpenBtn"),
 
   bayMapPage: document.getElementById("bayMapPage"),
   bayOverviewStats: document.getElementById("bayOverviewStats"),
@@ -1360,6 +1367,10 @@ function renderRackSelects() {
   }
 }
 
+function rackGroupLabel(rack) {
+  return rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks";
+}
+
 function rackOptionLabel(rack) {
   const status = String(rack.status || "Open");
   const qty = Number(rack.qty || 0);
@@ -1652,6 +1663,11 @@ function renderRacksPage() {
         <div class="rack-board-card-meta">
           <b>${escapeHtml(rack.qty || 0)} pcs</b>
           <small class="rack-status-badge ${escapeHtml(statusClass)}">${escapeHtml(statusText)}</small>
+          ${
+            hasPermission("manage_racks")
+              ? `<button type="button" class="icon-only icon-reset" data-rack-clear="${escapeHtml(rack.code)}" title="Clear rack" aria-label="Clear ${escapeHtml(rack.code)}"></button>`
+              : ""
+          }
         </div>
       </article>
     `;
@@ -1673,6 +1689,11 @@ function renderRacksPage() {
           <strong>${escapeHtml(totalQty)} pcs</strong>
 
           ${renderRackColumnActions(label)}
+          ${
+            hasPermission("manage_racks")
+              ? `<button type="button" class="icon-only icon-reset light" data-rack-set-clear="${escapeHtml(label)}" title="Clear rack set" aria-label="Clear ${escapeHtml(label)} rack set"></button>`
+              : ""
+          }
         </header>
 
         <div class="rack-board-card-list">
@@ -1682,14 +1703,51 @@ function renderRacksPage() {
     `;
   };
 
-  if (!state.selectedRackOverviewCode || !state.racks.some((rack) => rack.code === state.selectedRackOverviewCode)) {
+  const groupLabels = groups.map(([label]) => label);
+  if (!state.selectedRackSetLabel || !groupLabels.includes(state.selectedRackSetLabel)) {
+    state.selectedRackSetLabel = groupLabels.find((label) => label !== "Truck") || groupLabels[0] || "";
+  }
+
+  const selectedGroup = groups.find(([label]) => label === state.selectedRackSetLabel) || groups[0] || ["", []];
+  const selectedGroupLabel = selectedGroup[0];
+  const selectedGroupRacks = selectedGroup[1] || [];
+
+  if (!state.selectedRackOverviewCode || !selectedGroupRacks.some((rack) => rack.code === state.selectedRackOverviewCode)) {
     state.selectedRackOverviewCode =
+      selectedGroupRacks.find((rack) => Number(rack.qty || 0) > 0)?.code ||
+      selectedGroupRacks[0]?.code ||
       state.racks.find((rack) => Number(rack.qty || 0) > 0)?.code ||
       state.racks[0]?.code ||
       "";
   }
 
   const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackOverviewCode) || state.racks[0] || null;
+
+  const renderRackSetCard = ([label, racks]) => {
+    const selected = label === selectedGroupLabel;
+    const totalQty = racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
+    const activeCount = racks.filter((rack) => Number(rack.qty || 0) > 0).length;
+    const completeCount = racks.filter((rack) => String(rack.status || "").toLowerCase() === "closed").length;
+    const setClass = slugify(label || "rack-set") || "rack-set";
+
+    return `
+      <button type="button" class="rack-set-card ${escapeHtml(setClass)} ${selected ? "is-selected" : ""}" data-rack-set-select="${escapeHtml(label)}">
+        <span class="rack-set-icon ${escapeHtml(setClass)}" aria-hidden="true"></span>
+        <span class="rack-set-copy">
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml(racks.length)} rack${racks.length === 1 ? "" : "s"}</small>
+          <b>${escapeHtml(totalQty)} piece${totalQty === 1 ? "" : "s"}</b>
+        </span>
+        <span class="rack-set-chevron">›</span>
+        <span class="rack-set-meta">${escapeHtml(activeCount)} active | ${escapeHtml(completeCount)} complete</span>
+        ${
+          hasPermission("manage_racks")
+            ? `<span class="rack-set-reset-inline icon-only icon-reset" data-rack-set-clear="${escapeHtml(label)}" title="Clear ${escapeHtml(label)}" aria-label="Clear ${escapeHtml(label)}"></span>`
+            : ""
+        }
+      </button>
+    `;
+  };
 
   const renderSelectedRackDetails = (rack) => {
     if (!rack) {
@@ -1757,10 +1815,36 @@ function renderRacksPage() {
     `;
   };
 
+  const selectedSetQty = selectedGroupRacks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
+
   els.rackGrid.innerHTML = `
-    <div class="rack-board">
-      ${groups.map(renderRackBoardGroup).join("")}
-    </div>
+    <aside class="rack-sets-sidebar">
+      <header>
+        <h2>Rack Sets</h2>
+        <span>All rack sets at a glance</span>
+      </header>
+      <div class="rack-set-list">
+        ${groups.map(renderRackSetCard).join("") || `<div class="admin-empty">No rack sets found.</div>`}
+      </div>
+    </aside>
+
+    <section class="rack-center-panel">
+      <div class="rack-center-heading">
+        <div>
+          <h2>${escapeHtml(selectedGroupLabel || "Racks")}</h2>
+          <span>${escapeHtml(selectedGroupRacks.length)} rack${selectedGroupRacks.length === 1 ? "" : "s"} | ${escapeHtml(selectedSetQty)} pieces</span>
+        </div>
+        <div class="rack-center-controls">
+          <button type="button" class="rack-filter-button" disabled>Status: All</button>
+          <button type="button" class="rack-filter-button" disabled>Sort: Rack ID (A-Z)</button>
+          <button type="button" class="icon-only icon-reset" data-rack-set-clear="${escapeHtml(selectedGroupLabel)}" ${hasPermission("manage_racks") ? "" : "hidden"} title="Clear selected rack set" aria-label="Clear selected rack set"></button>
+        </div>
+      </div>
+
+      <div class="rack-overview-card-grid">
+        ${selectedGroupRacks.map(renderRackBoardCard).join("") || `<p class="admin-empty">No racks in this set.</p>`}
+      </div>
+    </section>
 
     ${renderSelectedRackDetails(selectedRack)}
   `;
@@ -1808,6 +1892,21 @@ async function clearRack(code) {
   const payload = await fetchJson("/api/racks/clear", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
+  renderRacksPage();
+}
+
+async function clearRackSet(label) {
+  const racks = (state.racks || []).filter((rack) => rackGroupLabel(rack) === label);
+  if (!racks.length) return;
+  if (!window.confirm(`Clear all active pieces from every rack in ${label}? Individual pieces will be left as delivery-list scans.`)) return;
+  let latestPayload = null;
+  for (const rack of racks) {
+    latestPayload = await fetchJson("/api/racks/clear", { method: "POST", body: JSON.stringify({ rackCode: rack.code }) });
+  }
+  if (latestPayload) {
+    state.racks = latestPayload.racks || [];
+    state.rackSummary = latestPayload.summary || null;
+  }
   renderRacksPage();
 }
 
@@ -1873,12 +1972,63 @@ async function saveRackDefinition() {
   closeAdminModal();
 }
 
+function selectedRackManagerRack(code = state.rackManagerSelectedCode) {
+  return state.racks.find((rack) => rack.code === code) || state.racks[0] || null;
+}
+
+function populateRackManagerQuickEdit(code = "") {
+  const select = document.getElementById("rackManagerQuickRackSelect");
+  const nameInput = document.getElementById("rackManagerQuickName");
+  const typeInput = document.getElementById("rackManagerQuickType");
+  const rack = selectedRackManagerRack(code || select?.value || state.rackManagerSelectedCode);
+
+  if (!rack) return;
+
+  state.rackManagerSelectedCode = rack.code || "";
+  if (select) select.value = rack.code || "";
+  if (nameInput) nameInput.value = rack.name || rack.type || rack.code || "";
+  if (typeInput) typeInput.value = rack.type || "Steel";
+}
+
+async function saveRackQuickEdit() {
+  const code = document.getElementById("rackManagerQuickRackSelect")?.value || state.rackManagerSelectedCode || "";
+  if (!code) return;
+
+  const payload = await fetchJson("/api/racks", {
+    method: "POST",
+    body: JSON.stringify({
+      rackCode: code,
+      name: document.getElementById("rackManagerQuickName")?.value || code,
+      type: document.getElementById("rackManagerQuickType")?.value || "Steel",
+    }),
+  });
+
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  state.rackManagerSelectedCode = code;
+  renderRacksPage();
+  renderScanRackTools();
+
+  if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
+    els.adminModalBody.innerHTML = adminModalContent("racks");
+  }
+
+  showFloatingNotice(`Saved rack ${code}.`, "success");
+}
+
 async function deleteRackDefinition(rackCode = state.selectedRackCode) {
-  if (!rackCode || !window.confirm(`Delete rack ${rackCode}? Empty racks only.`)) return;
+  if (!rackCode) return;
+  const typed = window.prompt(`Delete rack ${rackCode}? Empty racks only. Type DELETE RACK to confirm.`);
+  if (typed !== "DELETE RACK") return;
   const payload = await fetchJson("/api/racks/delete", { method: "POST", body: JSON.stringify({ rackCode }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
+  if (state.selectedRackOverviewCode === rackCode) state.selectedRackOverviewCode = "";
   renderRacksPage();
+  renderScanRackTools();
+  if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
+    els.adminModalBody.innerHTML = adminModalContent("racks");
+  }
 }
 
 async function createRackSet() {
@@ -1932,6 +2082,9 @@ async function deleteRackSet(label) {
   await ensureRacksLoaded();
   renderRacksPage();
   renderScanRackTools();
+  if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
+    els.adminModalBody.innerHTML = adminModalContent("racks");
+  }
 }
 
 function renderMobileCards() {
@@ -2005,7 +2158,7 @@ function renderLastScan() {
 
 function renderRecent() {
   if (!els.recentRows) return;
-  const rows = state.recent.slice(0, 7);
+  const rows = state.recent.slice(0, 2);
   els.recentRows.innerHTML = rows.length
     ? rows
         .map((entry) => {
@@ -2025,6 +2178,55 @@ function renderRecent() {
         })
         .join("")
     : `<tr><td colspan="6">No scans yet</td></tr>`;
+}
+
+function recentScansModalHtml() {
+  const rows = state.recent || [];
+  return `
+    <div class="recent-scans-modal">
+      <div class="modal-list-heading">
+        <strong>${escapeHtml(state.meta?.label || state.meta?.stage || "Current stage")}</strong>
+        <span>${escapeHtml(rows.length)} recent scan${rows.length === 1 ? "" : "s"}</span>
+      </div>
+      <div class="recent-table-wrap expanded">
+        <table class="recent-table">
+          <thead>
+            <tr>
+              <th>Barcode</th>
+              <th>Order Nr.</th>
+              <th>Item Nr.</th>
+              <th>Qty Scanned</th>
+              <th>Date & Time Scanned</th>
+              <th>Check</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              rows.length
+                ? rows
+                    .map((entry) => {
+                      const item = entry.item;
+                      const time = new Date(entry.time);
+                      const note = [entry.message, entry.reason].filter(Boolean).join(" - ");
+                      return `
+                        <tr class="${entry.ok ? "ok" : "error"}">
+                          <td><strong>${escapeHtml(entry.barcode)}</strong>${note ? `<small class="scan-row-note">${escapeHtml(note)}</small>` : ""}</td>
+                          <td>${item ? escapeHtml(item.order) : "-"}</td>
+                          <td>${item ? escapeHtml(item.item) : "-"}</td>
+                          <td>${item ? item.scanned : "-"}</td>
+                          <td>${Number.isNaN(time.getTime()) ? "" : time.toLocaleString()}</td>
+                          <td><span class="check-dot ${entry.ok ? "" : "error"}">${entry.ok ? "&#10003;" : "!"}</span></td>
+                        </tr>
+                      `;
+                    })
+                    .join("")
+                : `<tr><td colspan="6">No scans yet</td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 function renderMeta() {
@@ -2066,9 +2268,34 @@ function renderDeliveryListSelect() {
 }
 
 function applyPermissionUi() {
+  const displayName = state.user ? state.user.displayName || state.user.username : "Demo";
+  const roleText = state.user?.roles?.length ? state.user.roles.join(", ") : state.backend ? "Signed in" : "Local demo";
+  const stationText = userAssignedStation(state.user) || currentScanStation() || "No assigned station";
+  const initials = state.user ? userInitials(state.user) : "DM";
+  const accentClass = state.user ? userAccentClass(state.user) : "accent-default";
+
   if (els.signedInUser) {
-    els.signedInUser.textContent = state.user ? `${state.user.displayName || state.user.username}` : "Demo";
+    els.signedInUser.textContent = displayName;
   }
+
+  if (els.signedInRole) {
+    els.signedInRole.textContent = roleText;
+  }
+
+  if (els.userMenuDisplayName) {
+    els.userMenuDisplayName.textContent = displayName;
+  }
+
+  if (els.userMenuDetails) {
+    els.userMenuDetails.textContent = `${roleText} • ${stationText}`;
+  }
+
+  document.querySelectorAll(".user-menu .user-avatar").forEach((avatar) => {
+    avatar.textContent = initials;
+    avatar.className = `user-avatar ${accentClass}${avatar.classList.contains("user-menu-large-avatar") ? " user-menu-large-avatar" : ""}`;
+    avatar.setAttribute("aria-hidden", "true");
+  });
+
   if (els.logoutBtn) els.logoutBtn.hidden = !state.backend || !state.user;
   document.querySelectorAll("[data-permission-any]").forEach((element) => {
     const permissions = element.dataset.permissionAny.split(",").map((value) => value.trim());
@@ -2311,8 +2538,26 @@ function renderTodayProgress() {
     : `<div class="admin-empty">No delivery lists are loaded for ${formatDisplayDate(key)}.</div>`;
 }
 
+function renderHomeStageFilter() {
+  if (!els.homeStageFilter) return;
+  const current = state.homeStageFilter || "all";
+  const stageOptions = uniqueText(
+    state.lists
+      .map((list) => stageLabel(list) || list.stage || list.scanner || "")
+      .filter(Boolean),
+  ).sort((a, b) => a.localeCompare(b));
+
+  els.homeStageFilter.innerHTML = [
+    `<option value="all">All stages</option>`,
+    ...stageOptions.map((stage) => `<option value="${escapeHtml(stage)}">${escapeHtml(stage)}</option>`),
+  ].join("");
+  els.homeStageFilter.value = stageOptions.some((stage) => stage.toLowerCase() === String(current).toLowerCase()) ? current : "all";
+  state.homeStageFilter = els.homeStageFilter.value;
+}
+
 function renderHome() {
   if (!els.homePage) return;
+  renderHomeStageFilter();
   const overviewLists = filterListsByOverviewRange(state.lists);
   const overview = aggregateListStats(overviewLists);
   if (els.homeWelcome) {
@@ -3359,14 +3604,28 @@ function renderStaleBayPanel(orders) {
     .map((order) => `
       <article class="stale-bay-order">
         <span class="age-ribbon">${escapeHtml(order.daysOld)} days</span>
-        <div>
+        <div class="stale-bay-main">
           <strong>${escapeHtml(order.order)}-${escapeHtml(order.item)} <span>${escapeHtml(order.customer || "")}</span></strong>
-          <small>Bay ${escapeHtml(order.bayDisplay || order.bayCode)} | ${escapeHtml(order.job || order.product || "")}</small>
-          <small>${escapeHtml(order.dimensions || "")} | Delivery ${escapeHtml(formatDisplayDate(order.deliveryDate || ""))} | Last scanned ${escapeHtml(formatDateTime(order.lastScannedAt) || "Not scanned")}</small>
+          <div class="stale-bay-meta-grid">
+            <small><b>Bay</b>${escapeHtml(order.bayDisplay || order.bayCode)}</small>
+            <small><b>Glass</b>${escapeHtml(order.job || order.product || "")}</small>
+            <small><b>Size</b>${escapeHtml(order.dimensions || "")}</small>
+            <small><b>Delivery</b>${escapeHtml(formatDisplayDate(order.deliveryDate || ""))}</small>
+            <small><b>Last scanned</b>${escapeHtml(formatDateTime(order.lastScannedAt) || "Not scanned")}</small>
+          </div>
         </div>
         <div class="stale-snooze-row">
-          <input type="number" min="1" max="365" value="1" data-stale-days="${escapeHtml(order.assignmentId)}" aria-label="Snooze days">
-          <button type="button" data-stale-snooze="${escapeHtml(order.assignmentId)}">Snooze</button>
+          <label>
+            <span>Snooze</span>
+            <select data-stale-days="${escapeHtml(order.assignmentId)}" aria-label="Snooze days">
+              <option value="1">1 day</option>
+              <option value="3">3 days</option>
+              <option value="7">1 week</option>
+              <option value="14">2 weeks</option>
+              <option value="30">30 days</option>
+            </select>
+          </label>
+          <button type="button" data-stale-snooze="${escapeHtml(order.assignmentId)}">Apply</button>
         </div>
       </article>
     `)
@@ -4567,7 +4826,7 @@ async function importTempDeliveryFolder() {
   const sourceFolder = els.tempFolderInput?.value.trim() || "";
   const { dateFrom, dateTo } = currentImportDateWindow();
 
-  showImportStatusLoading("Importing Temp folder...");
+  showImportStatusLoading("Importing Temp folder...", `Checking delivery dates from ${formatDisplayDate(dateFrom)} forward.`);
   await waitForNextPaint();
 
   const result = await fetchJson("/api/import/folder", {
@@ -4581,7 +4840,10 @@ async function importTempDeliveryFolder() {
   const imported = result.importedFiles?.length || 0;
   const updated = result.updatedFiles?.length || 0;
   const skipped = result.skippedFiles?.length || 0;
+  const ignored = result.ignoredFiles?.length || 0;
   const failed = result.failedFiles?.length || 0;
+  const checked = result.checkedFiles ?? result.scannedFiles ?? imported + updated + skipped + failed;
+  const total = result.totalFolderFiles ?? checked + ignored;
   if (els.importPreviewBox) {
     els.importPreviewBox.hidden = false;
     els.importPreviewBox.classList.remove("loading");
@@ -4590,21 +4852,25 @@ async function importTempDeliveryFolder() {
     els.importPreviewBox.classList.toggle("review", Boolean(failed));
 
     const noUpdates = !imported && !updated && skipped && !failed;
+    const windowText = `Checked ${checked} file${checked === 1 ? "" : "s"} in the active import window. ${ignored ? `Skipped ${ignored} older file${ignored === 1 ? "" : "s"} outside the date window. ` : ""}${total ? `Folder total: ${total}.` : ""}`;
 
     els.importPreviewBox.innerHTML = failed
       ? `
         <strong>Import completed with issues.</strong>
         <span>${imported} new, ${updated} updated, ${skipped} unchanged, ${failed} failed.</span>
+        <small>${escapeHtml(windowText)}</small>
         ${result.failedFiles?.length ? `<small>${escapeHtml(result.failedFiles.map((file) => `${file.fileName}: ${(file.errors || []).join("; ")}`).join(" | "))}</small>` : ""}
       `
       : noUpdates
         ? `
           <strong>No updates found.</strong>
           <span>${skipped} delivery list file${skipped === 1 ? "" : "s"} checked. Existing New/Updated markers were refreshed where applicable.</span>
+          <small>${escapeHtml(windowText)}</small>
         `
         : `
           <strong>Import complete.</strong>
           <span>${imported} new, ${updated} updated, ${skipped} unchanged.</span>
+          <small>${escapeHtml(windowText)}</small>
         `;
   }
 }
@@ -4831,6 +5097,8 @@ function openAdminModal(kind) {
     lookups: "Lookup Manager",
     rackForm: "Rack",
     rackSetForm: "Rack Set",
+    racks: "Edit Racks",
+    recentScans: "All Scans",
   };
   els.adminModalTitle.textContent = titleMap[kind] || "Admin";
   els.adminModalBody.innerHTML = adminModalContent(kind);
@@ -4951,6 +5219,12 @@ function adminModalContent(kind) {
   if (kind === "lookups") {
     return lookupManagerModalHtml();
   }
+  if (kind === "recentScans") {
+    return recentScansModalHtml();
+  }
+  if (kind === "racks") {
+    return rackManagerModalHtml();
+  }
   if (kind === "rackForm") {
     return rackFormModalHtml();
   }
@@ -4960,63 +5234,245 @@ function adminModalContent(kind) {
   return `<div class="admin-empty">Choose a dashboard section to view details.</div>`;
 }
 
+function lookupTypeMeta(title) {
+  const clean = String(title || "").toLowerCase();
+
+  if (clean.includes("product")) {
+    return {
+      className: "products",
+      label: "Product names",
+      description: "Glass/product descriptions used in manual delivery-list edits.",
+    };
+  }
+
+  if (clean.includes("route")) {
+    return {
+      className: "routes",
+      label: "Route codes",
+      description: "Routing values such as CPU, DTC, GNV, or custom customer routes.",
+    };
+  }
+
+  return {
+    className: "processes",
+    label: "Process states",
+    description: "Status values such as New, Updated, Rush, Remake, and SDI.",
+  };
+}
+
 function lookupListHtml(title, items = []) {
+  const meta = lookupTypeMeta(title);
+
   return `
-    <section class="lookup-manager-list">
-      <h3>${escapeHtml(title)}</h3>
-      ${
-        items.length
-          ? items
-              .map((item) => `
-                <div class="lookup-row">
-                  <strong>${escapeHtml(item.label || item.value)}</strong>
-                  <span>${escapeHtml(item.value || "")}${item.category ? ` - ${escapeHtml(item.category)}` : ""}</span>
-                  ${item.matchTerms ? `<small>${escapeHtml(item.matchTerms)}</small>` : ""}
-                  <em>${escapeHtml(item.source || "discovered")}</em>
-                </div>
-              `)
-              .join("")
-          : `<div class="admin-empty">No ${escapeHtml(title.toLowerCase())} yet.</div>`
-      }
+    <section class="lookup-manager-list ${escapeHtml(meta.className)}">
+      <header>
+        <span class="lookup-type-icon" aria-hidden="true"></span>
+        <div>
+          <h3>${escapeHtml(meta.label)}</h3>
+          <p>${escapeHtml(meta.description)}</p>
+        </div>
+        <strong>${escapeHtml(items.length)}</strong>
+      </header>
+
+      <div class="lookup-row-list">
+        ${
+          items.length
+            ? items
+                .map((item) => `
+                  <article class="lookup-row">
+                    <div class="lookup-row-main">
+                      <strong>${escapeHtml(item.label || item.value)}</strong>
+                      <span>${escapeHtml(item.value || "")}${item.category ? ` | ${escapeHtml(item.category)}` : ""}</span>
+                      ${item.matchTerms ? `<small>Matches: ${escapeHtml(item.matchTerms)}</small>` : ""}
+                    </div>
+                    <em>${escapeHtml(item.source || "manual")}</em>
+                  </article>
+                `)
+                .join("")
+            : `<div class="lookup-empty-state"><strong>No ${escapeHtml(title.toLowerCase())} yet</strong><span>Add one above to make manual edits faster and cleaner.</span></div>`
+        }
+      </div>
     </section>
   `;
 }
 
 function lookupManagerModalHtml() {
   const lookups = state.manualEditLookups || { products: [], routes: [], processes: [] };
+  const productCount = (lookups.products || []).length;
+  const routeCount = (lookups.routes || []).length;
+  const processCount = (lookups.processes || []).length;
+
   return `
-    <div class="lookup-manager-shell">
-      <form id="manualLookupForm" class="lookup-manager-form">
-        <label>
-          <span>Type</span>
-          <select id="lookupTypeInput">
-            <option value="product">Product</option>
-            <option value="route">Route</option>
-            <option value="process">Process</option>
-          </select>
-        </label>
-        <label>
-          <span>Value / code</span>
-          <input id="lookupValueInput" type="text" autocomplete="off" placeholder="CPU, 1/4 Mirror, Rush">
-        </label>
-        <label>
-          <span>Label</span>
-          <input id="lookupLabelInput" type="text" autocomplete="off" placeholder="Customer Pickup">
-        </label>
-        <label class="lookup-route-only">
-          <span>Category</span>
-          <input id="lookupCategoryInput" type="text" autocomplete="off" placeholder="Pickup, delivery, branch">
-        </label>
-        <label class="lookup-route-only wide">
-          <span>Match terms</span>
-          <input id="lookupMatchTermsInput" type="text" autocomplete="off" placeholder="CPU-Air, customer pickup, will call">
-        </label>
-        <button type="submit">Add Lookup</button>
-      </form>
+    <div class="lookup-manager-shell lookup-manager-modern">
+      <section class="lookup-manager-hero">
+        <div>
+          <span class="lookup-hero-label">Lookup Manager</span>
+          <strong>Edit dropdown choices used by manual list editing</strong>
+          <span>Add clean product names, route codes, and process states so the manual editor stays consistent.</span>
+        </div>
+        <div class="lookup-manager-kpis">
+          ${miniStat("Products", productCount)}
+          ${miniStat("Routes", routeCount)}
+          ${miniStat("Processes", processCount)}
+        </div>
+      </section>
+
+      <section class="lookup-add-card">
+        <div class="lookup-add-copy">
+          <strong>Add lookup value</strong>
+          <span>Use Value for the actual saved code. Use Display label for the cleaner name people see.</span>
+        </div>
+
+        <form id="manualLookupForm" class="lookup-manager-form">
+          <label>
+            <span>Lookup type</span>
+            <select id="lookupTypeInput">
+              <option value="product">Product</option>
+              <option value="route">Route</option>
+              <option value="process">Process</option>
+            </select>
+          </label>
+          <label>
+            <span>Value / code</span>
+            <input id="lookupValueInput" type="text" autocomplete="off" placeholder="CPU, 1/4 Mirror, Rush">
+          </label>
+          <label>
+            <span>Display label</span>
+            <input id="lookupLabelInput" type="text" autocomplete="off" placeholder="Customer Pickup">
+          </label>
+          <label>
+            <span>Category</span>
+            <input id="lookupCategoryInput" type="text" autocomplete="off" placeholder="Pickup, delivery, branch">
+          </label>
+          <label class="wide">
+            <span>Match terms</span>
+            <input id="lookupMatchTermsInput" type="text" autocomplete="off" placeholder="CPU-Air, customer pickup, will call">
+          </label>
+          <button type="submit">Add Lookup</button>
+        </form>
+      </section>
+
       <div class="lookup-manager-grid">
         ${lookupListHtml("Products", lookups.products || [])}
         ${lookupListHtml("Routes", lookups.routes || [])}
         ${lookupListHtml("Processes", lookups.processes || [])}
+      </div>
+    </div>
+  `;
+}
+
+function rackManagerModalHtml() {
+  const groups = new Map();
+  for (const rack of state.racks || []) {
+    const label = rackGroupLabel(rack);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(rack);
+  }
+
+  const sortedGroups = [...groups.entries()].sort(([a], [b]) => {
+    if (a === "Truck") return 1;
+    if (b === "Truck") return -1;
+    const order = { Steel: 1, Wood: 2, Coral: 3 };
+    return (order[a] || 50) - (order[b] || 50) || a.localeCompare(b);
+  });
+
+  const selectedRack = selectedRackManagerRack(state.rackManagerSelectedCode) || state.racks[0] || null;
+  state.rackManagerSelectedCode = selectedRack?.code || "";
+
+  return `
+    <div class="rack-manager-shell">
+      <div class="rack-manager-topbar">
+        <div>
+          <strong>Rack Manager</strong>
+          <span>Edit individual racks, add rack sets, delete empty racks, or delete empty rack sets.</span>
+        </div>
+        <div class="rack-manager-actions">
+          <button type="button" data-rack-manager-new-rack>Create Rack</button>
+          <button type="button" data-rack-manager-new-set>Create Rack Set</button>
+        </div>
+      </div>
+
+      <form id="rackManagerQuickEditForm" class="rack-manager-quick-edit">
+        <div class="rack-manager-quick-copy">
+          <strong>Quick rack edit</strong>
+          <span>Select a rack, update its display name or set type, then save it without leaving this manager.</span>
+        </div>
+        <label>
+          <span>Rack</span>
+          <select id="rackManagerQuickRackSelect">
+            ${(state.racks || [])
+              .slice()
+              .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }))
+              .map((rack) => `<option value="${escapeHtml(rack.code)}" ${selectedRack?.code === rack.code ? "selected" : ""}>${escapeHtml(rack.code === "T" ? "Truck / No Rack" : rack.code)} - ${escapeHtml(rack.name || rack.type || "")}</option>`)
+              .join("")}
+          </select>
+        </label>
+        <label>
+          <span>Name</span>
+          <input id="rackManagerQuickName" type="text" autocomplete="off" value="${escapeHtml(selectedRack?.name || selectedRack?.type || selectedRack?.code || "")}" placeholder="Rack display name">
+        </label>
+        <label>
+          <span>Rack set / type</span>
+          <input id="rackManagerQuickType" type="text" list="rackManagerRackTypes" autocomplete="off" value="${escapeHtml(selectedRack?.type || "Steel")}" placeholder="Steel, Wood, Coral, Truck">
+          <datalist id="rackManagerRackTypes">
+            ${["Steel", "Wood", "Coral", "Truck", "Aluminum", "Other"].map((type) => `<option value="${escapeHtml(type)}"></option>`).join("")}
+          </datalist>
+        </label>
+        <button type="submit" class="rack-manager-save-button">Save Rack</button>
+      </form>
+
+      <div class="rack-manager-grid">
+        ${
+          sortedGroups.length
+            ? sortedGroups
+                .map(([label, racks]) => {
+                  const totalQty = racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
+                  const deletableCount = racks.filter((rack) => rack.code !== "T" && Number(rack.qty || 0) === 0).length;
+
+                  return `
+                    <section class="rack-manager-group">
+                      <header>
+                        <div>
+                          <h3>${escapeHtml(label)}</h3>
+                          <span>${escapeHtml(racks.length)} rack${racks.length === 1 ? "" : "s"} | ${escapeHtml(totalQty)} pcs</span>
+                        </div>
+                        <div class="rack-manager-group-actions">
+                          <button type="button" class="icon-only icon-pencil" data-rack-set-edit="${escapeHtml(label)}" title="Edit ${escapeHtml(label)} set" aria-label="Edit ${escapeHtml(label)} set"></button>
+                          <button type="button" class="icon-only icon-trash danger" data-rack-set-delete="${escapeHtml(label)}" ${deletableCount ? "" : "disabled"} title="Delete empty racks in ${escapeHtml(label)}" aria-label="Delete empty racks in ${escapeHtml(label)}"></button>
+                        </div>
+                      </header>
+
+                      <div class="rack-manager-rows">
+                        ${racks
+                          .slice()
+                          .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }))
+                          .map((rack) => {
+                            const qty = Number(rack.qty || 0);
+                            const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
+                            const canDelete = !isTruck && qty === 0;
+                            const status = String(rack.status || "Open").toLowerCase() === "closed" ? "Complete" : qty ? "Open" : "Empty";
+
+                            return `
+                              <article class="rack-manager-row">
+                                <div>
+                                  <strong>${escapeHtml(isTruck ? "Truck / No Rack" : rack.code)}</strong>
+                                  <span>${escapeHtml(rack.name || rack.type || "")}</span>
+                                </div>
+                                <span class="rack-status-badge ${escapeHtml(status.toLowerCase())}">${escapeHtml(status)}</span>
+                                <b>${escapeHtml(qty)} pcs</b>
+                                <button type="button" class="icon-only icon-pencil" data-rack-edit="${escapeHtml(rack.code)}" title="Edit rack" aria-label="Edit ${escapeHtml(rack.code)}"></button>
+                                <button type="button" class="icon-only icon-trash danger" data-rack-delete="${escapeHtml(rack.code)}" ${canDelete ? "" : "disabled"} title="Delete empty rack" aria-label="Delete ${escapeHtml(rack.code)}"></button>
+                              </article>
+                            `;
+                          })
+                          .join("")}
+                      </div>
+                    </section>
+                  `;
+                })
+                .join("")
+            : `<div class="admin-empty">No racks available. Create a rack set to get started.</div>`
+        }
       </div>
     </div>
   `;
@@ -5034,7 +5490,7 @@ function rackFormModalHtml() {
           ${["Steel", "Wood", "Truck", "Aluminum", "Other"].map((type) => `<option ${String(rack.type || "Steel") === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
         </select>
       </label>
-      <footer class="modal-actions"><button type="submit">Confirm</button></footer>
+      <footer class="modal-actions">${rack.code && rack.code !== "T" ? `<button type="button" class="danger" data-rack-delete="${escapeHtml(rack.code)}">Delete Rack</button>` : ""}<button type="submit">Confirm</button></footer>
     </form>
   `;
 }
@@ -5993,6 +6449,9 @@ async function resetAdminScansForDate(deliveryDate) {
   }
 
   await loadDeliveryLists(state.activeListId);
+  if (state.activeListId && lists.some((list) => list.id === state.activeListId)) {
+    await activateList(state.activeListId, false);
+  }
   await refreshAdminPage();
 
   renderHome();
@@ -6302,7 +6761,10 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                   <small>Station: ${escapeHtml(userAssignedStation(user) || "No assigned station")}</small>
                 </div>
 
-                <span class="user-session-pill ${loggedIn ? "is-online" : "is-offline"}">${loggedIn ? "Active" : "Inactive"}</span>
+                <span class="user-status-stack">
+                  <span class="user-status-pill ${user.active ? "active" : "inactive"}">${user.active ? "Active profile" : "Inactive profile"}</span>
+                  <span class="user-session-pill ${loggedIn ? "is-online" : "is-offline"}">${loggedIn ? "Signed in" : "Logged out"}</span>
+                </span>
               </article>
             `;
           })
@@ -6413,10 +6875,10 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                 <div class="user-admin-status">
                   <span class="user-status-pill ${active ? "active" : "inactive"}">
                     <i></i>
-                    ${active ? "Active" : "Inactive"}
+                    ${active ? "Active profile" : "Inactive profile"}
                   </span>
 
-                  ${loggedIn ? `<small class="logged-in-note">Signed in</small>` : ""}
+                  <span class="user-session-pill ${loggedIn ? "is-online" : "is-offline"}">${loggedIn ? "Signed in" : "Logged out"}</span>
                 </div>
 
                 <div class="user-admin-actions">
@@ -6452,6 +6914,17 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                         })
                       : ""
                   }
+
+                  ${
+                    hasPermission("manage_users")
+                      ? userActionButtonHtml({
+                          className: "danger",
+                          attr: `data-delete-user="${escapeHtml(username)}"`,
+                          label: "Delete user",
+                          icon: "icon-trash",
+                        })
+                      : ""
+                  }
                 </div>
               </article>
             `;
@@ -6481,11 +6954,17 @@ function renderAdminStationsList(editable = false, limit = 6) {
 }
 
 function customerRouteValue(route) {
-  const clean = String(route || "").trim().toUpperCase();
+  const raw = String(route || "").trim().toUpperCase();
+
+  if (["GRN", "GNV", "GREENVILLE"].includes(raw)) return "GNV";
+  if (raw === "DTC" || raw === "DELIVER TO CUSTOMER") return "DTC";
+  if (raw === "CPU" || raw === "CUSTOMER PICKUP") return "CPU";
+
+  const clean = raw.replace(/[^A-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
 
   if (["GRN", "GNV", "GREENVILLE"].includes(clean)) return "GNV";
   if (clean === "DTC") return "DTC";
-  if (clean === "CUSTOMER PICKUP") return "CPU";
+  if (clean === "CPU" || clean === "CUSTOMER-PICKUP") return "CPU";
 
   return clean || "CPU";
 }
@@ -6500,10 +6979,19 @@ function customerRouteDisplay(route) {
   return clean;
 }
 
+function customerRouteOptionList() {
+  const customRoutes = [...new Set((state.adminCustomerRouteRules || [])
+    .map((rule) => customerRouteValue(rule.route))
+    .filter((route) => route && !CUSTOMER_ROUTE_OPTIONS.some((option) => option.value === route)))]
+    .sort();
+
+  return [...CUSTOMER_ROUTE_OPTIONS, ...customRoutes.map((route) => ({ value: route, label: route }))];
+}
+
 function customerRouteOptionsHtml(selectedRoute = "CPU") {
   const selected = customerRouteValue(selectedRoute);
 
-  return CUSTOMER_ROUTE_OPTIONS
+  return customerRouteOptionList()
     .map((option) => `
       <option value="${escapeHtml(option.value)}" ${selected === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>
     `)
@@ -6517,61 +7005,91 @@ function customerRouteRuleRowsHtml(editable = false, limit = 0) {
     return `
       <div class="customer-route-empty">
         <strong>No customer route rules</strong>
-        <span>Add CPU, DTC, or GNV / Greenville customer defaults here.</span>
+        <span>Add customer-to-route rules here. Custom route codes create custom route stages during import.</span>
       </div>
     `;
   }
 
   return rules
-    .map((rule) => `
-      <div class="customer-route-rule-row">
-        <div>
-          <strong>${escapeHtml(rule.customerPattern)}</strong>
-          <span>${escapeHtml(customerRouteDisplay(rule.route))}</span>
-        </div>
+    .map((rule) => {
+      const routeCode = customerRouteValue(rule.route);
+      const routeLabel = customerRouteDisplay(rule.route);
 
-        ${
-          editable
-            ? `<div class="customer-route-row-actions">
-                <button type="button" data-edit-customer-route-rule="${escapeHtml(rule.id)}">Edit</button>
-                <button type="button" class="danger" data-remove-customer-route-rule="${escapeHtml(rule.id)}">Remove</button>
-              </div>`
-            : ""
-        }
-      </div>
-    `)
+      return `
+        <article class="customer-route-rule-row ${editable ? "is-editable" : ""}">
+          <div class="customer-route-row-fields">
+            <label class="customer-route-customer-field">
+              <span>Customer / match text</span>
+              ${
+                editable
+                  ? `<input data-customer-route-pattern="${escapeHtml(rule.id)}" type="text" value="${escapeHtml(rule.customerPattern)}" aria-label="Customer route customer">`
+                  : `<strong>${escapeHtml(rule.customerPattern)}</strong>`
+              }
+            </label>
+
+            <label class="customer-route-route-field">
+              <span>Route</span>
+              ${
+                editable
+                  ? `<select data-customer-route-route="${escapeHtml(rule.id)}" aria-label="Customer route code">
+                      ${customerRouteOptionsHtml(rule.route)}
+                    </select>`
+                  : `<em class="customer-route-badge">${escapeHtml(routeLabel)}</em>`
+              }
+            </label>
+          </div>
+
+          ${
+            editable
+              ? `<div class="customer-route-row-actions">
+                  <button type="button" class="icon-only icon-save" data-save-customer-route-rule="${escapeHtml(rule.id)}" title="Save route" aria-label="Save route"></button>
+                  <button type="button" class="icon-only icon-trash danger" data-remove-customer-route-rule="${escapeHtml(rule.id)}" title="Delete route" aria-label="Delete route"></button>
+                </div>`
+              : ""
+          }
+        </article>
+      `;
+    })
     .join("");
 }
 
 function customerRouteRulesModalHtml() {
-  return `
-    <div class="customer-route-modal-shell">
-      <form id="customerRouteRuleFormModal" class="customer-route-modal-form">
-        <input id="customerRouteEditIdModal" type="hidden">
-        <input id="customerRouteEditOriginalPatternModal" type="hidden">
+  const ruleCount = state.adminCustomerRouteRules.length;
 
+  return `
+    <div class="customer-route-modal-shell customer-route-modern">
+      <section class="customer-route-modal-intro">
+        <div>
+          <span>Customer Route Rules</span>
+          <strong>Match customers to the route they should import into.</strong>
+          <p>New custom routes become their own stage during import when a customer matches that route.</p>
+        </div>
+        <b>${escapeHtml(ruleCount)} active rule${ruleCount === 1 ? "" : "s"}</b>
+      </section>
+
+      <form id="customerRouteRuleFormModal" class="customer-route-modal-form">
         <label>
-          <span>Customer / Job match text</span>
+          <span>New customer / job match text</span>
           <input id="customerRoutePatternInputModal" type="text" autocomplete="off" placeholder="Example: Lowe's, CPU AIR, Greenville">
         </label>
 
         <label>
-          <span>Route</span>
-          <select id="customerRouteSelectModal">
-            ${customerRouteOptionsHtml("CPU")}
-          </select>
+          <span>New route code</span>
+          <input id="customerRouteSelectModal" type="text" list="customerRouteCodes" autocomplete="off" placeholder="CPU, DTC, GNV, or custom route">
         </label>
+        <datalist id="customerRouteCodes">
+          ${customerRouteOptionsHtml("CPU")}
+        </datalist>
 
         <div class="customer-route-modal-actions">
-          <button id="customerRouteSubmitBtnModal" type="submit">Add Rule</button>
-          <button type="button" class="secondary" data-clear-customer-route-edit>Clear</button>
+          <button id="customerRouteSubmitBtnModal" type="submit">Add Customer Route</button>
         </div>
       </form>
 
       <div class="customer-route-modal-list">
         <div class="customer-route-modal-list-heading">
-          <strong>Current Rules</strong>
-          <span>${escapeHtml(state.adminCustomerRouteRules.length)} active</span>
+          <strong>Current customer rules</strong>
+          <span>Change the route dropdown, then use the save icon on that row.</span>
         </div>
 
         ${customerRouteRuleRowsHtml(true)}
@@ -6601,16 +7119,16 @@ function setCustomerRouteEditForm(ruleId = "") {
 }
 
 function renderCustomerRouteRules() {
-function renderCustomerRouteRules() {
   if (!els.customerRouteRules) return;
 
   const rules = state.adminCustomerRouteRules || [];
-  const previewLimit = 5;
+  const previewLimit = 6;
   const hiddenCount = Math.max(rules.length - previewLimit, 0);
 
-  const routeStats = CUSTOMER_ROUTE_OPTIONS
+  const routeStats = customerRouteOptionList()
     .map((option) => {
       const count = rules.filter((rule) => customerRouteValue(rule.route) === option.value).length;
+      if (!count) return "";
 
       return `
         <div class="customer-route-stat">
@@ -6619,12 +7137,18 @@ function renderCustomerRouteRules() {
         </div>
       `;
     })
+    .filter(Boolean)
     .join("");
 
   els.customerRouteRules.innerHTML = `
     <div class="customer-route-overview">
+      <div class="customer-route-overview-heading">
+        <strong>${escapeHtml(rules.length)} customer route rule${rules.length === 1 ? "" : "s"}</strong>
+        <span>Quick view of customers that will be split to special/custom stages during import.</span>
+      </div>
+
       <div class="customer-route-stat-grid">
-        ${routeStats}
+        ${routeStats || `<div class="customer-route-stat"><small>No route rules yet</small><strong>0</strong></div>`}
       </div>
 
       <div class="customer-route-preview-list">
@@ -6638,85 +7162,6 @@ function renderCustomerRouteRules() {
       }
     </div>
   `;
-    }
-  }
-
-async function saveCustomerRouteRule() {
-  const modalForm = document.getElementById("customerRouteRuleFormModal");
-  const patternInput = modalForm?.querySelector("#customerRoutePatternInputModal") || els.customerRoutePatternInput;
-  const routeInput = modalForm?.querySelector("#customerRouteSelectModal") || els.customerRouteSelect;
-  const editIdInput = modalForm?.querySelector("#customerRouteEditIdModal");
-  const originalPatternInput = modalForm?.querySelector("#customerRouteEditOriginalPatternModal");
-
-  const customerPattern = patternInput?.value.trim() || "";
-  const route = customerRouteValue(routeInput?.value || "CPU");
-  const editRuleId = editIdInput?.value || "";
-  const originalPattern = originalPatternInput?.value.trim() || "";
-
-  if (!customerPattern) {
-    patternInput?.focus();
-    return;
-  }
-
-  const payload = await fetchJson("/api/admin/customer-route-rules", {
-    method: "POST",
-    body: JSON.stringify({ customerPattern, route }),
-  });
-
-  state.adminCustomerRouteRules = payload.rules || [];
-
-  if (editRuleId && originalPattern && originalPattern.toLowerCase() !== customerPattern.toLowerCase()) {
-    const removePayload = await fetchJson("/api/admin/customer-route-rules/remove", {
-      method: "POST",
-      body: JSON.stringify({ ruleId: editRuleId }),
-    });
-
-    state.adminCustomerRouteRules = removePayload.rules || [];
-  }
-
-  if (patternInput) patternInput.value = "";
-  if (editIdInput) editIdInput.value = "";
-  if (originalPatternInput) originalPatternInput.value = "";
-
-  renderCustomerRouteRules();
-
-  if (els.adminModalBody?.querySelector(".customer-route-modal-shell")) {
-    els.adminModalBody.innerHTML = adminModalContent("customerRoutes");
-  }
-}
-
-async function removeCustomerRouteRule(ruleId) {
-  const payload = await fetchJson("/api/admin/customer-route-rules/remove", {
-    method: "POST",
-    body: JSON.stringify({ ruleId }),
-  });
-
-  state.adminCustomerRouteRules = payload.rules || [];
-
-  renderCustomerRouteRules();
-
-  if (els.adminModalBody?.querySelector(".customer-route-modal-shell")) {
-    els.adminModalBody.innerHTML = adminModalContent("customerRoutes");
-  }
-}
-
-async function saveManualEditLookup() {
-  const lookupType = document.getElementById("lookupTypeInput")?.value || "product";
-  const value = document.getElementById("lookupValueInput")?.value.trim() || "";
-  const label = document.getElementById("lookupLabelInput")?.value.trim() || value;
-  const category = document.getElementById("lookupCategoryInput")?.value.trim() || "";
-  const matchTerms = document.getElementById("lookupMatchTermsInput")?.value.trim() || "";
-  if (!value) throw new Error("Lookup value is required");
-  const payload = await fetchJson("/api/admin/manual-edit-lookups", {
-    method: "POST",
-    body: JSON.stringify({ type: lookupType, value, label, category, matchTerms }),
-  });
-  state.manualEditLookups = {
-    products: payload.products || [],
-    routes: payload.routes || [],
-    processes: payload.processes || [],
-  };
-  openAdminModal("lookups");
 }
 
 function renderActiveSessions() {
@@ -7396,6 +7841,7 @@ function wireEvents() {
   });
 
   els.logoutBtn?.addEventListener("click", () => logout().catch((error) => showInlineError(error.message)));
+  els.viewAllRecent?.addEventListener("click", () => openAdminModal("recentScans"));
   els.globalPrintExportBtn?.addEventListener("click", () => {
     const date = state.page === "scan" ? state.meta?.deliveryDate : dashboardDateKey();
     const listIds = state.lists.filter((list) => !date || list.deliveryDate === date).map((list) => list.id);
@@ -7654,6 +8100,36 @@ function wireEvents() {
       return;
     }
 
+    const rackManagerNewRackButton = event.target.closest("[data-rack-manager-new-rack]");
+    if (rackManagerNewRackButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      openRackForm("");
+
+      return;
+    }
+
+    const rackManagerNewSetButton = event.target.closest("[data-rack-manager-new-set]");
+    if (rackManagerNewSetButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      openRackSetForm("");
+
+      return;
+    }
+
+    const deleteRackButton = event.target.closest("[data-rack-delete]");
+    if (deleteRackButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      deleteRackDefinition(deleteRackButton.dataset.rackDelete || "").catch((error) => showInlineError(error.message, true));
+
+      return;
+    }
+
     const editRackButton = event.target.closest("[data-rack-edit]");
     if (editRackButton) {
       event.preventDefault();
@@ -7680,6 +8156,16 @@ function wireEvents() {
       event.stopPropagation();
 
       deleteRackSet(deleteRackSetButton.dataset.rackSetDelete || "").catch((error) => showInlineError(error.message, true));
+
+      return;
+    }
+
+    const clearRackSetButton = event.target.closest("[data-rack-set-clear]");
+    if (clearRackSetButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      clearRackSet(clearRackSetButton.dataset.rackSetClear || "").catch((error) => showInlineError(error.message, true));
 
       return;
     }
@@ -7729,6 +8215,21 @@ function wireEvents() {
       return;
     }
 
+    const rackSetCard = event.target.closest("[data-rack-set-select]");
+    if (rackSetCard) {
+      event.preventDefault();
+      if (event.target.closest("[data-rack-set-clear]")) return;
+
+      state.selectedRackSetLabel = rackSetCard.dataset.rackSetSelect || "";
+      const matchingRacks = state.racks.filter((rack) => rackGroupLabel(rack) === state.selectedRackSetLabel);
+      state.selectedRackOverviewCode = matchingRacks.find((rack) => Number(rack.qty || 0) > 0)?.code || matchingRacks[0]?.code || "";
+      state.rackMoveItemId = "";
+
+      renderRacksPage();
+
+      return;
+    }
+
     const rackSelectCard = event.target.closest("[data-rack-select]");
     if (rackSelectCard) {
       event.preventDefault();
@@ -7758,6 +8259,7 @@ function wireEvents() {
 
   els.rackCreateOpenBtn?.addEventListener("click", () => openRackForm(""));
   els.rackSetCreateOpenBtn?.addEventListener("click", () => openRackSetForm(""));
+  els.rackEditOpenBtn?.addEventListener("click", () => openAdminModal("racks"));
 
   els.folderImportBtn?.addEventListener("click", () => {
     importTempDeliveryFolder().catch((error) => showInlineError(error.message, true));
@@ -7794,6 +8296,11 @@ function wireEvents() {
     if (event.target.closest("#rackSetFormModal")) {
       event.preventDefault();
       createRackSet().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#rackManagerQuickEditForm")) {
+      event.preventDefault();
+      saveRackQuickEdit().catch((error) => showInlineError(error.message, true));
       return;
     }
     if (event.target.closest("#manualLookupForm")) {
@@ -7848,6 +8355,13 @@ function wireEvents() {
   });
 
   document.addEventListener("change", (event) => {
+    const rackQuickSelect = event.target.closest("#rackManagerQuickRackSelect");
+
+    if (rackQuickSelect) {
+      populateRackManagerQuickEdit(rackQuickSelect.value);
+      return;
+    }
+
     const choiceSelect = event.target.closest("#manualEditModalResults .manual-edit-choice-select");
 
     if (choiceSelect) {
@@ -8157,6 +8671,10 @@ function wireEvents() {
             openAdminModal("customerRoutes");
           })
           .catch((error) => showInlineError(error.message, true));
+      } else if (modalKind === "deliveryLists" || modalKind === "deliveryActions") {
+        loadDeliveryLists(state.activeListId)
+          .then(() => openAdminModal(modalKind))
+          .catch((error) => showInlineError(error.message, true));
       } else {
         openAdminModal(modalKind);
       }
@@ -8370,6 +8888,22 @@ function wireEvents() {
       return;
     }
 
+    const deleteUserButton = event.target.closest("[data-delete-user]");
+    if (deleteUserButton) {
+      const username = deleteUserButton.dataset.deleteUser || "";
+      const typed = window.prompt(`Delete user ${username}? Type DELETE USER to confirm.`);
+      if (typed !== "DELETE USER") return;
+
+      fetchJson("/api/admin/users/delete", {
+        method: "POST",
+        body: JSON.stringify({ username }),
+      })
+        .then(() => refreshAdminUsersUi())
+        .catch((error) => showInlineError(error.message));
+
+      return;
+    }
+
     const generatePasswordButton = event.target.closest("[data-generate-user-password]");
     if (generatePasswordButton) {
       const username = generatePasswordButton.dataset.generateUserPassword;
@@ -8462,15 +8996,9 @@ function wireEvents() {
       deleteManualLineItem(deleteLineItemButton.dataset.deleteLineItem).catch((error) => showInlineError(error.message, true));
       return;
     }
-    const editCustomerRouteButton = event.target.closest("[data-edit-customer-route-rule]");
-    if (editCustomerRouteButton) {
-      setCustomerRouteEditForm(editCustomerRouteButton.dataset.editCustomerRouteRule);
-      return;
-    }
-
-    const clearCustomerRouteEditButton = event.target.closest("[data-clear-customer-route-edit]");
-    if (clearCustomerRouteEditButton) {
-      setCustomerRouteEditForm("");
+    const saveCustomerRouteButton = event.target.closest("[data-save-customer-route-rule]");
+    if (saveCustomerRouteButton) {
+      saveCustomerRouteRuleRow(saveCustomerRouteButton.dataset.saveCustomerRouteRule).catch((error) => showInlineError(error.message, true));
       return;
     }
 
