@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import html
+import re
+from datetime import datetime
 from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -22,6 +24,26 @@ STORE = create_store(CONFIG)
 
 def esc(value: object) -> str:
     return html.escape(str(value if value is not None else ""))
+
+
+def print_display_date(value: object) -> str:
+    """Return a plain M/D/YYYY date for printed sheets and packing lists.
+
+    Keep print headers simple: the stage belongs in the title, and the date
+    belongs in one obvious place. Future print changes should use this helper
+    instead of rebuilding stage/date labels in multiple spots.
+    """
+    text = str(value or "").strip()
+    parts = text.split("-")
+    if len(parts) == 3 and all(part.isdigit() for part in parts):
+        year, month, day = (int(part) for part in parts)
+        return f"{month}/{day}/{year}"
+    match = re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", text)
+    if match:
+        month, day, year = match.groups()
+        year_text = str(int(year) + 2000) if len(year) == 2 else str(int(year))
+        return f"{int(month)}/{int(day)}/{year_text}"
+    return text
 
 
 CODE39 = {
@@ -54,54 +76,169 @@ def code39_svg(value: str) -> str:
     return f'<svg class="rack-barcode" viewBox="0 0 {x} {height}" role="img" aria-label="{esc(text)}" preserveAspectRatio="none">{"".join(rects)}</svg>'
 
 
-def render_item_rows(items: list[dict]) -> str:
-    if not items:
-        return '<tr><td colspan="8">No printable rows.</td></tr>'
-    rows = []
-    current_product = object()
-    for item in sorted(items, key=lambda row: (str(row.get("product") or row.get("job") or ""), int(row.get("order") or 0), int(row.get("item") or 0))):
-        product = item.get("product") or item.get("job") or "Unspecified Glass"
-        if product != current_product:
-            current_product = product
-            rows.append(f'<tr class="glass-group"><td colspan="8">{esc(product)}</td></tr>')
-        rows.append(
-            f"""
+def render_item_row(item: dict) -> str:
+    job_text = item.get("job") or item.get("product")
+    customer_text = item.get("customer")
+    # Keep printed list rows to one visual line per item. Long job/customer names
+    # were wrapping, which made the browser spill one logical page onto an extra
+    # physical sheet and broke the list page count.
+    return f"""
             <tr>
-              <td>{esc(item.get("job") or item.get("product"))}</td>
-              <td>{esc(item.get("order"))}</td>
-              <td>{esc(item.get("item"))}</td>
-              <td>{esc(item.get("qty"))}</td>
-              <td>{esc(item.get("dimensions"))}</td>
-              <td>{esc(item.get("customer"))}</td>
-              <td>{esc(item.get("route"))}</td>
+              <td class="print-truncate job-cell" title="{esc(job_text)}">{esc(job_text)}</td>
+              <td class="print-nowrap order-cell">{esc(item.get("order"))}</td>
+              <td class="print-nowrap item-cell">{esc(item.get("item"))}</td>
+              <td class="print-nowrap qty-cell">{esc(item.get("qty"))}</td>
+              <td class="print-truncate dimensions-cell" title="{esc(item.get("dimensions"))}">{esc(item.get("dimensions"))}</td>
+              <td class="print-truncate customer-cell" title="{esc(customer_text)}">{esc(customer_text)}</td>
+              <td class="print-nowrap route-cell">{esc(item.get("route"))}</td>
               <td class="check-cell">&#9744;</td>
             </tr>
             """
-        )
-    return "".join(rows)
 
 
-def render_sheet(title: str, subtitle: str, items: list[dict], sheet_class: str = "", badge: str = "") -> str:
+def paginate_item_rows(items: list[dict], rows_per_page: int = 23) -> list[str]:
+    """Build explicit one-paper-page chunks for printed delivery lists.
+
+    Important for future edits: the browser print preview only understands the
+    sections we give it. If this number is too high, Chrome/Edge may split one
+    logical list page across two physical pieces of paper, which makes the page
+    label wrong. Keep this conservative so every rendered <section class="sheet">
+    fits on one printed page. The current print CSS uses larger rows/fonts, so
+    rows_per_page is set to 23 to use more of the sheet without forcing the
+    browser to create unexpected extra pages. The default print output is one physical
+    copy, so the labels stay as the actual list page count: 1 of 3, 2 of 3,
+    3 of 3.
+    """
+    if not items:
+        return ['<tr><td colspan="8">No printable rows.</td></tr>']
+
+    pages: list[str] = []
+    current_rows: list[str] = []
+    current_count = 0
+    current_product = object()
+
+    def flush_page() -> None:
+        nonlocal current_rows, current_count, current_product
+        if current_rows:
+            pages.append("".join(current_rows))
+        current_rows = []
+        current_count = 0
+        current_product = object()
+
+    sorted_items = sorted(
+        items,
+        key=lambda row: (
+            str(row.get("product") or row.get("job") or ""),
+            int(row.get("order") or 0),
+            int(row.get("item") or 0),
+        ),
+    )
+    for item in sorted_items:
+        product = item.get("product") or item.get("job") or "Unspecified Glass"
+        needs_group_row = product != current_product
+        needed_rows = 1 + (1 if needs_group_row else 0)
+        if current_rows and current_count + needed_rows > rows_per_page:
+            flush_page()
+            needs_group_row = True
+
+        if needs_group_row:
+            current_product = product
+            current_rows.append(f'<tr class="glass-group"><td colspan="8">{esc(product)}</td></tr>')
+            current_count += 1
+
+        if current_count >= rows_per_page and current_rows:
+            flush_page()
+            current_product = product
+            current_rows.append(f'<tr class="glass-group"><td colspan="8">{esc(product)}</td></tr>')
+            current_count += 1
+
+        current_rows.append(render_item_row(item))
+        current_count += 1
+
+    flush_page()
+    return pages
+
+
+def render_sheet(
+    title: str,
+    subtitle: str,
+    items: list[dict],
+    sheet_class: str = "",
+    badge: str = "",
+    printed_at: str = "",
+) -> str:
     badge_html = f'<span class="sheet-badge">{esc(badge)}</span>' if badge else ""
-    return f"""
-    <section class="sheet {sheet_class}">
-      <header>
+    printed_at_html = f'<p class="printed-at">Printed at: {esc(printed_at)}</p>' if printed_at else ""
+    item_pages = paginate_item_rows(items)
+    page_total = len(item_pages)
+    sections = []
+    for page_number, rows_html in enumerate(item_pages, start=1):
+        continuation = page_number > 1
+        # This is the list page count only. It intentionally does not count duplicate physical copies.
+        page_label = f"List page {page_number} of {page_total}"
+        if continuation:
+            header_html = f"""
+      <div class="sheet-page-top">{esc(page_label)}</div>
+      <header class="sheet-header sheet-header-compact">
+        <div>
+          {badge_html}
+          <h2>{esc(title)}</h2>
+          <p>Continuation sheet - {esc(page_label)}</p>
+          {printed_at_html}
+        </div>
+        <div class="copy-box"><span>Checked By: <i class="write-line checked-line"></i></span><span>Date: <i class="write-line date-line"></i></span></div>
+      </header>
+            """
+        else:
+            subtitle_html = f'<p>{esc(subtitle)}</p>' if subtitle else ""
+            header_html = f"""
+      <div class="sheet-page-top">{esc(page_label)}</div>
+      <header class="sheet-header">
         <div>
           {badge_html}
           <h1>{esc(title)}</h1>
-          <p>{esc(subtitle)}</p>
+          {printed_at_html}
+          {subtitle_html}
         </div>
-        <div class="copy-box">Checked By: __________ Date: ________</div>
+        <div class="copy-box"><span>Checked By: <i class="write-line checked-line"></i></span><span>Date: <i class="write-line date-line"></i></span></div>
       </header>
-      <table>
+            """
+        sections.append(
+            f"""
+    <section class="sheet {sheet_class}">
+      {header_html}
+      <table class="delivery-print-table">
+        <colgroup>
+          <col class="job-col">
+          <col class="order-col">
+          <col class="item-col">
+          <col class="qty-col">
+          <col class="dimensions-col">
+          <col class="customer-col">
+          <col class="route-col">
+          <col class="check-col">
+        </colgroup>
         <thead>
           <tr><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty.</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Check</th></tr>
         </thead>
-        <tbody>{render_item_rows(items)}</tbody>
+        <tbody>{rows_html}</tbody>
       </table>
       <div class="notes"><strong>Notes:</strong><span></span></div>
     </section>
+            """
+        )
+    return "".join(sections)
+
+
+
+def printed_item_is_remake(item: dict) -> bool:
+    """Return True when a printed row should be marked as a remake/RM.
+
+    Packing lists are used on the floor away from the screen, so remake pieces
+    need a visible RM flag even when the route/stage context is not obvious.
     """
+    text = " ".join(str(item.get(key, "")) for key in ("remake", "processState", "queueState", "process_state", "queue_state")).upper()
+    return "REMAKE" in text or re.search(r"\bRM\b", text) is not None
 
 def render_rack_packing_list(payload: dict) -> str:
     rack = payload.get("rack") or {}
@@ -113,7 +250,7 @@ def render_rack_packing_list(payload: dict) -> str:
         rows.append(
             f"""
             <tr>
-              <td>{esc(item.get("deliveryLabel"))}</td>
+              <td>{esc(print_display_date(item.get("deliveryDate") or item.get("deliveryLabel")))}</td>
               <td>{esc(item.get("job") or item.get("product"))}</td>
               <td>{esc(item.get("order"))}</td>
               <td>{esc(item.get("item"))}</td>
@@ -121,12 +258,13 @@ def render_rack_packing_list(payload: dict) -> str:
               <td>{esc(item.get("dimensions"))}</td>
               <td>{esc(item.get("customer"))}</td>
               <td>{esc(item.get("route"))}</td>
+              <td class="flag-cell">{'RM' if printed_item_is_remake(item) else ''}</td>
               <td class="check-cell">&#9744;</td>
             </tr>
             """
         )
     if not rows:
-        rows.append('<tr><td colspan="9">No pieces are currently assigned to this rack.</td></tr>')
+        rows.append('<tr><td colspan="10">No pieces are currently assigned to this rack.</td></tr>')
     return f"""
     <!doctype html>
     <html>
@@ -164,7 +302,7 @@ def render_rack_packing_list(payload: dict) -> str:
         </div>
       </header>
       <table>
-        <thead><tr><th>Delivery List</th><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Check</th></tr></thead>
+        <thead><tr><th>Delivery Date</th><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Flags</th><th>Check</th></tr></thead>
         <tbody>{''.join(rows)}</tbody>
       </table>
       <div class="notes"><strong>Notes:</strong></div>
@@ -204,6 +342,10 @@ def render_stale_bay_report(rows: list[dict]) -> str:
       <style>
         body {{ font-family: Arial, sans-serif; color: #071633; margin: 24px; }}
         header {{ display: flex; justify-content: space-between; border-bottom: 3px solid #071633; padding-bottom: 12px; }}
+        .copy-box {{ border: 1px solid #222; padding: 7px 10px; font-weight: 800; display: flex; gap: 14px; align-items: center; white-space: nowrap; }}
+        .write-line {{ display: inline-block; height: 1em; border-bottom: 1px solid #222; vertical-align: -2px; }}
+        .checked-line {{ width: 82px; }}
+        .date-line {{ width: 112px; }}
         h1 {{ margin: 0; font-size: 26px; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }}
         th, td {{ border: 1px solid #222; padding: 6px; text-align: left; vertical-align: top; }}
@@ -219,7 +361,7 @@ def render_stale_bay_report(rows: list[dict]) -> str:
           <h1>Old Bay Orders</h1>
           <p>Orders in Indian Trail bays more than 10 days.</p>
         </div>
-        <div>Checked By: __________ Date: ________</div>
+        <div class="copy-box"><span>Checked By: <i class="write-line checked-line"></i></span><span>Date: <i class="write-line date-line"></i></span></div>
       </header>
       <table>
         <thead>
@@ -234,47 +376,56 @@ def render_stale_bay_report(rows: list[dict]) -> str:
 
 def render_print_package(package: dict) -> str:
     sections = []
+    printed_at = datetime.now().strftime("%m/%d/%Y %I:%M %p")
     filters = package.get("filters", {}) or {}
     rush_only = str(filters.get("rushOnly") or "").lower() in {"1", "true", "yes"}
     remake_only = str(filters.get("remakeOnly") or "").lower() in {"1", "true", "yes"}
     updated_only = str(filters.get("updatedOnly") or "").lower() in {"1", "true", "yes"}
     special_only = rush_only or remake_only
 
-    def stage_badge(delivery_list: dict, mode: str = "") -> str:
+    def stage_print_name(delivery_list: dict) -> str:
+        """Short, human print name. Avoid repeating the stage in badges/subtitles."""
+        kind = str(delivery_list.get("stageKind") or delivery_list.get("sheetKind") or "").lower()
+        stage = str(delivery_list.get("stage") or "Delivery List")
+        mapped = {
+            "outbound": "Outbound",
+            "staging": "Staging",
+            "indian-trail": "Indian Trail",
+            "cpu": "CPU",
+            "dtc": "DTC",
+            "greenville": "BFS Greenville",
+        }.get(kind)
+        if mapped:
+            return mapped
+        if " - " in stage:
+            return stage.split(" - ", 1)[0].strip() or stage
+        return stage
+
+    def sheet_title(delivery_list: dict, mode: str = "") -> str:
+        date_text = print_display_date(delivery_list.get("deliveryDate"))
+        stage_name = stage_print_name(delivery_list)
+        if mode == "remake":
+            return f"{stage_name} Remake Sheet for {date_text}"
+        if mode == "rush":
+            return f"{stage_name} Rush Sheet for {date_text}"
+        if updated_only or delivery_list.get("sheetKind") == "updated":
+            return f"{stage_name} Updated Delivery List for {date_text}"
+        return f"{stage_name} Delivery List for {date_text}"
+
+    def sheet_badge(delivery_list: dict, mode: str = "") -> str:
         if mode == "remake":
             return "REMAKE"
         if mode == "rush":
             return "RUSH"
         if updated_only or delivery_list.get("sheetKind") == "updated":
-            return "UPDATED LIST"
-        kind = str(delivery_list.get("stageKind") or delivery_list.get("sheetKind") or "").lower()
-        return {
-            "indian-trail": "INDIAN TRAIL",
-            "cpu": "CPU",
-            "dtc": "DTC",
-            "greenville": "GREENVILLE",
-            "outbound": "OUTBOUND",
-            "staging": "STAGING",
-        }.get(kind, "DELIVERY LIST")
+            return "UPDATED"
+        return ""
 
-    def stage_title(delivery_list: dict, mode: str = "") -> str:
-        stage = str(delivery_list.get("stage") or "Delivery List")
-        if mode == "remake":
-            return f"REMAKE SHEET - {stage}"
-        if mode == "rush":
-            return f"RUSH ORDER SHEET - {stage}"
-        if updated_only or delivery_list.get("sheetKind") == "updated":
-            return f"UPDATED {stage} DELIVERY LIST"
-        kind = str(delivery_list.get("stageKind") or delivery_list.get("sheetKind") or "").lower()
-        prefix = {
-            "indian-trail": "INDIAN TRAIL",
-            "cpu": "CPU / CUSTOMER PICKUP",
-            "dtc": "DTC",
-            "greenville": "BFS GREENVILLE",
-            "outbound": "OUTBOUND",
-            "staging": "STAGING",
-        }.get(kind, stage.upper())
-        return f"{prefix} DELIVERY LIST"
+    def sheet_subtitle(delivery_list: dict) -> str:
+        mirror_count = int(delivery_list.get("excludedMirrorCount") or 0)
+        if mirror_count:
+            return f"Regular mirror rows excluded: {mirror_count}"
+        return ""
 
     for delivery_list in package.get("lists", []):
         remakes = delivery_list.get("remakes", [])
@@ -282,18 +433,20 @@ def render_print_package(package: dict) -> str:
         normal_items = delivery_list.get("normalItems")
         if normal_items is None:
             normal_items = [item for item in delivery_list.get("items", []) if item not in remakes and item not in rushes]
-        subtitle = f"{delivery_list.get('stage')} | {delivery_list.get('deliveryDate')} | Regular mirror rows excluded: {delivery_list.get('excludedMirrorCount', 0)}"
+        sheet_kind = esc(str(delivery_list.get("stageKind") or "regular"))
+        updated_class = "updated" if updated_only or delivery_list.get("sheetKind") == "updated" else ""
         if normal_items and not special_only:
-            title = stage_title(delivery_list)
-            badge = stage_badge(delivery_list)
-            sections.append(render_sheet(title, f"{subtitle} | Copy 1 of 2", normal_items, f"regular {esc(str(delivery_list.get('stageKind') or ''))} {'updated' if updated_only else ''}", badge))
-            sections.append(render_sheet(title, f"{subtitle} | Copy 2 of 2", normal_items, f"regular {esc(str(delivery_list.get('stageKind') or ''))} {'updated' if updated_only else ''}", badge))
+            title = sheet_title(delivery_list)
+            badge = sheet_badge(delivery_list)
+            # Print one physical copy by default. The browser print dialog should also stay at Copies = 1.
+            # If the shop later wants duplicate physical copies again, add a second render_sheet call here.
+            sections.append(render_sheet(title, sheet_subtitle(delivery_list), normal_items, f"regular {sheet_kind} {updated_class}", badge, printed_at))
         if rushes and not remake_only:
-            sections.append(render_sheet(stage_title(delivery_list, "rush"), f"{delivery_list.get('label')} | Copy 1 of 1", rushes, "rush", stage_badge(delivery_list, "rush")))
+            sections.append(render_sheet(sheet_title(delivery_list, "rush"), "", rushes, "rush", sheet_badge(delivery_list, "rush"), printed_at))
         if remakes and not rush_only:
-            title = stage_title(delivery_list, "remake")
-            sections.append(render_sheet(title, f"{delivery_list.get('label')} | Copy 1 of 2", remakes, "remake", stage_badge(delivery_list, "remake")))
-            sections.append(render_sheet(title, f"{delivery_list.get('label')} | Copy 2 of 2", remakes, "remake", stage_badge(delivery_list, "remake")))
+            title = sheet_title(delivery_list, "remake")
+            # Remake sheets also print one physical copy by default.
+            sections.append(render_sheet(title, "", remakes, "remake", sheet_badge(delivery_list, "remake"), printed_at))
     body = "".join(sections) or '<section class="sheet"><h1>No printable rows found</h1></section>'
     return f"""<!doctype html>
 <html>
@@ -303,31 +456,64 @@ def render_print_package(package: dict) -> str:
   <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
   <style>
     body {{ margin: 0; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #f6f8fb; }}
-    .sheet {{ width: min(1120px, calc(100% - 32px)); margin: 16px auto; padding: 18px; background: #fff; border: 1px solid #444; border-radius: 0; }}
-    header {{ display: flex; justify-content: space-between; gap: 16px; align-items: end; border-bottom: 3px solid #072a63; padding-bottom: 10px; margin-bottom: 12px; }}
-    h1 {{ margin: 5px 0 0; color: #041a3d; font-size: 24px; text-transform: uppercase; }}
-    p {{ margin: 4px 0 0; font-weight: 700; color: #41506c; }}
-    .sheet-badge {{ display: inline-flex; min-height: 26px; align-items: center; border: 1px solid #072a63; border-radius: 999px; background: #eaf2ff; color: #041a3d; padding: 0 12px; font-size: 12px; font-weight: 900; letter-spacing: .08em; }}
-    table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
-    th, td {{ border: 1px solid #d9e1ee; padding: 7px 8px; text-align: left; vertical-align: top; }}
-    th {{ background: #f1f1f1; color: #041a3d; }}
-    .glass-group td {{ background: #e9e9e9; font-weight: 900; text-transform: uppercase; }}
-    .check-cell {{ width: 28px; text-align: center; font-size: 16px; }}
-    .copy-box {{ border: 1px solid #333; padding: 8px 10px; font-weight: 800; white-space: nowrap; }}
-    .notes {{ margin-top: 12px; min-height: 72px; border: 1px solid #333; display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 8px; }}
+    .sheet {{ width: min(1120px, calc(100% - 32px)); margin: 16px auto; padding: 18px 20px 14px; background: #fff; border: 1px solid #444; border-radius: 0; break-inside: avoid; page-break-inside: avoid; }}
+    .sheet-header {{ display: flex; justify-content: space-between; gap: 18px; align-items: end; border-bottom: 3px solid #072a63; padding-bottom: 10px; margin-bottom: 10px; }}
+    .sheet-header-compact {{ align-items: center; padding-bottom: 8px; margin-bottom: 9px; border-bottom-width: 2px; }}
+    h1 {{ margin: 4px 0 0; color: #041a3d; font-size: 26px; line-height: 1.12; text-transform: uppercase; }}
+    h2 {{ margin: 3px 0 0; color: #041a3d; font-size: 18px; line-height: 1.15; text-transform: uppercase; }}
+    p {{ margin: 3px 0 0; font-weight: 750; color: #41506c; }}
+    .printed-at {{ color: #263550; font-size: 12px; font-weight: 850; }}
+    .sheet-page-top {{ color: #526078; font-size: 12px; font-weight: 900; text-align: right; margin-bottom: 5px; }}
+    .sheet-badge {{ display: inline-flex; min-height: 24px; align-items: center; border: 1px solid #072a63; border-radius: 999px; background: #eaf2ff; color: #041a3d; padding: 0 11px; font-size: 11px; font-weight: 900; letter-spacing: .08em; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 12.25px; line-height: 1.22; }}
+    .delivery-print-table {{ table-layout: fixed; }}
+    .delivery-print-table .job-col {{ width: 26%; }}
+    .delivery-print-table .order-col {{ width: 9%; }}
+    .delivery-print-table .item-col {{ width: 8%; }}
+    .delivery-print-table .qty-col {{ width: 5%; }}
+    .delivery-print-table .dimensions-col {{ width: 17%; }}
+    .delivery-print-table .customer-col {{ width: 24%; }}
+    .delivery-print-table .route-col {{ width: 6%; }}
+    .delivery-print-table .check-col {{ width: 5%; }}
+    th, td {{ border: 1px solid #d9e1ee; padding: 6px 7px; text-align: left; vertical-align: top; }}
+    .print-nowrap,
+    .print-truncate {{ white-space: nowrap; }}
+    .print-truncate {{ overflow: hidden; text-overflow: ellipsis; }}
+    th {{ background: #f1f1f1; color: #041a3d; font-size: 11.5px; }}
+    tr, td, th {{ break-inside: avoid; page-break-inside: avoid; }}
+    .glass-group td {{ background: #e9e9e9; font-size: 12px; font-weight: 900; text-transform: uppercase; padding-top: 6px; padding-bottom: 6px; }}
+    .check-cell {{ width: 30px; text-align: center; font-size: 16px; }}
+    .copy-box {{ border: 1px solid #333; padding: 8px 10px; font-size: 16px; font-weight: 850; white-space: nowrap; display: flex; align-items: center; gap: 16px; }}
+    .copy-box .write-line {{ display: inline-block; height: 1em; border-bottom: 1px solid #333; vertical-align: -2px; }}
+    .copy-box .checked-line {{ width: 82px; }}
+    .copy-box .date-line {{ width: 112px; }}
+    .notes {{ margin-top: 10px; min-height: 72px; border: 1px solid #333; display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 9px; font-size: 14px; }}
     .updated .sheet-badge {{ border-color: #135cff; background: #eaf2ff; color: #072a63; }}
-    .indian-trail .sheet-badge {{ border-color: #2fa84f; background: #ecf8ef; color: #176b2d; }}
-    .cpu .sheet-badge {{ border-color: #8a63d2; background: #f4ecff; color: #57359a; }}
-    .dtc .sheet-badge {{ border-color: #d9468f; background: #fff0f7; color: #9d1f60; }}
+    .indian-trail .sheet-header {{ border-bottom-color: #2fa84f; }}
+    .cpu .sheet-header {{ border-bottom-color: #8a63d2; }}
+    .dtc .sheet-header {{ border-bottom-color: #d9468f; }}
     .rush {{ border: 4px double #000; }}
-    .rush header {{ border-bottom: 6px double #000; }}
+    .rush .sheet-header {{ border-bottom: 6px double #000; }}
     .rush h1::before, .rush h1::after {{ content: " !!! "; }}
     .remake {{ border: 3px dashed #000; }}
     .remake .sheet-badge {{ border-color: #c92f42; background: #fff0f1; color: #9f1f31; }}
-    .remake header {{ border-bottom: 3px dashed #000; }}
+    .remake .sheet-header {{ border-bottom: 3px dashed #000; }}
+    @page {{ size: letter portrait; margin: 0.25in; }}
     @media print {{
       body {{ background: #fff; }}
-      .sheet {{ width: auto; margin: 0; border: 0; border-radius: 0; page-break-after: always; }}
+      .sheet {{
+        width: auto;
+        margin: 0;
+        padding: 0.04in 0.06in 0.03in;
+        border: 0;
+        border-radius: 0;
+        page-break-after: always;
+        break-after: page;
+      }}
+      /* Keep notes directly under the table. Using flex + margin-top:auto caused
+         large gaps and, in Edge/Chrome print preview, an extra mostly blank page. */
+      .sheet .notes {{ margin-top: 10px; }}
+      .sheet:last-child {{ page-break-after: auto; break-after: auto; }}
     }}
   </style>
 </head>
@@ -506,7 +692,8 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/reports/summary":
             if not self.require_permission("view_reports"):
                 return
-            self.send_json(STORE.reports_summary())
+            filters = {key: values[0] for key, values in parse_qs(parsed.query).items()}
+            self.send_json(STORE.reports_summary(filters))
             return
 
         if parsed.path == "/api/indian-trail/summary":

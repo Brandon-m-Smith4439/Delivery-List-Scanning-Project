@@ -1163,7 +1163,7 @@ class BaseDeliveryStore:
     def add_manual_edit_lookup(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
         raise NotImplementedError
 
-    def reports_summary(self) -> dict[str, Any]:
+    def reports_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
     def get_bays(self) -> list[dict[str, Any]]:
@@ -2665,6 +2665,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
     def add_customer_route_rule(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         customer = " ".join(str(data.get("customerPattern") or data.get("customer") or "").split())[:160]
         raw_route = str(data.get("route") or "").strip().upper()
+        rule_id = int(data.get("ruleId") or data.get("id") or 0)
         if raw_route in {"CPU", "CUSTOMER PICKUP"}:
             route = "CPU"
         elif raw_route in {"DTC", "DELIVER TO CUSTOMER"}:
@@ -2681,18 +2682,44 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             raise ValueError("Customer pattern is required")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            con.execute(
-                """
-                INSERT INTO customer_route_rules (customer_pattern, route, active, created_at, updated_at)
-                VALUES (?, ?, 1, ?, ?)
-                ON CONFLICT(customer_pattern) DO UPDATE SET
-                    route = excluded.route,
-                    active = 1,
-                    updated_at = excluded.updated_at
-                """,
-                (customer, route, now_iso(), now_iso()),
-            )
-            self.insert_audit(con, "customer_route_rule", customer, "upsert_customer_route_rule", user, "", "", {"route": route})
+            if rule_id:
+                existing = con.execute("SELECT id FROM customer_route_rules WHERE id = ?", (rule_id,)).fetchone()
+                if not existing:
+                    raise ValueError("Customer route rule not found")
+                duplicate = con.execute(
+                    "SELECT id FROM customer_route_rules WHERE customer_pattern = ? AND id <> ? AND active = 1",
+                    (customer, rule_id),
+                ).fetchone()
+                if duplicate:
+                    raise ValueError("Another active route rule already uses that customer pattern")
+                con.execute(
+                    """
+                    UPDATE customer_route_rules
+                    SET customer_pattern = ?,
+                        route = ?,
+                        active = 1,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (customer, route, now_iso(), rule_id),
+                )
+                audit_id = str(rule_id)
+                audit_action = "update_customer_route_rule"
+            else:
+                con.execute(
+                    """
+                    INSERT INTO customer_route_rules (customer_pattern, route, active, created_at, updated_at)
+                    VALUES (?, ?, 1, ?, ?)
+                    ON CONFLICT(customer_pattern) DO UPDATE SET
+                        route = excluded.route,
+                        active = 1,
+                        updated_at = excluded.updated_at
+                    """,
+                    (customer, route, now_iso(), now_iso()),
+                )
+                audit_id = customer
+                audit_action = "upsert_customer_route_rule"
+            self.insert_audit(con, "customer_route_rule", audit_id, audit_action, user, "", "", {"customer": customer, "route": route})
             con.commit()
         return {"rules": self.get_customer_route_rules()}
 
@@ -3373,6 +3400,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         barcode = str(scan_request.get("barcode") or "")
         user = request_user_name(scan_request)
         station = request_station(scan_request)
+        is_manual = str(scan_request.get("isManual") or "").lower() in {"1", "true", "yes"}
         if not list_id or not barcode.strip():
             raise ValueError("listId and barcode are required")
         rack_code, _rack_delivery_date = parse_rack_barcode(barcode)
@@ -3406,20 +3434,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 con.commit()
                 return self._get_payload(con, list_id, last)
 
-            auto_staged = self.auto_stage_for_outbound(con, list_id, row, barcode, canonical, user, station)
-            if auto_staged:
-                self.insert_event(
-                    con,
-                    list_id,
-                    row["id"],
-                    barcode,
-                    canonical,
-                    user,
-                    station,
-                    "notice",
-                    "Auto-staged before outbound",
-                    "This item was not scanned on staging, so it was auto-scanned for convenience.",
-                )
+            outbound_gate_payload = self.outbound_scan_gate(con, list_id, row, barcode, canonical, user, station, scan_request)
+            if outbound_gate_payload is not None:
+                con.commit()
+                return outbound_gate_payload
 
             rack_code_for_scan = normalize_rack_code(str(scan_request.get("rackCode") or ""))
             list_row_for_rack = con.execute("SELECT stage FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
@@ -3469,7 +3487,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", reason, "", 1)
             if preassigned_bay:
                 self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "notice", "Indian Trail bay preassigned", f"Preassigned to Bay {preassigned_bay}")
-            self.insert_audit(con, "line_item", row["id"], "scan", user, station, reason, {"barcode": barcode, "canonical": canonical})
+            self.insert_audit(
+                con,
+                "line_item",
+                row["id"],
+                "manual_scan" if is_manual else "scan",
+                user,
+                station,
+                reason,
+                {"barcode": barcode, "canonical": canonical, "manual": is_manual},
+            )
             con.commit()
             payload = self._get_payload(con, list_id, last)
             if rack_code_for_scan:
@@ -3477,6 +3504,203 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 payload["racks"] = racks_payload.get("racks", [])
                 payload["rackSummary"] = racks_payload.get("summary")
             return payload
+
+    def matching_staging_row_for_outbound(self, con: sqlite3.Connection, current_list: sqlite3.Row, outbound_row: sqlite3.Row) -> sqlite3.Row | None:
+        staging_list = con.execute(
+            """
+            SELECT id FROM delivery_lists
+            WHERE delivery_date = ?
+              AND scanner = ?
+              AND LOWER(stage) LIKE '%staging%'
+              AND id <> ?
+            ORDER BY id
+            LIMIT 1
+            """,
+            (current_list["delivery_date"], current_list["scanner"], current_list["id"]),
+        ).fetchone()
+        if not staging_list:
+            return None
+        return con.execute(
+            """
+            SELECT * FROM line_items
+            WHERE list_id = ?
+              AND (source_id = ? OR (order_no = ? AND item_no = ?))
+            ORDER BY id
+            LIMIT 1
+            """,
+            (staging_list["id"], outbound_row["source_id"], outbound_row["order_no"], outbound_row["item_no"]),
+        ).fetchone()
+
+    def transportation_for_staging_row(self, con: sqlite3.Connection, staging_line_item_id: str) -> sqlite3.Row | None:
+        return con.execute(
+            """
+            SELECT r.*
+            FROM rack_items ri
+            JOIN racks r ON r.id = ri.rack_id
+            WHERE ri.line_item_id = ?
+              AND ri.status = 'Active'
+              AND r.active = 1
+            ORDER BY CASE WHEN r.rack_code = 'T' THEN 0 ELSE 1 END, r.sort_order, r.rack_code
+            LIMIT 1
+            """,
+            (staging_line_item_id,),
+        ).fetchone()
+
+    def assign_transportation_from_outbound_override(
+        self,
+        con: sqlite3.Connection,
+        staging_row: sqlite3.Row,
+        rack_code: str,
+        user: str,
+        station: str,
+    ) -> str:
+        clean_rack_code = normalize_rack_code(rack_code)
+        if not clean_rack_code:
+            raise ValueError("Choose a transportation method before overriding outbound scan safety.")
+        rack = self.get_rack_by_code(con, clean_rack_code)
+        con.execute(
+            """
+            INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
+            VALUES (?, ?, 1, 'Active', ?, ?, 'Outbound override transportation assignment')
+            ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
+                qty = CASE
+                    WHEN rack_items.status = 'Active' THEN MAX(rack_items.qty, 1)
+                    ELSE excluded.qty
+                END,
+                status = 'Active',
+                removed_by = '',
+                removed_at = '',
+                reason = 'Outbound override transportation assignment',
+                added_by = excluded.added_by,
+                added_at = excluded.added_at
+            """,
+            (rack["id"], staging_row["id"], user, now_iso()),
+        )
+        self.insert_audit(
+            con,
+            "rack_item",
+            staging_row["id"],
+            "outbound_override_transportation",
+            user,
+            station,
+            "Transportation method selected during outbound safety override.",
+            {"rackCode": rack["rack_code"], "order": staging_row["order_no"], "item": staging_row["item_no"]},
+        )
+        return str(rack["rack_code"])
+
+    def outbound_scan_gate(
+        self,
+        con: sqlite3.Connection,
+        list_id: str,
+        outbound_row: sqlite3.Row,
+        barcode: str,
+        canonical: str,
+        user: str,
+        station: str,
+        scan_request: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Enforce outbound safety before a piece is scanned out.
+
+        Outbound scans should not silently auto-stage pieces anymore. The floor
+        gets a clear popup in the UI when staging was skipped or no rack/truck
+        transportation method exists. Supervisors can override from that popup
+        and choose the transportation method at the same time.
+        """
+        current_list = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+        if not current_list or "outbound" not in str(current_list["stage"]).lower():
+            return None
+
+        staging_row = self.matching_staging_row_for_outbound(con, current_list, outbound_row)
+        staging_scanned = bool(staging_row and int(staging_row["scanned_qty"] or 0) > 0)
+        transportation = self.transportation_for_staging_row(con, staging_row["id"]) if staging_row else None
+        has_transportation = transportation is not None
+        override_requested = str(scan_request.get("outboundOverride") or "").lower() in {"1", "true", "yes"}
+        requested_rack_code = normalize_rack_code(str(scan_request.get("rackCode") or ""))
+
+        needs_staging = not staging_scanned
+        needs_transportation = not has_transportation
+        if not needs_staging and not needs_transportation:
+            return None
+
+        if not override_requested:
+            if needs_staging and needs_transportation:
+                message = "Staging scan and transportation method required"
+                reason = "This piece has not been scanned on staging and has no rack/truck assigned."
+            elif needs_staging:
+                message = "Staging scan required before outbound"
+                reason = "This piece has not been scanned on staging."
+            else:
+                message = "Transportation method required"
+                reason = "This piece was staged but has no rack/truck assigned."
+            last = self.insert_event(con, list_id, outbound_row["id"], barcode, canonical, user, station, "error", message, reason)
+            self.insert_audit(
+                con,
+                "line_item",
+                outbound_row["id"],
+                "outbound_scan_blocked",
+                user,
+                station,
+                reason,
+                {"barcode": barcode, "canonical": canonical, "needsStaging": needs_staging, "needsTransportation": needs_transportation},
+            )
+            payload = self._get_payload(con, list_id, last)
+            payload.update(
+                {
+                    "outboundOverrideRequired": True,
+                    "outboundOverrideReason": reason,
+                    "outboundOverrideMessage": message,
+                    "outboundNeedsStaging": needs_staging,
+                    "outboundNeedsTransportation": needs_transportation,
+                    "outboundItem": {
+                        "order": outbound_row["order_no"],
+                        "item": outbound_row["item_no"],
+                        "customer": outbound_row["customer"],
+                        "dimensions": outbound_row["dimensions"],
+                    },
+                }
+            )
+            return payload
+
+        if needs_transportation and not requested_rack_code:
+            last = self.insert_event(
+                con,
+                list_id,
+                outbound_row["id"],
+                barcode,
+                canonical,
+                user,
+                station,
+                "error",
+                "Choose transportation method",
+                "Outbound override requires a rack or truck assignment.",
+            )
+            payload = self._get_payload(con, list_id, last)
+            payload.update({"outboundOverrideRequired": True, "outboundNeedsTransportation": True, "outboundOverrideMessage": "Choose transportation method"})
+            return payload
+
+        if needs_staging and staging_row:
+            self.auto_stage_for_outbound(con, list_id, outbound_row, barcode, canonical, user, station)
+        if staging_row and requested_rack_code and needs_transportation:
+            assigned_code = self.assign_transportation_from_outbound_override(con, staging_row, requested_rack_code, user, station)
+        else:
+            assigned_code = str(transportation["rack_code"] if transportation else requested_rack_code)
+        self.insert_audit(
+            con,
+            "line_item",
+            outbound_row["id"],
+            "outbound_scan_override",
+            user,
+            station,
+            "Outbound safety warning was overridden.",
+            {
+                "barcode": barcode,
+                "canonical": canonical,
+                "needsStaging": needs_staging,
+                "needsTransportation": needs_transportation,
+                "rackCode": assigned_code,
+            },
+        )
+        return None
 
     def auto_stage_for_outbound(
         self,
@@ -4187,16 +4411,56 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"ok": True, "deliveryDate": clean_date, "deletedCount": len(list_ids), "lists": self.get_delivery_lists()}
 
-    def reports_summary(self) -> dict[str, Any]:
+    def reports_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        filters = filters or {}
+        date_from = str(filters.get("dateFrom") or "").strip()
+        date_to = str(filters.get("dateTo") or "").strip()
+
+        def date_clause(alias: str = "") -> tuple[str, list[str]]:
+            column = f"{alias}.created_at" if alias else "created_at"
+            parts: list[str] = []
+            params: list[str] = []
+            if date_from:
+                parts.append(f"substr({column}, 1, 10) >= ?")
+                params.append(date_from)
+            if date_to:
+                parts.append(f"substr({column}, 1, 10) <= ?")
+                params.append(date_to)
+            return (" AND " + " AND ".join(parts), params) if parts else ("", [])
+
+        def delivery_list_date_clause(alias: str = "dl") -> tuple[str, list[str]]:
+            # Dashboard inventory stats are based on delivery-list dates, not scan timestamps.
+            column = f"{alias}.delivery_date" if alias else "delivery_date"
+            parts: list[str] = []
+            params: list[str] = []
+            if date_from:
+                parts.append(f"{column} >= ?")
+                params.append(date_from)
+            if date_to:
+                parts.append(f"{column} <= ?")
+                params.append(date_to)
+            return (" AND " + " AND ".join(parts), params) if parts else ("", [])
+
+        scan_date_sql, scan_params = date_clause()
+        audit_date_sql, audit_params = date_clause()
+        list_date_sql, list_date_params = delivery_list_date_clause("dl")
+        current_month = datetime.now(timezone.utc).date().replace(day=1)
+        next_month = (current_month.replace(year=current_month.year + 1, month=1) if current_month.month == 12 else current_month.replace(month=current_month.month + 1))
+        remake_sql = """
+            (UPPER(li.process_state) LIKE '%REMAKE%' OR UPPER(li.queue_state) LIKE '%REMAKE%'
+             OR (' ' || UPPER(li.process_state) || ' ') LIKE '% RM %'
+             OR (' ' || UPPER(li.queue_state) || ' ') LIKE '% RM %')
+        """
         with self.connect() as con:
             scans_by_user = con.execute(
-                """
+                f"""
                 SELECT user_name, COUNT(*) AS scans
                 FROM scan_events
-                WHERE event_type = 'scan'
+                WHERE event_type = 'scan'{scan_date_sql}
                 GROUP BY user_name
                 ORDER BY scans DESC
-                """
+                """,
+                scan_params,
             ).fetchall()
             incomplete = con.execute(
                 """
@@ -4208,10 +4472,104 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ORDER BY dl.delivery_date DESC, dl.label
                 """
             ).fetchall()
-            bad_scans = con.execute("SELECT COUNT(*) FROM scan_events WHERE event_type = 'error'").fetchone()[0]
-            duplicates = con.execute("SELECT COUNT(*) FROM scan_events WHERE event_type = 'duplicate'").fetchone()[0]
+            bad_scans = con.execute(
+                f"SELECT COUNT(*) FROM scan_events WHERE event_type = 'error'{scan_date_sql}",
+                scan_params,
+            ).fetchone()[0]
+            duplicates = con.execute(
+                f"SELECT COUNT(*) FROM scan_events WHERE event_type = 'duplicate'{scan_date_sql}",
+                scan_params,
+            ).fetchone()[0]
+            manual_scans = con.execute(
+                f"SELECT COUNT(*) FROM audit_events WHERE action = 'manual_scan'{audit_date_sql}",
+                audit_params,
+            ).fetchone()[0]
+            action_rows = con.execute(
+                f"""
+                SELECT action, COUNT(*) AS count
+                FROM audit_events
+                WHERE 1 = 1{audit_date_sql}
+                GROUP BY action
+                ORDER BY count DESC, action
+                """,
+                audit_params,
+            ).fetchall()
+            rack_actions = con.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM audit_events
+                WHERE (entity_type IN ('rack', 'rack_item') OR action LIKE '%rack%'){audit_date_sql}
+                """,
+                audit_params,
+            ).fetchone()[0]
+            bay_actions = con.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM audit_events
+                WHERE (entity_type IN ('bay', 'bay_assignment') OR action LIKE '%bay%' OR action LIKE '%sdi%' OR action = 'indian_trail_receive'){audit_date_sql}
+                """,
+                audit_params,
+            ).fetchone()[0]
+            user_actions = con.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM audit_events
+                WHERE (entity_type = 'user' OR action LIKE '%user%'){audit_date_sql}
+                """,
+                audit_params,
+            ).fetchone()[0]
+            manual_edits = con.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM audit_events
+                WHERE (action = 'manual_edit' OR action LIKE 'manual_location_%'){audit_date_sql}
+                """,
+                audit_params,
+            ).fetchone()[0]
+            bay_overrides = con.execute(
+                f"SELECT COUNT(*) FROM audit_events WHERE action = 'indian_trail_receive_bay_override'{audit_date_sql}",
+                audit_params,
+            ).fetchone()[0]
             sdi_count = con.execute("SELECT COUNT(*) FROM bay_assignments WHERE status = 'SDIOverride'").fetchone()[0]
+            glass_rows = con.execute(
+                f"""
+                SELECT glass_type, SUM(qty) AS qty, COUNT(*) AS row_count
+                FROM (
+                    SELECT
+                        dl.delivery_date,
+                        li.source_id,
+                        COALESCE(NULLIF(MAX(li.product), ''), NULLIF(MAX(li.job), ''), 'Other Glass') AS glass_type,
+                        MAX(li.qty) AS qty
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE dl.status = 'active'{list_date_sql}
+                    GROUP BY dl.delivery_date, li.source_id
+                ) unique_items
+                GROUP BY glass_type
+                HAVING qty > 0
+                ORDER BY qty DESC, glass_type
+                """,
+                list_date_params,
+            ).fetchall()
+            monthly_remake_row = con.execute(
+                f"""
+                SELECT COUNT(*) AS row_count, COALESCE(SUM(qty), 0) AS qty
+                FROM (
+                    SELECT dl.delivery_date, li.source_id, MAX(li.qty) AS qty
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE dl.status = 'active'
+                      AND dl.delivery_date >= ?
+                      AND dl.delivery_date < ?
+                      AND {remake_sql}
+                    GROUP BY dl.delivery_date, li.source_id
+                ) unique_remakes
+                """,
+                (current_month.isoformat(), next_month.isoformat()),
+            ).fetchone()
         return {
+            "dateFrom": date_from,
+            "dateTo": date_to,
             "scansByOperator": [{"user": row["user_name"], "scans": row["scans"]} for row in scans_by_user],
             "incompleteByDeliveryList": [
                 {"deliveryList": row["label"], "itemCount": row["item_count"], "remainingQty": row["remaining_qty"] or 0}
@@ -4219,7 +4577,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ],
             "badScanCount": bad_scans,
             "duplicateScanCount": duplicates,
+            "manualScanCount": manual_scans,
+            "manualEditCount": manual_edits,
+            "bayOverrideCount": bay_overrides,
+            "rackActionCount": rack_actions,
+            "bayActionCount": bay_actions,
+            "userActionCount": user_actions,
             "sdiCount": sdi_count,
+            "glassQuantityByType": [
+                {"glassType": row["glass_type"], "qty": int(row["qty"] or 0), "rowCount": int(row["row_count"] or 0)}
+                for row in glass_rows
+            ],
+            "monthlyRemakeCount": int(monthly_remake_row["row_count"] or 0),
+            "monthlyRemakeQty": int(monthly_remake_row["qty"] or 0),
+            "monthlyRemakeMonth": current_month.strftime("%B %Y"),
+            "actionCounts": {row["action"]: row["count"] for row in action_rows},
         }
 
     def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -5134,6 +5506,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         station = request_station(data) or "Indian Trail"
         barcode = str(data.get("barcode") or "")
         requested_bay_code = str(data.get("bayCode") or "").strip()
+        is_manual = str(data.get("isManual") or "").lower() in {"1", "true", "yes"}
         with self.connect() as con:
             if not list_id:
                 inbound = con.execute(
@@ -5186,21 +5559,57 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (row["id"],),
             ).fetchone()
             existing = bool(assignment)
+            used_override = False
             if assignment:
                 bay_code = assignment["bay_code"]
-                if str(assignment["status"] or "") == "PreAssigned":
+                assignment_status = str(assignment["status"] or "")
+                override_bay = self.get_bay_by_code(con, requested_bay_code) if requested_bay_code else None
+                # Manual Indian Trail bay mode should behave like the staging rack selector:
+                # when a bay is selected, that selected bay wins for this scan. This is not
+                # limited to PreAssigned rows because operators may need to correct an older
+                # suggested bay while receiving.
+                if override_bay and override_bay["id"] != assignment["bay_id"] and assignment_status != "SDIOverride":
+                    bay_code = override_bay["bay_code"]
+                    used_override = True
                     con.execute(
                         """
                         UPDATE bay_assignments
-                        SET status = 'Received',
-                            reason = 'Received at Indian Trail',
+                        SET bay_id = ?,
+                            status = 'Received',
+                            reason = 'Received at Indian Trail with bay override',
                             assigned_by = ?,
                             assigned_at = ?
                         WHERE id = ?
                         """,
-                        (user, now_iso(), assignment["id"]),
+                        (override_bay["id"], user, now_iso(), assignment["id"]),
                     )
-                    self.insert_bay_event(con, assignment["bay_id"], row["id"], "ReceivePreAssignedBay", user, "Received at Indian Trail", new_bay_id=assignment["bay_id"])
+                    self.insert_bay_event(
+                        con,
+                        override_bay["id"],
+                        row["id"],
+                        "ReceiveOverrideBay",
+                        user,
+                        "Received at Indian Trail with bay override",
+                        old_bay_id=assignment["bay_id"],
+                        new_bay_id=override_bay["id"],
+                    )
+                else:
+                    receive_reason = "Received at Indian Trail"
+                    if override_bay and override_bay["id"] == assignment["bay_id"]:
+                        used_override = True
+                        receive_reason = "Received at Indian Trail with selected manual bay"
+                    con.execute(
+                        """
+                        UPDATE bay_assignments
+                        SET status = 'Received',
+                            reason = ?,
+                            assigned_by = ?,
+                            assigned_at = ?
+                        WHERE id = ?
+                        """,
+                        (receive_reason, user, now_iso(), assignment["id"]),
+                    )
+                    self.insert_bay_event(con, assignment["bay_id"], row["id"], "ReceiveBay", user, receive_reason, new_bay_id=assignment["bay_id"])
             else:
                 row_item = {
                     "route": row["route"],
@@ -5217,21 +5626,38 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     bay_code = ""
                 else:
                     bay_code = bay["bay_code"]
+                    used_override = bool(requested_bay_code)
+                    receive_reason = "Bay override selected during receive" if used_override else "Auto suggested during receive"
                     con.execute(
                         """
                         INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
-                        VALUES (?, ?, ?, 1, 'Received', ?, ?, 'Auto suggested during receive')
+                        VALUES (?, ?, ?, 1, 'Received', ?, ?, ?)
                         """,
-                        (list_id, row["id"], bay["id"], user, now_iso()),
+                        (list_id, row["id"], bay["id"], user, now_iso(), receive_reason),
                     )
-                    self.insert_bay_event(con, bay["id"], row["id"], "ReceiveAssignBay", user, "Auto suggested during receive", new_bay_id=bay["id"])
-            self.insert_audit(con, "line_item", row["id"], "indian_trail_receive", user, station, reason, {"bayCode": bay_code})
+                    self.insert_bay_event(con, bay["id"], row["id"], "ReceiveAssignBay", user, receive_reason, new_bay_id=bay["id"])
+            self.insert_audit(
+                con,
+                "line_item",
+                row["id"],
+                "indian_trail_receive_bay_override" if used_override else "indian_trail_receive",
+                user,
+                station,
+                reason,
+                {"bayCode": bay_code, "requestedBayCode": requested_bay_code, "manual": is_manual},
+            )
+            if is_manual:
+                self.insert_audit(con, "line_item", row["id"], "manual_scan", user, station, reason, {"barcode": barcode, "canonical": canonical, "bayCode": bay_code})
             con.commit()
             scanned_after = int(row["scanned_qty"]) + 1
         message = (
-            f"Order {row['order_no']} / Item {row['item_no']} received. Existing Bay: {bay_code}. Place with existing order."
-            if existing
-            else f"Order {row['order_no']} / Item {row['item_no']} received. Suggested Bay: {bay_code}. Qty Received: {scanned_after}/{row['qty']}. Place in Bay {bay_code}."
+            f"Order {row['order_no']} / Item {row['item_no']} received. Override Bay: {bay_code}. Qty Received: {scanned_after}/{row['qty']}. Place in Bay {bay_code}."
+            if used_override
+            else (
+                f"Order {row['order_no']} / Item {row['item_no']} received. Existing Bay: {bay_code}. Place with existing order."
+                if existing
+                else f"Order {row['order_no']} / Item {row['item_no']} received. Suggested Bay: {bay_code}. Qty Received: {scanned_after}/{row['qty']}. Place in Bay {bay_code}."
+            )
         )
         return {"ok": True, "message": message, "bayCode": bay_code, "existingBay": existing, "lastScan": last}
 

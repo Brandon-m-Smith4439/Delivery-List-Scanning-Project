@@ -1,32 +1,40 @@
-Scanning Project UI/Print Polish - 2026-07-08 v5
+Scanning Project UI/backend update - v14
 
-Files included:
-- server.py
-- delivery_store.py
-- index.html
-- app.js
-- styles.css
+Updated in this package:
 
-Updates in this pass:
-- Squashed the Scan page barcode icon so it is shorter and sharper.
-- Refined the Admin top navigation cog icon.
-- Polished the signed-in user selector in the top right and added an in-app dropdown action area.
-- Kept the import window quick by checking from last week forward, with no upper-date cutoff by default.
-- Updated the import history view so active delivery-list dates from yesterday through the newest future list remain visible, while older dates only surface when there are actual changes.
-- Reworked print package behavior so remakes are automatically split to their own remake sheet for any selected stage.
-- Updated print output headings/badges so sheets clearly show Updated, Remake, Indian Trail, CPU, DTC, Greenville, Outbound, or Staging.
-- Updated print logic so updated-list sheets exclude remake rows and regular mirror rows, while remake sheets still include mirror remakes.
-- Remake sheets now print two copies, matching the regular delivery-list copy behavior.
-- Improved the Edit Racks modal so it fits without horizontal scrolling.
-- Added inline rack editing from the pencil icons inside Edit Racks.
-- Added a clearer inline edit row for rack name and rack set/type.
-- Made Complete Rack and Print Packing List buttons slightly larger and equal sized.
+1. Print / packing list polish
+- Enlarged the Date write-in area in the Checked By / Date box on printed delivery lists.
+- Kept the larger delivery-list print font and current pagination behavior.
+- Added an RM flag column to rack packing lists so remake pieces are obvious on printed packing paperwork.
 
-Validation performed:
+2. Outbound scan safety
+- Outbound piece scans are now blocked when the matching staging row has not been scanned.
+- Outbound piece scans are also blocked when the matching staging row has no rack/truck transportation method assigned.
+- Added an in-app Outbound Safety Check popup that lets the user override the block and assign a transportation method.
+- Override actions are written to the audit trail.
+- The old silent auto-stage behavior is no longer used for normal outbound scans; auto-stage only happens as part of an explicit override.
+
+3. Top-right user menu
+- Simplified the account control to a less-oval rounded rectangle.
+- Simplified the dropdown so it only shows Sign out.
+- Added smoother dropdown styling.
+
+4. Old Bay Review popup
+- Revamped the old bay popup with clearer summary cards, better order cards, bay pills, and a cleaner sticky footer.
+- Changed wording from Old Bay Orders to Old Bay Review.
+
+Validation completed:
+- server.py passed Python compile check.
+- delivery_store.py passed Python compile check.
 - app.js passed node --check.
-- server.py and delivery_store.py passed Python compile checks.
 
-Before replacing files:
-- Back up the current project folder.
-- Replace the matching files in the web app folder.
-- Restart the local server so Python and static files refresh.
+Install note:
+Back up your current project folder first, then replace the matching files with the files in this package.
+
+## v15 - Print wrap / stale bay / user menu polish
+
+- Prevented long Job Nr. and Customer values from wrapping on printed delivery-list rows, which stops those rows from pushing one list page onto an extra physical print page.
+- Kept the print page number only at the top-right of each delivery-list page.
+- Moved the Old Bay Review days counter into a smaller pill beside the order/customer information.
+- Added click-away and Escape-to-close behavior for the top-right user sign-out dropdown.
+

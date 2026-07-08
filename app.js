@@ -48,6 +48,9 @@ const state = {
   bayLayoutRedoStack: [],
   bayLayoutDraft: null,
   bayLayoutOriginal: null,
+  selectedBayOverrideCode: "",
+  bayOverrideMode: "auto",
+  bayOverrideOpenSections: new Set(),
   bayHoldingSections: new Set(),
   bayGroupColumns: {},
   racks: [],
@@ -90,6 +93,7 @@ const state = {
   eventsWired: false,
   pollTimer: null,
   lastScan: null,
+  homeReportSummary: null,
 };
 
 const els = {
@@ -116,6 +120,10 @@ const els = {
   homeUserCard: document.getElementById("homeUserCard"),
   homeRecentLists: document.getElementById("homeRecentLists"),
   homeActivity: document.getElementById("homeActivity"),
+  homeStatsPdfBtn: document.getElementById("homeStatsPdfBtn"),
+  homeStatisticsRangeText: document.getElementById("homeStatisticsRangeText"),
+  homeStatsChart: document.getElementById("homeStatsChart"),
+  homeMonthlyRemakes: document.getElementById("homeMonthlyRemakes"),
   homeListSearch: document.getElementById("homeListSearch"),
   homeStageFilter: document.getElementById("homeStageFilter"),
   homeListGrid: document.getElementById("homeListGrid"),
@@ -146,6 +154,12 @@ const els = {
   scanRackCompleteBtn: document.getElementById("scanRackCompleteBtn"),
   scanRackPrintBtn: document.getElementById("scanRackPrintBtn"),
   scanRackStatus: document.getElementById("scanRackStatus"),
+  scanBayOverridePanel: document.getElementById("scanBayOverridePanel"),
+  scanBayOverrideSelected: document.getElementById("scanBayOverrideSelected"),
+  scanBayOverrideClearBtn: document.getElementById("scanBayOverrideClearBtn"),
+  scanBayOverrideMode: document.getElementById("scanBayOverrideMode"),
+  scanBayOverrideSelect: document.getElementById("scanBayOverrideSelect"),
+  scanBayOverrideGroups: document.getElementById("scanBayOverrideGroups"),
   manualScanForm: document.getElementById("manualScanForm"),
   manualOrderInput: document.getElementById("manualOrderInput"),
   manualItemInput: document.getElementById("manualItemInput"),
@@ -2380,6 +2394,7 @@ function renderScanPage() {
   renderLastScan();
   renderManualAssignTools();
   renderScanRackTools();
+  renderScanBayOverrideTools();
   applyPermissionUi();
 }
 
@@ -2431,6 +2446,95 @@ function isIndianTrailScanContext() {
 function renderManualAssignTools() {
   if (!els.manualAssignPanel) return;
   els.manualAssignPanel.hidden = true;
+}
+
+
+async function ensureScanBayOverrideBays() {
+  if (!state.backend || state.bays.length) return;
+  const payload = await fetchJson("/api/indian-trail/bays");
+  state.bays = payload.bays || [];
+  renderScanBayOverrideTools();
+}
+
+function scanBayOverrideVisible() {
+  return state.backend && hasPermission("indian_trail_receive") && isIndianTrailScanContext();
+}
+
+function bayOverrideGroupLabel(bay) {
+  return String(bay?.mapSection || bay?.area || bay?.bayCategory || bay?.bayType || "Other Bays").trim() || "Other Bays";
+}
+
+function bayOverrideSort(a, b) {
+  return Number(a.layoutRow || 9999) - Number(b.layoutRow || 9999) ||
+    Number(a.layoutCol || 9999) - Number(b.layoutCol || 9999) ||
+    String(a.displayName || a.bayCode || "").localeCompare(String(b.displayName || b.bayCode || ""));
+}
+
+function renderScanBayOverrideTools() {
+  if (!els.scanBayOverridePanel) return;
+  const visible = scanBayOverrideVisible();
+  els.scanBayOverridePanel.hidden = !visible;
+  if (!visible) {
+    state.selectedBayOverrideCode = "";
+    state.bayOverrideMode = "auto";
+    return;
+  }
+
+  if (!state.bays.length) {
+    els.scanBayOverridePanel.classList.add("is-loading");
+    if (els.scanBayOverrideSelected) els.scanBayOverrideSelected.textContent = "Loading Indian Trail bays...";
+    if (els.scanBayOverrideSelect) {
+      els.scanBayOverrideSelect.disabled = true;
+      els.scanBayOverrideSelect.innerHTML = `<option value="">Loading bays...</option>`;
+    }
+    void ensureScanBayOverrideBays().catch((error) => showInlineError(error.message, true));
+    return;
+  }
+
+  els.scanBayOverridePanel.classList.remove("is-loading");
+
+  const availableBays = state.bays
+    .filter((bay) => bay.active !== false)
+    .filter((bay) => !/blocked|hold/i.test(`${bay.sourceStatus || ""} ${bay.status || ""}`))
+    .sort(bayOverrideSort);
+  const grouped = new Map();
+  for (const bay of availableBays) {
+    const label = bayOverrideGroupLabel(bay);
+    if (!grouped.has(label)) grouped.set(label, []);
+    grouped.get(label).push(bay);
+  }
+
+  const selectedBay = availableBays.find((bay) => bay.bayCode === state.selectedBayOverrideCode);
+  if (!selectedBay && state.selectedBayOverrideCode) state.selectedBayOverrideCode = "";
+  if (state.bayOverrideMode !== "manual") state.bayOverrideMode = "auto";
+
+  if (els.scanBayOverrideMode) {
+    els.scanBayOverrideMode.checked = state.bayOverrideMode === "manual";
+  }
+
+  if (els.scanBayOverrideSelect) {
+    const options = [`<option value="">Use auto-suggested bay</option>`];
+    for (const [label, bays] of grouped.entries()) {
+      options.push(`
+        <optgroup label="${escapeHtml(label)}">
+          ${bays.map((bay) => {
+            const name = bay.displayName || bay.bayCode;
+            const status = bay.status ? ` - ${bay.status}` : "";
+            return `<option value="${escapeHtml(bay.bayCode)}">${escapeHtml(name)}${escapeHtml(status)}</option>`;
+          }).join("")}
+        </optgroup>
+      `);
+    }
+    els.scanBayOverrideSelect.innerHTML = options.join("");
+    els.scanBayOverrideSelect.value = state.selectedBayOverrideCode || "";
+    els.scanBayOverrideSelect.disabled = state.bayOverrideMode !== "manual";
+  }
+
+  if (els.scanBayOverrideSelected) {
+    els.scanBayOverrideSelected.textContent = state.bayOverrideMode === "manual"
+      ? (selectedBay ? `Manual bay: ${selectedBay.displayName || selectedBay.bayCode}` : "Manual mode - choose a bay")
+      : "Auto suggested bay";
+  }
 }
 
 function compatibleBayCandidates(item) {
@@ -2503,6 +2607,341 @@ function aggregateListStats(lists) {
     lateQty,
     onTimePercent: timedQty ? (onTimeQty / timedQty) * 100 : 0,
   };
+}
+
+function homeStageBreakdown(lists) {
+  const buckets = new Map();
+  for (const list of lists) {
+    const key = stageCategory(list);
+    const current = buckets.get(key) || {
+      category: key,
+      label: stageLabel(list),
+      lists: 0,
+      totalQty: 0,
+      scannedQty: 0,
+      remainingQty: 0,
+    };
+    current.lists += 1;
+    current.totalQty += Number(list.totalQty || 0);
+    current.scannedQty += Number(list.scannedQty || 0);
+    current.remainingQty = Math.max(current.totalQty - current.scannedQty, 0);
+    buckets.set(key, current);
+  }
+  const order = ["staged", "outbound", "received", "pickup", "greenville", "dtc"];
+  return [...buckets.values()].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
+}
+
+function homeStatisticsRangeLabel() {
+  const label = els.overviewRangeSelect?.selectedOptions?.[0]?.textContent || "Current dashboard range";
+  const lists = filterListsByOverviewRange(state.lists).map((list) => list.deliveryDate).filter(Boolean).sort();
+  if (!lists.length) return `${label} - no active delivery dates`;
+  return `${label} - ${formatDisplayDate(lists[0])} through ${formatDisplayDate(lists[lists.length - 1])}`;
+}
+
+function homeReportDateParams() {
+  if (state.overviewRange === "all") return "";
+  const days = Number(state.overviewRange || 30);
+  if (!days) return "";
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setDate(start.getDate() - days + 1);
+  start.setHours(0, 0, 0, 0);
+  return `?dateFrom=${encodeURIComponent(dateInputValue(start))}&dateTo=${encodeURIComponent(dateInputValue(end))}`;
+}
+
+function reportActionCount(action) {
+  const report = state.homeReportSummary || {};
+  const counts = report.actionCounts || {};
+  return Number(counts[action] || 0);
+}
+
+function glassQuantitiesForStatistics(overviewLists) {
+  const reportRows = state.homeReportSummary?.glassQuantityByType || [];
+  if (reportRows.length) {
+    return reportRows
+      .map((row) => ({
+        label: String(row.glassType || row.label || "Other Glass").trim() || "Other Glass",
+        qty: Number(row.qty || 0),
+      }))
+      .filter((row) => row.qty > 0)
+      .sort((a, b) => b.qty - a.qty || a.label.localeCompare(b.label));
+  }
+
+  // Local-demo fallback: backend list cards only carry totals, but local lists keep row data.
+  // Keep this fallback here so the pie chart still works when running without the API.
+  const counts = new Map();
+  for (const list of overviewLists) {
+    for (const item of list.items || []) {
+      const label = glassTypeLabel(item);
+      counts.set(label, (counts.get(label) || 0) + itemPieceQty(item));
+    }
+  }
+  return [...counts.entries()]
+    .map(([label, qty]) => ({ label, qty }))
+    .filter((row) => row.qty > 0)
+    .sort((a, b) => b.qty - a.qty || a.label.localeCompare(b.label));
+}
+
+function renderHomeStatsChart(overviewLists) {
+  if (!els.homeStatsChart) return;
+  const entries = glassQuantitiesForStatistics(overviewLists);
+  const totalQty = entries.reduce((sum, row) => sum + Number(row.qty || 0), 0);
+
+  if (!entries.length || !totalQty) {
+    els.homeStatsChart.innerHTML = `
+      <div class="statistics-chart-heading">
+        <strong>Glass types by quantity</strong>
+        <span>No glass quantity data yet.</span>
+      </div>
+      <div class="statistics-chart-empty">Import delivery lists to populate the glass-type pie chart.</div>
+    `;
+    return;
+  }
+
+  let cursor = 0;
+  const slices = entries.map((entry, index) => {
+    const start = cursor;
+    const percent = (Number(entry.qty || 0) / totalQty) * 100;
+    cursor += percent;
+    return `var(--pie-${(index % 8) + 1}) ${start.toFixed(3)}% ${cursor.toFixed(3)}%`;
+  });
+
+  const legendRows = entries
+    .slice(0, 8)
+    .map((entry, index) => {
+      const percent = totalQty ? (Number(entry.qty || 0) / totalQty) * 100 : 0;
+      return `
+        <div class="statistics-pie-legend-row">
+          <i style="--slice-color: var(--pie-${(index % 8) + 1})"></i>
+          <span>${escapeHtml(entry.label)}</span>
+          <strong>${escapeHtml(entry.qty)} (${formatPercent(percent)})</strong>
+        </div>
+      `;
+    })
+    .join("");
+  const extraCount = Math.max(entries.length - 8, 0);
+
+  els.homeStatsChart.innerHTML = `
+    <div class="statistics-chart-heading">
+      <strong>Glass types by quantity</strong>
+      <span>${escapeHtml(totalQty)} pieces in selected range</span>
+    </div>
+    <div class="statistics-pie-layout">
+      <div class="statistics-pie" style="background: conic-gradient(${slices.join(", ")})">
+        <span>${escapeHtml(totalQty)}<small>pieces</small></span>
+      </div>
+      <div class="statistics-pie-legend">
+        ${legendRows}
+        ${extraCount ? `<div class="statistics-pie-more">+${escapeHtml(extraCount)} more glass types</div>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderMonthlyRemakes() {
+  if (!els.homeMonthlyRemakes) return;
+  const report = state.homeReportSummary || {};
+  const remakeCount = Number(report.monthlyRemakeCount || 0);
+  const remakeQty = Number(report.monthlyRemakeQty || 0);
+  const monthLabel = report.monthlyRemakeMonth || new Date().toLocaleString(undefined, { month: "long", year: "numeric" });
+  els.homeMonthlyRemakes.innerHTML = `
+    <div class="statistics-subsection-heading">
+      <strong>Monthly Remakes</strong>
+      <span>${escapeHtml(monthLabel)}</span>
+    </div>
+    <div class="statistics-remake-card ${remakeQty ? "notice" : "ok"}">
+      <strong>${escapeHtml(remakeQty)}</strong>
+      <span>remake pieces</span>
+      <small>${escapeHtml(remakeCount)} remake rows detected this month</small>
+    </div>
+  `;
+}
+
+function renderHomeStatistics(overviewLists, overview) {
+  const report = state.homeReportSummary || {};
+  const stages = homeStageBreakdown(overviewLists);
+  const badScans = Number(report.badScanCount || 0);
+  const duplicateScans = Number(report.duplicateScanCount || 0);
+  const sdiCount = Number(report.sdiCount || 0);
+  const manualScans = Number(report.manualScanCount || reportActionCount("manual_scan") || 0);
+  const bayOverrides = Number(report.bayOverrideCount || reportActionCount("indian_trail_receive_bay_override") || 0);
+  const resetScans = reportActionCount("reset_scans");
+  const manualEdits = Number(report.manualEditCount || reportActionCount("manual_edit") || 0);
+  const rackActions = Number(report.rackActionCount || 0);
+  const bayActions = Number(report.bayActionCount || 0);
+  const userActions = Number(report.userActionCount || 0);
+  const topOperator = (report.scansByOperator || [])[0];
+
+  // Statistics panel is the single source for dashboard KPI boxes.
+  // Keep the top page heading clean, and add future KPI cards here instead.
+  if (els.homeStatisticsRangeText) {
+    els.homeStatisticsRangeText.textContent = homeStatisticsRangeLabel();
+  }
+
+  if (els.overviewStats) {
+    els.overviewStats.innerHTML = [
+      miniStat("Delivery %", formatPercent(overview.deliveryPercent), `${overview.scannedQty}/${overview.totalQty} scanned`),
+      miniStat("On-Time %", formatPercent(overview.onTimePercent), `${overview.onTimeQty} on time`),
+      miniStat("Late Items", overview.lateQty, "Outbound timing"),
+      miniStat("Delivery Lists", overview.totalLists, "In selected range"),
+    ].join("");
+  }
+
+  renderHomeStatsChart(overviewLists);
+  renderMonthlyRemakes();
+
+  if (els.homeUserCard) {
+    els.homeUserCard.innerHTML = `
+      <div class="statistics-snapshot-grid">
+        ${miniStat("Pieces Scanned", `${overview.scannedQty}/${overview.totalQty}`, `${formatPercent(overview.deliveryPercent)} complete`)}
+        ${miniStat("Remaining", overview.remainingQty, `${overview.totalLists} active lists`)}
+        ${miniStat("Manual Scans", manualScans, "Typed order/item scans")}
+        ${miniStat("Bay Overrides", bayOverrides, "Indian Trail receive")}
+        ${miniStat("Rack Actions", rackActions, "Rack edits, clears, moves")}
+        ${miniStat("Bay Actions", bayActions, "Assign, move, clear, SDI")}
+      </div>
+    `;
+  }
+
+  if (els.homeRecentLists) {
+    els.homeRecentLists.innerHTML = stages.length
+      ? stages
+          .map((stage) => {
+            const percent = stage.totalQty ? (stage.scannedQty / stage.totalQty) * 100 : 0;
+            return `
+              <article class="statistics-stage-card ${escapeHtml(stage.category)}">
+                <div>
+                  <strong>${escapeHtml(stage.label)}</strong>
+                  <span>${escapeHtml(stage.lists)} lists</span>
+                </div>
+                <div class="list-card-progress"><span style="width:${Math.min(percent, 100)}%"></span></div>
+                <small>${escapeHtml(stage.scannedQty)} / ${escapeHtml(stage.totalQty)} scanned - ${formatPercent(percent)}</small>
+              </article>
+            `;
+          })
+          .join("")
+      : `<div><strong>No stage data</strong><span>Import delivery lists to populate statistics.</span></div>`;
+  }
+
+  if (els.homeActivity) {
+    els.homeActivity.innerHTML = [
+      `<article class="statistics-health-card ${badScans ? "warning" : "ok"}"><strong>${escapeHtml(badScans)}</strong><span>Bad scans</span></article>`,
+      `<article class="statistics-health-card ${duplicateScans ? "notice" : "ok"}"><strong>${escapeHtml(duplicateScans)}</strong><span>Duplicate scans</span></article>`,
+      `<article class="statistics-health-card"><strong>${escapeHtml(topOperator?.scans || 0)}</strong><span>${escapeHtml(topOperator?.user || "Top operator")}</span></article>`,
+      `<article class="statistics-health-card ${resetScans ? "notice" : "ok"}"><strong>${escapeHtml(resetScans)}</strong><span>Reset scans</span></article>`,
+      `<article class="statistics-health-card"><strong>${escapeHtml(manualEdits)}</strong><span>Manual edits</span></article>`,
+      `<article class="statistics-health-card"><strong>${escapeHtml(userActions)}</strong><span>User actions</span></article>`,
+    ].join("");
+  }
+}
+
+async function loadHomeReportSummary() {
+  if (!state.backend || !hasPermission("view_reports")) return;
+  try {
+    state.homeReportSummary = await fetchJson(`/api/reports/summary${homeReportDateParams()}`);
+    if (state.page === "home") renderHome();
+  } catch {
+    // Reports are a nice-to-have on the dashboard. Keep the home page usable
+    // even when a user lacks report access or the report query fails.
+    state.homeReportSummary = null;
+  }
+}
+
+function openHomeStatisticsReport() {
+  const overviewLists = filterListsByOverviewRange(state.lists);
+  const overview = aggregateListStats(overviewLists);
+  const stages = homeStageBreakdown(overviewLists);
+  const report = state.homeReportSummary || {};
+  const manualScans = Number(report.manualScanCount || 0);
+  const rackActions = Number(report.rackActionCount || 0);
+  const bayActions = Number(report.bayActionCount || 0);
+  const userActions = Number(report.userActionCount || 0);
+  const generatedAt = new Date().toLocaleString();
+  const rangeLabel = els.overviewRangeSelect?.selectedOptions?.[0]?.textContent || "Current dashboard range";
+  const glassEntries = glassQuantitiesForStatistics(overviewLists);
+  const glassRows = glassEntries
+    .slice(0, 18)
+    .map((row) => `<tr><td>${escapeHtml(row.label)}</td><td>${escapeHtml(row.qty)}</td></tr>`)
+    .join("") || `<tr><td colspan="2">No glass type quantity data available.</td></tr>`;
+  const monthlyRemakeQty = Number(report.monthlyRemakeQty || 0);
+  const monthlyRemakeCount = Number(report.monthlyRemakeCount || 0);
+  const monthlyRemakeMonth = report.monthlyRemakeMonth || new Date().toLocaleString(undefined, { month: "long", year: "numeric" });
+  const operatorRows = (report.scansByOperator || [])
+    .slice(0, 12)
+    .map((row) => `<tr><td>${escapeHtml(row.user || "Unknown")}</td><td>${escapeHtml(row.scans || 0)}</td></tr>`)
+    .join("") || `<tr><td colspan="2">No operator scan data available.</td></tr>`;
+  const incompleteRows = (report.incompleteByDeliveryList || [])
+    .slice(0, 12)
+    .map((row) => `<tr><td>${escapeHtml(row.deliveryList || "")}</td><td>${escapeHtml(row.itemCount || 0)}</td><td>${escapeHtml(row.remainingQty || 0)}</td></tr>`)
+    .join("") || `<tr><td colspan="3">No incomplete-list report data available.</td></tr>`;
+  const stageRows = stages
+    .map((stage) => {
+      const percent = stage.totalQty ? (stage.scannedQty / stage.totalQty) * 100 : 0;
+      return `<tr><td>${escapeHtml(stage.label)}</td><td>${escapeHtml(stage.lists)}</td><td>${escapeHtml(stage.scannedQty)} / ${escapeHtml(stage.totalQty)}</td><td>${formatPercent(percent)}</td></tr>`;
+    })
+    .join("") || `<tr><td colspan="4">No stage data available.</td></tr>`;
+
+  const markup = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Delivery Scanner Statistics Report</title>
+  <style>
+    body { margin: 24px; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; }
+    header { border-bottom: 3px solid #072a63; padding-bottom: 12px; margin-bottom: 18px; }
+    h1 { margin: 0; color: #041a3d; font-size: 28px; }
+    h2 { margin: 20px 0 8px; color: #041a3d; font-size: 18px; }
+    p { margin: 5px 0 0; color: #526078; font-weight: 700; }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
+    .kpis.secondary { margin-top: -6px; }
+    .kpi { border: 1px solid #d9e1ee; border-radius: 8px; padding: 10px; background: #f8fafc; }
+    .kpi small { display: block; color: #526078; font-weight: 800; }
+    .kpi strong { display: block; margin-top: 4px; font-size: 22px; color: #041a3d; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border: 1px solid #d9e1ee; padding: 7px 8px; text-align: left; }
+    th { background: #eef3fa; color: #041a3d; }
+    @media print { body { margin: 0.35in; } button { display: none; } }
+  </style>
+</head>
+<body>
+  <button onclick="window.print()">Print / Save PDF</button>
+  <header>
+    <h1>Delivery Scanner Statistics Report</h1>
+    <p>${escapeHtml(rangeLabel)} - Generated ${escapeHtml(generatedAt)}</p>
+  </header>
+  <section class="kpis">
+    <div class="kpi"><small>Delivery Progress</small><strong>${formatPercent(overview.deliveryPercent)}</strong><span>${escapeHtml(overview.scannedQty)} / ${escapeHtml(overview.totalQty)} pieces</span></div>
+    <div class="kpi"><small>On-Time Delivery</small><strong>${formatPercent(overview.onTimePercent)}</strong><span>${escapeHtml(overview.onTimeQty)} on time / ${escapeHtml(overview.lateQty)} late</span></div>
+    <div class="kpi"><small>Manual Scans</small><strong>${escapeHtml(manualScans)}</strong><span>Typed order/item scans</span></div>
+    <div class="kpi"><small>Monthly Remakes</small><strong>${escapeHtml(monthlyRemakeQty)}</strong><span>${escapeHtml(monthlyRemakeCount)} rows - ${escapeHtml(monthlyRemakeMonth)}</span></div>
+  </section>
+  <section class="kpis secondary">
+    <div class="kpi"><small>Bad Scans</small><strong>${escapeHtml(report.badScanCount || 0)}</strong><span>Needs review</span></div>
+    <div class="kpi"><small>Duplicate Scans</small><strong>${escapeHtml(report.duplicateScanCount || 0)}</strong><span>Prevented by system</span></div>
+    <div class="kpi"><small>Rack Actions</small><strong>${escapeHtml(rackActions)}</strong><span>Clears, moves, edits</span></div>
+    <div class="kpi"><small>Bay / User Actions</small><strong>${escapeHtml(bayActions + userActions)}</strong><span>Admin and bay activity</span></div>
+  </section>
+  <h2>Glass Types by Quantity</h2>
+  <table><thead><tr><th>Glass Type</th><th>Qty</th></tr></thead><tbody>${glassRows}</tbody></table>
+  <h2>Stage Breakdown</h2>
+  <table><thead><tr><th>Stage</th><th>Lists</th><th>Scanned Pieces</th><th>Complete</th></tr></thead><tbody>${stageRows}</tbody></table>
+  <h2>Scans by Operator</h2>
+  <table><thead><tr><th>Operator</th><th>Scans</th></tr></thead><tbody>${operatorRows}</tbody></table>
+  <h2>Incomplete Delivery Lists</h2>
+  <table><thead><tr><th>Delivery List</th><th>Rows</th><th>Remaining Qty</th></tr></thead><tbody>${incompleteRows}</tbody></table>
+  <script>window.addEventListener("load", () => setTimeout(() => window.print(), 300));</script>
+</body>
+</html>`;
+
+  const win = window.open("", "_blank", "width=1120,height=820");
+  if (!win) {
+    showInlineError("Allow popups to generate the statistics PDF report.");
+    return;
+  }
+  win.document.open();
+  win.document.write(markup);
+  win.document.close();
 }
 
 function stageProgressSegments(lists) {
@@ -2626,21 +3065,7 @@ function renderHome() {
   if (els.overviewRangeSelect && els.overviewRangeSelect.value !== state.overviewRange) {
     els.overviewRangeSelect.value = state.overviewRange;
   }
-  if (els.overviewStats) {
-    els.overviewStats.innerHTML = [
-      miniStat("Delivery %", formatPercent(overview.deliveryPercent), `${overview.scannedQty}/${overview.totalQty} scanned`),
-      miniStat("On-Time %", formatPercent(overview.onTimePercent), `${overview.onTimeQty} on time`),
-      miniStat("Late Items", overview.lateQty),
-      miniStat("Delivery Lists", overview.totalLists),
-    ].join("");
-  }
-  if (els.homeUserCard) {
-    els.homeUserCard.innerHTML = `
-      <strong>${escapeHtml(state.user?.displayName || state.user?.username || "Demo")}</strong>
-      <span>${escapeHtml((state.user?.roles || ["Local Demo"]).join(", "))}</span>
-      <small>Stages: ${escapeHtml((state.user?.stageAccess || ["All demo stages"]).join(", "))}</small>
-    `;
-  }
+  renderHomeStatistics(overviewLists, overview);
   renderTodayProgress();
   const filtered = filteredDeliveryLists();
   const dateGroups = listsByDeliveryDate(filtered);
@@ -2692,17 +3117,7 @@ function renderHome() {
     els.homePager.innerHTML = pagerHtml;
     if (els.homePagerTop) els.homePagerTop.innerHTML = pagerHtml;
   }
-  if (els.homeRecentLists) {
-    els.homeRecentLists.innerHTML = state.lists
-      .slice(0, 5)
-      .map((list) => `<button type="button" data-open-list="${escapeHtml(list.id)}"><strong>${escapeHtml(list.label)}</strong><span>${escapeHtml(list.stage)}</span></button>`)
-      .join("");
-  }
-  if (els.homeActivity) {
-    els.homeActivity.innerHTML = state.recent.length
-      ? state.recent.slice(0, 5).map((entry) => `<div><strong>${escapeHtml(entry.message)}</strong><span>${escapeHtml(entry.barcode)}</span></div>`).join("")
-      : `<div><strong>Ready</strong><span>Select a list to begin scanning.</span></div>`;
-  }
+  renderHomeStatistics(overviewLists, overview);
   applyPermissionUi();
 }
 
@@ -2732,7 +3147,77 @@ function showPage(page) {
   if (page === "scan") els.scanInput?.focus();
 }
 
-async function processScan(rawScan) {
+async function showOutboundOverrideDialog(payload, scanText, options = {}) {
+  await ensureRacksLoaded().catch(() => {});
+  const racks = (state.racks || []).filter((rack) => rack.active !== false);
+  const defaultRack = state.selectedRackCode && racks.some((rack) => rack.code === state.selectedRackCode)
+    ? state.selectedRackCode
+    : (racks.find((rack) => rack.code === "T")?.code || racks[0]?.code || "");
+
+  return new Promise((resolve) => {
+    document.querySelector(".outbound-override-backdrop")?.remove();
+    const item = payload.outboundItem || payload.lastScan?.item || {};
+    const dialog = document.createElement("div");
+    dialog.className = "outbound-override-backdrop";
+    dialog.innerHTML = `
+      <section class="outbound-override-dialog" role="dialog" aria-modal="true" aria-labelledby="outboundOverrideTitle">
+        <button type="button" class="outbound-override-close" data-outbound-override-cancel aria-label="Close outbound override">&times;</button>
+        <div class="outbound-override-icon" aria-hidden="true"></div>
+        <div class="outbound-override-copy">
+          <span class="outbound-override-eyebrow">Outbound safety check</span>
+          <h2 id="outboundOverrideTitle">${escapeHtml(payload.outboundOverrideMessage || "Outbound scan needs review")}</h2>
+          <p>${escapeHtml(payload.outboundOverrideReason || "Review this scan before allowing it to continue.")}</p>
+        </div>
+        <div class="outbound-override-item">
+          <span><small>Order</small><strong>${escapeHtml(item.order || "-")}</strong></span>
+          <span><small>Item</small><strong>${escapeHtml(item.item || "-")}</strong></span>
+          <span><small>Customer</small><strong>${escapeHtml(item.customer || "-")}</strong></span>
+          <span><small>Size</small><strong>${escapeHtml(item.dimensions || "-")}</strong></span>
+        </div>
+        <label class="outbound-override-field">
+          <span>Transportation method for this piece</span>
+          <select id="outboundOverrideRackSelect">
+            <option value="">Choose rack or truck...</option>
+            ${racks.map((rack) => `<option value="${escapeHtml(rack.code)}" ${rack.code === defaultRack ? "selected" : ""}>${rackOptionLabel(rack)}</option>`).join("")}
+          </select>
+        </label>
+        <div class="outbound-override-actions">
+          <button type="button" data-outbound-override-cancel>Cancel scan</button>
+          <button type="button" data-outbound-override-confirm>Override and scan outbound</button>
+        </div>
+      </section>
+    `;
+
+    const close = (confirmed) => {
+      dialog.remove();
+      document.body.classList.remove("modal-scroll-locked");
+      resolve(Boolean(confirmed));
+    };
+
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-outbound-override-cancel]")) {
+        close(false);
+        return;
+      }
+      if (event.target.closest("[data-outbound-override-confirm]")) {
+        const rackCode = dialog.querySelector("#outboundOverrideRackSelect")?.value || "";
+        if (!rackCode) {
+          showFloatingNotice("Choose a rack or truck before overriding outbound scan safety.", "error");
+          dialog.querySelector("#outboundOverrideRackSelect")?.focus();
+          return;
+        }
+        close(true);
+        processScan(scanText, { ...options, outboundOverride: true, rackCode }).catch((error) => showInlineError(error.message, false));
+      }
+    });
+
+    document.body.appendChild(dialog);
+    document.body.classList.add("modal-scroll-locked");
+    dialog.querySelector("#outboundOverrideRackSelect")?.focus();
+  });
+}
+
+async function processScan(rawScan, options = {}) {
   const scanText = rawScan.trim();
   if (!scanText || !state.activeListId) return;
   if (state.backend) {
@@ -2740,9 +3225,20 @@ async function processScan(rawScan) {
       hasPermission("indian_trail_receive") &&
       /indian trail/i.test(`${state.meta?.stage || ""} ${currentScanStation()}`);
     if (indianTrailReceive) {
+      if (state.bayOverrideMode === "manual" && !state.selectedBayOverrideCode) {
+        showFloatingNotice("Choose a manual Indian Trail bay before scanning, or switch bay assignment back to Auto.", "error");
+        els.scanBayOverrideSelect?.focus();
+        return;
+      }
       const result = await fetchJson("/api/indian-trail/receive", {
         method: "POST",
-        body: JSON.stringify({ listId: state.activeListId, barcode: scanText, ...requestContext() }),
+        body: JSON.stringify({
+          listId: state.activeListId,
+          barcode: scanText,
+          bayCode: state.bayOverrideMode === "manual" ? state.selectedBayOverrideCode || "" : "",
+          isManual: Boolean(options.isManual),
+          ...requestContext(),
+        }),
       });
       await activateList(state.activeListId, false);
       state.lastScan = result.lastScan || state.lastScan;
@@ -2763,11 +3259,19 @@ async function processScan(rawScan) {
       body: JSON.stringify({
         listId: state.activeListId,
         barcode: scanText,
-        rackCode: isStagingScanContext() ? state.selectedRackCode : "",
+        rackCode: options.rackCode || (isStagingScanContext() ? state.selectedRackCode : ""),
+        outboundOverride: Boolean(options.outboundOverride),
+        isManual: Boolean(options.isManual),
         ...requestContext(),
       }),
     });
     applyBackendPayload(payload);
+    if (payload.outboundOverrideRequired) {
+      scanFlash("error");
+      renderScanPage();
+      await showOutboundOverrideDialog(payload, scanText, options);
+      return;
+    }
     if (payload.message) {
       showFloatingNotice(payload.message, payload.lastScan?.ok ? "success" : "notice");
     }
@@ -2791,7 +3295,7 @@ async function submitManualScan() {
     showInlineError("Manual scan needs an order number and item number.", false);
     return;
   }
-  await processScan(canonicalBarcode(order, item));
+  await processScan(canonicalBarcode(order, item), { isManual: true });
   if (els.manualOrderInput) els.manualOrderInput.value = "";
   if (els.manualItemInput) els.manualItemInput.value = "";
   els.scanInput?.focus();
@@ -3656,40 +4160,71 @@ function closeStaleBayPanel() {
 
 function renderStaleBayPanel(orders) {
   if (!els.staleBayList) return;
-  if (!orders.length) {
-    els.staleBayList.innerHTML = `<div class="admin-empty">No bay orders are older than 10 days right now.</div>`;
+  const list = Array.isArray(orders) ? orders : [];
+  const oldestDays = list.reduce((max, order) => Math.max(max, Number(order.daysOld || 0)), 0);
+  const bayCount = new Set(list.map((order) => order.bayCode || order.bayDisplay).filter(Boolean)).size;
+
+  if (!list.length) {
+    els.staleBayList.innerHTML = `
+      <section class="stale-bay-summary-cards">
+        <article><small>Old bay rows</small><strong>0</strong><span>Nothing needs review</span></article>
+        <article><small>Bays affected</small><strong>0</strong><span>Clear right now</span></article>
+        <article><small>Oldest row</small><strong>0 days</strong><span>No aged rows</span></article>
+      </section>
+      <div class="stale-bay-empty">
+        <strong>No old bay orders right now.</strong>
+        <span>Indian Trail bay assignments older than 10 days will appear here.</span>
+      </div>
+    `;
     return;
   }
-  els.staleBayList.innerHTML = orders
-    .map((order) => `
-      <article class="stale-bay-order">
-        <span class="age-ribbon">${escapeHtml(order.daysOld)} days</span>
-        <div class="stale-bay-main">
-          <strong>${escapeHtml(order.order)}-${escapeHtml(order.item)} <span>${escapeHtml(order.customer || "")}</span></strong>
-          <div class="stale-bay-meta-grid">
-            <small><b>Bay</b>${escapeHtml(order.bayDisplay || order.bayCode)}</small>
-            <small><b>Glass</b>${escapeHtml(order.job || order.product || "")}</small>
-            <small><b>Size</b>${escapeHtml(order.dimensions || "")}</small>
-            <small><b>Delivery</b>${escapeHtml(formatDisplayDate(order.deliveryDate || ""))}</small>
-            <small><b>Last scanned</b>${escapeHtml(formatDateTime(order.lastScannedAt) || "Not scanned")}</small>
-          </div>
-        </div>
-        <div class="stale-snooze-row">
-          <label>
-            <span>Snooze</span>
-            <select data-stale-days="${escapeHtml(order.assignmentId)}" aria-label="Snooze days">
-              <option value="1">1 day</option>
-              <option value="3">3 days</option>
-              <option value="7">1 week</option>
-              <option value="14">2 weeks</option>
-              <option value="30">30 days</option>
-            </select>
-          </label>
-          <button type="button" data-stale-snooze="${escapeHtml(order.assignmentId)}">Apply</button>
-        </div>
-      </article>
-    `)
-    .join("");
+
+  els.staleBayList.innerHTML = `
+    <section class="stale-bay-summary-cards">
+      <article><small>Old bay rows</small><strong>${escapeHtml(list.length)}</strong><span>Need walkthrough</span></article>
+      <article><small>Bays affected</small><strong>${escapeHtml(bayCount)}</strong><span>Physical locations</span></article>
+      <article><small>Oldest row</small><strong>${escapeHtml(oldestDays)} days</strong><span>Assigned age</span></article>
+    </section>
+    <div class="stale-bay-card-list">
+      ${list
+        .map((order) => `
+          <article class="stale-bay-order">
+            <div class="stale-bay-main">
+              <div class="stale-bay-title-row">
+                <div class="stale-bay-identity">
+                  <span class="stale-bay-id-line">
+                    <strong>${escapeHtml(order.order)}-${escapeHtml(order.item)}</strong>
+                    <span class="stale-age-pill">${escapeHtml(order.daysOld)} days</span>
+                  </span>
+                  <span class="stale-bay-customer">${escapeHtml(order.customer || "No customer listed")}</span>
+                </div>
+                <span class="stale-bay-bay-pill">Bay ${escapeHtml(order.bayDisplay || order.bayCode)}</span>
+              </div>
+              <div class="stale-bay-meta-grid">
+                <small><b>Glass</b>${escapeHtml(order.job || order.product || "-")}</small>
+                <small><b>Size</b>${escapeHtml(order.dimensions || "-")}</small>
+                <small><b>Delivery</b>${escapeHtml(formatDisplayDate(order.deliveryDate || ""))}</small>
+                <small><b>Last scanned</b>${escapeHtml(formatDateTime(order.lastScannedAt) || "Not scanned")}</small>
+              </div>
+            </div>
+            <div class="stale-snooze-row">
+              <label>
+                <span>Snooze</span>
+                <select data-stale-days="${escapeHtml(order.assignmentId)}" aria-label="Snooze days">
+                  <option value="1">1 day</option>
+                  <option value="3">3 days</option>
+                  <option value="7">1 week</option>
+                  <option value="14">2 weeks</option>
+                  <option value="30">30 days</option>
+                </select>
+              </label>
+              <button type="button" data-stale-snooze="${escapeHtml(order.assignmentId)}">Snooze</button>
+            </div>
+          </article>
+        `)
+        .join("")}
+    </div>
+  `;
 }
 
 async function snoozeStaleBayOrders(assignmentIds, days) {
@@ -7486,6 +8021,102 @@ function renderCustomerRouteRules() {
   `;
 }
 
+function refreshCustomerRouteModal() {
+  renderCustomerRouteRules();
+  if (els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "customerRoutes" && els.adminModalBody) {
+    els.adminModalBody.innerHTML = customerRouteRulesModalHtml();
+  }
+}
+
+function customerRouteFormValues() {
+  const patternInput = document.getElementById("customerRoutePatternInputModal") || els.customerRoutePatternInput;
+  const routeInput = document.getElementById("customerRouteSelectModal") || els.customerRouteSelect;
+  const customerPattern = (patternInput?.value || "").trim();
+  const route = customerRouteValue(routeInput?.value || "CPU");
+
+  if (!customerPattern) {
+    patternInput?.focus();
+    throw new Error("Enter a customer or job match text before adding the route.");
+  }
+  if (!route) {
+    routeInput?.focus();
+    throw new Error("Enter a route code before adding the customer route.");
+  }
+
+  return { customerPattern, route, patternInput, routeInput };
+}
+
+async function saveCustomerRouteRule() {
+  const { customerPattern, route, patternInput, routeInput } = customerRouteFormValues();
+
+  if (state.backend) {
+    const payload = await fetchJson("/api/admin/customer-route-rules", {
+      method: "POST",
+      body: JSON.stringify({ customerPattern, route }),
+    });
+    state.adminCustomerRouteRules = payload.rules || [];
+  } else {
+    const existing = state.adminCustomerRouteRules.find(
+      (rule) => String(rule.customerPattern || "").toLowerCase() === customerPattern.toLowerCase(),
+    );
+    if (existing) existing.route = route;
+    else state.adminCustomerRouteRules.push({ id: Date.now(), customerPattern, route, active: true });
+  }
+
+  if (patternInput) patternInput.value = "";
+  if (routeInput) routeInput.value = "";
+  refreshCustomerRouteModal();
+  showFloatingNotice(`Customer route saved for ${customerPattern}.`, "success");
+}
+
+async function saveCustomerRouteRuleRow(ruleId) {
+  const patternInput = document.querySelector(`[data-customer-route-pattern="${CSS.escape(String(ruleId))}"]`);
+  const routeInput = document.querySelector(`[data-customer-route-route="${CSS.escape(String(ruleId))}"]`);
+  const customerPattern = (patternInput?.value || "").trim();
+  const route = customerRouteValue(routeInput?.value || "CPU");
+
+  if (!customerPattern) {
+    patternInput?.focus();
+    throw new Error("Customer match text is required.");
+  }
+
+  if (state.backend) {
+    const payload = await fetchJson("/api/admin/customer-route-rules", {
+      method: "POST",
+      body: JSON.stringify({ ruleId, customerPattern, route }),
+    });
+    state.adminCustomerRouteRules = payload.rules || [];
+  } else {
+    const rule = state.adminCustomerRouteRules.find((item) => String(item.id) === String(ruleId));
+    if (!rule) throw new Error("Customer route rule not found.");
+    rule.customerPattern = customerPattern;
+    rule.route = route;
+  }
+
+  refreshCustomerRouteModal();
+  showFloatingNotice(`Customer route updated for ${customerPattern}.`, "success");
+}
+
+async function removeCustomerRouteRule(ruleId) {
+  const rule = state.adminCustomerRouteRules.find((item) => String(item.id) === String(ruleId));
+  const label = rule?.customerPattern || "this customer route";
+
+  if (!window.confirm(`Delete the customer route for ${label}?`)) return;
+
+  if (state.backend) {
+    const payload = await fetchJson("/api/admin/customer-route-rules/remove", {
+      method: "POST",
+      body: JSON.stringify({ ruleId }),
+    });
+    state.adminCustomerRouteRules = payload.rules || [];
+  } else {
+    state.adminCustomerRouteRules = state.adminCustomerRouteRules.filter((item) => String(item.id) !== String(ruleId));
+  }
+
+  refreshCustomerRouteModal();
+  showFloatingNotice(`Customer route removed for ${label}.`, "success");
+}
+
 function renderActiveSessions() {
   if (!els.activeSessions) return;
   els.activeSessions.innerHTML = state.activeSessions.length
@@ -8119,6 +8750,7 @@ function stopPolling() {
 async function loadAuthenticatedApp(params = new URLSearchParams(window.location.search)) {
   await loadStations();
   await loadDeliveryLists(params.get("list") || "");
+  loadHomeReportSummary();
   if (params.get("list")) {
     showPage("scan");
   } else {
@@ -8163,6 +8795,18 @@ function wireEvents() {
   });
 
   els.logoutBtn?.addEventListener("click", () => logout().catch((error) => showInlineError(error.message)));
+
+  document.addEventListener("click", (event) => {
+    document.querySelectorAll(".user-menu[open]").forEach((menu) => {
+      if (!menu.contains(event.target)) menu.removeAttribute("open");
+    });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    document.querySelectorAll(".user-menu[open]").forEach((menu) => menu.removeAttribute("open"));
+  });
+
+  els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
   els.viewAllRecent?.addEventListener("click", () => openAdminModal("recentScans"));
   els.globalPrintExportBtn?.addEventListener("click", () => {
     const date = state.page === "scan" ? state.meta?.deliveryDate : dashboardDateKey();
@@ -8230,6 +8874,7 @@ function wireEvents() {
   els.overviewRangeSelect?.addEventListener("change", () => {
     state.overviewRange = els.overviewRangeSelect.value || "30";
     renderHome();
+    void loadHomeReportSummary();
   });
   els.homePageSize?.addEventListener("change", () => {
     state.homePageSize = Number(els.homePageSize.value) || 25;
@@ -8334,6 +8979,18 @@ function wireEvents() {
   els.scanRackSelect?.addEventListener("change", () => {
     state.selectedRackCode = els.scanRackSelect.value;
     renderScanRackTools();
+  });
+  els.scanBayOverrideMode?.addEventListener("change", () => {
+    state.bayOverrideMode = els.scanBayOverrideMode.checked ? "manual" : "auto";
+    if (state.bayOverrideMode === "auto") state.selectedBayOverrideCode = "";
+    renderScanBayOverrideTools();
+    els.scanInput?.focus();
+  });
+  els.scanBayOverrideSelect?.addEventListener("change", () => {
+    state.selectedBayOverrideCode = els.scanBayOverrideSelect.value || "";
+    state.bayOverrideMode = state.selectedBayOverrideCode ? "manual" : "auto";
+    renderScanBayOverrideTools();
+    els.scanInput?.focus();
   });
   els.scanRackCompleteBtn?.addEventListener("click", async () => {
     if (!state.selectedRackCode) return;
@@ -9238,6 +9895,14 @@ function wireEvents() {
       renderScanPage();
       return;
     }
+    if (event.target === els.scanBayOverrideClearBtn) {
+      state.selectedBayOverrideCode = "";
+      state.bayOverrideMode = "auto";
+      renderScanBayOverrideTools();
+      els.scanInput?.focus();
+      return;
+    }
+
     const row = event.target.closest("[data-id]");
     if (row) {
       state.selectedId = row.dataset.id;

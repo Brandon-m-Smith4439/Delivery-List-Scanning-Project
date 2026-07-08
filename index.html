@@ -58,17 +58,7 @@
             </span>
           </summary>
           <div class="user-menu-panel">
-            <div class="user-menu-profile-card">
-              <span class="user-avatar user-menu-large-avatar"></span>
-              <div>
-                <strong id="userMenuDisplayName">Demo User</strong>
-                <span id="userMenuDetails">Local demo</span>
-              </div>
-            </div>
-            <div class="user-menu-actions">
-              <button class="tool-button" data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button">Open Admin</button>
-              <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
-            </div>
+            <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
           </div>
         </details>
       </div>
@@ -81,18 +71,7 @@
             <h1>Delivery List Overview</h1>
             <p id="homeWelcome">Signed in</p>
           </div>
-          <div class="page-heading-actions">
-            <label class="overview-range-control">
-              <span>Dashboard Range</span>
-              <select id="overviewRangeSelect">
-                <option value="30">Last 30 days</option>
-                <option value="7">Last week</option>
-                <option value="365">Full year</option>
-                <option value="all">All lists</option>
-              </select>
-            </label>
-            <div class="overview-kpis" id="overviewStats"></div>
-          </div>
+          <div class="page-heading-actions home-heading-actions"></div>
         </div>
 
         <div class="home-grid">
@@ -141,18 +120,38 @@
             </div>
           </section>
 
-          <aside class="panel home-side">
+          <aside class="panel home-side home-statistics-panel">
             <section>
-              <h2>Signed In</h2>
-              <div id="homeUserCard" class="user-card"></div>
+              <div class="section-heading statistics-heading">
+                <div>
+                  <h2>System Statistics</h2>
+                  <span id="homeStatisticsRangeText">Current dashboard range</span>
+                </div>
+                <button class="tool-button" id="homeStatsPdfBtn" type="button">PDF Report</button>
+              </div>
+              <div class="statistics-controls">
+                <label class="overview-range-control statistics-range-control">
+                  <span>Statistics Date Range</span>
+                  <select id="overviewRangeSelect">
+                    <option value="30">Last 30 days</option>
+                    <option value="7">Last week</option>
+                    <option value="365">Full year</option>
+                    <option value="all">All lists</option>
+                  </select>
+                </label>
+              </div>
+              <div class="overview-kpis statistics-overview-kpis" id="overviewStats"></div>
+              <div id="homeStatsChart" class="statistics-chart statistics-pie-chart" aria-label="Glass type quantity chart"></div>
+              <div id="homeMonthlyRemakes" class="statistics-monthly-remakes"></div>
+              <div id="homeUserCard" class="user-card statistics-snapshot"></div>
             </section>
             <section>
-              <h2>Recent Delivery Lists</h2>
-              <div id="homeRecentLists" class="compact-list"></div>
+              <h2>Stage Breakdown</h2>
+              <div id="homeRecentLists" class="compact-list statistics-stage-list"></div>
             </section>
             <section>
-              <h2>Current Activity</h2>
-              <div id="homeActivity" class="compact-list"></div>
+              <h2>Action & Scan Health</h2>
+              <div id="homeActivity" class="compact-list statistics-health-list"></div>
             </section>
           </aside>
         </div>
@@ -292,6 +291,28 @@
                 </div>
               </div>
               <p id="scanRackStatus" hidden></p>
+            </section>
+
+            <section class="scan-bay-override-panel" id="scanBayOverridePanel" hidden>
+              <div class="scan-bay-override-heading">
+                <div>
+                  <h3>Indian Trail Bay Assignment</h3>
+                  <span id="scanBayOverrideSelected">Auto suggested bay</span>
+                </div>
+                <label class="bay-override-switch" for="scanBayOverrideMode">
+                  <span>Auto</span>
+                  <input id="scanBayOverrideMode" type="checkbox" role="switch" aria-label="Manually select Indian Trail bay">
+                  <i></i>
+                  <span>Manual</span>
+                </label>
+              </div>
+              <label class="bay-override-select-wrap" for="scanBayOverrideSelect">
+                <span>Manual bay location</span>
+                <select id="scanBayOverrideSelect" disabled>
+                  <option value="">Use auto-suggested bay</option>
+                </select>
+              </label>
+              <p class="bay-override-help">Auto uses the preassigned or suggested bay. Manual sends the selected bay with the next Indian Trail scan.</p>
             </section>
 
             <form class="scan-form" id="scanForm">
@@ -618,16 +639,16 @@
         <div class="modal-backdrop" id="staleBayBackdrop" hidden></div>
         <section class="modal-panel stale-bay-panel" id="staleBayPanel" hidden>
           <div class="section-heading">
-            <h2>Old Bay Orders</h2>
+            <h2>Old Bay Review</h2>
             <button id="staleBayCloseBtn" class="modal-close-x" type="button" aria-label="Close old bay orders">×</button>
           </div>
-          <p class="admin-empty">Orders below have been assigned to a bay for more than 10 days.</p>
+          <p class="stale-bay-intro">Review orders that have been sitting in Indian Trail bays for more than 10 days. Snooze rows that are verified, or print the investigation list for a physical walkthrough.</p>
           <div id="staleBayList" class="stale-bay-list"></div>
           <div class="stale-bay-actions">
             <label><span>Snooze all days</span><input id="staleBaySnoozeAllDays" type="number" min="1" max="365" value="1"></label>
-            <button id="staleBaySnoozeAllBtn" type="button">Snooze All</button>
+            <button id="staleBaySnoozeAllBtn" type="button">Snooze selected/all</button>
             <button id="staleBayPrintBtn" type="button">Print Investigation List</button>
-            <button id="staleBayOkBtn" type="button">OK</button>
+            <button id="staleBayOkBtn" type="button">Done</button>
           </div>
         </section>
         <div class="modal-backdrop" id="sdiBackdrop" hidden></div>
