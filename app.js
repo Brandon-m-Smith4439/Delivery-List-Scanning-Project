@@ -1,3 +1,16 @@
+/*
+  Delivery List Scanner UI
+  ------------------------
+  Code map for future edits:
+  - State/element references live at the top of this file.
+  - Shared helpers come next: formatting, dates, permissions, fetch helpers, search helpers.
+  - Page renderers are grouped by area: Home, Scan, Racks, Bay Map, Admin, Print/Email.
+  - Event wiring is intentionally centralized near the bottom in wireEvents().
+
+  Keep edits copy-paste friendly. Prefer changing an existing function/block instead of
+  adding a second override below it; the app has grown through many UI polish passes and
+  duplicated behavior is the main thing that can make it slower or harder to debug.
+*/
 const STORAGE_KEY = "delivery-list-scanner-demo-v1";
 const STATIONS_KEY = "delivery-list-scanner-stations-v1";
 const DEFAULT_STATIONS = ["Airport Rd", "Indian Trail", "Greenville", "Customer Pickup", "DTC"];
@@ -7,6 +20,8 @@ const CUSTOMER_ROUTE_OPTIONS = [
   { value: "DTC", label: "DTC / Deliver to Customer" },
   { value: "GNV", label: "GNV / Greenville" },
 ];
+const ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS = 21;
+const ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS = 7;
 
 const state = {
   page: "home",
@@ -31,7 +46,6 @@ const state = {
   expandedDeliveryDate: "",
   collapsedGlassTypes: new Set(),
   baySearch: "",
-  bayQuickFilter: "all",
   bayStatusFilter: "all",
   bayCategoryFilter: "all",
   bayGlassFilter: "all",
@@ -96,6 +110,7 @@ const state = {
   allPermissions: [],
   adminRecentImports: [],
   adminListSearchTimer: null,
+  adminDeliveryListVisiblePastDays: ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS,
   rolePermissionOpenRoles: new Set(),
   rolePermissionOpenCategories: new Set(),
   rolePermissionScrollTop: 0,
@@ -243,7 +258,6 @@ const els = {
 
   bayMapPage: document.getElementById("bayMapPage"),
   bayOverviewStats: document.getElementById("bayOverviewStats"),
-  bayQuickFilters: document.getElementById("bayQuickFilters"),
   bayMapSearch: document.getElementById("bayMapSearch"),
   bayScanOutForm: document.getElementById("bayScanOutForm"),
   bayScanOutInput: document.getElementById("bayScanOutInput"),
@@ -274,6 +288,11 @@ const els = {
   baySelectedCloseBtn: document.getElementById("baySelectedCloseBtn"),
   bayAllBaysList: document.getElementById("bayAllBaysList"),
   bayCheckBtn: document.getElementById("bayCheckBtn"),
+  bayFilterDrawer: document.getElementById("bayFilterDrawer"),
+  bayActiveFilterBar: document.getElementById("bayActiveFilterBar"),
+  bayActiveFilterSummary: document.getElementById("bayActiveFilterSummary"),
+  bayActiveFilterCount: document.getElementById("bayActiveFilterCount"),
+  bayClearFiltersBtn: document.getElementById("bayClearFiltersBtn"),
   bayFlowPanel: document.getElementById("bayFlowPanel"),
   indianTrailSummary: document.getElementById("indianTrailSummary"),
   bayActionButtons: document.getElementById("bayActionButtons"),
@@ -3729,7 +3748,9 @@ function renderBayRouteFlow(summary) {
       <em>${outbound ? escapeHtml(outbound.stage) : "No outbound list"}</em>
     </button>
     <button class="flow-lane flow-lane-v2 transit-lane-button" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest">
-      <span class="transit-animation" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span class="transit-animation transit-animation-v59" aria-hidden="true">
+        <span class="transit-flow-line"></span>
+      </span>
       <span class="flow-truck"><b>${escapeHtml(inTransitQty)} pieces on the way</b></span>
       <div class="flow-progress-track"><i style="width:${percent}%"></i></div>
       <small>${escapeHtml(inTransitJobCount)} job${inTransitJobCount === 1 ? "" : "s"} | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</small>
@@ -3988,7 +4009,6 @@ function bayMatchesFilter(bay, text) {
   const status = String(bay?.status || "").toLowerCase();
   const statusKind = bayStatusKind(bay);
   const policyKind = bayPolicyKind(bay);
-  const matchesQuick = bayMatchesQuickFilter(bay);
   const matchesCategory = state.bayCategoryFilter === "all" || bayCategoryKind(bay) === state.bayCategoryFilter;
   const matchesGlass =
     state.bayGlassFilter === "all" ||
@@ -4003,8 +4023,9 @@ function bayMatchesFilter(bay, text) {
     state.bayStatusFilter === "all" ||
     state.bayStatusFilter === statusKind ||
     state.bayStatusFilter === policyKind ||
-    (state.bayStatusFilter === "empty" && (status.includes("empty") || status.includes("available")));
-  if (!matchesQuick || !matchesCategory || !matchesStatus || !matchesGlass || !matchesSpecial) return false;
+    (state.bayStatusFilter === "empty" && (status.includes("empty") || status.includes("available"))) ||
+    (state.bayStatusFilter === "error" && bayHasErrorState(bay));
+  if (!matchesCategory || !matchesStatus || !matchesGlass || !matchesSpecial) return false;
   if (!search) return true;
   return text.toLowerCase().includes(search);
 }
@@ -4025,56 +4046,76 @@ function bayHasErrorState(bay) {
   return /error|exception|conflict|needs\s*check|bad|scanblocked|blockedall|blocked\s+for\s+all/.test(haystack);
 }
 
-function bayMatchesQuickFilter(bay) {
-  const filter = state.bayQuickFilter || "all";
-  const kind = bayStatusKind(bay);
-  if (filter === "all") return true;
-  if (filter === "occupied") return kind === "occupied";
-  if (filter === "preassigned") return kind === "preassigned";
-  if (filter === "available") return kind === "available";
-  if (filter === "auto") return bayPolicyKind(bay) === "auto";
-  if (filter === "manual") return bayPolicyKind(bay) === "manual";
-  if (filter === "blocked") return bayPolicyKind(bay) === "blocked";
-  if (filter === "error") return bayHasErrorState(bay);
-  if (filter === "old") return Number(bay?.staleDays || 0) > 10 || (bay?.assignments || []).some((assignment) => assignment.isStale);
-  if (filter === "sdi") return kind === "picking" || (bay?.assignments || []).some((assignment) => String(assignment.status || "").toLowerCase().includes("sdi"));
-  if (filter === "new") return Boolean(bay?.isNewToday || (bay?.assignments || []).some((assignment) => assignment.isNewToday));
-  return true;
+function filterOptionLabel(options, value, fallback = "") {
+  const match = options.find(([optionValue]) => optionValue === value);
+  return match ? match[1] : fallback || String(value || "");
 }
 
-function bayQuickFilterOptions() {
-  return [
-    ["all", "All"],
-    ["occupied", "Occupied"],
-    ["preassigned", "Pre Assigned"],
-    ["manual", "Manual Assign"],
-    ["auto", "Auto Assign"],
-    ["blocked", "Blocked Scans"],
-    ["error", "Errors"],
-    ["old", "Old Orders"],
-    ["sdi", "SDI"],
-    ["new", "New Today"],
-    ["available", "Available"],
-  ];
+function selectOptionLabel(select, value, fallback = "") {
+  if (!select) return fallback || String(value || "");
+  const option = [...select.options].find((item) => item.value === value);
+  return option ? option.textContent.trim() : fallback || String(value || "");
 }
 
-function renderBayQuickFilters() {
-  if (!els.bayQuickFilters) return;
-  const countable = (state.bays || []).filter((bay) => bayCategoryKind(bay) !== "spacer");
-  els.bayQuickFilters.innerHTML = bayQuickFilterOptions()
-    .map(([value, label]) => {
-      const count = value === "all" ? countable.length : countable.filter((bay) => bayMatchesQuickFilterForCount(bay, value)).length;
-      return `<button class="bay-filter-chip ${state.bayQuickFilter === value ? "is-active" : ""}" type="button" data-bay-quick-filter="${escapeHtml(value)}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(count)}</strong></button>`;
-    })
-    .join("");
+function activeBayFilterChips() {
+  const chips = [];
+  const search = state.baySearch.trim();
+
+  if (search) chips.push(["Search", search]);
+  if (state.bayStatusFilter !== "all") chips.push(["Status", selectOptionLabel(els.bayStatusFilter, state.bayStatusFilter)]);
+  if (state.bayGlassFilter !== "all") chips.push(["Glass", selectOptionLabel(els.bayGlassFilter, state.bayGlassFilter)]);
+  if (state.baySpecialFilter !== "all") chips.push(["Orders", selectOptionLabel(els.baySpecialFilter, state.baySpecialFilter)]);
+  if (state.bayCategoryFilter !== "all") chips.push(["Category", filterOptionLabel(bayCategoryFilterOptions(), state.bayCategoryFilter)]);
+
+  return chips;
 }
 
-function bayMatchesQuickFilterForCount(bay, value) {
-  const previous = state.bayQuickFilter;
-  state.bayQuickFilter = value;
-  const matches = bayMatchesQuickFilter(bay);
-  state.bayQuickFilter = previous;
-  return matches;
+function resetBayFilters() {
+  state.baySearch = "";
+  state.bayStatusFilter = "all";
+  state.bayCategoryFilter = "all";
+  state.bayGlassFilter = "all";
+  state.baySpecialFilter = "all";
+
+  if (els.bayMapSearch) els.bayMapSearch.value = "";
+  if (els.bayStatusFilter) els.bayStatusFilter.value = "all";
+  if (els.bayGlassFilter) els.bayGlassFilter.value = "all";
+  if (els.baySpecialFilter) els.baySpecialFilter.value = "all";
+  if (els.bayFilterDrawer) els.bayFilterDrawer.open = false;
+
+  collapseAllPhysicalBaySections();
+  renderBayMapPage();
+}
+
+function renderBayFilterSummary() {
+  if (!els.bayActiveFilterSummary && !els.bayActiveFilterCount && !els.bayClearFiltersBtn) return;
+
+  const chips = activeBayFilterChips();
+  const activeCount = chips.length;
+  const countable = (state.bays || []).filter((bay) => bay.active !== false && bayCategoryKind(bay) !== "spacer");
+  const visibleCount = countable.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))).length;
+  const summaryText = activeCount
+    ? `${visibleCount} of ${countable.length} bays shown`
+    : `Showing all ${countable.length} physical bays`;
+
+  if (els.bayActiveFilterSummary) {
+    const chipHtml = chips
+      .map(([label, value]) => `<span class="bay-active-filter-chip"><small>${escapeHtml(label)}</small>${escapeHtml(value)}</span>`)
+      .join("");
+
+    els.bayActiveFilterSummary.innerHTML = `
+      <strong>${escapeHtml(summaryText)}</strong>
+      ${chipHtml ? `<div class="bay-active-filter-chips">${chipHtml}</div>` : `<span>Search and filter controls are tucked into one compact bar.</span>`}
+    `;
+  }
+
+  if (els.bayActiveFilterCount) {
+    els.bayActiveFilterCount.textContent = String(activeCount);
+    els.bayActiveFilterCount.hidden = activeCount === 0;
+  }
+
+  if (els.bayClearFiltersBtn) els.bayClearFiltersBtn.hidden = activeCount === 0;
+  els.bayActiveFilterBar?.classList.toggle("has-active-filters", activeCount > 0);
 }
 
 function normalizeFilterValue(value) {
@@ -4355,7 +4396,7 @@ function renderBaySlotButton(bay, mode = "physical") {
     <button class="${modeClass} bay-slot-v2 bay-slot-v17 type-${escapeHtml(kind)} status-${escapeHtml(statusKind)} ${escapeHtml(String(status).toLowerCase())} ${dimmed ? "is-dimmed" : ""} ${searchMatch ? "is-search-match" : ""} ${state.selectedBayCode === bay.bayCode ? "is-selected" : ""}"
       type="button"
       data-bay-code="${escapeHtml(bay.bayCode)}"
-      data-assignment-id="${escapeHtml(assignment?.id || "")}" 
+      data-assignment-id="${escapeHtml(assignment?.id || "")}"
       ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""}
       title="${escapeHtml(text)}">
       ${ribbons}
@@ -4469,7 +4510,7 @@ function normalizedBayGridPositions(sections) {
 }
 
 function renderBaySection(section) {
-  const filtersActive = state.baySearch.trim() || state.bayQuickFilter !== "all" || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
+  const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
   const displayBays = filtersActive ? section.bays.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))) : section.bays;
   const visible = displayBays.length;
   const dimmed = !visible && filtersActive;
@@ -4507,7 +4548,7 @@ function renderBaySection(section) {
 function renderBayGrid(physicalSections) {
   if (state.bayEditMode && !state.bayLayoutDraft) initializeBayLayoutDraft();
   if (!state.bayEditMode) {
-    const filtersActive = state.baySearch.trim() || state.bayQuickFilter !== "all" || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
+    const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
     const helper = `
       <div class="bay-map-helper-v17">
         <strong>${filtersActive ? "Filtered view" : "Physical floor view"}</strong>
@@ -4674,7 +4715,7 @@ function animateBaySectionToggle(details) {
 
 function renderBayMapPage() {
   if (!els.bayMapCanvas || !state.bayLayout) return;
-  const filtersActive = state.baySearch.trim() || state.bayQuickFilter !== "all" || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
+  const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
   const physicalSections = bayPhysicalSections().filter((section) => !filtersActive || section.bays.some((bay) => bayMatchesFilter(bay, baySearchText(bay))));
   if (!state.baySectionsDefaultCollapsed && !state.bayEditMode) {
     physicalSections.forEach((section) => state.collapsedBaySections.add(section.label));
@@ -4706,7 +4747,7 @@ function renderBayMapPage() {
   }
   if (els.baySelectedText) els.baySelectedText.textContent = state.selectedBayCode ? `Selected: ${state.selectedBayCode}` : "No bay selected";
   renderBaySidePanels();
-  renderBayQuickFilters();
+  renderBayFilterSummary();
   renderBayRecentActions();
 }
 
@@ -4716,6 +4757,7 @@ function renderBaySidePanels() {
       .map(([value, label]) => `<button class="tab ${state.bayCategoryFilter === value ? "is-active" : ""}" type="button" data-bay-category-filter="${escapeHtml(value)}">${escapeHtml(label)}</button>`)
       .join("");
   }
+  if (els.bayStatusFilter) els.bayStatusFilter.value = state.bayStatusFilter;
   if (els.bayGlassFilter) {
     const options = bayGlassFilterOptions();
     if (state.bayGlassFilter !== "all" && !options.some(([value]) => value === state.bayGlassFilter)) state.bayGlassFilter = "all";
@@ -6811,20 +6853,114 @@ async function refreshAdminPage() {
   renderActiveSessions();
 }
 
-function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false) {
-  const rows = lists
+function adminDeliveryListCutoffDate(pastDays = state.adminDeliveryListVisiblePastDays) {
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - Math.max(Number(pastDays || 0), 0));
+  return cutoff;
+}
+
+function deliveryListIsInAdminWindow(list, pastDays = state.adminDeliveryListVisiblePastDays) {
+  const deliveryDate = parseDateKey(list?.deliveryDate);
+
+  if (!deliveryDate) return true;
+
+  return deliveryDate >= adminDeliveryListCutoffDate(pastDays);
+}
+
+function adminDeliveryListHiddenOlderRows(lists = state.lists, pastDays = state.adminDeliveryListVisiblePastDays) {
+  return lists.filter((list) => !deliveryListIsInAdminWindow(list, pastDays));
+}
+
+function adminDeliveryListWindowLabel(pastDays = state.adminDeliveryListVisiblePastDays) {
+  const days = Math.max(Number(pastDays || 0), ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS);
+
+  if (days % 7 === 0) {
+    const weeks = Math.max(Math.round(days / 7), 1);
+    return `all future dates and the last ${weeks === 1 ? "week" : `${weeks} weeks`}`;
+  }
+
+  return `all future dates and the last ${days} days`;
+}
+
+function adminDeliveryListModalResultsHtml(lists = state.lists, query = "") {
+  const cleanQuery = String(query || "").trim();
+
+  return deliveryListAdminRows(lists, 0, true, {
+    includeLoadMore: !cleanQuery,
+    query: cleanQuery,
+    visiblePastDays: state.adminDeliveryListVisiblePastDays,
+    sourceCount: state.lists.length,
+  });
+}
+
+function renderAdminDeliveryListModalResults(lists = state.lists, query = "") {
+  const target = document.getElementById("adminDeliveryListModalResults");
+
+  if (!target) return;
+
+  target.innerHTML = adminDeliveryListModalResultsHtml(lists, query);
+}
+
+async function refreshAdminDeliveryListModal() {
+  const searchInput = document.getElementById("adminDeliveryListModalSearch");
+  const query = searchInput?.value.trim() || "";
+
+  if (!query) {
+    renderAdminDeliveryListModalResults(state.lists, "");
+    return;
+  }
+
+  renderAdminDeliveryListModalResults(await searchAdminDeliveryLists(query), query);
+}
+
+function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false, options = {}) {
+  const cleanQuery = String(options.query || "").trim();
+  const includeLoadMore = Boolean(options.includeLoadMore);
+  const visiblePastDays = Number(options.visiblePastDays || state.adminDeliveryListVisiblePastDays || ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS);
+
+  const sortedRows = lists
     .slice()
     .sort((a, b) => String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || "")) || stageSort(a) - stageSort(b));
 
-  const limitedRows = limit ? rows.slice(0, limit) : rows;
+  const hiddenOlderRows = includeLoadMore ? adminDeliveryListHiddenOlderRows(sortedRows, visiblePastDays) : [];
+  const visibleRows = includeLoadMore ? sortedRows.filter((list) => deliveryListIsInAdminWindow(list, visiblePastDays)) : sortedRows;
+  const limitedRows = limit ? visibleRows.slice(0, limit) : visibleRows;
+  const hiddenOlderDates = new Set(hiddenOlderRows.map((list) => list.deliveryDate).filter(Boolean));
+  const shownDates = new Set(limitedRows.map((list) => list.deliveryDate).filter(Boolean));
+
+  const summaryHtml = editable
+    ? `
+      <div class="admin-delivery-window-note">
+        <strong>${escapeHtml(cleanQuery ? `Search results for "${cleanQuery}"` : `Showing ${adminDeliveryListWindowLabel(visiblePastDays)}`)}</strong>
+        <span>${escapeHtml(shownDates.size)} delivery date${shownDates.size === 1 ? "" : "s"} / ${escapeHtml(limitedRows.length)} stage${limitedRows.length === 1 ? "" : "s"}${cleanQuery ? " found. Search checks every active delivery list, including older dates." : "."}</span>
+      </div>
+    `
+    : "";
+
+  const loadMoreHtml = includeLoadMore && hiddenOlderRows.length
+    ? `
+      <div class="admin-delivery-load-more-wrap">
+        <button class="admin-delivery-load-more" type="button" data-admin-delivery-load-more>
+          Load more older delivery lists
+        </button>
+        <span>${escapeHtml(hiddenOlderDates.size)} older delivery date${hiddenOlderDates.size === 1 ? "" : "s"} hidden (${escapeHtml(hiddenOlderRows.length)} stage${hiddenOlderRows.length === 1 ? "" : "s"}).</span>
+      </div>
+    `
+    : "";
 
   if (!limitedRows.length) {
-    return `<div class="admin-empty">No delivery lists loaded.</div>`;
+    return `
+      ${summaryHtml}
+      <div class="admin-empty">${escapeHtml(cleanQuery ? "No delivery lists match that search." : "No delivery lists found in the current window.")}</div>
+      ${loadMoreHtml}
+    `;
   }
 
   const groups = listsByDeliveryDate(limitedRows);
 
   return `
+    ${summaryHtml}
     <div class="admin-delivery-edit-list">
       ${groups
         .map((group, index) => {
@@ -6833,7 +6969,7 @@ function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false)
           const percent = totalQty ? Math.round((scannedQty / totalQty) * 100) : 0;
 
           return `
-            <details class="admin-delivery-date-group" ${index === 0 ? "open" : ""}>
+            <details class="admin-delivery-date-group">
               <summary class="admin-delivery-date-summary">
                 <span class="admin-delivery-date-main">
                   <strong>${escapeHtml(formatDisplayDate(group.date))}</strong>
@@ -6922,6 +7058,7 @@ function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false)
         })
         .join("")}
     </div>
+    ${loadMoreHtml}
   `;
 }
 
@@ -7075,21 +7212,23 @@ function closeAdminModal() {
 
 function adminModalContent(kind) {
   if (kind === "deliveryLists") {
+    state.adminDeliveryListVisiblePastDays = ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS;
     return `
       <label class="search-box admin-modal-search">
         <span class="search-icon"></span>
         <input id="adminDeliveryListModalSearch" type="search" autocomplete="off" placeholder="Search date, Job Nr., order number, stage...">
       </label>
-      <div class="admin-table" id="adminDeliveryListModalResults">${deliveryListAdminRows(state.lists, state.lists.length || 1, true)}</div>
+      <div class="admin-table" id="adminDeliveryListModalResults">${adminDeliveryListModalResultsHtml()}</div>
     `;
   }
   if (kind === "deliveryActions") {
+    state.adminDeliveryListVisiblePastDays = ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS;
     return `
       <label class="search-box admin-modal-search">
         <span class="search-icon"></span>
         <input id="adminDeliveryListModalSearch" type="search" autocomplete="off" placeholder="Search date, Job Nr., order number, stage...">
       </label>
-      <div class="admin-table" id="adminDeliveryListModalResults">${deliveryListAdminRows(state.lists, state.lists.length || 1, true)}</div>
+      <div class="admin-table" id="adminDeliveryListModalResults">${adminDeliveryListModalResultsHtml()}</div>
     `;
   }
   if (kind === "users") {
@@ -8370,7 +8509,7 @@ function importHistoryRows(imports = []) {
               ${hasNewStages && hasUpdatedStages ? `<span class="import-status-pill new-stage">New Stage</span>` : ""}
             `
             : `<span class="import-status-pill no-change">No Updates</span>`;
-          
+
           const stageHtml = allStageRows.length
             ? allStageRows
                 .map((row) => {
@@ -8578,10 +8717,7 @@ async function resetAdminScansForDate(deliveryDate) {
   renderAdminResetControls();
   renderAdminDeliveryLists();
 
-  const target = document.getElementById("adminDeliveryListModalResults");
-  if (target) {
-    target.innerHTML = deliveryListAdminRows(state.lists, state.lists.length || 1, true);
-  }
+  await refreshAdminDeliveryListModal();
 
   if (els.resetScansStatus) {
     els.resetScansStatus.innerHTML = `<strong>Scans reset</strong><span>Every stage for ${escapeHtml(formatDisplayDate(deliveryDate))} is back to zero scanned quantity.</span>`;
@@ -8622,10 +8758,7 @@ async function deleteAdminDeliveryDateByDate(deliveryDate) {
   renderAdminResetControls();
   renderAdminDeliveryLists();
 
-  const target = document.getElementById("adminDeliveryListModalResults");
-  if (target) {
-    target.innerHTML = deliveryListAdminRows(state.lists, state.lists.length || 1, true);
-  }
+  await refreshAdminDeliveryListModal();
 
   if (els.deleteListStatus) {
     els.deleteListStatus.innerHTML = `<strong>Deleted date</strong><span>${escapeHtml(result.deletedCount || 0)} stages removed.</span>`;
@@ -9346,7 +9479,6 @@ function refreshCustomerRouteModal() {
     els.adminModalBody.innerHTML = customerRouteRulesModalHtml();
   }
 }
-
 
 
 function renderBayScannerRuleOverview() {
@@ -10679,12 +10811,16 @@ function wireEvents() {
     target?.classList.add("is-searching");
 
     state.adminListSearchTimer = window.setTimeout(() => {
-      searchAdminDeliveryLists(query)
+      if (!query) state.adminDeliveryListVisiblePastDays = ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS;
+
+      const searchPromise = query ? searchAdminDeliveryLists(query) : Promise.resolve(state.lists);
+
+      searchPromise
         .then((filtered) => {
           const stillCurrent = document.getElementById("adminDeliveryListModalSearch")?.value.trim() === query;
 
           if (target && stillCurrent) {
-            target.innerHTML = deliveryListAdminRows(filtered, filtered.length || 1, true);
+            renderAdminDeliveryListModalResults(filtered, query);
           }
         })
         .catch((error) => {
@@ -11286,7 +11422,9 @@ function wireEvents() {
     }
   });
   els.bayMapSearch?.addEventListener("input", () => {
+    const hadSearch = Boolean(state.baySearch.trim());
     state.baySearch = els.bayMapSearch.value;
+    if (hadSearch && !state.baySearch.trim()) collapseAllPhysicalBaySections();
     renderBayMapPage();
   });
   els.bayMapSearch?.addEventListener("keydown", (event) => {
@@ -11309,13 +11447,6 @@ function wireEvents() {
     state.baySpecialFilter = els.baySpecialFilter.value;
     renderBayMapPage();
   });
-  els.bayQuickFilters?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-bay-quick-filter]");
-    if (!button) return;
-    state.bayQuickFilter = button.dataset.bayQuickFilter || "all";
-    if (state.bayQuickFilter === "all") collapseAllPhysicalBaySections();
-    renderBayMapPage();
-  });
   els.bayCategoryFilters?.addEventListener("click", (event) => {
     const target = event.target.closest("[data-bay-category-filter]");
     if (!target) return;
@@ -11326,6 +11457,7 @@ function wireEvents() {
     state.baySearch = els.bayMapSearch?.value || "";
     scrollToBaySearchMatch();
   });
+  els.bayClearFiltersBtn?.addEventListener("click", resetBayFilters);
   els.bayScanOutForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     submitBayScanOut().catch((error) => showInlineError(error.message, true));
@@ -11739,6 +11871,12 @@ function wireEvents() {
       openPrintOptions({ date: dashboardDateKey(), listIds: state.lists.map((list) => list.id) });
       return;
     }
+    const adminDeliveryLoadMoreButton = event.target.closest("[data-admin-delivery-load-more]");
+    if (adminDeliveryLoadMoreButton) {
+      state.adminDeliveryListVisiblePastDays += ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS;
+      renderAdminDeliveryListModalResults(state.lists, "");
+      return;
+    }
     const adminListEditButton = event.target.closest("[data-admin-list-edit]");
     if (adminListEditButton) {
       const listId = adminListEditButton.dataset.adminListEdit || "";
@@ -12103,7 +12241,7 @@ function wireEvents() {
       openEmailDraftMailto(mailtoEmailDraftButton.dataset.mailtoEmailDraft);
       return;
     }
-    
+
     const printListsButton = event.target.closest("[data-print-lists]");
     if (printListsButton) {
       event.preventDefault();

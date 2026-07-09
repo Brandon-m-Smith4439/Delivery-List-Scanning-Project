@@ -1,3 +1,15 @@
+/*
+  Delivery List Scanner Styles
+  ----------------------------
+  Code map for future edits:
+  - Base tokens/layout are near the top (:root, app header, panels, tables).
+  - Feature sections follow the page flow: Home, Scan, Bay Map, Racks, Admin, Print.
+  - Later dated blocks are compatibility overrides from iterative UI work. Before adding
+    a new override at the bottom, search for the selector above and update the existing
+    rule when possible.
+  - Keep shared button/input/pill styles reusable so the CSS file does not keep growing
+    with one-off copies.
+*/
 :root {
   --navy: #072a63;
   --navy-dark: #041a3d;
@@ -714,50 +726,6 @@ select:disabled,
 .bay-action-bar #bayCheckBtn:hover {
   background: var(--navy-dark);
   border-color: var(--navy-dark);
-}
-
-.bay-quick-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 10px 0 8px;
-}
-
-.bay-filter-chip {
-  min-height: 36px;
-  border: 1px solid #cbd7ea;
-  border-radius: 999px;
-  background: #fff;
-  color: var(--navy-dark);
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 850;
-}
-
-.bay-filter-chip strong {
-  min-width: 24px;
-  height: 22px;
-  border-radius: 999px;
-  background: #eef3fa;
-  color: #526078;
-  display: inline-grid;
-  place-items: center;
-  padding: 0 7px;
-  font-size: 12px;
-}
-
-.bay-filter-chip.is-active {
-  border-color: var(--navy);
-  background: var(--navy);
-  color: #fff;
-  box-shadow: 0 6px 14px rgba(7, 42, 99, 0.16);
-}
-
-.bay-filter-chip.is-active strong {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
 }
 
 .delivery-list-grid {
@@ -5349,13 +5317,6 @@ select:disabled,
     grid-template-columns: 1fr;
   }
 
-  .delivery-card-meta {
-    justify-self: start;
-    text-align: left;
-    padding-left: 0;
-    white-space: normal;
-  }
-
   .bay-recent-panel {
     position: static;
     max-height: none;
@@ -5909,9 +5870,6 @@ select:disabled,
 }
 
 @media print {
-  body {
-    background: #fff;
-  }
 
   .top-actions,
   .scan-panel,
@@ -5944,10 +5902,6 @@ select:disabled,
 
   .title-block h1 {
     font-size: 22px;
-  }
-
-  .delivery-selector {
-    display: none;
   }
 
   .workspace {
@@ -6363,10 +6317,6 @@ body.bay-move-mode .excel-bay-map {
 .bay-summary .mini-stat {
   min-height: 48px;
   padding: 7px 8px;
-}
-
-.bay-summary .mini-stat strong {
-  font-size: 16px;
 }
 
 .bay-holding-list {
@@ -8181,14 +8131,6 @@ body.bay-move-mode .excel-bay-map {
 }
 
 @media (max-width: 860px) {
-  .admin-page .panel,
-  .admin-import-panel,
-  .admin-users-panel,
-  .admin-wide-panel,
-  .admin-maintenance-panel,
-  .admin-compact-panel {
-    grid-column: 1 / -1;
-  }
 
   .rack-scan-grid,
   .rack-toolbar,
@@ -8575,11 +8517,6 @@ body.bay-move-mode .excel-bay-map {
   min-height: 54px;
 }
 
-.lookup-manager-shell {
-  display: grid;
-  gap: 14px;
-}
-
 .lookup-manager-form {
   display: grid;
   grid-template-columns: minmax(120px, 0.7fr) repeat(2, minmax(160px, 1fr)) minmax(140px, 0.9fr);
@@ -8619,12 +8556,6 @@ body.bay-move-mode .excel-bay-map {
   background: var(--navy);
   color: #fff;
   font-weight: 900;
-}
-
-.lookup-manager-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
 }
 
 .lookup-manager-list {
@@ -9437,10 +9368,6 @@ body.bay-move-mode .excel-bay-map {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .users-table {
-    min-width: 0;
-  }
-
   .password-reset-row.polished {
     grid-template-columns: minmax(150px, 1fr) 62px 62px;
   }
@@ -9859,12 +9786,6 @@ body.bay-move-mode .excel-bay-map {
   border-bottom: 1px solid #edf1f6;
 }
 
-.manual-edit-card-title {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
 .manual-edit-card-title strong {
   color: var(--navy-dark);
   font-size: 15px;
@@ -9908,21 +9829,6 @@ body.bay-move-mode .excel-bay-map {
   color: #223f66;
   font-size: 12px;
   font-weight: 950;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.manual-edit-card-title strong {
-  color: var(--navy-dark);
-  font-size: 15px;
-  font-weight: 950;
-}
-
-.manual-edit-card-title span {
-  min-width: 0;
-  color: #526078;
-  font-size: 12px;
-  font-weight: 800;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10215,6 +10121,29 @@ body.bay-move-mode .excel-bay-map {
   border-color: #f0c5cb;
 }
 
+.admin-delivery-window-note {
+  display: grid;
+  gap: 2px;
+  margin: -2px 0 12px;
+  border: 1px solid #d9e4f3;
+  border-left: 4px solid var(--navy);
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 10px 12px;
+}
+
+.admin-delivery-window-note strong {
+  color: var(--navy-dark);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.admin-delivery-window-note span {
+  color: #526078;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .admin-delivery-edit-list {
   display: grid;
   gap: 10px;
@@ -10351,6 +10280,35 @@ body.bay-move-mode .excel-bay-map {
   display: block;
   border-radius: inherit;
   background: var(--green);
+}
+
+.admin-delivery-load-more-wrap {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 14px 10px 4px;
+}
+
+.admin-delivery-load-more-wrap span {
+  color: #526078;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.admin-delivery-load-more {
+  min-height: 38px;
+  border: 1px solid var(--navy);
+  border-radius: 7px;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 900;
+  padding: 0 18px;
+}
+
+.admin-delivery-load-more:hover {
+  background: var(--navy-dark);
+  border-color: var(--navy-dark);
 }
 
 @media (max-width: 820px) {
@@ -10737,10 +10695,6 @@ body.bay-move-mode .excel-bay-map {
   overflow: auto;
   padding-right: 4px;
   transition: opacity 120ms ease;
-}
-
-#adminDeliveryListModalResults.is-searching {
-  opacity: 0.92;
 }
 
 .modal-list {
@@ -12161,10 +12115,6 @@ body.bay-move-mode .excel-bay-map {
   border-radius: 12px;
   background: #fff;
   padding: 12px;
-}
-
-.lookup-manager-form .wide {
-  grid-column: span 2;
 }
 
 .lookup-manager-list header {
@@ -14829,8 +14779,23 @@ body.bay-move-mode .excel-bay-map {
   letter-spacing: 0.01em;
 }
 
-/* v14 polish: make the signed-in account control feel like a compact app menu,
-   not a pill, and keep the dropdown focused on the one action users need. */
+/* v50 polish: make the signed-in account control feel like a compact app menu,
+   keep the dropdown focused on the one action users need, and give the Sign out
+   dropdown a larger reliable hover/click area. */
+.user-menu {
+  position: relative;
+}
+
+.user-menu[open]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 119;
+  width: 206px;
+  height: 8px;
+}
+
 .user-menu summary {
   min-width: 164px !important;
   min-height: 42px !important;
@@ -14840,10 +14805,14 @@ body.bay-move-mode .excel-bay-map {
 }
 
 .user-menu-panel {
-  width: 172px !important;
-  padding: 8px !important;
+  top: calc(100% + 4px) !important;
+  right: 0 !important;
+  z-index: 120 !important;
+  width: 196px !important;
+  padding: 10px !important;
   border-radius: 12px !important;
-  display: block !important;
+  display: grid !important;
+  gap: 8px !important;
   transform-origin: top right;
   animation: user-menu-drop 0.16s ease-out;
 }
@@ -14855,17 +14824,20 @@ body.bay-move-mode .excel-bay-map {
 
 .user-menu .user-menu-panel #logoutBtn {
   width: 100% !important;
-  min-height: 40px !important;
-  border-radius: 9px !important;
+  min-height: 48px !important;
+  padding: 0 16px !important;
+  border-radius: 10px !important;
   border-color: #d7e2f0 !important;
   background: #ffffff !important;
   color: var(--navy-dark) !important;
   display: inline-flex !important;
   justify-content: center !important;
   align-items: center !important;
+  line-height: 1 !important;
 }
 
-.user-menu .user-menu-panel #logoutBtn:hover {
+.user-menu .user-menu-panel #logoutBtn:hover,
+.user-menu .user-menu-panel #logoutBtn:focus-visible {
   border-color: #efb7bf !important;
   background: #fff7f8 !important;
   color: #b42335 !important;
@@ -15595,11 +15567,12 @@ body.bay-move-mode .excel-bay-map {
 }
 
 .bay-control-deck {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) 160px 190px 160px auto;
+  grid-template-columns: minmax(420px, 1fr) auto auto;
   gap: 10px;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   padding: 12px;
   border: 1px solid #d7e3f4;
   border-radius: var(--bay-card-radius);
@@ -15609,18 +15582,20 @@ body.bay-move-mode .excel-bay-map {
 
 .bay-control-deck select,
 .bay-control-deck button,
+.bay-filter-drawer > summary,
 .bay-search-primary {
   height: 48px;
   border-radius: 10px;
 }
 
 .bay-control-deck select {
+  width: 100%;
+  min-width: 0;
   border: 1px solid #cbd8ec;
   background: #fff;
   color: var(--navy-dark);
   font-weight: 800;
   padding: 0 10px;
-  min-width: 0;
 }
 
 .bay-search-primary {
@@ -15636,14 +15611,207 @@ body.bay-move-mode .excel-bay-map {
   font-weight: 900 !important;
 }
 
-.bay-quick-filters-v2 {
-  margin: 0 0 14px;
+.bay-filter-drawer {
+  position: relative;
+  z-index: 12;
+  min-width: 132px;
 }
 
-.bay-quick-filters-v2 .bay-filter-chip {
-  border-radius: 11px;
-  min-height: 38px;
-  box-shadow: 0 8px 18px rgba(8, 38, 90, 0.04);
+.bay-filter-drawer > summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0 14px;
+  border: 1px solid #cbd8ec;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--navy-dark);
+  font-weight: 950;
+  list-style: none;
+  cursor: pointer;
+}
+
+.bay-filter-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.bay-filter-drawer[open] > summary {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(19, 92, 255, 0.1);
+}
+
+.bay-filter-icon {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  color: currentColor;
+}
+
+.bay-filter-icon::before,
+.bay-filter-icon::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  border-top: 2px solid currentColor;
+}
+
+.bay-filter-icon::before {
+  top: 4px;
+  box-shadow: 0 7px 0 currentColor;
+}
+
+.bay-filter-icon::after {
+  top: 1px;
+  width: 5px;
+  height: 5px;
+  margin-left: 7px;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: -8px 7px 0 -1px #fff, -8px 7px 0 1px currentColor;
+}
+
+.bay-filter-drawer > summary strong {
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--navy);
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.bay-filter-drawer-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(620px, calc(100vw - 42px));
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #cbd8ec;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 22px 48px rgba(5, 22, 48, 0.18);
+}
+
+.bay-filter-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bay-filter-field > span,
+.bay-filter-field-heading span {
+  color: var(--navy-dark);
+  font-size: 12px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bay-filter-group-full {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.bay-filter-field-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bay-filter-field-heading small {
+  color: #66738a;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.bay-active-filter-bar {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid #d7e3f4;
+  border-radius: 13px;
+  background: #f7faff;
+}
+
+.bay-active-filter-bar strong,
+.bay-active-filter-bar span {
+  display: block;
+}
+
+.bay-active-filter-bar strong {
+  color: var(--navy-dark);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.bay-active-filter-bar > div > span {
+  margin-top: 2px;
+  color: #66738a;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.bay-active-filter-bar.has-active-filters {
+  border-color: #b8c8e4;
+  background: #fff;
+}
+
+.bay-active-filter-bar button {
+  min-height: 34px;
+  border: 1px solid #cbd8ec;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--navy-dark);
+  font-size: 12px;
+  font-weight: 900;
+  padding: 0 12px;
+}
+
+.bay-active-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.bay-active-filter-chip {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  border: 1px solid #cbd8ec;
+  border-radius: 999px;
+  background: #fff;
+  color: #253a5d;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.bay-active-filter-chip small {
+  color: #66738a;
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .bay-map-shell-v2 {
@@ -18356,10 +18524,6 @@ body.modal-scroll-locked .app-header {
   grid-column: 2 / -1;
 }
 
-.bay-floor-grid-v19 .bay-section-counts {
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-}
-
 .bay-floor-grid-v19 .bay-section-counts .auto,
 .bay-floor-grid-v19 .bay-section-counts .manual {
   display: none !important;
@@ -19228,11 +19392,6 @@ body.modal-scroll-locked .app-header {
     padding: 18px !important;
   }
 
-  .selected-bay-metric-row-v28,
-  .selected-bay-primary-actions-v28,
-  .selected-bay-job-card {
-    grid-template-columns: 1fr !important;
-  }
 }
 
 /* v30 Bay Map / In-transit / Customer Email polish
@@ -20064,12 +20223,6 @@ body.modal-scroll-locked .app-header {
   padding-inline: 5px !important;
 }
 
-.bay-floor-grid-v19 .physical-bay-section-v17 > summary .bay-section-status small,
-.bay-dense-grid-v17 .physical-bay-section-v17 > summary .bay-section-status small,
-.bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-status small {
-  display: none !important;
-}
-
 .bay-slot-v17 .bay-slot-qty {
   min-width: 34px;
   text-align: center;
@@ -20669,11 +20822,6 @@ body.modal-scroll-locked .app-header {
   border: 1px dashed #cbd7ea;
   border-radius: 7px;
   background: #fbfdff;
-}
-
-.bay-history-empty strong,
-.bay-history-empty span {
-  display: block;
 }
 
 .bay-history-empty span {
@@ -21833,5 +21981,536 @@ body.modal-scroll-locked .app-header {
   .bay-auto-type-list,
   .bay-auto-manual-list {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 2026-07-09 v51: Bay Map right rail independence and longer transit polish.
+   Keep the action buttons in the same right-rail location, but let the scanner
+   card stick/scroll on its own so the controls do not move with the scanner. */
+.bay-workflow-row-full {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.bay-workflow-row-full .bay-route-flow-v2 {
+  width: 100%;
+  grid-template-columns: minmax(190px, 250px) minmax(520px, 1fr) minmax(190px, 250px);
+  gap: 16px;
+}
+
+.bay-workflow-row-full .flow-lane-v2 {
+  min-height: 124px;
+  padding: 16px 22px !important;
+}
+
+.bay-map-left-rail,
+.bay-right-rail {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.bay-map-left-rail .bay-control-deck,
+.bay-map-left-rail .bay-active-filter-bar {
+  margin: 0;
+}
+
+.bay-map-left-rail .bay-control-deck {
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+}
+
+.bay-right-rail {
+  position: static;
+  max-height: none;
+  overflow: visible;
+}
+
+.bay-right-rail .bay-action-buttons-v2 {
+  position: relative;
+  z-index: 2;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d7e3f4;
+  border-radius: var(--bay-card-radius);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--bay-card-shadow);
+}
+
+.bay-right-rail .bay-action-buttons-v2 button {
+  min-height: 44px;
+  border-radius: 10px;
+  box-shadow: none;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.bay-right-rail .bay-action-buttons-v2 button:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.bay-right-rail .bay-action-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+}
+
+.bay-right-rail .bay-scanner-panel-v2 {
+  position: sticky;
+  top: 114px;
+  max-height: calc(100vh - 136px);
+  overflow: auto;
+}
+
+/* 2026-07-09 v57: Professional Bay Map in-transit visualization.
+   Keep the v56 layout/sticky fix untouched. This only replaces the moving
+   vehicle-style lane with a cleaner logistics flow: status pill, route rail,
+   scan pulses, and a longer completion track. */
+.bay-workflow-row-full .transit-lane-button.flow-lane-v2 {
+  position: relative;
+  isolation: isolate;
+  gap: 10px !important;
+  overflow: hidden !important;
+  border: 1px solid #c8d8ee !important;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(19, 92, 255, 0.12), transparent 28%),
+    radial-gradient(circle at 84% 78%, rgba(47, 168, 79, 0.14), transparent 30%),
+    linear-gradient(180deg, #ffffff, #f4f8ff) !important;
+}
+
+.bay-workflow-row-full .transit-lane-button.flow-lane-v2::before {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  z-index: -1;
+  border-radius: 16px;
+  background:
+    linear-gradient(90deg, rgba(19, 92, 255, 0.06), transparent 30%, rgba(47, 168, 79, 0.07)),
+    repeating-linear-gradient(90deg, rgba(7, 42, 99, 0.055) 0 1px, transparent 1px 34px);
+  opacity: 0.75;
+}
+
+.bay-workflow-row-full .transit-lane-button .flow-truck,
+.bay-workflow-row-full .flow-lane-v2 .flow-truck {
+  order: 1 !important;
+  min-width: 0 !important;
+  width: fit-content !important;
+  max-width: 100% !important;
+  height: 36px !important;
+  margin: 0 auto !important;
+  padding: 0 20px !important;
+  border: 1px solid rgba(19, 92, 255, 0.22);
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  color: var(--navy-dark) !important;
+  box-shadow: 0 8px 20px rgba(8, 38, 90, 0.08) !important;
+}
+
+.bay-workflow-row-full .transit-lane-button .transit-animation {
+  order: 2 !important;
+  width: min(980px, calc(100% - 26px)) !important;
+  height: 44px !important;
+  margin: 0 auto !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+}
+
+.bay-workflow-row-full .transit-animation::before {
+  top: 20px;
+  height: 6px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(19, 92, 255, 0.16), rgba(19, 92, 255, 0.54) 28%, rgba(31, 143, 218, 0.58) 52%, rgba(47, 168, 79, 0.58) 78%, rgba(47, 168, 79, 0.18)),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.75) 0 20px, transparent 20px 34px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 0 0 1px rgba(107, 132, 176, 0.16),
+    0 12px 24px rgba(8, 38, 90, 0.10);
+}
+
+.bay-workflow-row-full .transit-animation::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 12px;
+  height: 22px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.72) 46%, rgba(255, 255, 255, 0.18) 56%, transparent 72%);
+  transform: translateX(-68%);
+  animation: bay-transit-sweep-v57 6.8s cubic-bezier(0.42, 0, 0.2, 1) infinite;
+}
+
+.bay-workflow-row-full .transit-animation i {
+  left: -58px;
+  top: 15px;
+  width: 46px;
+  height: 16px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.78) 24%, transparent 58%),
+    linear-gradient(90deg, #135cff, #1f8fda 55%, #2fa84f);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.68),
+    0 0 18px rgba(19, 92, 255, 0.26),
+    0 10px 18px rgba(8, 38, 90, 0.12);
+  animation: bay-transit-pulse-v57 6.2s cubic-bezier(0.42, 0, 0.2, 1) infinite;
+}
+
+.bay-workflow-row-full .transit-animation i::before,
+.bay-workflow-row-full .transit-animation i::after {
+  display: none !important;
+}
+
+.bay-workflow-row-full .transit-animation i:nth-child(2) {
+  animation-delay: 1.05s;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.72) 22%, transparent 58%),
+    linear-gradient(90deg, #2563eb, #18a7a2 60%, #22a447);
+}
+
+.bay-workflow-row-full .transit-animation i:nth-child(3) {
+  animation-delay: 2.1s;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.74) 22%, transparent 58%),
+    linear-gradient(90deg, #0f5bd8, #1f8fda 58%, #2fa84f);
+}
+
+.bay-workflow-row-full .transit-animation i:nth-child(4) {
+  animation-delay: 3.15s;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.74) 22%, transparent 58%),
+    linear-gradient(90deg, #174ea6, #168aad 58%, var(--green));
+}
+
+.bay-workflow-row-full .transit-lane-button .flow-progress-track {
+  order: 3 !important;
+  width: min(900px, 92%) !important;
+  height: 12px !important;
+  margin: 0 auto !important;
+  border: 1px solid rgba(107, 132, 176, 0.22);
+  background: #d8e4f5 !important;
+  box-shadow:
+    inset 0 1px 3px rgba(7, 42, 99, 0.12),
+    0 6px 14px rgba(8, 38, 90, 0.06);
+}
+
+.bay-workflow-row-full .flow-progress-track i {
+  background: linear-gradient(90deg, #135cff, #1f8fda 55%, #2fa84f) !important;
+  box-shadow: 0 0 18px rgba(47, 168, 79, 0.22);
+}
+
+.bay-workflow-row-full .transit-lane-button small {
+  order: 4 !important;
+  max-width: 100%;
+  color: #43536f !important;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bay-workflow-row-full .transit-lane-button em {
+  order: 5 !important;
+  color: #1756c2 !important;
+  letter-spacing: 0.02em;
+}
+
+@keyframes bay-transit-pulse-v57 {
+  0% {
+    left: -58px;
+    opacity: 0;
+    transform: scaleX(0.76) scaleY(0.9);
+  }
+
+  10%, 84% {
+    opacity: 1;
+  }
+
+  48% {
+    transform: scaleX(1) scaleY(1);
+  }
+
+  100% {
+    left: calc(100% + 58px);
+    opacity: 0;
+    transform: scaleX(0.82) scaleY(0.9);
+  }
+}
+
+@keyframes bay-transit-sweep-v57 {
+  0%, 22% {
+    transform: translateX(-72%);
+    opacity: 0;
+  }
+
+  46%, 72% {
+    opacity: 0.58;
+  }
+
+  100% {
+    transform: translateX(72%);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 1280px) {
+  .bay-right-rail .bay-scanner-panel-v2 {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 820px) {
+  .bay-workflow-row-full .bay-route-flow-v2,
+  .bay-map-left-rail .bay-control-deck {
+    grid-template-columns: 1fr;
+  }
+
+  .bay-workflow-row-full .transit-lane-button .transit-animation,
+  .bay-workflow-row-full .transit-lane-button .flow-progress-track {
+    width: 100% !important;
+  }
+}
+
+/* 2026-07-09 v56: Bay Map scanner sticky repair after full layout review.
+   Root cause: v55 used display: contents and grid-template-areas to split the
+   right rail into separate grid rows. That made the sticky scanner's containing
+   block start below the static buttons and behave like it was tied to the map
+   row instead of the viewport scroll. Keep the right rail as a real stretched
+   grid column, leave the action buttons normal/static, and make only the scanner
+   slot sticky. The scanner card itself stays full width with no internal scroll. */
+@media (min-width: 1051px) {
+  .bay-map-shell-v2 {
+    grid-template-columns: minmax(0, 1fr) minmax(440px, 500px) !important;
+    align-items: stretch !important;
+    overflow: visible !important;
+  }
+
+  .bay-map-left-rail {
+    min-width: 0;
+  }
+
+  .bay-right-rail {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: max-content;
+    align-content: start;
+    align-self: stretch;
+    gap: 12px;
+    width: 100%;
+    min-width: 0;
+    position: relative;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .bay-right-rail .bay-action-buttons-v2 {
+    position: relative !important;
+    top: auto !important;
+    align-self: start;
+    width: 100%;
+  }
+
+  .bay-scanner-sticky-slot {
+    position: sticky !important;
+    top: 114px !important;
+    z-index: 2;
+    align-self: start;
+    width: 100%;
+    min-width: 0;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .bay-scanner-sticky-slot .bay-scanner-panel-v2,
+  .bay-right-rail .bay-scanner-panel-v2 {
+    position: static !important;
+    top: auto !important;
+    width: 100%;
+    min-width: 0 !important;
+    max-width: none;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    overscroll-behavior: auto;
+  }
+
+  .bay-detail-panel-v2 {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1500px) {
+  .bay-map-shell-v2 {
+    grid-template-columns: minmax(0, 1fr) minmax(460px, 520px) !important;
+  }
+}
+
+@media (max-width: 1050px) {
+  .bay-map-shell-v2 {
+    grid-template-columns: 1fr !important;
+    align-items: start !important;
+  }
+
+  .bay-right-rail {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    gap: 12px;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .bay-right-rail .bay-action-buttons-v2 {
+    position: relative !important;
+    top: auto !important;
+  }
+
+  .bay-scanner-sticky-slot {
+    position: static !important;
+    top: auto !important;
+    width: 100%;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .bay-scanner-sticky-slot .bay-scanner-panel-v2,
+  .bay-right-rail .bay-scanner-panel-v2 {
+    position: static !important;
+    width: 100%;
+    min-width: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
+
+
+/* 2026-07-09 v59: simplified Bay Map in-transit lane.
+   Replaces the truck shuttle with one slower, steady left-to-right line so the
+   section feels clean, professional, and less visually busy. The working Bay Scan
+   sticky layout remains untouched. */
+.bay-workflow-row-full .transit-lane-button .transit-animation.transit-animation-v59 {
+  position: relative !important;
+  order: 2 !important;
+  width: min(980px, calc(100% - 26px)) !important;
+  height: 44px !important;
+  margin: 0 auto !important;
+  opacity: 1 !important;
+  overflow: hidden !important;
+  border-radius: 999px;
+}
+
+.bay-workflow-row-full .transit-animation.transit-animation-v59::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 19px;
+  height: 6px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(19, 92, 255, 0.16), rgba(31, 143, 218, 0.22) 48%, rgba(47, 168, 79, 0.22)),
+    linear-gradient(180deg, rgba(255,255,255,0.94), rgba(216,228,245,0.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.84),
+    0 0 0 1px rgba(107,132,176,0.16),
+    0 10px 20px rgba(8,38,90,0.08);
+}
+
+.bay-workflow-row-full .transit-animation-v59 .transit-flow-line {
+  position: absolute;
+  left: -38%;
+  top: 17px;
+  width: 34%;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, rgba(19,92,255,0.22) 16%, #1f8fda 54%, #2fa84f 86%, transparent 100%);
+  box-shadow:
+    0 0 18px rgba(19,92,255,0.16),
+    0 0 24px rgba(47,168,79,0.12);
+  animation: bay-transit-steady-line-v59 8.8s linear infinite;
+}
+
+.bay-workflow-row-full .transit-animation-v59 .transit-flow-line::before {
+  content: "";
+  position: absolute;
+  inset: 2px 10px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.72), transparent);
+  opacity: 0.76;
+}
+
+.bay-workflow-row-full .transit-lane-button .flow-progress-track {
+  width: min(920px, 94%) !important;
+}
+
+@keyframes bay-transit-steady-line-v59 {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+
+  10%, 88% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateX(405%);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 820px) {
+  .bay-workflow-row-full .transit-lane-button .transit-animation.transit-animation-v59 {
+    width: 100% !important;
+  }
+}
+
+
+/* 2026-07-09 v60: extend the simple in-transit line to the section edges.
+   Keep the v59 simple visual, but remove the inset so the motion reads from
+   the left edge of the in-transit lane to the right edge with a slower,
+   steady pass. */
+.bay-workflow-row-full .transit-lane-button .transit-animation.transit-animation-v59 {
+  width: calc(100% + 32px) !important;
+  max-width: none !important;
+  margin-left: -16px !important;
+  margin-right: -16px !important;
+  border-radius: 0 !important;
+}
+
+.bay-workflow-row-full .transit-animation.transit-animation-v59::before {
+  left: 0 !important;
+  right: 0 !important;
+}
+
+.bay-workflow-row-full .transit-animation-v59 .transit-flow-line {
+  left: -45% !important;
+  width: 45% !important;
+  animation: bay-transit-steady-line-v60 12s linear infinite !important;
+}
+
+@keyframes bay-transit-steady-line-v60 {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+
+  7%, 91% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateX(322%);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 820px) {
+  .bay-workflow-row-full .transit-lane-button .transit-animation.transit-animation-v59 {
+    width: calc(100% + 32px) !important;
   }
 }

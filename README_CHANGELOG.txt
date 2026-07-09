@@ -1,25 +1,16 @@
-Scanning Project Update v43 - Updated Remake Print Fix
+Delivery List Scanner - v60
 
-Files included:
-- server.py
-- delivery_store.py
-- index.html
-- app.js
+Edited files:
 - styles.css
+- index.html
 
-What changed in this update:
-- Fixed updated delivery-list printing so remake sheets only include remakes that were actually new/changed by the latest import/update.
-- Existing remakes no longer appear on the updated remake sheet unless that remake row itself was marked New Line / Updated Line / changed by the import.
-- Whole-list printing and remake-only printing still include all applicable remakes as before.
-- Rush updated printing keeps the same behavior and only prints updated rush rows when Updated Only is selected.
+Changes:
+- Extended the simple Bay Map in-transit animation so the moving line starts from the left edge of the lane and exits at the right edge.
+- Slowed the line movement down so it feels steady and intentional.
+- Kept the v59 simple animation approach.
+- Kept the working Bay Map scanner sticky layout untouched.
+- Updated cache-busting references to v60.
 
-Install:
-1. Stop the local server.
-2. Back up your current project folder.
-3. Replace the included files.
-4. Start the server again.
-
-Validation performed:
-- server.py Python compile check
-- delivery_store.py Python compile check
-- app.js node syntax check
+Notes:
+- No __pycache__ folders included.
+- No diff files included.

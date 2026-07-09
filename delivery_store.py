@@ -1,3 +1,12 @@
+# Delivery List Scanner data/business layer.
+#
+# Code map for future edits:
+# - Constants and parsing helpers are near the top.
+# - SQLiteDeliveryStore owns schema creation, migrations, and business workflows.
+# - Keep UI-only wording in app.js/styles.css; keep scanner/import/email/rack/bay rules here.
+# - Prefer adding small migration/repair helpers instead of changing old data assumptions
+#   in-place, because existing floor-machine databases must continue to open cleanly.
+
 """Data-access layer for the delivery-list scanner.
 
 The web/API layer should call these store methods instead of issuing SQL
@@ -2987,7 +2996,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
                         item["errorType"] = "stage_sequence"
                         item["errorReason"] = f"IT received {received_qty}; Outbound {current_qty}"
-                        
+
 
         return items
 
@@ -7408,8 +7417,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 LEFT JOIN racks r ON r.id = ri.rack_id AND r.active = 1
                 LEFT JOIN bay_assignments ba ON ba.line_item_id = li.id AND ba.status NOT IN ('Cleared', 'Cancelled')
                 LEFT JOIN bays b ON b.id = ba.bay_id
-                LEFT JOIN rack_items ri ON ri.line_item_id = li.id AND ri.status = 'Active'
-                LEFT JOIN racks r ON r.id = ri.rack_id AND r.active = 1
                 WHERE 1 = 1
                 {search_clause}
                 {stage_clause}

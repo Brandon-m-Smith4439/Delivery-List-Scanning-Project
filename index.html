@@ -1,3 +1,8 @@
+<!--
+  Delivery List Scanner shell.
+  Keep this file as stable markup for the main pages and modal anchors.
+  Most behavior lives in app.js and most visuals live in styles.css.
+-->
 <!doctype html>
 <html lang="en">
 <head>
@@ -5,7 +10,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-  <link rel="stylesheet" href="styles.css?v=20260707-admin-racks-routes">
+  <link rel="stylesheet" href="styles.css?v=20260709-v60">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
@@ -464,46 +469,9 @@
           <div id="indianTrailSummary" class="bay-summary bay-summary-command"></div>
         </section>
 
-        <section class="bay-workflow-row">
+        <section class="bay-workflow-row bay-workflow-row-full">
           <div id="bayFlowPanel" class="bay-route-flow bay-route-flow-v2"></div>
-
-          <div class="bay-action-buttons bay-action-buttons-v2" id="bayActionButtons" aria-label="Indian Trail bay actions">
-            <button type="button" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon old"></span>Old Bays</button>
-            <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi"><span class="bay-action-icon sdi"></span>SDI / Rush</button>
-            <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay"><span class="bay-action-icon manage"></span>Manage Items</button>
-            <button type="button" data-bay-action="bay-editor" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-edit"></span>Edit Bays</button>
-            <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout"><span class="bay-action-icon layout"></span>Edit Map</button>
-          </div>
         </section>
-
-        <section class="bay-control-deck" aria-label="Bay map search and filters">
-          <label class="search-box bay-search-primary">
-            <span class="search-icon"></span>
-            <input id="bayMapSearch" type="search" autocomplete="off" placeholder="Search bay, order, item, customer, glass type, size...">
-          </label>
-          <select id="bayStatusFilter" aria-label="Bay status filter">
-            <option value="all">All statuses</option>
-            <option value="available">Available</option>
-            <option value="occupied">Occupied</option>
-            <option value="preassigned">Pre Assigned</option>
-            <option value="picking">Picking / SDI</option>
-            <option value="manual">Manual Assign</option>
-            <option value="auto">Auto Assign</option>
-            <option value="blocked">Blocked Scans</option>
-          </select>
-          <select id="bayGlassFilter" aria-label="Bay glass type filter">
-            <option value="all">All glass types</option>
-          </select>
-          <select id="baySpecialFilter" aria-label="Bay special filter">
-            <option value="all">All bay orders</option>
-            <option value="old">Old orders</option>
-            <option value="sdi">SDI</option>
-            <option value="new">New today</option>
-          </select>
-          <button class="tool-button bay-find-btn" id="bayCheckBtn" type="button">Find Match</button>
-        </section>
-
-        <div class="bay-quick-filters bay-quick-filters-v2" id="bayQuickFilters" aria-label="Bay map quick filters"></div>
 
         <section class="bay-layout-manager" id="bayLayoutManager" hidden>
           <div class="section-heading">
@@ -535,19 +503,82 @@
         </section>
 
         <section class="bay-map-shell bay-map-shell-v2">
-          <section class="bay-main-map-card">
-            <div class="bay-map-card-heading">
-              <div>
-                <h2>Physical Bay Map</h2>
-                <p>Search first, then click a bay to manage its orders, target it for scanning, or start a move.</p>
-              </div>
-              <span id="baySelectedText" class="bay-selected-pill">No bay selected</span>
-            </div>
-            <div id="bayMapCanvas" class="excel-bay-map bay-map-canvas-v2"></div>
-          </section>
+          <div class="bay-map-left-rail">
+            <section class="bay-control-deck bay-control-deck-compact" aria-label="Bay map search and filters">
+              <label class="search-box bay-search-primary">
+                <span class="search-icon"></span>
+                <input id="bayMapSearch" type="search" autocomplete="off" placeholder="Search bay, order, item, customer, glass type, size...">
+              </label>
+              <button class="tool-button bay-find-btn" id="bayCheckBtn" type="button">Find Match</button>
+              <details class="bay-filter-drawer" id="bayFilterDrawer">
+                <summary>
+                  <span class="bay-filter-icon" aria-hidden="true"></span>
+                  <span>Filters</span>
+                  <strong id="bayActiveFilterCount">0</strong>
+                </summary>
+                <div class="bay-filter-drawer-panel">
+                  <label class="bay-filter-field">
+                    <span>Status</span>
+                    <select id="bayStatusFilter" aria-label="Bay status filter">
+                      <option value="all">All statuses</option>
+                      <option value="available">Available</option>
+                      <option value="occupied">Occupied</option>
+                      <option value="preassigned">Pre Assigned</option>
+                      <option value="picking">Picking / SDI</option>
+                      <option value="manual">Manual Assign</option>
+                      <option value="auto">Auto Assign</option>
+                      <option value="blocked">Blocked Scans</option>
+                      <option value="error">Errors / Needs Review</option>
+                    </select>
+                  </label>
+                  <label class="bay-filter-field">
+                    <span>Glass type</span>
+                    <select id="bayGlassFilter" aria-label="Bay glass type filter">
+                      <option value="all">All glass types</option>
+                    </select>
+                  </label>
+                  <label class="bay-filter-field">
+                    <span>Bay orders</span>
+                    <select id="baySpecialFilter" aria-label="Bay special filter">
+                      <option value="all">All bay orders</option>
+                      <option value="old">Old orders</option>
+                      <option value="sdi">SDI</option>
+                      <option value="new">New today</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+            </section>
 
-          <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v2" aria-label="Indian Trail bay scanner">
-            <div class="progress-band bay-panel-route-band bay-panel-route-band-v2">
+            <div class="bay-active-filter-bar" id="bayActiveFilterBar" aria-live="polite">
+              <div id="bayActiveFilterSummary"></div>
+              <button class="tool-button" id="bayClearFiltersBtn" type="button">Clear filters</button>
+            </div>
+
+            <section class="bay-main-map-card">
+              <div class="bay-map-card-heading">
+                <div>
+                  <h2>Physical Bay Map</h2>
+                  <p>Search first, then click a bay to manage its orders, target it for scanning, or start a move.</p>
+                </div>
+                <span id="baySelectedText" class="bay-selected-pill">No bay selected</span>
+              </div>
+              <div id="bayMapCanvas" class="excel-bay-map bay-map-canvas-v2"></div>
+            </section>
+          </div>
+
+          <div class="bay-right-rail">
+            <div class="bay-action-buttons bay-action-buttons-v2" id="bayActionButtons" aria-label="Indian Trail bay actions">
+              <button type="button" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon old"></span>Old Bays</button>
+              <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi"><span class="bay-action-icon sdi"></span>SDI / Rush</button>
+              <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay"><span class="bay-action-icon manage"></span>Manage Items</button>
+              <button type="button" data-bay-action="bay-editor" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-edit"></span>Edit Bays</button>
+              <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout"><span class="bay-action-icon layout"></span>Edit Map</button>
+            </div>
+
+            <div class="bay-scanner-sticky-slot">
+              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v2" aria-label="Indian Trail bay scanner">
+              <div class="progress-band bay-panel-route-band bay-panel-route-band-v2">
               <div class="progress-title">
                 <span class="cube-icon"></span>
                 <strong>Indian Trail Route</strong>
@@ -665,7 +696,9 @@
                 </div>
               </div>
             </section>
-          </aside>
+              </aside>
+            </div>
+          </div>
 
           <section class="bay-detail-panel bay-detail-panel-v2">
             <section class="bay-side-panel bay-selected-inline-card">
@@ -988,6 +1021,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=20260629-admin-dashboard"></script>
+  <script src="app.js?v=20260709-v60"></script>
 </body>
 </html>

@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+# Delivery List Scanner local web/API server.
+#
+# Code map for future edits:
+# - Render helpers at the top generate printable delivery/rack reports.
+# - Handler.do_GET and Handler.do_POST route HTTP requests to delivery_store.py.
+# - Keep business rules in delivery_store.py where possible; this file should mainly
+#   translate HTTP requests/responses and render printable HTML.
+
 """Local pilot server for the delivery-list scanner web app."""
 
 from __future__ import annotations
@@ -232,7 +240,6 @@ def render_sheet(
             """
         )
     return "".join(sections)
-
 
 
 def printed_item_is_remake(item: dict) -> bool:
