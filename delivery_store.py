@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import csv
 import base64
+import os
+import smtplib
 import hashlib
 import hmac
 import json
@@ -19,6 +21,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from io import BytesIO, StringIO
 from pathlib import Path
+from email.message import EmailMessage
 from typing import Any
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
@@ -285,6 +288,11 @@ def simplified_match_text(value: Any) -> str:
     for token in ("AND", "THE", "INC", "LLC", "COMPANY", "CO"):
         text = text.replace(token, "")
     return text
+
+
+def is_valid_email(value: str) -> bool:
+    text = str(value or "").strip()
+    return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text))
 
 
 def fuzzy_contains(text: str, needle: str) -> bool:
@@ -1157,6 +1165,357 @@ class BaseDeliveryStore:
     def remove_customer_route_rule(self, rule_id: int, user: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    def get_customer_email_settings(self) -> dict[str, Any]:
+        with self.connect() as con:
+            contacts = con.execute(
+                """
+                SELECT * FROM customer_email_contacts
+                WHERE active = 1
+                ORDER BY customer_pattern, email
+                """
+            ).fetchall()
+            cc_rows = con.execute(
+                """
+                SELECT * FROM customer_email_cc
+                WHERE active = 1
+                ORDER BY email
+                """
+            ).fetchall()
+            outbox = con.execute(
+                """
+                SELECT * FROM email_outbox
+                ORDER BY id DESC
+                LIMIT 20
+                """
+            ).fetchall()
+        return {
+            "contacts": [
+                {
+                    "id": row["id"],
+                    "customerPattern": row["customer_pattern"],
+                    "email": row["email"],
+                    "active": bool(row["active"]),
+                    "updatedAt": row["updated_at"] or row["created_at"],
+                }
+                for row in contacts
+            ],
+            "cc": [
+                {
+                    "id": row["id"],
+                    "email": row["email"],
+                    "active": bool(row["active"]),
+                    "updatedAt": row["updated_at"] or row["created_at"],
+                }
+                for row in cc_rows
+            ],
+            "outbox": [
+                {
+                    "id": row["id"],
+                    "emailType": row["email_type"],
+                    "customerName": row["customer_name"],
+                    "deliveryDate": row["delivery_date"],
+                    "toEmails": json.loads(row["to_emails"] or "[]"),
+                    "ccEmails": json.loads(row["cc_emails"] or "[]"),
+                    "subject": row["subject"],
+                    "body": row["body"],
+                    "status": row["status"],
+                    "createdAt": row["created_at"],
+                    "sentAt": row["sent_at"],
+                    "error": row["error"],
+                }
+                for row in outbox
+            ],
+            "smtpConfigured": bool(os.environ.get("DLS_SMTP_HOST") and os.environ.get("DLS_SMTP_FROM")),
+            "smtpConfig": {
+                "host": os.environ.get("DLS_SMTP_HOST", ""),
+                "port": os.environ.get("DLS_SMTP_PORT", "587"),
+                "from": os.environ.get("DLS_SMTP_FROM", ""),
+                "user": os.environ.get("DLS_SMTP_USER", ""),
+                "ssl": os.environ.get("DLS_SMTP_SSL", "").strip().lower() in {"1", "true", "yes"},
+            },
+        }
+
+    def upsert_customer_email_contact(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        customer = " ".join(str(data.get("customerPattern") or data.get("customer") or "").split())[:160]
+        email = str(data.get("email") or "").strip().lower()
+        contact_id = int(data.get("id") or 0)
+        if not customer:
+            raise ValueError("Customer match text is required")
+        if not is_valid_email(email):
+            raise ValueError("A valid customer email is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            if contact_id:
+                con.execute(
+                    """
+                    UPDATE customer_email_contacts
+                    SET customer_pattern = ?, email = ?, active = 1, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (customer, email, now_iso(), contact_id),
+                )
+                audit_id = str(contact_id)
+            else:
+                con.execute(
+                    """
+                    INSERT INTO customer_email_contacts (customer_pattern, email, active, created_at, updated_at)
+                    VALUES (?, ?, 1, ?, ?)
+                    ON CONFLICT(customer_pattern, email) DO UPDATE SET active = 1, updated_at = excluded.updated_at
+                    """,
+                    (customer, email, now_iso(), now_iso()),
+                )
+                audit_id = customer
+            self.insert_audit(con, "customer_email", audit_id, "upsert_customer_email", user, "", "", {"customer": customer, "email": email})
+            con.commit()
+        return self.get_customer_email_settings()
+
+    def remove_customer_email_contact(self, contact_id: int, user: str) -> dict[str, Any]:
+        if not contact_id:
+            raise ValueError("contact id is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM customer_email_contacts WHERE id = ?", (contact_id,)).fetchone()
+            if not row:
+                raise ValueError("Customer email contact not found")
+            con.execute("UPDATE customer_email_contacts SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), contact_id))
+            self.insert_audit(con, "customer_email", str(contact_id), "remove_customer_email", user, "", "", {"customer": row["customer_pattern"], "email": row["email"]})
+            con.commit()
+        return self.get_customer_email_settings()
+
+    def upsert_customer_email_cc(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        email = str(data.get("email") or "").strip().lower()
+        if not is_valid_email(email):
+            raise ValueError("A valid CC email is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                """
+                INSERT INTO customer_email_cc (email, active, created_at, updated_at)
+                VALUES (?, 1, ?, ?)
+                ON CONFLICT(email) DO UPDATE SET active = 1, updated_at = excluded.updated_at
+                """,
+                (email, now_iso(), now_iso()),
+            )
+            self.insert_audit(con, "customer_email_cc", email, "upsert_customer_email_cc", user, "", "", {"email": email})
+            con.commit()
+        return self.get_customer_email_settings()
+
+    def remove_customer_email_cc(self, cc_id: int, user: str) -> dict[str, Any]:
+        if not cc_id:
+            raise ValueError("cc id is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM customer_email_cc WHERE id = ?", (cc_id,)).fetchone()
+            if not row:
+                raise ValueError("CC email not found")
+            con.execute("UPDATE customer_email_cc SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), cc_id))
+            self.insert_audit(con, "customer_email_cc", str(cc_id), "remove_customer_email_cc", user, "", "", {"email": row["email"]})
+            con.commit()
+        return self.get_customer_email_settings()
+
+    def queue_customer_email_test(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Create or send a customer-email test message.
+
+        This deliberately writes to email_outbox even when SMTP is missing, so the
+        Admin Email Drafts section can preview exactly what would have been sent.
+        SMTP credentials stay server-side through DLS_SMTP_* environment variables.
+        """
+        to_email = str(data.get("toEmail") or data.get("email") or "").strip().lower()
+        cc_text = str(data.get("ccEmails") or "").replace(";", ",")
+        cc_emails = [part.strip().lower() for part in cc_text.split(",") if part.strip()]
+        subject = str(data.get("subject") or "Delivery Scanner test email").strip()[:180]
+        body = str(data.get("body") or "This is a test email from the Delivery List Scanner customer email system.").strip()
+        if not is_valid_email(to_email):
+            raise ValueError("Enter a valid recipient email for the test message")
+        clean_cc = sorted({email for email in cc_emails if is_valid_email(email) and email != to_email})
+        status = "queued"
+        sent_at = ""
+        error = ""
+        try:
+            self.try_send_email([to_email], clean_cc, subject, body)
+            status = "sent"
+            sent_at = now_iso()
+        except RuntimeError as exc:
+            status = "draft"
+            error = str(exc)
+        except Exception as exc:
+            status = "failed"
+            error = str(exc)
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                """
+                INSERT INTO email_outbox (email_type, customer_name, customer_pattern, delivery_date, to_emails, cc_emails, subject, body, status, created_at, sent_at, error, payload_json)
+                VALUES ('test', 'SMTP Test', 'SMTP Test', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    now_iso()[:10],
+                    json.dumps([to_email]),
+                    json.dumps(clean_cc),
+                    subject,
+                    body,
+                    status,
+                    now_iso(),
+                    sent_at,
+                    error,
+                    json.dumps({"user": user, "smtpConfigured": bool(os.environ.get("DLS_SMTP_HOST") and os.environ.get("DLS_SMTP_FROM"))}, separators=(",", ":")),
+                ),
+            )
+            self.insert_audit(con, "customer_email", to_email, "send_test_email", user, "", error, {"status": status, "subject": subject})
+            con.commit()
+        payload = self.get_customer_email_settings()
+        payload["testResult"] = {"status": status, "error": error, "toEmail": to_email}
+        return payload
+
+    def customer_email_matches(self, con: sqlite3.Connection, customer_name: str) -> list[sqlite3.Row]:
+        rows = con.execute(
+            """
+            SELECT * FROM customer_email_contacts
+            WHERE active = 1
+            ORDER BY LENGTH(customer_pattern) DESC, customer_pattern
+            """
+        ).fetchall()
+        return [row for row in rows if fuzzy_contains(customer_name, row["customer_pattern"]) or fuzzy_contains(row["customer_pattern"], customer_name)]
+
+    def customer_cc_emails(self, con: sqlite3.Connection) -> list[str]:
+        return [row["email"] for row in con.execute("SELECT email FROM customer_email_cc WHERE active = 1 ORDER BY email").fetchall()]
+
+    def queue_email_message(self, con: sqlite3.Connection, email_type: str, customer_name: str, customer_pattern: str, delivery_date: str, to_emails: list[str], cc_emails: list[str], subject: str, body: str, payload: dict[str, Any]) -> None:
+        clean_to = sorted({email.strip().lower() for email in to_emails if is_valid_email(email)})
+        clean_cc = sorted({email.strip().lower() for email in cc_emails if is_valid_email(email) and email.strip().lower() not in clean_to})
+        if not clean_to:
+            return
+        existing = con.execute(
+            """
+            SELECT * FROM email_outbox
+            WHERE email_type = ? AND customer_name = ? AND delivery_date = ? AND subject = ? AND status IN ('queued', 'draft', 'sent')
+            LIMIT 1
+            """,
+            (email_type, customer_name, delivery_date, subject),
+        ).fetchone()
+        if existing and existing["status"] == "sent":
+            return
+
+        status = "queued"
+        sent_at = ""
+        error = ""
+        try:
+            self.try_send_email(clean_to, clean_cc, subject, body)
+            status = "sent"
+            sent_at = now_iso()
+        except RuntimeError as exc:
+            status = "draft"
+            error = str(exc)
+        except Exception as exc:
+            status = "failed"
+            error = str(exc)
+
+        if existing:
+            # If a previous run saved a draft because SMTP was not configured, retry it
+            # on the next import/ready check after SMTP is configured instead of silently
+            # leaving the old draft forever. If SMTP is still unavailable, keep the draft.
+            if status != "sent":
+                return
+            con.execute(
+                """
+                UPDATE email_outbox
+                SET to_emails = ?, cc_emails = ?, body = ?, status = 'sent', sent_at = ?, error = '', payload_json = ?
+                WHERE id = ?
+                """,
+                (json.dumps(clean_to), json.dumps(clean_cc), body, sent_at, json.dumps(payload, separators=(",", ":")), existing["id"]),
+            )
+            return
+
+        con.execute(
+            """
+            INSERT INTO email_outbox (email_type, customer_name, customer_pattern, delivery_date, to_emails, cc_emails, subject, body, status, created_at, sent_at, error, payload_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (email_type, customer_name, customer_pattern, delivery_date, json.dumps(clean_to), json.dumps(clean_cc), subject, body, status, now_iso(), sent_at, error, json.dumps(payload, separators=(",", ":"))),
+        )
+
+    def try_send_email(self, to_emails: list[str], cc_emails: list[str], subject: str, body: str) -> None:
+        smtp_host = os.environ.get("DLS_SMTP_HOST", "").strip()
+        smtp_from = os.environ.get("DLS_SMTP_FROM", "").strip()
+        if not smtp_host or not smtp_from:
+            raise RuntimeError("SMTP is not configured; message saved as draft")
+        msg = EmailMessage()
+        msg["From"] = smtp_from
+        msg["To"] = ", ".join(to_emails)
+        if cc_emails:
+            msg["Cc"] = ", ".join(cc_emails)
+        msg["Subject"] = subject
+        msg.set_content(body)
+        port = int(os.environ.get("DLS_SMTP_PORT", "587") or 587)
+        username = os.environ.get("DLS_SMTP_USER", "").strip()
+        password = os.environ.get("DLS_SMTP_PASSWORD", "")
+        use_ssl = os.environ.get("DLS_SMTP_SSL", "").strip().lower() in {"1", "true", "yes"}
+        with (smtplib.SMTP_SSL(smtp_host, port, timeout=20) if use_ssl else smtplib.SMTP(smtp_host, port, timeout=20)) as smtp:
+            if not use_ssl:
+                smtp.starttls()
+            if username:
+                smtp.login(username, password)
+            smtp.send_message(msg)
+
+    def send_customer_manifests_for_import(self, con: sqlite3.Connection, payload: dict[str, Any], user: str) -> None:
+        delivery_date = str(payload.get("deliveryDate") or "")
+        items = [item for item in payload.get("items") or [] if isinstance(item, dict)]
+        customer_map: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            customer = str(item.get("customer") or "").strip()
+            if not customer:
+                continue
+            customer_map.setdefault(customer, []).append(item)
+        cc_emails = self.customer_cc_emails(con)
+        for customer, customer_items in customer_map.items():
+            contacts = self.customer_email_matches(con, customer)
+            if not contacts:
+                continue
+            to_emails = [row["email"] for row in contacts]
+            rows = "\n".join(
+                f"- Job {item.get('job') or item.get('product') or '-'} | Order {item.get('order')}-{item.get('item')} | Qty {item.get('qty')} | {item.get('dimensions') or '-'} | Route {item.get('route') or '-'}"
+                for item in customer_items
+            )
+            subject = f"Delivery manifest for {customer} - {format_display_date(delivery_date)}"
+            body = (
+                f"Hello,\n\nHere is the current manifest for {customer}.\n"
+                f"Expected ready date: {format_display_date(delivery_date)}\n\n"
+                f"Pieces:\n{rows}\n\n"
+                "This is an automated manifest from Barefoot Facility Services."
+            )
+            self.queue_email_message(con, "manifest", customer, contacts[0]["customer_pattern"], delivery_date, to_emails, cc_emails, subject, body, {"itemCount": len(customer_items), "user": user})
+
+    def queue_ready_email_if_customer_complete(self, con: sqlite3.Connection, list_id: str, scanned_row: sqlite3.Row, user: str) -> None:
+        list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+        if not list_row or "staging" not in str(list_row["stage"] or "").lower():
+            return
+        customer = str(scanned_row["customer"] or "").strip()
+        if not customer:
+            return
+        contacts = self.customer_email_matches(con, customer)
+        if not contacts:
+            return
+        rows = con.execute(
+            """
+            SELECT * FROM line_items
+            WHERE list_id = ? AND customer = ?
+            ORDER BY COALESCE(NULLIF(job, ''), product, order_no), order_no, item_no
+            """,
+            (list_id, customer),
+        ).fetchall()
+        if not rows or any(int(row["scanned_qty"] or 0) < int(row["qty"] or 0) for row in rows):
+            return
+        delivery_date = list_row["delivery_date"]
+        subject = f"Order ready - {customer} - {format_display_date(delivery_date)}"
+        item_lines = "\n".join(f"- Job {row['job'] or row['product'] or '-'} | Order {row['order_no']}-{row['item_no']} | Qty {row['qty']} | {row['dimensions']}" for row in rows)
+        body = (
+            f"Hello,\n\nAll staging pieces for {customer} on {format_display_date(delivery_date)} have been scanned.\n"
+            "Your order is ready for pickup or shipment based on the assigned route.\n\n"
+            f"Pieces:\n{item_lines}\n\n"
+            "This is an automated readiness notice from Barefoot Facility Services."
+        )
+        self.queue_email_message(con, "ready", customer, contacts[0]["customer_pattern"], delivery_date, [row["email"] for row in contacts], self.customer_cc_emails(con), subject, body, {"listId": list_id, "user": user})
+
     def get_manual_edit_lookups(self) -> dict[str, list[dict[str, Any]]]:
         raise NotImplementedError
 
@@ -1176,6 +1535,9 @@ class BaseDeliveryStore:
         raise NotImplementedError
 
     def indian_trail_summary(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def indian_trail_in_transit(self) -> dict[str, Any]:
         raise NotImplementedError
 
     def receive_indian_trail_scan(self, data: dict[str, Any], user: str) -> dict[str, Any]:
@@ -1247,6 +1609,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             self.seed_demo_data(con)
             self.seed_security_data(con)
             self.seed_bays(con)
+            self.repair_manual_assign_bay_visibility(con)
             self.seed_racks(con)
 
     def create_schema(self, con: sqlite3.Connection) -> None:
@@ -1478,6 +1841,41 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 snoozed_by TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS customer_email_contacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_pattern TEXT NOT NULL,
+                email TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT '',
+                UNIQUE(customer_pattern, email)
+            );
+
+            CREATE TABLE IF NOT EXISTS customer_email_cc (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS email_outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email_type TEXT NOT NULL,
+                customer_name TEXT NOT NULL DEFAULT '',
+                customer_pattern TEXT NOT NULL DEFAULT '',
+                delivery_date TEXT NOT NULL DEFAULT '',
+                to_emails TEXT NOT NULL DEFAULT '[]',
+                cc_emails TEXT NOT NULL DEFAULT '[]',
+                subject TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                sent_at TEXT NOT NULL DEFAULT '',
+                error TEXT NOT NULL DEFAULT '',
+                payload_json TEXT NOT NULL DEFAULT '{}'
+            );
             """
         )
         self.ensure_column(con, "bays", "display_name", "TEXT NOT NULL DEFAULT ''")
@@ -1493,6 +1891,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.ensure_column(con, "imports", "import_kind", "TEXT NOT NULL DEFAULT 'manual'")
         self.ensure_column(con, "imports", "change_summary", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "users", "station", "TEXT NOT NULL DEFAULT ''")
+        # Rack destination/transport lifecycle columns. Status remains the visible
+        # rack state (Open, Closed, In Transit), while destination tracks where
+        # a completed rack is heading so Indian Trail only sees its own inbound racks.
+        self.ensure_column(con, "racks", "destination", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "racks", "completed_at", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "racks", "departed_at", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "racks", "returned_at", "TEXT NOT NULL DEFAULT ''")
         con.commit()
 
     def ensure_column(self, con: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -1935,6 +2340,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
         con.commit()
 
+    def layout_bay_policy_status(self, bay: dict[str, Any]) -> str:
+        source_status = str(bay.get("sourceStatus") or "").strip()
+        normalized = source_status.replace(" ", "").replace("-", "").lower()
+        if normalized in {"deleted", "inactive"}:
+            return "Deleted"
+        if normalized in {"scanblocked", "blockedall", "blockscan", "blockscans"}:
+            return "ScanBlocked"
+        if not bay.get("autoAssignable") or normalized in {"hold", "blocked", "manual", "manualassign", "manualonly", "manualhold"}:
+            return "ManualAssign"
+        return "Available"
+
     def seed_layout_bays(self, con: sqlite3.Connection, bays: list[dict[str, Any]]) -> None:
         con.execute(
             """
@@ -1950,24 +2366,35 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 continue
             display_name = str(bay.get("displayName") or bay_code).strip()
             bay_type = str(bay.get("bayType") or "Other").strip()
-            active = 1 if bay.get("autoAssignable") and str(bay.get("sourceStatus") or "") == "Available" else 0
-            capacity = 1 if active else 0
+            status = self.layout_bay_policy_status(bay)
+            active = 0 if status == "Deleted" else 1
+            capacity = 1 if status == "Available" else 0
             sort_order = int(bay.get("assignmentPriority") or index)
             con.execute(
                 """
                 INSERT INTO bays (
                     bay_code, display_name, area, bay_type, capacity_qty, sort_order,
-                    active, map_section, bay_category, source_cell, layout_row,
+                    active, status, map_section, bay_category, source_cell, layout_row,
                     layout_col, layout_cell
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(bay_code) DO UPDATE SET
                     display_name = excluded.display_name,
                     area = excluded.area,
                     bay_type = excluded.bay_type,
-                    capacity_qty = excluded.capacity_qty,
+                    capacity_qty = CASE
+                        WHEN bays.status = 'Deleted' THEN bays.capacity_qty
+                        ELSE excluded.capacity_qty
+                    END,
                     sort_order = excluded.sort_order,
-                    active = excluded.active,
+                    active = CASE
+                        WHEN bays.status = 'Deleted' THEN 0
+                        ELSE excluded.active
+                    END,
+                    status = CASE
+                        WHEN bays.status = 'Deleted' THEN 'Deleted'
+                        ELSE excluded.status
+                    END,
                     map_section = excluded.map_section,
                     bay_category = excluded.bay_category,
                     source_cell = excluded.source_cell,
@@ -1986,6 +2413,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     capacity,
                     sort_order,
                     active,
+                    status,
                     str(bay.get("mapSection") or ""),
                     str(bay.get("bayCategory") or ""),
                     str(bay.get("sourceCell") or ""),
@@ -1994,6 +2422,45 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     str(bay.get("layoutCell") or ""),
                 ),
             )
+
+    def repair_manual_assign_bay_visibility(self, con: sqlite3.Connection) -> None:
+        # Repair for databases touched by older Bay Map builds:
+        # active=0 used to mean "manual/hold bay", but active now means "hidden/deleted".
+        # Any mapped inactive bay that is not explicitly Deleted should be visible again as Manual Assign.
+        repaired = con.execute(
+            """
+            UPDATE bays
+            SET active = 1,
+                status = CASE
+                    WHEN COALESCE(status, '') IN ('ScanBlocked', 'BlockedAll') THEN 'ScanBlocked'
+                    ELSE 'ManualAssign'
+                END
+            WHERE COALESCE(active, 0) = 0
+              AND COALESCE(status, 'Available') <> 'Deleted'
+              AND (
+                COALESCE(map_section, '') <> ''
+                OR COALESCE(source_cell, '') <> ''
+                OR COALESCE(layout_cell, '') <> ''
+                OR COALESCE(layout_row, 0) <> 0
+                OR COALESCE(layout_col, 0) <> 0
+              )
+            """
+        ).rowcount
+        con.execute("UPDATE bays SET active = 1, status = 'ManualAssign' WHERE status IN ('Hold', 'Blocked')")
+        con.execute("UPDATE bays SET active = 1, status = 'ScanBlocked' WHERE status = 'BlockedAll'")
+        con.execute("UPDATE bays SET active = 1 WHERE status IN ('ManualAssign', 'ScanBlocked')")
+        if repaired:
+            self.insert_audit(
+                con,
+                "bay",
+                "manual_assign_visibility",
+                "repair_manual_assign_bay_visibility",
+                "system",
+                "",
+                f"Restored {repaired} mapped manual-assign bay(s)",
+                {"repairedCount": repaired},
+            )
+        con.commit()
 
     def list_timing_metrics(self, con: sqlite3.Connection, list_id: str, delivery_date: str) -> dict[str, Any]:
         rows = con.execute(
@@ -2736,6 +3203,357 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"rules": self.get_customer_route_rules()}
 
+    def get_customer_email_settings(self) -> dict[str, Any]:
+        with self.connect() as con:
+            contacts = con.execute(
+                """
+                SELECT * FROM customer_email_contacts
+                WHERE active = 1
+                ORDER BY customer_pattern, email
+                """
+            ).fetchall()
+            cc_rows = con.execute(
+                """
+                SELECT * FROM customer_email_cc
+                WHERE active = 1
+                ORDER BY email
+                """
+            ).fetchall()
+            outbox = con.execute(
+                """
+                SELECT * FROM email_outbox
+                ORDER BY id DESC
+                LIMIT 20
+                """
+            ).fetchall()
+        return {
+            "contacts": [
+                {
+                    "id": row["id"],
+                    "customerPattern": row["customer_pattern"],
+                    "email": row["email"],
+                    "active": bool(row["active"]),
+                    "updatedAt": row["updated_at"] or row["created_at"],
+                }
+                for row in contacts
+            ],
+            "cc": [
+                {
+                    "id": row["id"],
+                    "email": row["email"],
+                    "active": bool(row["active"]),
+                    "updatedAt": row["updated_at"] or row["created_at"],
+                }
+                for row in cc_rows
+            ],
+            "outbox": [
+                {
+                    "id": row["id"],
+                    "emailType": row["email_type"],
+                    "customerName": row["customer_name"],
+                    "deliveryDate": row["delivery_date"],
+                    "toEmails": json.loads(row["to_emails"] or "[]"),
+                    "ccEmails": json.loads(row["cc_emails"] or "[]"),
+                    "subject": row["subject"],
+                    "body": row["body"],
+                    "status": row["status"],
+                    "createdAt": row["created_at"],
+                    "sentAt": row["sent_at"],
+                    "error": row["error"],
+                }
+                for row in outbox
+            ],
+            "smtpConfigured": bool(os.environ.get("DLS_SMTP_HOST") and os.environ.get("DLS_SMTP_FROM")),
+            "smtpConfig": {
+                "host": os.environ.get("DLS_SMTP_HOST", ""),
+                "port": os.environ.get("DLS_SMTP_PORT", "587"),
+                "from": os.environ.get("DLS_SMTP_FROM", ""),
+                "user": os.environ.get("DLS_SMTP_USER", ""),
+                "ssl": os.environ.get("DLS_SMTP_SSL", "").strip().lower() in {"1", "true", "yes"},
+            },
+        }
+
+    def upsert_customer_email_contact(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        customer = " ".join(str(data.get("customerPattern") or data.get("customer") or "").split())[:160]
+        email = str(data.get("email") or "").strip().lower()
+        contact_id = int(data.get("id") or 0)
+        if not customer:
+            raise ValueError("Customer match text is required")
+        if not is_valid_email(email):
+            raise ValueError("A valid customer email is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            if contact_id:
+                con.execute(
+                    """
+                    UPDATE customer_email_contacts
+                    SET customer_pattern = ?, email = ?, active = 1, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (customer, email, now_iso(), contact_id),
+                )
+                audit_id = str(contact_id)
+            else:
+                con.execute(
+                    """
+                    INSERT INTO customer_email_contacts (customer_pattern, email, active, created_at, updated_at)
+                    VALUES (?, ?, 1, ?, ?)
+                    ON CONFLICT(customer_pattern, email) DO UPDATE SET active = 1, updated_at = excluded.updated_at
+                    """,
+                    (customer, email, now_iso(), now_iso()),
+                )
+                audit_id = customer
+            self.insert_audit(con, "customer_email", audit_id, "upsert_customer_email", user, "", "", {"customer": customer, "email": email})
+            con.commit()
+        return self.get_customer_email_settings()
+
+    def remove_customer_email_contact(self, contact_id: int, user: str) -> dict[str, Any]:
+        if not contact_id:
+            raise ValueError("contact id is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM customer_email_contacts WHERE id = ?", (contact_id,)).fetchone()
+            if not row:
+                raise ValueError("Customer email contact not found")
+            con.execute("UPDATE customer_email_contacts SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), contact_id))
+            self.insert_audit(con, "customer_email", str(contact_id), "remove_customer_email", user, "", "", {"customer": row["customer_pattern"], "email": row["email"]})
+            con.commit()
+        return self.get_customer_email_settings()
+
+    def upsert_customer_email_cc(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        email = str(data.get("email") or "").strip().lower()
+        if not is_valid_email(email):
+            raise ValueError("A valid CC email is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                """
+                INSERT INTO customer_email_cc (email, active, created_at, updated_at)
+                VALUES (?, 1, ?, ?)
+                ON CONFLICT(email) DO UPDATE SET active = 1, updated_at = excluded.updated_at
+                """,
+                (email, now_iso(), now_iso()),
+            )
+            self.insert_audit(con, "customer_email_cc", email, "upsert_customer_email_cc", user, "", "", {"email": email})
+            con.commit()
+        return self.get_customer_email_settings()
+
+    def remove_customer_email_cc(self, cc_id: int, user: str) -> dict[str, Any]:
+        if not cc_id:
+            raise ValueError("cc id is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM customer_email_cc WHERE id = ?", (cc_id,)).fetchone()
+            if not row:
+                raise ValueError("CC email not found")
+            con.execute("UPDATE customer_email_cc SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), cc_id))
+            self.insert_audit(con, "customer_email_cc", str(cc_id), "remove_customer_email_cc", user, "", "", {"email": row["email"]})
+            con.commit()
+        return self.get_customer_email_settings()
+
+    def queue_customer_email_test(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Create or send a customer-email test message.
+
+        This deliberately writes to email_outbox even when SMTP is missing, so the
+        Admin Email Drafts section can preview exactly what would have been sent.
+        SMTP credentials stay server-side through DLS_SMTP_* environment variables.
+        """
+        to_email = str(data.get("toEmail") or data.get("email") or "").strip().lower()
+        cc_text = str(data.get("ccEmails") or "").replace(";", ",")
+        cc_emails = [part.strip().lower() for part in cc_text.split(",") if part.strip()]
+        subject = str(data.get("subject") or "Delivery Scanner test email").strip()[:180]
+        body = str(data.get("body") or "This is a test email from the Delivery List Scanner customer email system.").strip()
+        if not is_valid_email(to_email):
+            raise ValueError("Enter a valid recipient email for the test message")
+        clean_cc = sorted({email for email in cc_emails if is_valid_email(email) and email != to_email})
+        status = "queued"
+        sent_at = ""
+        error = ""
+        try:
+            self.try_send_email([to_email], clean_cc, subject, body)
+            status = "sent"
+            sent_at = now_iso()
+        except RuntimeError as exc:
+            status = "draft"
+            error = str(exc)
+        except Exception as exc:
+            status = "failed"
+            error = str(exc)
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                """
+                INSERT INTO email_outbox (email_type, customer_name, customer_pattern, delivery_date, to_emails, cc_emails, subject, body, status, created_at, sent_at, error, payload_json)
+                VALUES ('test', 'SMTP Test', 'SMTP Test', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    now_iso()[:10],
+                    json.dumps([to_email]),
+                    json.dumps(clean_cc),
+                    subject,
+                    body,
+                    status,
+                    now_iso(),
+                    sent_at,
+                    error,
+                    json.dumps({"user": user, "smtpConfigured": bool(os.environ.get("DLS_SMTP_HOST") and os.environ.get("DLS_SMTP_FROM"))}, separators=(",", ":")),
+                ),
+            )
+            self.insert_audit(con, "customer_email", to_email, "send_test_email", user, "", error, {"status": status, "subject": subject})
+            con.commit()
+        payload = self.get_customer_email_settings()
+        payload["testResult"] = {"status": status, "error": error, "toEmail": to_email}
+        return payload
+
+    def customer_email_matches(self, con: sqlite3.Connection, customer_name: str) -> list[sqlite3.Row]:
+        rows = con.execute(
+            """
+            SELECT * FROM customer_email_contacts
+            WHERE active = 1
+            ORDER BY LENGTH(customer_pattern) DESC, customer_pattern
+            """
+        ).fetchall()
+        return [row for row in rows if fuzzy_contains(customer_name, row["customer_pattern"]) or fuzzy_contains(row["customer_pattern"], customer_name)]
+
+    def customer_cc_emails(self, con: sqlite3.Connection) -> list[str]:
+        return [row["email"] for row in con.execute("SELECT email FROM customer_email_cc WHERE active = 1 ORDER BY email").fetchall()]
+
+    def queue_email_message(self, con: sqlite3.Connection, email_type: str, customer_name: str, customer_pattern: str, delivery_date: str, to_emails: list[str], cc_emails: list[str], subject: str, body: str, payload: dict[str, Any]) -> None:
+        clean_to = sorted({email.strip().lower() for email in to_emails if is_valid_email(email)})
+        clean_cc = sorted({email.strip().lower() for email in cc_emails if is_valid_email(email) and email.strip().lower() not in clean_to})
+        if not clean_to:
+            return
+        existing = con.execute(
+            """
+            SELECT * FROM email_outbox
+            WHERE email_type = ? AND customer_name = ? AND delivery_date = ? AND subject = ? AND status IN ('queued', 'draft', 'sent')
+            LIMIT 1
+            """,
+            (email_type, customer_name, delivery_date, subject),
+        ).fetchone()
+        if existing and existing["status"] == "sent":
+            return
+
+        status = "queued"
+        sent_at = ""
+        error = ""
+        try:
+            self.try_send_email(clean_to, clean_cc, subject, body)
+            status = "sent"
+            sent_at = now_iso()
+        except RuntimeError as exc:
+            status = "draft"
+            error = str(exc)
+        except Exception as exc:
+            status = "failed"
+            error = str(exc)
+
+        if existing:
+            # If a previous run saved a draft because SMTP was not configured, retry it
+            # on the next import/ready check after SMTP is configured instead of silently
+            # leaving the old draft forever. If SMTP is still unavailable, keep the draft.
+            if status != "sent":
+                return
+            con.execute(
+                """
+                UPDATE email_outbox
+                SET to_emails = ?, cc_emails = ?, body = ?, status = 'sent', sent_at = ?, error = '', payload_json = ?
+                WHERE id = ?
+                """,
+                (json.dumps(clean_to), json.dumps(clean_cc), body, sent_at, json.dumps(payload, separators=(",", ":")), existing["id"]),
+            )
+            return
+
+        con.execute(
+            """
+            INSERT INTO email_outbox (email_type, customer_name, customer_pattern, delivery_date, to_emails, cc_emails, subject, body, status, created_at, sent_at, error, payload_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (email_type, customer_name, customer_pattern, delivery_date, json.dumps(clean_to), json.dumps(clean_cc), subject, body, status, now_iso(), sent_at, error, json.dumps(payload, separators=(",", ":"))),
+        )
+
+    def try_send_email(self, to_emails: list[str], cc_emails: list[str], subject: str, body: str) -> None:
+        smtp_host = os.environ.get("DLS_SMTP_HOST", "").strip()
+        smtp_from = os.environ.get("DLS_SMTP_FROM", "").strip()
+        if not smtp_host or not smtp_from:
+            raise RuntimeError("SMTP is not configured; message saved as draft")
+        msg = EmailMessage()
+        msg["From"] = smtp_from
+        msg["To"] = ", ".join(to_emails)
+        if cc_emails:
+            msg["Cc"] = ", ".join(cc_emails)
+        msg["Subject"] = subject
+        msg.set_content(body)
+        port = int(os.environ.get("DLS_SMTP_PORT", "587") or 587)
+        username = os.environ.get("DLS_SMTP_USER", "").strip()
+        password = os.environ.get("DLS_SMTP_PASSWORD", "")
+        use_ssl = os.environ.get("DLS_SMTP_SSL", "").strip().lower() in {"1", "true", "yes"}
+        with (smtplib.SMTP_SSL(smtp_host, port, timeout=20) if use_ssl else smtplib.SMTP(smtp_host, port, timeout=20)) as smtp:
+            if not use_ssl:
+                smtp.starttls()
+            if username:
+                smtp.login(username, password)
+            smtp.send_message(msg)
+
+    def send_customer_manifests_for_import(self, con: sqlite3.Connection, payload: dict[str, Any], user: str) -> None:
+        delivery_date = str(payload.get("deliveryDate") or "")
+        items = [item for item in payload.get("items") or [] if isinstance(item, dict)]
+        customer_map: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            customer = str(item.get("customer") or "").strip()
+            if not customer:
+                continue
+            customer_map.setdefault(customer, []).append(item)
+        cc_emails = self.customer_cc_emails(con)
+        for customer, customer_items in customer_map.items():
+            contacts = self.customer_email_matches(con, customer)
+            if not contacts:
+                continue
+            to_emails = [row["email"] for row in contacts]
+            rows = "\n".join(
+                f"- Job {item.get('job') or item.get('product') or '-'} | Order {item.get('order')}-{item.get('item')} | Qty {item.get('qty')} | {item.get('dimensions') or '-'} | Route {item.get('route') or '-'}"
+                for item in customer_items
+            )
+            subject = f"Delivery manifest for {customer} - {format_display_date(delivery_date)}"
+            body = (
+                f"Hello,\n\nHere is the current manifest for {customer}.\n"
+                f"Expected ready date: {format_display_date(delivery_date)}\n\n"
+                f"Pieces:\n{rows}\n\n"
+                "This is an automated manifest from Barefoot Facility Services."
+            )
+            self.queue_email_message(con, "manifest", customer, contacts[0]["customer_pattern"], delivery_date, to_emails, cc_emails, subject, body, {"itemCount": len(customer_items), "user": user})
+
+    def queue_ready_email_if_customer_complete(self, con: sqlite3.Connection, list_id: str, scanned_row: sqlite3.Row, user: str) -> None:
+        list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+        if not list_row or "staging" not in str(list_row["stage"] or "").lower():
+            return
+        customer = str(scanned_row["customer"] or "").strip()
+        if not customer:
+            return
+        contacts = self.customer_email_matches(con, customer)
+        if not contacts:
+            return
+        rows = con.execute(
+            """
+            SELECT * FROM line_items
+            WHERE list_id = ? AND customer = ?
+            ORDER BY COALESCE(NULLIF(job, ''), product, order_no), order_no, item_no
+            """,
+            (list_id, customer),
+        ).fetchall()
+        if not rows or any(int(row["scanned_qty"] or 0) < int(row["qty"] or 0) for row in rows):
+            return
+        delivery_date = list_row["delivery_date"]
+        subject = f"Order ready - {customer} - {format_display_date(delivery_date)}"
+        item_lines = "\n".join(f"- Job {row['job'] or row['product'] or '-'} | Order {row['order_no']}-{row['item_no']} | Qty {row['qty']} | {row['dimensions']}" for row in rows)
+        body = (
+            f"Hello,\n\nAll staging pieces for {customer} on {format_display_date(delivery_date)} have been scanned.\n"
+            "Your order is ready for pickup or shipment based on the assigned route.\n\n"
+            f"Pieces:\n{item_lines}\n\n"
+            "This is an automated readiness notice from Barefoot Facility Services."
+        )
+        self.queue_email_message(con, "ready", customer, contacts[0]["customer_pattern"], delivery_date, [row["email"] for row in contacts], self.customer_cc_emails(con), subject, body, {"listId": list_id, "user": user})
+
     def get_manual_edit_lookups(self) -> dict[str, list[dict[str, Any]]]:
         buckets: dict[str, dict[str, dict[str, Any]]] = {
             "product": {},
@@ -2933,6 +3751,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "changedListIds": changed_list_ids,
             }
             con.execute("UPDATE imports SET change_summary = ? WHERE id = ?", (json.dumps(change_summary, separators=(",", ":")), import_cur.lastrowid))
+            # Queue customer manifests for every import/update attempt, not only when rows changed.
+            # This lets newly-added customer email rules catch the next import even when the list file is unchanged.
+            self.send_customer_manifests_for_import(con, payload, user)
             con.commit()
         created_count = sum(1 for definition in definitions if definition[0] not in existing_list_ids)
         updated_count = sum(1 for summary in stage_summaries if not summary["created"] and (summary["changedLineCount"] or summary["changedPieceQty"]))
@@ -3497,6 +4318,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 reason,
                 {"barcode": barcode, "canonical": canonical, "manual": is_manual},
             )
+            self.queue_ready_email_if_customer_complete(con, list_id, row, user)
             con.commit()
             payload = self._get_payload(con, list_id, last)
             if rack_code_for_scan:
@@ -3805,26 +4627,71 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ).fetchone()
         if not inbound:
             return ""
+
+        # Indian Trail bay assignment is job-based. One Job Nr. may contain multiple line items;
+        # every item in that job should live in one physical bay so the floor can pull the whole job together.
+        job_key = str(inbound["job"] or "").strip()
+        if job_key:
+            group_rows = con.execute(
+                """
+                SELECT * FROM line_items
+                WHERE list_id = ? AND COALESCE(job, '') = ?
+                ORDER BY order_no, item_no, id
+                """,
+                (inbound["list_id"], job_key),
+            ).fetchall()
+        else:
+            group_rows = con.execute(
+                """
+                SELECT * FROM line_items
+                WHERE list_id = ? AND order_no = ?
+                ORDER BY order_no, item_no, id
+                """,
+                (inbound["list_id"], inbound["order_no"]),
+            ).fetchall()
+        group_rows = group_rows or [inbound]
+        group_ids = [row["id"] for row in group_rows]
+        placeholders = ",".join("?" for _ in group_ids)
+
         existing = con.execute(
-            "SELECT 1 FROM bay_assignments WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled') LIMIT 1",
-            (inbound["id"],),
+            f"""
+            SELECT ba.*, b.bay_code
+            FROM bay_assignments ba
+            JOIN bays b ON b.id = ba.bay_id
+            WHERE ba.status NOT IN ('Cleared', 'Cancelled')
+              AND ba.line_item_id IN ({placeholders})
+            ORDER BY ba.id DESC
+            LIMIT 1
+            """,
+            group_ids,
         ).fetchone()
         if existing:
-            return ""
-        bay_type = suggested_bay(inbound["product"], inbound["dimensions"], inbound["route"])
-        bay = self.find_bay_for_assignment(con, bay_type) or self.find_bay_for_assignment(con, "Standard")
+            bay = con.execute("SELECT * FROM bays WHERE id = ?", (existing["bay_id"],)).fetchone()
+        else:
+            bay_type = suggested_bay(inbound["product"], inbound["dimensions"], inbound["route"])
+            bay = self.find_bay_for_assignment(con, bay_type) or self.find_bay_for_assignment(con, "Standard")
         if not bay:
-            self.insert_exception(con, inbound["list_id"], None, "bay_assignment_conflict", "No safe bay available during outbound preassign")
+            self.insert_exception(con, inbound["list_id"], None, "bay_assignment_conflict", "No safe bay available during outbound job preassign")
             return ""
-        con.execute(
-            """
-            INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
-            VALUES (?, ?, ?, 1, 'PreAssigned', ?, ?, 'Preassigned from outbound scan')
-            """,
-            (inbound["list_id"], inbound["id"], bay["id"], user, now_iso()),
-        )
-        self.insert_bay_event(con, bay["id"], inbound["id"], "PreAssignBay", user, "Preassigned from outbound scan", new_bay_id=bay["id"])
-        self.insert_audit(con, "bay_assignment", inbound["id"], "preassign_bay_from_outbound", user, station, "", {"bayCode": bay["bay_code"]})
+
+        assigned_count = 0
+        for group_row in group_rows:
+            active = con.execute(
+                "SELECT 1 FROM bay_assignments WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled') LIMIT 1",
+                (group_row["id"],),
+            ).fetchone()
+            if active:
+                continue
+            con.execute(
+                """
+                INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
+                VALUES (?, ?, ?, ?, 'PreAssigned', ?, ?, 'Job preassigned from outbound scan')
+                """,
+                (inbound["list_id"], group_row["id"], bay["id"], int(group_row["qty"] or 1), user, now_iso()),
+            )
+            self.insert_bay_event(con, bay["id"], group_row["id"], "PreAssignBay", user, "Job preassigned from outbound scan", new_bay_id=bay["id"])
+            assigned_count += 1
+        self.insert_audit(con, "bay_assignment", inbound["id"], "preassign_job_bay_from_outbound", user, station, "", {"bayCode": bay["bay_code"], "job": job_key, "itemsAssigned": assigned_count})
         return str(bay["bay_code"])
 
     def reset_stage(self, list_id: str, user: str, station: str) -> dict[str, Any]:
@@ -4660,8 +5527,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         has_physical_assignment = any(str(item["status"] or "") not in {"PreAssigned"} for item in assignments)
         all_preassigned = bool(assignments) and not has_physical_assignment
         bay_status = str(row["status"] or "Available")
-        if bay_status in {"Blocked", "Hold"}:
-            status = bay_status
+        if bay_status in {"Hold", "ManualAssign", "Blocked"}:
+            status = "ManualAssign"
+        elif bay_status in {"ScanBlocked", "BlockedAll"}:
+            status = "ScanBlocked"
         elif any(item["status"] == "SDIOverride" for item in assignments):
             status = "SDI"
         elif assigned_qty == 0:
@@ -4731,6 +5600,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "status": item["status"],
                 }
             )
+        # `active` is a soft-delete flag for live-map visibility, not an assign-policy flag.
+        # Older builds used active=0 for Hold/Blocked/Manual bays, which made those bays
+        # disappear after the live-map filter was tightened. Keep Manual/Blocked policy bays
+        # visible and only hide rows that were actually deleted.
+        visible_policy_statuses = {"Hold", "ManualAssign", "Blocked", "ScanBlocked", "BlockedAll"}
+        is_visible_live_bay = bool(row["active"]) or bay_status in visible_policy_statuses
         return {
             "id": row["id"],
             "bayCode": row["bay_code"],
@@ -4746,7 +5621,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "assignedQty": assigned_qty,
             "status": status,
             "sourceStatus": bay_status,
-            "active": bool(row["active"]),
+            "active": is_visible_live_bay,
             "staleDays": max_stale_days,
             "isNewToday": any_new_today,
             "assignments": assignment_payload,
@@ -4754,7 +5629,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
     def get_bays(self) -> list[dict[str, Any]]:
         with self.connect() as con:
-            rows = con.execute("SELECT * FROM bays ORDER BY COALESCE(layout_row, 9999), COALESCE(layout_col, 9999), sort_order, bay_code").fetchall()
+            # Deleted bays are soft-deactivated so old bay events remain intact.
+            # Manual/blocked policy bays must still render on the live map even if
+            # an older build stored them with active=0.
+            rows = con.execute(
+                """
+                SELECT *
+                FROM bays
+                WHERE active = 1
+                   OR COALESCE(status, '') IN ('Hold', 'ManualAssign', 'Blocked', 'ScanBlocked', 'BlockedAll')
+                ORDER BY COALESCE(layout_col, 9999), COALESCE(layout_row, 9999), sort_order, bay_code
+                """
+            ).fetchall()
             return [self.bay_from_row(con, row) for row in rows]
 
     def get_bay_layout(self) -> dict[str, Any]:
@@ -4947,6 +5833,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "name": rack["display_name"] or rack["rack_code"],
             "type": rack["rack_type"],
             "status": rack["status"],
+            "destination": rack["destination"] if "destination" in rack.keys() else "",
+            "completedAt": rack["completed_at"] if "completed_at" in rack.keys() else "",
+            "departedAt": rack["departed_at"] if "departed_at" in rack.keys() else "",
+            "returnedAt": rack["returned_at"] if "returned_at" in rack.keys() else "",
             "active": bool(rack["active"]),
             "sortOrder": rack["sort_order"],
             "qty": qty,
@@ -5087,18 +5977,40 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("BEGIN IMMEDIATE")
             rack = self.get_rack_by_code(con, rack_code)
             con.execute("UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Rack cleared' WHERE rack_id = ? AND status = 'Active'", (user, now_iso(), rack["id"]))
-            con.execute("UPDATE racks SET status = 'Open', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
+            con.execute("UPDATE racks SET status = 'Open', destination = '', completed_at = '', departed_at = '', returned_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), rack["id"]))
             self.insert_audit(con, "rack", rack["rack_code"], "clear_rack", user, "", "", {})
             con.commit()
         return self.get_racks()
 
+    def rack_destination_value(self, value: Any) -> str:
+        text = str(value or "").strip()
+        aliases = {
+            "": "Indian Trail",
+            "INDIAN TRAIL": "Indian Trail",
+            "IT": "Indian Trail",
+            "CPU": "CPU",
+            "CUSTOMER PICKUP": "CPU",
+            "GREENVILLE": "Greenville",
+            "GNV": "Greenville",
+            "DTC": "DTC",
+            "DELIVER TO CUSTOMER": "DTC",
+        }
+        return aliases.get(text.upper(), text[:40] or "Indian Trail")
+
     def complete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
+        destination = self.rack_destination_value(data.get("destination"))
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rack = self.get_rack_by_code(con, rack_code)
-            con.execute("UPDATE racks SET status = 'Closed', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
-            self.insert_audit(con, "rack", rack["rack_code"], "complete_rack", user, "", "Rack closed for outbound packing list", {})
+            active_count = con.execute("SELECT COUNT(*) FROM rack_items WHERE rack_id = ? AND status = 'Active'", (rack["id"],)).fetchone()[0]
+            if not active_count:
+                raise ValueError("Rack must have active pieces before it can be completed")
+            con.execute(
+                "UPDATE racks SET status = 'Closed', destination = ?, completed_at = ?, departed_at = '', returned_at = '', updated_at = ? WHERE id = ?",
+                (destination, now_iso(), now_iso(), rack["id"]),
+            )
+            self.insert_audit(con, "rack", rack["rack_code"], "complete_rack", user, "", "Rack closed for outbound packing list", {"destination": destination})
             con.commit()
         return self.get_racks()
 
@@ -5107,8 +6019,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rack = self.get_rack_by_code(con, rack_code)
-            con.execute("UPDATE racks SET status = 'Open', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
+            con.execute("UPDATE racks SET status = 'Open', destination = '', completed_at = '', departed_at = '', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
             self.insert_audit(con, "rack", rack["rack_code"], "uncomplete_rack", user, "", "Rack reopened for staging scans", {})
+            con.commit()
+        return self.get_racks()
+
+    def return_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            rack = self.get_rack_by_code(con, rack_code)
+            con.execute("UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Rack returned and cleared' WHERE rack_id = ? AND status = 'Active'", (user, now_iso(), rack["id"]))
+            con.execute("UPDATE racks SET status = 'Open', destination = '', completed_at = '', departed_at = '', returned_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), rack["id"]))
+            self.insert_audit(con, "rack", rack["rack_code"], "return_rack", user, "", "Rack returned and reset for staging", {})
             con.commit()
         return self.get_racks()
 
@@ -5276,7 +6199,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 scanned_count += delta
             if scanned_count == 0:
                 last = self.insert_event(con, list_id, None, barcode, f"RACK-{rack['rack_code']}", user, station, "duplicate", "Rack already scanned outbound", "All rack items were already complete")
-            con.execute("UPDATE racks SET status = 'In Transit', updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
+            con.execute("UPDATE racks SET status = 'In Transit', departed_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), rack["id"]))
             self.insert_audit(con, "rack", rack["rack_code"], "rack_outbound_scan", user, station, "", {"scannedCount": scanned_count, "cappedRows": capped_count})
             con.commit()
             payload = self._get_payload(con, list_id, last)
@@ -5284,6 +6207,280 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             cap_message = f" {capped_count} row{'s' if capped_count != 1 else ''} capped at remaining quantity." if capped_count else ""
             payload["message"] = f"Rack {rack['rack_code']} scanned outbound for {scanned_count} piece{'s' if scanned_count != 1 else ''}.{cap_message}"
             return payload
+
+
+    def indian_trail_in_transit(self) -> dict[str, Any]:
+        with self.connect() as con:
+            return self._indian_trail_in_transit_payload(con)
+
+    def _indian_trail_in_transit_payload(self, con: sqlite3.Connection) -> dict[str, Any]:
+        """Return pieces scanned outbound but not yet received at Indian Trail.
+
+        This powers the Indian Trail "In Transit" manifest. It groups by Job Nr.
+        first, then by transportation method/rack so receiving users can quickly
+        see what is physically on the way and where it was loaded.
+        """
+        inbound = con.execute(
+            """
+            SELECT id, delivery_date, label, stage
+            FROM delivery_lists
+            WHERE stage LIKE '%Indian Trail%' AND status = 'active'
+            ORDER BY delivery_date DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if not inbound:
+            return {"deliveryDate": "", "outboundListId": "", "inboundListId": "", "totalQty": 0, "jobs": [], "rows": []}
+
+        outbound = con.execute(
+            """
+            SELECT id, label, stage
+            FROM delivery_lists
+            WHERE delivery_date = ?
+              AND status = 'active'
+              AND stage LIKE '%Outbound%'
+            ORDER BY id
+            LIMIT 1
+            """,
+            (inbound["delivery_date"],),
+        ).fetchone()
+        outbound_id = outbound["id"] if outbound else ""
+
+        # Prefer the live transportation manifest: active rack/truck assignments
+        # represent pieces physically on the way, even when an outbound scan was
+        # missed or the active inbound date has moved forward. If no active
+        # transportation rows are found, the older outbound-minus-received query
+        # below still catches legacy scans without a rack/truck assignment.
+        rack_rows = con.execute(
+            """
+            SELECT
+                COALESCE(in_li.id, src_li.id) AS inbound_line_id,
+                COALESCE(out_li.id, '') AS outbound_line_id,
+                src_li.source_id,
+                src_li.order_no,
+                src_li.item_no,
+                src_li.qty,
+                src_li.dimensions,
+                src_li.customer,
+                src_li.route,
+                src_li.job,
+                src_li.product,
+                src_li.process_state,
+                src_li.queue_state,
+                COALESCE(out_li.scanned_qty, 0) AS outbound_scanned_qty,
+                COALESCE(in_li.scanned_qty, 0) AS received_qty,
+                MAX(ri.qty - COALESCE(in_li.scanned_qty, 0), 0) AS in_transit_qty,
+                r.rack_code AS rack_code,
+                COALESCE(NULLIF(r.display_name, ''), r.rack_code) AS rack_name,
+                COALESCE(NULLIF(r.rack_type, ''), CASE WHEN r.rack_code = 'T' THEN 'Truck' ELSE 'Rack' END) AS rack_type
+            FROM rack_items ri
+            JOIN racks r ON r.id = ri.rack_id AND r.active = 1
+            JOIN line_items src_li ON src_li.id = ri.line_item_id
+            JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id AND src_dl.status = 'active'
+            LEFT JOIN delivery_lists recv_dl
+              ON recv_dl.delivery_date = src_dl.delivery_date
+             AND recv_dl.status = 'active'
+             AND recv_dl.stage LIKE '%Indian Trail%'
+            LEFT JOIN line_items in_li
+              ON in_li.list_id = recv_dl.id
+             AND in_li.source_id = src_li.source_id
+             AND in_li.order_no = src_li.order_no
+             AND in_li.item_no = src_li.item_no
+            LEFT JOIN delivery_lists out_dl
+              ON out_dl.delivery_date = src_dl.delivery_date
+             AND out_dl.status = 'active'
+             AND out_dl.stage LIKE '%Outbound%'
+            LEFT JOIN line_items out_li
+              ON out_li.list_id = out_dl.id
+             AND out_li.source_id = src_li.source_id
+             AND out_li.order_no = src_li.order_no
+             AND out_li.item_no = src_li.item_no
+            WHERE ri.status = 'Active'
+              AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
+            GROUP BY ri.id
+            HAVING in_transit_qty > 0
+            ORDER BY src_dl.delivery_date DESC, COALESCE(NULLIF(src_li.job, ''), src_li.order_no), r.rack_code, src_li.order_no, src_li.item_no
+            """
+        ).fetchall()
+
+        rows = rack_rows or con.execute(
+            """
+            SELECT
+                in_li.id AS inbound_line_id,
+                out_li.id AS outbound_line_id,
+                in_li.source_id,
+                in_li.order_no,
+                in_li.item_no,
+                in_li.qty,
+                in_li.dimensions,
+                in_li.customer,
+                in_li.route,
+                in_li.job,
+                in_li.product,
+                in_li.process_state,
+                in_li.queue_state,
+                out_li.scanned_qty AS outbound_scanned_qty,
+                in_li.scanned_qty AS received_qty,
+                MAX(out_li.scanned_qty - in_li.scanned_qty, 0) AS in_transit_qty,
+                COALESCE((
+                    SELECT r.rack_code
+                    FROM rack_items ri
+                    JOIN racks r ON r.id = ri.rack_id
+                    JOIN line_items src_li ON src_li.id = ri.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
+                    WHERE ri.status = 'Active'
+                      AND r.active = 1
+                      AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
+                      AND src_dl.delivery_date = ?
+                      AND src_li.source_id = in_li.source_id
+                      AND src_li.order_no = in_li.order_no
+                      AND src_li.item_no = in_li.item_no
+                    ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
+                    LIMIT 1
+                ), '') AS rack_code,
+                COALESCE((
+                    SELECT r.display_name
+                    FROM rack_items ri
+                    JOIN racks r ON r.id = ri.rack_id
+                    JOIN line_items src_li ON src_li.id = ri.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
+                    WHERE ri.status = 'Active'
+                      AND r.active = 1
+                      AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
+                      AND src_dl.delivery_date = ?
+                      AND src_li.source_id = in_li.source_id
+                      AND src_li.order_no = in_li.order_no
+                      AND src_li.item_no = in_li.item_no
+                    ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
+                    LIMIT 1
+                ), '') AS rack_name,
+                COALESCE((
+                    SELECT r.rack_type
+                    FROM rack_items ri
+                    JOIN racks r ON r.id = ri.rack_id
+                    JOIN line_items src_li ON src_li.id = ri.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
+                    WHERE ri.status = 'Active'
+                      AND r.active = 1
+                      AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
+                      AND src_dl.delivery_date = ?
+                      AND src_li.source_id = in_li.source_id
+                      AND src_li.order_no = in_li.order_no
+                      AND src_li.item_no = in_li.item_no
+                    ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
+                    LIMIT 1
+                ), '') AS rack_type
+            FROM line_items in_li
+            JOIN line_items out_li
+              ON out_li.list_id = ?
+             AND out_li.source_id = in_li.source_id
+             AND out_li.order_no = in_li.order_no
+             AND out_li.item_no = in_li.item_no
+            WHERE in_li.list_id = ?
+              AND out_li.scanned_qty > in_li.scanned_qty
+            ORDER BY COALESCE(NULLIF(in_li.job, ''), in_li.order_no), rack_code, in_li.order_no, in_li.item_no
+            """,
+            (inbound["delivery_date"], inbound["delivery_date"], inbound["delivery_date"], outbound_id, inbound["id"]),
+        ).fetchall()
+
+        job_map: dict[str, dict[str, Any]] = {}
+        flat_rows: list[dict[str, Any]] = []
+        total_qty = 0
+        for row in rows:
+            qty = max(int(row["in_transit_qty"] or 0), 0)
+            if qty <= 0:
+                continue
+            total_qty += qty
+            job_label = str(row["job"] or row["product"] or row["order_no"] or "No Job Nr.")
+            job_key = normalized_match_text(job_label) or f"ORDER{row['order_no']}"
+            rack_code = str(row["rack_code"] or "").strip()
+            rack_name = str(row["rack_name"] or "").strip()
+            rack_type = str(row["rack_type"] or "").strip()
+            if not rack_code:
+                rack_code = "UNASSIGNED"
+                rack_name = "Needs transportation method"
+                rack_type = "Unassigned"
+            elif rack_code == "T":
+                rack_name = rack_name or "Truck"
+                rack_type = rack_type or "Truck"
+            else:
+                rack_name = rack_name or rack_code
+                rack_type = rack_type or "Rack"
+
+            item = {
+                "inboundLineId": row["inbound_line_id"],
+                "outboundLineId": row["outbound_line_id"],
+                "order": row["order_no"],
+                "item": row["item_no"],
+                "qty": qty,
+                "outboundScannedQty": row["outbound_scanned_qty"],
+                "receivedQty": row["received_qty"],
+                "dimensions": row["dimensions"],
+                "customer": row["customer"],
+                "route": row["route"],
+                "job": row["job"],
+                "product": row["product"],
+                "processState": row["process_state"],
+                "queueState": row["queue_state"],
+                "rackCode": rack_code,
+                "rackName": rack_name,
+                "rackType": rack_type,
+            }
+            flat_rows.append(item)
+
+            job = job_map.setdefault(
+                job_key,
+                {
+                    "key": job_key,
+                    "job": job_label,
+                    "customer": row["customer"] or "",
+                    "product": row["product"] or "",
+                    "totalQty": 0,
+                    "rackMap": {},
+                },
+            )
+            if not job["customer"] and row["customer"]:
+                job["customer"] = row["customer"]
+            if not job["product"] and row["product"]:
+                job["product"] = row["product"]
+            job["totalQty"] += qty
+            rack_key = rack_code or "UNASSIGNED"
+            rack = job["rackMap"].setdefault(
+                rack_key,
+                {
+                    "code": rack_code,
+                    "name": rack_name,
+                    "type": rack_type,
+                    "totalQty": 0,
+                    "items": [],
+                },
+            )
+            rack["totalQty"] += qty
+            rack["items"].append(item)
+
+        jobs: list[dict[str, Any]] = []
+        for job in job_map.values():
+            racks = sorted(
+                job["rackMap"].values(),
+                key=lambda rack: (rack["code"] == "UNASSIGNED", rack["code"] == "T", rack["code"]),
+            )
+            for rack in racks:
+                rack["items"].sort(key=lambda item: (str(item["order"]), str(item["item"])))
+            jobs.append({key: value for key, value in job.items() if key != "rackMap"} | {"racks": racks})
+
+        jobs.sort(key=lambda job: (str(job.get("job") or ""), str(job.get("customer") or "")))
+        return {
+            "deliveryDate": inbound["delivery_date"],
+            "outboundListId": outbound_id,
+            "outboundLabel": outbound["label"] if outbound else "",
+            "inboundListId": inbound["id"],
+            "inboundLabel": inbound["label"],
+            "totalQty": total_qty,
+            "jobCount": len(jobs),
+            "rowCount": len(flat_rows),
+            "jobs": jobs,
+            "rows": flat_rows,
+        }
 
     def indian_trail_summary(self) -> dict[str, Any]:
         with self.connect() as con:
@@ -5355,6 +6552,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ORDER BY r.sort_order, r.rack_code
                 """
             ).fetchall()
+            in_transit_payload = self._indian_trail_in_transit_payload(con)
+            transit_rows = in_transit_payload.get("rows", []) if isinstance(in_transit_payload, dict) else []
+            indian_trail_truck_qty = sum(int(row.get("qty") or 0) for row in transit_rows if str(row.get("rackCode") or "").upper() == "T")
+            indian_trail_rack_qty = sum(int(row.get("qty") or 0) for row in transit_rows if str(row.get("rackCode") or "").upper() not in {"", "T", "UNASSIGNED"})
         return {
             "activeInboundListId": list_id,
             "indianTrailOutboundTotal": outbound_totals["totalQty"],
@@ -5367,8 +6568,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "bayConflicts": conflicts,
             "clearedToday": cleared_today,
             "needsCheck": needs_check,
-            "rackInTransitQty": rack_summary["rackQty"],
-            "truckInTransitQty": rack_summary["truckQty"],
+            "inTransitQty": in_transit_payload.get("totalQty", 0),
+            "inTransitJobCount": in_transit_payload.get("jobCount", 0),
+            "rackInTransitQty": indian_trail_rack_qty,
+            "truckInTransitQty": indian_trail_truck_qty,
             "racksInTransit": [
                 {"code": row["rack_code"], "name": row["display_name"] or row["rack_code"], "status": row["status"], "qty": row["qty"]}
                 for row in rack_rows
@@ -5452,9 +6655,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return rows
 
     def get_bay_by_code(self, con: sqlite3.Connection, bay_code: str) -> sqlite3.Row:
-        row = con.execute("SELECT * FROM bays WHERE bay_code = ? AND active = 1 AND COALESCE(status, 'Available') != 'Blocked'", (bay_code,)).fetchone()
-        if not row:
-            raise ValueError(f"Unknown or inactive bay: {bay_code}")
+        row = con.execute("SELECT * FROM bays WHERE bay_code = ?", (bay_code,)).fetchone()
+        if not row or str(row["status"] or "") in {"ScanBlocked", "BlockedAll"}:
+            raise ValueError(f"Unknown or blocked bay: {bay_code}")
         return row
 
     def insert_bay_event(
@@ -5526,6 +6729,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "duplicate", "Item already complete", "Quantity already received")
                 con.commit()
                 return {"ok": False, "message": "Quantity already received. Send to supervisor.", "lastScan": last}
+
             con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
             con.execute(
                 """
@@ -5547,69 +6751,53 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (user, now_iso(), list_id, row["source_id"], row["order_no"], row["item_no"]),
             )
             last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", "Indian Trail received", reason, 1)
-            assignment = con.execute(
-                """
+
+            # Job-based bay logic: one Job Nr. should be staged/received into one bay.
+            # This keeps every line item for the same job together instead of scattering pieces across bays.
+            job_key = str(row["job"] or "").strip()
+            if job_key:
+                group_rows = con.execute(
+                    """
+                    SELECT * FROM line_items
+                    WHERE list_id = ? AND COALESCE(job, '') = ?
+                    ORDER BY order_no, item_no, id
+                    """,
+                    (list_id, job_key),
+                ).fetchall()
+            else:
+                group_rows = con.execute(
+                    """
+                    SELECT * FROM line_items
+                    WHERE list_id = ? AND order_no = ?
+                    ORDER BY order_no, item_no, id
+                    """,
+                    (list_id, row["order_no"]),
+                ).fetchall()
+            group_rows = group_rows or [row]
+            group_ids = [item["id"] for item in group_rows]
+            placeholders = ",".join("?" for _ in group_ids)
+
+            existing_group_assignment = con.execute(
+                f"""
                 SELECT ba.*, b.bay_code
                 FROM bay_assignments ba
                 JOIN bays b ON b.id = ba.bay_id
-                WHERE ba.line_item_id = ? AND ba.status NOT IN ('Cleared', 'Cancelled')
-                ORDER BY ba.id DESC
+                WHERE ba.status NOT IN ('Cleared', 'Cancelled')
+                  AND ba.line_item_id IN ({placeholders})
+                ORDER BY CASE WHEN ba.line_item_id = ? THEN 0 ELSE 1 END, ba.id DESC
                 LIMIT 1
                 """,
-                (row["id"],),
+                [*group_ids, row["id"]],
             ).fetchone()
-            existing = bool(assignment)
-            used_override = False
-            if assignment:
-                bay_code = assignment["bay_code"]
-                assignment_status = str(assignment["status"] or "")
-                override_bay = self.get_bay_by_code(con, requested_bay_code) if requested_bay_code else None
-                # Manual Indian Trail bay mode should behave like the staging rack selector:
-                # when a bay is selected, that selected bay wins for this scan. This is not
-                # limited to PreAssigned rows because operators may need to correct an older
-                # suggested bay while receiving.
-                if override_bay and override_bay["id"] != assignment["bay_id"] and assignment_status != "SDIOverride":
-                    bay_code = override_bay["bay_code"]
-                    used_override = True
-                    con.execute(
-                        """
-                        UPDATE bay_assignments
-                        SET bay_id = ?,
-                            status = 'Received',
-                            reason = 'Received at Indian Trail with bay override',
-                            assigned_by = ?,
-                            assigned_at = ?
-                        WHERE id = ?
-                        """,
-                        (override_bay["id"], user, now_iso(), assignment["id"]),
-                    )
-                    self.insert_bay_event(
-                        con,
-                        override_bay["id"],
-                        row["id"],
-                        "ReceiveOverrideBay",
-                        user,
-                        "Received at Indian Trail with bay override",
-                        old_bay_id=assignment["bay_id"],
-                        new_bay_id=override_bay["id"],
-                    )
-                else:
-                    receive_reason = "Received at Indian Trail"
-                    if override_bay and override_bay["id"] == assignment["bay_id"]:
-                        used_override = True
-                        receive_reason = "Received at Indian Trail with selected manual bay"
-                    con.execute(
-                        """
-                        UPDATE bay_assignments
-                        SET status = 'Received',
-                            reason = ?,
-                            assigned_by = ?,
-                            assigned_at = ?
-                        WHERE id = ?
-                        """,
-                        (receive_reason, user, now_iso(), assignment["id"]),
-                    )
-                    self.insert_bay_event(con, assignment["bay_id"], row["id"], "ReceiveBay", user, receive_reason, new_bay_id=assignment["bay_id"])
+            existing = bool(existing_group_assignment)
+            override_bay = self.get_bay_by_code(con, requested_bay_code) if requested_bay_code else None
+            used_override = bool(override_bay)
+            if override_bay:
+                target_bay = override_bay
+                receive_reason = "Received at Indian Trail with bay override"
+            elif existing_group_assignment:
+                target_bay = con.execute("SELECT * FROM bays WHERE id = ?", (existing_group_assignment["bay_id"],)).fetchone()
+                receive_reason = "Received at Indian Trail with existing job bay"
             else:
                 row_item = {
                     "route": row["route"],
@@ -5620,43 +6808,69 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "queueState": row["queue_state"],
                 }
                 bay_type = "CPU" if is_cpu_item(row_item) else suggested_bay(row["product"], row["dimensions"], row["route"])
-                bay = self.get_bay_by_code(con, requested_bay_code) if requested_bay_code else (self.find_bay_for_assignment(con, bay_type) or self.find_bay_for_assignment(con, "Standard"))
-                if not bay:
-                    self.insert_exception(con, list_id, None, "bay_assignment_conflict", "No safe bay available")
-                    bay_code = ""
-                else:
-                    bay_code = bay["bay_code"]
-                    used_override = bool(requested_bay_code)
-                    receive_reason = "Bay override selected during receive" if used_override else "Auto suggested during receive"
-                    con.execute(
+                target_bay = self.find_bay_for_assignment(con, bay_type) or self.find_bay_for_assignment(con, "Standard")
+                receive_reason = "Auto suggested during receive"
+            if not target_bay:
+                self.insert_exception(con, list_id, None, "bay_assignment_conflict", "No safe bay available")
+                bay_code = ""
+            else:
+                bay_code = target_bay["bay_code"]
+                for group_row in group_rows:
+                    assignment = con.execute(
                         """
-                        INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
-                        VALUES (?, ?, ?, 1, 'Received', ?, ?, ?)
+                        SELECT * FROM bay_assignments
+                        WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled')
+                        ORDER BY id DESC
+                        LIMIT 1
                         """,
-                        (list_id, row["id"], bay["id"], user, now_iso(), receive_reason),
-                    )
-                    self.insert_bay_event(con, bay["id"], row["id"], "ReceiveAssignBay", user, receive_reason, new_bay_id=bay["id"])
+                        (group_row["id"],),
+                    ).fetchone()
+                    is_scanned_row = group_row["id"] == row["id"]
+                    next_status = "Received" if is_scanned_row else (assignment["status"] if assignment else "PreAssigned")
+                    if next_status == "SDIOverride" and not is_scanned_row:
+                        continue
+                    if assignment:
+                        old_bay_id = assignment["bay_id"]
+                        con.execute(
+                            """
+                            UPDATE bay_assignments
+                            SET bay_id = ?, status = ?, reason = ?, assigned_by = ?, assigned_at = ?
+                            WHERE id = ?
+                            """,
+                            (target_bay["id"], next_status, receive_reason, user, now_iso(), assignment["id"]),
+                        )
+                        event_type = "ReceiveOverrideBay" if old_bay_id != target_bay["id"] else "ReceiveBay"
+                        self.insert_bay_event(con, target_bay["id"], group_row["id"], event_type, user, receive_reason, old_bay_id=old_bay_id, new_bay_id=target_bay["id"])
+                    else:
+                        con.execute(
+                            """
+                            INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (list_id, group_row["id"], target_bay["id"], int(group_row["qty"] or 1), next_status, user, now_iso(), receive_reason),
+                        )
+                        self.insert_bay_event(con, target_bay["id"], group_row["id"], "ReceiveAssignBay", user, receive_reason, new_bay_id=target_bay["id"])
             self.insert_audit(
                 con,
                 "line_item",
                 row["id"],
-                "indian_trail_receive_bay_override" if used_override else "indian_trail_receive",
+                "indian_trail_receive_job_bay_override" if used_override else "indian_trail_receive_job_bay",
                 user,
                 station,
                 reason,
-                {"bayCode": bay_code, "requestedBayCode": requested_bay_code, "manual": is_manual},
+                {"bayCode": bay_code, "requestedBayCode": requested_bay_code, "manual": is_manual, "job": job_key, "groupItemCount": len(group_rows)},
             )
             if is_manual:
                 self.insert_audit(con, "line_item", row["id"], "manual_scan", user, station, reason, {"barcode": barcode, "canonical": canonical, "bayCode": bay_code})
             con.commit()
             scanned_after = int(row["scanned_qty"]) + 1
         message = (
-            f"Order {row['order_no']} / Item {row['item_no']} received. Override Bay: {bay_code}. Qty Received: {scanned_after}/{row['qty']}. Place in Bay {bay_code}."
+            f"Order {row['order_no']} / Item {row['item_no']} received. Override Bay: {bay_code}. Qty Received: {scanned_after}/{row['qty']}. Keep Job Nr. {job_key or row['order_no']} together in Bay {bay_code}."
             if used_override
             else (
-                f"Order {row['order_no']} / Item {row['item_no']} received. Existing Bay: {bay_code}. Place with existing order."
+                f"Order {row['order_no']} / Item {row['item_no']} received. Existing Job Bay: {bay_code}. Keep this job together."
                 if existing
-                else f"Order {row['order_no']} / Item {row['item_no']} received. Suggested Bay: {bay_code}. Qty Received: {scanned_after}/{row['qty']}. Place in Bay {bay_code}."
+                else f"Order {row['order_no']} / Item {row['item_no']} received. Suggested Bay: {bay_code}. Qty Received: {scanned_after}/{row['qty']}. Keep Job Nr. {job_key or row['order_no']} together in Bay {bay_code}."
             )
         )
         return {"ok": True, "message": message, "bayCode": bay_code, "existingBay": existing, "lastScan": last}
@@ -5739,17 +6953,29 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
     def set_bay_status(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         bay_code = str(data.get("bayCode") or "").strip()
-        status = str(data.get("status") or "Available").strip().title()
+        raw_status = str(data.get("status") or "Available").strip()
+        status_lookup = {
+            "available": "Available",
+            "autoassign": "Available",
+            "hold": "ManualAssign",
+            "manualhold": "ManualAssign",
+            "manualassign": "ManualAssign",
+            "blocked": "ManualAssign",
+            "scanblocked": "ScanBlocked",
+            "blockedall": "ScanBlocked",
+        }
+        status = status_lookup.get(raw_status.lower().replace(" ", ""), raw_status)
         reason = str(data.get("reason") or f"Bay set to {status}").strip()
-        if status not in {"Available", "Hold", "Blocked"}:
-            raise ValueError("Bay status must be Available, Hold, or Blocked")
+        if status not in {"Available", "ManualAssign", "ScanBlocked"}:
+            raise ValueError("Bay status must be Available, ManualAssign, or ScanBlocked")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             bay = self.get_bay_by_code(con, bay_code) if status != "Available" else con.execute("SELECT * FROM bays WHERE bay_code = ?", (bay_code,)).fetchone()
             if not bay:
                 raise ValueError(f"Unknown bay: {bay_code}")
-            active = 0 if status == "Blocked" else 1
-            con.execute("UPDATE bays SET status = ?, active = ? WHERE id = ?", (status, active, bay["id"]))
+            # Keep policy/status changes visible on the bay map. `active=0` is now reserved
+            # for true soft deletion, not Manual Assign or Blocked Scans status.
+            con.execute("UPDATE bays SET status = ?, active = 1 WHERE id = ?", (status, bay["id"]))
             self.insert_bay_event(con, bay["id"], "", f"{status}Bay", user, reason)
             self.insert_audit(con, "bay", bay_code, f"set_bay_{status.lower()}", user, "", reason)
             con.commit()
@@ -5813,13 +7039,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         layout_row = int(data.get("layoutRow") or 0) or None
         layout_col = int(data.get("layoutCol") or 0) or None
         capacity = int(data.get("capacityQty") or 0)
-        active = 1 if data.get("active") in {True, "1", "true", "yes", 1} else 0
+        active_value = data.get("active", None)
         insert_before = str(data.get("insertBeforeBayCode") or "").strip()
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute("SELECT * FROM bays WHERE bay_code = ?", (bay_code,)).fetchone()
             if not row:
                 raise ValueError(f"Unknown bay: {bay_code}")
+            if active_value is None:
+                active = 1 if row["active"] or str(row["status"] or "") in {"Hold", "ManualAssign", "Blocked", "ScanBlocked", "BlockedAll"} else 0
+            else:
+                active = 1 if active_value in {True, "1", "true", "yes", 1} else 0
             if insert_before:
                 target = con.execute("SELECT * FROM bays WHERE bay_code = ?", (insert_before,)).fetchone()
                 if target:
@@ -5873,6 +7103,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         bay_category = " ".join(str(data.get("bayCategory") or data.get("category") or "Standard").split())[:120]
         prefix = " ".join(str(data.get("prefix") or map_section or bay_category or "BAY").split())[:60]
         count = max(1, min(int(data.get("count") or 1), 100))
+        layout_row = int(data.get("layoutRow") or 0) or None
+        layout_col = int(data.get("layoutCol") or 0) or None
         spacer = bool(data.get("spacer"))
         if not map_section:
             raise ValueError("Bay group is required")
@@ -5907,8 +7139,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "Spacer" if spacer else bay_code,
                         map_section,
                         "Spacer" if spacer else bay_category,
-                        next_number,
-                        next_number,
+                        layout_row if layout_row is not None else next_number,
+                        layout_col if layout_col is not None else next_number,
                     ),
                 )
                 bay_id = con.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -5933,7 +7165,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchone()
             if active_assignment:
                 raise ValueError("Clear or move active assignments before deleting this bay")
-            con.execute("UPDATE bays SET active = 0 WHERE id = ?", (row["id"],))
+            con.execute("UPDATE bays SET active = 0, status = 'Deleted' WHERE id = ?", (row["id"],))
             self.insert_bay_event(con, row["id"], "", "DeleteBay", user, "Bay deleted")
             self.insert_audit(con, "bay", bay_code, "delete_bay", user, "", "", {})
             con.commit()
@@ -5958,7 +7190,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if active_assignment:
                 raise ValueError("Clear or move active assignments before deleting this group")
             rows = con.execute("SELECT id, bay_code FROM bays WHERE map_section = ? AND active = 1", (map_section,)).fetchall()
-            con.execute("UPDATE bays SET active = 0 WHERE map_section = ?", (map_section,))
+            con.execute("UPDATE bays SET active = 0, status = 'Deleted' WHERE map_section = ?", (map_section,))
             for row in rows:
                 self.insert_bay_event(con, row["id"], "", "DeleteBayGroup", user, "Bay group deleted")
             self.insert_audit(con, "bay_group", map_section, "delete_bay_group", user, "", "", {"count": len(rows)})

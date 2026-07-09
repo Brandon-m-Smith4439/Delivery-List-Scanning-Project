@@ -42,6 +42,7 @@ const state = {
   bayEditMode: false,
   pendingBayMove: null,
   collapsedBaySections: new Set(),
+  baySectionsDefaultCollapsed: false,
   bayActionUndoStack: [],
   bayActionRedoStack: [],
   bayLayoutUndoStack: [],
@@ -70,7 +71,12 @@ const state = {
   bayLayout: null,
   bays: [],
   bayEvents: [],
+  manageItemsQuery: "",
+  manageItemsSelectedId: "",
+  bayEditorSelectedGroup: "",
+  bayEditorSelectedBay: "",
   adminCustomerRouteRules: [],
+  customerEmailSettings: { contacts: [], cc: [], outbox: [] },
   activeSessions: [],
   adminUsers: [],
   adminRoles: [],
@@ -235,6 +241,13 @@ const els = {
   bayManualSubmitBtn: document.getElementById("bayManualSubmitBtn"),
   bayScanOutStatus: document.getElementById("bayScanOutStatus"),
   bayScanOutRecent: document.getElementById("bayScanOutRecent"),
+  bayLastCard: document.getElementById("bayLastCard"),
+  bayLastTitle: document.getElementById("bayLastTitle"),
+  bayLastAction: document.getElementById("bayLastAction"),
+  bayLastOrder: document.getElementById("bayLastOrder"),
+  bayLastBay: document.getElementById("bayLastBay"),
+  bayLastTime: document.getElementById("bayLastTime"),
+  bayAllScansBtn: document.getElementById("bayAllScansBtn"),
   bayUndoBtn: document.getElementById("bayUndoBtn"),
   bayRedoBtn: document.getElementById("bayRedoBtn"),
   bayStatusFilter: document.getElementById("bayStatusFilter"),
@@ -263,6 +276,26 @@ const els = {
   sdiReasonInput: document.getElementById("sdiReasonInput"),
   sdiTypeInput: document.getElementById("sdiTypeInput"),
   sdiCurrentList: document.getElementById("sdiCurrentList"),
+  manageItemsPanel: document.getElementById("manageItemsPanel"),
+  manageItemsBackdrop: document.getElementById("manageItemsBackdrop"),
+  manageItemsCloseBtn: document.getElementById("manageItemsCloseBtn"),
+  manageItemsSearch: document.getElementById("manageItemsSearch"),
+  manageItemsList: document.getElementById("manageItemsList"),
+  manageItemsSelected: document.getElementById("manageItemsSelected"),
+  manageItemsTargetBay: document.getElementById("manageItemsTargetBay"),
+  manageItemsReason: document.getElementById("manageItemsReason"),
+  manageItemsMoveBtn: document.getElementById("manageItemsMoveBtn"),
+  manageItemsClearBtn: document.getElementById("manageItemsClearBtn"),
+  manageItemsScannerBtn: document.getElementById("manageItemsScannerBtn"),
+  manageItemsSdiBtn: document.getElementById("manageItemsSdiBtn"),
+  manageItemsStatus: document.getElementById("manageItemsStatus"),
+  bayEditorBackdrop: document.getElementById("bayEditorBackdrop"),
+  bayEditorPanel: document.getElementById("bayEditorPanel"),
+  bayEditorCloseBtn: document.getElementById("bayEditorCloseBtn"),
+  bayEditorNewGroupBtn: document.getElementById("bayEditorNewGroupBtn"),
+  bayEditorGroupList: document.getElementById("bayEditorGroupList"),
+  bayEditorGroupForm: document.getElementById("bayEditorGroupForm"),
+  bayEditorBayList: document.getElementById("bayEditorBayList"),
   staleBayBackdrop: document.getElementById("staleBayBackdrop"),
   staleBayPanel: document.getElementById("staleBayPanel"),
   staleBayList: document.getElementById("staleBayList"),
@@ -341,6 +374,7 @@ const els = {
   customerRoutePatternInput: document.getElementById("customerRoutePatternInput"),
   customerRouteSelect: document.getElementById("customerRouteSelect"),
   customerRouteRules: document.getElementById("customerRouteRules"),
+  customerEmailOverview: document.getElementById("customerEmailOverview"),
   manualEditSearch: document.getElementById("manualEditSearch"),
   manualEditStageSelect: document.getElementById("manualEditStageSelect"),
   manualEditSearchBtn: document.getElementById("manualEditSearchBtn"),
@@ -588,6 +622,9 @@ function updateModalScrollLock() {
     els.baySelectedModal,
     els.staleBayPanel,
     els.sdiPanel,
+    els.manageItemsPanel,
+    els.bayEditorPanel,
+    document.getElementById("emailDraftPreviewShell"),
   ].some((panel) => panel && !panel.hidden);
 
   document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
@@ -1395,12 +1432,32 @@ function rackGroupLabel(rack) {
 function rackOptionLabel(rack) {
   const status = String(rack.status || "Open");
   const qty = Number(rack.qty || 0);
-  const stateText = status.toLowerCase() === "closed" ? "Complete" : qty ? "Open with items" : "Empty";
-  return `${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(qty)} pcs, ${escapeHtml(stateText)})`;
+  const lower = status.toLowerCase();
+  const stateText = lower === "in transit" ? "On the way" : lower === "closed" ? "Complete" : qty ? "Open with items" : "Empty";
+  const destination = rack.destination ? `, ${rackDestinationLabel(rack.destination)}` : "";
+  return `${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(qty)} pcs, ${escapeHtml(stateText)}${escapeHtml(destination)})`;
+}
+
+function rackDestinationLabel(value) {
+  const text = String(value || "Indian Trail").trim();
+  if (/^cpu$/i.test(text)) return "CPU";
+  if (/^dtc$/i.test(text)) return "DTC";
+  if (/green|gnv/i.test(text)) return "Greenville";
+  if (/indian|trail|^it$/i.test(text)) return "Indian Trail";
+  return text || "Indian Trail";
+}
+
+function rackDestinationClass(value) {
+  const text = rackDestinationLabel(value).toLowerCase();
+  if (text.includes("cpu")) return "cpu";
+  if (text.includes("green")) return "greenville";
+  if (text.includes("dtc")) return "dtc";
+  return "indian-trail";
 }
 
 function rackVisualClass(rack) {
   const status = String(rack.status || "").toLowerCase();
+  if (status === "in transit") return "is-in-transit";
   if (status === "closed") return "is-complete";
   if (Number(rack.qty || 0) > 0) return "has-items";
   return "is-empty";
@@ -1410,6 +1467,7 @@ function rackComputedStatus(rack) {
   const status = String(rack?.status || "").toLowerCase();
   const qty = Number(rack?.qty || 0);
 
+  if (status === "in transit") return "in-transit";
   if (status === "closed") return "complete";
   if (qty > 0) return "open";
   return "empty";
@@ -1436,7 +1494,7 @@ function filteredSortedRacks(racks = []) {
     }
 
     if (sortMode === "status") {
-      const order = { open: 1, complete: 2, empty: 3 };
+      const order = { open: 1, complete: 2, "in-transit": 3, empty: 4 };
       return (order[rackComputedStatus(a)] || 9) - (order[rackComputedStatus(b)] || 9) || String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true });
     }
 
@@ -1554,7 +1612,8 @@ function renderRacksPage() {
     }
 
     const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
-    const isComplete = String(rack.status || "").toLowerCase() === "closed";
+    const rackState = String(rack.status || "").toLowerCase();
+    const isComplete = rackState === "closed" || rackState === "in transit";
 
     if (!isTruck) {
       return items.map((item) => renderRackItem(item, rack.code)).join("");
@@ -1595,7 +1654,9 @@ function renderRacksPage() {
   const renderRack = (rack) => {
     const hasItems = Number(rack.qty || 0) > 0;
     const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
-    const isComplete = String(rack.status || "").toLowerCase() === "closed";
+    const rackState = String(rack.status || "").toLowerCase();
+    const isComplete = rackState === "closed";
+    const isInTransit = rackState === "in transit";
     const rackHasMoveOpen = (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
     const rackOpen = state.expandedRackCodes.has(rack.code) || rackHasMoveOpen;
 
@@ -1620,7 +1681,7 @@ function renderRacksPage() {
 
     const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
     const printAction =
-      hasItems && isComplete
+      hasItems && (isComplete || isInTransit)
         ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">${printLabel}</button>`
         : "";
 
@@ -1638,9 +1699,11 @@ function renderRacksPage() {
           ${
             hasItems
               ? `${printAction}${
-                  isComplete
-                    ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
-                    : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
+                  isInTransit
+                    ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
+                    : isComplete
+                      ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
+                      : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
                 }`
               : ""
           }
@@ -1686,6 +1749,7 @@ function renderRacksPage() {
     const status = String(rack.status || "").toLowerCase();
     const qty = Number(rack.qty || 0);
 
+    if (status === "in transit") return "On the way";
     if (status === "closed") return "Complete";
     if (qty > 0) return "Open";
     return "Empty";
@@ -1695,6 +1759,7 @@ function renderRacksPage() {
     const status = String(rack.status || "").toLowerCase();
     const qty = Number(rack.qty || 0);
 
+    if (status === "in transit") return "in-transit";
     if (status === "closed") return "complete";
     if (qty > 0) return "open";
     return "empty";
@@ -1705,6 +1770,9 @@ function renderRacksPage() {
     const statusText = rackStatusText(rack);
     const statusClass = rackStatusClass(rack);
     const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
+    const destinationPill = rack.destination
+      ? `<small class="rack-destination-pill ${escapeHtml(rackDestinationClass(rack.destination))}">${escapeHtml(rackDestinationLabel(rack.destination))}</small>`
+      : "";
 
     return `
       <article
@@ -1714,6 +1782,7 @@ function renderRacksPage() {
         role="button"
         aria-label="View ${escapeHtml(isTruck ? "Truck" : rack.code)} details"
       >
+        ${destinationPill}
         <div class="rack-board-card-main">
           <strong>${escapeHtml(isTruck ? "Truck" : rack.code)}</strong>
           <span>${escapeHtml(rack.name || rack.type || "")}</span>
@@ -1822,7 +1891,9 @@ function renderRacksPage() {
 
     const hasItems = Number(rack.qty || 0) > 0;
     const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
-    const isComplete = String(rack.status || "").toLowerCase() === "closed";
+    const rackState = String(rack.status || "").toLowerCase();
+    const isComplete = rackState === "closed";
+    const isInTransit = rackState === "in transit";
     const statusText = rackStatusText(rack);
     const statusClass = rackStatusClass(rack);
     const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
@@ -1845,13 +1916,15 @@ function renderRacksPage() {
         <div class="rack-detail-actions">
           ${
             hasItems
-              ? isComplete
-                ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
-                : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
+              ? isInTransit
+                ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
+                : isComplete
+                  ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
+                  : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
               : ""
           }
 
-          <button type="button" data-rack-print="${escapeHtml(rack.code)}" ${hasItems && isComplete ? "" : "disabled"}>${printLabel}</button>
+          <button type="button" data-rack-print="${escapeHtml(rack.code)}" ${hasItems && (isComplete || isInTransit) ? "" : "disabled"}>${printLabel}</button>
         </div>
 
         <div class="rack-detail-pieces">
@@ -1895,6 +1968,7 @@ function renderRacksPage() {
               <option value="all" ${state.rackStatusFilter === "all" ? "selected" : ""}>All</option>
               <option value="open" ${state.rackStatusFilter === "open" ? "selected" : ""}>Open</option>
               <option value="complete" ${state.rackStatusFilter === "complete" ? "selected" : ""}>Complete</option>
+              <option value="in-transit" ${state.rackStatusFilter === "in-transit" ? "selected" : ""}>On the way</option>
               <option value="empty" ${state.rackStatusFilter === "empty" ? "selected" : ""}>Empty</option>
             </select>
           </label>
@@ -1941,8 +2015,63 @@ async function submitRackScan() {
   els.rackScanInput?.focus();
 }
 
+async function chooseRackDestination(rack) {
+  const currentDestination = rackDestinationLabel(rack?.destination || "Indian Trail");
+
+  return new Promise((resolve) => {
+    document.querySelector(".rack-destination-backdrop")?.remove();
+
+    const shell = document.createElement("div");
+    shell.className = "rack-destination-backdrop";
+    shell.innerHTML = `
+      <section class="rack-destination-dialog" role="dialog" aria-modal="true" aria-labelledby="rackDestinationTitle">
+        <button class="modal-close-x rack-destination-close" type="button" data-rack-destination-cancel aria-label="Close">&times;</button>
+        <div class="rack-destination-copy">
+          <small>Complete rack</small>
+          <h2 id="rackDestinationTitle">Where is ${escapeHtml(rack?.code || "this rack")} going?</h2>
+          <p>Select the destination before printing the packing list. Indian Trail is the default.</p>
+        </div>
+        <label class="rack-destination-field">
+          <span>Destination</span>
+          <select id="rackDestinationSelect">
+            ${["Indian Trail", "CPU", "Greenville", "DTC"].map((value) => `<option value="${escapeHtml(value)}" ${rackDestinationLabel(value) === currentDestination ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+          </select>
+        </label>
+        <div class="rack-destination-actions">
+          <button type="button" data-rack-destination-cancel>Cancel</button>
+          <button type="button" data-rack-destination-confirm>Complete Rack</button>
+        </div>
+      </section>
+    `;
+
+    const close = (value = "") => {
+      shell.remove();
+      document.body.classList.remove("modal-scroll-locked");
+      resolve(value);
+    };
+
+    shell.addEventListener("click", (event) => {
+      if (event.target === shell || event.target.closest("[data-rack-destination-cancel]")) {
+        close("");
+        return;
+      }
+      if (event.target.closest("[data-rack-destination-confirm]")) {
+        close(shell.querySelector("#rackDestinationSelect")?.value || "Indian Trail");
+      }
+    });
+
+    document.body.appendChild(shell);
+    document.body.classList.add("modal-scroll-locked");
+    shell.querySelector("#rackDestinationSelect")?.focus();
+  });
+}
+
 async function completeRack(code) {
-  const payload = await fetchJson("/api/racks/complete", { method: "POST", body: JSON.stringify({ rackCode: code }) });
+  const rack = state.racks.find((item) => item.code === code) || { code, destination: "Indian Trail" };
+  const destination = await chooseRackDestination(rack);
+  if (!destination) return;
+
+  const payload = await fetchJson("/api/racks/complete", { method: "POST", body: JSON.stringify({ rackCode: code, destination }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
@@ -1951,6 +2080,15 @@ async function completeRack(code) {
 
 async function uncompleteRack(code) {
   const payload = await fetchJson("/api/racks/uncomplete", { method: "POST", body: JSON.stringify({ rackCode: code }) });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+  renderScanRackTools();
+}
+
+async function returnRack(code) {
+  if (!window.confirm(`Mark ${code} returned and clear it for reuse? Active rack contents will be removed from the rack.`)) return;
+  const payload = await fetchJson("/api/racks/return", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
@@ -2018,7 +2156,7 @@ function rackPackingListUrl(rackCode, deliveryDate = "") {
 function printSelectedRackPackingSlip() {
   if (!state.selectedRackCode) return;
   const rack = state.racks.find((item) => item.code === state.selectedRackCode);
-  if (!rack || String(rack.status || "").toLowerCase() !== "closed") {
+  if (!rack || !["closed", "in transit"].includes(String(rack.status || "").toLowerCase())) {
     showFloatingNotice("Complete this rack before printing its packing list.", "notice");
     return;
   }
@@ -2425,7 +2563,9 @@ function renderScanRackTools() {
     state.selectedRackCode = state.racks.find((rack) => rack.code === "T")?.code || state.racks[0]?.code || "";
   }
   const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackCode);
-  const selectedClosed = String(selectedRack?.status || "").toLowerCase() === "closed";
+  const selectedRackState = String(selectedRack?.status || "").toLowerCase();
+  const selectedClosed = selectedRackState === "closed";
+  const selectedInTransit = selectedRackState === "in transit";
   els.scanRackPanel.classList.toggle("selected-rack-complete", selectedClosed);
   els.scanRackPanel.classList.toggle("selected-rack-loaded", Boolean(selectedRack && Number(selectedRack.qty || 0) > 0 && !selectedClosed));
   if (els.scanRackSelect) {
@@ -2435,7 +2575,7 @@ function renderScanRackTools() {
     els.scanRackSelect.value = state.selectedRackCode;
   }
   if (els.scanRackCompleteBtn) els.scanRackCompleteBtn.textContent = selectedClosed ? "Uncomplete" : "Complete";
-  if (els.scanRackPrintBtn) els.scanRackPrintBtn.disabled = !selectedRack || !selectedClosed || Number(selectedRack.qty || 0) <= 0;
+  if (els.scanRackPrintBtn) els.scanRackPrintBtn.disabled = !selectedRack || !(selectedClosed || selectedInTransit) || Number(selectedRack.qty || 0) <= 0;
   if (els.scanRackStatus) els.scanRackStatus.textContent = "";
 }
 
@@ -3508,30 +3648,40 @@ function renderBayRouteFlow(summary) {
   const outboundQty = Number(summary?.indianTrailOutboundScanned ?? outbound?.scannedQty ?? 0);
   const outboundTotal = inboundTotal || Number(summary?.indianTrailOutboundTotal ?? outbound?.totalQty ?? 0);
 
-  const inTransitQty = Math.max(outboundQty - inboundQty, 0);
+  // In Transit is the live count of Indian Trail pieces scanned outbound
+  // but not yet received inbound. The backend calculates this item-by-item
+  // so the total stays accurate even when partial quantities are received.
+  const inTransitQty = Number(summary?.inTransitQty ?? Math.max(outboundQty - inboundQty, 0));
+  const inTransitJobCount = Number(summary?.inTransitJobCount || 0);
+  const truckQty = Number(summary?.truckInTransitQty || 0);
+  const rackQty = Number(summary?.rackInTransitQty || 0);
+  const percent = outboundTotal ? Math.min((inboundQty / outboundTotal) * 100, 100) : 0;
   const rackLine = (summary?.racksInTransit || [])
     .slice(0, 5)
     .map((rack) => `${rack.code}: ${rack.qty}`)
     .join(" | ");
-  const truckQty = Number(summary?.truckInTransitQty || 0);
-  const rackQty = Number(summary?.rackInTransitQty || 0);
 
   els.bayFlowPanel.innerHTML = `
-    <button class="flow-card outbound" type="button" ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : ""}>
-      <small>Outbound to Indian Trail</small>
+    <button class="flow-card outbound flow-card-v2" type="button" ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : ""}>
+      <span class="flow-card-icon outbound"></span>
+      <small>Outbound sent</small>
       <strong>${escapeHtml(outboundQty)} / ${escapeHtml(outboundTotal)}</strong>
-      <span>${outbound ? escapeHtml(outbound.stage) : "No outbound list"}</span>
-      <em>Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</em>
+      <em>${outbound ? escapeHtml(outbound.stage) : "No outbound list"}</em>
     </button>
-    <div class="flow-lane" aria-hidden="true">
-      <span class="flow-truck"><b>In Transit: ${escapeHtml(inTransitQty)}</b></span>
-    </div>
-    <button class="flow-card inbound" type="button" ${inbound ? `data-open-list="${escapeHtml(inbound.id)}"` : ""}>
-      <small>Indian Trail Delivery List</small>
+    <button class="flow-lane flow-lane-v2 transit-lane-button" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest">
+      <span class="transit-animation" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span class="flow-truck"><b>${escapeHtml(inTransitQty)} pieces on the way</b></span>
+      <div class="flow-progress-track"><i style="width:${percent}%"></i></div>
+      <small>${escapeHtml(inTransitJobCount)} job${inTransitJobCount === 1 ? "" : "s"} | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</small>
+      <em>Open in-transit manifest</em>
+    </button>
+    <button class="flow-card inbound flow-card-v2" type="button" ${inbound ? `data-open-list="${escapeHtml(inbound.id)}"` : ""}>
+      <span class="flow-card-icon inbound"></span>
+      <small>Received at Indian Trail</small>
       <strong>${escapeHtml(inboundQty)} / ${escapeHtml(inboundTotal)}</strong>
-      <span>${inbound ? escapeHtml(inbound.stage) : "No Indian Trail list"}</span>
+      <em>${inbound ? escapeHtml(inbound.stage) : "No Indian Trail list"}</em>
     </button>
-    ${rackLine ? `<div class="flow-rack-line">In transit racks: ${escapeHtml(rackLine)}</div>` : ""}
+    ${rackLine ? `<div class="flow-rack-line flow-rack-line-v2">In transit racks: ${escapeHtml(rackLine)}</div>` : ""}
   `;
 
   const miniRoute = document.getElementById("bayPanelRouteMini");
@@ -3542,29 +3692,233 @@ function renderBayRouteFlow(summary) {
         <strong>${escapeHtml(outboundQty)} / ${escapeHtml(outboundTotal)}</strong>
       </div>
       <div class="bay-panel-route-lane">
-        <span>In Transit: ${escapeHtml(inTransitQty)} | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</span>
+        <span>${escapeHtml(inTransitQty)} pieces on the way | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</span>
       </div>
       <div class="bay-panel-route-node inbound">
-        <small>Indian Trail</small>
+        <small>Received</small>
         <strong>${escapeHtml(inboundQty)} / ${escapeHtml(inboundTotal)}</strong>
       </div>
     `;
   }
 }
 
+
+function transitManifestRowHtml(item) {
+  const flags = [
+    isRemakeItem(item) ? "RM" : "",
+    isRushItem(item) ? "Rush" : "",
+  ].filter(Boolean);
+  return `
+    <tr>
+      <td><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>${flags.length ? `<span class="transit-flags">${flags.map((flag) => `<i>${escapeHtml(flag)}</i>`).join("")}</span>` : ""}</td>
+      <td>${escapeHtml(item.qty)}</td>
+      <td>${escapeHtml(item.dimensions)}</td>
+      <td>${escapeHtml(item.customer || "")}</td>
+      <td>${escapeHtml(item.route)}</td>
+      <td>${escapeHtml(item.outboundScannedQty)} sent / ${escapeHtml(item.receivedQty)} received</td>
+    </tr>
+  `;
+}
+
+function transitRackDisplayName(rack) {
+  if (!rack) return "Needs transportation";
+  if (rack.code === "T") return "Truck";
+  if (rack.code === "UNASSIGNED") return "Needs transportation";
+  return rack.code || rack.name || "Rack";
+}
+
+function transitRackSortValue(rack) {
+  const code = String(rack?.code || "").toUpperCase();
+  if (code === "T") return "0000-TRUCK";
+  if (code === "UNASSIGNED" || !code) return "9999-UNASSIGNED";
+  return `1000-${code}`;
+}
+
+function transitManifestRackGroups(payload) {
+  const rackMap = new Map();
+
+  for (const job of payload.jobs || []) {
+    for (const sourceRack of job.racks || []) {
+      const rackCode = sourceRack.code || "UNASSIGNED";
+      const rackKey = rackCode || "UNASSIGNED";
+      if (!rackMap.has(rackKey)) {
+        rackMap.set(rackKey, {
+          code: rackCode,
+          name: sourceRack.name || "",
+          type: sourceRack.type || "",
+          totalQty: 0,
+          rowCount: 0,
+          jobMap: new Map(),
+        });
+      }
+
+      const rack = rackMap.get(rackKey);
+      const jobKey = job.key || job.job || "No Job Nr.";
+      if (!rack.jobMap.has(jobKey)) {
+        rack.jobMap.set(jobKey, {
+          key: jobKey,
+          job: job.job || "No Job Nr.",
+          customer: job.customer || "",
+          product: job.product || "",
+          totalQty: 0,
+          rowCount: 0,
+          items: [],
+        });
+      }
+
+      const jobGroup = rack.jobMap.get(jobKey);
+      for (const item of sourceRack.items || []) {
+        const qty = Number(item.qty || 0);
+        rack.totalQty += qty;
+        rack.rowCount += 1;
+        jobGroup.totalQty += qty;
+        jobGroup.rowCount += 1;
+        jobGroup.items.push(item);
+      }
+    }
+  }
+
+  return [...rackMap.values()]
+    .map((rack) => ({
+      ...rack,
+      jobs: [...rack.jobMap.values()]
+        .map((job) => ({
+          ...job,
+          items: job.items.slice().sort((a, b) => String(a.order).localeCompare(String(b.order)) || String(a.item).localeCompare(String(b.item))),
+        }))
+        .sort((a, b) => String(a.job).localeCompare(String(b.job)) || String(a.customer).localeCompare(String(b.customer))),
+    }))
+    .sort((a, b) => transitRackSortValue(a).localeCompare(transitRackSortValue(b)));
+}
+
+
+function transitRackIconClass(rack) {
+  const text = `${rack?.type || ""} ${rack?.name || ""} ${rack?.code || ""}`;
+  if (String(rack?.code || "").toUpperCase() === "T" || /truck/i.test(text)) return "truck";
+  if (/wood/i.test(text)) return "wood";
+  if (/coral/i.test(text)) return "coral";
+  if (/unassigned|needs transportation/i.test(text)) return "unassigned";
+  return "steel";
+}
+
+function transitManifestHtml(payload) {
+  const rackGroups = transitManifestRackGroups(payload);
+  const dateLabel = payload.deliveryDate ? formatDisplayDate(payload.deliveryDate) : "Current Indian Trail list";
+  const rackCards = rackGroups.length
+    ? rackGroups
+        .map((rack) => `
+          <details class="transit-rack-card transit-rack-group-card ${rack.code === "UNASSIGNED" ? "needs-method" : ""}">
+            <summary class="transit-rack-head transit-rack-group-head">
+              <span class="rack-set-icon transit-rack-icon ${escapeHtml(transitRackIconClass(rack))}" aria-hidden="true"></span>
+              <div>
+                <strong>${escapeHtml(transitRackDisplayName(rack))}</strong>
+                <small>${escapeHtml(rack.name && rack.name !== rack.code ? rack.name : rack.type || "Transportation method")}</small>
+              </div>
+              <b>${escapeHtml(rack.totalQty)} pcs</b>
+              <em>${escapeHtml(rack.jobs.length)} job${rack.jobs.length === 1 ? "" : "s"}</em>
+            </summary>
+            <div class="transit-rack-job-stack">
+              ${rack.jobs
+                .map((job) => `
+                  <details class="transit-job-card transit-job-details transit-job-in-rack">
+                    <summary>
+                      <span class="transit-job-chevron"></span>
+                      <div>
+                        <strong>${escapeHtml(job.job)}</strong>
+                        <span>${escapeHtml(job.customer || job.product || "No customer listed")}</span>
+                      </div>
+                      <b>${escapeHtml(job.totalQty)} pcs</b>
+                    </summary>
+                    <div class="transit-table-wrap">
+                      <table class="transit-table">
+                        <thead><tr><th>Order / Item</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Scan status</th></tr></thead>
+                        <tbody>${job.items.map(transitManifestRowHtml).join("")}</tbody>
+                      </table>
+                    </div>
+                  </details>
+                `)
+                .join("")}
+            </div>
+          </details>
+        `)
+        .join("")
+    : `<div class="transit-empty"><strong>No pieces are currently in transit.</strong><span>When Outbound scans Indian Trail pieces and they have not been received yet, they will appear here grouped by rack and Job Nr.</span></div>`;
+
+  return `
+    <div class="modal-backdrop transit-manifest-backdrop" data-close-transit-manifest></div>
+    <section class="modal-panel transit-manifest-panel" role="dialog" aria-modal="true" aria-label="Indian Trail in-transit manifest">
+      <header class="transit-manifest-header">
+        <div>
+          <small>Indian Trail Receiving</small>
+          <h2>In-Transit Manifest</h2>
+          <span>${escapeHtml(dateLabel)} | grouped by rack, then Job Nr.</span>
+        </div>
+        <button class="modal-close-x transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
+      </header>
+      <div class="transit-summary-row transit-summary-row-v31">
+        <article><small>Pieces on the way</small><strong>${escapeHtml(payload.totalQty || 0)}</strong></article>
+        <article><small>Racks / truck groups</small><strong>${escapeHtml(rackGroups.length || 0)}</strong></article>
+        <article><small>Job groups</small><strong>${escapeHtml(payload.jobCount || 0)}</strong></article>
+        <article><small>Line items</small><strong>${escapeHtml(payload.rowCount || 0)}</strong></article>
+      </div>
+      <div class="transit-manifest-body transit-manifest-body-v31">${rackCards}</div>
+    </section>
+  `;
+}
+
+async function openInTransitManifest() {
+  if (!hasPermission("view_indian_trail")) return;
+  closeInTransitManifest(false);
+  const shell = document.createElement("div");
+  shell.id = "transitManifestShell";
+  shell.className = "transit-manifest-shell";
+  shell.innerHTML = `
+    <div class="modal-backdrop transit-manifest-backdrop" data-close-transit-manifest></div>
+    <section class="modal-panel transit-manifest-panel is-loading" role="dialog" aria-modal="true" aria-label="Indian Trail in-transit manifest">
+      <header class="transit-manifest-header">
+        <div><small>Indian Trail Receiving</small><h2>Loading in-transit manifest...</h2><span>Checking outbound scans against received scans.</span></div>
+        <button class="modal-close-x transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
+      </header>
+      <div class="transit-empty"><strong>Loading</strong><span>Please wait while the current in-transit jobs are pulled together.</span></div>
+    </section>
+  `;
+  document.body.appendChild(shell);
+  document.body.classList.add("modal-scroll-locked");
+  try {
+    const payload = await fetchJson("/api/indian-trail/in-transit");
+    shell.innerHTML = transitManifestHtml(payload);
+  } catch (error) {
+    shell.querySelector(".transit-empty")?.remove();
+    shell.querySelector(".transit-manifest-panel")?.insertAdjacentHTML("beforeend", `<div class="transit-empty error"><strong>Unable to load manifest</strong><span>${escapeHtml(error.message)}</span></div>`);
+  }
+}
+
+function closeInTransitManifest(updateLock = true) {
+  document.getElementById("transitManifestShell")?.remove();
+  if (updateLock) updateModalScrollLock();
+}
+
 function renderIndianTrailSummary(summary) {
   if (!els.indianTrailSummary) return;
   const overview = bayOverview();
+  const assigned = overview.occupied + overview.preassigned + overview.sdi;
+  const openPct = overview.total ? Math.round((overview.available / overview.total) * 100) : 0;
 
   els.indianTrailSummary.innerHTML = `
-    <div class="mini-stat-grid">
-      ${miniStat("Total", overview.total)}
-      ${miniStat("Available", overview.available)}
-      ${miniStat("Occupied", overview.occupied)}
-      ${miniStat("Preassigned", overview.preassigned)}
-      ${miniStat("SDI", overview.sdi)}
-      ${miniStat("Hold/Blocked", overview.blocked)}
-      ${miniStat("Needs Check", summary?.needsCheck ?? 0)}
+    <div class="bay-command-stat primary">
+      <small>Bay availability</small>
+      <strong>${escapeHtml(overview.available)} open</strong>
+      <span>${escapeHtml(openPct)}% of ${escapeHtml(overview.total)} physical bays ready</span>
+    </div>
+    <div class="bay-command-stat">
+      <small>Assigned / occupied</small>
+      <strong>${escapeHtml(assigned)}</strong>
+      <span>${escapeHtml(overview.occupied)} occupied | ${escapeHtml(overview.preassigned)} preassigned</span>
+    </div>
+    <div class="bay-command-stat warning">
+      <small>Needs attention</small>
+      <strong>${escapeHtml(Number(summary?.needsCheck ?? 0) + overview.sdi + overview.blocked)}</strong>
+      <span>${escapeHtml(overview.sdi)} SDI | ${escapeHtml(overview.manual || 0)} manual assign | ${escapeHtml(overview.blocked)} blocked</span>
     </div>
   `;
 }
@@ -3572,8 +3926,8 @@ function renderIndianTrailSummary(summary) {
 function bayMatchesFilter(bay, text) {
   const search = state.baySearch.trim().toLowerCase();
   const status = String(bay?.status || "").toLowerCase();
-  const sourceStatus = String(bay?.sourceStatus || "").toLowerCase();
   const statusKind = bayStatusKind(bay);
+  const policyKind = bayPolicyKind(bay);
   const matchesQuick = bayMatchesQuickFilter(bay);
   const matchesCategory = state.bayCategoryFilter === "all" || bayCategoryKind(bay) === state.bayCategoryFilter;
   const matchesGlass =
@@ -3588,9 +3942,8 @@ function bayMatchesFilter(bay, text) {
   const matchesStatus =
     state.bayStatusFilter === "all" ||
     state.bayStatusFilter === statusKind ||
-    (state.bayStatusFilter === "manual" && (!bay?.active || sourceStatus.includes("manual"))) ||
-    (state.bayStatusFilter === "empty" && (status.includes("empty") || status.includes("available"))) ||
-    status.includes(state.bayStatusFilter);
+    state.bayStatusFilter === policyKind ||
+    (state.bayStatusFilter === "empty" && (status.includes("empty") || status.includes("available")));
   if (!matchesQuick || !matchesCategory || !matchesStatus || !matchesGlass || !matchesSpecial) return false;
   if (!search) return true;
   return text.toLowerCase().includes(search);
@@ -3609,7 +3962,7 @@ function bayHasErrorState(bay) {
       assignment.lastStage,
     ]),
   ].join(" ").toLowerCase();
-  return /error|exception|conflict|needs\s*check|bad|blocked|hold/.test(haystack);
+  return /error|exception|conflict|needs\s*check|bad|scanblocked|blockedall|blocked\s+for\s+all/.test(haystack);
 }
 
 function bayMatchesQuickFilter(bay) {
@@ -3619,7 +3972,9 @@ function bayMatchesQuickFilter(bay) {
   if (filter === "occupied") return kind === "occupied";
   if (filter === "preassigned") return kind === "preassigned";
   if (filter === "available") return kind === "available";
-  if (filter === "blocked") return kind === "blocked" || kind === "manual";
+  if (filter === "auto") return bayPolicyKind(bay) === "auto";
+  if (filter === "manual") return bayPolicyKind(bay) === "manual";
+  if (filter === "blocked") return bayPolicyKind(bay) === "blocked";
   if (filter === "error") return bayHasErrorState(bay);
   if (filter === "old") return Number(bay?.staleDays || 0) > 10 || (bay?.assignments || []).some((assignment) => assignment.isStale);
   if (filter === "sdi") return kind === "picking" || (bay?.assignments || []).some((assignment) => String(assignment.status || "").toLowerCase().includes("sdi"));
@@ -3632,11 +3987,13 @@ function bayQuickFilterOptions() {
     ["all", "All"],
     ["occupied", "Occupied"],
     ["preassigned", "Pre Assigned"],
+    ["manual", "Manual Assign"],
+    ["auto", "Auto Assign"],
+    ["blocked", "Blocked Scans"],
     ["error", "Errors"],
     ["old", "Old Orders"],
     ["sdi", "SDI"],
     ["new", "New Today"],
-    ["blocked", "Blocked"],
     ["available", "Available"],
   ];
 }
@@ -3676,9 +4033,9 @@ function isWorkbookLegendCell(cell) {
 function statusAbbreviation(status, bay) {
   if (!bay) return "";
   if (bayCategoryKind(bay) === "spacer") return "";
-  if (String(status).toLowerCase().includes("hold")) return "HLD";
-  if (!bay.active || String(status).toLowerCase() === "manualhold") return "MAN";
-  if (String(status).toLowerCase().includes("block")) return "BLK";
+  const policy = bayPolicyKind(bay);
+  if (policy === "manual") return "MAN";
+  if (policy === "blocked") return "BLK";
   if (status === "SDI") return "SDI";
   if (/pre|assign/i.test(status)) return "PRE";
   if (status === "Full" || status === "Occupied") return "OCC";
@@ -3737,16 +4094,40 @@ function baySearchText(bay) {
   ].join(" ");
 }
 
+function bayPolicyKind(bay) {
+  const status = String(bay?.status || "").toLowerCase().replace(/[^a-z]/g, "");
+  const sourceStatus = String(bay?.sourceStatus || "").toLowerCase().replace(/[^a-z]/g, "");
+
+  // Legacy Hold/Blocked bays are intentionally treated as Manual Assign.
+  // Use ScanBlocked/BlockedAll when a bay should be blocked from every scan workflow.
+  if (status.includes("scanblocked") || status.includes("blockedall") || sourceStatus.includes("scanblocked") || sourceStatus.includes("blockedall")) return "blocked";
+  if (!bay?.active || status.includes("manual") || status.includes("hold") || status.includes("blocked")) return "manual";
+  return "auto";
+}
+
 function bayStatusKind(bay) {
   const status = String(bay?.status || "").toLowerCase();
   const assigned = Number(bay?.assignedQty || 0);
-  if (status.includes("hold")) return "manual";
+  const policy = bayPolicyKind(bay);
   if (bayCategoryKind(bay) === "spacer") return "spacer";
-  if (!bay?.active || status.includes("manual") || status.includes("blocked")) return "blocked";
+  if (policy === "blocked") return "blocked";
+  if (policy === "manual" && !assigned && !status.includes("pre") && !status.includes("sdi") && !status.includes("pick")) return "manual";
   if (status.includes("sdi") || status.includes("pick")) return "picking";
-  if (status.includes("pre") || status.includes("assign")) return "preassigned";
+  if (status.includes("pre")) return "preassigned";
   if (assigned > 0 || status.includes("occupied") || status.includes("full") || status.includes("partial")) return "occupied";
   return "available";
+}
+
+function bayStatusLabel(bay) {
+  const kind = bayStatusKind(bay);
+  if (kind === "manual") return "Manual Assign";
+  if (kind === "blocked") return "Blocked Scans";
+  if (kind === "available") return bayPolicyKind(bay) === "auto" ? "Auto Assign" : "Available";
+  if (kind === "picking") return "Picking / SDI";
+  if (kind === "preassigned") return "Pre Assigned";
+  if (kind === "occupied") return "Occupied";
+  if (kind === "spacer") return "Spacer";
+  return String(bay?.status || "Available");
 }
 
 function bayUtilization(bay) {
@@ -3782,16 +4163,15 @@ function bayGlassFilterOptions() {
 }
 
 function bayOverview() {
-  const countableBays = state.bays.filter((bay) => bayCategoryKind(bay) !== "spacer");
+  const countableBays = state.bays.filter((bay) => bay.active !== false && bayCategoryKind(bay) !== "spacer");
 
   const available = countableBays.filter((bay) => bayStatusKind(bay) === "available").length;
   const occupied = countableBays.filter((bay) => bayStatusKind(bay) === "occupied").length;
   const preassigned = countableBays.filter((bay) => bayStatusKind(bay) === "preassigned").length;
   const sdi = countableBays.filter((bay) => bayStatusKind(bay) === "picking").length;
-  const blocked = countableBays.filter((bay) => {
-    const kind = bayStatusKind(bay);
-    return kind === "blocked" || kind === "manual";
-  }).length;
+  const blocked = countableBays.filter((bay) => bayPolicyKind(bay) === "blocked").length;
+  const manual = countableBays.filter((bay) => bayPolicyKind(bay) === "manual").length;
+  const auto = countableBays.filter((bay) => bayPolicyKind(bay) === "auto" && bayStatusKind(bay) === "available").length;
 
   return {
     total: countableBays.length,
@@ -3800,11 +4180,89 @@ function bayOverview() {
     preassigned,
     sdi,
     blocked,
+    manual,
+    auto,
   };
 }
 
+
+function bayGroupPolicySummary(section) {
+  const bays = (section?.bays || []).filter((bay) => bayCategoryKind(bay) !== "spacer");
+  const counts = { auto: 0, manual: 0, blocked: 0 };
+
+  for (const bay of bays) {
+    counts[bayPolicyKind(bay)] = (counts[bayPolicyKind(bay)] || 0) + 1;
+  }
+
+  // Keep the grouped-bay policy labels intentionally short. The physical map
+  // has compact bay cards, so long text like "Manual Assign" is shown through
+  // the detail tooltip/CSS title behavior instead of being allowed to crowd the
+  // bay group name.
+  if (!bays.length) {
+    return { kind: "empty", label: "Empty", detail: "0 bays" };
+  }
+  if (counts.blocked === bays.length) {
+    return { kind: "blocked", label: "Blocked", detail: `${counts.blocked} blocked` };
+  }
+  if (counts.manual === bays.length) {
+    return { kind: "manual", label: "Man", detail: `${counts.manual} manual` };
+  }
+  if (counts.auto === bays.length) {
+    return { kind: "auto", label: "Auto", detail: `${counts.auto} auto` };
+  }
+  return {
+    kind: "mixed",
+    label: "Mixed",
+    detail: `${counts.auto} auto / ${counts.manual} manual${counts.blocked ? ` / ${counts.blocked} blocked` : ""}`,
+  };
+}
+
+function assignmentJobKey(assignment) {
+  const job = String(assignment?.job || "").trim();
+  if (job) return `job:${job.toLowerCase()}`;
+  return `order:${assignment?.order || ""}`;
+}
+
+function assignmentJobLabel(assignment) {
+  return String(assignment?.job || assignment?.order || assignment?.product || "No Job Nr.").trim() || "No Job Nr.";
+}
+
+function groupAssignmentsByJob(assignments = []) {
+  const groups = new Map();
+  for (const assignment of assignments || []) {
+    const key = assignmentJobKey(assignment);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label: assignmentJobLabel(assignment),
+        customer: assignment.customer || "",
+        dimensions: assignment.dimensions || "",
+        assignments: [],
+        totalQty: 0,
+        scannedQty: 0,
+      });
+    }
+    const group = groups.get(key);
+    group.assignments.push(assignment);
+    const assignmentTotal = Number(assignment.assignedQty || assignment.qty || 0);
+    const assignmentScanned = Math.min(Number(assignment.scanned || 0), assignmentTotal || Number(assignment.qty || 0));
+    group.totalQty += assignmentTotal;
+    group.scannedQty += assignmentScanned;
+    if (!group.customer && assignment.customer) group.customer = assignment.customer;
+    if (!group.dimensions && assignment.dimensions) group.dimensions = assignment.dimensions;
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    itemCount: group.assignments.length,
+    orderLine: group.assignments.map((assignment) => `${assignment.order}-${assignment.item}`).join(", "),
+  }));
+}
+
 function renderBaySlotButton(bay, mode = "physical") {
-  const assignment = bay.assignments?.[0];
+  const assignments = bay.assignments || [];
+  const assignment = assignments[0];
+  const jobGroups = groupAssignmentsByJob(assignments);
+  const primaryGroup = jobGroups[0];
   const status = bay.status || "ManualHold";
   const text = baySearchText(bay);
   const search = state.baySearch.trim().toLowerCase();
@@ -3814,22 +4272,46 @@ function renderBaySlotButton(bay, mode = "physical") {
   const kind = bayCategoryKind(bay);
   const statusKind = bayStatusKind(bay);
   const label = bay.displayName || bay.bayCode;
-  const stateLine = assignment ? `${abbreviation || statusAbbreviation(status, bay) || statusKind.toUpperCase()}: ${assignment.order}` : `${abbreviation || "AVL"}: Empty`;
+  const assignedQty = assignments.reduce((sum, item) => sum + Number(item.assignedQty || item.qty || 0), 0) || Number(bay.assignedQty || 0);
+  const capacity = Number(bay.capacityQty || 0);
+  const utilization = bayUtilization(bay);
+  const jobTotalQty = Number(primaryGroup?.totalQty || 0);
+  const jobScannedQty = Number(primaryGroup?.scannedQty || 0);
+  // Bay cards show job-based receive progress. A Job Nr. with 3 pieces reads 0/3,
+  // then 1/3 after the first piece is scanned into that bay.
+  const bayCardCounter = primaryGroup ? `${jobScannedQty}/${jobTotalQty || primaryGroup.itemCount || 0}` : capacity ? `${assignedQty}/${capacity}` : `${assignedQty}`;
+  const orderLine = primaryGroup ? primaryGroup.label : "Empty";
+  const customerLine = primaryGroup?.customer || bay.mapSection || bay.bayCategory || bay.bayType || "Ready";
+  const sizeLine = primaryGroup ? `${primaryGroup.itemCount} item${primaryGroup.itemCount === 1 ? "" : "s"}${primaryGroup.dimensions ? ` • ${primaryGroup.dimensions}` : ""}` : bayCategoryLabel(kind);
+  const extraCount = Math.max(jobGroups.length - 1, 0);
   const ribbons = [
     Number(bay.staleDays || 0) > 10 ? `<span class="bay-ribbon stale">${escapeHtml(bay.staleDays)}d</span>` : "",
     bay.isNewToday ? `<span class="bay-ribbon new">NEW</span>` : "",
+    extraCount ? `<span class="bay-ribbon count">+${escapeHtml(extraCount)}</span>` : "",
   ].filter(Boolean).join("");
+  const modeClass = mode === "physical" ? "physical-bay-slot" : "bay-slot";
+
   return `
-    <button class="${mode === "physical" ? "physical-bay-slot" : "bay-slot"} type-${escapeHtml(kind)} status-${escapeHtml(statusKind)} ${escapeHtml(String(status).toLowerCase())} ${dimmed ? "is-dimmed" : ""} ${searchMatch ? "is-search-match" : ""} ${state.selectedBayCode === bay.bayCode ? "is-selected" : ""}"
+    <button class="${modeClass} bay-slot-v2 bay-slot-v17 type-${escapeHtml(kind)} status-${escapeHtml(statusKind)} ${escapeHtml(String(status).toLowerCase())} ${dimmed ? "is-dimmed" : ""} ${searchMatch ? "is-search-match" : ""} ${state.selectedBayCode === bay.bayCode ? "is-selected" : ""}"
       type="button"
       data-bay-code="${escapeHtml(bay.bayCode)}"
-      data-assignment-id="${escapeHtml(assignment?.id || "")}"
+      data-assignment-id="${escapeHtml(assignment?.id || "")}" 
       ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""}
       title="${escapeHtml(text)}">
       ${ribbons}
-      <span class="bay-code">${escapeHtml(label)}</span>
-      ${abbreviation ? `<span class="bay-state">${escapeHtml(abbreviation)}</span>` : ""}
-      <small>${escapeHtml(stateLine)}</small>
+      <span class="bay-slot-head">
+        <strong class="bay-code">${escapeHtml(label)}</strong>
+        <span class="bay-state status-${escapeHtml(statusKind)}">${escapeHtml(abbreviation || statusKind.toUpperCase())}</span>
+      </span>
+      <span class="bay-slot-main-row">
+        <span class="bay-slot-order">${escapeHtml(orderLine)}</span>
+        <span class="bay-slot-qty">${escapeHtml(bayCardCounter)}</span>
+      </span>
+      <small class="bay-slot-customer">${escapeHtml(customerLine)}</small>
+      <small class="bay-slot-size">${escapeHtml(sizeLine)}</small>
+      <span class="bay-slot-foot">
+        <i style="width:${utilization}%"></i>
+      </span>
     </button>
   `;
 }
@@ -3837,6 +4319,7 @@ function renderBaySlotButton(bay, mode = "physical") {
 function bayTypeSections() {
   const groups = new Map();
   for (const bay of state.bays || []) {
+    if (bay.active === false) continue;
     const kind = bayCategoryKind(bay);
     if (!groups.has(kind)) groups.set(kind, []);
     groups.get(kind).push(bay);
@@ -3873,6 +4356,7 @@ function bayTypeSections() {
 function bayPhysicalSections() {
   const sectionMap = new Map();
   for (const bay of state.bays || []) {
+    if (bay.active === false) continue;
     const label = bayRackLabel(bay);
     if (!sectionMap.has(label)) sectionMap.set(label, []);
     sectionMap.get(label).push(bay);
@@ -3891,29 +4375,21 @@ function bayPhysicalSections() {
 function initializeBayLayoutDraft() {
   const sections = bayPhysicalSections();
   const used = new Set();
+  const nextRowByColumn = new Map();
   state.bayLayoutDraft = {};
   state.bayHoldingSections = new Set();
+
+  // Edit Map mirrors the live physical columns. Rows are allowed to continue
+  // past 7 so large columns do not get forced into Unmapped/Holding.
   sections.forEach((section, index) => {
-    let row = Math.round(Number(section.row || 0));
-    let col = Math.round(Number(section.col || 0));
-    if (row < 1 || row > 7 || col < 1 || col > 7 || used.has(`${row}:${col}`)) {
-      row = Math.floor(index / 7) + 1;
-      col = (index % 7) + 1;
-      while (row <= 7 && used.has(`${row}:${col}`)) {
-        col += 1;
-        if (col > 7) {
-          col = 1;
-          row += 1;
-        }
-      }
-    }
-    if (row > 7) {
-      state.bayHoldingSections.add(section.label);
-      state.bayLayoutDraft[section.label] = { row: 0, col: 0, holding: true };
-    } else {
-      used.add(`${row}:${col}`);
-      state.bayLayoutDraft[section.label] = { row, col, holding: false };
-    }
+    let col = Math.max(1, Math.min(7, Math.round(Number(section.col || 0)) || (index % 7) + 1));
+    let row = Math.max(1, Math.round(Number(section.row || 0)) || (nextRowByColumn.get(col) || 1));
+
+    while (used.has(`${row}:${col}`)) row += 1;
+
+    used.add(`${row}:${col}`);
+    nextRowByColumn.set(col, Math.max(nextRowByColumn.get(col) || 1, row + 1));
+    state.bayLayoutDraft[section.label] = { row, col, holding: false };
   });
   state.bayLayoutOriginal = JSON.parse(JSON.stringify(state.bayLayoutDraft));
 }
@@ -3938,12 +4414,30 @@ function renderBaySection(section) {
   const visible = displayBays.length;
   const dimmed = !visible && filtersActive;
   const occupied = section.bays.filter((bay) => Number(bay.assignedQty || 0) > 0).length;
+  const attention = section.bays.filter((bay) => bayHasErrorState(bay) || Number(bay.staleDays || 0) > 10 || bayStatusKind(bay) === "picking").length;
+  const available = section.bays.filter((bay) => bayStatusKind(bay) === "available").length;
+  const blocked = section.bays.filter((bay) => bayPolicyKind(bay) === "blocked").length;
+  const groupPolicy = bayGroupPolicySummary(section);
   const open = Boolean(filtersActive) || !state.collapsedBaySections.has(section.label);
   const cols = Math.max(1, Math.min(Number(state.bayGroupColumns[section.label] || 1), 2));
   return `
-    <details ${open ? "open" : ""} class="physical-bay-section type-${escapeHtml(section.kind)} cols-${cols} ${state.bayEditMode ? "is-editing" : ""} ${dimmed ? "is-dimmed" : ""}" data-bay-drop-section="${escapeHtml(section.label)}" data-bay-drop-category="${escapeHtml(section.kind)}">
-      <summary ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""} data-bay-group-drag="${escapeHtml(section.label)}"><strong>${escapeHtml(section.label)}</strong><span>${escapeHtml(occupied)} / ${escapeHtml(section.bays.length)}</span>${state.bayEditMode ? `<span class="bay-column-controls"><button type="button" data-bay-col-action="dec" data-bay-section="${escapeHtml(section.label)}">-</button><b>${cols} col</b><button type="button" data-bay-col-action="inc" data-bay-section="${escapeHtml(section.label)}">+</button></span>` : ""}</summary>
-      <div class="physical-slot-grid" style="--bay-section-cols:${cols}">
+    <details ${open ? "open" : ""} class="physical-bay-section physical-bay-section-v17 type-${escapeHtml(section.kind)} cols-${cols} policy-${escapeHtml(groupPolicy.kind)} ${state.bayEditMode ? "is-editing" : ""} ${dimmed ? "is-dimmed" : ""}" data-bay-drop-section="${escapeHtml(section.label)}" data-bay-drop-category="${escapeHtml(section.kind)}">
+      <summary ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""} data-bay-group-drag="${escapeHtml(section.label)}">
+        <span class="bay-section-title"><strong>${escapeHtml(section.label)}</strong><small>${escapeHtml(bayCategoryLabel(section.kind))}</small></span>
+        <span class="bay-section-status status-${escapeHtml(groupPolicy.kind)}">
+          <strong>${escapeHtml(groupPolicy.label)}</strong>
+          <small>${escapeHtml(groupPolicy.detail)}</small>
+        </span>
+        <span class="bay-section-counts">
+          <b>${escapeHtml(occupied)}</b>
+          <i>${escapeHtml(available)} open</i>
+          ${blocked ? `<em class="blocked">${escapeHtml(blocked)} blocked</em>` : ""}
+          ${attention ? `<em>${escapeHtml(attention)} attention</em>` : ""}
+        </span>
+        <button class="bay-section-edit-btn" type="button" data-bay-editor-open="${escapeHtml(section.label)}" data-permission-any="manage_bay_layout">Edit</button>
+        ${state.bayEditMode ? `<span class="bay-column-controls"><button type="button" data-bay-col-action="dec" data-bay-section="${escapeHtml(section.label)}">-</button><b>${cols} col</b><button type="button" data-bay-col-action="inc" data-bay-section="${escapeHtml(section.label)}">+</button></span>` : ""}
+      </summary>
+      <div class="physical-slot-grid physical-slot-grid-v17" style="--bay-section-cols:${cols}">
         ${displayBays.map((bay) => renderBaySlotButton(bay, "physical")).join("")}
       </div>
     </details>
@@ -3953,55 +4447,190 @@ function renderBaySection(section) {
 function renderBayGrid(physicalSections) {
   if (state.bayEditMode && !state.bayLayoutDraft) initializeBayLayoutDraft();
   if (!state.bayEditMode) {
+    const filtersActive = state.baySearch.trim() || state.bayQuickFilter !== "all" || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
+    const helper = `
+      <div class="bay-map-helper-v17">
+        <strong>${filtersActive ? "Filtered view" : "Physical floor view"}</strong>
+        <span>${escapeHtml(physicalSections.length)} bay group${physicalSections.length === 1 ? "" : "s"} shown. Click a bay for tools or use Manage Items for bulk order work.</span>
+        <button type="button" data-bay-action="item-management">Open Manage Items</button>
+      </div>
+    `;
+    if (filtersActive) {
+      return `
+        ${helper}
+        <section class="bay-dense-grid bay-dense-grid-v17">
+          ${physicalSections.length ? physicalSections.map((section) => renderBaySection(section)).join("") : `<div class="admin-empty">No bays match those filters.</div>`}
+        </section>
+      `;
+    }
+
+    // Confirmed bay-map positions are preserved by column and top-to-bottom order.
+    // The physical map intentionally renders each saved column as an independent stack,
+    // so expanding one bay group only moves groups below it in the same column.
+    const columns = Array.from({ length: 7 }, () => []);
+    const used = new Set();
+    physicalSections.forEach((section, index) => {
+      let row = Math.max(1, Math.round(Number(section.row || 0)) || Math.floor(index / 7) + 1);
+      let col = Math.max(1, Math.min(7, Math.round(Number(section.col || 0)) || (index % 7) + 1));
+      while (used.has(`${row}:${col}`)) {
+        row += 1;
+      }
+      used.add(`${row}:${col}`);
+      columns[col - 1].push({ section, row });
+    });
+    const columnMarkup = columns
+      .map((column, index) => {
+        const cells = column
+          .sort((a, b) => a.row - b.row || a.section.label.localeCompare(b.section.label))
+          .map(({ section }) => `<div class="bay-floor-cell-v18">${renderBaySection(section)}</div>`)
+          .join("");
+        return `<div class="bay-floor-column-v19" data-bay-floor-column="${index + 1}">${cells}</div>`;
+      })
+      .join("");
     return `
-      <section class="bay-dense-grid">
-        ${physicalSections.length ? physicalSections.map((section) => renderBaySection(section)).join("") : `<div class="admin-empty">No bays match those filters.</div>`}
+      ${helper}
+      <section class="bay-floor-grid-v18 bay-floor-grid-v19">
+        ${physicalSections.length ? columnMarkup : `<div class="admin-empty">No bays match those filters.</div>`}
       </section>
     `;
   }
   const sectionByLabel = new Map(physicalSections.map((section) => [section.label, section]));
-  const cells = [];
-  for (let row = 1; row <= 7; row += 1) {
-    for (let col = 1; col <= 7; col += 1) {
-      const section = physicalSections.find((item) => {
-        const draft = state.bayLayoutDraft?.[item.label];
-        const sectionRow = draft ? draft.row : Math.round(Number(item.row || 0));
-        const sectionCol = draft ? draft.col : Math.round(Number(item.col || 0));
-        const holding = draft?.holding;
-        return !holding && sectionRow === row && sectionCol === col;
-      });
-      cells.push(`
-        <div class="bay-grid-cell ${section ? "has-section" : ""}" data-grid-row="${row}" data-grid-col="${col}" data-bay-drop-section="${escapeHtml(section?.label || `grid-${row}-${col}`)}" data-bay-grid-cell="true">
-          ${section ? renderBaySection(section) : `<span class="empty-grid-slot">Empty</span>`}
-        </div>
-      `);
-    }
-  }
+  const visibleSections = physicalSections
+    .map((section) => {
+      const draft = state.bayLayoutDraft?.[section.label] || {};
+      return {
+        section,
+        row: Math.max(1, Math.round(Number(draft.row || section.row || 1))),
+        col: Math.max(1, Math.min(7, Math.round(Number(draft.col || section.col || 1)))),
+        holding: Boolean(draft.holding),
+      };
+    })
+    .filter((entry) => !entry.holding);
+
+  const columns = Array.from({ length: 7 }, () => []);
+  const rowCounts = Array.from({ length: 7 }, () => 1);
+  visibleSections.forEach((entry) => {
+    columns[entry.col - 1].push(entry);
+    rowCounts[entry.col - 1] = Math.max(rowCounts[entry.col - 1], entry.row + 1);
+  });
+
+  const columnMarkup = columns
+    .map((column, index) => {
+      const col = index + 1;
+      const usedRows = new Set(column.map((entry) => entry.row));
+      const sorted = column.sort((a, b) => a.row - b.row || a.section.label.localeCompare(b.section.label));
+      const groupCells = sorted
+        .map((entry) => `
+          <div class="bay-edit-stack-cell has-section" data-grid-row="${entry.row}" data-grid-col="${col}" data-bay-drop-section="${escapeHtml(entry.section.label)}" data-bay-grid-cell="true">
+            ${renderBaySection(entry.section)}
+          </div>
+        `)
+        .join("");
+      const emptyRow = Math.max(rowCounts[index], ...[...usedRows, 0]) + 1;
+      return `
+        <section class="bay-edit-stack-column" data-bay-edit-column="${col}">
+          <header><strong>Column ${col}</strong><span>${escapeHtml(sorted.length)} grouped set${sorted.length === 1 ? "" : "s"}</span></header>
+          <div class="bay-edit-stack-list">
+            ${groupCells}
+            <div class="bay-edit-stack-cell empty" data-grid-row="${emptyRow}" data-grid-col="${col}" data-bay-drop-section="grid-${emptyRow}-${col}" data-bay-grid-cell="true">
+              <span class="empty-grid-slot">Drop group here</span>
+            </div>
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
   const holding = [...state.bayHoldingSections]
     .map((label) => sectionByLabel.get(label))
     .filter(Boolean);
+
   return `
-    ${state.bayEditMode ? `<section class="bay-holding-area" data-bay-holding-area="true">
-      <header><strong>Temporary Holding Area</strong><span>${escapeHtml(holding.length)} group${holding.length === 1 ? "" : "s"}</span></header>
-      <div class="bay-holding-list" data-bay-drop-section="__holding" data-bay-holding-drop="true">
-        ${holding.length ? holding.map((section) => renderBaySection(section)).join("") : `<div class="empty-grid-slot">Drop grouped bay sets here while reorganizing.</div>`}
+    <section class="bay-edit-map-shell-v23">
+      <div class="bay-edit-map-help-v23">
+        <strong>Edit Map Layout</strong>
+        <span>This view now matches the live physical bay map. Drag grouped bay set headers between columns, then Confirm Layout to save the exact floor-map position.</span>
       </div>
-    </section>` : ""}
-    <section class="bay-edit-grid">${cells.join("")}</section>
+      <section class="bay-holding-area bay-holding-area-v23" data-bay-holding-area="true">
+        <header><strong>Temporary Holding Area</strong><span>${escapeHtml(holding.length)} group${holding.length === 1 ? "" : "s"}</span></header>
+        <div class="bay-holding-list" data-bay-drop-section="__holding" data-bay-holding-drop="true">
+          ${holding.length ? holding.map((section) => renderBaySection(section)).join("") : `<div class="empty-grid-slot">Drop grouped bay sets here while reorganizing.</div>`}
+        </div>
+      </section>
+      <section class="bay-edit-column-grid-v23">${columnMarkup}</section>
+    </section>
   `;
+}
+
+function collapseAllPhysicalBaySections() {
+  (state.bays || []).forEach((bay) => state.collapsedBaySections.add(bayRackLabel(bay)));
+}
+
+function syncBaySectionState(details, open) {
+  const label = details.dataset.bayDropSection || "";
+  if (!label) return;
+  if (open) state.collapsedBaySections.delete(label);
+  else state.collapsedBaySections.add(label);
+}
+
+function animateBaySectionToggle(details) {
+  const body = details.querySelector(".physical-slot-grid-v17");
+  if (!body || details.dataset.animating === "1") return;
+
+  const isOpen = details.open;
+  details.dataset.animating = "1";
+
+  if (isOpen) {
+    const startHeight = `${body.scrollHeight}px`;
+    syncBaySectionState(details, false);
+    const animation = body.animate(
+      [
+        { height: startHeight, opacity: 1, transform: "translateY(0)" },
+        { height: "0px", opacity: 0, transform: "translateY(-6px)" },
+      ],
+      { duration: 170, easing: "ease" },
+    );
+    animation.onfinish = () => {
+      details.open = false;
+      delete details.dataset.animating;
+    };
+    animation.oncancel = () => delete details.dataset.animating;
+    return;
+  }
+
+  details.open = true;
+  syncBaySectionState(details, true);
+  const endHeight = `${body.scrollHeight}px`;
+  const animation = body.animate(
+    [
+      { height: "0px", opacity: 0, transform: "translateY(-6px)" },
+      { height: endHeight, opacity: 1, transform: "translateY(0)" },
+    ],
+    { duration: 190, easing: "ease" },
+  );
+  animation.onfinish = () => delete details.dataset.animating;
+  animation.oncancel = () => delete details.dataset.animating;
 }
 
 function renderBayMapPage() {
   if (!els.bayMapCanvas || !state.bayLayout) return;
   const filtersActive = state.baySearch.trim() || state.bayQuickFilter !== "all" || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
   const physicalSections = bayPhysicalSections().filter((section) => !filtersActive || section.bays.some((bay) => bayMatchesFilter(bay, baySearchText(bay))));
+  if (!state.baySectionsDefaultCollapsed && !state.bayEditMode) {
+    physicalSections.forEach((section) => state.collapsedBaySections.add(section.label));
+    state.baySectionsDefaultCollapsed = true;
+  }
   els.bayMapCanvas.innerHTML = renderBayGrid(physicalSections);
   els.bayMapCanvas.querySelectorAll(".physical-bay-section").forEach((details) => {
+    const summary = details.querySelector("summary");
+    summary?.addEventListener("click", (event) => {
+      if (event.target.closest("button")) return;
+      event.preventDefault();
+      animateBaySectionToggle(details);
+    });
     details.addEventListener("toggle", () => {
-      const label = details.dataset.bayDropSection || "";
-      if (!label) return;
-      if (details.open) state.collapsedBaySections.delete(label);
-      else state.collapsedBaySections.add(label);
+      if (details.dataset.animating === "1") return;
+      syncBaySectionState(details, details.open);
     });
   });
   const overview = bayOverview();
@@ -4011,7 +4640,8 @@ function renderBayMapPage() {
       miniStat("Available", overview.available),
       miniStat("Occupied", overview.occupied),
       miniStat("Pre Assigned", overview.preassigned),
-      miniStat("Blocked", overview.blocked),
+      miniStat("Manual Assign", overview.manual || 0),
+      miniStat("Blocked Scans", overview.blocked),
     ].join("");
   }
   if (els.baySelectedText) els.baySelectedText.textContent = state.selectedBayCode ? `Selected: ${state.selectedBayCode}` : "No bay selected";
@@ -4036,52 +4666,91 @@ function renderBaySidePanels() {
   const bay = selectedBay();
   if (els.baySelectedPanel) {
     if (!bay) {
-      els.baySelectedPanel.innerHTML = `<div class="admin-empty">Select a bay to see assigned orders, capacity, and route details.</div>`;
+      els.baySelectedPanel.innerHTML = `
+        <div class="selected-bay-empty-state">
+          <strong>Select a bay to manage it.</strong>
+          <span>Click a bay on the map or in the directory. From there you can send the bay to the scanner, hold/block it, move glass, clear assignments, or mark SDI.</span>
+        </div>
+      `;
     } else {
       const assignments = bay.assignments || [];
+      const jobGroups = groupAssignmentsByJob(assignments);
+      const assignedQty = assignments.reduce((sum, item) => sum + Number(item.assignedQty || item.qty || 0), 0);
+      const firstAssignment = assignments[0];
+      const policyKind = bayPolicyKind(bay);
+      const statusKind = bayStatusKind(bay);
+      const policyLabel = policyKind === "manual" ? "Man" : policyKind === "blocked" ? "Blocked" : "Auto";
+      const statusChip = ["available", "manual", "blocked"].includes(statusKind)
+        ? ""
+        : `<span class="status-chip status-${escapeHtml(statusKind)}">${escapeHtml(bayStatusLabel(bay))}</span>`;
       els.baySelectedPanel.innerHTML = `
-        <div class="selected-bay-heading">
-          <span class="bay-status-dot status-${escapeHtml(bayStatusKind(bay))}"></span>
-          <div><strong>${escapeHtml(bay.displayName || bay.bayCode)}</strong><small>${escapeHtml(bay.mapSection || bay.area || "")}</small></div>
-          <span class="status-chip status-${escapeHtml(bayStatusKind(bay))}">${escapeHtml(bay.status || "Available")}</span>
+        <div class="selected-bay-command-card selected-bay-command-card-v28 status-${escapeHtml(bayStatusKind(bay))} policy-${escapeHtml(policyKind)}">
+          <div class="selected-bay-title-row selected-bay-title-row-v28">
+            <div class="selected-bay-id-block">
+              <span class="bay-status-dot status-${escapeHtml(bayStatusKind(bay))}"></span>
+              <div class="selected-bay-title-copy">
+                <small>${escapeHtml(bay.mapSection || bay.area || "Indian Trail")}</small>
+                <strong>${escapeHtml(bay.displayName || bay.bayCode)}</strong>
+              </div>
+            </div>
+            <div class="selected-bay-badge-stack">
+              <span class="bay-policy-chip policy-${escapeHtml(policyKind)}" title="${escapeHtml(policyKind === "manual" ? "Manual Assign" : policyKind === "blocked" ? "Blocked Scans" : "Auto Assign")}">${escapeHtml(policyLabel)}</span>
+              ${statusChip}
+            </div>
+          </div>
+
+          <div class="selected-bay-metric-row selected-bay-metric-row-v28">
+            <span><small>Category</small><strong>${escapeHtml(bayCategoryLabel(bayCategoryKind(bay)))}</strong></span>
+            <span><small>Pieces</small><strong>${escapeHtml(assignedQty)}</strong></span>
+            <span><small>Filled</small><strong>${escapeHtml(bayUtilization(bay).toFixed(0))}%</strong></span>
+            <span><small>Primary Job</small><strong>${firstAssignment ? escapeHtml(assignmentJobLabel(firstAssignment)) : "None"}</strong></span>
+          </div>
+
+          <div class="capacity-meter selected-capacity-meter"><span style="width:${bayUtilization(bay)}%"></span></div>
+
+          <div class="selected-bay-primary-actions selected-bay-primary-actions-v28">
+            <button type="button" data-bay-action="scan-here">Use For Scanner</button>
+            <button type="button" data-bay-action="hold" data-permission-any="clear_bay,move_bay">Manual Assign</button>
+            <button type="button" data-bay-action="unblock" data-permission-any="clear_bay,move_bay">Auto Assign</button>
+            <button type="button" class="danger-light" data-bay-action="block" data-permission-any="clear_bay,move_bay">Block Scans</button>
+          </div>
         </div>
-        <div class="selected-bay-actions">
-          <button type="button" data-bay-action="hold" data-permission-any="clear_bay,move_bay">Hold Bay</button>
-          <button type="button" data-bay-action="block" data-permission-any="clear_bay,move_bay">Block Bay</button>
-          <button type="button" data-bay-action="unblock" data-permission-any="clear_bay,move_bay">Remove Hold/Block</button>
+
+        <div class="selected-bay-jobs-header">
+          <strong>Jobs in this bay</strong>
+          <span>${escapeHtml(jobGroups.length)} job group${jobGroups.length === 1 ? "" : "s"}</span>
         </div>
-        <div class="selected-bay-stats">
-          ${miniStat("Category", bayCategoryLabel(bayCategoryKind(bay)))}
-          ${miniStat("Items", assignments.reduce((sum, item) => sum + Number(item.assignedQty || item.qty || 0), 0))}
-          ${miniStat("Utilization", `${bayUtilization(bay).toFixed(0)}%`)}
-        </div>
-        <div class="capacity-meter"><span style="width:${bayUtilization(bay)}%"></span></div>
-        <div class="selected-assignment-list">
+
+        <div class="selected-assignment-list selected-assignment-list-v2 selected-bay-job-list">
           ${
-            assignments.length
-              ? assignments
+            jobGroups.length
+              ? jobGroups
                   .map(
-                    (assignment) => `
-                      <article class="selected-assignment" data-assignment-id="${escapeHtml(assignment.id)}">
-                        <div>
-                          <strong>${isNewOrUpdatedItem(assignment) ? '<span class="bay-new-star" title="New or updated line">*</span>' : ""}${escapeHtml(assignment.order)}-${escapeHtml(assignment.item)} <span>${escapeHtml(assignment.customer || "")}</span></strong>
-                          <small>${escapeHtml(assignment.product || assignment.job || "")}</small>
-                          <small>${escapeHtml(assignment.dimensions || "")} - Qty ${escapeHtml(assignment.assignedQty || assignment.qty || 0)}</small>
-                          <small>${escapeHtml(assignment.job || "")}</small>
-                          <small>Delivery: ${escapeHtml(formatDisplayDate(assignment.deliveryDate || ""))}</small>
-                          <small>Last scanned: ${escapeHtml(formatDateTime(assignment.lastScannedAt) || "Not scanned yet")}</small>
-                          <small>Last stage: ${escapeHtml(assignment.lastStage || assignment.lastScannedStation || "Not started")}</small>
+                    (group) => {
+                      const first = group.assignments[0];
+                      return `
+                      <article class="selected-bay-job-card" data-assignment-id="${escapeHtml(first.id)}">
+                        <div class="selected-bay-job-main">
+                          <div class="selected-bay-job-title">
+                            ${group.assignments.some(isNewOrUpdatedItem) ? '<span class="bay-new-star" title="New or updated line">NEW</span>' : ""}
+                            <strong>${escapeHtml(group.label)}</strong>
+                          </div>
+                          <span>${escapeHtml(group.customer || "No customer listed")}</span>
+                          <small>${escapeHtml(group.itemCount)} item${group.itemCount === 1 ? "" : "s"} | ${escapeHtml(group.orderLine)} | Qty ${escapeHtml(group.totalQty)}</small>
+                          <small>${escapeHtml(group.dimensions || "Mixed sizes")} | Delivery ${escapeHtml(formatDisplayDate(first.deliveryDate || ""))}</small>
                         </div>
-                        <div class="assignment-actions">
-                          <button type="button" title="Clear order from bay" data-assignment-action="clear" data-assignment-id="${escapeHtml(assignment.id)}">X</button>
-                          <button type="button" title="Move order" data-assignment-action="move" data-assignment-id="${escapeHtml(assignment.id)}">Move</button>
-                          <button type="button" title="Mark or clear SDI" data-assignment-action="sdi" data-assignment-id="${escapeHtml(assignment.id)}" data-order-no="${escapeHtml(assignment.order)}">!</button>
+                        <div class="assignment-actions assignment-actions-v2 selected-bay-job-actions">
+                          <button type="button" title="Open manage workflow" data-assignment-action="manage" data-assignment-id="${escapeHtml(first.id)}">Manage</button>
+                          <button type="button" title="Move this job" data-assignment-action="move" data-assignment-id="${escapeHtml(first.id)}">Move</button>
+                          <button type="button" title="Clear this job from bay" data-assignment-action="clear" data-assignment-id="${escapeHtml(first.id)}">Clear</button>
+                          <button type="button" title="Mark or clear SDI" data-assignment-action="sdi" data-assignment-id="${escapeHtml(first.id)}" data-order-no="${escapeHtml(first.order)}">SDI</button>
                         </div>
                       </article>
-                    `
+                    `;
+                    }
                   )
                   .join("")
-              : `<article><strong>No assigned orders</strong><small>This bay is ready for assignment if it is available.</small></article>`
+              : `<article class="selected-bay-empty-job"><strong>No assigned jobs</strong><small>This bay is available. Choose Use For Scanner, or manually assign an order from the bay scanner.</small></article>`
           }
         </div>
       `;
@@ -4268,38 +4937,52 @@ function bayEventTone(event) {
   return "ok";
 }
 
+function renderBayLastScanCard(event) {
+  const hasEvent = Boolean(event);
+  const tone = hasEvent ? bayEventTone(event) : "notice";
+  const when = new Date(event?.time || event?.createdAt || "");
+  const time = hasEvent && !Number.isNaN(when.getTime()) ? when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "-";
+  const bay = event?.bayDisplay || event?.bayCode || event?.newBayDisplay || event?.newBayCode || event?.oldBayDisplay || event?.oldBayCode || "-";
+  const order = event?.order ? `${event.order}-${event.item || ""}` : "-";
+  const action = hasEvent ? formatEventType(event.eventType || event.reason || "Bay action") : "-";
+  const title = hasEvent
+    ? [action, event?.reason].filter(Boolean).join(" - ")
+    : "No bay scans yet";
+
+  els.bayLastCard?.classList.remove("ok", "notice", "error");
+  els.bayLastCard?.classList.add(hasEvent ? tone : "notice");
+  if (els.bayLastTitle) els.bayLastTitle.textContent = title;
+  if (els.bayLastAction) els.bayLastAction.textContent = action;
+  if (els.bayLastOrder) els.bayLastOrder.textContent = order;
+  if (els.bayLastBay) els.bayLastBay.textContent = bay;
+  if (els.bayLastTime) els.bayLastTime.textContent = time;
+  if (els.bayScanOutStatus && !hasEvent) els.bayScanOutStatus.textContent = "Waiting";
+  if (els.bayScanOutStatus && hasEvent) els.bayScanOutStatus.textContent = tone === "error" ? "Needs review" : tone === "notice" ? "Notice" : "Just now";
+}
+
 function renderBayRecentActions() {
   const events = state.bayEvents || [];
-  if (els.bayScanOutRecent) {
-    els.bayScanOutRecent.innerHTML = events.length
-      ? `<div class="recent-table-wrap bay-recent-table-wrap">
-          <table class="recent-table bay-recent-table">
-            <thead><tr><th>Action</th><th>Order</th><th>Bay</th><th>Time</th><th>Check</th></tr></thead>
-            <tbody>
-              ${events.slice(0, 10)
-          .map((event) => {
-            const when = new Date(event.time || event.createdAt || "");
-            const time = Number.isNaN(when.getTime()) ? "" : when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-            const bay = event.bayDisplay || event.bayCode || event.newBayCode || event.oldBayCode || "Bay";
-            const order = event.order ? `${event.order}-${event.item || ""}` : "Bay action";
-            const tone = bayEventTone(event);
-            const check = tone === "error" ? "!" : tone === "notice" ? "i" : "✓";
-            return `
-                <tr class="${escapeHtml(tone)}">
-                  <td><strong>${escapeHtml(formatEventType(event.eventType))}</strong><small>${escapeHtml(event.reason || "")}</small></td>
-                  <td>${escapeHtml(order)}</td>
-                  <td>${escapeHtml(bay)}</td>
-                  <td>${escapeHtml(time)}</td>
-                  <td><span class="scan-check ${escapeHtml(tone)}">${escapeHtml(check)}</span></td>
-                </tr>
-              `;
-          })
-          .join("")}
-            </tbody>
-          </table>
-        </div>`
-      : `<div><strong>No recent bay removals</strong><span>Scan-out actions will appear here.</span></div>`;
-  }
+  renderBayLastScanCard(events[0] || null);
+  if (!els.bayScanOutRecent) return;
+  const recentRows = events.slice(1, 3);
+  els.bayScanOutRecent.innerHTML = recentRows.length
+    ? recentRows.map((event) => {
+        const when = new Date(event.time || event.createdAt || "");
+        const time = Number.isNaN(when.getTime()) ? "" : when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        const bay = event.bayDisplay || event.bayCode || event.newBayCode || event.oldBayCode || "Bay";
+        const order = event.order ? `${event.order}-${event.item || ""}` : "Bay action";
+        const tone = bayEventTone(event);
+        return `
+          <tr class="${escapeHtml(tone)}">
+            <td>${escapeHtml(formatEventType(event.eventType || event.reason || "Bay action"))}</td>
+            <td>${escapeHtml(order)}</td>
+            <td>${escapeHtml(bay)}</td>
+            <td>${escapeHtml(time)}</td>
+            <td><span class="check-dot ${escapeHtml(tone)}">${escapeHtml(tone === "error" ? "!" : tone === "notice" ? "i" : "✓")}</span></td>
+          </tr>
+        `;
+      }).join("")
+    : `<tr><td colspan="5"><div class="bay-history-empty"><strong>Recent bay actions</strong><span>The next two actions will appear here.</span></div></td></tr>`;
 }
 
 function scrollToBaySearchMatch() {
@@ -4429,6 +5112,481 @@ function assignmentById(assignmentId) {
   return { bay: selectedBay(), assignment: selectedBayAssignment() };
 }
 
+
+function bayAssignmentRows() {
+  const rows = [];
+  for (const bay of state.bays || []) {
+    const groups = groupAssignmentsByJob(bay.assignments || []);
+    for (const group of groups) {
+      const assignment = group.assignments[0];
+      rows.push({ bay, assignment, assignments: group.assignments, jobKey: group.key, jobLabel: group.label, itemCount: group.itemCount, totalQty: group.totalQty, orderLine: group.orderLine });
+    }
+  }
+  return rows.sort((a, b) => `${a.bay.displayName || a.bay.bayCode}`.localeCompare(`${b.bay.displayName || b.bay.bayCode}`) || `${a.jobLabel}`.localeCompare(`${b.jobLabel}`));
+}
+
+function selectedManageItem() {
+  const rows = bayAssignmentRows();
+  if (!state.manageItemsSelectedId && rows.length) state.manageItemsSelectedId = String(rows[0].assignment.id || "");
+  return rows.find(({ assignment }) => String(assignment.id) === String(state.manageItemsSelectedId)) || rows[0] || null;
+}
+
+function bayOptionGroups(selectedValue = "") {
+  const sections = bayPhysicalSections();
+  return sections
+    .map((section) => {
+      const options = section.bays
+        .filter((bay) => bayCategoryKind(bay) !== "spacer")
+        .map((bay) => `<option value="${escapeHtml(bay.bayCode)}" ${bay.bayCode === selectedValue ? "selected" : ""}>${escapeHtml(bay.displayName || bay.bayCode)} - ${escapeHtml(bay.status || "Available")}</option>`)
+        .join("");
+      return options ? `<optgroup label="${escapeHtml(section.label)}">${options}</optgroup>` : "";
+    })
+    .join("");
+}
+
+function renderManageItemsPanel() {
+  if (!els.manageItemsPanel) return;
+  const query = String(state.manageItemsQuery || "").trim().toLowerCase();
+  const rows = bayAssignmentRows().filter(({ bay, assignment }) => {
+    if (!query) return true;
+    return [
+      bay.bayCode,
+      bay.displayName,
+      bay.mapSection,
+      assignment.order,
+      assignment.item,
+      assignment.customer,
+      assignment.product,
+      assignment.job,
+      assignment.dimensions,
+      assignment.status,
+    ].join(" ").toLowerCase().includes(query);
+  });
+  if (!rows.some(({ assignment }) => String(assignment.id) === String(state.manageItemsSelectedId))) {
+    state.manageItemsSelectedId = rows[0]?.assignment.id ? String(rows[0].assignment.id) : "";
+  }
+  const selected = selectedManageItem();
+
+  if (els.manageItemsSearch && els.manageItemsSearch.value !== state.manageItemsQuery) els.manageItemsSearch.value = state.manageItemsQuery;
+  if (els.manageItemsList) {
+    els.manageItemsList.innerHTML = rows.length
+      ? rows.map(({ bay, assignment, jobLabel, itemCount, totalQty, orderLine }) => `
+          <button type="button" class="manage-item-row ${String(assignment.id) === String(state.manageItemsSelectedId) ? "is-active" : ""}" data-manage-assignment-id="${escapeHtml(assignment.id)}">
+            <span><strong>${escapeHtml(jobLabel)}</strong><small>${escapeHtml(itemCount)} item${itemCount === 1 ? "" : "s"} / Qty ${escapeHtml(totalQty)} - ${escapeHtml(assignment.customer || "No customer")}</small><small>${escapeHtml(orderLine)}</small></span>
+            <em>${escapeHtml(bay.displayName || bay.bayCode)}</em>
+          </button>
+        `).join("")
+      : `<div class="manage-items-empty"><strong>No bay items found.</strong><span>Adjust the search or filters and try again.</span></div>`;
+  }
+  if (els.manageItemsTargetBay) {
+    const currentBay = selected?.bay?.bayCode || state.selectedBayCode || "";
+    const selectedValue = els.manageItemsTargetBay.value || currentBay;
+    els.manageItemsTargetBay.innerHTML = bayOptionGroups(selectedValue);
+    if (selectedValue) els.manageItemsTargetBay.value = selectedValue;
+  }
+  if (els.manageItemsSelected) {
+    if (!selected) {
+      els.manageItemsSelected.innerHTML = `<div class="manage-items-empty"><strong>Select an item</strong><span>All active bay assignments will appear on the left.</span></div>`;
+    } else {
+      const { bay, assignment } = selected;
+      const groupAssignments = selected.assignments || [assignment];
+      els.manageItemsSelected.innerHTML = `
+        <article class="manage-selected-card status-${escapeHtml(bayStatusKind(bay))}">
+          <div>
+            <span class="bay-page-eyebrow">Selected Job Nr.</span>
+            <h3>${escapeHtml(selected.jobLabel || assignmentJobLabel(assignment))}</h3>
+            <p>${escapeHtml(assignment.customer || "No customer listed")}</p>
+          </div>
+          <div class="manage-selected-stats">
+            ${miniStat("Current Bay", bay.displayName || bay.bayCode)}
+            ${miniStat("Items", groupAssignments.length)}
+            ${miniStat("Total Qty", selected.totalQty || groupAssignments.reduce((sum, item) => sum + Number(item.assignedQty || item.qty || 0), 0))}
+            ${miniStat("Status", assignment.status || bay.status || "Assigned")}
+          </div>
+          <small>${escapeHtml((selected.orderLine || groupAssignments.map((item) => `${item.order}-${item.item}`).join(", ")) || "No item list")}</small>
+        </article>
+      `;
+    }
+  }
+  if (els.manageItemsStatus) {
+    els.manageItemsStatus.textContent = selected ? `Ready to manage ${selected.jobLabel || `${selected.assignment.order}-${selected.assignment.item}`}.` : "Select an item to begin.";
+  }
+}
+
+function openManageItemsPanel(assignmentId = "") {
+  if (!els.manageItemsPanel || !els.manageItemsBackdrop) return;
+  if (assignmentId) state.manageItemsSelectedId = String(assignmentId);
+  else if (selectedBayAssignment()?.id) state.manageItemsSelectedId = String(selectedBayAssignment().id);
+  renderManageItemsPanel();
+  els.manageItemsPanel.hidden = false;
+  els.manageItemsBackdrop.hidden = false;
+  updateModalScrollLock();
+  els.manageItemsSearch?.focus();
+}
+
+function closeManageItemsPanel() {
+  if (els.manageItemsPanel) els.manageItemsPanel.hidden = true;
+  if (els.manageItemsBackdrop) els.manageItemsBackdrop.hidden = true;
+  updateModalScrollLock();
+}
+
+async function moveManagedItem() {
+  const selected = selectedManageItem();
+  const targetBay = els.manageItemsTargetBay?.value || "";
+  const reason = els.manageItemsReason?.value || "Managed from Bay Map";
+  if (!selected?.assignment?.id) throw new Error("Select a job to move.");
+  if (!targetBay) throw new Error("Select a destination bay.");
+  const groupAssignments = selected.assignments || [selected.assignment];
+  for (const assignment of groupAssignments) {
+    await fetchJson("/api/indian-trail/move", {
+      method: "POST",
+      body: JSON.stringify({ assignmentId: assignment.id, newBayCode: targetBay, reason, ...requestContext() }),
+    });
+  }
+  await refreshBayMapPage();
+  if (els.manageItemsStatus) els.manageItemsStatus.textContent = `Moved ${selected.jobLabel || `${selected.assignment.order}-${selected.assignment.item}`} to ${targetBay}.`;
+  renderManageItemsPanel();
+}
+
+async function clearManagedItem() {
+  const selected = selectedManageItem();
+  const reason = els.manageItemsReason?.value || "Cleared from Manage Items";
+  if (!selected?.assignment?.id) throw new Error("Select a job to clear.");
+  const groupAssignments = selected.assignments || [selected.assignment];
+  const label = selected.jobLabel || `${selected.assignment.order}-${selected.assignment.item}`;
+  if (!window.confirm(`Clear ${label} (${groupAssignments.length} item${groupAssignments.length === 1 ? "" : "s"}) from ${selected.bay.displayName || selected.bay.bayCode}?`)) return;
+  for (const assignment of groupAssignments) {
+    await fetchJson("/api/indian-trail/clear-assignment", {
+      method: "POST",
+      body: JSON.stringify({ assignmentId: assignment.id, reason, ...requestContext() }),
+    });
+  }
+  await refreshBayMapPage();
+  if (els.manageItemsStatus) els.manageItemsStatus.textContent = `Cleared ${label}.`;
+  renderManageItemsPanel();
+}
+
+function useManagedBayForScanner() {
+  const targetBay = els.manageItemsTargetBay?.value || selectedManageItem()?.bay?.bayCode || "";
+  if (!targetBay) {
+    showInlineError("Select a bay before sending it to the scanner.", false);
+    return;
+  }
+  if (els.bayScanBayInput) els.bayScanBayInput.value = targetBay;
+  if (els.bayScanModeToggle) els.bayScanModeToggle.checked = true;
+  if (els.bayScanOutInput) {
+    els.bayScanOutInput.placeholder = `Scan order to add to ${targetBay}...`;
+    els.bayScanOutInput.focus();
+  }
+  closeManageItemsPanel();
+  showFloatingNotice(`${targetBay} is ready in the bay scanner.`, "success");
+}
+
+function bayEditorGroups() {
+  return bayPhysicalSections().sort((a, b) => a.col - b.col || a.row - b.row || a.label.localeCompare(b.label));
+}
+
+function bayEditorSelectedGroupObject() {
+  const groups = bayEditorGroups();
+  if (!state.bayEditorSelectedGroup && groups.length) state.bayEditorSelectedGroup = groups[0].label;
+  return groups.find((group) => group.label === state.bayEditorSelectedGroup) || groups[0] || null;
+}
+
+function bayEditorPolicyForGroup(group) {
+  const policies = (group?.bays || []).map((bay) => bayPolicyKind(bay));
+  if (policies.length && policies.every((policy) => policy === "blocked")) return "blocked";
+  if (policies.length && policies.every((policy) => policy === "manual")) return "manual";
+  return "auto";
+}
+
+function bayEditorStatusFromPolicy(policy) {
+  if (policy === "blocked") return "ScanBlocked";
+  if (policy === "manual") return "ManualAssign";
+  return "Available";
+}
+
+function renderBayEditorPanel() {
+  const groups = bayEditorGroups();
+  const selectedGroup = bayEditorSelectedGroupObject();
+  if (els.bayEditorGroupList) {
+    els.bayEditorGroupList.innerHTML = groups.length
+      ? groups.map((group) => {
+          const active = group.label === selectedGroup?.label;
+          const used = group.bays.filter((bay) => Number(bay.assignedQty || 0) > 0).length;
+          const policy = bayEditorPolicyForGroup(group);
+          return `
+            <button type="button" class="bay-editor-group-row ${active ? "is-active" : ""}" data-bay-editor-group="${escapeHtml(group.label)}">
+              <span><strong>${escapeHtml(group.label)}</strong><small>${escapeHtml(group.bays.length)} bays / ${escapeHtml(used)} used</small></span>
+              <em class="policy-${escapeHtml(policy)}">${escapeHtml(policy === "blocked" ? "Blocked" : policy === "manual" ? "Man" : "Auto")}</em>
+            </button>
+          `;
+        }).join("")
+      : `<div class="bay-editor-empty"><strong>No bay groups found.</strong><span>Create a grouped set of bays to begin.</span></div>`;
+  }
+
+  if (!selectedGroup) {
+    if (els.bayEditorGroupForm) {
+      els.bayEditorGroupForm.innerHTML = bayEditorNewGroupFormMarkup();
+    }
+    if (els.bayEditorBayList) els.bayEditorBayList.innerHTML = "";
+    return;
+  }
+
+  const firstBay = selectedGroup.bays[0] || {};
+  const policy = bayEditorPolicyForGroup(selectedGroup);
+  if (els.bayEditorGroupForm) {
+    els.bayEditorGroupForm.innerHTML = `
+      <div class="bay-editor-card bay-editor-group-card">
+        <div>
+          <span class="bay-page-eyebrow">Grouped bay set</span>
+          <h3>${escapeHtml(selectedGroup.label)}</h3>
+          <p>Rename this grouped set, set assign behavior, create more bays inside it, or delete the group after clearing active assignments.</p>
+        </div>
+        <div class="bay-editor-form-grid">
+          <label><span>Group name</span><input id="bayEditorGroupNameInput" type="text" value="${escapeHtml(selectedGroup.label)}"></label>
+          <label><span>Category</span><input id="bayEditorGroupCategoryInput" type="text" value="${escapeHtml(firstBay.bayCategory || selectedGroup.kind || "Standard")}"></label>
+          <label><span>Assign behavior</span><select id="bayEditorGroupPolicyInput">
+            <option value="auto" ${policy === "auto" ? "selected" : ""}>Auto assign / free for preassign</option>
+            <option value="manual" ${policy === "manual" ? "selected" : ""}>Manual assign only</option>
+            <option value="blocked" ${policy === "blocked" ? "selected" : ""}>Blocked for all scanning</option>
+          </select></label>
+          <label><span>Map row</span><input id="bayEditorGroupRowInput" type="number" min="1" max="7" value="${escapeHtml(Math.round(Number(selectedGroup.row || 1)))}"></label>
+          <label><span>Map column</span><input id="bayEditorGroupColInput" type="number" min="1" max="7" value="${escapeHtml(Math.round(Number(selectedGroup.col || 1)))}"></label>
+          <label><span>Add bay count</span><input id="bayEditorAddCountInput" type="number" min="1" max="50" value="1"></label>
+          <label><span>New bay prefix</span><input id="bayEditorAddPrefixInput" type="text" value="${escapeHtml(selectedGroup.label)}"></label>
+        </div>
+        <div class="bay-editor-actions">
+          <button type="button" data-bay-editor-action="save-group">Save Group</button>
+          <button type="button" data-bay-editor-action="add-bays">Add Bays To Group</button>
+          <button type="button" class="danger" data-bay-editor-action="delete-group">Delete Group</button>
+        </div>
+      </div>
+      ${bayEditorNewGroupFormMarkup(false)}
+    `;
+  }
+
+  if (els.bayEditorBayList) {
+    const bays = selectedGroup.bays.slice().sort((a, b) => Number(a.sortOrder || a.layoutRow || 9999) - Number(b.sortOrder || b.layoutRow || 9999) || String(a.displayName || a.bayCode).localeCompare(String(b.displayName || b.bayCode)));
+    els.bayEditorBayList.innerHTML = `
+      <div class="bay-editor-bay-heading">
+        <div><strong>Individual Bays</strong><span>Edit names, capacity, behavior, or remove empty bays.</span></div>
+        <span>${escapeHtml(bays.length)} bay${bays.length === 1 ? "" : "s"}</span>
+      </div>
+      ${bays.map((bay) => bayEditorBayRowMarkup(bay)).join("")}
+    `;
+  }
+}
+
+function bayEditorNewGroupFormMarkup(standalone = true) {
+  return `
+    <div class="bay-editor-card bay-editor-new-card ${standalone ? "standalone" : ""}">
+      <div>
+        <span class="bay-page-eyebrow">Create grouped set</span>
+        <h3>New Bay Group</h3>
+        <p>Create a grouped set of bays, then move it into the exact map position in Edit Map.</p>
+      </div>
+      <div class="bay-editor-form-grid compact">
+        <label><span>Group name</span><input id="bayEditorNewGroupNameInput" type="text" placeholder="Example: Showers A"></label>
+        <label><span>Category</span><input id="bayEditorNewGroupCategoryInput" type="text" placeholder="Showers, Mirror, Coral..."></label>
+        <label><span>Bay count</span><input id="bayEditorNewGroupCountInput" type="number" min="1" max="50" value="1"></label>
+        <label><span>Bay prefix</span><input id="bayEditorNewGroupPrefixInput" type="text" placeholder="SHOWER-A"></label>
+        <label><span>Map row</span><input id="bayEditorNewGroupRowInput" type="number" min="1" max="7" value="1"></label>
+        <label><span>Map column</span><input id="bayEditorNewGroupColInput" type="number" min="1" max="7" value="1"></label>
+      </div>
+      <div class="bay-editor-actions">
+        <button type="button" data-bay-editor-action="create-group">Create Group</button>
+      </div>
+    </div>
+  `;
+}
+
+function bayEditorBayRowMarkup(bay) {
+  const policy = bayPolicyKind(bay);
+  const assigned = (bay.assignments || []).length;
+  return `
+    <article class="bay-editor-bay-row" data-editor-bay-code="${escapeHtml(bay.bayCode)}">
+      <div class="bay-editor-bay-summary">
+        <strong>${escapeHtml(bay.displayName || bay.bayCode)}</strong>
+        <span>${escapeHtml(bay.bayCode)}${assigned ? ` / ${escapeHtml(assigned)} assigned job${assigned === 1 ? "" : "s"}` : " / empty"}</span>
+      </div>
+      <label><span>Name</span><input data-editor-field="displayName" type="text" value="${escapeHtml(bay.displayName || bay.bayCode)}"></label>
+      <label><span>Group</span><input data-editor-field="mapSection" type="text" value="${escapeHtml(bay.mapSection || "")}"></label>
+      <label><span>Category</span><input data-editor-field="bayCategory" type="text" value="${escapeHtml(bay.bayCategory || "")}"></label>
+      <label><span>Capacity</span><input data-editor-field="capacityQty" type="number" min="0" value="${escapeHtml(bay.capacityQty || 0)}"></label>
+      <label><span>Status</span><select data-editor-field="policy">
+        <option value="auto" ${policy === "auto" ? "selected" : ""}>Auto assign</option>
+        <option value="manual" ${policy === "manual" ? "selected" : ""}>Manual only</option>
+        <option value="blocked" ${policy === "blocked" ? "selected" : ""}>Blocked</option>
+      </select></label>
+      <div class="bay-editor-row-actions">
+        <button type="button" data-bay-editor-action="save-bay" data-bay-code="${escapeHtml(bay.bayCode)}">Save</button>
+        <button type="button" class="danger" data-bay-editor-action="delete-bay" data-bay-code="${escapeHtml(bay.bayCode)}">Delete</button>
+      </div>
+    </article>
+  `;
+}
+
+function openBayEditorPanel(groupLabel = "") {
+  if (!els.bayEditorPanel || !els.bayEditorBackdrop) return;
+  state.bayEditorSelectedGroup = groupLabel || state.bayEditorSelectedGroup || bayPhysicalSections()[0]?.label || "";
+  renderBayEditorPanel();
+  els.bayEditorPanel.hidden = false;
+  els.bayEditorBackdrop.hidden = false;
+  updateModalScrollLock();
+}
+
+function closeBayEditorPanel() {
+  if (els.bayEditorPanel) els.bayEditorPanel.hidden = true;
+  if (els.bayEditorBackdrop) els.bayEditorBackdrop.hidden = true;
+  updateModalScrollLock();
+}
+
+async function refreshBayEditorAfter(payload) {
+  if (payload?.bays) state.bays = payload.bays;
+  await refreshBayMapPage();
+  renderBayEditorPanel();
+}
+
+async function saveBayEditorGroup() {
+  const group = bayEditorSelectedGroupObject();
+  if (!group) throw new Error("Select a bay group first.");
+  const groupName = document.getElementById("bayEditorGroupNameInput")?.value.trim() || group.label;
+  const category = document.getElementById("bayEditorGroupCategoryInput")?.value.trim() || group.kind || "Standard";
+  const policy = document.getElementById("bayEditorGroupPolicyInput")?.value || "auto";
+  const row = Number(document.getElementById("bayEditorGroupRowInput")?.value || group.row || 1);
+  const col = Number(document.getElementById("bayEditorGroupColInput")?.value || group.col || 1);
+
+  for (const bay of group.bays) {
+    await fetchJson("/api/indian-trail/layout", {
+      method: "POST",
+      body: JSON.stringify({
+        bayCode: bay.bayCode,
+        displayName: bay.displayName || bay.bayCode,
+        mapSection: groupName,
+        bayCategory: category,
+        layoutRow: row,
+        layoutCol: col,
+        capacityQty: bay.capacityQty || 0,
+        active: bay.active !== false,
+        ...requestContext(),
+      }),
+    });
+    await fetchJson("/api/indian-trail/bay-status", {
+      method: "POST",
+      body: JSON.stringify({ bayCode: bay.bayCode, status: bayEditorStatusFromPolicy(policy), reason: "Updated from Edit Bays", ...requestContext() }),
+    });
+  }
+  state.bayEditorSelectedGroup = groupName;
+  await refreshBayMapPage();
+  renderBayEditorPanel();
+  showFloatingNotice(`Saved ${groupName}.`, "success");
+}
+
+async function createBayEditorGroup() {
+  const name = document.getElementById("bayEditorNewGroupNameInput")?.value.trim() || "";
+  const category = document.getElementById("bayEditorNewGroupCategoryInput")?.value.trim() || "Standard";
+  const count = Number(document.getElementById("bayEditorNewGroupCountInput")?.value || 1);
+  const prefix = document.getElementById("bayEditorNewGroupPrefixInput")?.value.trim() || name;
+  const row = Number(document.getElementById("bayEditorNewGroupRowInput")?.value || 1);
+  const col = Number(document.getElementById("bayEditorNewGroupColInput")?.value || 1);
+  if (!name) throw new Error("Enter a group name before creating bays.");
+  const payload = await fetchJson("/api/indian-trail/bays/add", {
+    method: "POST",
+    body: JSON.stringify({ mapSection: name, bayCategory: category, prefix, count, layoutRow: row, layoutCol: col, ...requestContext() }),
+  });
+  state.bayEditorSelectedGroup = name;
+  await refreshBayEditorAfter(payload);
+  showFloatingNotice(`Created ${name}.`, "success");
+}
+
+async function addBaysToEditorGroup() {
+  const group = bayEditorSelectedGroupObject();
+  if (!group) throw new Error("Select a bay group first.");
+  const count = Number(document.getElementById("bayEditorAddCountInput")?.value || 1);
+  const prefix = document.getElementById("bayEditorAddPrefixInput")?.value.trim() || group.label;
+  const category = document.getElementById("bayEditorGroupCategoryInput")?.value.trim() || group.kind || "Standard";
+  const row = Number(document.getElementById("bayEditorGroupRowInput")?.value || group.row || 1);
+  const col = Number(document.getElementById("bayEditorGroupColInput")?.value || group.col || 1);
+  const payload = await fetchJson("/api/indian-trail/bays/add", {
+    method: "POST",
+    body: JSON.stringify({ mapSection: group.label, bayCategory: category, prefix, count, layoutRow: row, layoutCol: col, ...requestContext() }),
+  });
+  await refreshBayEditorAfter(payload);
+  showFloatingNotice(`Added ${count} bay${count === 1 ? "" : "s"} to ${group.label}.`, "success");
+}
+
+async function deleteBayEditorGroup() {
+  const group = bayEditorSelectedGroupObject();
+  if (!group) throw new Error("Select a bay group first.");
+  if (!window.confirm(`Delete bay group ${group.label}? Empty bays will be deactivated. Active assignments must be cleared or moved first.`)) return;
+  const payload = await fetchJson("/api/indian-trail/bays/delete-group", {
+    method: "POST",
+    body: JSON.stringify({ mapSection: group.label, ...requestContext() }),
+  });
+  state.bayEditorSelectedGroup = "";
+  await refreshBayEditorAfter(payload);
+  showFloatingNotice(`Deleted ${group.label}.`, "success");
+}
+
+async function saveBayEditorBay(bayCode) {
+  const row = els.bayEditorBayList?.querySelector(`[data-editor-bay-code="${CSS.escape(String(bayCode))}"]`);
+  const bay = state.bays.find((item) => item.bayCode === bayCode);
+  if (!row || !bay) throw new Error("Bay row not found.");
+  const value = (field) => row.querySelector(`[data-editor-field="${field}"]`)?.value || "";
+  const payload = await fetchJson("/api/indian-trail/layout", {
+    method: "POST",
+    body: JSON.stringify({
+      bayCode,
+      displayName: value("displayName") || bayCode,
+      mapSection: value("mapSection") || bay.mapSection || "Unmapped",
+      bayCategory: value("bayCategory") || bay.bayCategory || "Standard",
+      layoutRow: bay.layoutRow || 1,
+      layoutCol: bay.layoutCol || 1,
+      capacityQty: Number(value("capacityQty") || 0),
+      active: true,
+      ...requestContext(),
+    }),
+  });
+  await fetchJson("/api/indian-trail/bay-status", {
+    method: "POST",
+    body: JSON.stringify({ bayCode, status: bayEditorStatusFromPolicy(value("policy") || "auto"), reason: "Updated from Edit Bays", ...requestContext() }),
+  });
+  await refreshBayEditorAfter(payload);
+  showFloatingNotice(`Saved ${bayCode}.`, "success");
+}
+
+async function deleteBayEditorBay(bayCode) {
+  if (!window.confirm(`Delete bay ${bayCode}? Active assignments must be cleared or moved first.`)) return;
+  const payload = await fetchJson("/api/indian-trail/bays/delete", {
+    method: "POST",
+    body: JSON.stringify({ bayCode, ...requestContext() }),
+  });
+  await refreshBayEditorAfter(payload);
+  showFloatingNotice(`Deleted ${bayCode}.`, "success");
+}
+
+function openBayAllScansModal() {
+  const events = state.bayEvents || [];
+  const rows = events.length
+    ? events.map((event) => {
+        const when = new Date(event.time || event.createdAt || "");
+        const time = Number.isNaN(when.getTime()) ? escapeHtml(event.time || "") : escapeHtml(when.toLocaleString());
+        const bay = event.bayDisplay || event.bayCode || event.newBayDisplay || event.newBayCode || event.oldBayDisplay || event.oldBayCode || "";
+        const order = event.order ? `${event.order}-${event.item || ""}` : "";
+        return `<tr><td>${escapeHtml(formatEventType(event.eventType))}</td><td>${escapeHtml(order)}</td><td>${escapeHtml(bay)}</td><td>${escapeHtml(event.customer || "")}</td><td>${escapeHtml(event.reason || "")}</td><td>${escapeHtml(event.user || "")}</td><td>${time}</td></tr>`;
+      }).join("")
+    : `<tr><td colspan="7">No bay scan history is available yet.</td></tr>`;
+  openAdminModal("custom", {
+    title: "All Bay Scans",
+    body: `
+      <div class="full-scans-modal bay-full-scans-modal">
+        <div class="section-heading"><h3>Indian Trail Bay Scan History</h3><span>${escapeHtml(events.length)} latest actions</span></div>
+        <div class="admin-table full-scans-table"><table><thead><tr><th>Action</th><th>Order</th><th>Bay</th><th>Customer</th><th>Reason</th><th>User</th><th>Time</th></tr></thead><tbody>${rows}</tbody></table></div>
+      </div>
+    `,
+  });
+}
+
 function openSdiPanel(assignmentId = "") {
   const found = assignmentById(assignmentId);
   if (found.bay?.bayCode) state.selectedBayCode = found.bay.bayCode;
@@ -4493,6 +5651,19 @@ async function submitSdi(mark = true) {
 }
 
 async function runBayAction(action) {
+  if (action === "scan-here") {
+    const bay = requireSelectedBay();
+    if (!bay) return;
+    if (els.bayScanBayInput) els.bayScanBayInput.value = bay.bayCode;
+    if (els.bayScanModeToggle) els.bayScanModeToggle.checked = true;
+    if (els.bayScanOutInput) {
+      els.bayScanOutInput.placeholder = `Scan order to add to ${bay.displayName || bay.bayCode}...`;
+      els.bayScanOutInput.focus();
+    }
+    closeSelectedBayModal();
+    showFloatingNotice(`${bay.displayName || bay.bayCode} is ready for manual bay scanning.`, "success");
+    return;
+  }
   if (action === "sdi") {
     openSdiPanel();
     return;
@@ -4502,8 +5673,11 @@ async function runBayAction(action) {
     return;
   }
   if (action === "item-management") {
-    openSdiPanel();
-    showFloatingNotice("Use the selected bay order buttons to move, clear, or mark items while the Item Management panel is expanded here.", "notice");
+    openManageItemsPanel();
+    return;
+  }
+  if (action === "bay-editor") {
+    openBayEditorPanel(state.selectedBayCode ? bayRackLabel(selectedBay()) : "");
     return;
   }
   if (action === "old-bays") {
@@ -4530,8 +5704,8 @@ async function runBayAction(action) {
     return;
   }
   if (action === "hold" || action === "block" || action === "unblock") {
-    const status = action === "hold" ? "Hold" : action === "block" ? "Blocked" : "Available";
-    const previousStatus = ["Hold", "Blocked", "Available"].includes(String(bay.status || "")) ? bay.status : "Available";
+    const status = action === "hold" ? "ManualAssign" : action === "block" ? "ScanBlocked" : "Available";
+    const previousStatus = ["ManualAssign", "ScanBlocked", "Hold", "Blocked", "Available"].includes(String(bay.status || "")) ? bay.status : "Available";
     const result = await postBayAction("/api/indian-trail/bay-status", { bayCode: bay.bayCode, status, reason: `${status} from bay map` });
     pushBayHistory({
       label: `bay status ${bay.displayName || bay.bayCode}`,
@@ -4539,7 +5713,7 @@ async function runBayAction(action) {
       redo: () => postBayAction("/api/indian-trail/bay-status", { bayCode: bay.bayCode, status, reason: `Redo status change to ${status}` }),
     });
     state.bays = result.bays || state.bays;
-    showFloatingNotice(`${bay.displayName || bay.bayCode} set to ${status}.`, "success");
+    showFloatingNotice(`${bay.displayName || bay.bayCode} set to ${status === "ManualAssign" ? "Manual Assign" : status === "ScanBlocked" ? "Blocked Scans" : "Auto Assign"}.`, "success");
   }
 }
 
@@ -4912,26 +6086,13 @@ async function runAssignmentAction(action, assignmentId) {
     openSdiPanel(assignment.id);
     return;
   }
-  if (action === "clear") {
-    if (!window.confirm(`Clear ${assignment.order}-${assignment.item} from this bay?`)) return;
-    await postBayAction("/api/indian-trail/clear-assignment", { assignmentId: assignment.id, reason: "Cleared selected order from bay map" });
-    pushBayHistory({
-      label: `clear ${assignment.order}-${assignment.item}`,
-      undo: () => postBayAction("/api/indian-trail/restore-assignment", { assignmentId: assignment.id, reason: "Undo selected bay clear" }),
-      redo: () => postBayAction("/api/indian-trail/clear-assignment", { assignmentId: assignment.id, reason: "Redo selected bay clear" }),
-    });
+  if (action === "manage") {
+    openManageItemsPanel(assignment.id);
     return;
   }
-  if (action === "move") {
-    const newBayCode = window.prompt("Move this order to which bay code?");
-    if (!newBayCode) return;
-    await postBayAction("/api/indian-trail/move", { assignmentId: assignment.id, newBayCode, reason: `Moved selected order from ${found.bay?.displayName || found.bay?.bayCode || "bay"}` });
-    const oldBayCode = found.bay?.bayCode || "";
-    pushBayHistory({
-      label: `move ${assignment.order}-${assignment.item}`,
-      undo: () => postBayAction("/api/indian-trail/move", { assignmentId: assignment.id, newBayCode: oldBayCode, reason: `Undo move from ${newBayCode}` }),
-      redo: () => postBayAction("/api/indian-trail/move", { assignmentId: assignment.id, newBayCode, reason: `Redo move from ${oldBayCode}` }),
-    });
+  if (action === "clear" || action === "move") {
+    // Clear and move now use the Manage Items workflow so a whole Job Nr. group moves together.
+    openManageItemsPanel(assignment.id);
   }
 }
 
@@ -5477,8 +6638,9 @@ async function refreshAdminPage() {
   requests.push(hasPermission("manage_users") ? fetchJson("/api/admin/users") : Promise.resolve(null));
   requests.push(hasPermission("view_active_sessions") ? fetchJson("/api/admin/sessions") : Promise.resolve(null));
   requests.push(hasPermission("manage_customer_route_rules") ? fetchJson("/api/admin/customer-route-rules") : Promise.resolve(null));
+  requests.push(hasPermission("manage_customer_route_rules") ? fetchJson("/api/admin/customer-emails") : Promise.resolve(null));
   requests.push(hasPermission("manage_roles") ? fetchJson("/api/admin/roles") : Promise.resolve(null));
-  const [summary, users, sessions, customerRules, roles] = await Promise.all(requests);
+  const [summary, users, sessions, customerRules, customerEmails, roles] = await Promise.all(requests);
   if (summary) state.adminSummary = summary;
   if (summary && els.adminSummary) {
     els.adminSummary.innerHTML = [
@@ -5499,12 +6661,14 @@ async function refreshAdminPage() {
   state.adminUsers = users?.users || [];
   state.activeSessions = sessions?.sessions || [];
   state.adminCustomerRouteRules = customerRules?.rules || [];
+  state.customerEmailSettings = customerEmails || state.customerEmailSettings || { contacts: [], cc: [], outbox: [] };
   state.adminRoles = roles?.roles || state.adminRoles || [];
   state.allPermissions = roles?.permissions || state.allPermissions || [];
   renderAdminUsers();
   renderAdminStations();
   renderManualEditStageOptions();
   renderCustomerRouteRules();
+  renderCustomerEmailOverview();
   renderActiveSessions();
 }
 
@@ -5713,7 +6877,7 @@ function renderAdminDeliveryLists() {
   els.adminDeliveryLists.innerHTML = importHistoryRows(activeRecentImports());
 }
 
-function openAdminModal(kind) {
+function openAdminModal(kind, options = null) {
   if (kind === "roles") {
   resetRolePermissionUiSession();
   }
@@ -5726,6 +6890,7 @@ function openAdminModal(kind) {
     sessions: "Active Sessions",
     stations: "Stations",
     customerRoutes: "Edit Customer Routes",
+    customerEmails: "Customer Email Rules",
     manualEdit: "Manual Delivery List Edit",
     lookups: "Lookup Manager",
     rackForm: "Rack",
@@ -5733,8 +6898,9 @@ function openAdminModal(kind) {
     racks: "Edit Racks",
     recentScans: "All Scans",
   };
-  els.adminModalTitle.textContent = titleMap[kind] || "Admin";
-  els.adminModalBody.innerHTML = adminModalContent(kind);
+  els.adminModalTitle.textContent = options?.title || titleMap[kind] || "Admin";
+  els.adminModal.dataset.kind = kind;
+  els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
   els.adminModal.hidden = false;
   if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = false;
   updateModalScrollLock();
@@ -5758,7 +6924,10 @@ function closeAdminModal() {
 
   state.manualEditDirty = false;
 
-  if (els.adminModal) els.adminModal.hidden = true;
+  if (els.adminModal) {
+    els.adminModal.hidden = true;
+    delete els.adminModal.dataset.kind;
+  }
   if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = true;
   updateModalScrollLock();
 }
@@ -5845,6 +7014,9 @@ function adminModalContent(kind) {
   }
   if (kind === "customerRoutes") {
     return customerRouteRulesModalHtml();
+  }
+  if (kind === "customerEmails") {
+    return customerEmailRulesModalHtml();
   }
   if (kind === "manualEdit") {
     return manualEditModalHtml();
@@ -8028,6 +9200,322 @@ function refreshCustomerRouteModal() {
   }
 }
 
+
+function renderCustomerEmailOverview() {
+  if (!els.customerEmailOverview) return;
+
+  const settings = state.customerEmailSettings || { contacts: [], cc: [], outbox: [] };
+  const contacts = settings.contacts || [];
+  const cc = settings.cc || [];
+  const outbox = settings.outbox || [];
+  const sentCount = outbox.filter((email) => String(email.status || "").toLowerCase() === "sent").length;
+  const draftCount = outbox.filter((email) => String(email.status || "").toLowerCase() === "draft").length;
+  const failedCount = outbox.filter((email) => String(email.status || "").toLowerCase() === "failed").length;
+  const previewContacts = contacts.slice(0, 4);
+
+  els.customerEmailOverview.innerHTML = `
+    <div class="customer-email-overview-card">
+      <div>
+        <strong>${escapeHtml(contacts.length)} email rule${contacts.length === 1 ? "" : "s"}</strong>
+        <span>${escapeHtml(cc.length)} global CC ${cc.length === 1 ? "address" : "addresses"} | ${settings.smtpConfigured ? "SMTP live" : "Draft mode"}</span>
+      </div>
+      <div class="customer-email-overview-status">
+        <span class="status-sent">${escapeHtml(sentCount)} sent</span>
+        <span class="status-draft">${escapeHtml(draftCount)} draft</span>
+        ${failedCount ? `<span class="status-failed">${escapeHtml(failedCount)} failed</span>` : ""}
+      </div>
+    </div>
+    <div class="customer-email-overview-rules">
+      ${previewContacts.length ? previewContacts.map((contact) => `
+        <div><strong>${escapeHtml(contact.customerPattern)}</strong><span>${escapeHtml(contact.email)}</span></div>
+      `).join("") : `<div><strong>No customer emails yet</strong><span>Add rules so manifests and ready notices know where to go.</span></div>`}
+      ${contacts.length > previewContacts.length ? `<div><strong>+${escapeHtml(contacts.length - previewContacts.length)} more</strong><span>Open Edit emails to review all rules.</span></div>` : ""}
+    </div>
+  `;
+}
+
+function emailAddressListText(values = []) {
+  return (values || []).filter(Boolean).join(", ");
+}
+
+function emailStatusLabel(status) {
+  const clean = String(status || "draft").toLowerCase();
+  if (clean === "sent") return "Sent";
+  if (clean === "failed") return "Failed";
+  if (clean === "queued") return "Queued";
+  return "Draft";
+}
+
+function customerEmailRulesModalHtml() {
+  const settings = state.customerEmailSettings || { contacts: [], cc: [], outbox: [], smtpConfig: {} };
+  const contacts = settings.contacts || [];
+  const cc = settings.cc || [];
+  const outbox = settings.outbox || [];
+  const drafts = outbox.filter((email) => ["draft", "queued", "failed"].includes(String(email.status || "").toLowerCase()));
+  const sent = outbox.filter((email) => String(email.status || "").toLowerCase() === "sent");
+  const smtp = settings.smtpConfig || {};
+
+  return `
+    <div class="customer-email-modal-shell customer-email-modal-shell-v34">
+      <section class="customer-email-intro">
+        <div>
+          <strong>Customer manifest and ready-notice emails</strong>
+          <p>Match customers to email addresses. Import/update creates a manifest draft, and staging completion creates a ready notice after all pieces for that customer/date are scanned.</p>
+        </div>
+        <span class="email-smtp-badge ${settings.smtpConfigured ? "is-live" : "is-draft"}">${settings.smtpConfigured ? "SMTP live" : "Draft mode"}</span>
+      </section>
+
+      <section class="customer-email-draft-control">
+        <div>
+          <strong>Email Drafts</strong>
+          <span>${escapeHtml(drafts.length)} open draft${drafts.length === 1 ? "" : "s"} / ${escapeHtml(sent.length)} sent recently</span>
+        </div>
+        <p>Draft mode keeps every generated email inside this webapp until SMTP is configured. Open a draft to review, copy it, or launch it in the default email app.</p>
+      </section>
+
+      <section class="customer-email-smtp-section">
+        <header>
+          <div>
+            <strong>SMTP setup readiness</strong>
+            <span>Server-side only. Passwords never belong in app.js or the browser.</span>
+          </div>
+          <em class="email-smtp-badge ${settings.smtpConfigured ? "is-live" : "is-draft"}">${settings.smtpConfigured ? "Ready to send" : "Saving drafts"}</em>
+        </header>
+        <div class="smtp-config-grid">
+          <span><small>Host</small><b>${escapeHtml(smtp.host || "Not set")}</b></span>
+          <span><small>Port</small><b>${escapeHtml(smtp.port || "587")}</b></span>
+          <span><small>From</small><b>${escapeHtml(smtp.from || "Not set")}</b></span>
+          <span><small>User</small><b>${escapeHtml(smtp.user || "Not set")}</b></span>
+          <span><small>SSL</small><b>${smtp.ssl ? "Yes" : "No / TLS"}</b></span>
+        </div>
+      </section>
+
+      <section class="customer-email-test-section">
+        <header><strong>Send test email</strong><span>If SMTP is not configured, this creates a draft you can open below.</span></header>
+        <form id="customerEmailTestForm" class="customer-email-test-form">
+          <label><span>Send test to</span><input id="customerEmailTestToInput" type="email" autocomplete="off" placeholder="you@example.com"></label>
+          <label><span>CC optional</span><input id="customerEmailTestCcInput" type="text" autocomplete="off" placeholder="manager@example.com, lead@example.com"></label>
+          <label><span>Subject</span><input id="customerEmailTestSubjectInput" type="text" autocomplete="off" value="Delivery Scanner test email"></label>
+          <label class="is-wide"><span>Body</span><textarea id="customerEmailTestBodyInput" rows="4">This is a test email from the Delivery List Scanner customer email system.</textarea></label>
+          <button type="submit">Send Test / Save Draft</button>
+        </form>
+      </section>
+
+      <form id="customerEmailContactForm" class="customer-email-form">
+        <input id="customerEmailEditIdInput" type="hidden">
+        <label><span>Customer match text</span><input id="customerEmailPatternInput" type="text" autocomplete="off" placeholder="Example: LENNAR HOMES"></label>
+        <label><span>Email address</span><input id="customerEmailAddressInput" type="email" autocomplete="off" placeholder="customer@example.com"></label>
+        <button id="customerEmailSubmitBtn" type="submit">Add Customer Email</button>
+      </form>
+
+      <section class="customer-email-list-section">
+        <header><strong>Customer email rules</strong><span>${escapeHtml(contacts.length)} active rule${contacts.length === 1 ? "" : "s"}</span></header>
+        <div class="customer-email-rule-list">
+          ${contacts.length ? contacts.map((contact) => `
+            <article class="customer-email-row">
+              <div><strong>${escapeHtml(contact.customerPattern)}</strong><span>${escapeHtml(contact.email)}</span></div>
+              <span class="customer-email-row-actions">
+                <button class="icon-only icon-pencil" type="button" data-edit-customer-email="${escapeHtml(contact.id)}" title="Edit customer email" aria-label="Edit customer email"></button>
+                <button class="icon-only icon-trash danger" type="button" data-remove-customer-email="${escapeHtml(contact.id)}" title="Remove customer email" aria-label="Remove customer email"></button>
+              </span>
+            </article>
+          `).join("") : `<div class="admin-empty">No customer emails yet.</div>`}
+        </div>
+      </section>
+
+      <section class="customer-email-cc-section">
+        <header><strong>CC on all customer emails</strong><span>These addresses receive every customer manifest and ready notice.</span></header>
+        <form id="customerEmailCcForm" class="customer-email-cc-form">
+          <input id="customerEmailCcInput" type="email" autocomplete="off" placeholder="manager@example.com">
+          <button type="submit">Add CC</button>
+        </form>
+        <div class="customer-email-cc-list">
+          ${cc.length ? cc.map((row) => `<span>${escapeHtml(row.email)} <button type="button" data-remove-customer-email-cc="${escapeHtml(row.id)}">&times;</button></span>`).join("") : `<em>No CC addresses configured.</em>`}
+        </div>
+      </section>
+
+      <section class="customer-email-outbox-section email-drafts-section">
+        <header><strong>Internal email drafts</strong><span>Open drafts here before SMTP is configured or after a send error.</span></header>
+        <div class="customer-email-outbox-list email-draft-list">
+          ${outbox.length ? outbox.map((email) => `
+            <article class="email-outbox-row status-${escapeHtml(email.status)}">
+              <div>
+                <strong>${escapeHtml(email.subject)}</strong>
+                <span>${escapeHtml(emailStatusLabel(email.status))} - ${escapeHtml(email.emailType)} - ${escapeHtml(email.customerName || "Customer email")} - ${escapeHtml(formatDisplayDate(email.deliveryDate))}</span>
+                <small>To: ${escapeHtml(emailAddressListText(email.toEmails))}${email.ccEmails?.length ? ` | CC: ${escapeHtml(emailAddressListText(email.ccEmails))}` : ""}</small>
+                ${email.error ? `<small class="email-error-text">${escapeHtml(email.error)}</small>` : ""}
+              </div>
+              <span class="email-outbox-actions">
+                <em>${escapeHtml(emailStatusLabel(email.status))}</em>
+                <button type="button" data-open-email-draft="${escapeHtml(email.id)}">Open</button>
+              </span>
+            </article>
+          `).join("") : `<div class="admin-empty">No customer email drafts yet.</div>`}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function emailDraftPreviewHtml(email) {
+  if (!email) return "";
+  return `
+    <div class="modal-backdrop email-draft-preview-backdrop" data-close-email-draft></div>
+    <section class="modal-panel email-draft-preview-panel" role="dialog" aria-modal="true" aria-label="Email draft preview">
+      <header>
+        <div>
+          <small>${escapeHtml(emailStatusLabel(email.status))} email</small>
+          <h2>${escapeHtml(email.subject || "Email draft")}</h2>
+          <span>${escapeHtml(email.emailType || "email")} - ${escapeHtml(email.customerName || "Customer email")}</span>
+        </div>
+        <button class="modal-close-x" type="button" data-close-email-draft aria-label="Close">&times;</button>
+      </header>
+      <div class="email-draft-meta-grid">
+        <span><small>To</small><b>${escapeHtml(emailAddressListText(email.toEmails) || "-")}</b></span>
+        <span><small>CC</small><b>${escapeHtml(emailAddressListText(email.ccEmails) || "-")}</b></span>
+        <span><small>Created</small><b>${escapeHtml(formatDateTime(email.createdAt) || "-")}</b></span>
+        <span><small>Status</small><b>${escapeHtml(emailStatusLabel(email.status))}</b></span>
+      </div>
+      ${email.error ? `<div class="email-draft-error"><strong>Send status</strong><span>${escapeHtml(email.error)}</span></div>` : ""}
+      <pre class="email-draft-body">${escapeHtml(email.body || "")}</pre>
+      <footer class="email-draft-actions">
+        <button type="button" data-copy-email-draft="${escapeHtml(email.id)}">Copy Body</button>
+        <button type="button" data-mailto-email-draft="${escapeHtml(email.id)}">Open in Email App</button>
+        <button type="button" data-close-email-draft>Close</button>
+      </footer>
+    </section>
+  `;
+}
+
+function openEmailDraftPreview(id) {
+  const email = (state.customerEmailSettings?.outbox || []).find((row) => String(row.id) === String(id));
+  if (!email) return;
+  closeEmailDraftPreview();
+  const shell = document.createElement("div");
+  shell.id = "emailDraftPreviewShell";
+  shell.className = "email-draft-preview-shell";
+  shell.innerHTML = emailDraftPreviewHtml(email);
+  document.body.appendChild(shell);
+  updateModalScrollLock();
+}
+
+function closeEmailDraftPreview() {
+  document.getElementById("emailDraftPreviewShell")?.remove();
+  updateModalScrollLock();
+}
+
+async function copyEmailDraftBody(id) {
+  const email = (state.customerEmailSettings?.outbox || []).find((row) => String(row.id) === String(id));
+  if (!email) return;
+  await navigator.clipboard.writeText(email.body || "");
+  showInlineError("Email body copied.", false);
+}
+
+function mailtoParam(name, value) {
+  // Do not use URLSearchParams for mailto body text. Some email clients keep
+  // plus signs as literal characters, so spaces must be encoded as %20.
+  return `${encodeURIComponent(name)}=${encodeURIComponent(value || "")}`;
+}
+
+function openEmailDraftMailto(id) {
+  const email = (state.customerEmailSettings?.outbox || []).find((row) => String(row.id) === String(id));
+  if (!email) return;
+  const to = emailAddressListText(email.toEmails);
+  const cc = emailAddressListText(email.ccEmails);
+  const params = [
+    mailtoParam("subject", email.subject || ""),
+    mailtoParam("body", email.body || ""),
+  ];
+  if (cc) params.push(mailtoParam("cc", cc));
+  window.location.href = `mailto:${encodeURIComponent(to)}?${params.join("&")}`;
+}
+
+async function refreshCustomerEmailSettings(openModal = false) {
+  const payload = await fetchJson("/api/admin/customer-emails");
+  state.customerEmailSettings = payload || { contacts: [], cc: [], outbox: [] };
+  if (openModal && els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "customerEmails" && els.adminModalBody) {
+    els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  }
+  return payload;
+}
+
+function startCustomerEmailEdit(id) {
+  const contact = (state.customerEmailSettings?.contacts || []).find((row) => String(row.id) === String(id));
+  if (!contact) return;
+  const idInput = document.getElementById("customerEmailEditIdInput");
+  const patternInput = document.getElementById("customerEmailPatternInput");
+  const emailInput = document.getElementById("customerEmailAddressInput");
+  const submitButton = document.getElementById("customerEmailSubmitBtn");
+  if (idInput) idInput.value = contact.id;
+  if (patternInput) patternInput.value = contact.customerPattern || "";
+  if (emailInput) emailInput.value = contact.email || "";
+  if (submitButton) submitButton.textContent = "Save Customer Email";
+  patternInput?.focus();
+}
+
+async function saveCustomerEmailContact() {
+  const id = document.getElementById("customerEmailEditIdInput")?.value.trim() || "";
+  const pattern = document.getElementById("customerEmailPatternInput")?.value.trim() || "";
+  const email = document.getElementById("customerEmailAddressInput")?.value.trim() || "";
+  const payload = await fetchJson("/api/admin/customer-emails", {
+    method: "POST",
+    body: JSON.stringify({ id, customerPattern: pattern, email }),
+  });
+  state.customerEmailSettings = payload || state.customerEmailSettings;
+  renderCustomerEmailOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+}
+
+async function saveCustomerEmailCc() {
+  const email = document.getElementById("customerEmailCcInput")?.value.trim() || "";
+  const payload = await fetchJson("/api/admin/customer-emails/cc", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+  state.customerEmailSettings = payload || state.customerEmailSettings;
+  renderCustomerEmailOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+}
+
+async function sendCustomerEmailTest() {
+  const toEmail = document.getElementById("customerEmailTestToInput")?.value.trim() || "";
+  const ccEmails = document.getElementById("customerEmailTestCcInput")?.value.trim() || "";
+  const subject = document.getElementById("customerEmailTestSubjectInput")?.value.trim() || "Delivery Scanner test email";
+  const body = document.getElementById("customerEmailTestBodyInput")?.value.trim() || "This is a test email from the Delivery List Scanner customer email system.";
+  const payload = await fetchJson("/api/admin/customer-emails/test", {
+    method: "POST",
+    body: JSON.stringify({ toEmail, ccEmails, subject, body }),
+  });
+  state.customerEmailSettings = payload || state.customerEmailSettings;
+  renderCustomerEmailOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  const result = payload.testResult || {};
+  const message = result.status === "sent"
+    ? `Test email sent to ${result.toEmail}.`
+    : `Test email saved as ${result.status || "draft"}. Open it in Email Drafts.`;
+  showFloatingNotice(message, result.status === "sent" ? "success" : "notice");
+}
+
+async function removeCustomerEmailContact(id) {
+  const payload = await fetchJson("/api/admin/customer-emails/remove", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+  state.customerEmailSettings = payload || state.customerEmailSettings;
+  renderCustomerEmailOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+}
+
+async function removeCustomerEmailCc(id) {
+  const payload = await fetchJson("/api/admin/customer-emails/cc/remove", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+  state.customerEmailSettings = payload || state.customerEmailSettings;
+  renderCustomerEmailOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+}
+
 function customerRouteFormValues() {
   const patternInput = document.getElementById("customerRoutePatternInputModal") || els.customerRoutePatternInput;
   const routeInput = document.getElementById("customerRouteSelectModal") || els.customerRouteSelect;
@@ -9039,7 +10527,7 @@ function wireEvents() {
 
       const rack = state.racks.find((item) => item.code === printButton.dataset.rackPrint);
 
-      if (!rack || String(rack.status || "").toLowerCase() !== "closed") {
+      if (!rack || !["closed", "in transit"].includes(String(rack.status || "").toLowerCase())) {
         showFloatingNotice("Complete this rack before printing its packing list.", "notice");
         return;
       }
@@ -9065,6 +10553,16 @@ function wireEvents() {
       event.stopPropagation();
 
       uncompleteRack(uncompleteButton.dataset.rackUncomplete).catch((error) => showInlineError(error.message, true));
+
+      return;
+    }
+
+    const returnButton = event.target.closest("[data-rack-return]");
+    if (returnButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      returnRack(returnButton.dataset.rackReturn).catch((error) => showInlineError(error.message, true));
 
       return;
     }
@@ -9303,6 +10801,21 @@ function wireEvents() {
       saveCustomerRouteRule().catch((error) => showInlineError(error.message, true));
       return;
     }
+    if (event.target.closest("#customerEmailContactForm")) {
+      event.preventDefault();
+      saveCustomerEmailContact().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#customerEmailCcForm")) {
+      event.preventDefault();
+      saveCustomerEmailCc().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#customerEmailTestForm")) {
+      event.preventDefault();
+      sendCustomerEmailTest().catch((error) => showInlineError(error.message, true));
+      return;
+    }
   });
   els.customerRouteRuleForm?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -9422,6 +10935,7 @@ function wireEvents() {
   });
   els.bayStatusFilter?.addEventListener("change", () => {
     state.bayStatusFilter = els.bayStatusFilter.value;
+    if (state.bayStatusFilter === "all") collapseAllPhysicalBaySections();
     renderBayMapPage();
   });
   els.bayGlassFilter?.addEventListener("change", () => {
@@ -9436,6 +10950,7 @@ function wireEvents() {
     const button = event.target.closest("[data-bay-quick-filter]");
     if (!button) return;
     state.bayQuickFilter = button.dataset.bayQuickFilter || "all";
+    if (state.bayQuickFilter === "all") collapseAllPhysicalBaySections();
     renderBayMapPage();
   });
   els.bayCategoryFilters?.addEventListener("click", (event) => {
@@ -9453,12 +10968,25 @@ function wireEvents() {
     submitBayScanOut().catch((error) => showInlineError(error.message, true));
   });
   els.bayManualSubmitBtn?.addEventListener("click", () => submitManualBayScan().catch((error) => showInlineError(error.message, true)));
-  els.bayScanModeToggle?.addEventListener("change", () => {
-    if (els.bayScanOutInput) els.bayScanOutInput.placeholder = els.bayScanModeToggle.checked ? "Scan order to add to bay..." : "Scan order to remove from bay...";
+  const updateBayScanModeUi = () => {
+    if (els.bayScanOutInput) els.bayScanOutInput.placeholder = els.bayScanModeToggle?.checked ? "Scan order to add to selected bay..." : "Scan order to remove from bay...";
+  };
+  document.querySelectorAll('input[name="bayScanVisualMode"]').forEach((input) => input.addEventListener("change", updateBayScanModeUi));
+  document.getElementById("bayTargetClearBtn")?.addEventListener("click", () => {
+    if (els.bayScanBayInput) els.bayScanBayInput.value = "";
+    if (els.bayScanModeToggle) els.bayScanModeToggle.checked = false;
+    if (els.bayScanOutInput) els.bayScanOutInput.placeholder = "Scan order to remove from bay...";
   });
   els.bayUndoBtn?.addEventListener("click", () => runBayHistory("undo").catch((error) => showInlineError(error.message, true)));
   els.bayRedoBtn?.addEventListener("click", () => runBayHistory("redo").catch((error) => showInlineError(error.message, true)));
   els.bayMapCanvas?.addEventListener("click", (event) => {
+    const bayEditorOpenButton = event.target.closest("[data-bay-editor-open]");
+    if (bayEditorOpenButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      openBayEditorPanel(bayEditorOpenButton.dataset.bayEditorOpen || "");
+      return;
+    }
     const columnButton = event.target.closest("[data-bay-col-action]");
     if (columnButton) {
       event.preventDefault();
@@ -9509,6 +11037,59 @@ function wireEvents() {
   });
   els.sdiCloseBtn?.addEventListener("click", () => closeSdiPanel());
   els.sdiBackdrop?.addEventListener("click", () => closeSdiPanel());
+  els.manageItemsCloseBtn?.addEventListener("click", () => closeManageItemsPanel());
+  els.manageItemsBackdrop?.addEventListener("click", () => closeManageItemsPanel());
+  els.bayEditorCloseBtn?.addEventListener("click", () => closeBayEditorPanel());
+  els.bayEditorBackdrop?.addEventListener("click", () => closeBayEditorPanel());
+  els.bayEditorNewGroupBtn?.addEventListener("click", () => {
+    state.bayEditorSelectedGroup = "";
+    renderBayEditorPanel();
+    setTimeout(() => document.getElementById("bayEditorNewGroupNameInput")?.focus(), 0);
+  });
+  els.bayEditorGroupList?.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-bay-editor-group]");
+    if (!row) return;
+    state.bayEditorSelectedGroup = row.dataset.bayEditorGroup || "";
+    renderBayEditorPanel();
+  });
+  els.bayEditorPanel?.addEventListener("click", (event) => {
+    const actionButton = event.target.closest("[data-bay-editor-action]");
+    if (!actionButton) return;
+    event.preventDefault();
+    const action = actionButton.dataset.bayEditorAction || "";
+    const bayCode = actionButton.dataset.bayCode || "";
+    const runner =
+      action === "save-group" ? saveBayEditorGroup :
+      action === "create-group" ? createBayEditorGroup :
+      action === "add-bays" ? addBaysToEditorGroup :
+      action === "delete-group" ? deleteBayEditorGroup :
+      action === "save-bay" ? () => saveBayEditorBay(bayCode) :
+      action === "delete-bay" ? () => deleteBayEditorBay(bayCode) : null;
+    if (runner) runner().catch((error) => showInlineError(error.message, true));
+  });
+  els.bayAllScansBtn?.addEventListener("click", () => openBayAllScansModal());
+  els.manageItemsSearch?.addEventListener("input", () => {
+    state.manageItemsQuery = els.manageItemsSearch.value;
+    renderManageItemsPanel();
+  });
+  els.manageItemsList?.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-manage-assignment-id]");
+    if (!row) return;
+    state.manageItemsSelectedId = row.dataset.manageAssignmentId || "";
+    renderManageItemsPanel();
+  });
+  els.manageItemsMoveBtn?.addEventListener("click", () => moveManagedItem().catch((error) => showInlineError(error.message, true)));
+  els.manageItemsClearBtn?.addEventListener("click", () => clearManagedItem().catch((error) => showInlineError(error.message, true)));
+  els.manageItemsScannerBtn?.addEventListener("click", () => useManagedBayForScanner());
+  els.manageItemsSdiBtn?.addEventListener("click", () => {
+    const selected = selectedManageItem();
+    if (!selected?.assignment?.id) {
+      showInlineError("Select an item before opening SDI.", false);
+      return;
+    }
+    closeManageItemsPanel();
+    openSdiPanel(selected.assignment.id);
+  });
   els.staleBayCloseBtn?.addEventListener("click", () => closeStaleBayPanel());
   els.staleBayOkBtn?.addEventListener("click", () => closeStaleBayPanel());
   els.staleBayBackdrop?.addEventListener("click", () => closeStaleBayPanel());
@@ -9541,7 +11122,7 @@ function wireEvents() {
   els.bayLayoutConfirmBtn?.addEventListener("click", () => confirmBayLayoutDraft().catch((error) => showInlineError(error.message, true)));
   els.bayLayoutCancelBtn?.addEventListener("click", () => cancelBayLayoutDraft());
   els.bayCollapseAllBtn?.addEventListener("click", () => {
-    (state.bays || []).forEach((bay) => state.collapsedBaySections.add(bayRackLabel(bay)));
+    collapseAllPhysicalBaySections();
     renderBayMapPage();
   });
   els.bayExpandAllBtn?.addEventListener("click", () => {
@@ -9675,6 +11256,10 @@ function wireEvents() {
             state.adminCustomerRouteRules = payload.rules || [];
             openAdminModal("customerRoutes");
           })
+          .catch((error) => showInlineError(error.message, true));
+      } else if (modalKind === "customerEmails") {
+        refreshCustomerEmailSettings(false)
+          .then(() => openAdminModal("customerEmails"))
           .catch((error) => showInlineError(error.message, true));
       } else if (modalKind === "deliveryLists" || modalKind === "deliveryActions") {
         loadDeliveryLists(state.activeListId)
@@ -9827,6 +11412,18 @@ function wireEvents() {
       deleteAdminDeliveryListById(adminListDeleteButton.dataset.adminListDelete).catch((error) => showInlineError(error.message, true));
       return;
     }
+    const openTransitButton = event.target.closest("[data-open-transit-manifest]");
+    if (openTransitButton) {
+      openInTransitManifest().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const closeTransitButton = event.target.closest("[data-close-transit-manifest]");
+    if (closeTransitButton) {
+      closeInTransitManifest();
+      return;
+    }
+
     const openListButton = event.target.closest("[data-open-list]");
     if (openListButton) {
       const searchText = openListButton.dataset.openSearch || "";
@@ -10087,6 +11684,48 @@ function wireEvents() {
     const removeCustomerRouteButton = event.target.closest("[data-remove-customer-route-rule]");
     if (removeCustomerRouteButton) {
       removeCustomerRouteRule(removeCustomerRouteButton.dataset.removeCustomerRouteRule).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const editCustomerEmailButton = event.target.closest("[data-edit-customer-email]");
+    if (editCustomerEmailButton) {
+      startCustomerEmailEdit(editCustomerEmailButton.dataset.editCustomerEmail);
+      return;
+    }
+
+    const removeCustomerEmailButton = event.target.closest("[data-remove-customer-email]");
+    if (removeCustomerEmailButton) {
+      removeCustomerEmailContact(removeCustomerEmailButton.dataset.removeCustomerEmail).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const removeCustomerEmailCcButton = event.target.closest("[data-remove-customer-email-cc]");
+    if (removeCustomerEmailCcButton) {
+      removeCustomerEmailCc(removeCustomerEmailCcButton.dataset.removeCustomerEmailCc).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const openEmailDraftButton = event.target.closest("[data-open-email-draft]");
+    if (openEmailDraftButton) {
+      openEmailDraftPreview(openEmailDraftButton.dataset.openEmailDraft);
+      return;
+    }
+
+    const closeEmailDraftButton = event.target.closest("[data-close-email-draft]");
+    if (closeEmailDraftButton) {
+      closeEmailDraftPreview();
+      return;
+    }
+
+    const copyEmailDraftButton = event.target.closest("[data-copy-email-draft]");
+    if (copyEmailDraftButton) {
+      copyEmailDraftBody(copyEmailDraftButton.dataset.copyEmailDraft).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const mailtoEmailDraftButton = event.target.closest("[data-mailto-email-draft]");
+    if (mailtoEmailDraftButton) {
+      openEmailDraftMailto(mailtoEmailDraftButton.dataset.mailtoEmailDraft);
       return;
     }
     

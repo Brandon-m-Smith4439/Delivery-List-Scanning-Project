@@ -5,8 +5,12 @@ from __future__ import annotations
 
 import json
 import html
+import os
 import re
-from datetime import datetime
+import threading
+import time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -245,6 +249,7 @@ def render_rack_packing_list(payload: dict) -> str:
     barcode = rack.get("barcode") or f"RACK-{rack.get('code', '')}"
     delivery_label = rack.get("deliveryLabel") or ""
     delivery_suffix = f" - {esc(delivery_label)}" if delivery_label else ""
+    destination = rack.get("destination") or "Indian Trail"
     rows = []
     for item in rack.get("items") or []:
         rows.append(
@@ -293,8 +298,8 @@ def render_rack_packing_list(payload: dict) -> str:
       <header>
         <div>
           <h1>{esc(rack.get("name") or rack.get("code"))} Packing List{delivery_suffix}</h1>
-          <p>Rack Type: {esc(rack.get("type"))} | Status: {esc(rack.get("status"))} | Qty: {esc(rack.get("qty"))}</p>
-          <p>Scan this rack barcode on the outbound stage to scan all active pieces on this rack.</p>
+          <p>Rack Type: {esc(rack.get("type"))} | Destination: {esc(destination)} | Status: {esc(rack.get("status"))} | Qty: {esc(rack.get("qty"))}</p>
+          <p>Scan this rack barcode on the outbound stage to mark the rack on the way.</p>
         </div>
         <div class="barcode-box">
           {code39_svg(str(barcode))}
@@ -642,6 +647,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"rules": STORE.get_customer_route_rules()})
             return
 
+        if parsed.path == "/api/admin/customer-emails":
+            if not self.require_permission("manage_customer_route_rules"):
+                return
+            self.send_json(STORE.get_customer_email_settings())
+            return
+
         if parsed.path == "/api/admin/manual-edit-lookups":
             if not self.require_permission("edit_delivery_lists"):
                 return
@@ -700,6 +711,12 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_permission("view_indian_trail"):
                 return
             self.send_json(STORE.indian_trail_summary())
+            return
+
+        if parsed.path == "/api/indian-trail/in-transit":
+            if not self.require_permission("view_indian_trail"):
+                return
+            self.send_json(STORE.indian_trail_in_transit())
             return
 
         if parsed.path == "/api/indian-trail/bays":
@@ -1063,6 +1080,41 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.remove_customer_route_rule(int(data.get("ruleId") or 0), user["username"]))
                 return
 
+            if parsed.path == "/api/admin/customer-emails":
+                user = self.require_permission("manage_customer_route_rules")
+                if not user:
+                    return
+                self.send_json(STORE.upsert_customer_email_contact(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/customer-emails/remove":
+                user = self.require_permission("manage_customer_route_rules")
+                if not user:
+                    return
+                self.send_json(STORE.remove_customer_email_contact(int(data.get("id") or 0), user["username"]))
+                return
+
+            if parsed.path == "/api/admin/customer-emails/test":
+                user = self.require_permission("manage_customer_route_rules")
+                if not user:
+                    return
+                self.send_json(STORE.queue_customer_email_test(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/customer-emails/cc":
+                user = self.require_permission("manage_customer_route_rules")
+                if not user:
+                    return
+                self.send_json(STORE.upsert_customer_email_cc(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/customer-emails/cc/remove":
+                user = self.require_permission("manage_customer_route_rules")
+                if not user:
+                    return
+                self.send_json(STORE.remove_customer_email_cc(int(data.get("id") or 0), user["username"]))
+                return
+
             if parsed.path == "/api/admin/manual-edit-lookups":
                 user = self.require_permission("edit_delivery_lists")
                 if not user:
@@ -1228,6 +1280,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.uncomplete_rack(data, user["username"]))
                 return
 
+            if parsed.path == "/api/racks/return":
+                user = self.require_permission("scan_racks")
+                if not user:
+                    return
+                self.send_json(STORE.return_rack(data, user["username"]))
+                return
+
             if parsed.path == "/api/racks/move-item":
                 user = self.require_permission("manage_racks")
                 if not user:
@@ -1277,8 +1336,38 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
 
 
+def daily_import_loop() -> None:
+    """Run the Temp Delivery Lists import once per day at 5 PM Eastern.
+
+    This is intentionally local-server based. If the server is not running at
+    5 PM Eastern, the next run happens the next time the server is running at
+    the scheduled time.
+    """
+    if os.environ.get("DLS_DAILY_IMPORT_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
+        return
+    tz = ZoneInfo("America/New_York")
+    while True:
+        now = datetime.now(tz)
+        next_run = now.replace(hour=17, minute=0, second=0, microsecond=0)
+        if next_run <= now:
+            next_run += timedelta(days=1)
+        time.sleep(max((next_run - now).total_seconds(), 1))
+        try:
+            date_from = (datetime.now(tz).date() - timedelta(days=7)).isoformat()
+            result = STORE.import_delivery_folder({"user": "daily-auto-import", "dateFrom": date_from, "dateTo": ""})
+            print(f"Daily 5 PM ET delivery-list import complete: {result.get('scannedFiles', 0)} files checked")
+        except Exception as exc:
+            print(f"Daily 5 PM ET delivery-list import failed: {exc}")
+
+
+def start_daily_import_scheduler() -> None:
+    thread = threading.Thread(target=daily_import_loop, name="daily-delivery-list-import", daemon=True)
+    thread.start()
+
+
 def main() -> int:
     STORE.initialize()
+    start_daily_import_scheduler()
     server = ThreadingHTTPServer((CONFIG.host, CONFIG.port), Handler)
     print(f"Delivery List Scanner running at http://{CONFIG.host}:{CONFIG.port}/")
     print(f"Database type: {CONFIG.database_type}")

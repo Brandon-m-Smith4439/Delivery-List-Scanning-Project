@@ -1,40 +1,23 @@
-Scanning Project UI/backend update - v14
+Scanning Project v36 - Bay scanner history and email draft modal polish
 
-Updated in this package:
+Updated files:
+- server.py
+- delivery_store.py
+- index.html
+- app.js
+- styles.css
 
-1. Print / packing list polish
-- Enlarged the Date write-in area in the Checked By / Date box on printed delivery lists.
-- Kept the larger delivery-list print font and current pagination behavior.
-- Added an RM flag column to rack packing lists so remake pieces are obvious on printed packing paperwork.
+Changes in this pass:
+- Reworked the Bay Map scan history section to use the same latest compact Scan History styling as the main Scan page scanning panel.
+- Changed Bay Map recent scan/action rows into a vertical compact table instead of side-by-side cards.
+- Tightened the Bay Map scanner panel spacing around Target Bay, scan input, and mode controls.
+- Kept Target Bay near the top of the bay scan workflow above the scan textbox.
+- Fixed Email Draft preview layering so it opens above the Customer Emails edit GUI.
+- Rebuilt Email Draft preview sizing, padding, and layout so the content has proper white space and does not overlap or hide behind the modal edges.
 
-2. Outbound scan safety
-- Outbound piece scans are now blocked when the matching staging row has not been scanned.
-- Outbound piece scans are also blocked when the matching staging row has no rack/truck transportation method assigned.
-- Added an in-app Outbound Safety Check popup that lets the user override the block and assign a transportation method.
-- Override actions are written to the audit trail.
-- The old silent auto-stage behavior is no longer used for normal outbound scans; auto-stage only happens as part of an explicit override.
-
-3. Top-right user menu
-- Simplified the account control to a less-oval rounded rectangle.
-- Simplified the dropdown so it only shows Sign out.
-- Added smoother dropdown styling.
-
-4. Old Bay Review popup
-- Revamped the old bay popup with clearer summary cards, better order cards, bay pills, and a cleaner sticky footer.
-- Changed wording from Old Bay Orders to Old Bay Review.
-
-Validation completed:
-- server.py passed Python compile check.
-- delivery_store.py passed Python compile check.
+Validation performed:
 - app.js passed node --check.
+- server.py and delivery_store.py passed Python compile checks.
 
 Install note:
-Back up your current project folder first, then replace the matching files with the files in this package.
-
-## v15 - Print wrap / stale bay / user menu polish
-
-- Prevented long Job Nr. and Customer values from wrapping on printed delivery-list rows, which stops those rows from pushing one list page onto an extra physical print page.
-- Kept the print page number only at the top-right of each delivery-list page.
-- Moved the Old Bay Review days counter into a smaller pill beside the order/customer information.
-- Added click-away and Escape-to-close behavior for the top-right user sign-out dropdown.
-
+- Stop the local server, back up the current project folder, replace these files, then restart the server.
