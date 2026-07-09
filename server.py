@@ -108,26 +108,29 @@ def render_item_row(item: dict) -> str:
             """
 
 
-def paginate_item_rows(items: list[dict], rows_per_page: int = 23) -> list[str]:
+def paginate_item_rows(items: list[dict], rows_per_page: int = 23, first_page_rows: int | None = None) -> list[str]:
     """Build explicit one-paper-page chunks for printed delivery lists.
 
     Important for future edits: the browser print preview only understands the
     sections we give it. If this number is too high, Chrome/Edge may split one
     logical list page across two physical pieces of paper, which makes the page
-    label wrong. Keep this conservative so every rendered <section class="sheet">
-    fits on one printed page. The current print CSS uses larger rows/fonts, so
-    rows_per_page is set to 23 to use more of the sheet without forcing the
-    browser to create unexpected extra pages. The default print output is one physical
-    copy, so the labels stay as the actual list page count: 1 of 3, 2 of 3,
-    3 of 3.
+    label wrong. Continuation pages use a compact title and can safely hold the
+    normal row count. Page 1 has a taller title/header, so it gets a smaller row
+    allowance to keep the Notes section on the same physical sheet.
     """
     if not items:
         return ['<tr><td colspan="8">No printable rows.</td></tr>']
+
+    first_page_limit = max(1, first_page_rows if first_page_rows is not None else rows_per_page - 2)
+    continuation_limit = max(1, rows_per_page)
 
     pages: list[str] = []
     current_rows: list[str] = []
     current_count = 0
     current_product = object()
+
+    def current_row_limit() -> int:
+        return first_page_limit if not pages else continuation_limit
 
     def flush_page() -> None:
         nonlocal current_rows, current_count, current_product
@@ -149,7 +152,7 @@ def paginate_item_rows(items: list[dict], rows_per_page: int = 23) -> list[str]:
         product = item.get("product") or item.get("job") or "Unspecified Glass"
         needs_group_row = product != current_product
         needed_rows = 1 + (1 if needs_group_row else 0)
-        if current_rows and current_count + needed_rows > rows_per_page:
+        if current_rows and current_count + needed_rows > current_row_limit():
             flush_page()
             needs_group_row = True
 
@@ -158,7 +161,7 @@ def paginate_item_rows(items: list[dict], rows_per_page: int = 23) -> list[str]:
             current_rows.append(f'<tr class="glass-group"><td colspan="8">{esc(product)}</td></tr>')
             current_count += 1
 
-        if current_count >= rows_per_page and current_rows:
+        if current_count >= current_row_limit() and current_rows:
             flush_page()
             current_product = product
             current_rows.append(f'<tr class="glass-group"><td colspan="8">{esc(product)}</td></tr>')

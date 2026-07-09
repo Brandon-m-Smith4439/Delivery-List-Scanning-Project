@@ -4638,6 +4638,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         updated_only = str(filters.get("updatedOnly") or "").lower() in {"1", "true", "yes"}
         glass_types = [term.strip().lower() for term in re.split(r"[,;\n]+", str(filters.get("glassType") or "")) if term.strip()]
         mirror_mode = str(filters.get("mirrorMode") or "exclude").strip().lower()
+        include_mirror_remakes = str(filters.get("includeMirrorRemakes") or "").lower() in {"1", "true", "yes"}
+        selected_mirror_glass = any(re.search(r"mirror|mirr|\bmir\b", glass_type) for glass_type in glass_types)
         customer_filter = str(filters.get("customers") or "").strip().lower()
         order_filter = str(filters.get("orders") or "").strip()
         customer_terms = [term.strip() for term in re.split(r"[,;\n]+", customer_filter) if term.strip()]
@@ -4654,8 +4656,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return False
             return True
 
+        def glass_filter_matches(item: dict[str, Any]) -> bool:
+            if not glass_types:
+                return True
+            glass_signal = f"{item.get('product', '')} {item.get('job', '')}".lower()
+            if any(glass_type in glass_signal for glass_type in glass_types):
+                return True
+            return include_mirror_remakes and not selected_mirror_glass and is_mirror_item(item) and is_remake_item(item)
+
         def search_filters_match(item: dict[str, Any]) -> bool:
-            if glass_types and not any(glass_type in f"{item.get('product', '')} {item.get('job', '')}".lower() for glass_type in glass_types):
+            if not glass_filter_matches(item):
                 return False
             if customer_terms and not any(term in str(item.get("customer", "")).lower() for term in customer_terms):
                 return False
@@ -4668,7 +4678,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return False
             if mirror_mode == "only":
                 return is_mirror_item(item)
-            if mirror_mode == "include" and not updated_only:
+            if mirror_mode == "include":
                 return True
             return should_print_delivery_item(item, exclude_mirrors=True, include_mirror_remakes=False)
 
@@ -4737,7 +4747,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not package_items:
                 continue
 
-            excluded_regular_mirrors = [
+            excluded_regular_mirrors = [] if mirror_mode == "include" else [
                 item
                 for item in source_items
                 if is_mirror_item(item) and not is_remake_item(item) and route_matches(item) and search_filters_match(item)

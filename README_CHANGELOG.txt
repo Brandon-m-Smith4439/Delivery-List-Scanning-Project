@@ -1,15 +1,16 @@
-Delivery List Scanner - v60
+Delivery List Scanner - v62
 
 Edited files:
-- styles.css
+- app.js
+- delivery_store.py
 - index.html
 
 Changes:
-- Extended the simple Bay Map in-transit animation so the moving line starts from the left edge of the lane and exits at the right edge.
-- Slowed the line movement down so it feels steady and intentional.
-- Kept the v59 simple animation approach.
-- Kept the working Bay Map scanner sticky layout untouched.
-- Updated cache-busting references to v60.
+- Fixed Print/Export Glass Type = Mirror so intentionally selecting mirror glass now includes regular mirror rows instead of only remake mirrors.
+- Kept the default mirror exclusion behavior for normal/updated delivery-list printing when mirrors are not selected.
+- Added backend handling so mirror remakes can still print with remake/update print packages even when regular mirrors are excluded by default.
+- Kept updated-list printing filtered to updated rows while still allowing selected mirror rows when Mirror is intentionally checked in Glass Types.
+- Updated cache-busting references to v62.
 
 Notes:
 - No __pycache__ folders included.

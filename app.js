@@ -6731,12 +6731,15 @@ function submitPrintOptions() {
     window.print();
     return;
   }
+  const checkedGlassInputs = [...(els.printOptionsGlassType?.querySelectorAll('.print-glass-choice:not(.print-glass-all-choice) input[type="checkbox"]:checked') || [])];
+  const selectedMirrorGlass = checkedGlassInputs.some((input) => (input.dataset.printGlassCategory || "") === "Mirror");
   const filters = {
     updatedOnly: els.printUpdatedOnly?.checked ? "1" : "",
     rushOnly: els.printRushOnly?.checked ? "1" : "",
     remakeOnly: els.printRemakeOnly?.checked ? "1" : "",
-    glassType: [...(els.printOptionsGlassType?.querySelectorAll('.print-glass-choice:not(.print-glass-all-choice) input[type="checkbox"]:checked') || [])].map((input) => input.value.trim()).filter(Boolean).join(","),
-    mirrorMode: "exclude",
+    glassType: checkedGlassInputs.map((input) => input.value.trim()).filter(Boolean).join(","),
+    mirrorMode: selectedMirrorGlass ? "include" : "exclude",
+    includeMirrorRemakes: selectedMirrorGlass ? "" : "1",
     customers: els.printCustomerFilter?.value.trim() || "",
     orders: els.printOrderFilter?.value.trim() || "",
   };
