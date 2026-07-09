@@ -20903,3 +20903,935 @@ body.modal-scroll-locked .app-header {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* 2026-07-09 v37: Bay scanner compaction, merged manual assign, and bay scanner rules UI. */
+.bay-scanner-panel-v2 {
+  padding-top: 0 !important;
+}
+
+.bay-scanner-panel-v2 > .progress-band:first-child,
+.bay-scanner-panel-v2 .bay-panel-route-band-v2 {
+  margin-top: 0 !important;
+  border-top-left-radius: 7px !important;
+  border-top-right-radius: 7px !important;
+}
+
+.bay-scan-command-form-v37 {
+  padding: 10px 12px 11px !important;
+  gap: 7px !important;
+}
+
+.bay-scan-mode-card-v37 {
+  gap: 7px !important;
+}
+
+.bay-scan-mode-card-v37 .bay-mode-option {
+  min-height: 38px !important;
+  padding: 6px 9px !important;
+  display: grid !important;
+  grid-template-columns: 16px minmax(0, 1fr) !important;
+  align-items: center !important;
+  justify-content: start !important;
+  gap: 7px !important;
+}
+
+.bay-scan-mode-card-v37 .bay-mode-option input {
+  grid-column: 1 !important;
+  justify-self: start !important;
+}
+
+.bay-scan-mode-card-v37 .bay-mode-option span {
+  grid-column: 2 !important;
+  min-width: 0 !important;
+}
+
+.bay-scan-mode-card-v37 .bay-mode-option strong {
+  font-size: 12px !important;
+}
+
+.bay-target-row-v37 {
+  margin-top: 1px !important;
+  margin-bottom: 9px !important;
+  align-items: end !important;
+}
+
+.bay-target-row-v37 .bay-code-field input,
+.bay-target-row-v37 .bay-target-clear {
+  height: 38px !important;
+}
+
+.bay-command-scan-input-v37 {
+  margin-top: 0 !important;
+  height: 58px !important;
+}
+
+.bay-command-scan-input-v37 input {
+  height: 58px !important;
+  padding-right: 124px !important;
+}
+
+.bay-scan-action-strip-v37 {
+  top: -22px !important;
+  right: 8px !important;
+}
+
+.bay-scan-action-strip-v37 .icon-button {
+  width: 46px !important;
+  min-width: 46px !important;
+  height: 39px !important;
+  min-height: 39px !important;
+}
+
+.bay-manual-card-v37 {
+  margin-top: 8px !important;
+  padding: 10px !important;
+  border-radius: 8px !important;
+  background: #fbfdff !important;
+}
+
+.bay-manual-card-v37 .section-heading {
+  margin-bottom: 7px !important;
+}
+
+.bay-manual-card-v37 .section-heading h3 {
+  font-size: 13px !important;
+}
+
+.bay-manual-card-v37 .section-heading span {
+  font-size: 10px !important;
+  max-width: 235px !important;
+  text-align: right !important;
+}
+
+.bay-manual-row-v37 {
+  grid-template-columns: minmax(0, 1.35fr) minmax(72px, 0.65fr) 78px !important;
+  gap: 7px !important;
+}
+
+.bay-manual-row-v37 input,
+.bay-manual-row-v37 button {
+  height: 36px !important;
+  min-height: 36px !important;
+}
+
+.bay-scanner-rules-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.bay-rule-card {
+  border: 1px solid #cbd7ea;
+  border-radius: 10px;
+  background: #fff;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.bay-rule-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bay-rule-card header strong,
+.bay-rule-card header span {
+  display: block;
+}
+
+.bay-rule-card header span {
+  color: #526078;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.bay-rule-form {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) minmax(160px, 0.6fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.bay-rule-form label {
+  display: grid;
+  gap: 5px;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.bay-rule-form input,
+.bay-rule-form select {
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+}
+
+.bay-rule-form button {
+  min-height: 40px;
+  border: 1px solid var(--navy);
+  border-radius: 7px;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 900;
+  padding: 0 12px;
+}
+
+.bay-rule-list {
+  display: grid;
+  gap: 8px;
+}
+
+.bay-rule-list article {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e2eaf6;
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 8px 10px;
+}
+
+.bay-rule-list strong,
+.bay-rule-list span {
+  display: block;
+}
+
+.bay-rule-list span {
+  color: #526078;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.manual-bay-confirm-dialog {
+  max-width: 620px;
+}
+
+.manual-bay-confirm-actions {
+  grid-template-columns: auto auto auto !important;
+}
+
+.manual-bay-confirm-actions .remember {
+  background: #0f766e !important;
+  border-color: #0f766e !important;
+}
+
+@media (max-width: 900px) {
+  .bay-rule-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 2026-07-09 v38: Bay scanner alignment and Bay Scanner Rules form cleanup.
+   These overrides intentionally live at the end of the file because the Bay Map
+   scanner has several historical style passes. Keep future scanner spacing fixes
+   below this block or replace this block as a whole. */
+.bay-scanner-panel-v2 {
+  margin-top: 8px !important;
+  gap: 8px !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-command-form-v37 {
+  padding: 9px 12px 10px !important;
+  gap: 6px !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-heading-compact {
+  margin-bottom: 2px !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-mode-card-v37 {
+  gap: 7px !important;
+  margin-bottom: 2px !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-mode-card-v37 .bay-mode-option {
+  min-height: 36px !important;
+  padding: 5px 9px !important;
+  grid-template-columns: 16px minmax(0, 1fr) !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-mode-card-v37 .bay-mode-option strong {
+  font-size: 12px !important;
+  line-height: 1.1 !important;
+}
+
+.bay-scanner-panel-v2 .bay-target-row-v37 {
+  margin-top: -1px !important;
+  margin-bottom: 13px !important;
+  gap: 9px !important;
+  align-items: end !important;
+}
+
+.bay-scanner-panel-v2 .bay-target-row-v37 .bay-code-field {
+  gap: 3px !important;
+}
+
+.bay-scanner-panel-v2 .bay-target-row-v37 .bay-code-field input,
+.bay-scanner-panel-v2 .bay-target-row-v37 .bay-target-clear {
+  height: 36px !important;
+}
+
+.bay-scanner-panel-v2 .bay-target-row-v37 .bay-target-clear {
+  min-width: 60px !important;
+}
+
+.bay-scanner-panel-v2 .bay-command-scan-input-v37 {
+  height: 50px !important;
+  min-height: 50px !important;
+  margin-top: 0 !important;
+}
+
+.bay-scanner-panel-v2 .bay-command-scan-input-v37 .barcode-icon {
+  width: 30px !important;
+  height: 30px !important;
+}
+
+.bay-scanner-panel-v2 .bay-command-scan-input-v37 input {
+  height: 50px !important;
+  min-height: 50px !important;
+  padding-right: 102px !important;
+  font-size: 15px !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-action-strip-v37 {
+  top: 7px !important;
+  right: 7px !important;
+  gap: 4px !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-action-strip-v37 .icon-button {
+  width: 39px !important;
+  min-width: 39px !important;
+  height: 33px !important;
+  min-height: 33px !important;
+  border-radius: 7px !important;
+  box-shadow: 0 6px 14px rgba(7, 42, 99, 0.14) !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-action-strip-v37 .icon-button span {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-action-strip-v37 .icon-button small {
+  font-size: 9px !important;
+  line-height: 1 !important;
+}
+
+.bay-scanner-panel-v2 .bay-manual-card-v37 {
+  margin-top: 6px !important;
+  padding: 9px !important;
+}
+
+.bay-scanner-panel-v2 .bay-manual-card-v37 .section-heading {
+  margin-bottom: 6px !important;
+}
+
+.bay-scanner-panel-v2 .bay-manual-row-v37 {
+  grid-template-columns: minmax(0, 1.35fr) minmax(72px, 0.65fr) 76px !important;
+  gap: 7px !important;
+}
+
+.bay-scanner-panel-v2 .bay-manual-row-v37 input,
+.bay-scanner-panel-v2 .bay-manual-row-v37 button {
+  height: 34px !important;
+  min-height: 34px !important;
+}
+
+/* Admin > Bay Scanner Rules: stop inputs from colliding in narrower modals. */
+.bay-scanner-rules-shell {
+  max-width: 100% !important;
+}
+
+.bay-rule-card {
+  overflow: hidden !important;
+}
+
+.bay-rule-form {
+  width: 100% !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px 12px !important;
+  align-items: end !important;
+}
+
+.bay-rule-form label,
+.bay-rule-form input,
+.bay-rule-form select,
+.bay-rule-form button {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.bay-rule-form label.is-wide {
+  grid-column: 1 / -1 !important;
+}
+
+.bay-rule-form input,
+.bay-rule-form select {
+  width: 100% !important;
+}
+
+.bay-rule-form button {
+  justify-self: stretch !important;
+  width: 100% !important;
+}
+
+@media (max-width: 760px) {
+  .bay-scanner-panel-v2 .bay-manual-row-v37,
+  .bay-rule-form {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* 2026-07-09 v39: Global search polish, Bay Map scanner visual cleanup,
+   and list-switch search reset support. Keep these overrides at the end so
+   they beat older Bay Map scanner passes. */
+.header-search {
+  grid-template-columns: minmax(260px, 1fr) auto !important;
+  gap: 10px !important;
+}
+
+.header-search .search-box {
+  position: relative !important;
+  height: 46px !important;
+  padding: 0 88px 0 15px !important;
+  border: 1px solid #c7d5ea !important;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 8px 22px rgba(7, 42, 99, 0.07) !important;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease !important;
+}
+
+.header-search .search-box::after {
+  content: "Ctrl + K";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 58px;
+  height: 24px;
+  border: 1px solid #d5dfef;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #60708a;
+  display: inline-grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+}
+
+.header-search .search-box:focus-within {
+  border-color: var(--blue) !important;
+  box-shadow:
+    0 0 0 3px rgba(19, 92, 255, 0.12),
+    0 12px 26px rgba(7, 42, 99, 0.11) !important;
+}
+
+.header-search .search-icon {
+  width: 18px !important;
+  height: 18px !important;
+  border-color: #39557e !important;
+}
+
+.header-search .search-icon::after {
+  background: #39557e !important;
+}
+
+.header-search input {
+  height: 44px !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  background: transparent !important;
+}
+
+.header-search input::placeholder {
+  color: #75849a !important;
+  font-weight: 650 !important;
+}
+
+#headerGlobalSearchBtn {
+  height: 42px !important;
+  min-width: 78px !important;
+  border-color: var(--navy) !important;
+  background: var(--navy) !important;
+  color: #fff !important;
+  border-radius: 10px !important;
+  font-weight: 950 !important;
+  box-shadow: 0 8px 18px rgba(7, 42, 99, 0.16) !important;
+}
+
+#headerGlobalSearchBtn:hover {
+  background: var(--navy-dark) !important;
+  border-color: var(--navy-dark) !important;
+  transform: translateY(-1px);
+}
+
+.header-search-results {
+  top: calc(100% + 10px) !important;
+  border-radius: 12px !important;
+  border-color: #c7d5ea !important;
+  padding: 10px !important;
+  box-shadow: 0 22px 46px rgba(7, 22, 51, 0.18) !important;
+}
+
+.header-search-results button {
+  min-height: 64px !important;
+  border: 1px solid #e1e8f4 !important;
+  border-radius: 10px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+  padding: 10px 12px !important;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease !important;
+}
+
+.header-search-results button:hover {
+  border-color: var(--blue) !important;
+  background: var(--blue-soft) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(19, 92, 255, 0.12) !important;
+}
+
+.header-search-results strong {
+  color: var(--navy-dark) !important;
+  font-size: 14px !important;
+}
+
+.header-search-results span {
+  color: #4d5c75 !important;
+  font-size: 12px !important;
+  font-weight: 750 !important;
+}
+
+.header-search-results small {
+  display: inline-flex !important;
+  width: fit-content !important;
+  margin-top: 5px !important;
+  padding: 2px 8px !important;
+  border-radius: 999px !important;
+  background: #eef4ff !important;
+  color: #365783 !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+}
+
+/* Bay Map search and scanner surfaces should feel intentional instead of a mix
+   of stark white inputs sitting on blue-tinted panels. */
+.bay-action-bar .search-box,
+.bay-scanner-panel-v2 .bay-code-field input,
+.bay-scanner-panel-v2 .bay-manual-row-v37 input,
+.bay-scanner-panel-v2 .bay-target-clear,
+.bay-scanner-panel-v2 .bay-manual-row-v37 button,
+.bay-panel-route-lane span {
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%) !important;
+  border-color: #c9d8ee !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88) !important;
+}
+
+.bay-action-bar .search-box {
+  border-radius: 10px !important;
+}
+
+.bay-action-bar .search-box input,
+.bay-scanner-panel-v2 .bay-code-field input,
+.bay-scanner-panel-v2 .bay-manual-row-v37 input {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.bay-scanner-panel-v2 .bay-manual-card-v37 {
+  background: linear-gradient(180deg, #ffffff 0%, #f9fcff 100%) !important;
+  border: 1px solid #d4e0f0 !important;
+}
+
+.bay-panel-route-lane span {
+  color: var(--navy) !important;
+  border: 1px solid #d5e2f3 !important;
+  white-space: nowrap !important;
+}
+
+/* Prevent the Bay Map scan input text from visually colliding with the focused
+   blue outline. The wrapper owns the border; the input stays borderless. */
+.bay-scanner-panel-v2 .bay-command-scan-input-v37 {
+  display: grid !important;
+  grid-template-columns: 44px minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 0 8px 0 12px !important;
+  overflow: visible !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+}
+
+.bay-scanner-panel-v2 .bay-command-scan-input-v37 .barcode-icon {
+  grid-column: 1 !important;
+  justify-self: center !important;
+  margin: 0 !important;
+}
+
+.bay-scanner-panel-v2 .bay-command-scan-input-v37 input {
+  grid-column: 2 !important;
+  min-width: 0 !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  padding: 0 92px 0 0 !important;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  line-height: 44px !important;
+}
+
+.bay-scanner-panel-v2 .bay-command-scan-input-v37 input:focus {
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+
+.bay-scanner-panel-v2 .bay-scan-action-strip-v37 {
+  grid-column: 3 !important;
+  position: absolute !important;
+  top: 8px !important;
+  right: 8px !important;
+  z-index: 3 !important;
+}
+
+@media (max-width: 980px) {
+  .header-search {
+    grid-template-columns: minmax(180px, 1fr) !important;
+  }
+
+  #headerGlobalSearchBtn {
+    display: none !important;
+  }
+}
+
+/* 2026-07-09 v40: Global search status colors and Bay Map scanner/search polish.
+   Keep this block at the end because older Bay Map overrides are intentionally layered. */
+.header-search-results button {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 4px 12px !important;
+  align-items: start !important;
+}
+
+.global-result-main {
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 9px !important;
+}
+
+.global-result-main strong,
+.global-result-main span,
+.global-result-job,
+.global-result-meta {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.global-result-main strong {
+  color: var(--navy-dark) !important;
+  font-size: 14px !important;
+  font-weight: 950 !important;
+}
+
+.global-result-main span {
+  color: #3f4e66 !important;
+  font-size: 12px !important;
+  font-weight: 850 !important;
+}
+
+.global-result-job,
+.global-result-meta,
+.global-result-status-row {
+  grid-column: 1 / -1 !important;
+}
+
+.global-result-job {
+  color: #4f6079 !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+}
+
+.global-result-meta {
+  color: #697990 !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+}
+
+.global-result-status-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 5px !important;
+  margin-top: 3px !important;
+}
+
+.header-search-results .global-result-status {
+  display: inline-flex !important;
+  align-items: center !important;
+  width: auto !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 3px 8px !important;
+  border: 1px solid #d7e1ef !important;
+  border-radius: 999px !important;
+  background: #f4f7fb !important;
+  color: #3f516d !important;
+  font-size: 10px !important;
+  font-weight: 950 !important;
+  line-height: 1.1 !important;
+  white-space: nowrap !important;
+}
+
+.header-search-results .global-result-status.staging { border-color: #9fc0ff !important; background: #eef5ff !important; color: #174ea6 !important; }
+.header-search-results .global-result-status.outbound { border-color: #f2cf72 !important; background: #fff7dd !important; color: #7a5200 !important; }
+.header-search-results .global-result-status.received { border-color: #93d9ab !important; background: #ebf9f0 !important; color: #176b2d !important; }
+.header-search-results .global-result-status.bay { border-color: #9ed6c5 !important; background: #ecfbf6 !important; color: #0f6b57 !important; }
+.header-search-results .global-result-status.rack { border-color: #b4c7f7 !important; background: #eef3ff !important; color: #173f8a !important; }
+.header-search-results .global-result-status.truck { border-color: #c4b5fd !important; background: #f4f0ff !important; color: #5b21b6 !important; }
+.header-search-results .global-result-status.cpu { border-color: #d8b4fe !important; background: #faf5ff !important; color: #7e22ce !important; }
+.header-search-results .global-result-status.greenville { border-color: #94dbe2 !important; background: #e9fbfd !important; color: #0f6f78 !important; }
+.header-search-results .global-result-status.dtc { border-color: #f2aacd !important; background: #fff0f7 !important; color: #9f1d5b !important; }
+.header-search-results .global-result-status.partial { border-color: #f4d07a !important; background: #fff8e6 !important; color: #805700 !important; }
+.header-search-results .global-result-status.not-started { border-color: #d6dee9 !important; background: #f7f9fc !important; color: #66738a !important; }
+
+.bay-action-bar {
+  border-color: #c6d5ea !important;
+  border-left-color: var(--navy) !important;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%) !important;
+  box-shadow: 0 10px 24px rgba(7, 42, 99, 0.07) !important;
+}
+
+.bay-action-bar .search-box {
+  height: 48px !important;
+  border: 1px solid #b9cce8 !important;
+  border-radius: 13px !important;
+  background: linear-gradient(180deg, #f9fcff 0%, #eef6ff 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 6px 16px rgba(7, 42, 99, 0.04) !important;
+}
+
+.bay-action-bar .search-box:focus-within {
+  border-color: var(--blue) !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
+  box-shadow:
+    0 0 0 3px rgba(19, 92, 255, 0.12),
+    0 8px 20px rgba(7, 42, 99, 0.08) !important;
+}
+
+.bay-action-bar input#bayMapSearch {
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  height: 46px !important;
+  line-height: 46px !important;
+  color: var(--navy-dark) !important;
+  font-size: 15px !important;
+  font-weight: 750 !important;
+}
+
+.bay-action-bar input#bayMapSearch:focus {
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+
+.bay-scanner-panel-v2 .bay-manual-row-v37 input {
+  border: 1px solid #c7d7ed !important;
+  background: linear-gradient(180deg, #f8fbff 0%, #f1f7ff 100%) !important;
+  color: var(--navy-dark) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88) !important;
+}
+
+.bay-scanner-panel-v2 .bay-manual-row-v37 input:focus {
+  border-color: var(--blue) !important;
+  outline: 0 !important;
+  box-shadow: 0 0 0 3px rgba(19, 92, 255, 0.12) !important;
+  background: #ffffff !important;
+}
+
+.bay-scanner-panel-v2 .bay-manual-row-v37 button {
+  border: 1px solid var(--navy) !important;
+  border-radius: 9px !important;
+  background: var(--navy) !important;
+  color: #ffffff !important;
+  font-weight: 950 !important;
+  box-shadow: 0 8px 16px rgba(7, 42, 99, 0.15) !important;
+}
+
+.bay-scanner-panel-v2 .bay-manual-row-v37 button:hover:not(:disabled) {
+  background: var(--navy-dark) !important;
+  border-color: var(--navy-dark) !important;
+  transform: translateY(-1px);
+}
+
+.bay-scanner-panel-v2 .bay-manual-row-v37 button:disabled {
+  background: #dfe8f7 !important;
+  border-color: #c5d3e8 !important;
+  color: #7d8aa0 !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
+/* v41: tighten the main Scan page last-scan card without affecting Bay Map history cards. */
+.scan-page .scanner-panel:not(.bay-scanner-panel) .compact-scan-history .last-card {
+  min-height: 98px;
+  padding: 10px 12px;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .compact-scan-history .last-card strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .compact-scan-history .last-fields {
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .compact-scan-history .last-fields span {
+  padding: 5px 7px;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .compact-scan-history .last-fields small {
+  margin-bottom: 3px;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .compact-scan-history .last-fields b {
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+/* v41: global search should present one current process-state pill, not a list of every stage row. */
+.global-result-status-row {
+  align-items: center;
+}
+
+.global-result-status.not-started {
+  border-color: #d7dfeb;
+  background: #f3f6fb;
+  color: #5c6a82;
+}
+
+/* 2026-07-09 v42: Bay auto assigner admin tuning and single-state global search polish. */
+.bay-auto-assigner-shell {
+  display: grid;
+  gap: 14px;
+  padding: 2px;
+}
+
+.bay-auto-assigner-form,
+.bay-auto-card {
+  display: grid;
+  gap: 14px;
+}
+
+.bay-auto-card {
+  border: 1px solid #cbd7ee;
+  border-radius: 14px;
+  background: #f8fbff;
+  padding: 16px;
+}
+
+.bay-auto-card header {
+  display: grid;
+  gap: 3px;
+}
+
+.bay-auto-card header strong {
+  color: var(--navy-dark);
+  font-size: 16px;
+}
+
+.bay-auto-card header span {
+  color: #526078;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.bay-auto-grid,
+.bay-auto-type-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bay-auto-grid label,
+.bay-auto-type-list label {
+  display: grid;
+  gap: 6px;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.bay-auto-grid input,
+.bay-auto-type-list select {
+  height: 42px;
+  min-width: 0;
+  border: 1px solid #cbd7ee;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--navy-dark);
+  padding: 0 12px;
+  font-weight: 750;
+}
+
+.bay-auto-manual-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bay-auto-manual-list label {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cbd7ee;
+  border-radius: 999px;
+  background: #fff;
+  padding: 0 12px;
+  color: var(--navy-dark);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.bay-auto-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.bay-auto-actions button {
+  min-height: 42px;
+  border: 1px solid var(--navy);
+  border-radius: 10px;
+  background: var(--navy);
+  color: #fff;
+  padding: 0 18px;
+  font-weight: 900;
+}
+
+.global-result-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 860px) {
+  .bay-auto-grid,
+  .bay-auto-type-list,
+  .bay-auto-manual-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -567,13 +567,13 @@
               </div>
             </div>
 
-            <form class="scan-form bay-scan-form bay-scan-form-v2 bay-scan-command-form bay-scan-command-form-v35" id="bayScanOutForm">
+            <form class="scan-form bay-scan-form bay-scan-form-v2 bay-scan-command-form bay-scan-command-form-v35 bay-scan-command-form-v37" id="bayScanOutForm">
               <div class="scan-form-heading bay-scan-heading-compact">
                 <label for="bayScanOutInput">Bay Scan</label>
-                <span class="bay-scan-hint">Choose add/remove, choose a target bay when needed, then scan.</span>
+                <span class="bay-scan-hint">Choose add/remove, pick a target bay when needed, then scan.</span>
               </div>
 
-              <div class="bay-scan-mode-card bay-scan-mode-card-compact bay-scan-mode-card-v35">
+              <div class="bay-scan-mode-card bay-scan-mode-card-compact bay-scan-mode-card-v35 bay-scan-mode-card-v37">
                 <label class="bay-mode-option is-remove">
                   <input name="bayScanVisualMode" type="radio" value="remove" checked>
                   <span><strong>Remove from bay</strong></span>
@@ -584,7 +584,7 @@
                 </label>
               </div>
 
-              <div class="bay-add-row bay-add-row-v2 bay-target-row-v17 bay-target-row-compact bay-target-row-v35">
+              <div class="bay-add-row bay-add-row-v2 bay-target-row-v17 bay-target-row-compact bay-target-row-v35 bay-target-row-v37">
                 <label class="bay-code-field">
                   <span>Target Bay</span>
                   <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Click bay or type code">
@@ -592,10 +592,10 @@
                 <button class="bay-target-clear" id="bayTargetClearBtn" type="button">Clear</button>
               </div>
 
-              <div class="scan-input-wrap bay-command-scan-input bay-command-scan-input-v35">
+              <div class="scan-input-wrap bay-command-scan-input bay-command-scan-input-v35 bay-command-scan-input-v37">
                 <span class="barcode-icon"></span>
                 <input id="bayScanOutInput" type="text" autocomplete="off" placeholder="Scan order to remove from bay...">
-                <div class="bay-scan-action-strip bay-scan-action-strip-v35" aria-label="Bay scan undo and redo">
+                <div class="bay-scan-action-strip bay-scan-action-strip-v35 bay-scan-action-strip-v37" aria-label="Bay scan undo and redo">
                   <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action">
                     <span class="undo-icon"></span>
                     <small>Undo</small>
@@ -606,26 +606,26 @@
                   </button>
                 </div>
               </div>
-            </form>
 
-            <section class="manual-scan-form bay-manual-card bay-manual-card-v2 bay-manual-card-v35">
-              <div class="section-heading">
-                <h3>Manual Assign</h3>
-                <span>Same quick-entry layout as the Scan page.</span>
-              </div>
-              <div class="manual-scan-row bay-manual-row-v35">
-                <label>
-                  <span>Order Nr.</span>
-                  <input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="235934">
-                </label>
-                <label>
-                  <span>Item Nr.</span>
-                  <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="001">
-                </label>
-                <input id="bayManualQtyInput" type="hidden" value="1">
-                <button id="bayManualSubmitBtn" type="button">Assign</button>
-              </div>
-            </section>
+              <section class="manual-scan-form bay-manual-card bay-manual-card-v2 bay-manual-card-v35 bay-manual-card-v37">
+                <div class="section-heading">
+                  <h3>Manual Assign</h3>
+                  <span>Assign order, Job Nr., barcode, or wording into target bay.</span>
+                </div>
+                <div class="manual-scan-row bay-manual-row-v35 bay-manual-row-v37">
+                  <label>
+                    <span>Order / Job / Scan Text</span>
+                    <input id="bayManualOrderInput" type="text" autocomplete="off" placeholder="Order, Job Nr., barcode, or label text">
+                  </label>
+                  <label>
+                    <span>Item Nr. optional</span>
+                    <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="001">
+                  </label>
+                  <input id="bayManualQtyInput" type="hidden" value="1">
+                  <button id="bayManualSubmitBtn" type="button">Assign</button>
+                </div>
+              </section>
+            </form>
 
             <section class="last-scan compact-scan-history bay-scan-history-v36">
               <div class="section-heading scan-history-heading bay-scan-history-heading-v36">
@@ -887,6 +887,28 @@
             <div class="compact-list lookup-summary-list">
               <div><strong>Manual Edit dropdowns</strong><span>Products, routes, and process options.</span></div>
               <div><strong>Data driven</strong><span>Imports plus admin-added values.</span></div>
+            </div>
+          </section>
+
+          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="manage_bay_layout">
+            <div class="section-heading">
+              <h2>Bay Scanner Rules</h2>
+              <button class="link-button" type="button" data-admin-modal="bayScannerRules">Edit rules</button>
+            </div>
+            <div id="bayScannerRuleOverview" class="compact-list bay-scanner-rule-overview">
+              <div><strong>Manual assign memory</strong><span>Known non-standard labels that should not warn.</span></div>
+              <div><strong>Bay barcode formats</strong><span>Extra scan formats for the Bay Map scanner only.</span></div>
+            </div>
+          </section>
+
+          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="manage_bay_layout">
+            <div class="section-heading">
+              <h2>Bay Auto Assigner</h2>
+              <button class="link-button" type="button" data-admin-modal="bayAutoAssigner">Edit auto assigner</button>
+            </div>
+            <div id="bayAutoAssignOverview" class="compact-list bay-auto-assign-overview">
+              <div><strong>Tall / oversize rules</strong><span>Control thresholds and manual assignment categories.</span></div>
+              <div><strong>Bay type mapping</strong><span>Choose where CPU, mirrors, standard, tall, and oversize glass should go.</span></div>
             </div>
           </section>
 

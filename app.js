@@ -77,6 +77,19 @@ const state = {
   bayEditorSelectedBay: "",
   adminCustomerRouteRules: [],
   customerEmailSettings: { contacts: [], cc: [], outbox: [] },
+  bayScannerSettings: { manualRules: [], barcodeRules: [] },
+  bayAutoAssignSettings: {
+    standardMaxInches: 59.99,
+    tallMinInches: 60,
+    oversizeMinInches: 96,
+    standardBayType: "Standard",
+    tallBayType: "Tall",
+    oversizeBayType: "Oversize",
+    mirrorBayType: "Mirror",
+    framedMirrorBayType: "Framed Mirror",
+    cpuBayType: "CPU",
+    manualAssignTypes: ["Tall", "Oversize"],
+  },
   activeSessions: [],
   adminUsers: [],
   adminRoles: [],
@@ -118,6 +131,7 @@ const els = {
   headerGlobalSearchBtn: document.getElementById("headerGlobalSearchBtn"),
   headerGlobalSearchResults: document.getElementById("headerGlobalSearchResults"),
   globalPrintExportBtn: document.getElementById("globalPrintExportBtn"),
+  bayAutoAssignOverview: document.getElementById("bayAutoAssignOverview"),
 
   homePage: document.getElementById("homePage"),
   homeWelcome: document.getElementById("homeWelcome"),
@@ -375,6 +389,7 @@ const els = {
   customerRouteSelect: document.getElementById("customerRouteSelect"),
   customerRouteRules: document.getElementById("customerRouteRules"),
   customerEmailOverview: document.getElementById("customerEmailOverview"),
+  bayScannerRuleOverview: document.getElementById("bayScannerRuleOverview"),
   manualEditSearch: document.getElementById("manualEditSearch"),
   manualEditStageSelect: document.getElementById("manualEditStageSelect"),
   manualEditSearchBtn: document.getElementById("manualEditSearchBtn"),
@@ -946,6 +961,13 @@ async function activateList(listId, navigate = true) {
     applyBackendPayload(payload);
   } else {
     setActiveList(listId);
+  }
+  if (changingList) {
+    // v39: Global search can seed the Scan page search after navigation.
+    // For normal list switching, clear the previous list search so a stale order
+    // number does not hide rows on the next delivery list.
+    state.search = "";
+    if (els.searchInput) els.searchInput.value = "";
   }
   if (changingList || navigate) {
     state.pageIndex = 1;
@@ -3289,7 +3311,10 @@ function showPage(page) {
 
 async function showOutboundOverrideDialog(payload, scanText, options = {}) {
   await ensureRacksLoaded().catch(() => {});
-  const racks = (state.racks || []).filter((rack) => rack.active !== false);
+  const racks = (state.racks || []).filter((rack) => {
+    const status = String(rack.status || "").toLowerCase();
+    return rack.active !== false && !["closed", "complete", "completed", "in transit"].includes(status);
+  });
   const defaultRack = state.selectedRackCode && racks.some((rack) => rack.code === state.selectedRackCode)
     ? state.selectedRackCode
     : (racks.find((rack) => rack.code === "T")?.code || racks[0]?.code || "");
@@ -3317,7 +3342,7 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
         <label class="outbound-override-field">
           <span>Transportation method for this piece</span>
           <select id="outboundOverrideRackSelect">
-            <option value="">Choose rack or truck...</option>
+            <option value="">Choose an open rack or truck...</option>
             ${racks.map((rack) => `<option value="${escapeHtml(rack.code)}" ${rack.code === defaultRack ? "selected" : ""}>${rackOptionLabel(rack)}</option>`).join("")}
           </select>
         </label>
@@ -3583,11 +3608,34 @@ async function runGlobalSearch() {
   return payload.results || [];
 }
 
+function globalSearchProcessClass(text, result = {}) {
+  const signal = `${text || ""} ${result.stage || ""} ${result.scanner || ""} ${result.bayCode || ""} ${result.bay || ""} ${result.rackCode || ""} ${result.rackType || ""}`.toLowerCase();
+  if (signal.includes("bay")) return "bay";
+  if (signal.includes("truck") || result.rackCode === "T") return "truck";
+  if (signal.includes("rack") || result.rackCode) return "rack";
+  if (signal.includes("not scanned") || signal.includes("not started")) return "not-started";
+  if (signal.includes("partial") || /\b\d+\s*\/\s*\d+\b/.test(signal)) return "partial";
+  if (signal.includes("complete") || signal.includes("received") || signal.includes("inbound")) return "received";
+  if (signal.includes("outbound")) return "outbound";
+  if (signal.includes("staging")) return "staging";
+  if (signal.includes("customer pickup") || /\bcpu\b/.test(signal)) return "cpu";
+  if (signal.includes("greenville") || /\bgnv\b/.test(signal)) return "greenville";
+  if (signal.includes("dtc") || signal.includes("deliver to customer")) return "dtc";
+  return "default";
+}
+
+function globalSearchStatusBadges(result) {
+  // Global Search should show one current location/process state, not every stage
+  // on the delivery date. The backend resolves locationText from latest scan state.
+  const label = String(result.locationText || "Not Scanned Yet").trim() || "Not Scanned Yet";
+  return `<small class="global-result-status ${globalSearchProcessClass(label, result)}">${escapeHtml(label)}</small>`;
+}
+
 function renderGlobalSearchResults(results) {
   if (!els.headerGlobalSearchResults) return;
   if (!results.length) {
     els.headerGlobalSearchResults.hidden = false;
-    els.headerGlobalSearchResults.innerHTML = `<div class="no-search-results"><strong>No results</strong><span>No order, item, customer, or bay matched that search.</span></div>`;
+    els.headerGlobalSearchResults.innerHTML = `<div class="no-search-results"><strong>No results</strong><span>No order, item, customer, rack, bay, or route matched that search.</span></div>`;
     return;
   }
   els.headerGlobalSearchResults.hidden = false;
@@ -3595,12 +3643,24 @@ function renderGlobalSearchResults(results) {
     .slice(0, 8)
     .map(
       (result) => {
+        const openAttrs = result.bayCode
+          ? `data-open-bay="${escapeHtml(result.bayCode)}"`
+          : `data-open-list="${escapeHtml(result.deliveryListId)}" data-open-search="${escapeHtml([result.order, result.item].filter(Boolean).join(" "))}"`;
+        const destinationLabel = result.bay
+          ? `Bay ${result.bay}`
+          : result.rackCode
+            ? `${result.rackCode === "T" ? "Truck" : "Rack"} ${result.rackName || result.rackCode}`
+            : result.stage || "";
+
         return `
-        <button type="button" ${result.bayCode ? `data-open-bay="${escapeHtml(result.bayCode)}"` : `data-open-list="${escapeHtml(result.deliveryListId)}" data-open-search="${escapeHtml([result.order, result.item].filter(Boolean).join(" "))}"`}>
-          <strong>${escapeHtml(result.order)}-${escapeHtml(result.item)}</strong>
-          <span>${escapeHtml(result.job || result.product || "")}</span>
-          <span>${escapeHtml(result.customer)}${result.bay ? ` - Bay ${escapeHtml(result.bay)}` : ""}</span>
-          <small>${escapeHtml(result.locationText || result.stage || "")}</small>
+        <button type="button" ${openAttrs}>
+          <div class="global-result-main">
+            <strong>${escapeHtml(result.order)}-${escapeHtml(result.item)}</strong>
+            <span>${escapeHtml(result.customer || "No customer")}</span>
+          </div>
+          <span class="global-result-job">${escapeHtml(result.job || result.product || "No job/product")}</span>
+          <span class="global-result-meta">${escapeHtml(destinationLabel)}${result.deliveryDate ? ` • ${escapeHtml(formatDisplayDate(result.deliveryDate))}` : ""}</span>
+          <div class="global-result-status-row">${globalSearchStatusBadges(result)}</div>
         </button>
       `;
       },
@@ -5071,6 +5131,7 @@ async function submitBayScanOut() {
   const result = adding
     ? await postBayAction("/api/indian-trail/receive", { barcode, bayCode, reason: "Scanned into bay map" })
     : await postBayAction("/api/indian-trail/scan-out", { barcode, bayCode, reason: "Scanned out from bay map" });
+
   if (!adding && result.assignmentId) {
     pushBayHistory({
       label: `scan-out ${result.order}-${result.item}`,
@@ -5078,25 +5139,97 @@ async function submitBayScanOut() {
       redo: () => postBayAction("/api/indian-trail/scan-out", { barcode, bayCode: result.bayCode || bayCode, reason: "Redo bay scan-out" }),
     });
   }
+
+  if (adding && Array.isArray(result.assignmentIds) && result.assignmentIds.length) {
+    const assignedIds = result.assignmentIds.slice();
+    pushBayHistory({
+      label: `bay receive ${barcode}`,
+      undo: () => Promise.all(assignedIds.map((assignmentId) => postBayAction("/api/indian-trail/clear-assignment", { assignmentId, reason: "Undo bay receive/manual assign" }))),
+      redo: () => postBayAction("/api/indian-trail/receive", { barcode, bayCode: result.bayCode || bayCode, reason: "Redo bay receive/manual assign" }),
+    });
+  }
+
   if (els.bayScanOutInput) els.bayScanOutInput.value = "";
   if (els.bayScanOutStatus) els.bayScanOutStatus.textContent = adding ? result.message : `Removed ${result.order}-${result.item} from ${result.bayDisplay || result.bayCode}`;
   scanFlash("success");
   showFloatingNotice(adding ? result.message : `Removed ${result.order}-${result.item} from ${result.bayDisplay || result.bayCode}`, "success");
 }
 
-function manualBayBarcode() {
-  const order = digitsOnly(els.bayManualOrderInput?.value || "");
-  const item = digitsOnly(els.bayManualItemInput?.value || "");
-  if (!order) throw new Error("Enter an order number.");
-  return item ? `T200${order.padStart(6, "0")}${item.padStart(3, "0")}000` : `T200${order.padStart(6, "0")}`;
+function manualBayInputText() {
+  return (els.bayManualOrderInput?.value || "").trim();
+}
+
+async function confirmManualBayUnknown(message, details) {
+  return new Promise((resolve) => {
+    const existing = document.querySelector(".manual-bay-confirm-backdrop");
+    if (existing) existing.remove();
+    const dialog = document.createElement("div");
+    dialog.className = "manual-bay-confirm-backdrop action-confirm-backdrop";
+    dialog.innerHTML = `
+      <section class="action-confirm-dialog manual-bay-confirm-dialog" role="dialog" aria-modal="true">
+        <button type="button" class="action-confirm-close" data-manual-bay-choice="no" aria-label="Close">&times;</button>
+        <span class="action-confirm-icon" aria-hidden="true"></span>
+        <div class="action-confirm-copy">
+          <h2>Unrecognized manual assignment</h2>
+          <p>${escapeHtml(message || "This does not match a known order, Job Nr., or accepted bay barcode rule.")}</p>
+          ${details ? `<small>${escapeHtml(details)}</small>` : ""}
+        </div>
+        <div class="action-confirm-actions manual-bay-confirm-actions">
+          <button type="button" class="action-confirm-cancel" data-manual-bay-choice="no">No</button>
+          <button type="button" class="action-confirm-confirm" data-manual-bay-choice="yes">Yes, assign once</button>
+          <button type="button" class="action-confirm-confirm remember" data-manual-bay-choice="remember">Yes, remember this</button>
+        </div>
+      </section>
+    `;
+    const close = (choice) => {
+      dialog.remove();
+      document.body.classList.remove("modal-scroll-locked");
+      updateModalScrollLock();
+      resolve(choice);
+    };
+    dialog.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-manual-bay-choice]");
+      if (button) close(button.dataset.manualBayChoice || "no");
+      else if (event.target === dialog) close("no");
+    });
+    document.body.appendChild(dialog);
+    document.body.classList.add("modal-scroll-locked");
+    dialog.querySelector("[data-manual-bay-choice='no']")?.focus();
+  });
 }
 
 async function submitManualBayScan() {
-  const barcode = manualBayBarcode();
-  if (els.bayScanOutInput) els.bayScanOutInput.value = barcode;
-  await submitBayScanOut();
+  const scanText = manualBayInputText();
+  const itemNo = (els.bayManualItemInput?.value || "").trim();
+  const bayCode = (els.bayScanBayInput?.value || "").trim();
+  if (!scanText) throw new Error("Enter an order, Job Nr., barcode, or manual wording.");
+  if (!bayCode) throw new Error("Choose a target bay before manual assigning.");
+
+  const payload = { scanText, itemNo, bayCode, confirmUnrecognized: false, rememberUnrecognized: false };
+  let result = await postBayAction("/api/indian-trail/manual-assign", payload);
+
+  if (result?.needsConfirmation) {
+    const choice = await confirmManualBayUnknown(result.message, `Input: ${scanText} | Target bay: ${bayCode}`);
+    if (choice === "no") return;
+    result = await postBayAction("/api/indian-trail/manual-assign", {
+      ...payload,
+      confirmUnrecognized: true,
+      rememberUnrecognized: choice === "remember",
+    });
+  }
+
+  if (Array.isArray(result.assignmentIds) && result.assignmentIds.length) {
+    const assignedIds = result.assignmentIds.slice();
+    pushBayHistory({
+      label: `manual assign ${scanText}`,
+      undo: () => Promise.all(assignedIds.map((assignmentId) => postBayAction("/api/indian-trail/clear-assignment", { assignmentId, reason: "Undo manual bay assignment" }))),
+      redo: () => postBayAction("/api/indian-trail/manual-assign", { scanText, itemNo, bayCode, confirmUnrecognized: true, rememberUnrecognized: false, reason: "Redo manual bay assignment" }),
+    });
+  }
+
   if (els.bayManualOrderInput) els.bayManualOrderInput.value = "";
   if (els.bayManualItemInput) els.bayManualItemInput.value = "";
+  showFloatingNotice(result.message || "Manual bay assignment complete.", "success");
 }
 
 function selectedBayAssignment() {
@@ -6639,8 +6772,10 @@ async function refreshAdminPage() {
   requests.push(hasPermission("view_active_sessions") ? fetchJson("/api/admin/sessions") : Promise.resolve(null));
   requests.push(hasPermission("manage_customer_route_rules") ? fetchJson("/api/admin/customer-route-rules") : Promise.resolve(null));
   requests.push(hasPermission("manage_customer_route_rules") ? fetchJson("/api/admin/customer-emails") : Promise.resolve(null));
+  requests.push(hasPermission("manage_bay_layout") ? fetchJson("/api/admin/bay-scanner-rules") : Promise.resolve(null));
+  requests.push(hasPermission("manage_bay_layout") ? fetchJson("/api/admin/bay-auto-assigner") : Promise.resolve(null));
   requests.push(hasPermission("manage_roles") ? fetchJson("/api/admin/roles") : Promise.resolve(null));
-  const [summary, users, sessions, customerRules, customerEmails, roles] = await Promise.all(requests);
+  const [summary, users, sessions, customerRules, customerEmails, bayScannerRules, bayAutoAssignSettings, roles] = await Promise.all(requests);
   if (summary) state.adminSummary = summary;
   if (summary && els.adminSummary) {
     els.adminSummary.innerHTML = [
@@ -6662,6 +6797,8 @@ async function refreshAdminPage() {
   state.activeSessions = sessions?.sessions || [];
   state.adminCustomerRouteRules = customerRules?.rules || [];
   state.customerEmailSettings = customerEmails || state.customerEmailSettings || { contacts: [], cc: [], outbox: [] };
+  state.bayScannerSettings = bayScannerRules || state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
+  state.bayAutoAssignSettings = bayAutoAssignSettings || state.bayAutoAssignSettings;
   state.adminRoles = roles?.roles || state.adminRoles || [];
   state.allPermissions = roles?.permissions || state.allPermissions || [];
   renderAdminUsers();
@@ -6669,6 +6806,8 @@ async function refreshAdminPage() {
   renderManualEditStageOptions();
   renderCustomerRouteRules();
   renderCustomerEmailOverview();
+  renderBayScannerRuleOverview();
+  renderBayAutoAssignOverview();
   renderActiveSessions();
 }
 
@@ -6891,6 +7030,8 @@ function openAdminModal(kind, options = null) {
     stations: "Stations",
     customerRoutes: "Edit Customer Routes",
     customerEmails: "Customer Email Rules",
+    bayScannerRules: "Bay Scanner Rules",
+    bayAutoAssigner: "Bay Auto Assigner",
     manualEdit: "Manual Delivery List Edit",
     lookups: "Lookup Manager",
     rackForm: "Rack",
@@ -7017,6 +7158,12 @@ function adminModalContent(kind) {
   }
   if (kind === "customerEmails") {
     return customerEmailRulesModalHtml();
+  }
+  if (kind === "bayScannerRules") {
+    return bayScannerRulesModalHtml();
+  }
+  if (kind === "bayAutoAssigner") {
+    return bayAutoAssignerModalHtml();
   }
   if (kind === "manualEdit") {
     return manualEditModalHtml();
@@ -9201,6 +9348,200 @@ function refreshCustomerRouteModal() {
 }
 
 
+
+function renderBayScannerRuleOverview() {
+  if (!els.bayScannerRuleOverview) return;
+  const settings = state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
+  const manualRules = settings.manualRules || [];
+  const barcodeRules = settings.barcodeRules || [];
+  els.bayScannerRuleOverview.innerHTML = `
+    <div><strong>${escapeHtml(manualRules.length)} remembered manual input${manualRules.length === 1 ? "" : "s"}</strong><span>Known phrases and odd labels that will not ask for confirmation.</span></div>
+    <div><strong>${escapeHtml(barcodeRules.length)} accepted bay barcode rule${barcodeRules.length === 1 ? "" : "s"}</strong><span>Extra barcode formats accepted only on the Bay Map scanner.</span></div>
+  `;
+}
+
+function autoAssignTypeOptions(selected = "") {
+  const values = ["Standard", "Tall", "Oversize", "Mirror", "Framed Mirror", "CPU"];
+  return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
+}
+
+function renderBayAutoAssignOverview() {
+  if (!els.bayAutoAssignOverview) return;
+  const settings = state.bayAutoAssignSettings || {};
+  const manualTypes = settings.manualAssignTypes || [];
+  els.bayAutoAssignOverview.innerHTML = `
+    <div><strong>Tall starts at ${escapeHtml(settings.tallMinInches ?? 60)}"</strong><span>Oversize starts at ${escapeHtml(settings.oversizeMinInches ?? 96)}".</span></div>
+    <div><strong>${escapeHtml(manualTypes.length ? manualTypes.join(", ") : "None")} manual</strong><span>These categories will not be auto-preassigned.</span></div>
+  `;
+}
+
+function bayAutoAssignerModalHtml() {
+  const settings = state.bayAutoAssignSettings || {};
+  const manual = new Set(settings.manualAssignTypes || []);
+  const typeRows = [
+    ["standardBayType", "Standard glass", settings.standardBayType || "Standard"],
+    ["tallBayType", "Tall glass", settings.tallBayType || "Tall"],
+    ["oversizeBayType", "Oversize glass", settings.oversizeBayType || "Oversize"],
+    ["mirrorBayType", "Mirror", settings.mirrorBayType || "Mirror"],
+    ["framedMirrorBayType", "Framed mirror", settings.framedMirrorBayType || "Framed Mirror"],
+    ["cpuBayType", "CPU route", settings.cpuBayType || "CPU"],
+  ];
+  return `
+    <div class="bay-auto-assigner-shell">
+      <section class="customer-email-intro">
+        <div>
+          <strong>Indian Trail bay auto-assigner</strong>
+          <p>Control how the system classifies glass for bay preassignment. Categories marked Manual Assign will be left for a user to place instead of being auto-assigned.</p>
+        </div>
+        <span class="email-smtp-badge is-live">Indian Trail</span>
+      </section>
+
+      <form id="bayAutoAssignerForm" class="bay-auto-assigner-form">
+        <section class="bay-auto-card">
+          <header><strong>Size thresholds</strong><span>Largest glass dimension controls Standard / Tall / Oversize.</span></header>
+          <div class="bay-auto-grid">
+            <label><span>Tall starts at inches</span><input id="bayAutoTallMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.tallMinInches ?? 60)}"></label>
+            <label><span>Oversize starts at inches</span><input id="bayAutoOversizeMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.oversizeMinInches ?? 96)}"></label>
+          </div>
+        </section>
+
+        <section class="bay-auto-card">
+          <header><strong>Bay type mapping</strong><span>Match each classification to one of your bay groups/types.</span></header>
+          <div class="bay-auto-type-list">
+            ${typeRows.map(([field, label, selected]) => `
+              <label>
+                <span>${escapeHtml(label)}</span>
+                <select data-bay-auto-field="${escapeHtml(field)}">${autoAssignTypeOptions(selected)}</select>
+              </label>
+            `).join("")}
+          </div>
+        </section>
+
+        <section class="bay-auto-card">
+          <header><strong>Manual assignment categories</strong><span>Checked categories will not be auto-preassigned. They will require manual placement.</span></header>
+          <div class="bay-auto-manual-list">
+            ${["Standard", "Tall", "Oversize", "Mirror", "Framed Mirror", "CPU"].map((type) => `
+              <label><input type="checkbox" value="${escapeHtml(type)}" ${manual.has(type) ? "checked" : ""}> <span>${escapeHtml(type)}</span></label>
+            `).join("")}
+          </div>
+        </section>
+
+        <div class="bay-auto-actions">
+          <button type="submit">Save Auto Assigner</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+async function refreshBayAutoAssigner(openModal = false) {
+  const payload = await fetchJson("/api/admin/bay-auto-assigner");
+  state.bayAutoAssignSettings = payload || state.bayAutoAssignSettings;
+  renderBayAutoAssignOverview();
+  if (openModal && els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "bayAutoAssigner" && els.adminModalBody) {
+    els.adminModalBody.innerHTML = bayAutoAssignerModalHtml();
+  }
+  return payload;
+}
+
+async function saveBayAutoAssignerSettings() {
+  const payload = {
+    tallMinInches: Number(document.getElementById("bayAutoTallMin")?.value || 60),
+    oversizeMinInches: Number(document.getElementById("bayAutoOversizeMin")?.value || 96),
+    manualAssignTypes: [...document.querySelectorAll(".bay-auto-manual-list input:checked")].map((input) => input.value),
+  };
+  document.querySelectorAll("[data-bay-auto-field]").forEach((select) => {
+    payload[select.dataset.bayAutoField] = select.value;
+  });
+  const saved = await fetchJson("/api/admin/bay-auto-assigner", { method: "POST", body: JSON.stringify(payload) });
+  state.bayAutoAssignSettings = saved || payload;
+  renderBayAutoAssignOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = bayAutoAssignerModalHtml();
+  showInlineError("Bay auto-assigner settings saved.", false);
+}
+
+function bayScannerRulesModalHtml() {
+  const settings = state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
+  const manualRules = settings.manualRules || [];
+  const barcodeRules = settings.barcodeRules || [];
+  return `
+    <div class="bay-scanner-rules-shell">
+      <section class="customer-email-intro">
+        <div>
+          <strong>Bay Map scanner and manual assignment rules</strong>
+          <p>These rules only apply to Indian Trail Bay Map scanning/manual assign. They do not change the main delivery-list scanner.</p>
+        </div>
+        <span class="email-smtp-badge is-live">Bay Map only</span>
+      </section>
+
+      <section class="bay-rule-card">
+        <header><strong>Remembered manual inputs</strong><span>Accepted without asking for confirmation.</span></header>
+        <form id="bayManualRuleForm" class="bay-rule-form">
+          <label><span>Match type</span><select id="bayManualRuleType"><option value="exact">Exact text</option><option value="contains">Contains text</option><option value="regex">Regex pattern</option></select></label>
+          <label class="is-wide"><span>Text / pattern</span><input id="bayManualRulePattern" type="text" autocomplete="off" placeholder="Example: Sample rack label or ^WOOD-[0-9]+$"></label>
+          <label><span>Label</span><input id="bayManualRuleLabel" type="text" autocomplete="off" placeholder="Optional label"></label>
+          <button type="submit">Add Memory</button>
+        </form>
+        <div class="bay-rule-list">
+          ${manualRules.length ? manualRules.map((rule) => `
+            <article><div><strong>${escapeHtml(rule.pattern)}</strong><span>${escapeHtml(rule.matchType)}${rule.label ? ` - ${escapeHtml(rule.label)}` : ""}</span></div><button class="icon-only icon-trash danger" type="button" data-remove-bay-manual-rule="${escapeHtml(rule.id)}" aria-label="Remove remembered manual input"></button></article>
+          `).join("") : `<div class="admin-empty">No remembered manual inputs yet.</div>`}
+        </div>
+      </section>
+
+      <section class="bay-rule-card">
+        <header><strong>Accepted bay scanner barcode formats</strong><span>Use regex for extra labels/barcodes that can be scanned into a target bay.</span></header>
+        <form id="bayBarcodeRuleForm" class="bay-rule-form">
+          <label class="is-wide"><span>Regex pattern</span><input id="bayBarcodeRulePattern" type="text" autocomplete="off" placeholder="Example: ^BOX-[A-Z0-9-]+$"></label>
+          <label><span>Label</span><input id="bayBarcodeRuleLabel" type="text" autocomplete="off" placeholder="Box label"></label>
+          <button type="submit">Add Barcode Rule</button>
+        </form>
+        <div class="bay-rule-list">
+          ${barcodeRules.length ? barcodeRules.map((rule) => `
+            <article><div><strong>${escapeHtml(rule.pattern)}</strong><span>${escapeHtml(rule.label || "Accepted bay barcode")}</span></div><button class="icon-only icon-trash danger" type="button" data-remove-bay-barcode-rule="${escapeHtml(rule.id)}" aria-label="Remove bay barcode rule"></button></article>
+          `).join("") : `<div class="admin-empty">No extra bay barcode formats yet.</div>`}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+async function refreshBayScannerRules(openModal = false) {
+  const payload = await fetchJson("/api/admin/bay-scanner-rules");
+  state.bayScannerSettings = payload || { manualRules: [], barcodeRules: [] };
+  renderBayScannerRuleOverview();
+  if (openModal && els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "bayScannerRules" && els.adminModalBody) {
+    els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  }
+  return payload;
+}
+
+async function saveBayManualRule() {
+  const matchType = document.getElementById("bayManualRuleType")?.value || "exact";
+  const pattern = document.getElementById("bayManualRulePattern")?.value.trim() || "";
+  const label = document.getElementById("bayManualRuleLabel")?.value.trim() || "";
+  const payload = await fetchJson("/api/admin/bay-scanner-rules/manual", { method: "POST", body: JSON.stringify({ matchType, pattern, label }) });
+  state.bayScannerSettings = payload || state.bayScannerSettings;
+  renderBayScannerRuleOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+}
+
+async function saveBayBarcodeRule() {
+  const pattern = document.getElementById("bayBarcodeRulePattern")?.value.trim() || "";
+  const label = document.getElementById("bayBarcodeRuleLabel")?.value.trim() || "";
+  const payload = await fetchJson("/api/admin/bay-scanner-rules/barcode", { method: "POST", body: JSON.stringify({ pattern, label }) });
+  state.bayScannerSettings = payload || state.bayScannerSettings;
+  renderBayScannerRuleOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+}
+
+async function removeBayScannerRule(kind, id) {
+  const payload = await fetchJson(`/api/admin/bay-scanner-rules/${kind}/remove`, { method: "POST", body: JSON.stringify({ id }) });
+  state.bayScannerSettings = payload || state.bayScannerSettings;
+  renderBayScannerRuleOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+}
+
 function renderCustomerEmailOverview() {
   if (!els.customerEmailOverview) return;
 
@@ -10290,8 +10631,15 @@ function wireEvents() {
     });
   });
   document.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      els.headerGlobalSearchInput?.focus();
+      els.headerGlobalSearchInput?.select();
+      return;
+    }
     if (event.key !== "Escape") return;
     document.querySelectorAll(".user-menu[open]").forEach((menu) => menu.removeAttribute("open"));
+    if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
   });
 
   els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
@@ -10814,6 +11162,21 @@ function wireEvents() {
     if (event.target.closest("#customerEmailTestForm")) {
       event.preventDefault();
       sendCustomerEmailTest().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#bayManualRuleForm")) {
+      event.preventDefault();
+      saveBayManualRule().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#bayBarcodeRuleForm")) {
+      event.preventDefault();
+      saveBayBarcodeRule().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#bayAutoAssignerForm")) {
+      event.preventDefault();
+      saveBayAutoAssignerSettings().catch((error) => showInlineError(error.message, true));
       return;
     }
   });
@@ -11690,6 +12053,18 @@ function wireEvents() {
     const editCustomerEmailButton = event.target.closest("[data-edit-customer-email]");
     if (editCustomerEmailButton) {
       startCustomerEmailEdit(editCustomerEmailButton.dataset.editCustomerEmail);
+      return;
+    }
+
+    const removeBayManualRuleButton = event.target.closest("[data-remove-bay-manual-rule]");
+    if (removeBayManualRuleButton) {
+      removeBayScannerRule("manual", removeBayManualRuleButton.dataset.removeBayManualRule).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const removeBayBarcodeRuleButton = event.target.closest("[data-remove-bay-barcode-rule]");
+    if (removeBayBarcodeRuleButton) {
+      removeBayScannerRule("barcode", removeBayBarcodeRuleButton.dataset.removeBayBarcodeRule).catch((error) => showInlineError(error.message, true));
       return;
     }
 

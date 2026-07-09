@@ -1,23 +1,25 @@
-Scanning Project v36 - Bay scanner history and email draft modal polish
+Scanning Project Update v43 - Updated Remake Print Fix
 
-Updated files:
+Files included:
 - server.py
 - delivery_store.py
 - index.html
 - app.js
 - styles.css
 
-Changes in this pass:
-- Reworked the Bay Map scan history section to use the same latest compact Scan History styling as the main Scan page scanning panel.
-- Changed Bay Map recent scan/action rows into a vertical compact table instead of side-by-side cards.
-- Tightened the Bay Map scanner panel spacing around Target Bay, scan input, and mode controls.
-- Kept Target Bay near the top of the bay scan workflow above the scan textbox.
-- Fixed Email Draft preview layering so it opens above the Customer Emails edit GUI.
-- Rebuilt Email Draft preview sizing, padding, and layout so the content has proper white space and does not overlap or hide behind the modal edges.
+What changed in this update:
+- Fixed updated delivery-list printing so remake sheets only include remakes that were actually new/changed by the latest import/update.
+- Existing remakes no longer appear on the updated remake sheet unless that remake row itself was marked New Line / Updated Line / changed by the import.
+- Whole-list printing and remake-only printing still include all applicable remakes as before.
+- Rush updated printing keeps the same behavior and only prints updated rush rows when Updated Only is selected.
+
+Install:
+1. Stop the local server.
+2. Back up your current project folder.
+3. Replace the included files.
+4. Start the server again.
 
 Validation performed:
-- app.js passed node --check.
-- server.py and delivery_store.py passed Python compile checks.
-
-Install note:
-- Stop the local server, back up the current project folder, replace these files, then restart the server.
+- server.py Python compile check
+- delivery_store.py Python compile check
+- app.js node syntax check

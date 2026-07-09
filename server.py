@@ -653,6 +653,18 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(STORE.get_customer_email_settings())
             return
 
+        if parsed.path == "/api/admin/bay-scanner-rules":
+            if not self.require_permission("manage_bay_layout"):
+                return
+            self.send_json(STORE.get_bay_scan_settings())
+            return
+
+        if parsed.path == "/api/admin/bay-auto-assigner":
+            if not self.require_permission("manage_bay_layout"):
+                return
+            self.send_json(STORE.get_bay_auto_assign_settings())
+            return
+
         if parsed.path == "/api/admin/manual-edit-lookups":
             if not self.require_permission("edit_delivery_lists"):
                 return
@@ -1115,6 +1127,41 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.remove_customer_email_cc(int(data.get("id") or 0), user["username"]))
                 return
 
+            if parsed.path == "/api/admin/bay-scanner-rules/manual":
+                user = self.require_permission("manage_bay_layout")
+                if not user:
+                    return
+                self.send_json(STORE.upsert_bay_manual_input_rule(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/bay-scanner-rules/manual/remove":
+                user = self.require_permission("manage_bay_layout")
+                if not user:
+                    return
+                self.send_json(STORE.remove_bay_manual_input_rule(int(data.get("id") or 0), user["username"]))
+                return
+
+            if parsed.path == "/api/admin/bay-scanner-rules/barcode":
+                user = self.require_permission("manage_bay_layout")
+                if not user:
+                    return
+                self.send_json(STORE.upsert_bay_scan_barcode_rule(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/bay-scanner-rules/barcode/remove":
+                user = self.require_permission("manage_bay_layout")
+                if not user:
+                    return
+                self.send_json(STORE.remove_bay_scan_barcode_rule(int(data.get("id") or 0), user["username"]))
+                return
+
+            if parsed.path == "/api/admin/bay-auto-assigner":
+                user = self.require_permission("manage_bay_layout")
+                if not user:
+                    return
+                self.send_json(STORE.update_bay_auto_assign_settings(data, user["username"]))
+                return
+
             if parsed.path == "/api/admin/manual-edit-lookups":
                 user = self.require_permission("edit_delivery_lists")
                 if not user:
@@ -1144,6 +1191,13 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
                     return
                 self.send_json(STORE.receive_indian_trail_scan(data, user["username"]))
+                return
+
+            if parsed.path == "/api/indian-trail/manual-assign":
+                user = self.require_permission("assign_bay")
+                if not user:
+                    return
+                self.send_json(STORE.manual_assign_bay_item(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/assign":
