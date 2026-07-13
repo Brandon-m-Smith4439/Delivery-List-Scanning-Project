@@ -42,6 +42,7 @@ DEFAULT_STATIONS = ["Airport Rd", "Indian Trail", "Greenville", "Customer Pickup
 SESSION_COOKIE_NAME = "dls_session"
 PASSWORD_ITERATIONS = 260000
 SESSION_HOURS = 12
+PASSWORD_RESET_MINUTES = 30
 PERMISSIONS = [
     "scan",
     "view_lists",
@@ -178,11 +179,15 @@ LIST_PROFILES = [
     ("customer-pickup", "Customer Pickup", "Customer Pickup", "cpu"),
     ("dtc", "DTC - Deliver to Customer", "DTC", "dtc"),
 ]
+CPU_DESTINATION_ADDRESS = "1709 Airport Rd, Monroe, NC 28110"
+INDIAN_TRAIL_DESTINATION_ADDRESS = "3980 Matthews Indian Trail Rd, Matthews, NC 28104"
+GREENVILLE_DESTINATION_ADDRESS = "Greenville address pending"
+
 DEFAULT_CUSTOMER_ROUTE_RULES = [
-    ("Blue Color Glass", "CPU"),
-    ("ABZZ Glass", "CPU"),
-    ("Glass & Door Pro", "CPU"),
-    ("Add It Home Services", "DTC"),
+    ("Blue Color Glass", "CPU", CPU_DESTINATION_ADDRESS),
+    ("ABZZ Glass", "CPU", CPU_DESTINATION_ADDRESS),
+    ("Glass & Door Pro", "CPU", CPU_DESTINATION_ADDRESS),
+    ("Add It Home Services", "DTC", ""),
 ]
 
 # Bay auto-assigner settings are intentionally stored as simple key/value
@@ -284,8 +289,10 @@ def parse_rack_barcode(value: str) -> tuple[str, str]:
         payload = "T" + payload[5:]
     if payload.startswith("NORACK"):
         payload = "T" + payload[6:]
-    if payload.startswith("T") and len(payload) >= 9 and payload[1:9].isdigit():
-        return "T", f"{payload[1:5]}-{payload[5:7]}-{payload[7:9]}"
+    legacy_truck_match = re.fullmatch(r"T(20\d{6})", payload)
+    if legacy_truck_match:
+        date_text = legacy_truck_match.group(1)
+        return "T", f"{date_text[:4]}-{date_text[4:6]}-{date_text[6:8]}"
     match = re.match(r"^([A-Z0-9]+?)(20\d{6})$", payload)
     if match:
         date_text = match.group(2)
@@ -333,7 +340,7 @@ def fuzzy_contains(text: str, needle: str) -> bool:
 
 def default_customer_route(item: dict[str, Any]) -> str:
     signal = " ".join(str(item.get(key, "")) for key in ("customer", "job", "product", "route"))
-    for customer, route in DEFAULT_CUSTOMER_ROUTE_RULES:
+    for customer, route, _address in DEFAULT_CUSTOMER_ROUTE_RULES:
         if fuzzy_contains(signal, customer):
             return route
     return ""
@@ -815,7 +822,8 @@ def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
             "suggestedBay": row["suggested_bay"],
         }
     return {
-        "ok": row["event_type"] in {"scan", "undo"},
+        "ok": row["event_type"] in {"scan", "manual_scan", "undo"},
+        "isManual": row["event_type"] == "manual_scan",
         "barcode": row["canonical_barcode"] or row["barcode"],
         "raw": row["barcode"],
         "item": item,
@@ -1161,7 +1169,7 @@ class BaseDeliveryStore:
     def update_user_password(self, username: str, password: str, updated_by: str = "system") -> dict[str, Any]:
         raise NotImplementedError
 
-    def update_user_roles(self, username: str, roles: list[str], station: str | None = None, updated_by: str = "system") -> dict[str, Any]:
+    def update_user_roles(self, username: str, roles: list[str], station: str | None = None, email: str | None = None, updated_by: str = "system") -> dict[str, Any]:
         raise NotImplementedError
 
     def list_active_sessions(self) -> list[dict[str, Any]]:
@@ -1274,7 +1282,11 @@ class BaseDeliveryStore:
             clean_code = normalize_rack_code(str(code or ""))
             if not clean_code:
                 return ""
-            return "Truck" if clean_code == "T" else f"Rack {clean_code}"
+            if clean_code == "T":
+                return "Truck"
+            if re.fullmatch(r"T\d+", clean_code):
+                return f"Truck {clean_code[1:]}"
+            return f"Rack {clean_code}"
 
         def airport_label(scanner: Any) -> str:
             return str(scanner or "Airport Rd").replace(" - ", " ").strip() or "Airport Rd"
@@ -1734,18 +1746,44 @@ class BaseDeliveryStore:
             if not contacts:
                 continue
             to_emails = [row["email"] for row in contacts]
-            rows = "\n".join(
-                f"- Job {item.get('job') or item.get('product') or '-'} | Order {item.get('order')}-{item.get('item')} | Qty {item.get('qty')} | {item.get('dimensions') or '-'} | Route {item.get('route') or '-'}"
+            manifest_items = [
+                {
+                    "job": item.get("job") or item.get("product") or "-",
+                    "order": item.get("order") or "",
+                    "item": item.get("item") or "",
+                    "qty": item.get("qty") or 0,
+                    "dimensions": item.get("dimensions") or "",
+                    "route": item.get("route") or "",
+                    "product": item.get("product") or "",
+                }
                 for item in customer_items
+            ]
+            rows = "\n".join(
+                f"- Job {item['job']} | Order {item['order']}-{item['item']} | Qty {item['qty']} | {item['dimensions'] or '-'}"
+                for item in manifest_items
             )
+            piece_qty = sum(int(item.get("qty") or 0) for item in customer_items)
             subject = f"Delivery manifest for {customer} - {format_display_date(delivery_date)}"
             body = (
-                f"Hello,\n\nHere is the current manifest for {customer}.\n"
-                f"Expected ready date: {format_display_date(delivery_date)}\n\n"
-                f"Pieces:\n{rows}\n\n"
+                f"Hello,\n\nAttached/available is the current order manifest for {customer}.\n"
+                f"Expected ready date: {format_display_date(delivery_date)}\n"
+                f"Total pieces: {piece_qty}\n"
+                f"Total line items: {len(customer_items)}\n\n"
+                f"Order summary:\n{rows}\n\n"
                 "This is an automated manifest from Barefoot Facility Services."
             )
-            self.queue_email_message(con, "manifest", customer, contacts[0]["customer_pattern"], delivery_date, to_emails, cc_emails, subject, body, {"itemCount": len(customer_items), "user": user})
+            self.queue_email_message(
+                con,
+                "manifest",
+                customer,
+                contacts[0]["customer_pattern"],
+                delivery_date,
+                to_emails,
+                cc_emails,
+                subject,
+                body,
+                {"itemCount": len(customer_items), "pieceQty": piece_qty, "items": manifest_items, "user": user},
+            )
 
     def queue_ready_email_if_customer_complete(self, con: sqlite3.Connection, list_id: str, scanned_row: sqlite3.Row, user: str) -> None:
         list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
@@ -1953,6 +1991,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 customer_pattern TEXT NOT NULL UNIQUE,
                 route TEXT NOT NULL,
+                customer_address TEXT NOT NULL DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT ''
@@ -2013,6 +2052,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
+                email TEXT NOT NULL DEFAULT '',
                 display_name TEXT NOT NULL DEFAULT '',
                 password_hash TEXT NOT NULL DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1,
@@ -2050,6 +2090,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 expires_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
                 user_agent TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                code_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT NOT NULL DEFAULT '',
+                requested_by TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS bays (
@@ -2196,6 +2246,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.ensure_column(con, "bays", "layout_col", "INTEGER")
         self.ensure_column(con, "bays", "layout_cell", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "bays", "status", "TEXT NOT NULL DEFAULT 'Available'")
+        self.ensure_column(con, "customer_route_rules", "customer_address", "TEXT NOT NULL DEFAULT ''")
+        con.execute(
+            """
+            UPDATE customer_route_rules
+            SET customer_address = ?
+            WHERE active = 1
+              AND UPPER(route) IN ('CPU', 'CUSTOMER PICKUP')
+              AND COALESCE(customer_address, '') = ''
+            """,
+            (CPU_DESTINATION_ADDRESS,),
+        )
+        self.ensure_column(con, "users", "email", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "imports", "source_path", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "imports", "source_hash", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "imports", "import_kind", "TEXT NOT NULL DEFAULT 'manual'")
@@ -2526,13 +2588,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
     def seed_customer_route_rules(self, con: sqlite3.Connection) -> None:
         created = now_iso()
-        for customer, route in DEFAULT_CUSTOMER_ROUTE_RULES:
+        for customer, route, address in DEFAULT_CUSTOMER_ROUTE_RULES:
             con.execute(
                 """
-                INSERT OR IGNORE INTO customer_route_rules (customer_pattern, route, active, created_at)
-                VALUES (?, ?, 1, ?)
+                INSERT OR IGNORE INTO customer_route_rules (customer_pattern, route, customer_address, active, created_at)
+                VALUES (?, ?, ?, 1, ?)
                 """,
-                (customer, route, created),
+                (customer, route, address, created),
             )
 
     def seed_security_data(self, con: sqlite3.Connection) -> None:
@@ -2559,11 +2621,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             created = now_iso()
             cur = con.execute(
                 """
-                INSERT INTO users (username, display_name, password_hash, active, created_at)
-                VALUES (?, ?, ?, 1, ?)
+                INSERT INTO users (username, email, display_name, password_hash, active, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
                 """,
                 (
                     self.config.default_admin_username,
+                    "",
                     "Default Admin",
                     hash_password(self.config.default_admin_password),
                     created,
@@ -2889,9 +2952,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 JOIN line_items src ON src.id = ri.line_item_id
                 JOIN delivery_lists src_dl ON src_dl.id = src.list_id
                 JOIN line_items target
-                  ON target.source_id = src.source_id
-                 AND target.order_no = src.order_no
-                 AND target.item_no = src.item_no
+                  ON (
+                    target.id = src.id
+                    OR (src.source_id <> '' AND target.source_id = src.source_id)
+                    OR (target.order_no = src.order_no AND target.item_no = src.item_no)
+                  )
                 JOIN delivery_lists target_dl
                   ON target_dl.id = target.list_id
                  AND target_dl.delivery_date = src_dl.delivery_date
@@ -2932,6 +2997,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 GROUP BY line_item_id
             ) latest ON latest.max_id = se.id
             WHERE se.event_type = 'error'
+              AND se.message <> 'Rack destination mismatch'
+              AND se.message NOT LIKE 'Rack %'
+              AND COALESCE(se.reason, '') NOT LIKE 'Rack % already assigned%'
+              AND COALESCE(se.reason, '') NOT LIKE '%must go on a separate rack%'
             """,
             (list_id,),
         ).fetchall()
@@ -3162,11 +3231,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             """,
             (row["id"],),
         ).fetchall()
+        station_text = row["station"] if "station" in row.keys() else ""
+        assigned_stations = [station.strip() for station in re.split(r"[,|]", station_text or "") if station.strip()]
         return {
             "id": row["id"],
             "username": row["username"],
+            "email": row["email"] if "email" in row.keys() else "",
             "displayName": row["display_name"] or row["username"],
-            "station": row["station"] if "station" in row.keys() else "",
+            "station": station_text,
+            "assignedStations": assigned_stations,
             "active": bool(row["active"]),
             "roles": roles,
             "permissions": [permission["permission_name"] for permission in permission_rows],
@@ -3174,9 +3247,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def get_user_by_username(self, con: sqlite3.Connection, username: str) -> sqlite3.Row | None:
+        clean = username.strip()
         return con.execute(
-            "SELECT * FROM users WHERE lower(username) = lower(?)",
-            (username.strip(),),
+            """
+            SELECT * FROM users
+            WHERE lower(username) = lower(?)
+               OR (COALESCE(email, '') <> '' AND lower(email) = lower(?))
+            """,
+            (clean, clean),
         ).fetchone()
 
     def authenticate_user(self, username: str, password: str) -> dict[str, Any]:
@@ -3234,6 +3312,68 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         with self.connect() as con:
             con.execute("DELETE FROM sessions WHERE token_hash = ?", (token_digest,))
             con.commit()
+
+    def request_password_reset(self, identity: str, requested_by: str = "self-service") -> dict[str, Any]:
+        clean_identity = " ".join(str(identity or "").split())
+        if not clean_identity:
+            raise ValueError("BFS email or username is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = self.get_user_by_username(con, clean_identity)
+            # Do not reveal whether an account exists unless this is local development.
+            if not row or not row["active"]:
+                con.commit()
+                return {"ok": True, "message": "If that account exists, a reset code was created."}
+            code = f"{secrets.randbelow(1000000):06d}"
+            code_hash = session_token_hash(code, self.config.session_secret)
+            created = now_iso()
+            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=PASSWORD_RESET_MINUTES)).isoformat(timespec="seconds")
+            con.execute("UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at = ''", (created, row["id"]))
+            con.execute(
+                """
+                INSERT INTO password_reset_tokens (user_id, code_hash, created_at, expires_at, requested_by)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (row["id"], code_hash, created, expires_at, requested_by),
+            )
+            self.insert_audit(con, "user", row["username"], "request_password_reset", requested_by, "", "", {"identity": clean_identity})
+            con.commit()
+        payload = {"ok": True, "message": "Reset code created. Use it within 30 minutes.", "expiresAt": expires_at}
+        if not self.config.production:
+            payload["resetCode"] = code
+        return payload
+
+    def confirm_password_reset(self, identity: str, reset_code: str, new_password: str) -> dict[str, Any]:
+        clean_identity = " ".join(str(identity or "").split())
+        clean_code = re.sub(r"\D", "", str(reset_code or ""))
+        if not clean_identity or not clean_code or not new_password:
+            raise ValueError("Identity, reset code, and new password are required")
+        if len(new_password) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = self.get_user_by_username(con, clean_identity)
+            if not row or not row["active"]:
+                raise ValueError("Invalid or expired reset code")
+            code_hash = session_token_hash(clean_code, self.config.session_secret)
+            token_row = con.execute(
+                """
+                SELECT * FROM password_reset_tokens
+                WHERE user_id = ? AND code_hash = ? AND used_at = ''
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (row["id"], code_hash),
+            ).fetchone()
+            if not token_row or parse_iso(token_row["expires_at"]) <= datetime.now(timezone.utc):
+                raise ValueError("Invalid or expired reset code")
+            now = now_iso()
+            con.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(new_password), row["id"]))
+            con.execute("UPDATE password_reset_tokens SET used_at = ? WHERE id = ?", (now, token_row["id"]))
+            con.execute("DELETE FROM sessions WHERE user_id = ?", (row["id"],))
+            self.insert_audit(con, "user", row["username"], "confirm_password_reset", "self-service", "", "", {"identity": clean_identity})
+            con.commit()
+        return {"ok": True, "message": "Password reset. Sign in with the new password."}
 
     def list_users(self) -> list[dict[str, Any]]:
         with self.connect() as con:
@@ -3306,14 +3446,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"users": self.list_users(), "username": clean_username}
 
-    def update_user_roles(self, username: str, roles: list[str], station: str | None = None, updated_by: str = "system") -> dict[str, Any]:
+    def update_user_roles(self, username: str, roles: list[str], station: str | None = None, email: str | None = None, updated_by: str = "system") -> dict[str, Any]:
         clean_username = str(username or "").strip()
         clean_roles = [str(role).strip() for role in roles if str(role).strip()]
         station_supplied = station is not None
-        clean_station = " ".join(str(station or "").split())[:80]
+        email_supplied = email is not None
+        clean_station = " ".join(str(station or "").split())[:240]
+        clean_email = " ".join(str(email or "").split()).lower()[:160]
 
         if not clean_username or not clean_roles:
             raise ValueError("username and at least one role are required")
+        if clean_email and not is_valid_email(clean_email):
+            raise ValueError("Enter a valid BFS email address")
 
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -3354,6 +3498,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if station_supplied:
                 con.execute("UPDATE users SET station = ? WHERE id = ?", (clean_station, user_row["id"]))
 
+            if email_supplied:
+                if clean_email:
+                    duplicate_email = con.execute(
+                        """
+                        SELECT id
+                        FROM users
+                        WHERE lower(email) = lower(?) AND id <> ?
+                        LIMIT 1
+                        """,
+                        (clean_email, user_row["id"]),
+                    ).fetchone()
+                    if duplicate_email:
+                        raise ValueError("That BFS email is already assigned to another user")
+                con.execute("UPDATE users SET email = ? WHERE id = ?", (clean_email, user_row["id"]))
+
             self.insert_audit(
                 con,
                 "user",
@@ -3362,11 +3521,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 updated_by,
                 clean_station,
                 "",
-                {"roles": clean_roles, "station": clean_station},
+                {"roles": clean_roles, "station": clean_station, "email": clean_email if email_supplied else None},
             )
             con.commit()
 
-        return {"users": self.list_users(), "username": clean_username, "roles": clean_roles, "station": clean_station}
+        return {"users": self.list_users(), "username": clean_username, "roles": clean_roles, "station": clean_station, "email": clean_email if email_supplied else None}
 
     def list_active_sessions(self) -> list[dict[str, Any]]:
         now = now_iso()
@@ -3396,31 +3555,35 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ]
 
     def create_user(self, data: dict[str, Any], created_by: str = "system") -> dict[str, Any]:
-        username = " ".join(str(data.get("username") or "").split())[:80]
+        email = " ".join(str(data.get("email") or data.get("bfsEmail") or "").split()).lower()[:160]
+        username = " ".join(str(data.get("username") or email).split())[:160]
         display_name = " ".join(str(data.get("displayName") or username).split())[:120]
-        station = " ".join(str(data.get("station") or "").split())[:80]
+        station = " ".join(str(data.get("station") or "").split())[:240]
         password = str(data.get("password") or "")
         roles = data.get("roles") or ["Operator"]
+        if email and not is_valid_email(email):
+            raise ValueError("Enter a valid BFS email address")
         if not username or not password:
-            raise ValueError("username and password are required")
+            raise ValueError("BFS email/username and password are required")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             existing = self.get_user_by_username(con, username)
-            if existing:
+            email_existing = self.get_user_by_username(con, email) if email else None
+            if existing or email_existing:
                 raise ValueError("User already exists")
             cur = con.execute(
                 """
-                INSERT INTO users (username, display_name, station, password_hash, active, created_at)
-                VALUES (?, ?, ?, ?, 1, ?)
+                INSERT INTO users (username, email, display_name, station, password_hash, active, created_at)
+                VALUES (?, ?, ?, ?, ?, 1, ?)
                 """,
-                (username, display_name, station, hash_password(password), now_iso()),
+                (username, email, display_name, station, hash_password(password), now_iso()),
             )
             for role_name in roles:
                 role = con.execute("SELECT id FROM roles WHERE name = ?", (str(role_name),)).fetchone()
                 if not role:
                     raise ValueError(f"Unknown role: {role_name}")
                 con.execute("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)", (cur.lastrowid, role["id"]))
-            self.insert_audit(con, "user", username, "create_user", created_by, station, "", {"roles": roles, "station": station})
+            self.insert_audit(con, "user", username, "create_user", created_by, station, "", {"roles": roles, "station": station, "email": email})
             con.commit()
             user_row = con.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone()
             return self.user_from_row(con, user_row)
@@ -3435,6 +3598,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "id": row["id"],
                 "customerPattern": row["customer_pattern"],
                 "route": row["route"],
+                "customerAddress": row["customer_address"] if "customer_address" in row.keys() else "",
                 "active": bool(row["active"]),
             }
             for row in rows
@@ -3442,6 +3606,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
     def add_customer_route_rule(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         customer = " ".join(str(data.get("customerPattern") or data.get("customer") or "").split())[:160]
+        customer_address = " ".join(str(data.get("customerAddress") or data.get("address") or "").split())[:240]
         raw_route = str(data.get("route") or "").strip().upper()
         rule_id = int(data.get("ruleId") or data.get("id") or 0)
         if raw_route in {"CPU", "CUSTOMER PICKUP"}:
@@ -3458,6 +3623,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             raise ValueError("Route is required")
         if not customer:
             raise ValueError("Customer pattern is required")
+        if route == "CPU" and not customer_address:
+            customer_address = CPU_DESTINATION_ADDRESS
+        if route == "GNV" and not customer_address:
+            customer_address = GREENVILLE_DESTINATION_ADDRESS
+        if route == "DTC" and not customer_address:
+            raise ValueError("DTC customer route rules require a delivery address")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             if rule_id:
@@ -3475,29 +3646,31 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     UPDATE customer_route_rules
                     SET customer_pattern = ?,
                         route = ?,
+                        customer_address = ?,
                         active = 1,
                         updated_at = ?
                     WHERE id = ?
                     """,
-                    (customer, route, now_iso(), rule_id),
+                    (customer, route, customer_address, now_iso(), rule_id),
                 )
                 audit_id = str(rule_id)
                 audit_action = "update_customer_route_rule"
             else:
                 con.execute(
                     """
-                    INSERT INTO customer_route_rules (customer_pattern, route, active, created_at, updated_at)
-                    VALUES (?, ?, 1, ?, ?)
+                    INSERT INTO customer_route_rules (customer_pattern, route, customer_address, active, created_at, updated_at)
+                    VALUES (?, ?, ?, 1, ?, ?)
                     ON CONFLICT(customer_pattern) DO UPDATE SET
                         route = excluded.route,
+                        customer_address = excluded.customer_address,
                         active = 1,
                         updated_at = excluded.updated_at
                     """,
-                    (customer, route, now_iso(), now_iso()),
+                    (customer, route, customer_address, now_iso(), now_iso()),
                 )
                 audit_id = customer
                 audit_action = "upsert_customer_route_rule"
-            self.insert_audit(con, "customer_route_rule", audit_id, audit_action, user, "", "", {"customer": customer, "route": route})
+            self.insert_audit(con, "customer_route_rule", audit_id, audit_action, user, "", "", {"customer": customer, "route": route, "address": customer_address})
             con.commit()
         return {"rules": self.get_customer_route_rules()}
 
@@ -4968,6 +5141,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     payload["racks"] = racks_payload.get("racks", [])
                     payload["rackSummary"] = racks_payload.get("summary")
                     return payload
+                try:
+                    self.validate_rack_destination_for_item(con, rack_for_scan, row)
+                except ValueError as exc:
+                    last = self.insert_event(
+                        con,
+                        list_id,
+                        row["id"],
+                        barcode,
+                        canonical,
+                        user,
+                        station,
+                        "error",
+                        "Rack destination mismatch",
+                        str(exc),
+                    )
+                    con.commit()
+                    payload = self._get_payload(con, list_id, last)
+                    racks_payload = self.get_racks()
+                    payload["racks"] = racks_payload.get("racks", [])
+                    payload["rackSummary"] = racks_payload.get("summary")
+                    return payload
             con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
             if rack_for_scan:
                 con.execute(
@@ -4988,8 +5182,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     """,
                     (rack_for_scan["id"], row["id"], user, now_iso()),
                 )
+                self.refresh_rack_destination(con, rack_for_scan["id"])
             preassigned_bay = self.preassign_bay_for_outbound(con, list_id, row, user, station)
-            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", reason, "", 1)
+            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "manual_scan" if is_manual else "scan", reason, "", 1)
             if preassigned_bay:
                 self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "notice", "Indian Trail bay preassigned", f"Preassigned to Bay {preassigned_bay}")
             self.insert_audit(
@@ -5639,6 +5834,31 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     change_summary = {}
                 stage_summaries = change_summary.get("stages") if isinstance(change_summary, dict) else []
                 changed_list_ids = change_summary.get("changedListIds") if isinstance(change_summary, dict) else []
+
+                # Normalize historical import summaries created by older builds.
+                # Some no-change rows stored originalQty=0 even though totalQty
+                # already contained the stage's existing pieces. That made an
+                # unchanged DTC stage look like 0 -> 10 with no recorded change.
+                normalized_stage_summaries: list[dict[str, Any]] = []
+                for stage_summary in stage_summaries if isinstance(stage_summaries, list) else []:
+                    if not isinstance(stage_summary, dict):
+                        continue
+                    normalized = dict(stage_summary)
+                    total_qty = int(normalized.get("totalQty") or normalized.get("updatedQty") or 0)
+                    original_qty = int(normalized.get("originalQty") or 0)
+                    added_qty = int(normalized.get("addedPieceQty") or 0)
+                    changed_qty = int(normalized.get("changedPieceQty") or 0)
+                    changed_lines = int(normalized.get("changedLineCount") or 0)
+                    created_stage = bool(normalized.get("created"))
+
+                    if not created_stage and original_qty <= 0 and total_qty > 0:
+                        if not added_qty and not changed_qty and not changed_lines:
+                            normalized["originalQty"] = total_qty
+                        elif added_qty > 0:
+                            normalized["originalQty"] = max(total_qty - added_qty, 0)
+
+                    normalized_stage_summaries.append(normalized)
+
                 recent_imports.append(
                     {
                         "id": row["id"],
@@ -5655,7 +5875,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "updatedCount": change_summary.get("updatedCount", 0) if isinstance(change_summary, dict) else 0,
                         "addedPieceQty": change_summary.get("addedPieceQty", 0) if isinstance(change_summary, dict) else 0,
                         "changedPieceQty": change_summary.get("changedPieceQty", 0) if isinstance(change_summary, dict) else 0,
-                        "stageSummaries": stage_summaries if isinstance(stage_summaries, list) else [],
+                        "stageSummaries": normalized_stage_summaries,
                         "listIds": changed_list_ids if isinstance(changed_list_ids, list) and changed_list_ids else [f"{row['delivery_date']}-{suffix}" for suffix, _, _, _ in LIST_PROFILES],
                     }
                 )
@@ -5788,7 +6008,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             clean_code = normalize_rack_code(str(code or ""))
             if not clean_code:
                 return ""
-            return "Truck" if clean_code == "T" else f"Rack {clean_code}"
+            if clean_code == "T":
+                return "Truck"
+            if re.fullmatch(r"T\d+", clean_code):
+                return f"Truck {clean_code[1:]}"
+            return f"Rack {clean_code}"
 
         def airport_label(scanner: Any) -> str:
             return str(scanner or "Airport Rd").replace(" - ", " ").strip() or "Airport Rd"
@@ -5982,10 +6206,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         clean = str(location or "").strip()
         line_item_id = row["id"]
         if not clean:
+            previous_rack_ids = [item["rack_id"] for item in con.execute("SELECT DISTINCT rack_id FROM rack_items WHERE line_item_id = ? AND status = 'Active'", (line_item_id,)).fetchall()]
             con.execute(
                 "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Manual location cleared' WHERE line_item_id = ? AND status = 'Active'",
                 (user, now_iso(), line_item_id),
             )
+            for rack_id in previous_rack_ids:
+                self.refresh_rack_destination(con, rack_id)
             con.execute(
                 "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = 'Manual location cleared' WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled')",
                 (user, now_iso(), line_item_id),
@@ -5994,6 +6221,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return
         rack = con.execute("SELECT * FROM racks WHERE UPPER(rack_code) = UPPER(?) AND active = 1", (clean,)).fetchone()
         if rack:
+            self.validate_rack_destination_for_item(con, rack, row)
+            previous_rack_ids = [item["rack_id"] for item in con.execute("SELECT DISTINCT rack_id FROM rack_items WHERE line_item_id = ? AND rack_id <> ? AND status = 'Active'", (line_item_id, rack["id"])).fetchall()]
             con.execute(
                 "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = 'Moved to rack from manual edit' WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled')",
                 (user, now_iso(), line_item_id),
@@ -6018,16 +6247,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Moved to another rack from manual edit' WHERE line_item_id = ? AND rack_id <> ? AND status = 'Active'",
                 (user, now_iso(), line_item_id, rack["id"]),
             )
+            for rack_id in previous_rack_ids:
+                self.refresh_rack_destination(con, rack_id)
+            self.refresh_rack_destination(con, rack["id"])
             self.insert_audit(con, "line_item", line_item_id, "manual_location_rack", user, "", "", {"rackCode": rack["rack_code"]})
             return
         bay = con.execute("SELECT * FROM bays WHERE UPPER(bay_code) = UPPER(?) AND active = 1", (clean,)).fetchone()
         if not bay:
             bay = con.execute("SELECT * FROM bays WHERE UPPER(display_name) = UPPER(?) AND active = 1", (clean,)).fetchone()
         if bay:
+            previous_rack_ids = [item["rack_id"] for item in con.execute("SELECT DISTINCT rack_id FROM rack_items WHERE line_item_id = ? AND status = 'Active'", (line_item_id,)).fetchall()]
             con.execute(
                 "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Moved to bay from manual edit' WHERE line_item_id = ? AND status = 'Active'",
                 (user, now_iso(), line_item_id),
             )
+            for rack_id in previous_rack_ids:
+                self.refresh_rack_destination(con, rack_id)
             con.execute(
                 "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = 'Moved to another bay from manual edit' WHERE line_item_id = ? AND bay_id <> ? AND status NOT IN ('Cleared', 'Cancelled')",
                 (user, now_iso(), line_item_id, bay["id"]),
@@ -6250,6 +6485,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 (current_month.isoformat(), next_month.isoformat()),
             ).fetchone()
+            range_remake_row = con.execute(
+                f"""
+                SELECT COUNT(*) AS row_count, COALESCE(SUM(qty), 0) AS qty
+                FROM (
+                    SELECT dl.delivery_date, li.source_id, MAX(li.qty) AS qty
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE dl.status = 'active'{list_date_sql}
+                      AND {remake_sql}
+                    GROUP BY dl.delivery_date, li.source_id
+                ) unique_remakes
+                """,
+                list_date_params,
+            ).fetchone()
         return {
             "dateFrom": date_from,
             "dateTo": date_to,
@@ -6274,6 +6523,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "monthlyRemakeCount": int(monthly_remake_row["row_count"] or 0),
             "monthlyRemakeQty": int(monthly_remake_row["qty"] or 0),
             "monthlyRemakeMonth": current_month.strftime("%B %Y"),
+            "rangeRemakeCount": int(range_remake_row["row_count"] or 0),
+            "rangeRemakeQty": int(range_remake_row["qty"] or 0),
             "actionCounts": {row["action"]: row["count"] for row in action_rows},
         }
 
@@ -6309,6 +6560,32 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 }
             )
         return events
+
+    def get_email_outbox_item(self, email_id: int) -> dict[str, Any]:
+        with self.connect() as con:
+            row = con.execute("SELECT * FROM email_outbox WHERE id = ?", (int(email_id),)).fetchone()
+        if not row:
+            raise ValueError("Email draft not found")
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except Exception:
+            payload = {}
+        return {
+            "id": row["id"],
+            "emailType": row["email_type"],
+            "customerName": row["customer_name"],
+            "customerPattern": row["customer_pattern"],
+            "deliveryDate": row["delivery_date"],
+            "toEmails": json.loads(row["to_emails"] or "[]"),
+            "ccEmails": json.loads(row["cc_emails"] or "[]"),
+            "subject": row["subject"],
+            "body": row["body"],
+            "status": row["status"],
+            "createdAt": row["created_at"],
+            "sentAt": row["sent_at"],
+            "error": row["error"],
+            "payload": payload,
+        }
 
     def bay_from_row(self, con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         assignments = con.execute(
@@ -6649,7 +6926,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "name": rack["display_name"] or rack["rack_code"],
             "type": rack["rack_type"],
             "status": rack["status"],
-            "destination": rack["destination"] if "destination" in rack.keys() else "",
+            "destination": (rack["destination"] if "destination" in rack.keys() and rack["destination"] else self.computed_rack_destination(con, rack["id"])),
             "completedAt": rack["completed_at"] if "completed_at" in rack.keys() else "",
             "departedAt": rack["departed_at"] if "departed_at" in rack.keys() else "",
             "returnedAt": rack["returned_at"] if "returned_at" in rack.keys() else "",
@@ -6663,9 +6940,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         row = con.execute(
             """
             SELECT
-              COALESCE(SUM(CASE WHEN r.rack_code = 'T' THEN ri.qty ELSE 0 END),0) AS truck_qty,
-              COALESCE(SUM(CASE WHEN r.rack_code <> 'T' THEN ri.qty ELSE 0 END),0) AS rack_qty,
-              COUNT(DISTINCT CASE WHEN r.rack_code <> 'T' AND ri.status = 'Active' THEN r.id END) AS rack_count
+              COALESCE(SUM(CASE WHEN r.rack_code = 'T' OR UPPER(COALESCE(r.rack_type, '')) = 'TRUCK' THEN ri.qty ELSE 0 END),0) AS truck_qty,
+              COALESCE(SUM(CASE WHEN r.rack_code <> 'T' AND UPPER(COALESCE(r.rack_type, '')) <> 'TRUCK' THEN ri.qty ELSE 0 END),0) AS rack_qty,
+              COUNT(DISTINCT CASE WHEN r.rack_code <> 'T' AND UPPER(COALESCE(r.rack_type, '')) <> 'TRUCK' AND ri.status = 'Active' THEN r.id END) AS rack_count
             FROM racks r
             LEFT JOIN rack_items ri ON ri.rack_id = r.id AND ri.status = 'Active'
             WHERE r.active = 1
@@ -6699,8 +6976,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not list_row or "staging" not in str(list_row["stage"]).lower():
                 raise ValueError("Rack scans must be made from a staging delivery list")
             rack = self.get_rack_by_code(con, rack_code)
-            if str(rack["status"] or "").lower() == "closed":
+            rack_status = str(rack["status"] or "").lower()
+            if rack_status == "closed":
                 raise ValueError(f"Rack {rack['rack_code']} is closed. Uncomplete or clear it before scanning more pieces.")
+            if rack_status == "in transit":
+                raise ValueError(f"Rack {rack['rack_code']} is marked on the way. Mark it Not On The Way before scanning more pieces into it.")
             rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall()
             row, canonical, reason = self.recover_scan(barcode, rows)
             if row is None:
@@ -6708,6 +6988,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 con.commit()
                 payload = self.get_racks()
                 payload.update({"ok": False, "message": reason, "lastScan": last})
+                return payload
+            try:
+                self.validate_rack_destination_for_item(con, rack, row)
+            except ValueError as exc:
+                last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "error", "Rack destination mismatch", str(exc))
+                con.commit()
+                payload = self.get_racks()
+                payload.update({"ok": False, "message": str(exc), "lastScan": last})
                 return payload
             if row["scanned_qty"] < row["qty"]:
                 con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
@@ -6729,7 +7017,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 (rack["id"], row["id"], user, now_iso()),
             )
-            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", f"Added to {rack['rack_code']}", reason, 1)
+            destination = self.refresh_rack_destination(con, rack["id"])
+            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", f"Added to {rack['rack_code']}", f"{reason} Destination: {destination}".strip(), 1)
             self.insert_audit(con, "rack", rack["rack_code"], "rack_scan_in", user, station, reason, {"lineItemId": row["id"]})
             con.commit()
         payload = self.get_racks()
@@ -6747,7 +7036,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             item = con.execute("SELECT * FROM rack_items WHERE id = ? AND status = 'Active'", (rack_item_id,)).fetchone()
             if not item:
                 raise ValueError("Rack item not found")
+            line_item = con.execute("SELECT * FROM line_items WHERE id = ?", (item["line_item_id"],)).fetchone()
+            if not line_item:
+                raise ValueError("Rack line item not found")
+            self.validate_rack_destination_for_item(con, target, line_item)
+            old_rack_id = item["rack_id"]
             con.execute("UPDATE rack_items SET rack_id = ?, reason = 'Moved between racks' WHERE id = ?", (target["id"], rack_item_id))
+            self.refresh_rack_destination(con, old_rack_id)
+            self.refresh_rack_destination(con, target["id"])
             self.insert_audit(con, "rack_item", str(rack_item_id), "move_rack_item", user, "", "", {"targetRackCode": target["rack_code"]})
             con.commit()
         return self.get_racks()
@@ -6774,6 +7070,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Individually cleared from rack' WHERE id = ?",
                 (user, now_iso(), rack_item_id),
             )
+            self.refresh_rack_destination(con, item["rack_id"])
             self.insert_audit(
                 con,
                 "rack_item",
@@ -6813,22 +7110,83 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
         return aliases.get(text.upper(), text[:40] or "Indian Trail")
 
+    def destination_for_line_item(self, item: sqlite3.Row | dict[str, Any]) -> str:
+        source = {
+            "route": item["route"] if isinstance(item, sqlite3.Row) else item.get("route", ""),
+            "job": item["job"] if isinstance(item, sqlite3.Row) else item.get("job", ""),
+            "customer": item["customer"] if isinstance(item, sqlite3.Row) else item.get("customer", ""),
+            "product": item["product"] if isinstance(item, sqlite3.Row) else item.get("product", ""),
+            "processState": item["process_state"] if isinstance(item, sqlite3.Row) and "process_state" in item.keys() else (item.get("processState") or item.get("process_state", "") if isinstance(item, dict) else ""),
+            "queueState": item["queue_state"] if isinstance(item, sqlite3.Row) and "queue_state" in item.keys() else (item.get("queueState") or item.get("queue_state", "") if isinstance(item, dict) else ""),
+        }
+        category = route_category(source)
+        if category == "cpu":
+            return "CPU"
+        if category == "greenville":
+            return "Greenville"
+        if category == "dtc":
+            return "DTC"
+        if category.startswith("custom:"):
+            return route_stage_label(category.split(":", 1)[1])
+        return "Indian Trail"
+
+    def rack_destinations_from_items(self, con: sqlite3.Connection, rack_id: int, extra_item: sqlite3.Row | dict[str, Any] | None = None) -> list[str]:
+        rows = con.execute(
+            """
+            SELECT li.*
+            FROM rack_items ri
+            JOIN line_items li ON li.id = ri.line_item_id
+            WHERE ri.rack_id = ?
+              AND ri.status = 'Active'
+            """,
+            (rack_id,),
+        ).fetchall()
+        destinations = {self.destination_for_line_item(row) for row in rows}
+        if extra_item is not None:
+            destinations.add(self.destination_for_line_item(extra_item))
+        return sorted(destination for destination in destinations if destination)
+
+    def computed_rack_destination(self, con: sqlite3.Connection, rack_id: int) -> str:
+        destinations = self.rack_destinations_from_items(con, rack_id)
+        return destinations[0] if len(destinations) == 1 else ""
+
+    def refresh_rack_destination(self, con: sqlite3.Connection, rack_id: int) -> str:
+        destination = self.computed_rack_destination(con, rack_id)
+        con.execute("UPDATE racks SET destination = ?, updated_at = ? WHERE id = ?", (destination, now_iso(), rack_id))
+        return destination
+
+    def validate_rack_destination_for_item(self, con: sqlite3.Connection, rack: sqlite3.Row, item: sqlite3.Row | dict[str, Any]) -> str:
+        destination = self.destination_for_line_item(item)
+        current_destinations = self.rack_destinations_from_items(con, int(rack["id"]))
+        if current_destinations and current_destinations != [destination]:
+            existing = ", ".join(current_destinations)
+            raise ValueError(
+                f"Rack {rack['rack_code']} is already assigned to {existing}. "
+                f"This item is marked for {destination} and must go on a separate rack."
+            )
+        return destination
+
     def complete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
-        destination = self.rack_destination_value(data.get("destination"))
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rack = self.get_rack_by_code(con, rack_code)
             active_count = con.execute("SELECT COUNT(*) FROM rack_items WHERE rack_id = ? AND status = 'Active'", (rack["id"],)).fetchone()[0]
             if not active_count:
                 raise ValueError("Rack must have active pieces before it can be completed")
+            destinations = self.rack_destinations_from_items(con, rack["id"])
+            if len(destinations) != 1:
+                raise ValueError("Rack destination could not be determined safely. Clear or split this rack before completing it.")
+            destination = destinations[0]
             con.execute(
                 "UPDATE racks SET status = 'Closed', destination = ?, completed_at = ?, departed_at = '', returned_at = '', updated_at = ? WHERE id = ?",
                 (destination, now_iso(), now_iso(), rack["id"]),
             )
-            self.insert_audit(con, "rack", rack["rack_code"], "complete_rack", user, "", "Rack closed for outbound packing list", {"destination": destination})
+            self.insert_audit(con, "rack", rack["rack_code"], "complete_rack", user, "", "Rack closed with automatic destination from contents", {"destination": destination})
             con.commit()
-        return self.get_racks()
+        payload = self.get_racks()
+        payload["message"] = f"Rack {rack_code} completed for {destination}."
+        return payload
 
     def uncomplete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
@@ -6851,23 +7209,223 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return self.get_racks()
 
+    def not_on_way_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            rack = self.get_rack_by_code(con, rack_code)
+            if str(rack["status"] or "").lower() != "in transit":
+                raise ValueError("Only racks marked on the way can be marked Not On The Way")
+
+            canonical = f"RACK-{rack['rack_code']}"
+            outbound_rows = con.execute(
+                """
+                WITH rack_targets AS (
+                    SELECT DISTINCT
+                        out_li.id AS outbound_line_item_id,
+                        out_li.list_id AS outbound_list_id
+                    FROM rack_items ri
+                    JOIN line_items src_li ON src_li.id = ri.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
+                    JOIN delivery_lists out_dl
+                      ON out_dl.delivery_date = src_dl.delivery_date
+                     AND out_dl.status = 'active'
+                     AND LOWER(out_dl.stage) LIKE '%outbound%'
+                    JOIN line_items out_li
+                      ON out_li.list_id = out_dl.id
+                     AND (
+                        (src_li.source_id <> '' AND out_li.source_id = src_li.source_id)
+                        OR (out_li.order_no = src_li.order_no AND out_li.item_no = src_li.item_no)
+                     )
+                    WHERE ri.rack_id = ?
+                      AND ri.status = 'Active'
+                )
+                SELECT
+                    rt.outbound_line_item_id,
+                    rt.outbound_list_id,
+                    li.scanned_qty AS scanned_qty,
+                    COALESCE(SUM(se.qty_delta), 0) AS rack_outbound_qty
+                FROM rack_targets rt
+                JOIN line_items li ON li.id = rt.outbound_line_item_id
+                LEFT JOIN scan_events se
+                  ON se.line_item_id = rt.outbound_line_item_id
+                 AND se.canonical_barcode = ?
+                 AND se.qty_delta <> 0
+                GROUP BY rt.outbound_line_item_id, rt.outbound_list_id, li.scanned_qty
+                HAVING rack_outbound_qty > 0
+                """,
+                (rack["id"], canonical),
+            ).fetchall()
+
+            undone_piece_qty = 0
+            undone_row_count = 0
+            timestamp = now_iso()
+            for row in outbound_rows:
+                decrement = min(max(int(row["rack_outbound_qty"] or 0), 0), max(int(row["scanned_qty"] or 0), 0))
+                if decrement <= 0:
+                    continue
+                con.execute(
+                    "UPDATE line_items SET scanned_qty = MAX(scanned_qty - ?, 0) WHERE id = ?",
+                    (decrement, row["outbound_line_item_id"]),
+                )
+                self.insert_event(
+                    con,
+                    row["outbound_list_id"],
+                    row["outbound_line_item_id"],
+                    canonical,
+                    canonical,
+                    user,
+                    "",
+                    "undo",
+                    f"Rack {rack['rack_code']} marked Not On The Way",
+                    "Outbound rack scan quantity was reversed so the rack can be reopened.",
+                    -decrement,
+                )
+                undone_piece_qty += decrement
+                undone_row_count += 1
+
+            con.execute(
+                "UPDATE racks SET status = 'Open', destination = '', completed_at = '', departed_at = '', updated_at = ? WHERE id = ?",
+                (timestamp, rack["id"]),
+            )
+            self.insert_audit(
+                con,
+                "rack",
+                rack["rack_code"],
+                "rack_not_on_way",
+                user,
+                "",
+                "Rack reopened and outbound rack scans reversed",
+                {"undonePieceQty": undone_piece_qty, "undoneRowCount": undone_row_count},
+            )
+            con.commit()
+
+        payload = self.get_racks()
+        payload.update(
+            {
+                "ok": True,
+                "message": f"Rack {rack['rack_code']} is open again. Reversed {undone_piece_qty} outbound piece scan{'s' if undone_piece_qty != 1 else ''}.",
+                "undonePieceQty": undone_piece_qty,
+                "undoneRowCount": undone_row_count,
+            }
+        )
+        return payload
+
+    def assign_line_item_to_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        line_item_id = str(data.get("lineItemId") or "").strip()
+        rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
+        if not line_item_id:
+            raise ValueError("lineItemId is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(
+                """
+                SELECT li.*, dl.delivery_date, dl.stage
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE li.id = ?
+                """,
+                (line_item_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError("Line item not found")
+            target_row = row
+            if "staging" not in str(row["stage"] or "").lower():
+                mapped = con.execute(
+                    """
+                    SELECT li.*, dl.delivery_date, dl.stage
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE dl.delivery_date = ?
+                      AND LOWER(dl.stage) LIKE '%staging%'
+                      AND (
+                        li.source_id = ?
+                        OR (li.order_no = ? AND li.item_no = ?)
+                      )
+                    ORDER BY dl.id
+                    LIMIT 1
+                    """,
+                    (row["delivery_date"], row["source_id"], row["order_no"], row["item_no"]),
+                ).fetchone()
+                if mapped:
+                    target_row = mapped
+            if int(target_row["scanned_qty"] or 0) <= 0:
+                raise ValueError("Only line items already scanned at Staging can be assigned to a rack")
+
+            current_rack = con.execute(
+                """
+                SELECT r.*
+                FROM rack_items ri
+                JOIN racks r ON r.id = ri.rack_id
+                WHERE ri.line_item_id = ?
+                  AND ri.status = 'Active'
+                  AND r.active = 1
+                ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
+                LIMIT 1
+                """,
+                (target_row["id"],),
+            ).fetchone()
+            if current_rack:
+                current_status = str(current_rack["status"] or "").lower()
+                if current_status in {"closed", "complete", "completed", "in transit", "on the way"}:
+                    raise ValueError(f"Rack {current_rack['rack_code']} is {current_rack['status']} and cannot be changed from the scan table")
+
+            if rack_code:
+                rack = self.get_rack_by_code(con, rack_code)
+                rack_status = str(rack["status"] or "").lower()
+                if rack_status in {"closed", "complete", "completed", "in transit", "on the way"}:
+                    raise ValueError(f"Rack {rack['rack_code']} must be open before assigning a line item to it")
+            self.update_line_item_location(con, target_row, rack_code, user)
+            payload = self._get_payload(con, target_row["list_id"])
+            self.insert_audit(
+                con,
+                "line_item",
+                target_row["id"],
+                "rack_location_recovery",
+                user,
+                "",
+                "Supervisor/Admin rack location assignment from scan table",
+                {"rackCode": rack_code},
+            )
+            con.commit()
+        racks_payload = self.get_racks()
+        payload["racks"] = racks_payload.get("racks", [])
+        payload["rackSummary"] = racks_payload.get("summary")
+        return payload
+
     def update_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         code = normalize_rack_code(str(data.get("rackCode") or data.get("code") or ""))
+        old_code = normalize_rack_code(str(data.get("oldRackCode") or data.get("oldCode") or code))
         name = str(data.get("name") or data.get("displayName") or code).strip()[:80]
         rack_type = str(data.get("type") or data.get("rackType") or "Steel").strip()[:40]
         if not code:
             raise ValueError("Rack code is required")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            existing = con.execute("SELECT id FROM racks WHERE rack_code = ?", (code,)).fetchone()
+            existing = con.execute("SELECT id, rack_code FROM racks WHERE rack_code = ?", (old_code,)).fetchone() if old_code else None
             if existing:
-                con.execute("UPDATE racks SET display_name = ?, rack_type = ?, active = 1, updated_at = ? WHERE rack_code = ?", (name, rack_type, now_iso(), code))
+                if old_code == "T" and code != "T":
+                    raise ValueError("Truck rack code cannot be changed")
+                if code != old_code:
+                    conflict = con.execute("SELECT id FROM racks WHERE rack_code = ? AND id <> ?", (code, existing["id"])).fetchone()
+                    if conflict:
+                        raise ValueError(f"Rack code {code} already exists")
+                con.execute(
+                    "UPDATE racks SET rack_code = ?, display_name = ?, rack_type = ?, active = 1, updated_at = ? WHERE id = ?",
+                    (code, name, rack_type, now_iso(), existing["id"]),
+                )
             else:
-                sort_order = con.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM racks").fetchone()[0]
-                con.execute("INSERT INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at) VALUES (?, ?, ?, 'Open', 1, ?, ?)", (code, name, rack_type, sort_order, now_iso()))
-            self.insert_audit(con, "rack", code, "upsert_rack", user, "", "", {"name": name, "type": rack_type})
+                conflict = con.execute("SELECT id FROM racks WHERE rack_code = ?", (code,)).fetchone()
+                if conflict:
+                    con.execute("UPDATE racks SET display_name = ?, rack_type = ?, active = 1, updated_at = ? WHERE rack_code = ?", (name, rack_type, now_iso(), code))
+                else:
+                    sort_order = con.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM racks").fetchone()[0]
+                    con.execute("INSERT INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at) VALUES (?, ?, ?, 'Open', 1, ?, ?)", (code, name, rack_type, sort_order, now_iso()))
+            self.insert_audit(con, "rack", code, "upsert_rack", user, old_code if old_code != code else "", "", {"name": name, "type": rack_type, "oldCode": old_code})
             con.commit()
-        return self.get_racks()
+        payload = self.get_racks()
+        payload["rack"] = next((rack for rack in payload.get("racks", []) if rack.get("code") == code), None)
+        return payload
 
     def create_rack_set(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         prefix = re.sub(r"[^A-Za-z0-9]", "", str(data.get("prefix") or "")).upper()[:8]
@@ -6915,6 +7473,54 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return self.get_racks()
 
+    def destination_address_for_rack(self, con: sqlite3.Connection, rack_payload: dict[str, Any]) -> dict[str, Any]:
+        destination = self.rack_destination_value(rack_payload.get("destination") or "Indian Trail")
+
+        if destination == "Indian Trail":
+            return {"destination": destination, "address": INDIAN_TRAIL_DESTINATION_ADDRESS, "stops": []}
+        if destination == "CPU":
+            return {"destination": destination, "address": CPU_DESTINATION_ADDRESS, "stops": []}
+        if destination == "Greenville":
+            return {"destination": destination, "address": GREENVILLE_DESTINATION_ADDRESS, "stops": []}
+
+        rules = con.execute(
+            """
+            SELECT customer_pattern, route, customer_address
+            FROM customer_route_rules
+            WHERE active = 1
+              AND COALESCE(customer_address, '') <> ''
+            ORDER BY route, customer_pattern
+            """
+        ).fetchall()
+        stops: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        for item in rack_payload.get("items") or []:
+            signal = " ".join(str(item.get(key, "")) for key in ("customer", "job", "product", "route"))
+            for rule in rules:
+                if destination == "DTC" and self.rack_destination_value(rule["route"]) != "DTC":
+                    continue
+                if fuzzy_contains(signal, rule["customer_pattern"]):
+                    key = (str(rule["customer_pattern"]), str(rule["customer_address"]))
+                    if key not in seen:
+                        seen.add(key)
+                        stops.append(
+                            {
+                                "customer": str(rule["customer_pattern"]),
+                                "address": str(rule["customer_address"]),
+                            }
+                        )
+                    break
+
+        if destination == "DTC":
+            if len(stops) == 1:
+                return {"destination": destination, "address": stops[0]["address"], "stops": stops}
+            if len(stops) > 1:
+                return {"destination": destination, "address": "Multiple DTC stops - see customer addresses below", "stops": stops}
+            return {"destination": destination, "address": "No DTC customer address on file", "stops": []}
+
+        return {"destination": destination, "address": "Address not configured", "stops": []}
+
     def rack_packing_list(self, rack_code: str, delivery_date: str = "") -> dict[str, Any]:
         with self.connect() as con:
             rack = self.get_rack_by_code(con, rack_code)
@@ -6926,6 +7532,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 rack_payload["deliveryDate"] = clean_date
                 rack_payload["deliveryLabel"] = format_display_date(clean_date)
                 rack_payload["barcode"] = rack_barcode_text(rack_payload["code"], clean_date)
+            rack_payload["destinationAddress"] = self.destination_address_for_rack(con, rack_payload)
+            if self.rack_destination_value(rack_payload.get("destination")) == "DTC":
+                rules = con.execute(
+                    """
+                    SELECT customer_pattern, customer_address
+                    FROM customer_route_rules
+                    WHERE active = 1
+                      AND UPPER(route) IN ('DTC', 'DELIVER TO CUSTOMER')
+                      AND COALESCE(customer_address, '') <> ''
+                    ORDER BY customer_pattern
+                    """
+                ).fetchall()
+                for item in rack_payload.get("items") or []:
+                    signal = " ".join(str(item.get(key, "")) for key in ("customer", "job", "product", "route"))
+                    item["destinationAddress"] = "No DTC customer address on file"
+                    for rule in rules:
+                        if fuzzy_contains(signal, rule["customer_pattern"]):
+                            item["destinationAddress"] = str(rule["customer_address"])
+                            item["destinationCustomerPattern"] = str(rule["customer_pattern"])
+                            break
             return {"rack": rack_payload}
 
     def scan_rack_outbound(self, scan_request: dict[str, Any], rack_code: str) -> dict[str, Any]:
@@ -7032,9 +7658,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
     def _indian_trail_in_transit_payload(self, con: sqlite3.Connection) -> dict[str, Any]:
         """Return pieces scanned outbound but not yet received at Indian Trail.
 
-        This powers the Indian Trail "In Transit" manifest. It groups by Job Nr.
-        first, then by transportation method/rack so receiving users can quickly
-        see what is physically on the way and where it was loaded.
+        This powers the Indian Trail "In Transit" manifest. The API returns
+        flat rows plus rack/job metadata so the frontend can group the manifest
+        by rack first and then by glass type while still showing each Job Nr.
         """
         inbound = con.execute(
             """
@@ -7216,8 +7842,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 rack_code = "UNASSIGNED"
                 rack_name = "Needs transportation method"
                 rack_type = "Unassigned"
-            elif rack_code == "T":
-                rack_name = rack_name or "Truck"
+            elif rack_code == "T" or re.fullmatch(r"T\d+", rack_code) or "TRUCK" in rack_type.upper():
+                rack_name = rack_name or ("Truck" if rack_code == "T" else f"Truck {rack_code[1:]}")
                 rack_type = rack_type or "Truck"
             else:
                 rack_name = rack_name or rack_code
@@ -7362,7 +7988,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 SELECT r.rack_code, r.display_name, r.status, COALESCE(SUM(ri.qty),0) AS qty
                 FROM racks r
                 JOIN rack_items ri ON ri.rack_id = r.id AND ri.status = 'Active'
-                WHERE r.active = 1 AND r.rack_code <> 'T'
+                WHERE r.active = 1
+                  AND r.rack_code <> 'T'
+                  AND UPPER(COALESCE(r.rack_type, '')) <> 'TRUCK'
                 GROUP BY r.id
                 HAVING qty > 0
                 ORDER BY r.sort_order, r.rack_code
@@ -7370,8 +7998,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchall()
             in_transit_payload = self._indian_trail_in_transit_payload(con)
             transit_rows = in_transit_payload.get("rows", []) if isinstance(in_transit_payload, dict) else []
-            indian_trail_truck_qty = sum(int(row.get("qty") or 0) for row in transit_rows if str(row.get("rackCode") or "").upper() == "T")
-            indian_trail_rack_qty = sum(int(row.get("qty") or 0) for row in transit_rows if str(row.get("rackCode") or "").upper() not in {"", "T", "UNASSIGNED"})
+            def transit_row_is_truck(row: dict[str, Any]) -> bool:
+                rack_code = str(row.get("rackCode") or "").upper()
+                rack_type = str(row.get("rackType") or "").upper()
+                return rack_code == "T" or re.fullmatch(r"T\d+", rack_code) is not None or "TRUCK" in rack_type
+
+            indian_trail_truck_qty = sum(int(row.get("qty") or 0) for row in transit_rows if transit_row_is_truck(row))
+            indian_trail_rack_qty = sum(
+                int(row.get("qty") or 0)
+                for row in transit_rows
+                if str(row.get("rackCode") or "").upper() not in {"", "UNASSIGNED"} and not transit_row_is_truck(row)
+            )
         return {
             "activeInboundListId": list_id,
             "indianTrailOutboundTotal": outbound_totals["totalQty"],

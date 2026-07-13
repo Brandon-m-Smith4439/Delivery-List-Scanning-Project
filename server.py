@@ -257,29 +257,139 @@ def printed_item_is_remake(item: dict) -> bool:
 def render_rack_packing_list(payload: dict) -> str:
     rack = payload.get("rack") or {}
     barcode = rack.get("barcode") or f"RACK-{rack.get('code', '')}"
-    delivery_label = rack.get("deliveryLabel") or ""
-    delivery_suffix = f" - {esc(delivery_label)}" if delivery_label else ""
     destination = rack.get("destination") or "Indian Trail"
-    rows = []
-    for item in rack.get("items") or []:
-        rows.append(
-            f"""
-            <tr>
-              <td>{esc(print_display_date(item.get("deliveryDate") or item.get("deliveryLabel")))}</td>
-              <td>{esc(item.get("job") or item.get("product"))}</td>
-              <td>{esc(item.get("order"))}</td>
-              <td>{esc(item.get("item"))}</td>
-              <td>{esc(item.get("rackQty") or item.get("qty"))}</td>
-              <td>{esc(item.get("dimensions"))}</td>
-              <td>{esc(item.get("customer"))}</td>
-              <td>{esc(item.get("route"))}</td>
-              <td class="flag-cell">{'RM' if printed_item_is_remake(item) else ''}</td>
-              <td class="check-cell">&#9744;</td>
-            </tr>
+    is_dtc = str(destination).strip().upper() == "DTC"
+    all_items = rack.get("items") or []
+
+    destination_payload = rack.get("destinationAddress") or {}
+    default_address = destination_payload.get("address") or "Address not configured"
+
+    def customer_date_groups() -> list[dict]:
+        if not is_dtc:
+            return [
+                {
+                    "title": rack.get("name") or rack.get("code"),
+                    "deliveryDate": rack.get("deliveryDate") or "",
+                    "deliveryLabel": rack.get("deliveryLabel") or "",
+                    "customer": "",
+                    "address": default_address,
+                    "items": all_items,
+                }
+            ]
+
+        groups: dict[tuple[str, str, str], dict] = {}
+        for item in all_items:
+            customer = str(item.get("customer") or "DTC Customer").strip() or "DTC Customer"
+            delivery_date = str(item.get("deliveryDate") or rack.get("deliveryDate") or "").strip()
+            address = str(item.get("destinationAddress") or default_address or "No DTC customer address on file").strip()
+            key = (customer.lower(), delivery_date, address.lower())
+            if key not in groups:
+                groups[key] = {
+                    "title": f"{rack.get('name') or rack.get('code')} - {customer}",
+                    "deliveryDate": delivery_date,
+                    "deliveryLabel": print_display_date(delivery_date) if delivery_date else rack.get("deliveryLabel") or "",
+                    "customer": customer,
+                    "address": address,
+                    "items": [],
+                }
+            groups[key]["items"].append(item)
+        return list(groups.values()) or [
+            {
+                "title": rack.get("name") or rack.get("code"),
+                "deliveryDate": rack.get("deliveryDate") or "",
+                "deliveryLabel": rack.get("deliveryLabel") or "",
+                "customer": "DTC Customer",
+                "address": default_address,
+                "items": [],
+            }
+        ]
+
+    def rows_for_items(items: list[dict]) -> str:
+        rows = []
+        for item in items:
+            rows.append(
+                f"""
+                <tr>
+                  <td>{esc(print_display_date(item.get("deliveryDate") or item.get("deliveryLabel")))}</td>
+                  <td>{esc(item.get("job") or item.get("product"))}</td>
+                  <td>{esc(item.get("order"))}</td>
+                  <td>{esc(item.get("item"))}</td>
+                  <td>{esc(item.get("rackQty") or item.get("qty"))}</td>
+                  <td>{esc(item.get("dimensions"))}</td>
+                  <td>{esc(item.get("customer"))}</td>
+                  <td>{esc(item.get("route"))}</td>
+                  <td class="flag-cell">{'RM' if printed_item_is_remake(item) else ''}</td>
+                  <td class="check-cell">&#9744;</td>
+                </tr>
+                """
+            )
+        return "".join(rows) or '<tr><td colspan="10">No pieces are currently assigned to this rack.</td></tr>'
+
+    groups = customer_date_groups()
+    group_count = len(groups)
+
+    def sheet_html(group: dict, index: int) -> str:
+        delivery_label = group.get("deliveryLabel") or rack.get("deliveryLabel") or ""
+        delivery_suffix = f" - {esc(delivery_label)}" if delivery_label else ""
+        title = group.get("title") or rack.get("name") or rack.get("code")
+        customer_html = ""
+        if is_dtc:
+            customer_html = f"""
+            <div class="destination-stop primary-stop">
+              <strong>{esc(group.get("customer") or "DTC Customer")}</strong>
+              <span>{esc(group.get("address") or default_address)}</span>
+            </div>
             """
-        )
-    if not rows:
-        rows.append('<tr><td colspan="10">No pieces are currently assigned to this rack.</td></tr>')
+        signature_html = """
+        <section class="signature-section">
+          <div><strong>Customer Signature</strong><span></span></div>
+          <div><strong>Date</strong><span></span></div>
+        </section>
+        """ if is_dtc else ""
+        page_note = f"DTC customer slip {index} of {group_count}" if is_dtc and group_count > 1 else "Packing List"
+        qty = sum(int(item.get("rackQty") or item.get("qty") or 0) for item in group.get("items") or [])
+        destination_card_html = f"""
+        <section class="destination-card destination-card-single">
+          <div class="destination-card-main">
+            <small>Destination Address</small>
+            <strong>{esc(group.get("customer") or destination if is_dtc else destination)}</strong>
+            <span>{esc(group.get("address") or default_address)}</span>
+          </div>
+        </section>
+        """
+        return f"""
+      <section class="packing-sheet">
+        <header class="packing-header">
+          <div class="packing-logo-box">
+            <img class="packing-logo" src="/assets/barefoot-logo.jpg" alt="Barefoot & Company" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+            <span class="packing-logo-fallback" style="display:none;">Barefoot &amp; Company</span>
+          </div>
+          <div class="packing-title">
+            <small>{esc(page_note)}</small>
+            <h1>{esc(title)}{delivery_suffix}</h1>
+            <div class="rack-meta">
+              <span><b>Rack Type</b>{esc(rack.get("type"))}</span>
+              <span><b>Destination</b>{esc(destination)}</span>
+              <span><b>Status</b>{esc(rack.get("status"))}</span>
+              <span><b>Qty</b>{esc(qty or rack.get("qty"))}</span>
+            </div>
+          </div>
+          <div class="barcode-box">
+            {code39_svg(str(barcode))}
+            <div class="barcode-text">*{esc(barcode)}*</div>
+          </div>
+        </header>
+        {destination_card_html}
+        <table>
+          <thead><tr><th>Delivery Date</th><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Flags</th><th>Check</th></tr></thead>
+          <tbody>{rows_for_items(group.get("items") or [])}</tbody>
+        </table>
+        {signature_html}
+      </section>
+        """
+
+    sheets = "".join(sheet_html(group, index) for index, group in enumerate(groups, start=1))
+
     return f"""
     <!doctype html>
     <html>
@@ -288,43 +398,150 @@ def render_rack_packing_list(payload: dict) -> str:
       <title>{esc(rack.get("name") or rack.get("code"))} Packing List</title>
       <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
       <style>
-        body {{ font-family: Arial, sans-serif; color: #071633; margin: 24px; }}
-        header {{ display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; border-bottom: 3px solid #071633; padding-bottom: 14px; }}
-        h1 {{ margin: 0; font-size: 28px; }}
+        * {{ box-sizing: border-box; }}
+        body {{ font-family: Arial, sans-serif; color: #071633; margin: 22px; background: #fff; }}
+        button {{ margin-bottom: 12px; }}
+        .packing-sheet {{ page-break-after: always; }}
+        .packing-sheet:last-child {{ page-break-after: auto; }}
+        .packing-header {{ display: grid; grid-template-columns: 210px minmax(260px, 1fr) 300px; gap: 8px; align-items: start; border-bottom: 3px solid #071633; padding-bottom: 14px; }}
+        .packing-logo-box {{ min-height: 128px; display: grid; align-content: start; gap: 6px; }}
+        .packing-logo {{ width: 205px; max-width: 100%; max-height: 128px; object-fit: contain; object-position: left top; display: block; filter: drop-shadow(0 4px 7px rgba(5, 22, 48, 0.22)); }}
+        .packing-logo-fallback {{ color: #071633; font-size: 15px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; text-shadow: 0 3px 6px rgba(5, 22, 48, 0.18); }}
+        .packing-title small {{ display: block; color: #526078; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }}
+        h1 {{ margin: 3px 0 10px; font-size: 28px; line-height: 1.05; overflow-wrap: anywhere; }}
         p {{ margin: 4px 0; }}
-        .barcode-box {{ width: 320px; text-align: center; }}
+        .rack-meta {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }}
+        .rack-meta span {{ border: 1px solid #d6deeb; border-radius: 6px; background: #f8fafc; padding: 6px 8px; font-size: 12px; }}
+        .rack-meta b {{ display: block; color: #526078; font-size: 10px; text-transform: uppercase; }}
+        .barcode-box {{ width: 100%; text-align: center; border: 1px solid #d6deeb; border-radius: 8px; padding: 10px; }}
         .rack-barcode {{ width: 100%; height: 72px; display: block; }}
-        .barcode-text {{ font-size: 18px; font-weight: 900; letter-spacing: 1px; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 12px; }}
-        th, td {{ border: 1px solid #222; padding: 6px; text-align: left; }}
+        .barcode-text {{ margin-top: 5px; font-size: 18px; font-weight: 900; letter-spacing: 1px; }}
+        .destination-card {{ margin-top: 14px; display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 1.2fr); gap: 12px; border: 2px solid #071633; border-radius: 8px; padding: 10px 12px; }}
+        .destination-card.destination-card-single {{ grid-template-columns: minmax(0, 1fr); }}
+        .destination-card small {{ display: block; color: #526078; font-size: 10px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }}
+        .destination-card strong {{ display: block; font-size: 18px; margin-top: 2px; }}
+        .destination-card span {{ display: block; font-size: 15px; font-weight: 800; margin-top: 2px; }}
+        .destination-card-main {{ min-width: 0; }}
+        .destination-stops {{ display: grid; gap: 5px; }}
+        .destination-stop {{ border-left: 4px solid #071633; padding-left: 8px; }}
+        .destination-stop strong {{ font-size: 13px; }}
+        .destination-stop span {{ font-size: 12px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; table-layout: fixed; }}
+        th, td {{ border: 1px solid #222; padding: 6px; text-align: left; vertical-align: top; overflow: hidden; text-overflow: ellipsis; }}
         th {{ background: #efefef; }}
-        .check-cell {{ width: 44px; text-align: center; font-size: 20px; }}
-        .notes {{ margin-top: 24px; border: 1px solid #222; min-height: 80px; padding: 8px; }}
-        @media print {{ body {{ margin: 0.3in; }} button {{ display: none; }} }}
+        th:nth-child(1), td:nth-child(1) {{ width: 12%; white-space: nowrap; }}
+        th:nth-child(2), td:nth-child(2) {{ width: 15%; }}
+        th:nth-child(3), td:nth-child(3) {{ width: 9%; }}
+        th:nth-child(4), td:nth-child(4) {{ width: 7%; }}
+        th:nth-child(5), td:nth-child(5) {{ width: 5%; text-align: center; }}
+        th:nth-child(6), td:nth-child(6) {{ width: 13%; }}
+        th:nth-child(7), td:nth-child(7) {{ width: 17%; }}
+        th:nth-child(8), td:nth-child(8) {{ width: 7%; }}
+        th:nth-child(9), td:nth-child(9) {{ width: 5%; text-align: center; }}
+        th:nth-child(10), td:nth-child(10) {{ width: 5%; text-align: center; }}
+        .check-cell {{ text-align: center; font-size: 20px; }}
+        .signature-section {{ margin-top: 18px; display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }}
+        .signature-section div {{ min-height: 58px; border: 1px solid #222; padding: 8px; }}
+        .signature-section span {{ display: block; height: 28px; border-bottom: 1px solid #222; margin-top: 12px; }}
+        @media print {{ body {{ margin: 0.25in; }} button {{ display: none; }} .packing-header {{ grid-template-columns: 190px minmax(250px, 1fr) 280px; gap: 7px; }} .packing-logo {{ width: 185px; max-height: 118px; }} .packing-logo-box {{ min-height: 118px; }} .barcode-box {{ padding: 8px; }} }}
       </style>
     </head>
     <body onload="setTimeout(function(){{ window.print(); }}, 350)">
       <button onclick="window.print()">Print</button>
-      <header>
-        <div>
-          <h1>{esc(rack.get("name") or rack.get("code"))} Packing List{delivery_suffix}</h1>
-          <p>Rack Type: {esc(rack.get("type"))} | Destination: {esc(destination)} | Status: {esc(rack.get("status"))} | Qty: {esc(rack.get("qty"))}</p>
-          <p>Scan this rack barcode on the outbound stage to mark the rack on the way.</p>
-        </div>
-        <div class="barcode-box">
-          {code39_svg(str(barcode))}
-          <div class="barcode-text">*{esc(barcode)}*</div>
-        </div>
-      </header>
-      <table>
-        <thead><tr><th>Delivery Date</th><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Flags</th><th>Check</th></tr></thead>
-        <tbody>{''.join(rows)}</tbody>
-      </table>
-      <div class="notes"><strong>Notes:</strong></div>
+      {sheets}
     </body>
     </html>
     """
 
+def render_customer_email_manifest_pdf_page(email: dict) -> str:
+    payload = email.get("payload") or {}
+    items = payload.get("items") or []
+    customer = email.get("customerName") or "Customer"
+    delivery_date = email.get("deliveryDate") or ""
+    piece_qty = payload.get("pieceQty") or sum(int(item.get("qty") or 0) for item in items)
+    item_count = payload.get("itemCount") or len(items)
+
+    if not items:
+        rows_html = '<tr><td colspan="6">No detailed manifest rows were saved for this older draft. Open the text draft for the original message body.</td></tr>'
+    else:
+        rows_html = "".join(
+            f"""
+            <tr>
+              <td>{esc(item.get('job') or item.get('product') or '-')}</td>
+              <td>{esc(item.get('order'))}</td>
+              <td>{esc(item.get('item'))}</td>
+              <td>{esc(item.get('qty'))}</td>
+              <td>{esc(item.get('dimensions') or '-')}</td>
+              <td>{esc(item.get('route') or '-')}</td>
+            </tr>
+            """
+            for item in items
+        )
+
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{esc(customer)} Order Manifest</title>
+  <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 24px; color: #071633; font-family: Arial, sans-serif; background: #fff; }}
+    .print-button {{ margin-bottom: 14px; border: 1px solid #071633; border-radius: 8px; background: #071633; color: #fff; font-weight: 800; padding: 8px 12px; }}
+    .manifest-sheet {{ border: 1px solid #d8e2ef; border-radius: 14px; padding: 24px; box-shadow: 0 16px 34px rgba(8, 38, 90, 0.10); }}
+    header {{ display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; align-items: start; border-bottom: 3px solid #071633; padding-bottom: 18px; }}
+    .manifest-logo {{ width: 170px; max-height: 86px; object-fit: contain; object-position: left top; filter: drop-shadow(0 4px 7px rgba(7, 22, 51, 0.14)); }}
+    .fallback-logo {{ display: none; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }}
+    .manifest-title small {{ color: #526078; font-size: 11px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }}
+    h1 {{ margin: 4px 0 8px; font-size: 32px; line-height: 1.05; }}
+    .manifest-title p {{ margin: 0; color: #41506c; font-weight: 750; }}
+    .summary-grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }}
+    .summary-grid span {{ border: 1px solid #d7e1ef; border-radius: 10px; background: #f8fbff; padding: 10px 12px; }}
+    .summary-grid small {{ display: block; color: #526078; font-size: 10px; font-weight: 950; text-transform: uppercase; }}
+    .summary-grid strong {{ display: block; margin-top: 3px; font-size: 18px; }}
+    table {{ width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }}
+    th, td {{ border: 1px solid #1f2937; padding: 7px; text-align: left; vertical-align: top; }}
+    th {{ background: #eef3f9; color: #071633; font-size: 11px; text-transform: uppercase; }}
+    th:nth-child(1), td:nth-child(1) {{ width: 28%; }}
+    th:nth-child(2), td:nth-child(2) {{ width: 12%; }}
+    th:nth-child(3), td:nth-child(3) {{ width: 9%; }}
+    th:nth-child(4), td:nth-child(4) {{ width: 7%; text-align: center; }}
+    th:nth-child(5), td:nth-child(5) {{ width: 26%; }}
+    th:nth-child(6), td:nth-child(6) {{ width: 18%; }}
+    footer {{ margin-top: 18px; color: #526078; font-size: 11px; font-weight: 750; }}
+    @media print {{ body {{ margin: .25in; }} .print-button {{ display: none; }} .manifest-sheet {{ border: 0; box-shadow: none; padding: 0; }} }}
+  </style>
+</head>
+<body onload="setTimeout(function(){{ window.print(); }}, 350)">
+  <button class="print-button" onclick="window.print()">Print / Save as PDF</button>
+  <section class="manifest-sheet">
+    <header>
+      <div>
+        <img class="manifest-logo" src="/assets/barefoot-logo.jpg" alt="Barefoot & Company" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+        <span class="fallback-logo">Barefoot &amp; Company</span>
+      </div>
+      <div class="manifest-title">
+        <small>Customer order manifest</small>
+        <h1>{esc(customer)}</h1>
+        <p>Professional order manifest generated from the Delivery List Scanner.</p>
+      </div>
+    </header>
+
+    <section class="summary-grid">
+      <span><small>Delivery date</small><strong>{esc(print_display_date(delivery_date))}</strong></span>
+      <span><small>Total pieces</small><strong>{esc(piece_qty)}</strong></span>
+      <span><small>Line items</small><strong>{esc(item_count)}</strong></span>
+      <span><small>Status</small><strong>{esc(email.get('status') or 'Draft')}</strong></span>
+    </section>
+
+    <table>
+      <thead><tr><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty</th><th>Dimensions</th><th>Route</th></tr></thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+    <footer>This automated manifest includes order information relevant to the customer only. Internal scanner notes, scan history, and plant workflow details are not included.</footer>
+  </section>
+</body>
+</html>"""
 
 def render_stale_bay_report(rows: list[dict]) -> str:
     body_rows = []
@@ -594,6 +811,30 @@ class Handler(SimpleHTTPRequestHandler):
             return None
         return user
 
+
+    def require_confirmation_text(self, data: dict, required_text: str) -> bool:
+        typed = str(data.get("confirmText") or "").strip()
+        if typed == required_text:
+            return True
+        self.send_json(
+            {"error": f"Type {required_text} to confirm this action."},
+            HTTPStatus.BAD_REQUEST,
+        )
+        return False
+
+    def require_rack_recovery_power(self) -> dict | None:
+        """Allow only Admin/Supervisor-level users to manually recover rack locations."""
+        user = self.current_user()
+        if not user:
+            self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+            return None
+        roles = set(user.get("roles") or [])
+        permissions = set(user.get("permissions") or [])
+        if "manage_racks" not in permissions and not roles.intersection({"Admin", "Supervisor"}):
+            self.send_json({"error": "Permission denied", "permission": "rack_recovery"}, HTTPStatus.FORBIDDEN)
+            return None
+        return user
+
     def set_session_cookie(self, token: str, expires_at: str) -> None:
         secure = "; Secure" if CONFIG.production else ""
         self.send_header(
@@ -655,6 +896,17 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_permission("manage_customer_route_rules"):
                 return
             self.send_json({"rules": STORE.get_customer_route_rules()})
+            return
+
+        email_manifest_match = re.match(r"^/api/admin/customer-emails/(\d+)/manifest-pdf$", parsed.path)
+        if email_manifest_match:
+            if not self.require_permission("manage_customer_route_rules"):
+                return
+            html_body = render_customer_email_manifest_pdf_page(STORE.get_email_outbox_item(int(email_manifest_match.group(1))))
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(html_body.encode("utf-8"))
             return
 
         if parsed.path == "/api/admin/customer-emails":
@@ -900,6 +1152,20 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(body)
                 return
 
+            if parsed.path == "/api/password-reset/request":
+                self.send_json(STORE.request_password_reset(str(data.get("identity") or data.get("username") or data.get("email") or "")))
+                return
+
+            if parsed.path == "/api/password-reset/confirm":
+                self.send_json(
+                    STORE.confirm_password_reset(
+                        str(data.get("identity") or data.get("username") or data.get("email") or ""),
+                        str(data.get("resetCode") or data.get("code") or ""),
+                        str(data.get("newPassword") or data.get("password") or ""),
+                    )
+                )
+                return
+
             if parsed.path == "/api/logout":
                 STORE.delete_session(self.session_token())
                 body = json.dumps({"ok": True}, indent=2).encode("utf-8")
@@ -929,6 +1195,8 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 if not STORE.user_can_access_list(user, str(data.get("listId") or "")):
                     self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
+                    return
+                if not self.require_confirmation_text(data, "RESET"):
                     return
                 self.send_json(
                     STORE.reset_stage(
@@ -1062,6 +1330,7 @@ class Handler(SimpleHTTPRequestHandler):
                         str(data.get("username") or ""),
                         data.get("roles") or [],
                         station=data.get("station"),
+                        email=data.get("email"),
                         updated_by=user["username"],
                     )
                 )
@@ -1183,12 +1452,16 @@ class Handler(SimpleHTTPRequestHandler):
                 user = self.require_permission("edit_delivery_lists")
                 if not user:
                     return
+                if not self.require_confirmation_text(data, "DELETE"):
+                    return
                 self.send_json(STORE.delete_delivery_list(str(data.get("listId") or ""), user["username"]))
                 return
 
             if parsed.path == "/api/admin/delete-date":
                 user = self.require_permission("edit_delivery_lists")
                 if not user:
+                    return
+                if not self.require_confirmation_text(data, "DELETE"):
                     return
                 self.send_json(STORE.delete_delivery_date(str(data.get("deliveryDate") or ""), user["username"]))
                 return
@@ -1349,6 +1622,22 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.return_rack(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/not-on-way":
+                user = self.require_permission("scan_racks")
+                if not user:
+                    return
+                if not self.require_confirmation_text(data, "NOT ON THE WAY"):
+                    return
+                self.send_json(STORE.not_on_way_rack(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/assign-line-item":
+                user = self.require_rack_recovery_power()
+                if not user:
+                    return
+                self.send_json(STORE.assign_line_item_to_rack(data, user["username"]))
                 return
 
             if parsed.path == "/api/racks/move-item":

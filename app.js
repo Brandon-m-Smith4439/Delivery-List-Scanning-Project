@@ -20,6 +20,10 @@ const CUSTOMER_ROUTE_OPTIONS = [
   { value: "DTC", label: "DTC / Deliver to Customer" },
   { value: "GNV", label: "GNV / Greenville" },
 ];
+const CUSTOMER_ROUTE_DEFAULT_ADDRESSES = {
+  CPU: "1709 Airport Rd, Monroe, NC 28110",
+  GNV: "Greenville address pending",
+};
 const ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS = 21;
 const ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS = 7;
 
@@ -128,6 +132,11 @@ const state = {
   pollTimer: null,
   lastScan: null,
   homeReportSummary: null,
+  homeChartMetric: "glass",
+  homeChartView: "bar",
+  homeChartQuery: "",
+  homeChartLimit: "all",
+  homeChartSort: "value-desc",
 };
 
 const els = {
@@ -136,6 +145,15 @@ const els = {
   loginUsername: document.getElementById("loginUsername"),
   loginPassword: document.getElementById("loginPassword"),
   loginError: document.getElementById("loginError"),
+  forgotPasswordBtn: document.getElementById("forgotPasswordBtn"),
+  passwordResetPanel: document.getElementById("passwordResetPanel"),
+  resetIdentityInput: document.getElementById("resetIdentityInput"),
+  requestResetCodeBtn: document.getElementById("requestResetCodeBtn"),
+  resetCodeInput: document.getElementById("resetCodeInput"),
+  resetNewPasswordInput: document.getElementById("resetNewPasswordInput"),
+  confirmPasswordResetBtn: document.getElementById("confirmPasswordResetBtn"),
+  cancelPasswordResetBtn: document.getElementById("cancelPasswordResetBtn"),
+  passwordResetMessage: document.getElementById("passwordResetMessage"),
   signedInUser: document.getElementById("signedInUser"),
   signedInRole: document.getElementById("signedInRole"),
   userMenuDisplayName: document.getElementById("userMenuDisplayName"),
@@ -159,6 +177,19 @@ const els = {
   homeStatisticsRangeText: document.getElementById("homeStatisticsRangeText"),
   homeStatsChart: document.getElementById("homeStatsChart"),
   homeMonthlyRemakes: document.getElementById("homeMonthlyRemakes"),
+  statsChartModal: document.getElementById("statsChartModal"),
+  statsChartBackdrop: document.getElementById("statsChartBackdrop"),
+  statsChartCloseBtn: document.getElementById("statsChartCloseBtn"),
+  statsChartMetricSelect: document.getElementById("statsChartMetricSelect"),
+  statsChartViewSelect: document.getElementById("statsChartViewSelect"),
+  statsChartSortSelect: document.getElementById("statsChartSortSelect"),
+  statsChartLimitSelect: document.getElementById("statsChartLimitSelect"),
+  statsChartFilterInput: document.getElementById("statsChartFilterInput"),
+  statsChartResetBtn: document.getElementById("statsChartResetBtn"),
+  statsChartResultCount: document.getElementById("statsChartResultCount"),
+  statsChartModalTitle: document.getElementById("statsChartModalTitle"),
+  statsChartModalSubtitle: document.getElementById("statsChartModalSubtitle"),
+  statsChartModalCanvas: document.getElementById("statsChartModalCanvas"),
   homeListSearch: document.getElementById("homeListSearch"),
   homeStageFilter: document.getElementById("homeStageFilter"),
   homeListGrid: document.getElementById("homeListGrid"),
@@ -178,6 +209,7 @@ const els = {
   deliveryDateSelect: document.getElementById("deliveryDateSelect"),
   deliveryStageSelect: document.getElementById("deliveryStageSelect"),
   stationSelect: document.getElementById("stationSelect"),
+  stationProfileDisplay: document.getElementById("stationProfileDisplay"),
   operatorInput: document.getElementById("operatorInput"),
   progressText: document.getElementById("progressText"),
   progressFill: document.getElementById("progressFill"),
@@ -397,6 +429,7 @@ const els = {
   createUserForm: document.getElementById("createUserForm"),
   newUserName: document.getElementById("newUserName"),
   newUserDisplay: document.getElementById("newUserDisplay"),
+  newUserEmail: document.getElementById("newUserEmail"),
   newUserPassword: document.getElementById("newUserPassword"),
   newUserRole: document.getElementById("newUserRole"),
   adminUsers: document.getElementById("adminUsers"),
@@ -426,6 +459,437 @@ function escapeHtml(value) {
 
 function pad(value, length) {
   return String(value).padStart(length, "0");
+}
+
+
+const customSelectUi = {
+  initialized: false,
+  openSelect: null,
+  menu: null,
+  highlightedIndex: -1,
+  observer: null,
+  syncTimer: null,
+};
+
+function customSelectIsEligible(select) {
+  return (
+    select instanceof HTMLSelectElement &&
+    !select.multiple &&
+    Number(select.size || 0) <= 1 &&
+    !select.hidden &&
+    !select.dataset.nativeSelect
+  );
+}
+
+function customSelectAccessibleLabel(select) {
+  const explicit = select.getAttribute("aria-label") || select.getAttribute("title");
+  if (explicit) return explicit;
+
+  const label = select.labels?.[0];
+  if (label) {
+    const labelText = label.querySelector(":scope > span")?.textContent || label.textContent;
+    const clean = String(labelText || "").replace(/\s+/g, " ").trim();
+    if (clean) return clean;
+  }
+
+  return select.id
+    ? select.id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[-_]+/g, " ")
+    : "Choose an option";
+}
+
+function customSelectSelectedText(select) {
+  const option = select.selectedOptions?.[0] || select.options?.[select.selectedIndex];
+  return option?.textContent?.trim() || select.getAttribute("placeholder") || "Choose an option";
+}
+
+function syncCustomSelect(select) {
+  const shell = select.closest(".custom-select-shell");
+  const trigger = shell?.querySelector(":scope > .custom-select-trigger");
+  const value = trigger?.querySelector(".custom-select-value");
+  if (!shell || !trigger || !value) return;
+
+  const option = select.selectedOptions?.[0] || select.options?.[select.selectedIndex];
+  const disabled = Boolean(select.disabled);
+  const hidden = Boolean(select.hidden);
+  const sourceClasses = [...select.classList].filter((name) => name !== "custom-select-native");
+
+  trigger.className = "custom-select-trigger";
+  sourceClasses.forEach((name) => trigger.classList.add(name));
+  trigger.disabled = disabled;
+  trigger.setAttribute("aria-disabled", disabled ? "true" : "false");
+  trigger.setAttribute("aria-expanded", customSelectUi.openSelect === select ? "true" : "false");
+  trigger.title = option?.textContent?.trim() || customSelectAccessibleLabel(select);
+  value.textContent = customSelectSelectedText(select);
+
+  shell.hidden = hidden;
+  shell.classList.toggle("is-disabled", disabled);
+  shell.classList.toggle("is-open", customSelectUi.openSelect === select);
+  shell.classList.toggle("is-placeholder", !option || (!option.value && option.disabled));
+
+  if (customSelectUi.openSelect === select && customSelectUi.menu) {
+    customSelectUi.menu.querySelectorAll("[data-custom-option-index]").forEach((button) => {
+      const optionIndex = Number(button.dataset.customOptionIndex);
+      const selected = optionIndex === select.selectedIndex;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-selected", selected ? "true" : "false");
+    });
+  }
+}
+
+function syncAllCustomSelects() {
+  if (customSelectUi.openSelect && !customSelectUi.openSelect.isConnected) closeCustomSelect(false);
+  document.querySelectorAll("select[data-custom-select-enhanced='true']").forEach((select) => syncCustomSelect(select));
+}
+
+function positionCustomSelectMenu() {
+  const select = customSelectUi.openSelect;
+  const menu = customSelectUi.menu;
+  const trigger = select?.closest(".custom-select-shell")?.querySelector(":scope > .custom-select-trigger");
+  if (!select || !menu || !trigger) return;
+
+  const rect = trigger.getBoundingClientRect();
+  const viewportPadding = 10;
+  const longestOptionLength = [...select.options].reduce(
+    (length, option) => Math.max(length, option.textContent?.trim().length || 0),
+    0,
+  );
+  const contentWidth = Math.min(420, Math.max(210, longestOptionLength * 7.2 + 58));
+  const preferredWidth = Math.max(rect.width, contentWidth);
+  const maxWidth = Math.max(210, window.innerWidth - viewportPadding * 2);
+  const menuWidth = Math.min(preferredWidth, maxWidth);
+
+  menu.style.width = `${menuWidth}px`;
+  menu.style.left = `${Math.min(Math.max(rect.left, viewportPadding), window.innerWidth - menuWidth - viewportPadding)}px`;
+
+  const menuHeight = Math.min(menu.scrollHeight || 320, Math.max(180, window.innerHeight - viewportPadding * 2));
+  const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+  const spaceAbove = rect.top - viewportPadding;
+  const openAbove = spaceBelow < Math.min(menuHeight, 280) && spaceAbove > spaceBelow;
+
+  menu.classList.toggle("opens-above", openAbove);
+  menu.style.maxHeight = `${Math.max(160, openAbove ? spaceAbove : spaceBelow)}px`;
+  menu.style.top = openAbove
+    ? `${Math.max(viewportPadding, rect.top - Math.min(menuHeight, spaceAbove) - 7)}px`
+    : `${Math.min(window.innerHeight - viewportPadding, rect.bottom + 7)}px`;
+}
+
+function setCustomSelectHighlight(index, focus = true) {
+  const buttons = [...(customSelectUi.menu?.querySelectorAll("[data-custom-option-index]:not(:disabled)") || [])];
+  if (!buttons.length) {
+    customSelectUi.highlightedIndex = -1;
+    return;
+  }
+
+  const safeIndex = Math.min(Math.max(index, 0), buttons.length - 1);
+  customSelectUi.highlightedIndex = safeIndex;
+  buttons.forEach((button, buttonIndex) => button.classList.toggle("is-highlighted", buttonIndex === safeIndex));
+
+  if (focus) {
+    buttons[safeIndex].focus({ preventScroll: true });
+    buttons[safeIndex].scrollIntoView({ block: "nearest" });
+  }
+}
+
+function closeCustomSelect(restoreFocus = false) {
+  const select = customSelectUi.openSelect;
+  const trigger = select?.closest(".custom-select-shell")?.querySelector(":scope > .custom-select-trigger");
+
+  customSelectUi.menu?.remove();
+  customSelectUi.menu = null;
+  customSelectUi.openSelect = null;
+  customSelectUi.highlightedIndex = -1;
+
+  if (select) syncCustomSelect(select);
+  if (restoreFocus) trigger?.focus();
+}
+
+function customSelectOptionRows(select, query = "") {
+  const cleanQuery = String(query || "").trim().toLowerCase();
+  const rows = [];
+  let currentGroup = "";
+
+  [...select.options].forEach((option, index) => {
+    if (option.hidden) return;
+    const text = option.textContent?.trim() || option.value;
+    if (cleanQuery && !`${text} ${option.value}`.toLowerCase().includes(cleanQuery)) return;
+
+    const parentGroup = option.parentElement instanceof HTMLOptGroupElement
+      ? option.parentElement.label.trim()
+      : "";
+
+    if (parentGroup && parentGroup !== currentGroup) {
+      rows.push({ type: "group", label: parentGroup });
+      currentGroup = parentGroup;
+    }
+
+    rows.push({ type: "option", option, index, text });
+  });
+
+  return rows;
+}
+
+function renderCustomSelectOptions(select, optionsHost, query = "") {
+  optionsHost.replaceChildren();
+  const rows = customSelectOptionRows(select, query);
+
+  if (!rows.some((row) => row.type === "option")) {
+    const empty = document.createElement("div");
+    empty.className = "custom-select-empty";
+    empty.textContent = "No matching options";
+    optionsHost.append(empty);
+    customSelectUi.highlightedIndex = -1;
+    return;
+  }
+
+  rows.forEach((row) => {
+    if (row.type === "group") {
+      const group = document.createElement("div");
+      group.className = "custom-select-group";
+      group.textContent = row.label;
+      optionsHost.append(group);
+      return;
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "custom-select-option";
+    button.dataset.customOptionIndex = String(row.index);
+    button.disabled = Boolean(row.option.disabled);
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", row.index === select.selectedIndex ? "true" : "false");
+    button.classList.toggle("is-selected", row.index === select.selectedIndex);
+
+    const label = document.createElement("span");
+    label.className = "custom-select-option-label";
+    label.textContent = row.text;
+
+    const check = document.createElement("span");
+    check.className = "custom-select-option-check";
+    check.setAttribute("aria-hidden", "true");
+
+    button.append(label, check);
+    optionsHost.append(button);
+
+    button.addEventListener("click", () => {
+      if (row.option.disabled) return;
+      const changed = select.selectedIndex !== row.index;
+      select.selectedIndex = row.index;
+      syncCustomSelect(select);
+      closeCustomSelect(true);
+
+      if (changed) {
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+  });
+
+  const enabledButtons = [...optionsHost.querySelectorAll("[data-custom-option-index]:not(:disabled)")];
+  const selectedEnabledIndex = enabledButtons.findIndex((button) => Number(button.dataset.customOptionIndex) === select.selectedIndex);
+  setCustomSelectHighlight(selectedEnabledIndex >= 0 ? selectedEnabledIndex : 0, false);
+}
+
+function openCustomSelect(select) {
+  if (!customSelectIsEligible(select) || select.disabled) return;
+  if (customSelectUi.openSelect === select) {
+    closeCustomSelect(true);
+    return;
+  }
+
+  closeCustomSelect(false);
+  customSelectUi.openSelect = select;
+
+  const shell = select.closest(".custom-select-shell");
+  const trigger = shell?.querySelector(":scope > .custom-select-trigger");
+  if (!shell || !trigger) return;
+
+  const menu = document.createElement("div");
+  menu.className = "custom-select-menu";
+  menu.id = `${select.id || `customSelect${Date.now()}`}Menu`;
+  menu.setAttribute("role", "listbox");
+  menu.setAttribute("aria-label", customSelectAccessibleLabel(select));
+
+  const optionsHost = document.createElement("div");
+  optionsHost.className = "custom-select-options";
+
+  const visibleOptionCount = [...select.options].filter((option) => !option.hidden).length;
+  if (visibleOptionCount >= 10) {
+    const searchWrap = document.createElement("label");
+    searchWrap.className = "custom-select-search";
+
+    const searchIcon = document.createElement("span");
+    searchIcon.className = "custom-select-search-icon";
+    searchIcon.setAttribute("aria-hidden", "true");
+
+    const search = document.createElement("input");
+    search.type = "search";
+    search.autocomplete = "off";
+    search.placeholder = "Filter options...";
+    search.setAttribute("aria-label", `Filter ${customSelectAccessibleLabel(select)}`);
+    search.addEventListener("input", () => {
+      renderCustomSelectOptions(select, optionsHost, search.value);
+      positionCustomSelectMenu();
+    });
+    search.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setCustomSelectHighlight(0);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeCustomSelect(true);
+      }
+    });
+
+    searchWrap.append(searchIcon, search);
+    menu.append(searchWrap);
+  }
+
+  menu.append(optionsHost);
+  document.body.append(menu);
+  customSelectUi.menu = menu;
+
+  trigger.setAttribute("aria-controls", menu.id);
+  renderCustomSelectOptions(select, optionsHost);
+  syncCustomSelect(select);
+  positionCustomSelectMenu();
+
+  menu.addEventListener("keydown", (event) => {
+    const enabledButtons = [...menu.querySelectorAll("[data-custom-option-index]:not(:disabled)")];
+    const focusedIndex = enabledButtons.indexOf(document.activeElement);
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setCustomSelectHighlight(focusedIndex >= 0 ? focusedIndex + 1 : customSelectUi.highlightedIndex + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setCustomSelectHighlight(focusedIndex >= 0 ? focusedIndex - 1 : customSelectUi.highlightedIndex - 1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setCustomSelectHighlight(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setCustomSelectHighlight(enabledButtons.length - 1);
+    } else if (event.key === "Escape" || event.key === "Tab") {
+      closeCustomSelect(event.key === "Escape");
+    }
+  });
+
+  const searchInput = menu.querySelector(".custom-select-search input");
+  if (searchInput) {
+    searchInput.focus();
+  } else {
+    requestAnimationFrame(() => setCustomSelectHighlight(customSelectUi.highlightedIndex >= 0 ? customSelectUi.highlightedIndex : 0));
+  }
+}
+
+function enhanceCustomSelect(select) {
+  if (!customSelectIsEligible(select) || select.dataset.customSelectEnhanced === "true") return;
+
+  const shell = document.createElement("span");
+  shell.className = "custom-select-shell";
+  shell.dataset.customSelectFor = select.id || "dynamic";
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "custom-select-trigger";
+  trigger.setAttribute("role", "combobox");
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.setAttribute("aria-label", customSelectAccessibleLabel(select));
+
+  const value = document.createElement("span");
+  value.className = "custom-select-value";
+
+  const arrow = document.createElement("span");
+  arrow.className = "custom-select-arrow";
+  arrow.setAttribute("aria-hidden", "true");
+
+  trigger.append(value, arrow);
+  select.parentNode?.insertBefore(shell, select);
+  shell.append(select, trigger);
+
+  select.dataset.customSelectEnhanced = "true";
+  select.classList.add("custom-select-native");
+  select.tabIndex = -1;
+  select.setAttribute("aria-hidden", "true");
+
+  trigger.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openCustomSelect(select);
+  });
+
+  trigger.addEventListener("keydown", (event) => {
+    if (["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key)) {
+      event.preventDefault();
+      openCustomSelect(select);
+    }
+  });
+
+  select.addEventListener("input", () => syncCustomSelect(select));
+  select.addEventListener("change", () => syncCustomSelect(select));
+
+  syncCustomSelect(select);
+}
+
+function enhanceCustomSelects(root = document) {
+  if (root instanceof HTMLSelectElement) {
+    enhanceCustomSelect(root);
+    return;
+  }
+  root.querySelectorAll?.("select").forEach((select) => enhanceCustomSelect(select));
+}
+
+function initCustomSelectSystem() {
+  if (customSelectUi.initialized) return;
+  customSelectUi.initialized = true;
+
+  enhanceCustomSelects(document);
+
+  customSelectUi.observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === "childList") {
+        mutation.addedNodes.forEach((node) => {
+          if (node instanceof Element) enhanceCustomSelects(node);
+        });
+      }
+
+      const select = mutation.target instanceof HTMLSelectElement
+        ? mutation.target
+        : mutation.target.closest?.("select");
+      if (select) {
+        if (select.dataset.customSelectEnhanced === "true") syncCustomSelect(select);
+        else enhanceCustomSelect(select);
+      }
+    });
+  });
+
+  customSelectUi.observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class", "disabled", "hidden"],
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!customSelectUi.openSelect || !customSelectUi.menu) return;
+    const trigger = customSelectUi.openSelect.closest(".custom-select-shell")?.querySelector(":scope > .custom-select-trigger");
+    if (customSelectUi.menu.contains(event.target) || trigger?.contains(event.target)) return;
+    closeCustomSelect(false);
+  }, true);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && customSelectUi.openSelect) closeCustomSelect(true);
+  });
+
+  document.addEventListener("change", () => queueMicrotask(syncAllCustomSelects), true);
+  window.addEventListener("resize", () => customSelectUi.openSelect && positionCustomSelectMenu());
+  document.addEventListener("scroll", (event) => {
+    if (!customSelectUi.openSelect || customSelectUi.menu?.contains(event.target)) return;
+    closeCustomSelect(false);
+  }, true);
+
+  customSelectUi.syncTimer = window.setInterval(syncAllCustomSelects, 300);
 }
 
 function canonicalBarcode(order, item) {
@@ -596,8 +1060,25 @@ function setControlAllowed(element, allowed, hide = false) {
   element.classList.toggle("is-disabled", !allowed);
 }
 
+function userAssignedStations(user = state.user) {
+  const explicit = Array.isArray(user?.assignedStations) ? user.assignedStations : [];
+  const stationText = String(user?.station || user?.assignedStation || "");
+  const parsed = stationText
+    .split(/[|,]/)
+    .map((station) => station.trim())
+    .filter(Boolean);
+
+  return uniqueText([...explicit, ...parsed]);
+}
+
 function userAssignedStation(user = state.user) {
-  return String(user?.station || user?.assignedStation || "").trim();
+  return userAssignedStations(user)[0] || "";
+}
+
+function userAssignedStationLabel(user = state.user, fallback = "") {
+  const stations = userAssignedStations(user);
+  if (stations.length) return stations.join(", ");
+  return String(fallback || "No assigned station").trim();
 }
 
 function currentScanStation() {
@@ -659,6 +1140,7 @@ function updateModalScrollLock() {
     els.manageItemsPanel,
     els.bayEditorPanel,
     document.getElementById("emailDraftPreviewShell"),
+    els.statsChartModal,
   ].some((panel) => panel && !panel.hidden);
 
   document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
@@ -703,15 +1185,22 @@ function showLogin(message = "") {
   if (!els.loginPanel) return;
   els.loginPanel.hidden = false;
   document.querySelector(".app")?.setAttribute("aria-hidden", "true");
-  if (els.loginError) els.loginError.textContent = message;
+  if (els.loginError) {
+    els.loginError.textContent = message;
+    els.loginError.classList.remove("success");
+  }
   window.setTimeout(() => (els.loginPassword || els.loginUsername)?.focus(), 30);
 }
 
 function hideLogin() {
   if (!els.loginPanel) return;
   els.loginPanel.hidden = true;
+  if (els.passwordResetPanel) els.passwordResetPanel.hidden = true;
   document.querySelector(".app")?.removeAttribute("aria-hidden");
-  if (els.loginError) els.loginError.textContent = "";
+  if (els.loginError) {
+    els.loginError.textContent = "";
+    els.loginError.classList.remove("success");
+  }
 }
 
 async function loadSession() {
@@ -737,6 +1226,61 @@ async function login(username, password) {
   hideLogin();
   if (els.loginPassword) els.loginPassword.value = "";
   if (els.operatorInput) els.operatorInput.value = state.user.displayName || state.user.username || "Scanner";
+}
+
+function showPasswordResetPanel(show = true) {
+  if (!els.passwordResetPanel) return;
+  els.passwordResetPanel.hidden = !show;
+  if (els.loginForm) els.loginForm.hidden = Boolean(show);
+  if (els.passwordResetMessage) {
+    els.passwordResetMessage.textContent = "";
+    els.passwordResetMessage.classList.remove("success");
+  }
+  if (show) {
+    if (els.resetIdentityInput && els.loginUsername?.value) els.resetIdentityInput.value = els.loginUsername.value.trim();
+    window.setTimeout(() => (els.resetIdentityInput || els.loginUsername)?.focus(), 30);
+  } else {
+    window.setTimeout(() => els.loginUsername?.focus(), 30);
+  }
+}
+
+function setPasswordResetMessage(message, success = false) {
+  if (!els.passwordResetMessage) return;
+  els.passwordResetMessage.textContent = message;
+  els.passwordResetMessage.classList.toggle("success", success);
+}
+
+async function requestPasswordResetCode() {
+  const identity = els.resetIdentityInput?.value.trim() || "";
+  if (!identity) throw new Error("Enter your BFS email or username first.");
+  const payload = await fetchJson("/api/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ identity }),
+  });
+  const codeText = payload.resetCode ? ` Reset code: ${payload.resetCode}` : "";
+  setPasswordResetMessage(`${payload.message || "Reset request created."}${codeText}`, true);
+  if (payload.resetCode && els.resetCodeInput) els.resetCodeInput.value = payload.resetCode;
+  els.resetCodeInput?.focus();
+}
+
+async function confirmPasswordReset() {
+  const identity = els.resetIdentityInput?.value.trim() || "";
+  const resetCode = els.resetCodeInput?.value.trim() || "";
+  const newPassword = els.resetNewPasswordInput?.value || "";
+  if (!identity || !resetCode || !newPassword) throw new Error("Enter your identity, reset code, and new password.");
+  const payload = await fetchJson("/api/password-reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({ identity, resetCode, newPassword }),
+  });
+  if (els.loginUsername) els.loginUsername.value = identity;
+  if (els.loginPassword) els.loginPassword.value = "";
+  if (els.resetCodeInput) els.resetCodeInput.value = "";
+  if (els.resetNewPasswordInput) els.resetNewPasswordInput.value = "";
+  showPasswordResetPanel(false);
+  if (els.loginError) {
+    els.loginError.textContent = payload.message || "Password reset. You can sign in now.";
+    els.loginError.classList.add("success");
+  }
 }
 
 async function logout() {
@@ -876,16 +1420,27 @@ function saveLocalStations() {
 function renderStationOptions(preferredStation = "") {
   if (!els.stationSelect) return;
 
-  const assignedStation = userAssignedStation();
+  const assignedStations = userAssignedStations();
+  const assignedStation = assignedStations[0] || "";
   const current = assignedStation || preferredStation || els.stationSelect.value || state.meta?.scanner || DEFAULT_STATIONS[0];
 
-  state.stations = uniqueText([...DEFAULT_STATIONS, ...state.stations, current]);
+  state.stations = uniqueText([...DEFAULT_STATIONS, ...state.stations, ...assignedStations, current]);
   els.stationSelect.innerHTML = state.stations
     .map((station) => `<option value="${escapeHtml(station)}">${escapeHtml(station)}</option>`)
     .join("");
   els.stationSelect.value = state.stations.includes(current) ? current : state.stations[0];
-  els.stationSelect.disabled = Boolean(assignedStation);
-  els.stationSelect.title = assignedStation ? "Station is assigned to your login by an admin." : "Station defaults to the selected delivery list.";
+  els.stationSelect.disabled = true;
+  els.stationSelect.title = assignedStations.length
+    ? `Assigned station${assignedStations.length === 1 ? "" : "s"}: ${assignedStations.join(", ")}`
+    : "No assigned station on this login; using the selected delivery list default.";
+
+  if (els.stationProfileDisplay) {
+    const label = userAssignedStationLabel(state.user, current);
+    els.stationProfileDisplay.textContent = label;
+    els.stationProfileDisplay.title = els.stationSelect.title;
+    els.stationProfileDisplay.classList.toggle("has-multiple", assignedStations.length > 1);
+    els.stationProfileDisplay.classList.toggle("is-unassigned", !assignedStations.length);
+  }
 }
 
 async function loadStations() {
@@ -1203,10 +1758,86 @@ function renderProcessState(item) {
 
 function locationLabel(item) {
   const stageText = `${state.meta?.stage || ""} ${state.meta?.scanner || ""}`.toLowerCase();
+  const rackCode = String(item.rackCode || "").trim().toUpperCase();
   if (stageText.includes("indian trail")) return item.bayCode ? `Bay ${item.bayCode}` : "";
-  if (item.rackCode === "T") return "Truck";
-  if (item.rackCode) return item.rackCode;
+  if (rackCode === "T" || /^T\d+$/i.test(rackCode) || /truck|no rack/i.test(`${item.rackName || ""} ${item.rackType || ""}`)) {
+    return rackCode === "T" ? "Truck" : `Truck ${rackCode.replace(/^T/i, "")}`;
+  }
+  if (rackCode) return rackCode;
   return "";
+}
+
+function clearSelectedLineItem(render = true) {
+  if (!state.selectedId) return;
+  state.selectedId = null;
+  saveState();
+  if (render) renderScanPage();
+}
+
+function canAssignRackLocation() {
+  const roles = state.user?.roles || [];
+  return Boolean(
+    state.backend &&
+      isStagingScanContext() &&
+      (hasPermission("manage_racks") || roles.includes("Admin") || roles.includes("Supervisor")),
+  );
+}
+
+function rackStatusValue(rack) {
+  return String(rack?.status || "").trim().toLowerCase();
+}
+
+function rackIsLockedForLineAssignment(rack) {
+  return ["closed", "complete", "completed", "in transit", "on the way"].includes(rackStatusValue(rack));
+}
+
+function rackForCode(code) {
+  const cleanCode = String(code || "").trim().toUpperCase();
+  if (!cleanCode) return null;
+  return (state.racks || []).find((rack) => String(rack.code || "").trim().toUpperCase() === cleanCode) || null;
+}
+
+function itemCanShowRackLocationDropdown(item) {
+  if (!canAssignRackLocation() || item.id !== state.selectedId) return false;
+  if (itemScannedPieceQty(item) <= 0) return false;
+
+  const currentRackCode = String(item.rackCode || "").trim();
+  if (!currentRackCode) return true;
+
+  const currentRack = rackForCode(currentRackCode);
+  return !currentRack || !rackIsLockedForLineAssignment(currentRack);
+}
+
+function locationBadgeClass(location) {
+  return `location-badge ${
+    location.toLowerCase().includes("bay")
+      ? "bay"
+      : location.toLowerCase().includes("truck")
+        ? "truck"
+        : "rack"
+  }`;
+}
+
+function rackLocationDropdown(item, currentLocation = "") {
+  if (!itemCanShowRackLocationDropdown(item)) {
+    return currentLocation ? `<span class="${escapeHtml(locationBadgeClass(currentLocation))}">${escapeHtml(currentLocation)}</span>` : "";
+  }
+
+  const currentRackCode = String(item.rackCode || "").trim().toUpperCase() === "T" ? "T" : String(item.rackCode || "").trim();
+  const rackOptions = (state.racks || [])
+    .filter((rack) => !rackIsLockedForLineAssignment(rack))
+    .map((rack) => `<option value="${escapeHtml(rack.code)}" ${rack.code === currentRackCode ? "selected" : ""}>${rackOptionLabel(rack)}</option>`)
+    .join("");
+
+  return `
+    <label class="line-rack-location-control" title="Supervisor/Admin rack recovery assignment">
+      <span>Rack</span>
+      <select data-line-rack-select="${escapeHtml(item.id)}" ${rackOptions ? "" : "disabled"}>
+        <option value="">${rackOptions ? "No rack" : "Loading racks..."}</option>
+        ${rackOptions}
+      </select>
+    </label>
+  `;
 }
 
 function renderCounts() {
@@ -1360,15 +1991,7 @@ function renderItemRow(item) {
     ? `<span class="route-tag ${escapeHtml(route.toLowerCase())}">${escapeHtml(route)}</span>`
     : "";
   const location = locationLabel(item);
-  const locationClass = location
-    ? `location-badge ${
-        location.toLowerCase().includes("bay")
-          ? "bay"
-          : location.toLowerCase().includes("truck")
-            ? "truck"
-            : "rack"
-      }`
-    : "";
+  const locationHtml = rackLocationDropdown(item, location);
 
   const markers = [
     isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
@@ -1394,7 +2017,7 @@ function renderItemRow(item) {
       <td>${escapeHtml(item.customer)}</td>
       <td>${markers}</td>
       <td>${routeTag}</td>
-      <td class="location-cell">${location ? `<span class="${escapeHtml(locationClass)}">${escapeHtml(location)}</span>` : ""}</td>
+      <td class="location-cell">${locationHtml}</td>
       <td><span class="process-pill ${processClass}">${escapeHtml(processText)}</span></td>
     </tr>
   `;
@@ -1470,13 +2093,29 @@ function rackGroupLabel(rack) {
   return rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks";
 }
 
+function isTruckRack(rack) {
+  return Boolean(rack && (rack.code === "T" || /^T\d+$/i.test(String(rack.code || "")) || /truck/i.test(rack.type || "")));
+}
+
+function nextTruckRackDefaults() {
+  const truckRacks = (state.racks || []).filter(isTruckRack);
+  const usedCodes = new Set(truckRacks.map((rack) => String(rack.code || "").toUpperCase()));
+  let number = 2;
+  while (usedCodes.has(`T${number}`)) number += 1;
+  return {
+    code: `T${number}`,
+    name: `Truck ${number}`,
+    type: "Truck",
+  };
+}
+
 function rackOptionLabel(rack) {
-  const status = String(rack.status || "Open");
-  const qty = Number(rack.qty || 0);
-  const lower = status.toLowerCase();
-  const stateText = lower === "in transit" ? "On the way" : lower === "closed" ? "Complete" : qty ? "Open with items" : "Empty";
-  const destination = rack.destination ? `, ${rackDestinationLabel(rack.destination)}` : "";
-  return `${escapeHtml(rack.code)} - ${escapeHtml(rack.name)} (${escapeHtml(qty)} pcs, ${escapeHtml(stateText)}${escapeHtml(destination)})`;
+  const code = String(rack?.code || "").trim() || "Rack";
+  const qty = Number(rack?.qty || 0);
+  const lower = String(rack?.status || "Open").toLowerCase();
+  const stateText = lower === "in transit" ? "On the way" : lower === "closed" ? "Complete" : qty ? "Open" : "Empty";
+  const qtyText = qty ? ` ${qty}pcs` : "";
+  return `${escapeHtml(code)}${escapeHtml(qtyText)} (${escapeHtml(stateText)})`;
 }
 
 function rackDestinationLabel(value) {
@@ -1741,7 +2380,7 @@ function renderRacksPage() {
             hasItems
               ? `${printAction}${
                   isInTransit
-                    ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
+                    ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" data-rack-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>`
                     : isComplete
                       ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
                       : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
@@ -1958,7 +2597,7 @@ function renderRacksPage() {
           ${
             hasItems
               ? isInTransit
-                ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
+                ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" data-rack-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>`
                 : isComplete
                   ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
                   : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
@@ -2108,13 +2747,10 @@ async function chooseRackDestination(rack) {
 }
 
 async function completeRack(code) {
-  const rack = state.racks.find((item) => item.code === code) || { code, destination: "Indian Trail" };
-  const destination = await chooseRackDestination(rack);
-  if (!destination) return;
-
-  const payload = await fetchJson("/api/racks/complete", { method: "POST", body: JSON.stringify({ rackCode: code, destination }) });
+  const payload = await fetchJson("/api/racks/complete", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
+  showFloatingNotice(payload.message || `Rack ${code} completed with automatic destination.`, "success");
   renderRacksPage();
   renderScanRackTools();
 }
@@ -2134,6 +2770,48 @@ async function returnRack(code) {
   state.rackSummary = payload.summary || null;
   renderRacksPage();
   renderScanRackTools();
+}
+
+async function markRackNotOnTheWay(code) {
+  const confirmed = await confirmWebAppAction({
+    title: "Mark rack Not On The Way?",
+    message: `Reopen <strong>${escapeHtml(code)}</strong> and undo the outbound scans that were recorded from this rack barcode.`,
+    details: "The pieces will stay assigned to the rack so staging can add more or correct the rack before it is sent again.",
+    confirmLabel: "Not On The Way",
+    requiredText: "NOT ON THE WAY",
+    requiredTextLabel: "Type this exact phrase to undo the outbound rack scans",
+  });
+
+  if (!confirmed) return;
+
+  const payload = await fetchJson("/api/racks/not-on-way", { method: "POST", body: JSON.stringify({ rackCode: code, confirmText: "NOT ON THE WAY" }) });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+  renderScanRackTools();
+  showFloatingNotice(payload.message || `Rack ${code} is open again and outbound rack scans were reversed.`, "success");
+}
+
+async function assignLineItemToRack(lineItemId, rackCode) {
+  const payload = await fetchJson("/api/racks/assign-line-item", {
+    method: "POST",
+    body: JSON.stringify({ lineItemId, rackCode }),
+  });
+
+  if (payload.racks) {
+    state.racks = payload.racks;
+    state.rackSummary = payload.rackSummary || state.rackSummary;
+  }
+
+  if (payload.meta?.id === state.activeListId) {
+    applyBackendPayload(payload);
+  } else if (state.activeListId) {
+    await activateList(state.activeListId, false);
+  }
+
+  renderScanPage();
+  renderRacksPage();
+  showFloatingNotice(rackCode ? `Line item assigned to rack ${rackCode}.` : "Line item rack location cleared.", "success");
 }
 
 async function clearRack(code) {
@@ -2202,7 +2880,7 @@ function printSelectedRackPackingSlip() {
     return;
   }
   const activeList = state.lists.find((list) => list.id === state.activeListId);
-  const dateParam = state.selectedRackCode === "T" && activeList?.deliveryDate ? activeList.deliveryDate : "";
+  const dateParam = isTruckRack(rack) && activeList?.deliveryDate ? activeList.deliveryDate : "";
   window.open(rackPackingListUrl(state.selectedRackCode, dateParam), "_blank", "noopener");
 }
 
@@ -2210,6 +2888,7 @@ async function saveRackDefinition() {
   const payload = await fetchJson("/api/racks", {
     method: "POST",
     body: JSON.stringify({
+      oldRackCode: document.getElementById("rackModalOldCode")?.value || "",
       rackCode: document.getElementById("rackModalCode")?.value || "",
       name: document.getElementById("rackModalName")?.value || "",
       type: document.getElementById("rackModalType")?.value || "Steel",
@@ -2301,8 +2980,9 @@ async function createRackSet() {
   showFloatingNotice(`Created ${payload.created?.length || 0} rack(s).`, "success");
 }
 
-function openRackForm(rackCode = "") {
-  const rack = state.racks.find((item) => item.code === rackCode) || {};
+function openRackForm(rackCode = "", defaults = {}) {
+  const existingRack = state.racks.find((item) => item.code === rackCode);
+  const rack = existingRack ? { ...existingRack, oldCode: existingRack.code } : { ...defaults };
   state.rackModal = { rack };
   openAdminModal("rackForm");
 }
@@ -2381,8 +3061,9 @@ function setLastScan(entry) {
   els.lastCard.classList.remove("ok", "error");
   els.lastCard.classList.add(entry.ok ? "ok" : "error");
   if (els.lastScanTime) els.lastScanTime.textContent = entry.ok ? "Just now" : entry.eventType === "duplicate" ? "Notice" : "Needs review";
+  const manualPrefix = scanEntryIsManual(entry) ? "Manual Scan - " : "";
   const scanMessage = [entry.message, entry.reason].filter(Boolean).join(" - ");
-  if (els.lastJob) els.lastJob.textContent = scanMessage && !entry.ok ? scanMessage : entry.item ? entry.item.job : entry.message;
+  if (els.lastJob) els.lastJob.textContent = scanMessage && !entry.ok ? `${manualPrefix}${scanMessage}` : entry.item ? `${manualPrefix}${entry.item.job || entry.item.product || ""}`.trim() : `${manualPrefix}${entry.message || ""}`.trim();
   if (els.lastOrder) els.lastOrder.textContent = entry.item ? entry.item.order : "-";
   if (els.lastItem) els.lastItem.textContent = entry.item ? entry.item.item : "-";
   if (els.lastQty) els.lastQty.textContent = entry.item ? String(entry.item.scanned) : "-";
@@ -2405,18 +3086,40 @@ function renderLastScan() {
   if (els.lastCustomer) els.lastCustomer.textContent = "-";
 }
 
+function sameScanEntry(a, b) {
+  if (!a || !b) return false;
+  const itemA = a.item || {};
+  const itemB = b.item || {};
+  return String(a.time || "") === String(b.time || "") &&
+    String(a.barcode || "") === String(b.barcode || "") &&
+    String(a.eventType || "") === String(b.eventType || "") &&
+    String(itemA.id || `${itemA.order || ""}-${itemA.item || ""}`) === String(itemB.id || `${itemB.order || ""}-${itemB.item || ""}`);
+}
+
+function scanEntryIsManual(entry) {
+  return String(entry?.eventType || "").toLowerCase() === "manual_scan" || Boolean(entry?.isManual);
+}
+
+function recentRowsExcludingCurrentLastScan() {
+  const recent = state.recent || [];
+  if (!state.lastScan) return recent.slice(0, 2);
+  return recent.filter((entry) => !sameScanEntry(entry, state.lastScan)).slice(0, 2);
+}
+
 function renderRecent() {
   if (!els.recentRows) return;
-  const rows = state.recent.slice(0, 2);
+  const rows = recentRowsExcludingCurrentLastScan();
   els.recentRows.innerHTML = rows.length
     ? rows
         .map((entry) => {
           const item = entry.item;
           const time = new Date(entry.time);
           const note = [entry.message, entry.reason].filter(Boolean).join(" - ");
+          const manualNote = scanEntryIsManual(entry) ? "Manual Scan" : "";
+          const detailNote = [manualNote, note].filter(Boolean).join(" - ");
           return `
-            <tr class="${entry.ok ? "ok" : "error"}">
-              <td><strong>${escapeHtml(entry.barcode)}</strong>${note ? `<small class="scan-row-note">${escapeHtml(note)}</small>` : ""}</td>
+            <tr class="${entry.ok ? "ok" : "error"} ${scanEntryIsManual(entry) ? "manual" : ""}">
+              <td><strong>${item ? escapeHtml(item.job || item.product || "-") : "-"}</strong>${detailNote ? `<small class="scan-row-note">${escapeHtml(detailNote)}</small>` : ""}</td>
               <td>${item ? escapeHtml(item.order) : "-"}</td>
               <td>${item ? escapeHtml(item.item) : "-"}</td>
               <td>${item ? item.scanned : "-"}</td>
@@ -2442,6 +3145,7 @@ function recentScansModalHtml() {
           <thead>
             <tr>
               <th>Barcode</th>
+              <th>Job Nr.</th>
               <th>Order Nr.</th>
               <th>Item Nr.</th>
               <th>Qty Scanned</th>
@@ -2459,9 +3163,12 @@ function recentScansModalHtml() {
                       const item = entry.item;
                       const time = new Date(entry.time);
                       const note = [entry.message, entry.reason].filter(Boolean).join(" - ");
+                      const manualNote = scanEntryIsManual(entry) ? "Manual Scan" : "";
+                      const detailNote = [manualNote, note].filter(Boolean).join(" - ");
                       return `
-                        <tr class="${entry.ok ? "ok" : "error"}">
-                          <td><strong>${escapeHtml(entry.barcode)}</strong>${note ? `<small class="scan-row-note">${escapeHtml(note)}</small>` : ""}</td>
+                        <tr class="${entry.ok ? "ok" : "error"} ${scanEntryIsManual(entry) ? "manual" : ""}">
+                          <td><strong>${escapeHtml(entry.barcode)}</strong>${detailNote ? `<small class="scan-row-note">${escapeHtml(detailNote)}</small>` : ""}</td>
+                          <td>${item ? escapeHtml(item.job || item.product || "-") : "-"}</td>
                           <td>${item ? escapeHtml(item.order) : "-"}</td>
                           <td>${item ? escapeHtml(item.item) : "-"}</td>
                           <td>${item ? item.scanned : "-"}</td>
@@ -2473,7 +3180,7 @@ function recentScansModalHtml() {
                       `;
                     })
                     .join("")
-                : `<tr><td colspan="8">No scans yet</td></tr>`
+                : `<tr><td colspan="9">No scans yet</td></tr>`
             }
           </tbody>
         </table>
@@ -2608,16 +3315,26 @@ function renderScanRackTools() {
   const selectedClosed = selectedRackState === "closed";
   const selectedInTransit = selectedRackState === "in transit";
   els.scanRackPanel.classList.toggle("selected-rack-complete", selectedClosed);
-  els.scanRackPanel.classList.toggle("selected-rack-loaded", Boolean(selectedRack && Number(selectedRack.qty || 0) > 0 && !selectedClosed));
+  els.scanRackPanel.classList.toggle("selected-rack-in-transit", selectedInTransit);
+  els.scanRackPanel.classList.toggle("selected-rack-loaded", Boolean(selectedRack && Number(selectedRack.qty || 0) > 0 && !selectedClosed && !selectedInTransit));
   if (els.scanRackSelect) {
     els.scanRackSelect.innerHTML = state.racks
       .map((rack) => `<option value="${escapeHtml(rack.code)}">${rackOptionLabel(rack)}</option>`)
       .join("");
     els.scanRackSelect.value = state.selectedRackCode;
   }
-  if (els.scanRackCompleteBtn) els.scanRackCompleteBtn.textContent = selectedClosed ? "Uncomplete" : "Complete";
-  if (els.scanRackPrintBtn) els.scanRackPrintBtn.disabled = !selectedRack || !(selectedClosed || selectedInTransit) || Number(selectedRack.qty || 0) <= 0;
-  if (els.scanRackStatus) els.scanRackStatus.textContent = "";
+  if (els.scanRackCompleteBtn) {
+    els.scanRackCompleteBtn.textContent = selectedInTransit ? "Mark Returned" : selectedClosed ? "Uncomplete" : "Complete";
+  }
+  if (els.scanRackPrintBtn) {
+    els.scanRackPrintBtn.textContent = selectedInTransit ? "Not On The Way" : "Print Packing List";
+    els.scanRackPrintBtn.disabled = !selectedRack || (selectedInTransit ? false : !(selectedClosed || selectedInTransit) || Number(selectedRack.qty || 0) <= 0);
+  }
+  if (els.scanRackStatus) {
+    els.scanRackStatus.textContent = selectedInTransit
+      ? "This rack is marked on the way. Return it to clear it, or mark Not On The Way to reopen it and undo this rack's outbound scans."
+      : "";
+  }
 }
 
 function isIndianTrailScanContext() {
@@ -2812,11 +3529,16 @@ function homeStageBreakdown(lists) {
   return [...buckets.values()].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
 }
 
-function homeStatisticsRangeLabel() {
+function homeStatisticsRangeParts() {
   const label = els.overviewRangeSelect?.selectedOptions?.[0]?.textContent || "Current dashboard range";
   const lists = filterListsByOverviewRange(state.lists).map((list) => list.deliveryDate).filter(Boolean).sort();
-  if (!lists.length) return `${label} - no active delivery dates`;
-  return `${label} - ${formatDisplayDate(lists[0])} through ${formatDisplayDate(lists[lists.length - 1])}`;
+  if (!lists.length) return { label, dates: "No active delivery dates" };
+  return { label, dates: `${formatDisplayDate(lists[0])} through ${formatDisplayDate(lists[lists.length - 1])}` };
+}
+
+function homeStatisticsRangeLabel() {
+  const parts = homeStatisticsRangeParts();
+  return `${parts.label} - ${parts.dates}`;
 }
 
 function homeReportDateParams() {
@@ -2872,8 +3594,11 @@ function renderHomeStatsChart(overviewLists) {
   if (!entries.length || !totalQty) {
     els.homeStatsChart.innerHTML = `
       <div class="statistics-chart-heading">
-        <strong>Glass types by quantity</strong>
-        <span>No glass quantity data yet.</span>
+        <div>
+          <strong>Glass types by quantity</strong>
+          <span>No glass quantity data yet.</span>
+        </div>
+        <button class="statistics-chart-expand" type="button" data-open-statistics-chart>Open full chart</button>
       </div>
       <div class="statistics-chart-empty">Import delivery lists to populate the glass-type pie chart.</div>
     `;
@@ -2889,24 +3614,36 @@ function renderHomeStatsChart(overviewLists) {
   });
 
   const legendRows = entries
-    .slice(0, 8)
+    .slice(0, 7)
     .map((entry, index) => {
       const percent = totalQty ? (Number(entry.qty || 0) / totalQty) * 100 : 0;
       return `
         <div class="statistics-pie-legend-row">
           <i style="--slice-color: var(--pie-${(index % 8) + 1})"></i>
           <span>${escapeHtml(entry.label)}</span>
-          <strong>${escapeHtml(entry.qty)} (${formatPercent(percent)})</strong>
+          <strong>${escapeHtml(entry.qty)} pcs <em>${formatPercent(percent)}</em></strong>
         </div>
       `;
     })
     .join("");
-  const extraCount = Math.max(entries.length - 8, 0);
+  const extraCount = Math.max(entries.length - 7, 0);
+  const topEntry = entries[0];
+  const topPercent = topEntry && totalQty ? (Number(topEntry.qty || 0) / totalQty) * 100 : 0;
 
   els.homeStatsChart.innerHTML = `
     <div class="statistics-chart-heading">
-      <strong>Glass types by quantity</strong>
-      <span>${escapeHtml(totalQty)} pieces in selected range</span>
+      <div>
+        <strong>Glass mix by quantity</strong>
+        <span>${escapeHtml(totalQty)} total pieces in this range</span>
+      </div>
+      <div class="statistics-chart-heading-actions">
+        <div class="statistics-chart-highlight">
+          <small>Top type</small>
+          <b>${escapeHtml(topEntry?.label || "-")}</b>
+          <span>${topEntry ? `${escapeHtml(topEntry.qty)} pcs | ${formatPercent(topPercent)}` : "No data"}</span>
+        </div>
+        <button class="statistics-chart-expand" type="button" data-open-statistics-chart>Open full chart</button>
+      </div>
     </div>
     <div class="statistics-pie-layout">
       <div class="statistics-pie" style="background: conic-gradient(${slices.join(", ")})">
@@ -2920,21 +3657,259 @@ function renderHomeStatsChart(overviewLists) {
   `;
 }
 
-function renderMonthlyRemakes() {
-  if (!els.homeMonthlyRemakes) return;
+
+function statisticsChartDataset(metric = state.homeChartMetric) {
+  const overviewLists = filterListsByOverviewRange(state.lists);
   const report = state.homeReportSummary || {};
-  const remakeCount = Number(report.monthlyRemakeCount || 0);
-  const remakeQty = Number(report.monthlyRemakeQty || 0);
-  const monthLabel = report.monthlyRemakeMonth || new Date().toLocaleString(undefined, { month: "long", year: "numeric" });
-  els.homeMonthlyRemakes.innerHTML = `
-    <div class="statistics-subsection-heading">
-      <strong>Monthly Remakes</strong>
-      <span>${escapeHtml(monthLabel)}</span>
+
+  if (metric === "stages") {
+    return {
+      title: "Stage completion",
+      subtitle: "Completion percentage for every stage in the selected dashboard range.",
+      suffix: "%",
+      entries: homeStageBreakdown(overviewLists).map((stage) => ({
+        label: stage.label,
+        value: stage.totalQty ? Math.round((stage.scannedQty / stage.totalQty) * 100) : 0,
+        detail: `${stage.scannedQty} / ${stage.totalQty} pieces`,
+      })),
+    };
+  }
+
+  if (metric === "operators") {
+    return {
+      title: "Scans by operator",
+      subtitle: "Recorded scan activity by user for the selected dashboard range.",
+      suffix: "",
+      entries: (report.scansByOperator || []).map((row) => ({
+        label: row.user || "Unknown user",
+        value: Number(row.scans || 0),
+        detail: `${Number(row.scans || 0)} scans`,
+      })),
+    };
+  }
+
+  if (metric === "activity") {
+    const entries = [
+      ["Manual scans", Number(report.manualScanCount || 0)],
+      ["Bad scans", Number(report.badScanCount || 0)],
+      ["Duplicate scans", Number(report.duplicateScanCount || 0)],
+      ["Rack actions", Number(report.rackActionCount || 0)],
+      ["Bay actions", Number(report.bayActionCount || 0)],
+      ["User actions", Number(report.userActionCount || 0)],
+    ];
+    return {
+      title: "System activity",
+      subtitle: "Scan exceptions and operational actions in the selected dashboard range.",
+      suffix: "",
+      entries: entries.map(([label, value]) => ({ label, value, detail: `${value} events` })),
+    };
+  }
+
+  if (metric === "remakes") {
+    const remake = selectedRangeRemakeStats(overviewLists);
+    return {
+      title: "Remakes in selected range",
+      subtitle: "Remake pieces and distinct remake lines for the active dashboard filter.",
+      suffix: "",
+      entries: [
+        { label: "Remake pieces", value: Number(remake.qty || 0), detail: `${Number(remake.qty || 0)} pieces` },
+        { label: "Remake lines", value: Number(remake.rows || 0), detail: `${Number(remake.rows || 0)} lines` },
+      ],
+    };
+  }
+
+  if (metric === "work") {
+    const stageRows = homeStageBreakdown(overviewLists);
+    return {
+      title: "Scanned and open work by stage",
+      subtitle: "Piece counts completed versus still open for every stage in the selected dashboard range.",
+      suffix: "",
+      entries: stageRows.flatMap((stage) => [
+        {
+          label: `${stage.label} - Scanned`,
+          value: Number(stage.scannedQty || 0),
+          detail: `${Number(stage.scannedQty || 0)} scanned pieces`,
+        },
+        {
+          label: `${stage.label} - Open`,
+          value: Math.max(Number(stage.totalQty || 0) - Number(stage.scannedQty || 0), 0),
+          detail: `${Math.max(Number(stage.totalQty || 0) - Number(stage.scannedQty || 0), 0)} open pieces`,
+        },
+      ]),
+    };
+  }
+
+  return {
+    title: "Glass mix by quantity",
+    subtitle: "Piece quantity by glass type for the selected dashboard range.",
+    suffix: "",
+    entries: glassQuantitiesForStatistics(overviewLists).map((row) => ({
+      label: row.label,
+      value: Number(row.qty || 0),
+      detail: `${Number(row.qty || 0)} pieces`,
+    })),
+  };
+}
+
+function filteredStatisticsChartEntries(dataset) {
+  const query = String(state.homeChartQuery || "").trim().toLowerCase();
+  const limitValue = String(state.homeChartLimit || "all");
+  const sortMode = String(state.homeChartSort || "value-desc");
+
+  let entries = (dataset.entries || []).filter((entry) => Number(entry.value || 0) >= 0);
+
+  if (query) {
+    entries = entries.filter((entry) =>
+      `${entry.label || ""} ${entry.detail || ""}`.toLowerCase().includes(query),
+    );
+  }
+
+  entries = entries.slice().sort((a, b) => {
+    if (sortMode === "label-asc") return String(a.label || "").localeCompare(String(b.label || ""), undefined, { numeric: true });
+    if (sortMode === "label-desc") return String(b.label || "").localeCompare(String(a.label || ""), undefined, { numeric: true });
+    if (sortMode === "value-asc") return Number(a.value || 0) - Number(b.value || 0) || String(a.label || "").localeCompare(String(b.label || ""));
+    return Number(b.value || 0) - Number(a.value || 0) || String(a.label || "").localeCompare(String(b.label || ""));
+  });
+
+  const totalMatches = entries.length;
+  const numericLimit = limitValue === "all" ? 0 : Number(limitValue || 0);
+  if (numericLimit > 0) entries = entries.slice(0, numericLimit);
+
+  return { entries, totalMatches };
+}
+
+function renderStatisticsChartModal() {
+  if (!els.statsChartModalCanvas) return;
+
+  const dataset = statisticsChartDataset(state.homeChartMetric);
+  const allEntryCount = (dataset.entries || []).length;
+  const filtered = filteredStatisticsChartEntries(dataset);
+  const entries = filtered.entries;
+  const total = entries.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
+  const maxValue = Math.max(...entries.map((entry) => Number(entry.value || 0)), 1);
+
+  if (els.statsChartModalTitle) els.statsChartModalTitle.textContent = dataset.title;
+  if (els.statsChartModalSubtitle) {
+    els.statsChartModalSubtitle.textContent = `${dataset.subtitle} ${homeStatisticsRangeLabel()}`;
+  }
+  if (els.statsChartMetricSelect) els.statsChartMetricSelect.value = state.homeChartMetric;
+  if (els.statsChartViewSelect) els.statsChartViewSelect.value = state.homeChartView;
+  if (els.statsChartSortSelect) els.statsChartSortSelect.value = state.homeChartSort;
+  if (els.statsChartLimitSelect) els.statsChartLimitSelect.value = state.homeChartLimit;
+  if (els.statsChartFilterInput && els.statsChartFilterInput.value !== state.homeChartQuery) {
+    els.statsChartFilterInput.value = state.homeChartQuery;
+  }
+  if (els.statsChartResultCount) {
+    els.statsChartResultCount.textContent = `Showing ${entries.length} of ${filtered.totalMatches} matching categories (${allEntryCount} total)`;
+  }
+  [els.statsChartMetricSelect, els.statsChartViewSelect, els.statsChartSortSelect, els.statsChartLimitSelect].forEach((select) => {
+    if (select) syncCustomSelect(select);
+  });
+
+  if (!entries.length) {
+    els.statsChartModalCanvas.innerHTML = `<div class="statistics-chart-modal-empty">No data is available for this chart in the selected range.</div>`;
+    return;
+  }
+
+  if (state.homeChartView === "donut") {
+    let cursor = 0;
+    const slices = entries.map((entry, index) => {
+      const start = cursor;
+      const percent = total ? (Number(entry.value || 0) / total) * 100 : 0;
+      cursor += percent;
+      return `var(--pie-${(index % 8) + 1}) ${start.toFixed(3)}% ${cursor.toFixed(3)}%`;
+    });
+
+    els.statsChartModalCanvas.innerHTML = `
+      <div class="statistics-chart-modal-donut-layout">
+        <div class="statistics-chart-modal-donut" style="background: conic-gradient(${slices.join(", ")})">
+          <span>${escapeHtml(total)}<small>Total</small></span>
+        </div>
+        <div class="statistics-chart-modal-legend">
+          ${entries.map((entry, index) => {
+            const percent = total ? (Number(entry.value || 0) / total) * 100 : 0;
+            return `
+              <div>
+                <i style="--chart-color: var(--pie-${(index % 8) + 1})"></i>
+                <span>${escapeHtml(entry.label)}</span>
+                <strong>${escapeHtml(entry.value)}${escapeHtml(dataset.suffix)} <small>${formatPercent(percent)}</small></strong>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  els.statsChartModalCanvas.innerHTML = `
+    <div class="statistics-chart-modal-bars">
+      ${entries.map((entry, index) => {
+        const width = Math.max((Number(entry.value || 0) / maxValue) * 100, Number(entry.value || 0) ? 3 : 0);
+        return `
+          <article>
+            <header><strong>${escapeHtml(entry.label)}</strong><span>${escapeHtml(entry.value)}${escapeHtml(dataset.suffix)}</span></header>
+            <div class="statistics-chart-modal-bar-track"><i style="width:${width}%; --chart-color: var(--pie-${(index % 8) + 1})"></i></div>
+            <small>${escapeHtml(entry.detail || "")}</small>
+          </article>
+        `;
+      }).join("")}
     </div>
-    <div class="statistics-remake-card ${remakeQty ? "notice" : "ok"}">
-      <strong>${escapeHtml(remakeQty)}</strong>
-      <span>remake pieces</span>
-      <small>${escapeHtml(remakeCount)} remake rows detected this month</small>
+  `;
+}
+
+function openStatisticsChartModal() {
+  if (!els.statsChartModal || !els.statsChartBackdrop) return;
+  els.statsChartModal.hidden = false;
+  els.statsChartBackdrop.hidden = false;
+  renderStatisticsChartModal();
+  updateModalScrollLock();
+}
+
+function closeStatisticsChartModal() {
+  if (els.statsChartModal) els.statsChartModal.hidden = true;
+  if (els.statsChartBackdrop) els.statsChartBackdrop.hidden = true;
+  updateModalScrollLock();
+}
+
+function selectedRangeRemakeStats(overviewLists = []) {
+  const report = state.homeReportSummary || {};
+  const backendQty = Number(report.rangeRemakeQty ?? report.remakeRangeQty ?? 0);
+  const backendCount = Number(report.rangeRemakeCount ?? report.remakeRangeCount ?? 0);
+
+  if (backendQty || backendCount) {
+    return { qty: backendQty, rows: backendCount };
+  }
+
+  const seen = new Set();
+  let qty = 0;
+  let rows = 0;
+
+  for (const list of overviewLists || []) {
+    for (const item of list.items || []) {
+      if (!isRemakeItem(item)) continue;
+      const key = `${list.deliveryDate || ""}:${item.sourceId || item.id || item.order}-${item.item}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows += 1;
+      qty += itemPieceQty(item);
+    }
+  }
+
+  return { qty, rows };
+}
+
+function renderMonthlyRemakes(overviewLists = []) {
+  if (!els.homeMonthlyRemakes) return;
+  const stats = selectedRangeRemakeStats(overviewLists);
+  const rangeParts = homeStatisticsRangeParts();
+  els.homeMonthlyRemakes.innerHTML = `
+    <div class="statistics-remake-card ${stats.qty ? "notice" : "ok"}">
+      <small>Remakes</small>
+      <strong>${escapeHtml(stats.qty)}</strong>
+      <span>Filtered range</span>
+      <em>${escapeHtml(stats.rows)} remake row${stats.rows === 1 ? "" : "s"}</em>
+      <b>${escapeHtml(rangeParts.label)}</b>
     </div>
   `;
 }
@@ -2957,20 +3932,21 @@ function renderHomeStatistics(overviewLists, overview) {
   // Statistics panel is the single source for dashboard KPI boxes.
   // Keep the top page heading clean, and add future KPI cards here instead.
   if (els.homeStatisticsRangeText) {
-    els.homeStatisticsRangeText.textContent = homeStatisticsRangeLabel();
+    const rangeParts = homeStatisticsRangeParts();
+    els.homeStatisticsRangeText.innerHTML = `<b>${escapeHtml(rangeParts.label)}</b><span>${escapeHtml(rangeParts.dates)}</span>`;
   }
 
   if (els.overviewStats) {
     els.overviewStats.innerHTML = [
-      miniStat("Delivery %", formatPercent(overview.deliveryPercent), `${overview.scannedQty}/${overview.totalQty} scanned`),
-      miniStat("On-Time %", formatPercent(overview.onTimePercent), `${overview.onTimeQty} on time`),
-      miniStat("Late Items", overview.lateQty, "Outbound timing"),
+      miniStat("Delivery Progress", formatPercent(overview.deliveryPercent), `${overview.scannedQty}/${overview.totalQty} pieces`),
+      miniStat("On-Time / Late", `${formatPercent(overview.onTimePercent)} / ${overview.lateQty}`, `${overview.onTimeQty} on time`),
+      miniStat("Open Work", overview.remainingQty, "Pieces remaining"),
       miniStat("Delivery Lists", overview.totalLists, "In selected range"),
     ].join("");
   }
 
   renderHomeStatsChart(overviewLists);
-  renderMonthlyRemakes();
+  renderMonthlyRemakes(overviewLists);
 
   if (els.homeUserCard) {
     els.homeUserCard.innerHTML = `
@@ -3175,14 +4151,26 @@ function deliveryListCard(list, extraClass = "") {
   const category = stageCategory(list);
   const onTime = Number(list.onTimePercent || 0);
   const title = stageLabel(list);
-  const onTimeText = category === "outbound" ? ` - On-time ${formatPercent(onTime)}` : "";
+  const scannedQty = Number(list.scannedQty || 0);
+  const totalQty = Number(list.totalQty || 0);
+  const remainingQty = Math.max(totalQty - scannedQty, 0);
+  const onTimeText = category === "outbound" ? `On-time ${formatPercent(onTime)}` : stageLabel(list);
   return `
     <article class="delivery-list-card ${escapeHtml(category)} ${escapeHtml(extraClass)}" data-open-list="${escapeHtml(list.id)}">
       <div class="delivery-card-main">
-        <strong>${escapeHtml(title)}</strong>
+        <span class="delivery-stage-dot" aria-hidden="true"></span>
+        <div class="delivery-card-title-copy">
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(onTimeText)}</small>
+        </div>
+        <span class="delivery-card-action" aria-hidden="true">Open</span>
       </div>
-      <small class="delivery-card-meta">${escapeHtml(list.totalQty || 0)} pieces - ${escapeHtml(list.scannedQty || 0)}/${escapeHtml(list.totalQty || 0)} scanned${onTimeText}</small>
-      <div class="progress-line delivery-card-progress"><span>Progress:</span><div class="list-card-progress"><span style="width:${progressWidth(percent)}%"></span></div><strong>${formatPercent(percent)}</strong></div>
+      <div class="delivery-card-metrics">
+        <span><b>${escapeHtml(scannedQty)}</b><small>Scanned</small></span>
+        <span><b>${escapeHtml(remainingQty)}</b><small>Open</small></span>
+        <span><b>${escapeHtml(totalQty)}</b><small>Pieces</small></span>
+      </div>
+      <div class="progress-line delivery-card-progress"><span>Progress</span><div class="list-card-progress"><span style="width:${progressWidth(percent)}%"></span></div><strong>${formatPercent(percent)}</strong></div>
     </article>
   `;
 }
@@ -3264,7 +4252,8 @@ function renderHome() {
             return `
               <details class="delivery-date-group" data-delivery-date="${escapeHtml(group.date)}" ${group.date === state.expandedDeliveryDate ? "open" : ""}>
                 <summary>
-                  <span>
+                  <span class="home-date-chevron" aria-hidden="true"></span>
+                  <span class="home-date-summary-main">
                     <strong>${escapeHtml(formatDisplayDate(group.date))}</strong>
                     <small>${escapeHtml(group.lists.length)} stages - Delivery on-time ${formatPercent(stats.onTimePercent)}</small>
                     ${renderStackedProgress(group.lists, stats)}
@@ -3281,12 +4270,16 @@ function renderHome() {
       : `<div class="admin-empty">No delivery lists match.</div>`;
     els.homeListGrid.querySelectorAll(".delivery-date-group").forEach((details) => {
       details.addEventListener("toggle", () => {
+        details.classList.remove("is-expanding");
         if (!details.open) return;
+        void details.offsetWidth;
+        details.classList.add("is-expanding");
         state.expandedDeliveryDate = details.dataset.deliveryDate || "";
         els.homeListGrid.querySelectorAll(".delivery-date-group").forEach((other) => {
           if (other !== details) other.open = false;
         });
       });
+      details.addEventListener("animationend", () => details.classList.remove("is-expanding"));
     });
   }
   if (els.homePager) {
@@ -3469,7 +4462,7 @@ async function processScan(rawScan, options = {}) {
     renderScanPage();
     return;
   }
-  processLocalScan(scanText);
+  processLocalScan(scanText, options);
 }
 
 async function submitManualScan() {
@@ -3485,7 +4478,7 @@ async function submitManualScan() {
   els.scanInput?.focus();
 }
 
-function processLocalScan(scanText) {
+function processLocalScan(scanText, options = {}) {
   const recovered = recoverScan(scanText);
   const timestamp = new Date().toISOString();
   if (!recovered.ok) {
@@ -3512,8 +4505,7 @@ function processLocalScan(scanText) {
   }
   item.scanned += 1;
   state.selectedId = item.id;
-  const entry = { ok: true, eventType: "scan", barcode: recovered.barcode, raw: scanText, item, message: recovered.reason, time: timestamp };
-  state.recent.unshift(entry);
+  const entry = { ok: true, eventType: options.isManual ? "manual_scan" : "scan", isManual: Boolean(options.isManual), barcode: recovered.barcode, raw: scanText, item, message: recovered.reason, time: timestamp };  state.recent.unshift(entry);
   state.lastScan = entry;
   scanFlash("success");
   saveState();
@@ -3573,7 +4565,7 @@ async function resetState() {
   if (state.backend) {
     const payload = await fetchJson("/api/reset", {
       method: "POST",
-      body: JSON.stringify({ listId: state.activeListId, ...requestContext() }),
+      body: JSON.stringify({ listId: state.activeListId, confirmText: "RESET", ...requestContext() }),
     });
     applyBackendPayload(payload);
     renderScanPage();
@@ -3630,7 +4622,7 @@ async function runGlobalSearch() {
 function globalSearchProcessClass(text, result = {}) {
   const signal = `${text || ""} ${result.stage || ""} ${result.scanner || ""} ${result.bayCode || ""} ${result.bay || ""} ${result.rackCode || ""} ${result.rackType || ""}`.toLowerCase();
   if (signal.includes("bay")) return "bay";
-  if (signal.includes("truck") || result.rackCode === "T") return "truck";
+  if (signal.includes("truck") || result.rackCode === "T" || /^T\d+$/i.test(String(result.rackCode || ""))) return "truck";
   if (signal.includes("rack") || result.rackCode) return "rack";
   if (signal.includes("not scanned") || signal.includes("not started")) return "not-started";
   if (signal.includes("partial") || /\b\d+\s*\/\s*\d+\b/.test(signal)) return "partial";
@@ -3668,7 +4660,7 @@ function renderGlobalSearchResults(results) {
         const destinationLabel = result.bay
           ? `Bay ${result.bay}`
           : result.rackCode
-            ? `${result.rackCode === "T" ? "Truck" : "Rack"} ${result.rackName || result.rackCode}`
+            ? `${result.rackCode === "T" || /^T\d+$/i.test(String(result.rackCode || "")) || /truck/i.test(result.rackType || "") ? "Truck" : "Rack"} ${result.rackName || result.rackCode}`
             : result.stage || "";
 
         return `
@@ -3740,29 +4732,66 @@ function renderBayRouteFlow(summary) {
     .map((rack) => `${rack.code}: ${rack.qty}`)
     .join(" | ");
 
+  const inTransitPieceLabel = `${inTransitQty} piece${inTransitQty === 1 ? "" : "s"} on the way`;
+  const outboundStageLabel = outbound ? outbound.stage : "No outbound list";
+  const inboundStageLabel = inbound ? inbound.stage : "No Indian Trail list";
+
   els.bayFlowPanel.innerHTML = `
-    <button class="flow-card outbound flow-card-v2" type="button" ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : ""}>
-      <span class="flow-card-icon outbound"></span>
-      <small>Outbound sent</small>
-      <strong>${escapeHtml(outboundQty)} / ${escapeHtml(outboundTotal)}</strong>
-      <em>${outbound ? escapeHtml(outbound.stage) : "No outbound list"}</em>
-    </button>
-    <button class="flow-lane flow-lane-v2 transit-lane-button" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest">
-      <span class="transit-animation transit-animation-v59" aria-hidden="true">
-        <span class="transit-flow-line"></span>
+    <button
+      class="flow-card outbound flow-card-v2 bay-flow-side-card ${outbound ? "is-actionable" : "is-unavailable"}"
+      type="button"
+      ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : "disabled"}
+      title="${outbound ? "Open the current Outbound delivery list" : "No Outbound delivery list is available"}"
+      aria-label="${outbound ? "Open Outbound delivery list" : "No Outbound delivery list available"}"
+    >
+      <span class="flow-card-icon outbound" aria-hidden="true"></span>
+      <span class="flow-card-copy">
+        <small>Outbound sent</small>
+        <strong>${escapeHtml(outboundQty)}<span>/${escapeHtml(outboundTotal)}</span></strong>
+        <em>${escapeHtml(outboundStageLabel)}</em>
       </span>
-      <span class="flow-truck"><b>${escapeHtml(inTransitQty)} pieces on the way</b></span>
-      <div class="flow-progress-track"><i style="width:${percent}%"></i></div>
-      <small>${escapeHtml(inTransitJobCount)} job${inTransitJobCount === 1 ? "" : "s"} | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</small>
-      <em>Open in-transit manifest</em>
+      <span class="flow-card-open" aria-hidden="true"><b>${outbound ? "Open list" : "Unavailable"}</b><i></i></span>
     </button>
-    <button class="flow-card inbound flow-card-v2" type="button" ${inbound ? `data-open-list="${escapeHtml(inbound.id)}"` : ""}>
-      <span class="flow-card-icon inbound"></span>
-      <small>Received at Indian Trail</small>
-      <strong>${escapeHtml(inboundQty)} / ${escapeHtml(inboundTotal)}</strong>
-      <em>${inbound ? escapeHtml(inbound.stage) : "No Indian Trail list"}</em>
+
+    <button class="flow-lane flow-lane-v2 transit-lane-button transit-lane-polished" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest">
+      <span class="flow-truck"><b>${escapeHtml(inTransitPieceLabel)}</b></span>
+      <span class="transit-animation transit-animation-v59 transit-animation-truck" aria-hidden="true">
+        <span class="transit-route-node transit-route-node-start"></span>
+        <span class="transit-route-line"></span>
+        <span class="transit-moving-truck">
+          <svg viewBox="0 0 92 44" focusable="false" aria-hidden="true">
+            <rect class="transit-truck-cargo" x="7" y="7" width="49" height="27" rx="4"></rect>
+            <path class="transit-truck-cab" d="M56 15h17l11 11v8H56V15Z"></path>
+            <path class="transit-truck-window" d="M62 18h9l7 7H62v-7Z"></path>
+            <rect class="transit-truck-bumper" x="82" y="30" width="7" height="4" rx="1.5"></rect>
+            <circle class="transit-truck-wheel" cx="23" cy="36" r="6"></circle>
+            <circle class="transit-truck-wheel" cx="70" cy="36" r="6"></circle>
+            <circle class="transit-truck-hub" cx="23" cy="36" r="2.5"></circle>
+            <circle class="transit-truck-hub" cx="70" cy="36" r="2.5"></circle>
+          </svg>
+        </span>
+        <span class="transit-route-node transit-route-node-end"></span>
+      </span>
+      <span class="flow-progress-track" role="progressbar" aria-label="Indian Trail received progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(percent)}"><i style="width:${percent}%"></i></span>
+      ${rackLine ? `<span class="flow-rack-line flow-rack-line-v2"><b>Racks:</b><span>${escapeHtml(rackLine)}</span></span>` : ""}
+      <span class="transit-open-action"><b>Open manifest</b><i aria-hidden="true"></i></span>
     </button>
-    ${rackLine ? `<div class="flow-rack-line flow-rack-line-v2">In transit racks: ${escapeHtml(rackLine)}</div>` : ""}
+
+    <button
+      class="flow-card inbound flow-card-v2 bay-flow-side-card ${inbound ? "is-actionable" : "is-unavailable"}"
+      type="button"
+      ${inbound ? `data-open-list="${escapeHtml(inbound.id)}"` : "disabled"}
+      title="${inbound ? "Open the current Indian Trail delivery list" : "No Indian Trail delivery list is available"}"
+      aria-label="${inbound ? "Open Indian Trail delivery list" : "No Indian Trail delivery list available"}"
+    >
+      <span class="flow-card-icon inbound" aria-hidden="true"></span>
+      <span class="flow-card-copy">
+        <small>Received at Indian Trail</small>
+        <strong>${escapeHtml(inboundQty)}<span>/${escapeHtml(inboundTotal)}</span></strong>
+        <em>${escapeHtml(inboundStageLabel)}</em>
+      </span>
+      <span class="flow-card-open" aria-hidden="true"><b>${inbound ? "Open list" : "Unavailable"}</b><i></i></span>
+    </button>
   `;
 
   const miniRoute = document.getElementById("bayPanelRouteMini");
@@ -3770,14 +4799,14 @@ function renderBayRouteFlow(summary) {
     miniRoute.innerHTML = `
       <div class="bay-panel-route-node outbound">
         <small>Outbound</small>
-        <strong>${escapeHtml(outboundQty)} / ${escapeHtml(outboundTotal)}</strong>
+        <strong>${escapeHtml(outboundQty)}/${escapeHtml(outboundTotal)}</strong>
       </div>
       <div class="bay-panel-route-lane">
         <span>${escapeHtml(inTransitQty)} pieces on the way | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</span>
       </div>
       <div class="bay-panel-route-node inbound">
         <small>Received</small>
-        <strong>${escapeHtml(inboundQty)} / ${escapeHtml(inboundTotal)}</strong>
+        <strong>${escapeHtml(inboundQty)}/${escapeHtml(inboundTotal)}</strong>
       </div>
     `;
   }
@@ -3789,8 +4818,11 @@ function transitManifestRowHtml(item) {
     isRemakeItem(item) ? "RM" : "",
     isRushItem(item) ? "Rush" : "",
   ].filter(Boolean);
+  const jobText = item.job || item.product || "No Job Nr.";
+
   return `
     <tr>
+      <td>${escapeHtml(jobText)}</td>
       <td><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>${flags.length ? `<span class="transit-flags">${flags.map((flag) => `<i>${escapeHtml(flag)}</i>`).join("")}</span>` : ""}</td>
       <td>${escapeHtml(item.qty)}</td>
       <td>${escapeHtml(item.dimensions)}</td>
@@ -3804,6 +4836,7 @@ function transitManifestRowHtml(item) {
 function transitRackDisplayName(rack) {
   if (!rack) return "Needs transportation";
   if (rack.code === "T") return "Truck";
+  if (/^T\d+$/i.test(String(rack.code || "")) || /truck/i.test(rack.type || "")) return rack.name || `Truck ${String(rack.code || "").replace(/^T/i, "")}`;
   if (rack.code === "UNASSIGNED") return "Needs transportation";
   return rack.code || rack.name || "Rack";
 }
@@ -3811,63 +4844,114 @@ function transitRackDisplayName(rack) {
 function transitRackSortValue(rack) {
   const code = String(rack?.code || "").toUpperCase();
   if (code === "T") return "0000-TRUCK";
+  if (/^T\d+$/.test(code)) return `0001-${code.padStart(6, "0")}`;
   if (code === "UNASSIGNED" || !code) return "9999-UNASSIGNED";
   return `1000-${code}`;
+}
+
+function transitManifestGlassTypeClass(label) {
+  const text = String(label || "").toLowerCase();
+
+  if (/framed.*mirror|mirror.*framed/.test(text)) return "framed-mirror";
+  if (/mirror/.test(text)) return "mirror";
+  if (/shower/.test(text)) return "showers";
+  if (/coral/.test(text)) return "coral";
+  if (/\bcrl\b/.test(text)) return "crl";
+  if (/\blr\b|\brr\b|left.*right|right.*left/.test(text)) return "lr-rr";
+  if (/door/.test(text)) return "door";
+  return "other";
+}
+
+function transitManifestSourceRows(payload) {
+  if (Array.isArray(payload.rows) && payload.rows.length) return payload.rows.slice();
+
+  const rows = [];
+  for (const job of payload.jobs || []) {
+    for (const rack of job.racks || []) {
+      for (const item of rack.items || []) {
+        rows.push({
+          ...item,
+          job: item.job || job.job || "No Job Nr.",
+          product: item.product || job.product || "",
+          customer: item.customer || job.customer || "",
+          rackCode: item.rackCode || rack.code || "UNASSIGNED",
+          rackName: item.rackName || rack.name || "",
+          rackType: item.rackType || rack.type || "",
+        });
+      }
+    }
+  }
+
+  return rows;
 }
 
 function transitManifestRackGroups(payload) {
   const rackMap = new Map();
 
-  for (const job of payload.jobs || []) {
-    for (const sourceRack of job.racks || []) {
-      const rackCode = sourceRack.code || "UNASSIGNED";
-      const rackKey = rackCode || "UNASSIGNED";
-      if (!rackMap.has(rackKey)) {
-        rackMap.set(rackKey, {
-          code: rackCode,
-          name: sourceRack.name || "",
-          type: sourceRack.type || "",
-          totalQty: 0,
-          rowCount: 0,
-          jobMap: new Map(),
-        });
-      }
+  for (const sourceItem of transitManifestSourceRows(payload)) {
+    const rackCode = String(sourceItem.rackCode || "").trim() || "UNASSIGNED";
+    const rackKey = rackCode || "UNASSIGNED";
+    const rackName = String(sourceItem.rackName || "").trim();
+    const rackType = String(sourceItem.rackType || "").trim();
 
-      const rack = rackMap.get(rackKey);
-      const jobKey = job.key || job.job || "No Job Nr.";
-      if (!rack.jobMap.has(jobKey)) {
-        rack.jobMap.set(jobKey, {
-          key: jobKey,
-          job: job.job || "No Job Nr.",
-          customer: job.customer || "",
-          product: job.product || "",
-          totalQty: 0,
-          rowCount: 0,
-          items: [],
-        });
-      }
-
-      const jobGroup = rack.jobMap.get(jobKey);
-      for (const item of sourceRack.items || []) {
-        const qty = Number(item.qty || 0);
-        rack.totalQty += qty;
-        rack.rowCount += 1;
-        jobGroup.totalQty += qty;
-        jobGroup.rowCount += 1;
-        jobGroup.items.push(item);
-      }
+    if (!rackMap.has(rackKey)) {
+      rackMap.set(rackKey, {
+        code: rackCode,
+        name: rackCode === "UNASSIGNED" ? "Needs transportation method" : rackName,
+        type: rackCode === "T" ? "Truck" : rackCode === "UNASSIGNED" ? "Unassigned" : rackType || "Rack",
+        totalQty: 0,
+        rowCount: 0,
+        jobSet: new Set(),
+        glassMap: new Map(),
+      });
     }
+
+    const rack = rackMap.get(rackKey);
+    const item = { ...sourceItem, rackCode };
+    const qty = Math.max(Number(item.qty || 0), 0);
+    const jobText = String(item.job || item.product || item.order || "No Job Nr.").trim() || "No Job Nr.";
+    const glassLabel = glassTypeLabel(item);
+    const glassKey = glassLabel.toLowerCase();
+
+    rack.name = rack.name || rackName;
+    rack.type = rack.type || rackType || "Rack";
+    rack.totalQty += qty;
+    rack.rowCount += 1;
+    rack.jobSet.add(jobText);
+
+    if (!rack.glassMap.has(glassKey)) {
+      rack.glassMap.set(glassKey, {
+        label: glassLabel,
+        typeClass: transitManifestGlassTypeClass(glassLabel),
+        totalQty: 0,
+        rowCount: 0,
+        jobSet: new Set(),
+        items: [],
+      });
+    }
+
+    const glassGroup = rack.glassMap.get(glassKey);
+    glassGroup.totalQty += qty;
+    glassGroup.rowCount += 1;
+    glassGroup.jobSet.add(jobText);
+    glassGroup.items.push(item);
   }
 
   return [...rackMap.values()]
     .map((rack) => ({
       ...rack,
-      jobs: [...rack.jobMap.values()]
-        .map((job) => ({
-          ...job,
-          items: job.items.slice().sort((a, b) => String(a.order).localeCompare(String(b.order)) || String(a.item).localeCompare(String(b.item))),
+      jobCount: rack.jobSet.size,
+      glassTypes: [...rack.glassMap.values()]
+        .map((glass) => ({
+          ...glass,
+          jobCount: glass.jobSet.size,
+          items: glass.items.slice().sort((a, b) =>
+            String(a.job || "").localeCompare(String(b.job || "")) ||
+            String(a.order || "").localeCompare(String(b.order || ""), undefined, { numeric: true }) ||
+            String(a.item || "").localeCompare(String(b.item || ""), undefined, { numeric: true }),
+          ),
         }))
-        .sort((a, b) => String(a.job).localeCompare(String(b.job)) || String(a.customer).localeCompare(String(b.customer))),
+        .sort((a, b) => String(a.label).localeCompare(String(b.label))),
     }))
     .sort((a, b) => transitRackSortValue(a).localeCompare(transitRackSortValue(b)));
 }
@@ -3884,7 +4968,10 @@ function transitRackIconClass(rack) {
 
 function transitManifestHtml(payload) {
   const rackGroups = transitManifestRackGroups(payload);
+  const manifestRows = transitManifestSourceRows(payload);
   const dateLabel = payload.deliveryDate ? formatDisplayDate(payload.deliveryDate) : "Current Indian Trail list";
+  const glassGroupCount = rackGroups.reduce((sum, rack) => sum + rack.glassTypes.length, 0);
+  const jobCount = new Set(manifestRows.map((item) => String(item.job || item.product || item.order || "No Job Nr.").trim() || "No Job Nr.")).size;
   const rackCards = rackGroups.length
     ? rackGroups
         .map((rack) => `
@@ -3896,24 +4983,24 @@ function transitManifestHtml(payload) {
                 <small>${escapeHtml(rack.name && rack.name !== rack.code ? rack.name : rack.type || "Transportation method")}</small>
               </div>
               <b>${escapeHtml(rack.totalQty)} pcs</b>
-              <em>${escapeHtml(rack.jobs.length)} job${rack.jobs.length === 1 ? "" : "s"}</em>
+              <em>${escapeHtml(rack.glassTypes.length)} glass type${rack.glassTypes.length === 1 ? "" : "s"}</em>
             </summary>
-            <div class="transit-rack-job-stack">
-              ${rack.jobs
-                .map((job) => `
-                  <details class="transit-job-card transit-job-details transit-job-in-rack">
-                    <summary>
-                      <span class="transit-job-chevron"></span>
+            <div class="transit-rack-glass-stack">
+              ${rack.glassTypes
+                .map((glass) => `
+                  <details class="transit-glass-card transit-glass-details type-${escapeHtml(glass.typeClass)}">
+                    <summary class="transit-glass-ribbon">
+                      <span class="transit-glass-chevron"></span>
                       <div>
-                        <strong>${escapeHtml(job.job)}</strong>
-                        <span>${escapeHtml(job.customer || job.product || "No customer listed")}</span>
+                        <strong>${escapeHtml(glass.label)}</strong>
+                        <small>${escapeHtml(glass.jobCount)} Job Nr.${glass.jobCount === 1 ? "" : "s"} on this rack</small>
                       </div>
-                      <b>${escapeHtml(job.totalQty)} pcs</b>
+                      <b>${escapeHtml(glass.totalQty)} pcs</b>
                     </summary>
                     <div class="transit-table-wrap">
-                      <table class="transit-table">
-                        <thead><tr><th>Order / Item</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Scan status</th></tr></thead>
-                        <tbody>${job.items.map(transitManifestRowHtml).join("")}</tbody>
+                      <table class="transit-table transit-glass-table">
+                        <thead><tr><th>Job Nr.</th><th>Order / Item</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Scan status</th></tr></thead>
+                        <tbody>${glass.items.map(transitManifestRowHtml).join("")}</tbody>
                       </table>
                     </div>
                   </details>
@@ -3923,7 +5010,7 @@ function transitManifestHtml(payload) {
           </details>
         `)
         .join("")
-    : `<div class="transit-empty"><strong>No pieces are currently in transit.</strong><span>When Outbound scans Indian Trail pieces and they have not been received yet, they will appear here grouped by rack and Job Nr.</span></div>`;
+    : `<div class="transit-empty"><strong>No pieces are currently in transit.</strong><span>When Outbound scans Indian Trail pieces and they have not been received yet, they will appear here grouped by rack and glass type.</span></div>`;
 
   return `
     <div class="modal-backdrop transit-manifest-backdrop" data-close-transit-manifest></div>
@@ -3932,14 +5019,15 @@ function transitManifestHtml(payload) {
         <div>
           <small>Indian Trail Receiving</small>
           <h2>In-Transit Manifest</h2>
-          <span>${escapeHtml(dateLabel)} | grouped by rack, then Job Nr.</span>
+          <span>${escapeHtml(dateLabel)} | grouped by rack, then glass type</span>
         </div>
         <button class="modal-close-x transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
       </header>
       <div class="transit-summary-row transit-summary-row-v31">
         <article><small>Pieces on the way</small><strong>${escapeHtml(payload.totalQty || 0)}</strong></article>
         <article><small>Racks / truck groups</small><strong>${escapeHtml(rackGroups.length || 0)}</strong></article>
-        <article><small>Job groups</small><strong>${escapeHtml(payload.jobCount || 0)}</strong></article>
+        <article><small>Glass groups</small><strong>${escapeHtml(glassGroupCount || 0)}</strong></article>
+        <article><small>Job Nr. groups</small><strong>${escapeHtml(jobCount || payload.jobCount || 0)}</strong></article>
         <article><small>Line items</small><strong>${escapeHtml(payload.rowCount || 0)}</strong></article>
       </div>
       <div class="transit-manifest-body transit-manifest-body-v31">${rackCards}</div>
@@ -7239,8 +8327,13 @@ function adminModalContent(kind) {
       <section class="users-modal-shell">
         <form id="createUserFormModal" class="admin-form admin-modal-create-user users-create-card">
           <label>
+            <span>BFS Email</span>
+            <input id="newUserEmailModal" type="email" autocomplete="off" placeholder="name@bfs.local">
+          </label>
+
+          <label>
             <span>Username</span>
-            <input id="newUserNameModal" type="text" autocomplete="off" placeholder="Enter username">
+            <input id="newUserNameModal" type="text" autocomplete="off" placeholder="Defaults to BFS email">
           </label>
 
           <label>
@@ -7455,6 +8548,46 @@ function lookupManagerModalHtml() {
   `;
 }
 
+function rackManagerRackEditHtml() {
+  const code = state.rackManagerEditingRackCode || "";
+  if (!code) return "";
+
+  const rack = (state.racks || []).find((item) => item.code === code);
+  if (!rack) return "";
+
+  const legacyTruck = rack.code === "T";
+
+  return `
+    <form id="rackManagerInlineEditForm" class="rack-manager-set-edit rack-manager-rack-edit">
+      <input id="rackManagerInlineOldCode" type="hidden" value="${escapeHtml(rack.code)}">
+      <div class="rack-manager-quick-copy">
+        <strong>Edit ${escapeHtml(legacyTruck ? "Truck / No Rack" : rack.code)}</strong>
+        <span>Change the coded rack name, display name, or rack set/type from the same edit area used for rack sets.</span>
+      </div>
+
+      <label>
+        <span>Rack code</span>
+        <input id="rackManagerInlineCode" type="text" autocomplete="off" value="${escapeHtml(rack.code)}" ${legacyTruck ? "readonly" : ""} placeholder="R1S or T2">
+      </label>
+
+      <label>
+        <span>Display name</span>
+        <input id="rackManagerInlineName" type="text" autocomplete="off" value="${escapeHtml(rack.name || rack.type || rack.code || "")}" placeholder="Rack display name">
+      </label>
+
+      <label>
+        <span>Rack set / type</span>
+        <input id="rackManagerInlineType" type="text" list="rackManagerRackTypes" autocomplete="off" value="${escapeHtml(rack.type || "Steel")}" placeholder="Steel, Wood, Coral, Truck">
+      </label>
+
+      <div class="rack-manager-set-actions">
+        <button type="button" class="secondary" data-rack-inline-cancel>Cancel</button>
+        <button type="submit">Save Rack</button>
+      </div>
+    </form>
+  `;
+}
+
 function rackManagerSetEditHtml() {
   const label = state.rackManagerEditingSetLabel || "";
   if (!label) return "";
@@ -7465,7 +8598,11 @@ function rackManagerSetEditHtml() {
   const firstRack = racks[0] || {};
   const sampleName = String(firstRack.name || "");
   const firstNumber = rackSortNumber(firstRack.code);
-  const nameRoot = firstNumber ? sampleName.replace(new RegExp(`\\s*${firstNumber}\\s*$`), "").trim() : sampleName || label;
+  const nameRoot = label === "Truck"
+    ? "Truck"
+    : firstNumber
+      ? sampleName.replace(new RegExp(`\\s*${firstNumber}\\s*$`), "").trim()
+      : sampleName || label;
 
   return `
     <form id="rackManagerSetEditForm" class="rack-manager-set-edit">
@@ -7497,6 +8634,7 @@ function focusRackManagerRackEdit(code) {
 }
 
 function openRackManagerRackInlineEdit(code) {
+  state.rackManagerEditingSetLabel = "";
   state.rackManagerEditingRackCode = code || "";
   state.rackManagerSelectedCode = code || state.rackManagerSelectedCode || "";
 
@@ -7511,12 +8649,14 @@ function openRackManagerRackInlineEdit(code) {
 }
 
 async function saveRackInlineEdit() {
-  const code = state.rackManagerEditingRackCode || document.getElementById("rackManagerInlineCode")?.value || "";
-  if (!code) return;
+  const oldCode = state.rackManagerEditingRackCode || document.getElementById("rackManagerInlineOldCode")?.value || "";
+  const code = document.getElementById("rackManagerInlineCode")?.value || oldCode;
+  if (!oldCode || !code) return;
 
   const payload = await fetchJson("/api/racks", {
     method: "POST",
     body: JSON.stringify({
+      oldRackCode: oldCode,
       rackCode: code,
       name: document.getElementById("rackManagerInlineName")?.value || code,
       type: document.getElementById("rackManagerInlineType")?.value || "Steel",
@@ -7525,7 +8665,8 @@ async function saveRackInlineEdit() {
 
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
-  state.rackManagerSelectedCode = code;
+  const savedRack = payload.rack || state.racks.find((rack) => rack.code === code) || null;
+  state.rackManagerSelectedCode = savedRack?.code || code;
   state.rackManagerEditingRackCode = "";
   renderRacksPage();
   renderScanRackTools();
@@ -7538,6 +8679,7 @@ async function saveRackInlineEdit() {
 }
 
 function openRackManagerSetEdit(label) {
+  state.rackManagerEditingRackCode = "";
   state.rackManagerEditingSetLabel = label || "";
 
   if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
@@ -7562,9 +8704,13 @@ async function saveRackSetQuickEdit() {
 
   for (const rack of racks) {
     const number = rackSortNumber(rack.code);
-    const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
+    const isTruck = isTruckRack(rack);
     const nextType = isTruck ? "Truck" : newType;
-    const nextName = isTruck ? (document.getElementById("rackManagerSetNameRootInput")?.value || rack.name || "Truck / No Rack") : `${nameRoot}${number ? ` ${number}` : ""}`;
+    const nextName = isTruck
+      ? rack.code === "T"
+        ? rack.name || "Truck / No Rack"
+        : `${nameRoot || "Truck"}${number ? ` ${number}` : ""}`
+      : `${nameRoot}${number ? ` ${number}` : ""}`;
 
     latestPayload = await fetchJson("/api/racks", {
       method: "POST",
@@ -7621,36 +8767,7 @@ function rackManagerModalHtml() {
         </div>
       </div>
 
-      ${rackManagerSetEditHtml()}
-
-      <form id="rackManagerQuickEditForm" class="rack-manager-quick-edit">
-        <div class="rack-manager-quick-copy">
-          <strong>Quick rack edit</strong>
-          <span>Select a rack, update its display name or set type, then save it without leaving this manager.</span>
-        </div>
-        <label>
-          <span>Rack</span>
-          <select id="rackManagerQuickRackSelect">
-            ${(state.racks || [])
-              .slice()
-              .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }))
-              .map((rack) => `<option value="${escapeHtml(rack.code)}" ${selectedRack?.code === rack.code ? "selected" : ""}>${escapeHtml(rack.code === "T" ? "Truck / No Rack" : rack.code)} - ${escapeHtml(rack.name || rack.type || "")}</option>`)
-              .join("")}
-          </select>
-        </label>
-        <label>
-          <span>Name</span>
-          <input id="rackManagerQuickName" type="text" autocomplete="off" value="${escapeHtml(selectedRack?.name || selectedRack?.type || selectedRack?.code || "")}" placeholder="Rack display name">
-        </label>
-        <label>
-          <span>Rack set / type</span>
-          <input id="rackManagerQuickType" type="text" list="rackManagerRackTypes" autocomplete="off" value="${escapeHtml(selectedRack?.type || "Steel")}" placeholder="Steel, Wood, Coral, Truck">
-          <datalist id="rackManagerRackTypes">
-            ${["Steel", "Wood", "Coral", "Truck", "Aluminum", "Other"].map((type) => `<option value="${escapeHtml(type)}"></option>`).join("")}
-          </datalist>
-        </label>
-        <button type="submit" class="rack-manager-save-button">Save Rack</button>
-      </form>
+      ${rackManagerRackEditHtml() || rackManagerSetEditHtml()}
 
       <div class="rack-manager-grid">
         ${
@@ -7668,6 +8785,7 @@ function rackManagerModalHtml() {
                           <span>${escapeHtml(racks.length)} rack${racks.length === 1 ? "" : "s"} | ${escapeHtml(totalQty)} pcs</span>
                         </div>
                         <div class="rack-manager-group-actions">
+                          <button type="button" class="icon-only icon-plus" data-rack-manager-add-to-set="${escapeHtml(label)}" title="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}" aria-label="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}"></button>
                           <button type="button" class="icon-only icon-pencil" data-rack-set-edit="${escapeHtml(label)}" title="Edit ${escapeHtml(label)} set" aria-label="Edit ${escapeHtml(label)} set"></button>
                           <button type="button" class="icon-only icon-trash danger" data-rack-set-delete="${escapeHtml(label)}" ${deletableCount ? "" : "disabled"} title="Delete empty racks in ${escapeHtml(label)}" aria-label="Delete empty racks in ${escapeHtml(label)}"></button>
                         </div>
@@ -7679,8 +8797,9 @@ function rackManagerModalHtml() {
                           .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }))
                           .map((rack) => {
                             const qty = Number(rack.qty || 0);
-                            const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
-                            const canDelete = !isTruck && qty === 0;
+                            const isTruck = isTruckRack(rack);
+                            const legacyTruck = rack.code === "T";
+                            const canDelete = !legacyTruck && qty === 0;
                             const status = String(rack.status || "Open").toLowerCase() === "closed" ? "Complete" : qty ? "Open" : "Empty";
 
                             const isEditing = state.rackManagerEditingRackCode === rack.code;
@@ -7688,7 +8807,7 @@ function rackManagerModalHtml() {
                             return `
                               <article class="rack-manager-row ${isEditing ? "is-editing" : ""}">
                                 <div>
-                                  <strong>${escapeHtml(isTruck ? "Truck / No Rack" : rack.code)}</strong>
+                                  <strong>${escapeHtml(legacyTruck ? "Truck / No Rack" : rack.code)}</strong>
                                   <span>${escapeHtml(rack.name || rack.type || "")}</span>
                                 </div>
                                 <span class="rack-status-badge ${escapeHtml(status.toLowerCase())}">${escapeHtml(status)}</span>
@@ -7696,25 +8815,6 @@ function rackManagerModalHtml() {
                                 <button type="button" class="icon-only icon-pencil" data-rack-edit="${escapeHtml(rack.code)}" title="Edit rack" aria-label="Edit ${escapeHtml(rack.code)}"></button>
                                 <button type="button" class="icon-only icon-trash danger" data-rack-delete="${escapeHtml(rack.code)}" ${canDelete ? "" : "disabled"} title="Delete empty rack" aria-label="Delete ${escapeHtml(rack.code)}"></button>
                               </article>
-                              ${
-                                isEditing
-                                  ? `<form id="rackManagerInlineEditForm" class="rack-manager-inline-edit">
-                                      <input id="rackManagerInlineCode" type="hidden" value="${escapeHtml(rack.code)}">
-                                      <label>
-                                        <span>Rack name</span>
-                                        <input id="rackManagerInlineName" type="text" autocomplete="off" value="${escapeHtml(rack.name || rack.type || rack.code || "")}" placeholder="Rack display name">
-                                      </label>
-                                      <label>
-                                        <span>Rack set / type</span>
-                                        <input id="rackManagerInlineType" type="text" list="rackManagerRackTypes" autocomplete="off" value="${escapeHtml(rack.type || "Steel")}" placeholder="Steel, Wood, Coral, Truck">
-                                      </label>
-                                      <div class="rack-manager-inline-actions">
-                                        <button type="button" class="secondary" data-rack-inline-cancel>Cancel</button>
-                                        <button type="submit">Save</button>
-                                      </div>
-                                    </form>`
-                                  : ""
-                              }
                             `;
                           })
                           .join("")}
@@ -7734,7 +8834,8 @@ function rackFormModalHtml() {
   const rack = state.rackModal?.rack || {};
   return `
     <form id="rackFormModal" class="admin-form rack-modal-form">
-      <label><span>Rack code</span><input id="rackModalCode" type="text" autocomplete="off" value="${escapeHtml(rack.code || "")}" ${rack.code ? "readonly" : ""} placeholder="R11S"></label>
+      <input id="rackModalOldCode" type="hidden" value="${escapeHtml(rack.oldCode || rack.code || "")}">
+      <label><span>Rack code</span><input id="rackModalCode" type="text" autocomplete="off" value="${escapeHtml(rack.code || "")}" ${rack.code === "T" ? "readonly" : ""} placeholder="R11S"></label>
       <label><span>Rack name</span><input id="rackModalName" type="text" autocomplete="off" value="${escapeHtml(rack.name || "")}" placeholder="Rack 11 Steel"></label>
       <label>
         <span>Rack type</span>
@@ -8001,6 +9102,25 @@ function permissionSummaryFromPermissions(permissions) {
   return "Custom access";
 }
 
+function permissionSummaryForUser(user) {
+  const directPermissions = Array.isArray(user?.permissions) ? user.permissions : [];
+
+  if (directPermissions.length) {
+    return permissionSummaryFromPermissions(directPermissions);
+  }
+
+  const rolePermissions = (state.adminRoles || [])
+    .filter((role) => (user?.roles || []).includes(role.name))
+    .flatMap((role) => role.permissions || []);
+
+  if (rolePermissions.length) {
+    return permissionSummaryFromPermissions(rolePermissions);
+  }
+
+  const roleText = (user?.roles || []).join(", ");
+  return roleText ? `${roleText} access` : "Custom access";
+}
+
 async function saveRolePermissions(roleName) {
   rememberRolePermissionUiState();
 
@@ -8256,42 +9376,47 @@ function importHistoryRows(imports = []) {
     const explicitAddedQty = Number(row.addedPieceQty ?? row.addedQty ?? 0);
     const explicitChangedQty = Number(row.changedPieceQty ?? row.changedQty ?? 0);
 
-    if (row.created) {
-      return updatedQty;
-    }
-
-    if (!explicitAddedQty && !explicitChangedQty) {
-      const explicitOriginalQty = row.originalQty ?? row.previousQty ?? row.oldQty ?? row.beforeQty;
-
-      if (Number(explicitOriginalQty || 0) <= 0 && updatedQty > 0) {
-        return updatedQty;
-      }
-    }
-
+    if (row.created) return updatedQty;
     return explicitAddedQty || explicitChangedQty || 0;
   };
 
   const originalQtyForRow = (row, list) => {
     const updatedQty = updatedQtyForRow(row, list);
-    const changedQty = changedQtyForRow(row, list);
+    const explicitAddedQty = Number(row.addedPieceQty ?? row.addedQty ?? 0);
+    const explicitChangedQty = Number(row.changedPieceQty ?? row.changedQty ?? 0);
     const explicitOriginalQty = row.originalQty ?? row.originalPieceQty ?? row.previousQty ?? row.oldQty ?? row.beforeQty;
 
+    if (row.created) return 0;
+
     if (explicitOriginalQty !== undefined && explicitOriginalQty !== null && explicitOriginalQty !== "") {
-      return Number(explicitOriginalQty);
+      const originalQty = Number(explicitOriginalQty || 0);
+
+      // Older import-history records sometimes stored 0 even when an unchanged
+      // stage already contained pieces. In that case, the current total is the
+      // original quantity—not a newly-added quantity.
+      if (originalQty <= 0 && updatedQty > 0 && !explicitAddedQty && !explicitChangedQty) {
+        return updatedQty;
+      }
+
+      if (originalQty <= 0 && updatedQty > 0 && explicitAddedQty > 0) {
+        return Math.max(updatedQty - explicitAddedQty, 0);
+      }
+
+      return originalQty;
     }
 
-    if (row.created) {
-      return 0;
-    }
-
-    return Math.max(updatedQty - changedQty, 0);
+    return Math.max(updatedQty - explicitAddedQty, 0);
   };
 
   const isNewStageRow = (row, list) => {
     const originalQty = originalQtyForRow(row, list);
     const updatedQty = updatedQtyForRow(row, list);
+    const hasRecordedChanges =
+      Number(row.changedLineCount || 0) > 0 ||
+      Number(row.changedPieceQty || 0) > 0 ||
+      Number(row.addedPieceQty || 0) > 0;
 
-    return Boolean(row.created) || (originalQty <= 0 && updatedQty > 0);
+    return Boolean(row.created) || (originalQty <= 0 && updatedQty > 0 && hasRecordedChanges);
   };
 
   const stageRowsForEntry = (entry) => {
@@ -8564,6 +9689,7 @@ function importHistoryRows(imports = []) {
           return `
             <details class="admin-import-date-group ${groupClass}">
 <summary class="admin-import-date-summary">
+  <span class="admin-import-expand-arrow" aria-hidden="true"></span>
   <span class="admin-import-date-main">
     <span class="admin-import-date-title">
       <strong>${escapeHtml(formatDisplayDate(group.deliveryDate))}</strong>
@@ -8664,6 +9790,8 @@ async function resetAdminScansForList(listId) {
     message: `Reset all scan quantities and scan history for <strong>${escapeHtml(list.label)}</strong>.`,
     details: "This keeps the delivery-list rows but returns this stage to zero scanned quantity.",
     confirmLabel: "Reset scans",
+    requiredText: "RESET",
+    requiredTextLabel: "Type RESET to reset this delivery-list stage",
   });
 
   if (!confirmed) {
@@ -8672,7 +9800,7 @@ async function resetAdminScansForList(listId) {
   }
   const payload = await fetchJson("/api/reset", {
     method: "POST",
-    body: JSON.stringify({ listId, ...requestContext() }),
+    body: JSON.stringify({ listId, confirmText: "RESET", ...requestContext() }),
   });
   if (payload.meta?.id === state.activeListId) applyBackendPayload(payload);
   await loadDeliveryLists(state.activeListId);
@@ -8690,6 +9818,8 @@ async function resetAdminScansForDate(deliveryDate) {
     message: `Reset all scan quantities and scan history for every stage on <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
     details: `${lists.length} stage${lists.length === 1 ? "" : "s"} will be reset. Delivery-list rows will stay in place.`,
     confirmLabel: "Reset all stages",
+    requiredText: "RESET",
+    requiredTextLabel: "Type RESET to reset every stage for this date",
   });
 
   if (!confirmed) {
@@ -8703,7 +9833,7 @@ async function resetAdminScansForDate(deliveryDate) {
   for (const list of lists) {
     await fetchJson("/api/reset", {
       method: "POST",
-      body: JSON.stringify({ listId: list.id, ...requestContext() }),
+      body: JSON.stringify({ listId: list.id, confirmText: "RESET", ...requestContext() }),
     });
   }
 
@@ -8728,11 +9858,23 @@ async function resetAdminScansForDate(deliveryDate) {
 }
 
 async function deleteAdminDeliveryDateByDate(deliveryDate) {
-  if (!deliveryDate || !window.confirm(`Delete every stage for ${formatDisplayDate(deliveryDate)}?`)) return;
+  if (!deliveryDate) return;
+
+  const lists = state.lists.filter((list) => list.deliveryDate === deliveryDate);
+  const confirmed = await confirmWebAppAction({
+    title: "Delete every stage for this date?",
+    message: `Delete every delivery-list stage for <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
+    details: `${lists.length || "All matching"} stage${lists.length === 1 ? "" : "s"} will be removed. This cannot be undone from the web app.`,
+    confirmLabel: "Delete date",
+    requiredText: "DELETE",
+    requiredTextLabel: "Type DELETE to remove every stage for this date",
+  });
+
+  if (!confirmed) return;
 
   const result = await fetchJson("/api/admin/delete-date", {
     method: "POST",
-    body: JSON.stringify({ deliveryDate, ...requestContext() }),
+    body: JSON.stringify({ deliveryDate, confirmText: "DELETE", ...requestContext() }),
   });
 
   state.lists = result.lists || [];
@@ -8770,25 +9912,54 @@ async function deleteAdminDeliveryDateByDate(deliveryDate) {
 
 async function deleteSelectedDeliveryList(deleteDate = false) {
   if (!state.backend) return;
+
   const deliveryDate = els.deleteDateSelect?.value || "";
   const listId = els.deleteListSelect?.value || "";
+
   if (deleteDate) {
-    if (!deliveryDate || !window.confirm(`Delete every stage for ${formatDisplayDate(deliveryDate)}?`)) return;
+    if (!deliveryDate) return;
+
+    const lists = state.lists.filter((list) => list.deliveryDate === deliveryDate);
+    const confirmed = await confirmWebAppAction({
+      title: "Delete every stage for this date?",
+      message: `Delete every delivery-list stage for <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
+      details: `${lists.length || "All matching"} stage${lists.length === 1 ? "" : "s"} will be removed. This cannot be undone from the web app.`,
+      confirmLabel: "Delete date",
+      requiredText: "DELETE",
+      requiredTextLabel: "Type DELETE to remove every stage for this date",
+    });
+
+    if (!confirmed) return;
+
     const result = await fetchJson("/api/admin/delete-date", {
       method: "POST",
-      body: JSON.stringify({ deliveryDate, ...requestContext() }),
+      body: JSON.stringify({ deliveryDate, confirmText: "DELETE", ...requestContext() }),
     });
     state.lists = result.lists || [];
     if (els.deleteListStatus) els.deleteListStatus.innerHTML = `<strong>Deleted date</strong><span>${escapeHtml(result.deletedCount || 0)} stages removed.</span>`;
   } else {
-    if (!listId || !window.confirm("Delete this delivery-list stage?")) return;
+    const list = state.lists.find((item) => item.id === listId);
+    if (!list) return;
+
+    const confirmed = await confirmWebAppAction({
+      title: "Delete this delivery-list stage?",
+      message: `Delete <strong>${escapeHtml(list.label)}</strong>.`,
+      details: "This removes that stage and its rows from the active delivery-list set.",
+      confirmLabel: "Delete stage",
+      requiredText: "DELETE",
+      requiredTextLabel: "Type DELETE to remove this delivery-list stage",
+    });
+
+    if (!confirmed) return;
+
     const result = await fetchJson("/api/admin/delete-list", {
       method: "POST",
-      body: JSON.stringify({ listId, ...requestContext() }),
+      body: JSON.stringify({ listId, confirmText: "DELETE", ...requestContext() }),
     });
     state.lists = result.lists || [];
     if (els.deleteListStatus) els.deleteListStatus.innerHTML = `<strong>Deleted stage</strong><span>${escapeHtml(result.deletedListId || listId)} removed.</span>`;
   }
+
   if (!state.lists.some((list) => list.id === state.activeListId)) {
     state.activeListId = state.lists[0]?.id || "";
 
@@ -8815,10 +9986,22 @@ async function deleteSelectedDeliveryList(deleteDate = false) {
 
 async function deleteAdminDeliveryListById(listId) {
   const list = state.lists.find((item) => item.id === listId);
-  if (!list || !window.confirm(`Delete ${list.label}? This removes that delivery-list stage.`)) return;
+  if (!list) return;
+
+  const confirmed = await confirmWebAppAction({
+    title: "Delete this delivery-list stage?",
+    message: `Delete <strong>${escapeHtml(list.label)}</strong>.`,
+    details: "This removes that stage and its rows from the active delivery-list set.",
+    confirmLabel: "Delete stage",
+    requiredText: "DELETE",
+    requiredTextLabel: "Type DELETE to remove this delivery-list stage",
+  });
+
+  if (!confirmed) return;
+
   const result = await fetchJson("/api/admin/delete-list", {
     method: "POST",
-    body: JSON.stringify({ listId, ...requestContext() }),
+    body: JSON.stringify({ listId, confirmText: "DELETE", ...requestContext() }),
   });
   state.lists = result.lists || [];
   if (!state.lists.some((item) => item.id === state.activeListId)) {
@@ -8844,26 +10027,6 @@ async function deleteAdminDeliveryListById(listId) {
   renderAdminDeleteControls();
   renderAdminDeliveryLists();
   openAdminModal("deliveryLists");
-}
-
-function renderAdminUsers() {
-  if (!els.adminUsers) return;
-  if (!state.adminUsers.length) {
-    els.adminUsers.innerHTML = `<div class="admin-empty">No users loaded.</div>`;
-    return;
-  }
-  els.adminUsers.innerHTML = renderAdminUsersTable(false, state.adminUsers.length || 1);
-}
-
-function permissionSummaryForUser(user) {
-  const roles = user.roles || [];
-  const permissions = user.permissions || [];
-  if (permissions.includes("view_admin")) return "Full admin access";
-  if (roles.some((role) => /manager/i.test(role))) return "Manage scans, bays, users, and reports";
-  if (roles.some((role) => /lead|supervisor/i.test(role))) return "Scan, undo, manage exceptions, and reports";
-  if (roles.some((role) => /indian trail/i.test(role))) return "Indian Trail scanning and bay access";
-  if (permissions.includes("scan_items")) return "Scan and view assigned stages";
-  return "View assigned delivery lists";
 }
 
 function userInitials(user) {
@@ -8932,12 +10095,23 @@ async function refreshAdminUsersUi() {
   }
 }
 
-function confirmWebAppAction({ title, message, details = "", confirmLabel = "Confirm", cancelLabel = "Cancel", danger = true } = {}) {
+function confirmWebAppAction({
+  title,
+  message,
+  details = "",
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  danger = true,
+  requiredText = "",
+  requiredTextLabel = "Type the confirmation word to continue",
+} = {}) {
   return new Promise((resolve) => {
     const existingDialog = document.querySelector(".action-confirm-backdrop");
     if (existingDialog) existingDialog.remove();
 
     const dialog = document.createElement("div");
+    const requiredValue = String(requiredText || "").trim();
+    const requiresTypedConfirmation = Boolean(requiredValue);
     let keyHandler = () => {};
 
     dialog.className = "action-confirm-backdrop";
@@ -8953,12 +10127,30 @@ function confirmWebAppAction({ title, message, details = "", confirmLabel = "Con
           ${details ? `<small>${escapeHtml(details)}</small>` : ""}
         </div>
 
+        ${requiresTypedConfirmation ? `
+          <label class="action-confirm-typed-field">
+            <span>${escapeHtml(requiredTextLabel)}</span>
+            <b>${escapeHtml(requiredValue)}</b>
+            <input type="text" autocomplete="off" spellcheck="false" data-action-confirm-input aria-label="Type ${escapeHtml(requiredValue)} to confirm">
+          </label>
+        ` : ""}
+
         <div class="action-confirm-actions">
           <button type="button" class="action-confirm-cancel" data-action-confirm-cancel>${escapeHtml(cancelLabel)}</button>
-          <button type="button" class="action-confirm-confirm" data-action-confirm-confirm>${escapeHtml(confirmLabel)}</button>
+          <button type="button" class="action-confirm-confirm" data-action-confirm-confirm ${requiresTypedConfirmation ? "disabled" : ""}>${escapeHtml(confirmLabel)}</button>
         </div>
       </section>
     `;
+
+    const input = dialog.querySelector("[data-action-confirm-input]");
+    const confirmButton = dialog.querySelector("[data-action-confirm-confirm]");
+
+    const typedConfirmationMatches = () => !requiresTypedConfirmation || String(input?.value || "").trim() === requiredValue;
+
+    const syncTypedConfirmation = () => {
+      if (!confirmButton) return;
+      confirmButton.disabled = !typedConfirmationMatches();
+    };
 
     const close = (confirmed) => {
       document.removeEventListener("keydown", keyHandler);
@@ -8968,6 +10160,13 @@ function confirmWebAppAction({ title, message, details = "", confirmLabel = "Con
       resolve(Boolean(confirmed));
     };
 
+    input?.addEventListener("input", syncTypedConfirmation);
+    input?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      if (typedConfirmationMatches()) close(true);
+    });
+
     dialog.addEventListener("click", (event) => {
       if (event.target === dialog || event.target.closest("[data-action-confirm-cancel]")) {
         close(false);
@@ -8975,6 +10174,10 @@ function confirmWebAppAction({ title, message, details = "", confirmLabel = "Con
       }
 
       if (event.target.closest("[data-action-confirm-confirm]")) {
+        if (!typedConfirmationMatches()) {
+          input?.focus();
+          return;
+        }
         close(true);
       }
     });
@@ -8987,7 +10190,8 @@ function confirmWebAppAction({ title, message, details = "", confirmLabel = "Con
     document.addEventListener("keydown", keyHandler);
     document.body.appendChild(dialog);
     document.body.classList.add("modal-scroll-locked");
-    dialog.querySelector("[data-action-confirm-cancel]")?.focus();
+    syncTypedConfirmation();
+    (input || dialog.querySelector("[data-action-confirm-cancel]"))?.focus();
   });
 }
 
@@ -9048,6 +10252,23 @@ function confirmDeactivateUser(username) {
   });
 }
 
+function renderAdminUsers() {
+  if (!els.adminUsers) return;
+
+  const previewLimit = 6;
+  const totalUsers = state.adminUsers.length;
+  const hiddenCount = Math.max(totalUsers - previewLimit, 0);
+
+  els.adminUsers.innerHTML = `
+    ${renderAdminUsersTable(false, previewLimit)}
+    ${
+      hiddenCount
+        ? `<button type="button" class="link-button admin-preview-more-button" data-admin-modal="users">View ${escapeHtml(hiddenCount)} more user${hiddenCount === 1 ? "" : "s"}</button>`
+        : ""
+    }
+  `;
+}
+
 function renderAdminUsersTable(editable = false, limit = 5) {
   const users = state.adminUsers.slice(0, limit);
 
@@ -9068,7 +10289,8 @@ function renderAdminUsersTable(editable = false, limit = 5) {
 
                 <div>
                   <strong>${escapeHtml(user.displayName)}</strong>
-                  <span>${escapeHtml(user.username)} · ${escapeHtml((user.roles || []).join(", ") || "No role")}</span>
+                  <span>${escapeHtml(user.email || user.username)} · ${escapeHtml((user.roles || []).join(", ") || "No role")}</span>
+                  <small>${escapeHtml(user.username)}${user.email ? ` · ${escapeHtml(user.email)}` : ""}</small>
                   <small>${escapeHtml(permissionSummaryForUser(user))}</small>
                   <small>Station: ${escapeHtml(userAssignedStation(user) || "No assigned station")}</small>
                 </div>
@@ -9089,6 +10311,7 @@ function renderAdminUsersTable(editable = false, limit = 5) {
     <div class="users-table">
       <div class="users-table-head">
         <span>User</span>
+        <span>Email</span>
         <span>Role</span>
         <span>Station</span>
         <span>Permissions / Notes</span>
@@ -9104,7 +10327,8 @@ function renderAdminUsersTable(editable = false, limit = 5) {
             const username = String(user.username || "");
             const roles = user.roles || [];
             const stageAccess = user.stageAccess || [];
-            const assignedStation = userAssignedStation(user);
+            const assignedStations = userAssignedStations(user);
+            const assignedStation = assignedStations[0] || "";
             const loggedIn = activeSessionUsers.has(username.toLowerCase());
 
             return `
@@ -9118,6 +10342,11 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                   </span>
                 </div>
 
+                <label class="user-admin-email user-admin-email-edit">
+                  <span>BFS sign-in email</span>
+                  <input data-user-email="${escapeHtml(username)}" type="email" autocomplete="off" value="${escapeHtml(user.email || "")}" placeholder="name@barefootandcompany.com">
+                </label>
+
                 <div class="user-admin-role">
                   ${
                     hasPermission("manage_roles")
@@ -9130,18 +10359,22 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                   }
                 </div>
 
-                <div class="user-admin-station">
+                <div class="user-admin-station user-admin-station-list">
                   ${
                     hasPermission("manage_roles")
                       ? `
-                        <select data-user-station-select="${escapeHtml(username)}">
-                          <option value="">No assigned station</option>
+                        <div class="station-assignment-list" data-user-station-list="${escapeHtml(username)}">
                           ${state.stations
-                            .map((station) => `<option value="${escapeHtml(station)}" ${assignedStation === station ? "selected" : ""}>${escapeHtml(station)}</option>`)
+                            .map((station) => `
+                              <label class="station-assignment-option">
+                                <input type="checkbox" value="${escapeHtml(station)}" ${assignedStations.includes(station) ? "checked" : ""}>
+                                <span>${escapeHtml(station)}</span>
+                              </label>
+                            `)
                             .join("")}
-                        </select>
+                        </div>
                       `
-                      : `<span>${escapeHtml(assignedStation || "No assigned station")}</span>`
+                      : `<span>${escapeHtml(assignedStations.join(", ") || "No assigned station")}</span>`
                   }
                 </div>
 
@@ -9291,6 +10524,24 @@ function customerRouteDisplay(route) {
   return clean;
 }
 
+function customerRouteDefaultAddress(route) {
+  return CUSTOMER_ROUTE_DEFAULT_ADDRESSES[customerRouteValue(route)] || "";
+}
+
+function customerRouteAddress(rule = {}) {
+  const savedAddress = String(rule.customerAddress || rule.address || "").trim();
+  return savedAddress || customerRouteDefaultAddress(rule.route);
+}
+
+function customerRouteAddressStatus(rule = {}) {
+  const route = customerRouteValue(rule.route);
+  const address = customerRouteAddress(rule);
+
+  if (route === "DTC" && !address) return "DTC address required";
+  if (!address) return "No address on file";
+  return address;
+}
+
 function customerRouteOptionList() {
   const customRoutes = [...new Set((state.adminCustomerRouteRules || [])
     .map((rule) => customerRouteValue(rule.route))
@@ -9326,6 +10577,8 @@ function customerRouteRuleRowsHtml(editable = false, limit = 0) {
     .map((rule) => {
       const routeCode = customerRouteValue(rule.route);
       const routeLabel = customerRouteDisplay(rule.route);
+      const addressText = customerRouteAddressStatus(rule);
+      const addressClass = routeCode === "DTC" && !customerRouteAddress(rule) ? " needs-address" : "";
 
       return `
         <article class="customer-route-rule-row ${editable ? "is-editable" : ""}">
@@ -9347,6 +10600,15 @@ function customerRouteRuleRowsHtml(editable = false, limit = 0) {
                       ${customerRouteOptionsHtml(rule.route)}
                     </select>`
                   : `<em class="customer-route-badge">${escapeHtml(routeLabel)}</em>`
+              }
+            </label>
+
+            <label class="customer-route-address-field${addressClass}">
+              <span>Destination address</span>
+              ${
+                editable
+                  ? `<input data-customer-route-address="${escapeHtml(rule.id)}" type="text" value="${escapeHtml(customerRouteAddress(rule))}" aria-label="Customer route destination address" placeholder="Required for DTC customers">`
+                  : `<small>${escapeHtml(addressText)}</small>`
               }
             </label>
           </div>
@@ -9389,6 +10651,11 @@ function customerRouteRulesModalHtml() {
           <span>New route code</span>
           <input id="customerRouteSelectModal" type="text" list="customerRouteCodes" autocomplete="off" placeholder="CPU, DTC, GNV, or custom route">
         </label>
+
+        <label class="customer-route-form-address">
+          <span>Destination address</span>
+          <input id="customerRouteAddressInputModal" type="text" autocomplete="off" placeholder="Required for DTC customers">
+        </label>
         <datalist id="customerRouteCodes">
           ${customerRouteOptionsHtml("CPU")}
         </datalist>
@@ -9419,12 +10686,14 @@ function setCustomerRouteEditForm(ruleId = "") {
   const originalPatternInput = document.getElementById("customerRouteEditOriginalPatternModal");
   const patternInput = document.getElementById("customerRoutePatternInputModal");
   const routeInput = document.getElementById("customerRouteSelectModal");
+  const addressInput = document.getElementById("customerRouteAddressInputModal");
   const submitButton = document.getElementById("customerRouteSubmitBtnModal");
 
   if (idInput) idInput.value = rule?.id || "";
   if (originalPatternInput) originalPatternInput.value = rule?.customerPattern || "";
   if (patternInput) patternInput.value = rule?.customerPattern || "";
   if (routeInput) routeInput.value = customerRouteValue(rule?.route || "CPU");
+  if (addressInput) addressInput.value = rule ? customerRouteAddress(rule) : "";
   if (submitButton) submitButton.textContent = rule ? "Save Rule" : "Add Rule";
 
   patternInput?.focus();
@@ -9687,7 +10956,7 @@ function renderCustomerEmailOverview() {
   const sentCount = outbox.filter((email) => String(email.status || "").toLowerCase() === "sent").length;
   const draftCount = outbox.filter((email) => String(email.status || "").toLowerCase() === "draft").length;
   const failedCount = outbox.filter((email) => String(email.status || "").toLowerCase() === "failed").length;
-  const previewContacts = contacts.slice(0, 4);
+  const previewContacts = contacts.slice(0, 7);
 
   els.customerEmailOverview.innerHTML = `
     <div class="customer-email-overview-card">
@@ -9824,6 +11093,7 @@ function customerEmailRulesModalHtml() {
               <span class="email-outbox-actions">
                 <em>${escapeHtml(emailStatusLabel(email.status))}</em>
                 <button type="button" data-open-email-draft="${escapeHtml(email.id)}">Open</button>
+                <button type="button" data-email-manifest-pdf="${escapeHtml(email.id)}">PDF</button>
               </span>
             </article>
           `).join("") : `<div class="admin-empty">No customer email drafts yet.</div>`}
@@ -9855,6 +11125,7 @@ function emailDraftPreviewHtml(email) {
       ${email.error ? `<div class="email-draft-error"><strong>Send status</strong><span>${escapeHtml(email.error)}</span></div>` : ""}
       <pre class="email-draft-body">${escapeHtml(email.body || "")}</pre>
       <footer class="email-draft-actions">
+        <button type="button" data-email-manifest-pdf="${escapeHtml(email.id)}">Generate PDF</button>
         <button type="button" data-copy-email-draft="${escapeHtml(email.id)}">Copy Body</button>
         <button type="button" data-mailto-email-draft="${escapeHtml(email.id)}">Open in Email App</button>
         <button type="button" data-close-email-draft>Close</button>
@@ -9995,8 +11266,15 @@ async function removeCustomerEmailCc(id) {
 function customerRouteFormValues() {
   const patternInput = document.getElementById("customerRoutePatternInputModal") || els.customerRoutePatternInput;
   const routeInput = document.getElementById("customerRouteSelectModal") || els.customerRouteSelect;
+  const addressInput = document.getElementById("customerRouteAddressInputModal");
   const customerPattern = (patternInput?.value || "").trim();
   const route = customerRouteValue(routeInput?.value || "CPU");
+  let customerAddress = (addressInput?.value || "").trim();
+
+  if (!customerAddress && customerRouteDefaultAddress(route)) {
+    customerAddress = customerRouteDefaultAddress(route);
+    if (addressInput) addressInput.value = customerAddress;
+  }
 
   if (!customerPattern) {
     patternInput?.focus();
@@ -10006,29 +11284,38 @@ function customerRouteFormValues() {
     routeInput?.focus();
     throw new Error("Enter a route code before adding the customer route.");
   }
+  if (route === "DTC" && !customerAddress) {
+    addressInput?.focus();
+    throw new Error("Enter a delivery address for DTC customer routes.");
+  }
 
-  return { customerPattern, route, patternInput, routeInput };
+  return { customerPattern, route, customerAddress, patternInput, routeInput, addressInput };
 }
 
 async function saveCustomerRouteRule() {
-  const { customerPattern, route, patternInput, routeInput } = customerRouteFormValues();
+  const { customerPattern, route, customerAddress, patternInput, routeInput, addressInput } = customerRouteFormValues();
 
   if (state.backend) {
     const payload = await fetchJson("/api/admin/customer-route-rules", {
       method: "POST",
-      body: JSON.stringify({ customerPattern, route }),
+      body: JSON.stringify({ customerPattern, route, customerAddress }),
     });
     state.adminCustomerRouteRules = payload.rules || [];
   } else {
     const existing = state.adminCustomerRouteRules.find(
       (rule) => String(rule.customerPattern || "").toLowerCase() === customerPattern.toLowerCase(),
     );
-    if (existing) existing.route = route;
-    else state.adminCustomerRouteRules.push({ id: Date.now(), customerPattern, route, active: true });
+    if (existing) {
+      existing.route = route;
+      existing.customerAddress = customerAddress;
+    } else {
+      state.adminCustomerRouteRules.push({ id: Date.now(), customerPattern, route, customerAddress, active: true });
+    }
   }
 
   if (patternInput) patternInput.value = "";
   if (routeInput) routeInput.value = "";
+  if (addressInput) addressInput.value = "";
   refreshCustomerRouteModal();
   showFloatingNotice(`Customer route saved for ${customerPattern}.`, "success");
 }
@@ -10036,18 +11323,25 @@ async function saveCustomerRouteRule() {
 async function saveCustomerRouteRuleRow(ruleId) {
   const patternInput = document.querySelector(`[data-customer-route-pattern="${CSS.escape(String(ruleId))}"]`);
   const routeInput = document.querySelector(`[data-customer-route-route="${CSS.escape(String(ruleId))}"]`);
+  const addressInput = document.querySelector(`[data-customer-route-address="${CSS.escape(String(ruleId))}"]`);
   const customerPattern = (patternInput?.value || "").trim();
   const route = customerRouteValue(routeInput?.value || "CPU");
+  let customerAddress = (addressInput?.value || "").trim() || customerRouteDefaultAddress(route);
 
   if (!customerPattern) {
     patternInput?.focus();
     throw new Error("Customer match text is required.");
   }
+  if (route === "DTC" && !customerAddress) {
+    addressInput?.focus();
+    throw new Error("DTC customer route rules require a delivery address.");
+  }
+  if (addressInput && !addressInput.value && customerAddress) addressInput.value = customerAddress;
 
   if (state.backend) {
     const payload = await fetchJson("/api/admin/customer-route-rules", {
       method: "POST",
-      body: JSON.stringify({ ruleId, customerPattern, route }),
+      body: JSON.stringify({ ruleId, customerPattern, route, customerAddress }),
     });
     state.adminCustomerRouteRules = payload.rules || [];
   } else {
@@ -10055,6 +11349,7 @@ async function saveCustomerRouteRuleRow(ruleId) {
     if (!rule) throw new Error("Customer route rule not found.");
     rule.customerPattern = customerPattern;
     rule.route = route;
+    rule.customerAddress = customerAddress;
   }
 
   refreshCustomerRouteModal();
@@ -10091,21 +11386,24 @@ function renderActiveSessions() {
 async function createUserFromForm() {
   const usernameInput = document.getElementById("newUserNameModal") || els.newUserName;
   const displayInput = document.getElementById("newUserDisplayModal") || els.newUserDisplay;
+  const emailInput = document.getElementById("newUserEmailModal") || els.newUserEmail;
   const passwordInput = document.getElementById("newUserPasswordModal") || els.newUserPassword;
   const roleInput = document.getElementById("newUserRoleModal") || els.newUserRole;
   const stationInput = document.getElementById("newUserStationModal");
-  const username = usernameInput?.value.trim() || "";
+  const email = emailInput?.value.trim() || "";
+  const username = usernameInput?.value.trim() || email;
   const displayName = displayInput?.value.trim() || username;
   const password = passwordInput?.value || "";
   const role = roleInput?.value || "Operator";
   const station = stationInput?.value || "";
-  if (!username || !password) throw new Error("Username and password are required");
+  if (!username || !password) throw new Error("BFS email/username and password are required");
   await fetchJson("/api/admin/users", {
     method: "POST",
-    body: JSON.stringify({ username, displayName, password, roles: [role], station }),
+    body: JSON.stringify({ username, email, displayName, password, roles: [role], station }),
   });
   if (usernameInput) usernameInput.value = "";
   if (displayInput) displayInput.value = "";
+  if (emailInput) emailInput.value = "";
   if (passwordInput) passwordInput.value = "";
   if (stationInput) stationInput.value = "";
   await refreshAdminPage();
@@ -10349,7 +11647,6 @@ function manualEditCurrentLocationValue(item) {
 function manualEditLocationOptions(item) {
   const options = [
     ["", "No location / clear"],
-    ["T", "Truck / no rack"],
   ];
 
   const racks = (state.racks || [])
@@ -10372,8 +11669,8 @@ function manualEditLocationOptions(item) {
 
     options.push([
       code,
-      code === "T"
-        ? `T - Truck / no rack (${qty} pcs)`
+      isTruckRack(rack)
+        ? `${code} - ${name || (code === "T" ? "Truck / no rack" : `Truck ${code.replace(/^T/i, "")}`)} (${qty} pcs, ${status})`
         : `${code} - ${name} (${qty} pcs, ${status})`,
     ]);
   }
@@ -10744,9 +12041,32 @@ async function init() {
   showPage("home");
 }
 
+function replayExpandableListAnimation(details) {
+  if (!details?.open) return;
+
+  const target = details.classList.contains("admin-import-date-group")
+    ? details.querySelector(".admin-import-stage-wrap")
+    : details.querySelector(".delivery-stage-list");
+
+  if (!target) return;
+
+  target.style.setProperty("animation", "none", "important");
+  void target.offsetHeight;
+  requestAnimationFrame(() => {
+    target.style.setProperty("animation", "delivery-expand-replay-v023 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both", "important");
+  });
+}
+
 function wireEvents() {
   if (state.eventsWired) return;
   state.eventsWired = true;
+  initCustomSelectSystem();
+
+  document.addEventListener("toggle", (event) => {
+    const details = event.target.closest?.(".delivery-date-group, .admin-import-date-group");
+    if (!details || details !== event.target) return;
+    replayExpandableListAnimation(details);
+  }, true);
 
   els.loginForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -10754,7 +12074,10 @@ function wireEvents() {
       await login(els.loginUsername?.value || "", els.loginPassword?.value || "");
       await loadAuthenticatedApp();
     } catch (error) {
-      if (els.loginError) els.loginError.textContent = error.message;
+      if (els.loginError) {
+        els.loginError.textContent = error.message;
+        els.loginError.classList.remove("success");
+      }
     }
   });
 
@@ -10778,6 +12101,39 @@ function wireEvents() {
   });
 
   els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
+  els.homeStatsChart?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-open-statistics-chart]")) openStatisticsChartModal();
+  });
+  els.statsChartCloseBtn?.addEventListener("click", () => closeStatisticsChartModal());
+  els.statsChartBackdrop?.addEventListener("click", () => closeStatisticsChartModal());
+  els.statsChartMetricSelect?.addEventListener("change", () => {
+    state.homeChartMetric = els.statsChartMetricSelect.value || "glass";
+    renderStatisticsChartModal();
+  });
+  els.statsChartViewSelect?.addEventListener("change", () => {
+    state.homeChartView = els.statsChartViewSelect.value || "bar";
+    renderStatisticsChartModal();
+  });
+  els.statsChartSortSelect?.addEventListener("change", () => {
+    state.homeChartSort = els.statsChartSortSelect.value || "value-desc";
+    renderStatisticsChartModal();
+  });
+  els.statsChartLimitSelect?.addEventListener("change", () => {
+    state.homeChartLimit = els.statsChartLimitSelect.value || "all";
+    renderStatisticsChartModal();
+  });
+  els.statsChartFilterInput?.addEventListener("input", () => {
+    state.homeChartQuery = els.statsChartFilterInput.value || "";
+    renderStatisticsChartModal();
+  });
+  els.statsChartResetBtn?.addEventListener("click", () => {
+    state.homeChartMetric = "glass";
+    state.homeChartView = "bar";
+    state.homeChartQuery = "";
+    state.homeChartLimit = "all";
+    state.homeChartSort = "value-desc";
+    renderStatisticsChartModal();
+  });
   els.viewAllRecent?.addEventListener("click", () => openAdminModal("recentScans"));
   els.globalPrintExportBtn?.addEventListener("click", () => {
     const date = state.page === "scan" ? state.meta?.deliveryDate : dashboardDateKey();
@@ -10860,6 +12216,24 @@ function wireEvents() {
     state.search = els.searchInput.value;
     state.pageIndex = 1;
     renderScanPage();
+  });
+  els.scanInput?.addEventListener("focus", () => clearSelectedLineItem());
+  document.addEventListener("click", (event) => {
+    if (state.page !== "scan" || !state.selectedId) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+
+    const clickedLineItem = target.closest("#listRows tr[data-id], #mobileListCards [data-id]");
+    const clickedRackLocationControl = target.closest(".line-rack-location-control, [data-line-rack-select]");
+    if (!clickedLineItem && !clickedRackLocationControl) clearSelectedLineItem();
+  });
+  document.addEventListener("change", (event) => {
+    const rackSelect = event.target.closest("[data-line-rack-select]");
+    if (!rackSelect) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    assignLineItemToRack(rackSelect.dataset.lineRackSelect || "", rackSelect.value || "").catch((error) => showInlineError(error.message, true));
   });
   els.pageSize?.addEventListener("change", () => {
     state.pageSize = Number(els.pageSize.value) || 25;
@@ -10971,7 +12345,10 @@ function wireEvents() {
     if (!state.selectedRackCode) return;
     try {
       const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackCode);
-      if (String(selectedRack?.status || "").toLowerCase() === "closed") {
+      const selectedRackStatus = String(selectedRack?.status || "").toLowerCase();
+      if (selectedRackStatus === "in transit") {
+        await returnRack(state.selectedRackCode);
+      } else if (selectedRackStatus === "closed") {
         await uncompleteRack(state.selectedRackCode);
       } else {
         await completeRack(state.selectedRackCode);
@@ -10982,7 +12359,14 @@ function wireEvents() {
       showInlineError(error.message, true);
     }
   });
-  els.scanRackPrintBtn?.addEventListener("click", () => printSelectedRackPackingSlip());
+  els.scanRackPrintBtn?.addEventListener("click", () => {
+    const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackCode);
+    if (String(selectedRack?.status || "").toLowerCase() === "in transit") {
+      markRackNotOnTheWay(state.selectedRackCode).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    printSelectedRackPackingSlip();
+  });
   els.rackScanForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -11054,6 +12438,16 @@ function wireEvents() {
       return;
     }
 
+    const notOnWayButton = event.target.closest("[data-rack-not-on-way]");
+    if (notOnWayButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      markRackNotOnTheWay(notOnWayButton.dataset.rackNotOnWay).catch((error) => showInlineError(error.message, true));
+
+      return;
+    }
+
     const clearButton = event.target.closest("[data-rack-clear]");
     if (clearButton) {
       event.preventDefault();
@@ -11080,6 +12474,17 @@ function wireEvents() {
       event.stopPropagation();
 
       openRackSetForm("");
+
+      return;
+    }
+
+    const rackManagerAddToSetButton = event.target.closest("[data-rack-manager-add-to-set]");
+    if (rackManagerAddToSetButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      const label = rackManagerAddToSetButton.dataset.rackManagerAddToSet || "";
+
+      openRackForm("", { type: label, name: label ? `${label} Rack` : "" });
 
       return;
     }
@@ -11242,6 +12647,17 @@ function wireEvents() {
       addStationFromInput().catch((error) => showInlineError(error.message));
     }
   });
+  els.forgotPasswordBtn?.addEventListener("click", () => showPasswordResetPanel(true));
+  els.cancelPasswordResetBtn?.addEventListener("click", () => showPasswordResetPanel(false));
+  els.requestResetCodeBtn?.addEventListener("click", () => requestPasswordResetCode().catch((error) => setPasswordResetMessage(error.message)));
+  els.confirmPasswordResetBtn?.addEventListener("click", () => confirmPasswordReset().catch((error) => setPasswordResetMessage(error.message)));
+  els.resetNewPasswordInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmPasswordReset().catch((error) => setPasswordResetMessage(error.message));
+    }
+  });
+
   els.createUserForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     createUserFromForm().catch((error) => showInlineError(error.message));
@@ -11359,6 +12775,22 @@ function wireEvents() {
   });
 
   document.addEventListener("change", (event) => {
+    const customerRouteCodeField = event.target.closest("#customerRouteSelectModal, [data-customer-route-route]");
+
+    if (customerRouteCodeField) {
+      const route = customerRouteValue(customerRouteCodeField.value || "CPU");
+      const defaultAddress = customerRouteDefaultAddress(route);
+      const row = customerRouteCodeField.closest(".customer-route-rule-row");
+      const addressInput = row
+        ? row.querySelector("[data-customer-route-address]")
+        : document.getElementById("customerRouteAddressInputModal");
+
+      if (addressInput && defaultAddress && !addressInput.value.trim()) {
+        addressInput.value = defaultAddress;
+      }
+      return;
+    }
+
     const rackQuickSelect = event.target.closest("#rackManagerQuickRackSelect");
 
     if (rackQuickSelect) {
@@ -11796,6 +13228,18 @@ function wireEvents() {
         return;
       }
 
+      const rackManagerAddToSetButton = event.target.closest("[data-rack-manager-add-to-set]");
+      if (rackManagerAddToSetButton) {
+        event.preventDefault();
+        const label = rackManagerAddToSetButton.dataset.rackManagerAddToSet || "";
+        if (label === "Truck") {
+          openRackForm("", nextTruckRackDefaults());
+        } else {
+          openRackForm("", { type: label, name: label ? `${label} Rack` : "" });
+        }
+        return;
+      }
+
       const rackManagerEditButton = event.target.closest("[data-rack-edit]");
       if (rackManagerEditButton) {
         event.preventDefault();
@@ -12004,11 +13448,23 @@ function wireEvents() {
       return;
     }
 
-    const row = event.target.closest("[data-id]");
+    if (event.target.closest(".line-rack-location-control, [data-line-rack-select]")) {
+      event.stopPropagation();
+      return;
+    }
+
+    const row = event.target.closest("#listRows tr[data-id]");
     if (row) {
+      if (state.selectedId === row.dataset.id) return;
       state.selectedId = row.dataset.id;
       saveState();
-      renderScanPage();
+      if (canAssignRackLocation()) {
+        ensureRacksLoaded()
+          .then(() => renderScanPage())
+          .catch((error) => showInlineError(error.message, true));
+      } else {
+        renderScanPage();
+      }
       return;
     }
     const removeStationButton = event.target.closest("[data-remove-station]");
@@ -12144,14 +13600,19 @@ function wireEvents() {
     if (updateUserRoleButton) {
       const username = updateUserRoleButton.dataset.updateUserRole;
       const select = document.querySelector(`[data-user-role-select="${CSS.escape(username)}"]`);
-      const stationSelect = document.querySelector(`[data-user-station-select="${CSS.escape(username)}"]`);
+      const stationList = document.querySelector(`[data-user-station-list="${CSS.escape(username)}"]`);
+      const assignedStations = Array.from(stationList?.querySelectorAll("input[type='checkbox']:checked") || [])
+        .map((input) => input.value)
+        .filter(Boolean);
+      const emailInput = document.querySelector(`[data-user-email="${CSS.escape(username)}"]`);
 
       fetchJson("/api/admin/users/roles", {
         method: "POST",
         body: JSON.stringify({
           username,
           roles: [select?.value || "Operator"],
-          station: stationSelect?.value || "",
+          station: assignedStations.join(", "),
+          email: emailInput?.value || "",
         }),
       })
         .then(() => refreshAdminUsersUi())
@@ -12242,6 +13703,13 @@ function wireEvents() {
     const mailtoEmailDraftButton = event.target.closest("[data-mailto-email-draft]");
     if (mailtoEmailDraftButton) {
       openEmailDraftMailto(mailtoEmailDraftButton.dataset.mailtoEmailDraft);
+      return;
+    }
+
+    const emailManifestPdfButton = event.target.closest("[data-email-manifest-pdf]");
+    if (emailManifestPdfButton) {
+      const id = encodeURIComponent(emailManifestPdfButton.dataset.emailManifestPdf || "");
+      if (id) window.open(`/api/admin/customer-emails/${id}/manifest-pdf`, "_blank");
       return;
     }
 

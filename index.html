@@ -10,24 +10,76 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-  <link rel="stylesheet" href="styles.css?v=20260709-v62">
+  <link rel="stylesheet" href="styles.css?v=20260713-v033">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
-    <form class="login-card" id="loginForm" autocomplete="off">
-      <img src="assets/barefoot-logo.jpg" alt="Barefoot & Company">
-      <h1>Delivery List Scanner</h1>
-      <label>
-        <span>Username</span>
-        <input id="loginUsername" name="dls_login_user" type="text" autocomplete="username" value="admin">
-      </label>
-      <label>
-        <span>Password</span>
-        <input id="loginPassword" name="dls_login_password" type="password" autocomplete="current-password">
-      </label>
-      <button type="submit">Sign in</button>
-      <p id="loginError" class="login-error"></p>
-    </form>
+    <div class="login-shell">
+      <aside class="login-hero-card">
+        <img src="assets/barefoot-logo.jpg" alt="Barefoot & Company" onerror="this.style.display='none'; this.nextElementSibling.hidden=false;">
+        <strong hidden>Barefoot &amp; Company</strong>
+        <span>Glass Delivery Scanner</span>
+        <h1>Production scanning, rack control, and delivery visibility in one place.</h1>
+        <p>Sign in with your BFS email or assigned username to continue.</p>
+        <div class="login-hero-stats">
+          <span><b>Live</b>Scan tracking</span>
+          <span><b>Safe</b>Rack recovery</span>
+          <span><b>Ready</b>Delivery lists</span>
+        </div>
+      </aside>
+
+      <form class="login-card" id="loginForm" autocomplete="off">
+        <div class="login-card-heading">
+          <span class="login-lock-icon" aria-hidden="true"></span>
+          <div>
+            <small>Secure sign in</small>
+            <h2>Welcome back</h2>
+          </div>
+        </div>
+        <label>
+          <span>BFS Email or Username</span>
+          <input id="loginUsername" name="dls_login_user" type="text" autocomplete="username" value="admin" placeholder="name@bfs.local or admin">
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="loginPassword" name="dls_login_password" type="password" autocomplete="current-password" placeholder="Enter password">
+        </label>
+        <div class="login-action-row">
+          <button type="submit">Sign in</button>
+          <button id="forgotPasswordBtn" class="login-link-button" type="button">Forgot password?</button>
+        </div>
+        <p id="loginError" class="login-error"></p>
+      </form>
+
+      <section class="login-card password-reset-card" id="passwordResetPanel" hidden>
+        <div class="login-card-heading">
+          <span class="login-reset-icon" aria-hidden="true"></span>
+          <div>
+            <small>Password reset</small>
+            <h2>Reset access</h2>
+          </div>
+        </div>
+        <p class="password-reset-help">Enter your BFS email or username. In local mode, the reset code will display here so an admin can complete the reset without email delivery.</p>
+        <label>
+          <span>BFS Email or Username</span>
+          <input id="resetIdentityInput" type="text" autocomplete="username" placeholder="name@bfs.local">
+        </label>
+        <button id="requestResetCodeBtn" type="button">Request reset code</button>
+        <label>
+          <span>Reset Code</span>
+          <input id="resetCodeInput" type="text" autocomplete="one-time-code" placeholder="6-digit code">
+        </label>
+        <label>
+          <span>New Password</span>
+          <input id="resetNewPasswordInput" type="password" autocomplete="new-password" placeholder="At least 8 characters">
+        </label>
+        <div class="login-action-row">
+          <button id="confirmPasswordResetBtn" type="button">Reset password</button>
+          <button id="cancelPasswordResetBtn" class="login-link-button" type="button">Back to sign in</button>
+        </div>
+        <p id="passwordResetMessage" class="login-error password-reset-message"></p>
+      </section>
+    </div>
   </section>
 
   <div class="app">
@@ -48,12 +100,12 @@
           <span class="search-icon"></span>
           <input id="headerGlobalSearchInput" type="search" autocomplete="off" placeholder="Global search...">
         </label>
-        <button class="tool-button" id="headerGlobalSearchBtn" type="button">Search</button>
+        <button class="tool-button header-action-icon-button search-action-button" id="headerGlobalSearchBtn" type="button"><span class="button-icon search-button-icon" aria-hidden="true"></span><span>Search</span></button>
         <div class="header-search-results" id="headerGlobalSearchResults" hidden></div>
       </div>
       <div class="header-actions">
-        <button class="tool-button primary-tool" id="globalPrintExportBtn" type="button">Print/Export</button>
-        <span class="backend-status" id="backendStatus">Local demo</span>
+        <button class="tool-button primary-tool header-action-icon-button print-export-button" id="globalPrintExportBtn" type="button"><span class="button-icon print-export-icon" aria-hidden="true"></span><span>Print/Export</span></button>
+        <span class="backend-status" id="backendStatus" hidden>Local demo</span>
         <details class="user-menu">
           <summary>
             <span class="user-avatar"></span>
@@ -125,37 +177,50 @@
             </div>
           </section>
 
-          <aside class="panel home-side home-statistics-panel">
-            <section>
-              <div class="section-heading statistics-heading">
-                <div>
-                  <h2>System Statistics</h2>
-                  <span id="homeStatisticsRangeText">Current dashboard range</span>
+          <aside class="panel home-side home-statistics-panel statistics-dashboard-v019">
+            <section class="statistics-main-block">
+              <div class="section-heading statistics-heading statistics-heading-v019">
+                <div class="statistics-title-copy">
+                  <span class="statistics-eyebrow">Plant performance</span>
+                  <h2>Statistics Dashboard</h2>
+                  <div class="statistics-range-row">
+                    <label class="overview-range-control statistics-range-control statistics-range-pill-control">
+                      <span>Range</span>
+                      <select id="overviewRangeSelect">
+                        <option value="30">Last 30 days</option>
+                        <option value="7">Last week</option>
+                        <option value="365">Full year</option>
+                        <option value="all">All lists</option>
+                      </select>
+                    </label>
+                    <span id="homeStatisticsRangeText">Current dashboard range</span>
+                  </div>
                 </div>
-                <button class="tool-button" id="homeStatsPdfBtn" type="button">PDF Report</button>
+                <div class="statistics-heading-tools">
+                  <button class="tool-button pdf-text-button" id="homeStatsPdfBtn" type="button" title="Generate statistics PDF report" aria-label="Generate statistics PDF report">PDF</button>
+                </div>
               </div>
-              <div class="statistics-controls">
-                <label class="overview-range-control statistics-range-control">
-                  <span>Statistics Date Range</span>
-                  <select id="overviewRangeSelect">
-                    <option value="30">Last 30 days</option>
-                    <option value="7">Last week</option>
-                    <option value="365">Full year</option>
-                    <option value="all">All lists</option>
-                  </select>
-                </label>
+
+              <div class="statistics-primary-grid">
+                <div class="overview-kpis statistics-overview-kpis" id="overviewStats"></div>
+                <div id="homeMonthlyRemakes" class="statistics-monthly-remakes"></div>
               </div>
-              <div class="overview-kpis statistics-overview-kpis" id="overviewStats"></div>
+
               <div id="homeStatsChart" class="statistics-chart statistics-pie-chart" aria-label="Glass type quantity chart"></div>
-              <div id="homeMonthlyRemakes" class="statistics-monthly-remakes"></div>
               <div id="homeUserCard" class="user-card statistics-snapshot"></div>
             </section>
-            <section>
-              <h2>Stage Breakdown</h2>
+            <section class="statistics-secondary-block">
+              <div class="statistics-section-title">
+                <h2>Stage Breakdown</h2>
+                <span>Progress by route/stage</span>
+              </div>
               <div id="homeRecentLists" class="compact-list statistics-stage-list"></div>
             </section>
-            <section>
-              <h2>Action & Scan Health</h2>
+            <section class="statistics-secondary-block">
+              <div class="statistics-section-title">
+                <h2>Action & Scan Health</h2>
+                <span>Exceptions and manual activity</span>
+              </div>
               <div id="homeActivity" class="compact-list statistics-health-list"></div>
             </section>
           </aside>
@@ -177,9 +242,10 @@
               <span>Stage</span>
               <select id="deliveryStageSelect"></select>
             </label>
-            <label class="operator-field">
+            <label class="operator-field station-profile-field">
               <span>Station</span>
-              <select id="stationSelect"></select>
+              <span class="station-profile-pill" id="stationProfileDisplay">Assigned station</span>
+              <select id="stationSelect" hidden></select>
             </label>
             <input id="operatorInput" class="visually-hidden" type="text" autocomplete="off" value="Scanner">
           </div>
@@ -401,7 +467,7 @@
                   <table class="recent-table">
                     <thead>
                       <tr>
-                        <th>Barcode</th>
+                        <th>Job Nr.</th>
                         <th>Order</th>
                         <th>Item</th>
                         <th>Qty</th>
@@ -473,32 +539,22 @@
           <div id="bayFlowPanel" class="bay-route-flow bay-route-flow-v2"></div>
         </section>
 
-        <section class="bay-layout-manager" id="bayLayoutManager" hidden>
-          <div class="section-heading">
-            <h2>Bay Map Edit Mode</h2>
+        <section class="bay-layout-manager bay-layout-manager-simple" id="bayLayoutManager" hidden>
+          <div class="bay-layout-simple-head">
+            <div>
+              <span class="bay-page-eyebrow">Map layout edit mode</span>
+              <h2>Edit Physical Bay Map</h2>
+              <p>Drag whole bay groups into the layout you want. Bay names, bay counts, and bay rules are handled in the separate Edit Bays GUI.</p>
+            </div>
             <button id="bayLayoutCloseBtn" type="button">Close</button>
           </div>
-          <p class="admin-empty">Drag grouped bay sets in the same column layout as the live Physical Bay Map. Use Edit Bays for names, behavior, adding bays, and deleting empty bays/groups.</p>
-          <div class="bay-layout-tools">
+          <div class="bay-layout-tools bay-layout-tools-simple">
             <button class="icon-button undo-redo-icon undo-icon-button" id="bayLayoutUndoBtn" type="button" title="Undo layout change" aria-label="Undo layout change"><span class="undo-icon"></span><small>Undo</small></button>
             <button class="icon-button undo-redo-icon redo-icon-button" id="bayLayoutRedoBtn" type="button" title="Redo layout change" aria-label="Redo layout change"><span class="redo-icon"></span><small>Redo</small></button>
-            <button id="bayCollapseAllBtn" type="button">Collapse All Bays</button>
-            <button id="bayExpandAllBtn" type="button">Expand All Bays</button>
-            <button id="bayHoldAllBtn" type="button">Put All Bays In Holding</button>
-            <button id="bayLayoutCancelBtn" type="button">Cancel Changes</button>
-            <button id="bayLayoutConfirmBtn" type="button">Confirm Layout</button>
-          </div>
-          <div class="bay-layout-editor">
-            <label><span>Bay</span><select id="bayLayoutSelect"></select></label>
-            <label><span>Name</span><input id="bayLayoutDisplayInput" type="text"></label>
-            <label><span>Group</span><input id="bayLayoutSectionInput" type="text"></label>
-            <label><span>Category</span><input id="bayLayoutCategoryInput" type="text"></label>
-            <label><span>Row</span><input id="bayLayoutRowInput" type="number" min="1" max="7"></label>
-            <label><span>Column</span><input id="bayLayoutColInput" type="number" min="1" max="7"></label>
-            <label><span>Capacity</span><input id="bayLayoutCapacityInput" type="number" min="0"></label>
-            <label class="checkbox-row"><input id="bayLayoutActiveInput" type="checkbox"> <span>Active</span></label>
-            <button id="bayLayoutSaveBtn" type="button">Save Bay</button>
-            <button id="bayLayoutDeleteBtn" type="button">Delete Bay</button>
+            <button id="bayCollapseAllBtn" type="button">Collapse All</button>
+            <button id="bayExpandAllBtn" type="button">Expand All</button>
+            <button id="bayLayoutCancelBtn" type="button">Cancel</button>
+            <button id="bayLayoutConfirmBtn" type="button">Save Layout</button>
           </div>
         </section>
 
@@ -1011,6 +1067,65 @@
       <button id="printOptionsSubmit" type="button">Run Print/Export</button>
     </section>
 
+    <div class="modal-backdrop statistics-chart-backdrop" id="statsChartBackdrop" hidden></div>
+    <section class="modal-panel statistics-chart-modal" id="statsChartModal" hidden>
+      <div class="statistics-chart-modal-header">
+        <div>
+          <span class="statistics-eyebrow">Statistics explorer</span>
+          <h2 id="statsChartModalTitle">Full Statistics Chart</h2>
+          <p id="statsChartModalSubtitle">Explore the selected dashboard range.</p>
+        </div>
+        <button id="statsChartCloseBtn" class="modal-close-x" type="button" aria-label="Close statistics chart">×</button>
+      </div>
+      <div class="statistics-chart-modal-controls">
+        <label>
+          <span>Chart data</span>
+          <select id="statsChartMetricSelect">
+            <option value="glass">All glass types</option>
+            <option value="stages">Stage completion</option>
+            <option value="work">Scanned vs open work</option>
+            <option value="operators">Scans by operator</option>
+            <option value="activity">System activity</option>
+            <option value="remakes">Remakes</option>
+          </select>
+        </label>
+        <label>
+          <span>Chart style</span>
+          <select id="statsChartViewSelect">
+            <option value="bar">Bar chart</option>
+            <option value="donut">Donut chart</option>
+          </select>
+        </label>
+        <label>
+          <span>Sort</span>
+          <select id="statsChartSortSelect">
+            <option value="value-desc">Highest first</option>
+            <option value="value-asc">Lowest first</option>
+            <option value="label-asc">A to Z</option>
+            <option value="label-desc">Z to A</option>
+          </select>
+        </label>
+        <label>
+          <span>Display</span>
+          <select id="statsChartLimitSelect">
+            <option value="all">Show all</option>
+            <option value="5">Top 5</option>
+            <option value="10">Top 10</option>
+            <option value="20">Top 20</option>
+          </select>
+        </label>
+        <label class="statistics-chart-filter-control">
+          <span>Filter chart labels</span>
+          <input id="statsChartFilterInput" type="search" autocomplete="off" placeholder="Search glass types, stages, users...">
+        </label>
+        <button id="statsChartResetBtn" class="statistics-chart-reset" type="button">Reset filters</button>
+      </div>
+      <div class="statistics-chart-result-bar">
+        <span id="statsChartResultCount">Showing all chart categories</span>
+      </div>
+      <div id="statsChartModalCanvas" class="statistics-chart-modal-canvas"></div>
+    </section>
+
     <div class="modal-backdrop" id="adminModalBackdrop" hidden></div>
     <section class="modal-panel admin-modal-panel" id="adminModal" hidden>
       <div class="section-heading">
@@ -1021,6 +1136,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=20260709-v62"></script>
+  <script src="app.js?v=20260713-v033"></script>
 </body>
 </html>
