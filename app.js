@@ -76,6 +76,7 @@ const state = {
   racks: [],
   rackSummary: null,
   selectedRackCode: "T",
+  selectedOutboundRackCode: "",
   selectedRackOverviewCode: "",
   selectedRackSetLabel: "",
   rackScanListId: "",
@@ -131,6 +132,10 @@ const state = {
   permissions: [],
   eventsWired: false,
   pollTimer: null,
+  notificationPollTimer: null,
+  notificationQueue: [],
+  activeNotificationId: 0,
+  acknowledgedNotificationIds: new Set(),
   lastScan: null,
   homeReportSummary: null,
   homeChartMetric: "glass",
@@ -146,6 +151,8 @@ const state = {
     }
   })(),
   restoreFullscreenAfterPrint: false,
+  managedPrintWindow: null,
+  managedPrintWatchTimer: null,
 };
 
 const els = {
@@ -176,6 +183,7 @@ const els = {
   languageToggleBtn: document.getElementById("languageToggleBtn"),
   loginLanguageToggleBtn: document.getElementById("loginLanguageToggleBtn"),
   fullscreenToggleBtn: document.getElementById("fullscreenToggleBtn"),
+  appHeader: document.querySelector(".app-header"),
   bayAutoAssignOverview: document.getElementById("bayAutoAssignOverview"),
 
   homePage: document.getElementById("homePage"),
@@ -233,6 +241,9 @@ const els = {
   scanRackCompleteBtn: document.getElementById("scanRackCompleteBtn"),
   scanRackPrintBtn: document.getElementById("scanRackPrintBtn"),
   scanRackStatus: document.getElementById("scanRackStatus"),
+  outboundRackStatusPanel: document.getElementById("outboundRackStatusPanel"),
+  outboundRackStatusSelect: document.getElementById("outboundRackStatusSelect"),
+  outboundRackStatusSummary: document.getElementById("outboundRackStatusSummary"),
   scanBayOverridePanel: document.getElementById("scanBayOverridePanel"),
   scanBayOverrideSelected: document.getElementById("scanBayOverrideSelected"),
   scanBayOverrideClearBtn: document.getElementById("scanBayOverrideClearBtn"),
@@ -1403,6 +1414,7 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Rack type", "Tipo de rack"],
   ["Racks / truck groups", "Racks / grupos de camiones"],
   ["Received", "Recibido"],
+  ["Received - awaiting return", "Recibido - pendiente de devolución"],
   ["Recent bay actions", "Acciones recientes de bahía"],
   ["recent scan", "escaneo reciente"],
   ["Regex pattern", "Patrón de expresión regular"],
@@ -1474,6 +1486,54 @@ const SPANISH_UI_EXTENDED = new Map([
 ]);
 SPANISH_UI_EXTENDED.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
+[
+  ["Transportation Status", "Estado del transporte"],
+  ["Select a rack", "Seleccione un rack"],
+  ["View completion and outbound status", "Ver estado de finalización y salida"],
+  ["Bay Assignment", "Asignación de bahía"],
+  ["Job", "Trabajo"],
+  ["Jobs", "Trabajos"],
+  ["Fulfillment", "Cumplimiento"],
+  ["Primary Job", "Trabajo principal"],
+  ["Jobs in this bay", "Trabajos en esta bahía"],
+  ["View orders", "Ver órdenes"],
+  ["Full details", "Detalles completos"],
+  ["Event", "Evento"],
+  ["Barcode / Source", "Código / origen"],
+  ["Job / Order / Item", "Trabajo / orden / artículo"],
+  ["User / Station", "Usuario / estación"],
+  ["Delivery list imported", "Lista de entrega importada"],
+  ["Delivery list updated", "Lista de entrega actualizada"],
+  ["Delivery list imported successfully", "Lista de entrega importada correctamente"],
+  ["Delivery list updated successfully", "Lista de entrega actualizada correctamente"],
+  ["Import", "Importación"],
+  ["Update", "Actualización"],
+  ["Scan error", "Error de escaneo"],
+  ["Item is not on this delivery list", "El artículo no está en esta lista de entrega"],
+  ["Multiple items match this scan", "Varios artículos coinciden con este escaneo"],
+  ["Not on this delivery list - check another date or stage", "No está en esta lista; revise otra fecha o etapa"],
+  ["More than one item matched - use the full barcode", "Coincidió más de un artículo; use el código completo"],
+  ["Scan needs review", "El escaneo requiere revisión"],
+  ["Complete - awaiting outbound scan", "Completo - esperando escaneo de salida"],
+  ["Scanned outbound", "Escaneado en salida"],
+  ["Not complete", "Incompleto"],
+  ["No active pieces are assigned", "No hay piezas activas asignadas"],
+  ["Loading complete job and missing-item details...", "Cargando detalles completos del trabajo y artículos faltantes..."],
+  ["Job complete", "Trabajo completo"],
+  ["In bay", "En la bahía"],
+  ["All required order items are present", "Todos los artículos requeridos están presentes"],
+  ["No order-item details are available for this job.", "No hay detalles de artículos de orden para este trabajo."],
+  ["No line item attached", "No hay una línea asociada"],
+  ["No additional details", "No hay detalles adicionales"],
+  ["Complete scan, error, import, and update details for this stage", "Detalles completos de escaneos, errores, importaciones y actualizaciones de esta etapa"],
+  ["Successful", "Correcto"],
+  ["Needs review", "Requiere revisión"],
+  ["Check the delivery list date for this item", "Revise la fecha de la lista de entrega para este artículo"],
+  ["New Rush Submitted", "Nueva orden urgente"],
+  ["Acknowledge Rush", "Reconocer urgente"],
+  ["Production Priority Alert", "Alerta de prioridad de producción"],
+].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
+
 const SPANISH_PLACEHOLDERS = new Map([
   ["Global search...", "Búsqueda global..."],
   ["Search date, stage, route...", "Buscar fecha, etapa o ruta..."],
@@ -1507,6 +1567,7 @@ const languageUi = {
 };
 
 const SPANISH_DYNAMIC_PATTERNS = [
+  [/^Check delivery list date (.+)$/i, (_, date) => `Revise la fecha de la lista de entrega ${date}`],
   [/^(Rush|Remake) marked for Job Nr\. (.+)\.$/i, (_, type, job) => `${type.toLowerCase() === "rush" ? "Urgente" : "Rehacer"} marcado para el núm. de trabajo ${job}.`],
   [/^(Rush|Remake) marked for order (.+)\.$/i, (_, type, order) => `${type.toLowerCase() === "rush" ? "Urgente" : "Rehacer"} marcado para la orden ${order}.`],
   [/^(\d+) piece on the way$/i, (_, count) => `${count} pieza en camino`],
@@ -1570,9 +1631,9 @@ const SPANISH_DYNAMIC_PATTERNS = [
   [/^(\d+)\s+stages?\s*[•|]\s*Delivery on-time\s*(.*)$/i, (_, stages, value) => `${stages} etapas • Entrega a tiempo ${value}`],
   [/^(\d+)\s+stages?\s*[•|]\s*Updated\s*(.*)$/i, (_, stages, value) => `${stages} etapas • Actualizado ${value}`],
   [/^All Glass\s*\((\d+)\)$/i, (_, count) => `Todo el vidrio (${count})`],
-  [/^(.+?)\s+(\d+)pcs\s+\((Empty|Open|Complete|On the way)\)$/i, (_, code, qty, status) => `${code} ${qty} pzas (${SPANISH_UI_TEXT.get(status) || status})`],
-  [/^(.+?)\s+\((Empty|Open|Complete|On the way)\)$/i, (_, code, status) => `${code} (${SPANISH_UI_TEXT.get(status) || status})`],
-  [/^(.+?)\s+-\s+(Empty|Open|Complete|On the way)$/i, (_, label, status) => `${label} - ${SPANISH_UI_TEXT.get(status) || status}`],
+  [/^(.+?)\s+(\d+)pcs\s+\((Empty|Open|Complete|On the way|Received)\)$/i, (_, code, qty, status) => `${code} ${qty} pzas (${SPANISH_UI_TEXT.get(status) || status})`],
+  [/^(.+?)\s+\((Empty|Open|Complete|On the way|Received)\)$/i, (_, code, status) => `${code} (${SPANISH_UI_TEXT.get(status) || status})`],
+  [/^(.+?)\s+-\s+(Empty|Open|Complete|On the way|Received)$/i, (_, label, status) => `${label} - ${SPANISH_UI_TEXT.get(status) || status}`],
   [/^Open\s+(.+)$/i, (_, value) => `Abrir ${value}`],
   [/^Remove\s+(.+)$/i, (_, value) => `Quitar ${value}`],
   [/^Edit\s+(.+)$/i, (_, value) => `Editar ${value}`],
@@ -1602,6 +1663,16 @@ const SPANISH_DYNAMIC_PATTERNS = [
   [/^(.+)\s+is back to zero scanned quantity\.$/i, (_, label) => `${label} volvió a cero escaneos.`],
   [/^(\d+)\s+stages? removed\.$/i, (_, count) => `Se eliminaron ${count} etapas.`],
   [/^Showing\s+(\d+)\s+of\s+(\d+)\s+rows?$/i, (_, shown, total) => `Mostrando ${shown} de ${total} filas`],
+  [/^(\d+)\s+pieces? scanned and marked on the way$/i, (_, count) => `${count} piezas escaneadas y marcadas en camino`],
+  [/^(\d+)\s+pieces? ready for the rack barcode scan$/i, (_, count) => `${count} piezas listas para escanear el código del rack`],
+  [/^(\d+)\s+pieces? currently assigned$/i, (_, count) => `${count} piezas asignadas actualmente`],
+  [/^Fulfillment\s+(\d+)\/(\d+)\s+\|\s+(\d+)\s+order items? missing$/i, (_, current, total, missing) => `Cumplimiento ${current}/${total} | Faltan ${missing} artículos de orden`],
+  [/^Fulfillment\s+(\d+)\/(\d+)\s+\|\s+Job complete$/i, (_, current, total) => `Cumplimiento ${current}/${total} | Trabajo completo`],
+  [/^(\d+)\/(\d+)\s+pieces in bay$/i, (_, current, total) => `${current}/${total} piezas en la bahía`],
+  [/^(\d+)\s+order items? still missing$/i, (_, count) => `Aún faltan ${count} artículos de orden`],
+  [/^(\d+)\s+missing$/i, (_, count) => `Faltan ${count}`],
+  [/^Order\s+(.+)\s+\/\s+Item\s+(.+)$/i, (_, order, item) => `Orden ${order} / Artículo ${item}`],
+  [/^(\d+)\s+recent events?$/i, (_, count) => `${count} eventos recientes`],
 ];
 
 function translateDynamicUiText(cleanText) {
@@ -1744,8 +1815,27 @@ function initLanguageSystem() {
   languageUi.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 }
 
+function syncFullscreenStickyPanelOffset() {
+  const headerHeight = Math.ceil(els.appHeader?.getBoundingClientRect().height || 108);
+  const panelGap = 20;
+  const panelTop = headerHeight + panelGap;
+  const panelBottomGap = 12;
+
+  document.documentElement.style.setProperty("--sticky-scanner-panel-top", `${panelTop}px`);
+  document.documentElement.style.setProperty(
+    "--sticky-scanner-panel-max-height",
+    `calc(100vh - ${panelTop + panelBottomGap}px)`,
+  );
+  document.documentElement.style.setProperty("--fullscreen-sticky-panel-top", `${panelTop}px`);
+  document.documentElement.style.setProperty(
+    "--fullscreen-sticky-panel-max-height",
+    `calc(100vh - ${panelTop + panelBottomGap}px)`,
+  );
+}
+
 function syncFullscreenControl() {
   const active = Boolean(document.fullscreenElement);
+  syncFullscreenStickyPanelOffset();
   if (!els.fullscreenToggleBtn) return;
   els.fullscreenToggleBtn.classList.toggle("is-active", active);
   const label = active ? "Exit fullscreen" : "Enter fullscreen";
@@ -2444,6 +2534,7 @@ function updateModalScrollLock() {
     els.bayEditorPanel,
     document.getElementById("emailDraftPreviewShell"),
     document.getElementById("actionFeedbackShell"),
+    document.getElementById("rushAlertShell"),
     els.statsChartModal,
   ].some((panel) => panel && !panel.hidden);
 
@@ -2469,6 +2560,7 @@ async function fetchJson(url, options = {}) {
       state.authenticated = false;
       state.user = null;
       state.permissions = [];
+      stopNotificationPolling();
       showLogin("Please sign in to continue.");
     }
     throw new Error(message);
@@ -2595,6 +2687,7 @@ async function logout() {
   state.user = null;
   state.permissions = [];
   stopPolling();
+  stopNotificationPolling();
   showLogin("Signed out.");
 }
 
@@ -3061,6 +3154,7 @@ function renderProcessState(item) {
 }
 
 function locationLabel(item) {
+  if (item?.received === true || Number(item?.receivedQty || 0) > 0) return "Received";
   const stageText = `${state.meta?.stage || ""} ${state.meta?.scanner || ""}`.toLowerCase();
   const rackCode = String(item.rackCode || "").trim().toUpperCase();
   if (stageText.includes("indian trail")) return item.bayCode ? `Bay ${item.bayCode}` : "";
@@ -3113,12 +3207,15 @@ function itemCanShowRackLocationDropdown(item) {
 }
 
 function locationBadgeClass(location) {
+  const lower = String(location || "").toLowerCase();
   return `location-badge ${
-    location.toLowerCase().includes("bay")
-      ? "bay"
-      : location.toLowerCase().includes("truck")
-        ? "truck"
-        : "rack"
+    lower.includes("received")
+      ? "received"
+      : lower.includes("bay")
+        ? "bay"
+        : lower.includes("truck")
+          ? "truck"
+          : "rack"
   }`;
 }
 
@@ -3437,13 +3534,35 @@ function nextTruckRackDefaults() {
   };
 }
 
+function rackIsReceived(rack) {
+  return Boolean(rack?.received);
+}
+
+function rackStatusLabel(rack) {
+  const status = String(rack?.status || "Open").trim().toLowerCase();
+  const qty = Number(rack?.qty || 0);
+  if (rackIsReceived(rack)) return "Received";
+  if (status === "in transit") return "On the way";
+  if (status === "closed" || status === "complete" || status === "completed") return "Complete";
+  if (qty > 0) return "Open";
+  return "Empty";
+}
+
+function rackStatusClassName(rack) {
+  if (rackIsReceived(rack)) return "received";
+  const status = String(rack?.status || "Open").trim().toLowerCase();
+  const qty = Number(rack?.qty || 0);
+  if (status === "in transit") return "in-transit";
+  if (status === "closed" || status === "complete" || status === "completed") return "complete";
+  if (qty > 0) return "open";
+  return "empty";
+}
+
 function rackOptionLabel(rack) {
   const code = String(rack?.code || "").trim() || "Rack";
   const qty = Number(rack?.qty || 0);
-  const lower = String(rack?.status || "Open").toLowerCase();
-  const stateText = lower === "in transit" ? "On the way" : lower === "closed" ? "Complete" : qty ? "Open" : "Empty";
   const qtyText = qty ? ` ${qty}pcs` : "";
-  return `${escapeHtml(code)}${escapeHtml(qtyText)} (${escapeHtml(stateText)})`;
+  return `${escapeHtml(code)}${escapeHtml(qtyText)} (${escapeHtml(rackStatusLabel(rack))})`;
 }
 
 function rackDestinationLabel(value) {
@@ -3464,6 +3583,7 @@ function rackDestinationClass(value) {
 }
 
 function rackVisualClass(rack) {
+  if (rackIsReceived(rack)) return "is-received";
   const status = String(rack.status || "").toLowerCase();
   if (status === "in transit") return "is-in-transit";
   if (status === "closed") return "is-complete";
@@ -3472,13 +3592,7 @@ function rackVisualClass(rack) {
 }
 
 function rackComputedStatus(rack) {
-  const status = String(rack?.status || "").toLowerCase();
-  const qty = Number(rack?.qty || 0);
-
-  if (status === "in transit") return "in-transit";
-  if (status === "closed") return "complete";
-  if (qty > 0) return "open";
-  return "empty";
+  return rackStatusClassName(rack);
 }
 
 function rackSortNumber(value) {
@@ -3708,7 +3822,9 @@ function renderRacksPage() {
             hasItems
               ? `${printAction}${
                   isInTransit
-                    ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" data-rack-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>`
+                    ? rackIsReceived(rack)
+                      ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
+                      : `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" data-rack-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>`
                     : isComplete
                       ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
                       : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
@@ -3753,25 +3869,9 @@ function renderRacksPage() {
     `;
   };
 
-  const rackStatusText = (rack) => {
-    const status = String(rack.status || "").toLowerCase();
-    const qty = Number(rack.qty || 0);
+  const rackStatusText = (rack) => rackStatusLabel(rack);
 
-    if (status === "in transit") return "On the way";
-    if (status === "closed") return "Complete";
-    if (qty > 0) return "Open";
-    return "Empty";
-  };
-
-  const rackStatusClass = (rack) => {
-    const status = String(rack.status || "").toLowerCase();
-    const qty = Number(rack.qty || 0);
-
-    if (status === "in transit") return "in-transit";
-    if (status === "closed") return "complete";
-    if (qty > 0) return "open";
-    return "empty";
-  };
+  const rackStatusClass = (rack) => rackStatusClassName(rack);
 
   const renderRackBoardCard = (rack) => {
     const selected = state.selectedRackOverviewCode === rack.code;
@@ -3799,6 +3899,11 @@ function renderRacksPage() {
         <div class="rack-board-card-meta">
           <b>${escapeHtml(rack.qty || 0)} pcs</b>
           <small class="rack-status-badge ${escapeHtml(statusClass)}">${escapeHtml(statusText)}</small>
+          ${
+            rackIsReceived(rack) && hasPermission("scan_racks")
+              ? `<button type="button" class="rack-return-inline" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
+              : ""
+          }
           ${
             hasPermission("manage_racks")
               ? `<button type="button" class="icon-only icon-reset" data-rack-clear="${escapeHtml(rack.code)}" title="Clear rack" aria-label="Clear ${escapeHtml(rack.code)}"></button>`
@@ -3925,7 +4030,9 @@ function renderRacksPage() {
           ${
             hasItems
               ? isInTransit
-                ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" data-rack-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>`
+                ? rackIsReceived(rack)
+                  ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
+                  : `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" data-rack-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>`
                 : isComplete
                   ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
                   : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
@@ -3977,6 +4084,7 @@ function renderRacksPage() {
               <option value="open" ${state.rackStatusFilter === "open" ? "selected" : ""}>Open</option>
               <option value="complete" ${state.rackStatusFilter === "complete" ? "selected" : ""}>Complete</option>
               <option value="in-transit" ${state.rackStatusFilter === "in-transit" ? "selected" : ""}>On the way</option>
+              <option value="received" ${state.rackStatusFilter === "received" ? "selected" : ""}>Received</option>
               <option value="empty" ${state.rackStatusFilter === "empty" ? "selected" : ""}>Empty</option>
             </select>
           </label>
@@ -4383,6 +4491,80 @@ function renderMobileCards() {
   `;
 }
 
+function scanEntryEventLabel(entry) {
+  const type = String(entry?.eventType || "").toLowerCase();
+  if (type === "manual_scan") return "Manual scan";
+  if (type === "duplicate") return "Duplicate";
+  if (type === "import") return "Import";
+  if (type === "update") return "Update";
+  if (type === "undo") return "Undo";
+  if (type === "redo") return "Redo";
+  if (type === "error") return "Scan error";
+  if (type === "notice") return "Notice";
+  return type === "scan" ? "Scan" : String(entry?.message || "Activity");
+}
+
+function scanEntryDeliveryDateHint(entry) {
+  const combined = `${entry?.message || ""} ${entry?.reason || ""}`.replace(/\s+/g, " ").trim();
+  const dated = combined.match(/check (?:the )?delivery list date\s+([^.;]+(?:,\s*[^.;]+)*)/i);
+  if (dated?.[1] && !/for the scanned item/i.test(dated[1])) return dated[1].trim();
+
+  // Older saved scan errors included every matching stage after the date.
+  // Pull only the date so old history rows follow the cleaner v043 wording too.
+  const legacyDate = combined.match(/\b(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/);
+  if (!legacyDate?.[1]) return "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(legacyDate[1])
+    ? formatDisplayDate(legacyDate[1])
+    : legacyDate[1];
+}
+
+function scanEntryCompactMessage(entry) {
+  if (!entry) return "";
+  const type = String(entry.eventType || "").toLowerCase();
+  const message = String(entry.message || "").trim();
+  const reason = String(entry.reason || "").trim();
+  if (type === "error") {
+    if (/not on (the )?(selected |active )?delivery list/i.test(`${message} ${reason}`)) {
+      const deliveryDate = scanEntryDeliveryDateHint(entry);
+      return deliveryDate
+        ? `Check delivery list date ${deliveryDate}`
+        : "Check the delivery list date for this item";
+    }
+    if (/multiple|ambiguous/i.test(`${message} ${reason}`)) {
+      return "More than one item matched - use the full barcode";
+    }
+    return message || "Scan needs review";
+  }
+  if (type === "import") return "Delivery list imported successfully";
+  if (type === "update") return "Delivery list updated successfully";
+  if (type === "duplicate") return message || "Item already complete";
+  return [scanEntryIsManual(entry) ? "Manual Scan" : "", message].filter(Boolean).join(" - ") || reason;
+}
+
+function scanEntryFullDetail(entry) {
+  const message = String(entry?.message || "").trim();
+  const reason = String(entry?.reason || "").trim();
+  const raw = String(entry?.raw || "").trim();
+  const canonical = String(entry?.barcode || "").trim();
+  const wrongList = /not on (the )?(selected |active )?delivery list/i.test(`${message} ${reason}`);
+  const deliveryDate = wrongList ? scanEntryDeliveryDateHint(entry) : "";
+  const displayReason = wrongList
+    ? deliveryDate
+      ? `Check delivery list date ${deliveryDate}.`
+      : "Check the delivery list date for this item."
+    : reason;
+  const parts = [];
+  if (message) parts.push(`<strong>${escapeHtml(message)}</strong>`);
+  if (displayReason && displayReason !== message) parts.push(`<span>${escapeHtml(displayReason)}</span>`);
+  if (raw && canonical && raw !== canonical) parts.push(`<small>Scanned: ${escapeHtml(raw)} | Resolved: ${escapeHtml(canonical)}</small>`);
+  return parts.join("");
+}
+
+function scanEntryRowClass(entry) {
+  const type = String(entry?.eventType || "").toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  return `${entry?.ok ? "ok" : "error"} event-${type || "activity"} ${scanEntryIsManual(entry) ? "manual" : ""}`.trim();
+}
+
 function setLastScan(entry) {
   if (!entry || !els.lastCard) return;
   state.lastScan = entry;
@@ -4390,8 +4572,10 @@ function setLastScan(entry) {
   els.lastCard.classList.add(entry.ok ? "ok" : "error");
   if (els.lastScanTime) els.lastScanTime.textContent = entry.ok ? "Just now" : entry.eventType === "duplicate" ? "Notice" : "Needs review";
   const manualPrefix = scanEntryIsManual(entry) ? "Manual Scan - " : "";
-  const scanMessage = [entry.message, entry.reason].filter(Boolean).join(" - ");
-  if (els.lastJob) els.lastJob.textContent = scanMessage && !entry.ok ? `${manualPrefix}${scanMessage}` : entry.item ? `${manualPrefix}${entry.item.job || entry.item.product || ""}`.trim() : `${manualPrefix}${entry.message || ""}`.trim();
+  const compactMessage = scanEntryCompactMessage(entry);
+  if (els.lastJob) els.lastJob.textContent = !entry.ok || !entry.item
+    ? compactMessage
+    : `${manualPrefix}${entry.item.job || entry.item.product || compactMessage || ""}`.trim();
   if (els.lastOrder) els.lastOrder.textContent = entry.item ? entry.item.order : "-";
   if (els.lastItem) els.lastItem.textContent = entry.item ? entry.item.item : "-";
   if (els.lastQty) els.lastQty.textContent = entry.item ? String(entry.item.scanned) : "-";
@@ -4442,17 +4626,16 @@ function renderRecent() {
         .map((entry) => {
           const item = entry.item;
           const time = new Date(entry.time);
-          const note = [entry.message, entry.reason].filter(Boolean).join(" - ");
-          const manualNote = scanEntryIsManual(entry) ? "Manual Scan" : "";
-          const detailNote = [manualNote, note].filter(Boolean).join(" - ");
+          const compactNote = scanEntryCompactMessage(entry);
+          const primaryText = item ? (item.job || item.product || "-") : scanEntryEventLabel(entry);
           return `
-            <tr class="${entry.ok ? "ok" : "error"} ${scanEntryIsManual(entry) ? "manual" : ""}">
-              <td><strong>${item ? escapeHtml(item.job || item.product || "-") : "-"}</strong>${detailNote ? `<small class="scan-row-note">${escapeHtml(detailNote)}</small>` : ""}</td>
+            <tr class="${scanEntryRowClass(entry)}">
+              <td><strong>${escapeHtml(primaryText)}</strong>${compactNote ? `<small class="scan-row-note">${escapeHtml(compactNote)}</small>` : ""}</td>
               <td>${item ? escapeHtml(item.order) : "-"}</td>
               <td>${item ? escapeHtml(item.item) : "-"}</td>
-              <td>${item ? item.scanned : "-"}</td>
+              <td>${item ? item.scanned : Math.abs(Number(entry.qtyDelta || 0)) || "-"}</td>
               <td>${Number.isNaN(time.getTime()) ? "" : time.toLocaleString()}</td>
-              <td><span class="check-dot ${entry.ok ? "" : "error"}">${entry.ok ? "&#10003;" : "!"}</span></td>
+              <td><span class="check-dot ${entry.ok ? "" : "error"}" role="img" aria-label="${entry.ok ? "Successful" : "Needs review"}"></span></td>
             </tr>
           `;
         })
@@ -4465,21 +4648,24 @@ function recentScansModalHtml() {
   return `
     <div class="recent-scans-modal full-scans-modal">
       <div class="modal-list-heading">
-        <strong>${escapeHtml(state.meta?.label || state.meta?.stage || "Current stage")}</strong>
-        <span>${escapeHtml(rows.length)} recent scan${rows.length === 1 ? "" : "s"}</span>
+        <div>
+          <strong>${escapeHtml(state.meta?.label || state.meta?.stage || "Current stage")}</strong>
+          <small>Complete scan, error, import, and update details for this stage</small>
+        </div>
+        <span>${escapeHtml(rows.length)} recent event${rows.length === 1 ? "" : "s"}</span>
       </div>
       <div class="recent-table-wrap expanded">
-        <table class="recent-table">
+        <table class="recent-table all-scans-table">
           <thead>
             <tr>
-              <th>Barcode</th>
-              <th>Job Nr.</th>
-              <th>Order Nr.</th>
-              <th>Item Nr.</th>
-              <th>Qty Scanned</th>
+              <th>Event</th>
+              <th>Barcode / Source</th>
+              <th>Job / Order / Item</th>
+              <th>Qty</th>
               <th>Customer</th>
-              <th>Message</th>
-              <th>Date & Time Scanned</th>
+              <th>Full details</th>
+              <th>User / Station</th>
+              <th>Date & Time</th>
               <th>Check</th>
             </tr>
           </thead>
@@ -4490,20 +4676,26 @@ function recentScansModalHtml() {
                     .map((entry) => {
                       const item = entry.item;
                       const time = new Date(entry.time);
-                      const note = [entry.message, entry.reason].filter(Boolean).join(" - ");
-                      const manualNote = scanEntryIsManual(entry) ? "Manual Scan" : "";
-                      const detailNote = [manualNote, note].filter(Boolean).join(" - ");
+                      const eventLabel = scanEntryEventLabel(entry);
+                      const eventType = String(entry.eventType || "").toLowerCase();
+                      const sourceLabel = ["import", "update"].includes(eventType)
+                        ? String(entry.reason || "").split("|")[0].trim() || eventLabel
+                        : entry.barcode || entry.raw || "SYSTEM";
+                      const quantity = item ? `${escapeHtml(item.scanned)}/${escapeHtml(item.qty || item.scanned || "-")}` : Math.abs(Number(entry.qtyDelta || 0)) || "-";
+                      const jobOrderItem = item
+                        ? `<strong>${escapeHtml(item.job || item.product || "No Job Nr.")}</strong><span>Order ${escapeHtml(item.order)} / Item ${escapeHtml(item.item)}</span>`
+                        : `<strong>${escapeHtml(eventLabel)}</strong><span>No line item attached</span>`;
                       return `
-                        <tr class="${entry.ok ? "ok" : "error"} ${scanEntryIsManual(entry) ? "manual" : ""}">
-                          <td><strong>${escapeHtml(entry.barcode)}</strong>${detailNote ? `<small class="scan-row-note">${escapeHtml(detailNote)}</small>` : ""}</td>
-                          <td>${item ? escapeHtml(item.job || item.product || "-") : "-"}</td>
-                          <td>${item ? escapeHtml(item.order) : "-"}</td>
-                          <td>${item ? escapeHtml(item.item) : "-"}</td>
-                          <td>${item ? item.scanned : "-"}</td>
-                          <td>${item ? escapeHtml(item.customer || "") : "-"}</td>
-                          <td>${note ? escapeHtml(note) : escapeHtml(entry.message || "")}</td>
+                        <tr class="${scanEntryRowClass(entry)}">
+                          <td><span class="scan-event-badge event-${escapeHtml(eventType || "activity")}">${escapeHtml(eventLabel)}</span></td>
+                          <td><strong>${escapeHtml(sourceLabel)}</strong>${!["import", "update"].includes(eventType) && entry.raw && entry.raw !== entry.barcode ? `<small>Raw: ${escapeHtml(entry.raw)}</small>` : ""}</td>
+                          <td><div class="all-scans-item-cell">${jobOrderItem}</div></td>
+                          <td>${quantity}</td>
+                          <td>${item ? escapeHtml(item.customer || "-") : "-"}</td>
+                          <td><div class="all-scans-detail-cell">${scanEntryFullDetail(entry) || `<span>${escapeHtml(scanEntryCompactMessage(entry) || "No additional details")}</span>`}</div></td>
+                          <td><strong>${escapeHtml(entry.user || "System")}</strong><span>${escapeHtml(entry.station || "No station")}</span></td>
                           <td>${Number.isNaN(time.getTime()) ? "" : time.toLocaleString()}</td>
-                          <td><span class="check-dot ${entry.ok ? "" : "error"}">${entry.ok ? "&#10003;" : "!"}</span></td>
+                          <td><span class="check-dot ${entry.ok ? "" : "error"}" role="img" title="${entry.ok ? "Successful" : "Needs review"}" aria-label="${entry.ok ? "Successful" : "Needs review"}"></span></td>
                         </tr>
                       `;
                     })
@@ -4608,6 +4800,7 @@ function renderScanPage() {
   renderLastScan();
   renderManualAssignTools();
   renderScanRackTools();
+  renderOutboundRackStatusTools();
   renderScanBayOverrideTools();
   applyPermissionUi();
 }
@@ -4616,12 +4809,17 @@ function isStagingScanContext() {
   return /staging/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
 }
 
-async function ensureRacksLoaded() {
-  if (!state.backend || state.racks.length) return;
+function isOutboundScanContext() {
+  return /outbound/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
+}
+
+async function ensureRacksLoaded(force = false) {
+  if (!state.backend || (!force && state.racks.length)) return;
   const payload = await fetchJson("/api/racks");
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderScanRackTools();
+  renderOutboundRackStatusTools();
 }
 
 function renderScanRackTools() {
@@ -4661,6 +4859,102 @@ function renderScanRackTools() {
     els.scanRackStatus.textContent = selectedInTransit
       ? "This rack is marked on the way. Return it to clear it, or mark Not On The Way to reopen it and undo this rack's outbound scans."
       : "";
+  }
+}
+
+function outboundRackStatusMeta(rack) {
+  const status = String(rack?.status || "Open").trim().toLowerCase();
+  const qty = Number(rack?.qty || 0);
+  if (rackIsReceived(rack)) {
+    return {
+      key: "received",
+      label: "Received - awaiting return",
+      detail: `${qty} piece${qty === 1 ? "" : "s"} received at ${rackDestinationLabel(rack?.destination)}`,
+    };
+  }
+  if (status === "in transit") {
+    return {
+      key: "scanned",
+      label: "Scanned outbound",
+      detail: `${qty} piece${qty === 1 ? "" : "s"} scanned and marked on the way`,
+    };
+  }
+  if (status === "closed" || status === "complete" || status === "completed") {
+    return {
+      key: "ready",
+      label: "Complete - awaiting outbound scan",
+      detail: `${qty} piece${qty === 1 ? "" : "s"} ready for the rack barcode scan`,
+    };
+  }
+  if (qty > 0) {
+    return {
+      key: "building",
+      label: "Not complete",
+      detail: `${qty} piece${qty === 1 ? "" : "s"} currently assigned`,
+    };
+  }
+  return {
+    key: "empty",
+    label: "Empty",
+    detail: "No active pieces are assigned",
+  };
+}
+
+function outboundRackStatusOptionsHtml(racks = [], selectedCode = "") {
+  const groups = new Map();
+  for (const rack of racks) {
+    const groupLabel = String(rack.type || "Other").trim() || "Other";
+    if (!groups.has(groupLabel)) groups.set(groupLabel, []);
+    groups.get(groupLabel).push(rack);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([label, groupRacks]) => `
+      <optgroup label="${escapeHtml(label)}">
+        ${groupRacks
+          .slice()
+          .sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true }))
+          .map((rack) => {
+            const meta = outboundRackStatusMeta(rack);
+            const selected = String(rack.code || "") === String(selectedCode || "") ? " selected" : "";
+            return `<option value="${escapeHtml(rack.code || "")}"${selected}>${escapeHtml(rack.code || "")} - ${escapeHtml(rack.name || rack.code || "Rack")} - ${escapeHtml(meta.label)}</option>`;
+          })
+          .join("")}
+      </optgroup>
+    `)
+    .join("");
+}
+
+function renderOutboundRackStatusTools() {
+  if (!els.outboundRackStatusPanel) return;
+  const visible = isOutboundScanContext() && hasPermission("scan");
+  els.outboundRackStatusPanel.hidden = !visible;
+  if (!visible) return;
+  if (!state.racks.length) {
+    els.outboundRackStatusPanel.classList.add("is-loading");
+    void ensureRacksLoaded().catch((error) => showInlineError(error.message, true));
+    return;
+  }
+  els.outboundRackStatusPanel.classList.remove("is-loading", "status-scanned", "status-received", "status-ready", "status-building", "status-empty");
+  if (!state.selectedOutboundRackCode || !state.racks.some((rack) => rack.code === state.selectedOutboundRackCode)) {
+    state.selectedOutboundRackCode = state.racks.find((rack) => String(rack.status || "").toLowerCase() === "closed")?.code
+      || state.racks.find((rack) => Number(rack.qty || 0) > 0)?.code
+      || state.racks[0]?.code
+      || "";
+  }
+  const selectedRack = state.racks.find((rack) => rack.code === state.selectedOutboundRackCode);
+  const meta = outboundRackStatusMeta(selectedRack);
+  els.outboundRackStatusPanel.classList.add(`status-${meta.key}`);
+  if (els.outboundRackStatusSelect) {
+    els.outboundRackStatusSelect.innerHTML = outboundRackStatusOptionsHtml(state.racks, state.selectedOutboundRackCode);
+    els.outboundRackStatusSelect.value = state.selectedOutboundRackCode;
+    syncCustomSelect(els.outboundRackStatusSelect);
+  }
+  if (els.outboundRackStatusSummary) {
+    els.outboundRackStatusSummary.innerHTML = `
+      <strong>${escapeHtml(meta.label)}</strong>
+      <span>${escapeHtml(meta.detail)}</span>
+    `;
   }
 }
 
@@ -4753,6 +5047,7 @@ function renderScanBayOverrideTools() {
     els.scanBayOverrideSelect.innerHTML = options.join("");
     els.scanBayOverrideSelect.value = state.selectedBayOverrideCode || "";
     els.scanBayOverrideSelect.disabled = state.bayOverrideMode !== "manual";
+    syncCustomSelect(els.scanBayOverrideSelect);
   }
 
   if (els.scanBayOverrideSelected) {
@@ -5415,10 +5710,20 @@ function openHomeStatisticsReport() {
   <h2>Incomplete Delivery Lists</h2>
   <table><thead><tr><th>Delivery List</th><th>Rows</th><th>Remaining Qty</th></tr></thead><tbody>${incompleteRows}</tbody></table>
   <script>
+    let printCompleteSent = false;
+    const notifyPrintComplete = () => {
+      if (printCompleteSent) return;
+      printCompleteSent = true;
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: "delivery-print-complete" }, window.opener.location.origin);
+      }
+    };
     window.addEventListener("afterprint", () => {
-      if (window.opener && !window.opener.closed) window.opener.postMessage({ type: "delivery-print-complete" }, window.opener.location.origin);
+      notifyPrintComplete();
       setTimeout(() => window.close(), 100);
     });
+    window.addEventListener("pagehide", notifyPrintComplete);
+    window.addEventListener("beforeunload", notifyPrintComplete);
     window.addEventListener("load", () => setTimeout(() => window.print(), 300));
   </script>
 </body>
@@ -5433,6 +5738,7 @@ function openHomeStatisticsReport() {
   win.document.open();
   win.document.write(markup);
   win.document.close();
+  watchManagedPrintWindow(win);
 }
 
 function stageProgressSegments(lists) {
@@ -5789,8 +6095,8 @@ async function processScan(rawScan, options = {}) {
     if (payload.racks) {
       state.racks = payload.racks || state.racks;
       state.rackSummary = payload.rackSummary || state.rackSummary;
-    } else if (isStagingScanContext() && state.racks.length) {
-      void ensureRacksLoaded().catch(() => {});
+    } else if ((isStagingScanContext() || isOutboundScanContext()) && state.racks.length) {
+      void ensureRacksLoaded(isOutboundScanContext()).catch(() => {});
     }
     scanFlash(payload.lastScan?.ok ? "success" : payload.lastScan?.eventType === "duplicate" || payload.lastScan?.eventType === "notice" ? "notice" : "error");
     renderScanPage();
@@ -5816,7 +6122,17 @@ function processLocalScan(scanText, options = {}) {
   const recovered = recoverScan(scanText);
   const timestamp = new Date().toISOString();
   if (!recovered.ok) {
-    const entry = { ok: false, eventType: "error", barcode: scanText, message: "BAD SCAN format", reason: recovered.reason, time: timestamp };
+    const noListMatch = recovered.reason === "No unique delivery-list match";
+    const entry = {
+      ok: false,
+      eventType: "error",
+      barcode: scanText,
+      message: noListMatch ? "Item is not on this delivery list" : "Unable to match this scan",
+      reason: noListMatch
+        ? "Check the delivery date and stage. This barcode may belong to another delivery list."
+        : recovered.reason,
+      time: timestamp,
+    };
     state.errors.unshift(entry);
     state.recent.unshift(entry);
     state.lastScan = entry;
@@ -5944,6 +6260,7 @@ function showFloatingNotice(message, kind = "notice") {
 function closeActionFeedback() {
   document.getElementById("actionFeedbackShell")?.remove();
   updateModalScrollLock();
+  window.setTimeout(() => presentNextUserNotification(), 120);
 }
 
 function showActionFeedback({
@@ -6013,6 +6330,133 @@ function showActionFeedback({
   shell.querySelector("[data-action-feedback-primary], [data-action-feedback-secondary]")?.focus();
 }
 
+function rushNotificationIsBlocked() {
+  return Boolean(
+    document.getElementById("actionFeedbackShell") ||
+    document.getElementById("rushAlertShell") ||
+    (els.adminModal && !els.adminModal.hidden) ||
+    (els.printOptionsPanel && !els.printOptionsPanel.hidden) ||
+    (els.sdiPanel && !els.sdiPanel.hidden)
+  );
+}
+
+async function acknowledgeUserNotification(notificationId) {
+  const cleanId = Number(notificationId || 0);
+  if (!cleanId || !state.backend || !state.authenticated) return;
+  await fetchJson("/api/notifications/acknowledge", {
+    method: "POST",
+    body: JSON.stringify({ notificationId: cleanId }),
+  });
+}
+
+function closeRushAlert({ acknowledge = true } = {}) {
+  const shell = document.getElementById("rushAlertShell");
+  const notificationId = Number(shell?.dataset.notificationId || state.activeNotificationId || 0);
+  shell?.remove();
+  state.activeNotificationId = 0;
+  if (notificationId) state.acknowledgedNotificationIds.add(notificationId);
+  updateModalScrollLock();
+  if (acknowledge && notificationId) {
+    acknowledgeUserNotification(notificationId).catch(() => {});
+  }
+  window.setTimeout(() => presentNextUserNotification(), 180);
+}
+
+function showRushAlert(notification) {
+  if (!notification || rushNotificationIsBlocked()) return false;
+  const notificationId = Number(notification.id || 0);
+  const details = notification.details || {};
+  const spanish = state.language === "es";
+  const job = String(details.job || "").trim();
+  const order = String(details.order || "").trim();
+  const lookup = String(details.lookup || "").trim();
+  const customer = String(details.customer || "").trim();
+  const itemCount = Math.max(Number(details.items || 0), 1);
+  const submittedBy = String(details.submittedBy || notification.createdBy || "").trim();
+  const title = spanish ? "Nueva orden urgente" : "New Rush Submitted";
+  const message = spanish
+    ? `${job || order || lookup || "Este trabajo"} fue marcado como urgente${customer ? ` para ${customer}` : ""}. Priorice este trabajo.`
+    : `${job || order || lookup || "This work"} was marked as Rush${customer ? ` for ${customer}` : ""}. Prioritize this work.`;
+
+  const shell = document.createElement("div");
+  shell.id = "rushAlertShell";
+  shell.className = "rush-alert-shell";
+  shell.dataset.notificationId = String(notificationId);
+  shell.innerHTML = `
+    <button class="rush-alert-backdrop" type="button" data-rush-alert-close aria-label="${spanish ? "Cerrar alerta urgente" : "Close Rush alert"}"></button>
+    <section class="rush-alert-panel" role="alertdialog" aria-modal="true" aria-labelledby="rushAlertTitle">
+      <button class="rush-alert-close" type="button" data-rush-alert-close aria-label="${spanish ? "Cerrar" : "Close"}">&times;</button>
+      <div class="rush-alert-icon" aria-hidden="true"><i>!</i></div>
+      <div class="rush-alert-copy">
+        <small>${spanish ? "ALERTA DE PRODUCCION" : "PRODUCTION PRIORITY ALERT"}</small>
+        <h2 id="rushAlertTitle">${escapeHtml(title)}</h2>
+        <p>${escapeHtml(message)}</p>
+      </div>
+      <div class="rush-alert-details">
+        ${job ? `<div><small>${spanish ? "Num. de trabajo" : "Job Nr."}</small><strong>${escapeHtml(job)}</strong></div>` : ""}
+        ${order ? `<div><small>${spanish ? "Orden" : "Order"}</small><strong>${escapeHtml(order)}</strong></div>` : ""}
+        ${customer ? `<div><small>${spanish ? "Cliente" : "Customer"}</small><strong>${escapeHtml(customer)}</strong></div>` : ""}
+        <div><small>${spanish ? "Articulos prioritarios" : "Priority items"}</small><strong>${escapeHtml(itemCount)}</strong></div>
+        ${submittedBy ? `<div><small>${spanish ? "Enviado por" : "Submitted by"}</small><strong>${escapeHtml(submittedBy)}</strong></div>` : ""}
+      </div>
+      <button class="rush-alert-acknowledge" type="button" data-rush-alert-close>${spanish ? "Reconocer urgente" : "Acknowledge Rush"}</button>
+    </section>
+  `;
+  document.body.appendChild(shell);
+  state.activeNotificationId = notificationId;
+  updateModalScrollLock();
+  shell.querySelectorAll("[data-rush-alert-close]").forEach((button) => {
+    button.addEventListener("click", () => closeRushAlert({ acknowledge: true }));
+  });
+  shell.querySelector(".rush-alert-acknowledge")?.focus();
+  return true;
+}
+
+function presentNextUserNotification() {
+  if (!state.authenticated || document.hidden || rushNotificationIsBlocked()) return;
+  const next = state.notificationQueue.shift();
+  if (!next) return;
+  if (!showRushAlert(next)) state.notificationQueue.unshift(next);
+}
+
+async function pollUserNotifications() {
+  if (!state.backend || !state.authenticated || document.hidden) return;
+  try {
+    const payload = await fetchJson("/api/notifications/pending");
+    const knownIds = new Set([
+      ...state.notificationQueue.map((notification) => Number(notification.id || 0)),
+      ...state.acknowledgedNotificationIds,
+      Number(state.activeNotificationId || 0),
+    ]);
+    for (const notification of payload.notifications || []) {
+      const notificationId = Number(notification.id || 0);
+      if (!notificationId || knownIds.has(notificationId)) continue;
+      knownIds.add(notificationId);
+      state.notificationQueue.push(notification);
+    }
+    presentNextUserNotification();
+  } catch {
+    // Notification polling must never interrupt scanning.
+  }
+}
+
+function startNotificationPolling() {
+  stopNotificationPolling();
+  void pollUserNotifications();
+  state.notificationPollTimer = window.setInterval(() => {
+    void pollUserNotifications();
+  }, 7000);
+}
+
+function stopNotificationPolling() {
+  if (state.notificationPollTimer) window.clearInterval(state.notificationPollTimer);
+  state.notificationPollTimer = null;
+  state.notificationQueue = [];
+  state.activeNotificationId = 0;
+  state.acknowledgedNotificationIds.clear();
+  document.getElementById("rushAlertShell")?.remove();
+}
+
 async function restoreFullscreenAfterManagedPrint() {
   const shouldRestore = Boolean(state.restoreFullscreenAfterPrint);
   state.restoreFullscreenAfterPrint = false;
@@ -6038,6 +6482,45 @@ async function restoreFullscreenAfterManagedPrint() {
   }
 }
 
+function stopManagedPrintWindowWatch(printWindow = null) {
+  if (printWindow && state.managedPrintWindow && state.managedPrintWindow !== printWindow) return;
+  if (state.managedPrintWatchTimer) {
+    window.clearInterval(state.managedPrintWatchTimer);
+    state.managedPrintWatchTimer = null;
+  }
+  if (!printWindow || state.managedPrintWindow === printWindow) {
+    state.managedPrintWindow = null;
+  }
+}
+
+async function finishManagedPrintSession(printWindow = null) {
+  if (printWindow && state.managedPrintWindow && state.managedPrintWindow !== printWindow) return;
+  stopManagedPrintWindowWatch(printWindow);
+  await restoreFullscreenAfterManagedPrint();
+}
+
+function checkManagedPrintWindowClosed() {
+  const printWindow = state.managedPrintWindow;
+  if (!printWindow) return;
+
+  let isClosed = false;
+  try {
+    isClosed = Boolean(printWindow.closed);
+  } catch {
+    return;
+  }
+
+  if (isClosed) {
+    finishManagedPrintSession(printWindow).catch(() => {});
+  }
+}
+
+function watchManagedPrintWindow(printWindow) {
+  stopManagedPrintWindowWatch();
+  state.managedPrintWindow = printWindow;
+  state.managedPrintWatchTimer = window.setInterval(checkManagedPrintWindowClosed, 250);
+}
+
 function launchManagedPrint(url, windowName = "deliveryListPrintWindow") {
   state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
   const printWindow = window.open(url, windowName, "popup=yes,width=1180,height=860,resizable=yes,scrollbars=yes");
@@ -6046,6 +6529,7 @@ function launchManagedPrint(url, windowName = "deliveryListPrintWindow") {
     showInlineError("Allow popups to open the print preview.", false);
     return null;
   }
+  watchManagedPrintWindow(printWindow);
   printWindow.focus();
   return printWindow;
 }
@@ -6155,6 +6639,7 @@ async function refreshBayMapPage() {
     renderBayRouteFlow(null);
   }
   renderBayMapPage();
+  if (state.selectedBayCode) void loadBayJobDetails(state.selectedBayCode);
   maybeShowStaleBayAlert().catch(() => {});
 }
 
@@ -6181,7 +6666,6 @@ function renderBayRouteFlow(summary) {
   const rackQty = Number(summary?.rackInTransitQty || 0);
   const percent = outboundTotal ? Math.min((inboundQty / outboundTotal) * 100, 100) : 0;
   const rackLine = (summary?.racksInTransit || [])
-    .slice(0, 5)
     .map((rack) => `${rack.code}: ${rack.qty}`)
     .join(" | ");
 
@@ -6255,7 +6739,7 @@ function renderBayRouteFlow(summary) {
         <strong>${escapeHtml(outboundQty)}/${escapeHtml(outboundTotal)}</strong>
       </div>
       <div class="bay-panel-route-lane">
-        <span>${escapeHtml(inTransitQty)} pieces on the way | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</span>
+        <span>${escapeHtml(inTransitPieceLabel)} | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</span>
       </div>
       <div class="bay-panel-route-node inbound">
         <small>Received</small>
@@ -6900,6 +7384,35 @@ function groupAssignmentsByJob(assignments = []) {
   }));
 }
 
+function bayJobDetailForGroup(bay, group) {
+  const details = bay?.jobDetails || [];
+  return details.find((detail) => String(detail.key || "") === String(group?.key || "")) || null;
+}
+
+function selectedBayJobItemsHtml(detail) {
+  const items = detail?.items || [];
+  if (!items.length) {
+    return `<div class="selected-bay-job-empty-detail">No order-item details are available for this job.</div>`;
+  }
+  return `
+    <div class="selected-bay-job-detail-grid">
+      ${items
+        .map((item) => `
+          <div class="selected-bay-job-item ${item.complete ? "is-complete" : "is-missing"}">
+            <span class="selected-bay-job-item-status" aria-hidden="true">${item.complete ? "&#10003;" : "!"}</span>
+            <div>
+              <strong>Order ${escapeHtml(item.order)} / Item ${escapeHtml(item.item)}</strong>
+              <span>${escapeHtml(item.product || "Glass item")} ${item.dimensions ? `| ${escapeHtml(item.dimensions)}` : ""}</span>
+            </div>
+            <b>${escapeHtml(item.inBayQty)}/${escapeHtml(item.qty)}</b>
+            <small>${item.complete ? "In bay" : `${escapeHtml(item.missingQty)} missing`}</small>
+          </div>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
 function renderBaySlotButton(bay, mode = "physical") {
   const assignments = bay.assignments || [];
   const assignment = assignments[0];
@@ -7317,9 +7830,15 @@ function renderBaySidePanels() {
       `;
     } else {
       const assignments = bay.assignments || [];
-      const jobGroups = groupAssignmentsByJob(assignments);
-      const assignedQty = assignments.reduce((sum, item) => sum + Number(item.assignedQty || item.qty || 0), 0);
+      const jobGroups = groupAssignmentsByJob(assignments).map((group) => ({
+        ...group,
+        detail: bayJobDetailForGroup(bay, group),
+      }));
       const firstAssignment = assignments[0];
+      const requiredQty = jobGroups.reduce((sum, group) => sum + Number(group.detail?.requiredQty || group.totalQty || 0), 0);
+      const inBayQty = jobGroups.reduce((sum, group) => sum + Number(group.detail?.inBayQty ?? group.scannedQty ?? 0), 0);
+      const completedJobCount = jobGroups.filter((group) => group.detail ? group.detail.complete : Number(group.scannedQty || 0) >= Number(group.totalQty || 0)).length;
+      const fulfillmentPercent = requiredQty ? Math.min((inBayQty / requiredQty) * 100, 100) : 0;
       const policyKind = bayPolicyKind(bay);
       const statusKind = bayStatusKind(bay);
       const policyLabel = policyKind === "manual" ? "Man" : policyKind === "blocked" ? "Blocked" : "Auto";
@@ -7344,12 +7863,12 @@ function renderBaySidePanels() {
 
           <div class="selected-bay-metric-row selected-bay-metric-row-v28">
             <span><small>Category</small><strong>${escapeHtml(bayCategoryLabel(bayCategoryKind(bay)))}</strong></span>
-            <span><small>Pieces</small><strong>${escapeHtml(assignedQty)}</strong></span>
-            <span><small>Filled</small><strong>${escapeHtml(bayUtilization(bay).toFixed(0))}%</strong></span>
+            <span><small>${jobGroups.length === 1 ? "Job" : "Jobs"}</small><strong>${escapeHtml(completedJobCount)}/${escapeHtml(jobGroups.length)}</strong></span>
+            <span><small>Fulfillment</small><strong>${escapeHtml(inBayQty)}/${escapeHtml(requiredQty)}</strong></span>
             <span><small>Primary Job</small><strong>${firstAssignment ? escapeHtml(assignmentJobLabel(firstAssignment)) : "None"}</strong></span>
           </div>
 
-          <div class="capacity-meter selected-capacity-meter"><span style="width:${bayUtilization(bay)}%"></span></div>
+          <div class="capacity-meter selected-capacity-meter fulfillment-meter" title="${escapeHtml(inBayQty)} of ${escapeHtml(requiredQty)} required pieces are in this bay"><span style="width:${fulfillmentPercent}%"></span></div>
 
           <div class="selected-bay-primary-actions selected-bay-primary-actions-v28">
             <button type="button" data-bay-action="scan-here">Use For Scanner</button>
@@ -7371,24 +7890,42 @@ function renderBaySidePanels() {
                   .map(
                     (group) => {
                       const first = group.assignments[0];
+                      const detail = group.detail;
+                      const jobRequiredQty = Number(detail?.requiredQty || group.totalQty || 0);
+                      const jobInBayQty = Number(detail?.inBayQty ?? group.scannedQty ?? 0);
+                      const missingCount = Number(detail?.missingItems?.length || 0);
                       return `
-                      <article class="selected-bay-job-card" data-assignment-id="${escapeHtml(first.id)}">
-                        <div class="selected-bay-job-main">
-                          <div class="selected-bay-job-title">
-                            ${group.assignments.some(isNewOrUpdatedItem) ? '<span class="bay-new-star" title="New or updated line">NEW</span>' : ""}
-                            <strong>${escapeHtml(group.label)}</strong>
+                      <details class="selected-bay-job-card selected-bay-job-details" data-assignment-id="${escapeHtml(first.id)}">
+                        <summary class="selected-bay-job-summary">
+                          <div class="selected-bay-job-main">
+                            <div class="selected-bay-job-title">
+                              ${group.assignments.some(isNewOrUpdatedItem) ? '<span class="bay-new-star" title="New or updated line">NEW</span>' : ""}
+                              <strong>${escapeHtml(group.label)}</strong>
+                            </div>
+                            <span>${escapeHtml(group.customer || "No customer listed")}</span>
+                            <small>${escapeHtml(group.itemCount)} assigned line${group.itemCount === 1 ? "" : "s"} | ${escapeHtml(group.orderLine)}</small>
+                            <small>Fulfillment ${escapeHtml(jobInBayQty)}/${escapeHtml(jobRequiredQty)} | ${missingCount ? `${escapeHtml(missingCount)} order item${missingCount === 1 ? "" : "s"} missing` : "Job complete"}</small>
                           </div>
-                          <span>${escapeHtml(group.customer || "No customer listed")}</span>
-                          <small>${escapeHtml(group.itemCount)} item${group.itemCount === 1 ? "" : "s"} | ${escapeHtml(group.orderLine)} | Qty ${escapeHtml(group.totalQty)}</small>
-                          <small>${escapeHtml(group.dimensions || "Mixed sizes")} | Delivery ${escapeHtml(formatDisplayDate(first.deliveryDate || ""))}</small>
+                          <span class="selected-bay-job-open"><b>View orders</b><i aria-hidden="true"></i></span>
+                        </summary>
+                        <div class="selected-bay-job-expanded">
+                          <div class="selected-bay-job-fulfillment">
+                            <strong>${escapeHtml(jobInBayQty)}/${escapeHtml(jobRequiredQty)} pieces in bay</strong>
+                            <span>${missingCount ? `${escapeHtml(missingCount)} order item${missingCount === 1 ? "" : "s"} still missing` : "All required order items are present"}</span>
+                          </div>
+                          ${bay.jobDetailsLoading
+                            ? `<div class="selected-bay-job-empty-detail">Loading complete job and missing-item details...</div>`
+                            : bay.jobDetailsError
+                              ? `<div class="selected-bay-job-empty-detail">Unable to load job details: ${escapeHtml(bay.jobDetailsError)}</div>`
+                              : selectedBayJobItemsHtml(detail)}
+                          <div class="assignment-actions assignment-actions-v2 selected-bay-job-actions">
+                            <button type="button" title="Open manage workflow" data-assignment-action="manage" data-assignment-id="${escapeHtml(first.id)}">Manage</button>
+                            <button type="button" title="Move this job" data-assignment-action="move" data-assignment-id="${escapeHtml(first.id)}">Move</button>
+                            <button type="button" title="Clear this job from bay" data-assignment-action="clear" data-assignment-id="${escapeHtml(first.id)}">Clear</button>
+                            <button type="button" title="Mark or clear Rush / Remake" data-assignment-action="sdi" data-assignment-id="${escapeHtml(first.id)}" data-order-no="${escapeHtml(first.order)}">Rush / Remake</button>
+                          </div>
                         </div>
-                        <div class="assignment-actions assignment-actions-v2 selected-bay-job-actions">
-                          <button type="button" title="Open manage workflow" data-assignment-action="manage" data-assignment-id="${escapeHtml(first.id)}">Manage</button>
-                          <button type="button" title="Move this job" data-assignment-action="move" data-assignment-id="${escapeHtml(first.id)}">Move</button>
-                          <button type="button" title="Clear this job from bay" data-assignment-action="clear" data-assignment-id="${escapeHtml(first.id)}">Clear</button>
-                          <button type="button" title="Mark or clear SDI" data-assignment-action="sdi" data-assignment-id="${escapeHtml(first.id)}" data-order-no="${escapeHtml(first.order)}">SDI</button>
-                        </div>
-                      </article>
+                      </details>
                     `;
                     }
                   )
@@ -7621,7 +8158,7 @@ function renderBayRecentActions() {
             <td>${escapeHtml(order)}</td>
             <td>${escapeHtml(bay)}</td>
             <td>${escapeHtml(time)}</td>
-            <td><span class="check-dot ${escapeHtml(tone)}">${escapeHtml(tone === "error" ? "!" : tone === "notice" ? "i" : "✓")}</span></td>
+            <td><span class="check-dot ${escapeHtml(tone)}" role="img" aria-label="${escapeHtml(tone === "error" ? "Needs review" : tone === "notice" ? "Notice" : "Successful")}"></span></td>
           </tr>
         `;
       }).join("")
@@ -7647,6 +8184,32 @@ function selectedBay() {
   return state.bays.find((bay) => bay.bayCode === state.selectedBayCode) || null;
 }
 
+async function loadBayJobDetails(bayCode) {
+  if (!state.backend || !bayCode) return;
+  const bay = state.bays.find((item) => item.bayCode === bayCode);
+  if (!bay || bay.jobDetailsLoaded || bay.jobDetailsLoading) return;
+  bay.jobDetailsLoading = true;
+  if (state.selectedBayCode === bayCode) renderBaySidePanels();
+  try {
+    const payload = await fetchJson(`/api/indian-trail/bay-job-details?bayCode=${encodeURIComponent(bayCode)}`);
+    const currentBay = state.bays.find((item) => item.bayCode === bayCode);
+    if (currentBay) {
+      currentBay.jobDetails = payload.jobDetails || [];
+      currentBay.jobDetailsLoaded = true;
+      currentBay.jobDetailsLoading = false;
+    }
+  } catch (error) {
+    const currentBay = state.bays.find((item) => item.bayCode === bayCode);
+    if (currentBay) {
+      currentBay.jobDetails = [];
+      currentBay.jobDetailsLoaded = true;
+      currentBay.jobDetailsLoading = false;
+      currentBay.jobDetailsError = error.message;
+    }
+  }
+  if (state.selectedBayCode === bayCode) renderBaySidePanels();
+}
+
 function selectBay(bayCode) {
   state.selectedBayCode = bayCode || "";
   renderBayMapPage();
@@ -7659,6 +8222,7 @@ function selectBay(bayCode) {
     els.baySelectedModal.hidden = false;
     if (els.baySelectedBackdrop) els.baySelectedBackdrop.hidden = false;
     updateModalScrollLock();
+    void loadBayJobDetails(bayCode);
   }
 }
 
@@ -10303,7 +10867,7 @@ function rackManagerModalHtml() {
                             const isTruck = isTruckRack(rack);
                             const legacyTruck = rack.code === "T";
                             const canDelete = !legacyTruck && qty === 0;
-                            const status = String(rack.status || "Open").toLowerCase() === "closed" ? "Complete" : qty ? "Open" : "Empty";
+                            const status = rackStatusLabel(rack);
 
                             const isEditing = state.rackManagerEditingRackCode === rack.code;
 
@@ -13168,7 +13732,7 @@ function manualEditLocationOptions(item) {
 
     const name = rack.name || rack.type || "Rack";
     const qty = Number(rack.qty || 0);
-    const status = String(rack.status || "Open");
+    const status = rackStatusLabel(rack);
 
     options.push([
       code,
@@ -13521,6 +14085,7 @@ async function loadAuthenticatedApp(params = new URLSearchParams(window.location
     showPage("home");
   }
   startPolling();
+  startNotificationPolling();
 }
 
 async function init() {
@@ -13591,9 +14156,21 @@ function wireEvents() {
   els.loginLanguageToggleBtn?.addEventListener("click", () => toggleAppLanguage());
   els.fullscreenToggleBtn?.addEventListener("click", () => toggleFullscreen().catch((error) => showInlineError(error.message)));
   document.addEventListener("fullscreenchange", () => syncFullscreenControl());
+  window.addEventListener("resize", () => syncFullscreenStickyPanelOffset());
+  if (window.ResizeObserver && els.appHeader) {
+    state.headerResizeObserver = new ResizeObserver(() => syncFullscreenStickyPanelOffset());
+    state.headerResizeObserver.observe(els.appHeader);
+  }
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin || event.data?.type !== "delivery-print-complete") return;
-    restoreFullscreenAfterManagedPrint().catch(() => {});
+    finishManagedPrintSession().catch(() => {});
+  });
+  window.addEventListener("focus", () => {
+    checkManagedPrintWindowClosed();
+    void pollUserNotifications();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void pollUserNotifications();
   });
 
   document.addEventListener("click", (event) => {
@@ -13612,6 +14189,7 @@ function wireEvents() {
     document.querySelectorAll(".user-menu[open]").forEach((menu) => menu.removeAttribute("open"));
     if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
     if (document.getElementById("actionFeedbackShell")) closeActionFeedback();
+    if (document.getElementById("rushAlertShell")) closeRushAlert({ acknowledge: true });
   });
 
   els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
@@ -13842,6 +14420,11 @@ function wireEvents() {
   els.scanRackSelect?.addEventListener("change", () => {
     state.selectedRackCode = els.scanRackSelect.value;
     renderScanRackTools();
+  });
+  els.outboundRackStatusSelect?.addEventListener("change", () => {
+    state.selectedOutboundRackCode = els.outboundRackStatusSelect.value || "";
+    renderOutboundRackStatusTools();
+    els.scanInput?.focus();
   });
   els.scanBayOverrideMode?.addEventListener("change", () => {
     state.bayOverrideMode = els.scanBayOverrideMode.checked ? "manual" : "auto";

@@ -55,6 +55,8 @@ def print_lifecycle_script(delay_ms: int = 300) -> str:
           if (window.opener && !window.opener.closed) setTimeout(function() {{ window.close(); }}, 120);
         }}
         window.addEventListener('afterprint', notifyComplete);
+        window.addEventListener('pagehide', notifyComplete);
+        window.addEventListener('beforeunload', notifyComplete);
         window.addEventListener('load', function() {{ setTimeout(function() {{ window.print(); }}, {delay}); }});
       }})();
     </script>
@@ -886,6 +888,14 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"authenticated": bool(user), "user": user})
             return
 
+        if parsed.path == "/api/notifications/pending":
+            user = self.current_user()
+            if not user:
+                self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+                return
+            self.send_json({"notifications": STORE.get_pending_notifications(user["username"])})
+            return
+
         if parsed.path == "/api/delivery-lists":
             user = self.require_permission("view_lists")
             if not user:
@@ -1023,6 +1033,13 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_permission("view_bays"):
                 return
             self.send_json({"bays": STORE.get_bays()})
+            return
+
+        if parsed.path == "/api/indian-trail/bay-job-details":
+            if not self.require_permission("view_bays"):
+                return
+            bay_code = parse_qs(parsed.query).get("bayCode", [""])[0]
+            self.send_json(STORE.get_bay_job_details(bay_code))
             return
 
         if parsed.path == "/api/indian-trail/layout":
@@ -1202,6 +1219,19 @@ class Handler(SimpleHTTPRequestHandler):
                 self.clear_session_cookie()
                 self.end_headers()
                 self.wfile.write(body)
+                return
+
+            if parsed.path == "/api/notifications/acknowledge":
+                user = self.current_user()
+                if not user:
+                    self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+                    return
+                self.send_json(
+                    STORE.acknowledge_notification(
+                        int(data.get("notificationId") or 0),
+                        user["username"],
+                    )
+                )
                 return
 
             if parsed.path == "/api/scans":

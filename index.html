@@ -10,7 +10,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-  <link rel="stylesheet" href="styles.css?v=20260713-v037">
+  <link rel="stylesheet" href="styles.css?v=20260714-v043">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
@@ -375,11 +375,24 @@
               <p id="scanRackStatus" hidden></p>
             </section>
 
-            <section class="scan-bay-override-panel" id="scanBayOverridePanel" hidden>
-              <div class="scan-bay-override-heading">
-                <div>
-                  <h3>Indian Trail Bay Assignment</h3>
-                  <span id="scanBayOverrideSelected">Auto suggested bay</span>
+            <section class="outbound-rack-status-panel" id="outboundRackStatusPanel" hidden>
+              <div class="outbound-rack-status-row">
+                <label>
+                  <span>Transportation Status</span>
+                  <select id="outboundRackStatusSelect"></select>
+                </label>
+                <div class="outbound-rack-status-summary" id="outboundRackStatusSummary">
+                  <strong>Select a rack</strong>
+                  <span>View completion and outbound status</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="scan-bay-override-panel scan-bay-override-panel-compact" id="scanBayOverridePanel" hidden title="Auto uses the suggested bay. Manual sends the selected bay with the next Indian Trail scan.">
+              <div class="scan-bay-override-row">
+                <div class="scan-bay-override-copy">
+                  <span>Bay Assignment</span>
+                  <strong id="scanBayOverrideSelected">Auto suggested bay</strong>
                 </div>
                 <label class="bay-override-switch" for="scanBayOverrideMode">
                   <span>Auto</span>
@@ -387,14 +400,13 @@
                   <i></i>
                   <span>Manual</span>
                 </label>
+                <label class="bay-override-select-wrap" for="scanBayOverrideSelect">
+                  <span>Bay</span>
+                  <select id="scanBayOverrideSelect" disabled>
+                    <option value="">Use auto-suggested bay</option>
+                  </select>
+                </label>
               </div>
-              <label class="bay-override-select-wrap" for="scanBayOverrideSelect">
-                <span>Manual bay location</span>
-                <select id="scanBayOverrideSelect" disabled>
-                  <option value="">Use auto-suggested bay</option>
-                </select>
-              </label>
-              <p class="bay-override-help">Auto uses the preassigned or suggested bay. Manual sends the selected bay with the next Indian Trail scan.</p>
             </section>
 
             <form class="scan-form" id="scanForm">
@@ -645,124 +657,124 @@
 
             <div class="bay-scanner-sticky-slot">
               <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v2" aria-label="Indian Trail bay scanner">
-              <div class="progress-band bay-panel-route-band bay-panel-route-band-v2">
-              <div class="progress-title">
-                <span class="cube-icon"></span>
-                <strong>Indian Trail Route</strong>
-              </div>
-              <div class="bay-panel-route-mini" id="bayPanelRouteMini">
-                <div class="bay-panel-route-node outbound">
-                  <small>Outbound</small>
-                  <strong>0 / 0</strong>
+                <div class="progress-band bay-panel-route-band bay-panel-route-band-v2">
+                  <div class="progress-title">
+                    <span class="cube-icon"></span>
+                    <strong>Indian Trail Route</strong>
+                  </div>
+                  <div class="bay-panel-route-mini" id="bayPanelRouteMini">
+                    <div class="bay-panel-route-node outbound">
+                      <small>Outbound</small>
+                      <strong>0/0</strong>
+                    </div>
+                    <div class="bay-panel-route-lane">
+                      <span>0 pieces on the way</span>
+                    </div>
+                    <div class="bay-panel-route-node inbound">
+                      <small>Received</small>
+                      <strong>0/0</strong>
+                    </div>
+                  </div>
                 </div>
-                <div class="bay-panel-route-lane">
-                  <span>In Transit: 0</span>
-                </div>
-                <div class="bay-panel-route-node inbound">
-                  <small>Indian Trail</small>
-                  <strong>0 / 0</strong>
-                </div>
-              </div>
-            </div>
 
-            <form class="scan-form bay-scan-form bay-scan-form-v2 bay-scan-command-form bay-scan-command-form-v35 bay-scan-command-form-v37" id="bayScanOutForm">
-              <div class="scan-form-heading bay-scan-heading-compact">
-                <label for="bayScanOutInput">Bay Scan</label>
-                <span class="bay-scan-hint">Choose add/remove, pick a target bay when needed, then scan.</span>
-              </div>
-
-              <div class="bay-scan-mode-card bay-scan-mode-card-compact bay-scan-mode-card-v35 bay-scan-mode-card-v37">
-                <label class="bay-mode-option is-remove">
-                  <input name="bayScanVisualMode" type="radio" value="remove" checked>
-                  <span><strong>Remove from bay</strong></span>
-                </label>
-                <label class="bay-mode-option is-add">
-                  <input id="bayScanModeToggle" name="bayScanVisualMode" type="radio" value="add">
-                  <span><strong>Add to bay</strong></span>
-                </label>
-              </div>
-
-              <div class="bay-add-row bay-add-row-v2 bay-target-row-v17 bay-target-row-compact bay-target-row-v35 bay-target-row-v37">
-                <label class="bay-code-field">
-                  <span>Target Bay</span>
-                  <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Click bay or type code">
-                </label>
-                <button class="bay-target-clear" id="bayTargetClearBtn" type="button">Clear</button>
-              </div>
-
-              <div class="scan-input-wrap bay-command-scan-input bay-command-scan-input-v35 bay-command-scan-input-v37">
-                <span class="barcode-icon"></span>
-                <input id="bayScanOutInput" type="text" autocomplete="off" placeholder="Scan order to remove from bay...">
-                <div class="bay-scan-action-strip bay-scan-action-strip-v35 bay-scan-action-strip-v37" aria-label="Bay scan undo and redo">
-                  <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action">
-                    <span class="undo-icon"></span>
-                    <small>Undo</small>
-                  </button>
-                  <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action">
-                    <span class="redo-icon"></span>
-                    <small>Redo</small>
-                  </button>
-                </div>
-              </div>
-
-              <section class="manual-scan-form bay-manual-card bay-manual-card-v2 bay-manual-card-v35 bay-manual-card-v37">
-                <div class="section-heading">
-                  <h3>Manual Assign</h3>
-                  <span>Assign order, Job Nr., barcode, or wording into target bay.</span>
-                </div>
-                <div class="manual-scan-row bay-manual-row-v35 bay-manual-row-v37">
-                  <label>
-                    <span>Order / Job / Scan Text</span>
-                    <input id="bayManualOrderInput" type="text" autocomplete="off" placeholder="Order, Job Nr., barcode, or label text">
-                  </label>
-                  <label>
-                    <span>Item Nr. optional</span>
-                    <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="001">
-                  </label>
-                  <input id="bayManualQtyInput" type="hidden" value="1">
-                  <button id="bayManualSubmitBtn" type="button">Assign</button>
-                </div>
-              </section>
-            </form>
-
-            <section class="last-scan compact-scan-history bay-scan-history-v36">
-              <div class="section-heading scan-history-heading bay-scan-history-heading-v36">
-                <h3>Bay Scan History</h3>
-                <span id="bayScanOutStatus">Waiting</span>
-                <button id="bayAllScansBtn" type="button">All scans</button>
-              </div>
-              <div class="last-card" id="bayLastCard">
-                <div class="last-card-status"></div>
-                <strong id="bayLastTitle">No bay scans yet</strong>
-                <div class="last-fields">
-                  <span><small>Action</small><b id="bayLastAction">-</b></span>
-                  <span><small>Order</small><b id="bayLastOrder">-</b></span>
-                  <span><small>Bay</small><b id="bayLastBay">-</b></span>
-                  <span><small>Time</small><b id="bayLastTime">-</b></span>
-                </div>
-              </div>
-
-              <div class="recent-inline-block bay-recent-inline-v36">
-                <div class="recent-inline-heading">
-                  <h4>Recent bay scans</h4>
-                  <span>Latest 2</span>
-                </div>
-                <div class="recent-table-wrap compact">
-                  <table class="recent-table bay-recent-table-v36">
-                    <thead>
-                      <tr>
-                        <th>Action</th>
-                        <th>Order</th>
-                        <th>Bay</th>
-                        <th>Time</th>
-                        <th>Check</th>
-                      </tr>
-                    </thead>
-                    <tbody id="bayScanOutRecent"></tbody>
-                  </table>
-                </div>
-              </div>
-            </section>
+                <form class="scan-form bay-scan-form bay-scan-form-v2 bay-scan-command-form bay-scan-command-form-v35 bay-scan-command-form-v37" id="bayScanOutForm">
+                  <div class="scan-form-heading bay-scan-heading-compact">
+                    <label for="bayScanOutInput">Bay Scan</label>
+                    <span class="bay-scan-hint">Choose add/remove, pick a target bay when needed, then scan.</span>
+                  </div>
+    
+                  <div class="bay-scan-mode-card bay-scan-mode-card-compact bay-scan-mode-card-v35 bay-scan-mode-card-v37">
+                    <label class="bay-mode-option is-remove">
+                      <input name="bayScanVisualMode" type="radio" value="remove" checked>
+                      <span><strong>Remove from bay</strong></span>
+                    </label>
+                    <label class="bay-mode-option is-add">
+                      <input id="bayScanModeToggle" name="bayScanVisualMode" type="radio" value="add">
+                      <span><strong>Add to bay</strong></span>
+                    </label>
+                  </div>
+    
+                  <div class="bay-add-row bay-add-row-v2 bay-target-row-v17 bay-target-row-compact bay-target-row-v35 bay-target-row-v37">
+                    <label class="bay-code-field">
+                      <span>Target Bay</span>
+                      <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Click bay or type code">
+                    </label>
+                    <button class="bay-target-clear" id="bayTargetClearBtn" type="button">Clear</button>
+                  </div>
+    
+                  <div class="scan-input-wrap bay-command-scan-input bay-command-scan-input-v35 bay-command-scan-input-v37">
+                    <span class="barcode-icon"></span>
+                    <input id="bayScanOutInput" type="text" autocomplete="off" placeholder="Scan order to remove from bay...">
+                    <div class="bay-scan-action-strip bay-scan-action-strip-v35 bay-scan-action-strip-v37" aria-label="Bay scan undo and redo">
+                      <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action">
+                        <span class="undo-icon"></span>
+                        <small>Undo</small>
+                      </button>
+                      <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action">
+                        <span class="redo-icon"></span>
+                        <small>Redo</small>
+                      </button>
+                    </div>
+                  </div>
+    
+                  <section class="manual-scan-form bay-manual-card bay-manual-card-v2 bay-manual-card-v35 bay-manual-card-v37">
+                    <div class="section-heading">
+                      <h3>Manual Assign</h3>
+                      <span>Assign order, Job Nr., barcode, or wording into target bay.</span>
+                    </div>
+                    <div class="manual-scan-row bay-manual-row-v35 bay-manual-row-v37">
+                      <label>
+                        <span>Order / Job / Scan Text</span>
+                        <input id="bayManualOrderInput" type="text" autocomplete="off" placeholder="Order, Job Nr., barcode, or label text">
+                      </label>
+                      <label>
+                        <span>Item Nr. optional</span>
+                        <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="001">
+                      </label>
+                      <input id="bayManualQtyInput" type="hidden" value="1">
+                      <button id="bayManualSubmitBtn" type="button">Assign</button>
+                    </div>
+                  </section>
+                </form>
+    
+                <section class="last-scan compact-scan-history bay-scan-history-v36">
+                  <div class="section-heading scan-history-heading bay-scan-history-heading-v36">
+                    <h3>Bay Scan History</h3>
+                    <span id="bayScanOutStatus">Waiting</span>
+                    <button id="bayAllScansBtn" type="button">All scans</button>
+                  </div>
+                  <div class="last-card" id="bayLastCard">
+                    <div class="last-card-status"></div>
+                    <strong id="bayLastTitle">No bay scans yet</strong>
+                    <div class="last-fields">
+                      <span><small>Action</small><b id="bayLastAction">-</b></span>
+                      <span><small>Order</small><b id="bayLastOrder">-</b></span>
+                      <span><small>Bay</small><b id="bayLastBay">-</b></span>
+                      <span><small>Time</small><b id="bayLastTime">-</b></span>
+                    </div>
+                  </div>
+    
+                  <div class="recent-inline-block bay-recent-inline-v36">
+                    <div class="recent-inline-heading">
+                      <h4>Recent bay scans</h4>
+                      <span>Latest 2</span>
+                    </div>
+                    <div class="recent-table-wrap compact">
+                      <table class="recent-table bay-recent-table-v36">
+                        <thead>
+                          <tr>
+                            <th>Action</th>
+                            <th>Order</th>
+                            <th>Bay</th>
+                            <th>Time</th>
+                            <th>Check</th>
+                          </tr>
+                        </thead>
+                        <tbody id="bayScanOutRecent"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
               </aside>
             </div>
           </div>
@@ -1148,6 +1160,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=20260713-v037"></script>
+  <script src="app.js?v=20260714-v043"></script>
 </body>
 </html>
