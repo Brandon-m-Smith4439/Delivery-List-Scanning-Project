@@ -1,99 +1,58 @@
-# Delivery List Scanner - v033 Moving Truck Transit Animation
+# Delivery List Scanner - v037 Job Nr. SDI and Managed Print Workflow
 
 Date: 2026-07-13
 
 ## Summary
 
-This package builds on v028 and focuses only on the Indian Trail Bay Map transit workflow section. The Outbound, In Transit, and Received areas now read as one consistent professional control group, with clearer click affordances and improved readability.
+This package builds on v036. It fixes the Bay Map Rush / Remake GUI so users can paste a complete Job Nr. label, adds a reusable polished success popup, and improves printing from fullscreen mode.
 
 ## Changed Files
 
 - `app.js`
+- `delivery_store.py`
+- `server.py`
 - `styles.css`
 - `index.html`
 - `README_CHANGELOG.md`
-- `delivery_store.py` unchanged
-- `server.py` unchanged
-- `scanner_config.py` unchanged
 
 ## Changes
 
-### Outbound and Received cards
+### SDI Job Nr. lookup
 
-- Rebuilt both side cards into a consistent layout with:
-  - clear section label
-  - large scanned/total quantity
-  - delivery-list stage label
-  - visible `Open list` action row
-- Added professional hover and keyboard-focus effects so users can clearly tell the cards are clickable.
-- Added subtle Outbound yellow and Received green accent treatments.
-- Added disabled/unavailable presentation when a matching delivery list does not exist.
+- The SDI field now accepts a full Job Nr. such as `88418245M LOGAN FARMS 51`.
+- It also accepts an SO number, order number, or barcode.
+- Spacing and punctuation differences are normalized when matching a Job Nr.
+- When a Job Nr. is matched, every line item belonging to that job on the selected active delivery list is updated together.
+- Existing Bay Map assignments for those items are updated to the Rush / Remake override state so the change is visible throughout the Bay Map.
+- Clearing by Job Nr. removes the special process state and restores matching bay assignments.
+- Replacing the prefilled SDI value with a different Job Nr. now searches for the pasted value instead of silently applying the change to the previously selected assignment.
+- The SDI input label, placeholder, and helper text now explain all accepted input formats.
 
-### In-transit workflow card
+### Polished success popup
 
-- Tightened spacing and improved visual hierarchy.
-- Corrected singular/plural wording such as `1 piece on the way`.
-- Replaced the compressed summary sentence with separate compact summary chips for jobs, truck pieces, and rack pieces.
-- Integrated the rack-in-transit summary into the center card instead of leaving it as a detached footer line.
-- Added a clearer `Open manifest` action with hover movement.
-- Preserved the existing animated flow line and received-progress calculation.
+- Replaced the native Rush / Remake print confirmation with a custom webapp-styled success popup.
+- The popup shows the matched Job Nr. or order, customer, and number of items updated.
+- Rush and Remake results provide the correct print action directly in the popup.
+- The popup component is reusable for other important edits in future versions.
+- Added matching Spanish translations for the new interface text.
 
-### Overall layout
+### Printing and fullscreen
 
-- Made all three cards use matching borders, radius, shadows, spacing, and hover behavior.
-- Added responsive adjustments for narrower screens.
-- No business logic, scan logic, manifest data, or routing behavior was changed.
-
-### Cache version update
-
-- `styles.css?v=20260713-v029`
-- `app.js?v=20260713-v029`
+- Print pages opened by the app now use a managed print window.
+- After print preview is closed or cancelled, the temporary print window closes automatically.
+- The main webapp is focused again after printing.
+- When the app was fullscreen before printing, it attempts to return to fullscreen automatically.
+- Browsers that block automatic fullscreen restoration show a polished one-click `Return to fullscreen` popup instead.
+- Applied the managed workflow to delivery-list packages, Rush/Remake sheets, rack packing lists, stale-bay reports, customer manifests, and the Statistics PDF report.
 
 ## Validation
 
-Passed:
-
-- `python3 -m py_compile delivery_store.py server.py scanner_config.py`
 - `node --check app.js`
+- `python3 -m py_compile delivery_store.py server.py scanner_config.py`
+- Temporary SQLite test: pasted full Job Nr. marked two matching items as Rush, updated both Bay Map assignments, and cleared both successfully.
+- Printable HTML render test verified the after-print notification and automatic print-window close workflow.
 
+## Cache References
 
-## v030 Changes
-
-- Centered the selected text inside the Statistics range selector dropdown so values like `Last 30 days` sit visually centered in the pill.
-- Simplified the Bay Map in-transit center card so it is easier to scan and read.
-- Increased the main in-transit text size and reduced the number of separate info rows in the middle section.
-- Replaced the three small transit summary chips with one concise summary sentence.
-- Kept the animated lane, received progress bar, rack summary, and Open manifest action.
-- Updated cache references to `styles.css?v=20260713-v030` and `app.js?v=20260713-v030`.
-
-
-## v031 Changes
-
-- Changed Outbound and Inbound card totals to a compact ratio format such as `0/104`.
-- Removed the center sentence showing jobs, rack pieces, and truck pieces in transit.
-- Restored the in-transit animation and progress-bar dimensions used before v030.
-- Recentered the pieces-on-the-way count, animation, and progress bar lower in the middle card.
-- Kept the rack summary and Open manifest action.
-- Updated cache references to `styles.css?v=20260713-v031` and `app.js?v=20260713-v031`.
-
-
-## v032 Changes
-
-- Restored the Bay Map in-transit animation lane to span the full width of the center card.
-- Kept the existing animation speed, progress bar, pieces-on-the-way count, rack summary, and manifest behavior.
-- Rebuilt the Home delivery-date expand icon as a true east-pointing SVG-style arrow instead of a rotated border corner.
-- Centered the arrow inside its circular background.
-- The arrow now rotates cleanly from east to south when a delivery date is expanded.
-- Updated cache references to `styles.css?v=20260713-v032` and `app.js?v=20260713-v032`.
-
-
-## v033 Changes
-
-- Replaced the Bay Map moving light bar with a full-width Moving Truck animation.
-- Added a professional blue delivery truck rendered directly in the web UI with inline SVG and CSS.
-- The truck travels from the Outbound side to the Indian Trail side across the entire center lane.
-- Added yellow origin and green destination markers with a blue-to-green dashed route.
-- Preserved the pieces-on-the-way count, received progress bar, rack summary, and Open manifest action.
-- Preserved the v032 Home delivery-list arrow redesign: a true centered east-pointing arrow that rotates south when expanded.
-- Added reduced-motion support so the truck remains centered without animation when the operating system requests reduced motion.
-- Updated cache references to `styles.css?v=20260713-v033` and `app.js?v=20260713-v033`.
+- `styles.css?v=20260713-v037`
+- `app.js?v=20260713-v037`

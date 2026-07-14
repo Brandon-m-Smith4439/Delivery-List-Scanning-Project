@@ -38,6 +38,29 @@ def esc(value: object) -> str:
     return html.escape(str(value if value is not None else ""))
 
 
+def print_lifecycle_script(delay_ms: int = 300) -> str:
+    """Notify the app after print preview closes and close script-opened print windows."""
+    delay = max(int(delay_ms or 0), 0)
+    return f"""
+    <script>
+      (function() {{
+        let completed = false;
+        function notifyComplete() {{
+          if (completed) return;
+          completed = true;
+          const target = window.opener && !window.opener.closed
+            ? window.opener
+            : (window.parent && window.parent !== window ? window.parent : null);
+          if (target) target.postMessage({{ type: 'delivery-print-complete' }}, window.location.origin);
+          if (window.opener && !window.opener.closed) setTimeout(function() {{ window.close(); }}, 120);
+        }}
+        window.addEventListener('afterprint', notifyComplete);
+        window.addEventListener('load', function() {{ setTimeout(function() {{ window.print(); }}, {delay}); }});
+      }})();
+    </script>
+    """
+
+
 def print_display_date(value: object) -> str:
     """Return a plain M/D/YYYY date for printed sheets and packing lists.
 
@@ -446,9 +469,10 @@ def render_rack_packing_list(payload: dict) -> str:
         @media print {{ body {{ margin: 0.25in; }} button {{ display: none; }} .packing-header {{ grid-template-columns: 190px minmax(250px, 1fr) 280px; gap: 7px; }} .packing-logo {{ width: 185px; max-height: 118px; }} .packing-logo-box {{ min-height: 118px; }} .barcode-box {{ padding: 8px; }} }}
       </style>
     </head>
-    <body onload="setTimeout(function(){{ window.print(); }}, 350)">
+    <body>
       <button onclick="window.print()">Print</button>
       {sheets}
+      {print_lifecycle_script(350)}
     </body>
     </html>
     """
@@ -512,7 +536,7 @@ def render_customer_email_manifest_pdf_page(email: dict) -> str:
     @media print {{ body {{ margin: .25in; }} .print-button {{ display: none; }} .manifest-sheet {{ border: 0; box-shadow: none; padding: 0; }} }}
   </style>
 </head>
-<body onload="setTimeout(function(){{ window.print(); }}, 350)">
+<body>
   <button class="print-button" onclick="window.print()">Print / Save as PDF</button>
   <section class="manifest-sheet">
     <header>
@@ -540,6 +564,7 @@ def render_customer_email_manifest_pdf_page(email: dict) -> str:
     </table>
     <footer>This automated manifest includes order information relevant to the customer only. Internal scanner notes, scan history, and plant workflow details are not included.</footer>
   </section>
+  {print_lifecycle_script(350)}
 </body>
 </html>"""
 
@@ -601,6 +626,7 @@ def render_stale_bay_report(rows: list[dict]) -> str:
         </thead>
         <tbody>{''.join(body_rows)}</tbody>
       </table>
+      {print_lifecycle_script(250)}
     </body>
     </html>
     """
@@ -751,7 +777,7 @@ def render_print_package(package: dict) -> str:
 </head>
 <body>
   {body}
-  <script>window.addEventListener("load", () => setTimeout(() => window.print(), 250));</script>
+  {print_lifecycle_script(250)}
 </body>
 </html>"""
 

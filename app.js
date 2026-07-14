@@ -13,6 +13,7 @@
 */
 const STORAGE_KEY = "delivery-list-scanner-demo-v1";
 const STATIONS_KEY = "delivery-list-scanner-stations-v1";
+const LANGUAGE_KEY = "delivery-list-scanner-language-v1";
 const DEFAULT_STATIONS = ["Airport Rd", "Indian Trail", "Greenville", "Customer Pickup", "DTC"];
 const ROLE_OPTIONS = ["Operator", "Supervisor", "Indian Trail Operator", "Indian Trail Lead", "Indian Trail Manager", "Admin"];
 const CUSTOMER_ROUTE_OPTIONS = [
@@ -137,6 +138,14 @@ const state = {
   homeChartQuery: "",
   homeChartLimit: "all",
   homeChartSort: "value-desc",
+  language: (() => {
+    try {
+      return localStorage.getItem(LANGUAGE_KEY) === "es" ? "es" : "en";
+    } catch {
+      return "en";
+    }
+  })(),
+  restoreFullscreenAfterPrint: false,
 };
 
 const els = {
@@ -164,6 +173,9 @@ const els = {
   headerGlobalSearchBtn: document.getElementById("headerGlobalSearchBtn"),
   headerGlobalSearchResults: document.getElementById("headerGlobalSearchResults"),
   globalPrintExportBtn: document.getElementById("globalPrintExportBtn"),
+  languageToggleBtn: document.getElementById("languageToggleBtn"),
+  loginLanguageToggleBtn: document.getElementById("loginLanguageToggleBtn"),
+  fullscreenToggleBtn: document.getElementById("fullscreenToggleBtn"),
   bayAutoAssignOverview: document.getElementById("bayAutoAssignOverview"),
 
   homePage: document.getElementById("homePage"),
@@ -461,6 +473,1297 @@ function pad(value, length) {
   return String(value).padStart(length, "0");
 }
 
+const SPANISH_UI_TEXT = new Map([
+  ["Home", "Inicio"],
+  ["Scan", "Escanear"],
+  ["Racks", "Racks"],
+  ["Bay Map", "Mapa de Bahias"],
+  ["Admin", "Administracion"],
+  ["Search", "Buscar"],
+  ["Print/Export", "Imprimir/Exportar"],
+  ["Sign out", "Cerrar sesion"],
+  ["Sign in", "Iniciar sesion"],
+  ["Secure sign in", "Inicio de sesion seguro"],
+  ["Welcome back", "Bienvenido de nuevo"],
+  ["BFS Email or Username", "Correo BFS o nombre de usuario"],
+  ["Password", "Contrasena"],
+  ["Forgot password?", "Olvido su contrasena?"],
+  ["Password reset", "Restablecer contrasena"],
+  ["Reset access", "Restablecer acceso"],
+  ["Request reset code", "Solicitar codigo"],
+  ["Reset Code", "Codigo de restablecimiento"],
+  ["New Password", "Nueva contrasena"],
+  ["Reset password", "Restablecer contrasena"],
+  ["Back to sign in", "Volver al inicio"],
+  ["Delivery List Overview", "Resumen de listas de entrega"],
+  ["Today's Delivery Progress", "Progreso de entregas de hoy"],
+  ["Find Delivery List", "Buscar lista de entrega"],
+  ["Statistics Dashboard", "Panel de estadisticas"],
+  ["Plant performance", "Rendimiento de planta"],
+  ["Range", "Rango"],
+  ["Last 30 days", "Ultimos 30 dias"],
+  ["Last week", "Ultima semana"],
+  ["Full year", "Ano completo"],
+  ["All lists", "Todas las listas"],
+  ["PDF", "PDF"],
+  ["Remakes", "Rehechos"],
+  ["Stage Breakdown", "Desglose por etapa"],
+  ["Action & Scan Health", "Actividad y estado de escaneo"],
+  ["Date", "Fecha"],
+  ["Stage", "Etapa"],
+  ["Station", "Estacion"],
+  ["Status", "Estado"],
+  ["All", "Todos"],
+  ["Not Scanned", "Sin escanear"],
+  ["Partial", "Parcial"],
+  ["Complete", "Completo"],
+  ["Rushes", "Urgentes"],
+  ["New/Updated", "Nuevo/Actualizado"],
+  ["Errors", "Errores"],
+  ["Route", "Ruta"],
+  ["Glass Type", "Tipo de vidrio"],
+  ["Rows", "Filas"],
+  ["Job Nr.", "Num. de trabajo"],
+  ["Order Nr.", "Num. de orden"],
+  ["Item Nr.", "Num. de articulo"],
+  ["Qty.", "Cant."],
+  ["Qty", "Cant."],
+  ["Dimensions", "Dimensiones"],
+  ["Customer", "Cliente"],
+  ["Flags", "Indicadores"],
+  ["Location", "Ubicacion"],
+  ["Process State", "Estado del proceso"],
+  ["Transportation Method", "Metodo de transporte"],
+  ["Complete Rack", "Completar rack"],
+  ["Complete", "Completar"],
+  ["Uncomplete", "Reabrir"],
+  ["Print Packing List", "Imprimir lista de empaque"],
+  ["Not On The Way", "No esta en camino"],
+  ["Mark Returned", "Marcar devuelto"],
+  ["Scan Barcode", "Escanear codigo de barras"],
+  ["Undo", "Deshacer"],
+  ["Redo", "Rehacer"],
+  ["Manual Scan", "Escaneo manual"],
+  ["Submit", "Enviar"],
+  ["Scan History", "Historial de escaneos"],
+  ["All scans", "Todos los escaneos"],
+  ["Recent scans", "Escaneos recientes"],
+  ["Remaining", "Restante"],
+  ["Needs Review", "Requiere revision"],
+  ["Rack Overview", "Resumen de racks"],
+  ["Edit Racks", "Editar racks"],
+  ["Indian Trail Inventory", "Inventario de Indian Trail"],
+  ["Bay Map Command Center", "Centro de control de bahias"],
+  ["Open list", "Abrir lista"],
+  ["Open manifest", "Abrir manifiesto"],
+  ["Outbound sent", "Salida enviada"],
+  ["Received at Indian Trail", "Recibido en Indian Trail"],
+  ["Admin Dashboard", "Panel de administracion"],
+  ["Delivery List Management", "Administracion de listas de entrega"],
+  ["Edit Delivery Lists", "Editar listas de entrega"],
+  ["Customer Route Rules", "Reglas de rutas de clientes"],
+  ["Edit Customer Routes", "Editar rutas de clientes"],
+  ["Customer Email Rules", "Reglas de correo de clientes"],
+  ["Edit Emails", "Editar correos"],
+  ["Users", "Usuarios"],
+  ["Edit Users", "Editar usuarios"],
+  ["Active Sessions", "Sesiones activas"],
+  ["Open", "Abierto"],
+  ["Empty", "Vacio"],
+  ["On the way", "En camino"],
+  ["Truck", "Camion"],
+  ["Steel", "Acero"],
+  ["Wood", "Madera"],
+  ["Aluminum", "Aluminio"],
+  ["Other", "Otro"],
+  ["No rack", "Sin rack"],
+  ["Loading racks...", "Cargando racks..."],
+  ["Choose an option", "Elija una opcion"],
+  ["No matching options", "No hay opciones coincidentes"],
+  ["Filter options...", "Filtrar opciones..."],
+  ["Open full chart", "Abrir grafica completa"],
+  ["Reset filters", "Restablecer filtros"],
+  ["Save", "Guardar"],
+  ["Cancel", "Cancelar"],
+  ["Delete", "Eliminar"],
+  ["Close", "Cerrar"],
+  ["Add", "Agregar"],
+  ["Edit", "Editar"],
+]);
+
+[
+  ["Bay Map", "Mapa de Bahías"],
+  ["Admin", "Administración"],
+  ["Sign out", "Cerrar sesión"],
+  ["Sign in", "Iniciar sesión"],
+  ["Secure sign in", "Inicio de sesión seguro"],
+  ["Welcome back", "Bienvenido de nuevo"],
+  ["BFS Email or Username", "Correo BFS o nombre de usuario"],
+  ["Password", "Contraseña"],
+  ["Forgot password?", "¿Olvidó su contraseña?"],
+  ["Password reset", "Restablecer contraseña"],
+  ["Request reset code", "Solicitar código"],
+  ["Reset Code", "Código de restablecimiento"],
+  ["New Password", "Nueva contraseña"],
+  ["Reset password", "Restablecer contraseña"],
+  ["Back to sign in", "Volver al inicio de sesión"],
+  ["Today's Delivery Progress", "Progreso de entregas de hoy"],
+  ["Statistics Dashboard", "Panel de estadísticas"],
+  ["Last 30 days", "Últimos 30 días"],
+  ["Last week", "Última semana"],
+  ["Full year", "Año completo"],
+  ["Station", "Estación"],
+  ["Location", "Ubicación"],
+  ["Manual Scan", "Escaneo manual"],
+  ["Scan History", "Historial de escaneos"],
+  ["Needs Review", "Requiere revisión"],
+  ["Bay Map Command Center", "Centro de control de bahías"],
+  ["Admin Dashboard", "Panel de administración"],
+  ["Delivery List Management", "Administración de listas de entrega"],
+  ["Customer Route Rules", "Reglas de rutas de clientes"],
+  ["Active Sessions", "Sesiones activas"],
+  ["All stages", "Todas las etapas"],
+  ["All statuses", "Todos los estados"],
+  ["All glass types", "Todos los tipos de vidrio"],
+  ["All bay orders", "Todas las órdenes en bahías"],
+  ["Attention", "Atención"],
+  ["Assigned station", "Estación asignada"],
+  ["Available", "Disponible"],
+  ["Bay", "Bahía"],
+  ["Bay Auto Assigner", "Asignador automático de bahías"],
+  ["Bay Code", "Código de bahía"],
+  ["Bay Directory", "Directorio de bahías"],
+  ["Bay Scan", "Escaneo de bahía"],
+  ["Bay Scan History", "Historial de escaneos de bahía"],
+  ["Bay Scanner Rules", "Reglas del escáner de bahías"],
+  ["Blocked Scans", "Escaneos bloqueados"],
+  ["Cancel", "Cancelar"],
+  ["Chart data", "Datos de la gráfica"],
+  ["Chart style", "Estilo de gráfica"],
+  ["Check", "Verificar"],
+  ["Clear", "Limpiar"],
+  ["Clear filters", "Limpiar filtros"],
+  ["Close", "Cerrar"],
+  ["Collapse All", "Contraer todo"],
+  ["Customer Emails", "Correos de clientes"],
+  ["Customer manifests", "Manifiestos de clientes"],
+  ["Data driven", "Basado en datos"],
+  ["Delivery Date", "Fecha de entrega"],
+  ["Delivery List", "Lista de entrega"],
+  ["Delivery lists", "Listas de entrega"],
+  ["Details open when a bay is selected", "Los detalles se abren al seleccionar una bahía"],
+  ["Display", "Mostrar"],
+  ["Done", "Listo"],
+  ["Donut chart", "Gráfica de dona"],
+  ["Edit Bays", "Editar bahías"],
+  ["Edit Map", "Editar mapa"],
+  ["Edit Physical Bay Map", "Editar mapa físico de bahías"],
+  ["Edit auto assigner", "Editar asignación automática"],
+  ["Edit customer routes", "Editar rutas de clientes"],
+  ["Edit delivery lists", "Editar listas de entrega"],
+  ["Edit emails", "Editar correos"],
+  ["Edit lookups", "Editar catálogos"],
+  ["Edit role permissions", "Editar permisos de roles"],
+  ["Edit rules", "Editar reglas"],
+  ["Edit users", "Editar usuarios"],
+  ["Errors / Needs Review", "Errores / Requiere revisión"],
+  ["Expand All", "Expandir todo"],
+  ["Export XLSX", "Exportar XLSX"],
+  ["Filter chart labels", "Filtrar etiquetas de la gráfica"],
+  ["Filters", "Filtros"],
+  ["Find Bay", "Buscar bahía"],
+  ["Find Match", "Buscar coincidencia"],
+  ["Full Statistics Chart", "Gráfica completa de estadísticas"],
+  ["Glass type", "Tipo de vidrio"],
+  ["Grouped by rack/category", "Agrupado por rack/categoría"],
+  ["Highest first", "Mayor primero"],
+  ["Import / Update Delivery List", "Importar / Actualizar lista de entrega"],
+  ["Import folder and date settings", "Carpeta de importación y fechas"],
+  ["Indian Trail Bay Assignment", "Asignación de bahía de Indian Trail"],
+  ["Indian Trail only", "Solo Indian Trail"],
+  ["Item", "Artículo"],
+  ["Latest 2", "Últimos 2"],
+  ["Lists", "Listas"],
+  ["Lowest first", "Menor primero"],
+  ["Manage Bay Items", "Administrar artículos de bahía"],
+  ["Manage Items", "Administrar artículos"],
+  ["Manual", "Manual"],
+  ["Manual Assign", "Asignación manual"],
+  ["Manual Bay Assign", "Asignación manual de bahía"],
+  ["Move Item", "Mover artículo"],
+  ["Occupied", "Ocupado"],
+  ["Old Bay Review", "Revisión de bahías antiguas"],
+  ["Order", "Orden"],
+  ["Outbound", "Salida"],
+  ["Physical Bay Map", "Mapa físico de bahías"],
+  ["Print", "Imprimir"],
+  ["Print / Export Delivery Lists", "Imprimir / Exportar listas de entrega"],
+  ["Print Packing Slip", "Imprimir lista de empaque"],
+  ["Products, routes, and process options.", "Productos, rutas y opciones de proceso."],
+  ["Progress by route/stage", "Progreso por ruta/etapa"],
+  ["Rack recovery", "Recuperación de racks"],
+  ["Ready notices", "Avisos de disponibilidad"],
+  ["Reason", "Motivo"],
+  ["Review", "Revisar"],
+  ["Run Print/Export", "Ejecutar Imprimir/Exportar"],
+  ["Rush", "Urgente"],
+  ["Rush orders", "Órdenes urgentes"],
+  ["Save Layout", "Guardar diseño"],
+  ["Scan staging pieces into racks, close racks, and print rack packing lists.", "Escanee piezas de preparación en racks, cierre racks e imprima listas de empaque."],
+  ["Scanned vs open work", "Escaneado frente a trabajo pendiente"],
+  ["Scans by operator", "Escaneos por operador"],
+  ["Select a delivery list", "Seleccione una lista de entrega"],
+  ["Select an item to begin.", "Seleccione un artículo para comenzar."],
+  ["Selected Bay", "Bahía seleccionada"],
+  ["Selected Bay Tools", "Herramientas de la bahía seleccionada"],
+  ["Settings", "Configuración"],
+  ["Show all", "Mostrar todo"],
+  ["Sort", "Ordenar"],
+  ["Specific customers", "Clientes específicos"],
+  ["Specific orders", "Órdenes específicas"],
+  ["Statistics explorer", "Explorador de estadísticas"],
+  ["Summary", "Resumen"],
+  ["System activity", "Actividad del sistema"],
+  ["Target Bay", "Bahía de destino"],
+  ["Today", "Hoy"],
+  ["Top 10", "10 principales"],
+  ["Top 20", "20 principales"],
+  ["Top 5", "5 principales"],
+  ["Updated items only", "Solo artículos actualizados"],
+  ["Users & Permissions", "Usuarios y permisos"],
+  ["Waiting", "En espera"],
+].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
+
+const SPANISH_UI_ADDITIONS = new Map([
+  ["+ New Bay Group", "+ Nuevo grupo de bahías"],
+  ["A to Z", "A a Z"],
+  ["Action", "Acción"],
+  ["Add to bay", "Agregar a la bahía"],
+  ["are active bays without a confirmed map group/position. Assign them to a group here or in Edit Map.", "son bahías activas sin un grupo o una posición confirmados en el mapa. Asígnelas a un grupo aquí o en Editar mapa."],
+  ["Assign", "Asignar"],
+  ["Assign order, Job Nr., barcode, or wording into target bay.", "Asigne una orden, un núm. de trabajo, un código de barras o texto a la bahía de destino."],
+  ["Attention filters", "Filtros de atención"],
+  ["Auto", "Automático"],
+  ["Auto Assign", "Asignación automática"],
+  ["Auto suggested bay", "Bahía sugerida automáticamente"],
+  ["Auto uses the preassigned or suggested bay. Manual sends the selected bay with the next Indian Trail scan.", "Automático usa la bahía preasignada o sugerida. Manual envía la bahía seleccionada con el siguiente escaneo de Indian Trail."],
+  ["Bar chart", "Gráfica de barras"],
+  ["Bay barcode formats", "Formatos de códigos de barras de bahía"],
+  ["Bay glass type filter", "Filtro de tipo de vidrio de bahía"],
+  ["Bay map search and filters", "Búsqueda y filtros del mapa de bahías"],
+  ["Bay Map v16: command-center layout keeps the scanner available while giving users faster search, filters, and bay actions.", "El diseño del centro de control mantiene disponible el escáner y ofrece búsquedas, filtros y acciones de bahía más rápidas."],
+  ["Bay orders", "Órdenes en bahías"],
+  ["Bay scan undo and redo", "Deshacer y rehacer escaneos de bahía"],
+  ["Bay special filter", "Filtro especial de bahía"],
+  ["Bay status filter", "Filtro de estado de bahía"],
+  ["Bay type mapping", "Asignación de tipos de bahía"],
+  ["Check from", "Revisar desde"],
+  ["Check through", "Revisar hasta"],
+  ["Choose add/remove, pick a target bay when needed, then scan.", "Elija agregar o quitar, seleccione una bahía de destino cuando sea necesario y luego escanee."],
+  ["Choose where CPU, mirrors, standard, tall, and oversize glass should go.", "Elija a dónde deben ir CPU, espejos, vidrio estándar, alto y sobredimensionado."],
+  ["Clear Item", "Quitar artículo"],
+  ["Clear SDI", "Quitar SDI"],
+  ["Clear Rush / Remake", "Quitar urgente / rehacer"],
+  ["Click bay or type code", "Haga clic en una bahía o escriba el código"],
+  ["Close admin window", "Cerrar ventana de administración"],
+  ["Close edit bays window", "Cerrar ventana de edición de bahías"],
+  ["Close manage items window", "Cerrar ventana de administración de artículos"],
+  ["Close old bay orders", "Cerrar órdenes antiguas de bahía"],
+  ["Close print/export", "Cerrar Imprimir/Exportar"],
+  ["Close SDI window", "Cerrar ventana SDI"],
+  ["Close selected bay", "Cerrar bahía seleccionada"],
+  ["Close statistics chart", "Cerrar gráfica de estadísticas"],
+  ["Control thresholds and manual assignment categories.", "Controle los límites y las categorías de asignación manual."],
+  ["Create, rename, delete, and set bay group behavior from one workflow.", "Cree, renombre, elimine y configure grupos de bahías desde un solo flujo de trabajo."],
+  ["Current dashboard range", "Rango actual del panel"],
+  ["Customer Pickup", "Recogida del cliente"],
+  ["Default: last week + future", "Predeterminado: última semana + futuras"],
+  ["Delivery list filters", "Filtros de listas de entrega"],
+  ["Delivery list pages", "Páginas de listas de entrega"],
+  ["Delivery List Scanner", "Escáner de listas de entrega"],
+  ["Drag whole bay groups into the layout you want. Bay names, bay counts, and bay rules are handled in the separate Edit Bays GUI.", "Arrastre grupos completos de bahías al diseño deseado. Los nombres, cantidades y reglas de bahía se administran en la ventana separada Editar bahías."],
+  ["Enter fullscreen", "Entrar en pantalla completa"],
+  ["Exit fullscreen", "Salir de pantalla completa"],
+  ["Enter your BFS email or username. In local mode, the reset code will display here so an admin can complete the reset without email delivery.", "Ingrese su correo BFS o nombre de usuario. En modo local, el código aparecerá aquí para que un administrador pueda completar el restablecimiento sin enviar un correo."],
+  ["Exceptions and manual activity", "Excepciones y actividad manual"],
+  ["Explore the selected dashboard range.", "Explore el rango seleccionado del panel."],
+  ["Extra scan formats for the Bay Map scanner only.", "Formatos de escaneo adicionales solo para el escáner del mapa de bahías."],
+  ["Find bays, assign glass, review old orders, and manage the physical bay layout from one page.", "Busque bahías, asigne vidrio, revise órdenes antiguas y administre el diseño físico desde una sola página."],
+  ["Generate statistics PDF report", "Generar informe PDF de estadísticas"],
+  ["Glass Delivery Scanner", "Escáner de entregas de vidrio"],
+  ["Glass type filters", "Filtros de tipo de vidrio"],
+  ["Glass type quantity chart", "Gráfica de cantidad por tipo de vidrio"],
+  ["Imports plus admin-added values.", "Importaciones más valores agregados por el administrador."],
+  ["In Transit: 0", "En tránsito: 0"],
+  ["Indian Trail bay actions", "Acciones de bahía de Indian Trail"],
+  ["Indian Trail bay scanner", "Escáner de bahías de Indian Trail"],
+  ["Indian Trail Route", "Ruta de Indian Trail"],
+  ["Item Nr. optional", "Núm. de artículo opcional"],
+  ["Known non-standard labels that should not warn.", "Etiquetas no estándar conocidas que no deben generar advertencias."],
+  ["Last updated: --", "Última actualización: --"],
+  ["List", "Lista"],
+  ["Live", "En vivo"],
+  ["Local demo", "Demostración local"],
+  ["Lookup Manager", "Administrador de catálogos"],
+  ["Main pages", "Páginas principales"],
+  ["Manage system settings, users, stations, imports, racks, and plant operations.", "Administre la configuración, los usuarios, las estaciones, las importaciones, los racks y las operaciones de planta."],
+  ["Manual assign memory", "Memoria de asignación manual"],
+  ["Manual bay location", "Ubicación manual de bahía"],
+  ["Manual Edit dropdowns", "Menús de edición manual"],
+  ["Manual edit stage", "Etapa de edición manual"],
+  ["Manually select Indian Trail bay", "Seleccionar manualmente una bahía de Indian Trail"],
+  ["Map layout edit mode", "Modo de edición del diseño del mapa"],
+  ["Mark Rush / SDI", "Marcar urgente / SDI"],
+  ["Mark rush, remake, or same-day install handling without mixing this workflow into Manage Items.", "Marque urgente, rehacer o instalación el mismo día sin mezclar este flujo con Administrar artículos."],
+  ["Mark SDI / Rush", "Marcar SDI / urgente"],
+  ["Menu", "Menú"],
+  ["Mobile navigation", "Navegación móvil"],
+  ["Move / target bay", "Mover / bahía de destino"],
+  ["Move, clear, target, or mark items without using the SDI window.", "Mueva, quite, dirija o marque artículos sin usar la ventana SDI."],
+  ["New today", "Nuevo hoy"],
+  ["Newest future list", "Lista futura más reciente"],
+  ["No bay scans yet", "Aún no hay escaneos de bahía"],
+  ["No bay selected", "No hay una bahía seleccionada"],
+  ["No scans yet", "Aún no hay escaneos"],
+  ["Old Bays", "Bahías antiguas"],
+  ["Old orders", "Órdenes antiguas"],
+  ["Optional", "Opcional"],
+  ["Optional bay", "Bahía opcional"],
+  ["Optional, comma-separated", "Opcional, separado por comas"],
+  ["Order / Job / Scan Text", "Orden / trabajo / texto escaneado"],
+  ["Order Type", "Tipo de orden"],
+  ["Order, Job Nr., barcode, or label text", "Orden, núm. de trabajo, código de barras o texto de etiqueta"],
+  ["Pagination", "Paginación"],
+  ["Picking / SDI", "Selección / SDI"],
+  ["Plant Operations", "Operaciones de planta"],
+  ["Pre Assigned", "Preasignado"],
+  ["Print Investigation List", "Imprimir lista de investigación"],
+  ["Production scanning, rack control, and delivery visibility in one place.", "Escaneo de producción, control de racks y visibilidad de entregas en un solo lugar."],
+  ["Ready", "Listo"],
+  ["Reason / note", "Motivo / nota"],
+  ["Recent bay scans", "Escaneos recientes de bahía"],
+  ["Redo last bay action", "Rehacer la última acción de bahía"],
+  ["Redo last scan", "Rehacer el último escaneo"],
+  ["Redo layout change", "Rehacer cambio de diseño"],
+  ["Remove from bay", "Quitar de la bahía"],
+  ["Review orders that have been sitting in Indian Trail bays for more than 10 days. Snooze rows that are verified, or print the investigation list for a physical walkthrough.", "Revise las órdenes que llevan más de 10 días en bahías de Indian Trail. Pospuonga las filas verificadas o imprima la lista de investigación para una revisión física."],
+  ["Route filters", "Filtros de ruta"],
+  ["Safe", "Seguro"],
+  ["Scan order to remove from bay...", "Escanee una orden para quitarla de la bahía..."],
+  ["Scan tracking", "Seguimiento de escaneos"],
+  ["Scanner:", "Escáner:"],
+  ["SDI / Rush", "SDI / urgente"],
+  ["Rush / Remake", "Urgente / rehacer"],
+  ["SDI / Rush Order", "Orden SDI / urgente"],
+  ["Rush / Remake Order", "Orden urgente / rehecha"],
+  ["Search bay, order, item, customer, glass type, size...", "Buscar bahía, orden, artículo, cliente, tipo de vidrio o tamaño..."],
+  ["Search first, then click a bay to manage its orders, target it for scanning, or start a move.", "Busque primero y luego haga clic en una bahía para administrar sus órdenes, enviarla al escáner o iniciar un movimiento."],
+  ["Search glass types, stages, users...", "Buscar tipos de vidrio, etapas o usuarios..."],
+  ["Search order or customer", "Buscar orden o cliente"],
+  ["Search order, item, customer, bay...", "Buscar orden, artículo, cliente o bahía..."],
+  ["Select a bay on the map to view orders, send the bay to the scanner, hold/block it, or move assigned glass.", "Seleccione una bahía en el mapa para ver órdenes, enviarla al escáner, ponerla en espera/bloquearla o mover el vidrio asignado."],
+  ["Select Rush or Remake", "Seleccione urgente o rehacer"],
+  ["Send straight to installer truck / skip bay", "Enviar directamente al camión del instalador / omitir bahía"],
+  ["Sent after all customer pieces are scanned on staging.", "Se envía después de escanear en preparación todas las piezas del cliente."],
+  ["Sent after delivery-list import/update when an email match exists.", "Se envía después de importar/actualizar la lista cuando existe una coincidencia de correo."],
+  ["Showing all chart categories", "Mostrando todas las categorías de la gráfica"],
+  ["Sign in with your BFS email or assigned username to continue.", "Inicie sesión con su correo BFS o nombre de usuario asignado para continuar."],
+  ["Signed in", "Sesión iniciada"],
+  ["Snooze all days", "Posponer todos los días"],
+  ["Snooze selected/all", "Posponer seleccionados/todos"],
+  ["SO / Order Nr.", "SO / Núm. de orden"],
+  ["Job Nr. / SO / Order Nr.", "Núm. de trabajo / SO / Núm. de orden"],
+  ["Paste the full Job Nr., customer description, SO number, order number, or barcode.", "Pegue el núm. de trabajo completo, la descripción del cliente, el número SO, el número de orden o el código de barras."],
+  ["Enter a Job Nr., SO number, order number, or barcode.", "Ingrese un núm. de trabajo, número SO, número de orden o código de barras."],
+  ["Bay Map update complete", "Actualización del mapa de bahías completada"],
+  ["Bay Map update cleared", "Actualización del mapa de bahías eliminada"],
+  ["Rush marked", "Urgente marcado"],
+  ["Remake marked", "Rehacer marcado"],
+  ["Rush / Remake cleared", "Marca urgente / rehacer eliminada"],
+  ["Job Nr. / Order", "Núm. de trabajo / orden"],
+  ["Items updated", "Artículos actualizados"],
+  ["Print Rush sheet", "Imprimir hoja urgente"],
+  ["Print remake sheet", "Imprimir hoja de rehacer"],
+  ["Done", "Listo"],
+  ["Update complete", "Actualización completada"],
+  ["Saved successfully", "Guardado correctamente"],
+  ["Print complete", "Impresión completada"],
+  ["Return to fullscreen", "Volver a pantalla completa"],
+  ["The print window closed. Your browser requires one click to enter fullscreen again.", "La ventana de impresión se cerró. Su navegador requiere un clic para volver a pantalla completa."],
+  ["Stay in windowed mode", "Permanecer en modo ventana"],
+  ["Allow popups to open the print preview.", "Permita ventanas emergentes para abrir la vista previa de impresión."],
+  ["Job Nr., SO number, order number, or barcode was not found on active delivery lists", "No se encontró el núm. de trabajo, número SO, número de orden o código de barras en las listas de entrega activas"],
+  ["Select a bay assignment or enter a Job Nr., SO number, or order number", "Seleccione una asignación de bahía o ingrese un núm. de trabajo, número SO o número de orden"],
+  ["Stage completion", "Finalización por etapa"],
+  ["Stages", "Etapas"],
+  ["Status filters", "Filtros de estado"],
+  ["Tall / oversize rules", "Reglas para alto / sobredimensionado"],
+  ["Temp Delivery Lists folder", "Carpeta temporal de listas de entrega"],
+  ["Temp Delivery Lists folder path", "Ruta de la carpeta temporal de listas de entrega"],
+  ["Time", "Hora"],
+  ["Undo last bay action", "Deshacer la última acción de bahía"],
+  ["Undo last scan", "Deshacer el último escaneo"],
+  ["Undo layout change", "Deshacer cambio de diseño"],
+  ["Unmapped bays", "Bahías sin asignar en el mapa"],
+  ["Use auto-suggested bay", "Usar bahía sugerida automáticamente"],
+  ["Use Bay For Scanner", "Usar bahía para el escáner"],
+  ["Z to A", "Z a A"],
+  ["Loading Indian Trail bays...", "Cargando bahías de Indian Trail..."],
+  ["Allow popups to generate the statistics PDF report.", "Permita ventanas emergentes para generar el informe PDF de estadísticas."],
+  ["Assignment not found.", "No se encontró la asignación."],
+  ["Bay auto-assigner settings saved.", "Se guardó la configuración del asignador automático de bahías."],
+  ["Bay map layout changes were cancelled.", "Se cancelaron los cambios del diseño del mapa de bahías."],
+  ["Bay map layout confirmed.", "Se confirmó el diseño del mapa de bahías."],
+  ["Choose a destination rack before confirming the move.", "Elija un rack de destino antes de confirmar el movimiento."],
+  ["Choose a manual Indian Trail bay before scanning, or switch bay assignment back to Auto.", "Elija una bahía manual de Indian Trail antes de escanear o cambie la asignación a Automático."],
+  ["Choose a rack or truck before overriding outbound scan safety.", "Elija un rack o camión antes de omitir la seguridad del escaneo de salida."],
+  ["Choose a staging list and rack, then scan a piece.", "Elija una lista de preparación y un rack, y luego escanee una pieza."],
+  ["Complete this rack before printing its packing list.", "Complete este rack antes de imprimir su lista de empaque."],
+  ["Delete this line item from its delivery list?", "¿Eliminar esta línea de su lista de entrega?"],
+  ["Email body copied.", "Se copió el cuerpo del correo."],
+  ["Enter or generate a new password before saving.", "Ingrese o genere una contraseña nueva antes de guardar."],
+  ["Manual bay assign needs an order number.", "La asignación manual de bahía necesita un número de orden."],
+  ["Manual scan needs an order number and item number.", "El escaneo manual necesita un número de orden y de artículo."],
+  ["Move all grouped bays out of the temporary holding area before closing edit mode.", "Mueva todos los grupos de bahías fuera del área temporal antes de cerrar el modo de edición."],
+  ["Move all grouped bays out of the temporary holding area before confirming.", "Mueva todos los grupos de bahías fuera del área temporal antes de confirmar."],
+  ["Move all grouped bays out of the temporary holding area before leaving the Bay Map.", "Mueva todos los grupos de bahías fuera del área temporal antes de salir del mapa de bahías."],
+  ["No bay map match found for that search.", "No se encontró una coincidencia en el mapa para esa búsqueda."],
+  ["No delivery lists are available to print.", "No hay listas de entrega disponibles para imprimir."],
+  ["Only admins can edit the bay map layout.", "Solo los administradores pueden editar el diseño del mapa de bahías."],
+  ["Save Customer Email", "Guardar correo del cliente"],
+  ["Select a bay before sending it to the scanner.", "Seleccione una bahía antes de enviarla al escáner."],
+  ["Select a bay first.", "Seleccione primero una bahía."],
+  ["Select an item before opening SDI.", "Seleccione un artículo antes de abrir SDI."],
+  ["Select at least one stage to print or export.", "Seleccione al menos una etapa para imprimir o exportar."],
+  ["Select Rush or Remake before marking SDI.", "Seleccione urgente o rehacer antes de marcar SDI."],
+  ["Spacer added to the bay map.", "Se agregó un separador al mapa de bahías."],
+  ["Temporary password generated. Save it, then give it to the user.", "Se generó una contraseña temporal. Guárdela y entréguela al usuario."],
+  ["That bay does not have an assignment to move.", "Esa bahía no tiene una asignación para mover."],
+  ["Use the grouped bay header to move bay sets around the edit grid.", "Use el encabezado del grupo para mover conjuntos de bahías en la cuadrícula de edición."],
+  ["You have unsaved manual delivery-list edits. Close without saving?", "Tiene cambios manuales sin guardar. ¿Cerrar sin guardar?"],
+  ["You have unsaved manual delivery-list edits. Go back without saving?", "Tiene cambios manuales sin guardar. ¿Volver sin guardar?"],
+  ["You have unsaved manual delivery-list edits. Leave without saving?", "Tiene cambios manuales sin guardar. ¿Salir sin guardar?"],
+  ["You have unsaved manual delivery-list edits. Load another stage without saving?", "Tiene cambios manuales sin guardar. ¿Cargar otra etapa sin guardar?"],
+  ["Active delivery lists", "Listas de entrega activas"],
+  ["Active Delivery Lists", "Listas de entrega activas"],
+  ["Active Racks", "Racks activos"],
+  ["Active Users", "Usuarios activos"],
+  ["Admin & Users", "Administración y usuarios"],
+  ["Admin dashboard, users, roles, active sessions, passwords, and updates.", "Panel de administración, usuarios, roles, sesiones activas, contraseñas y actualizaciones."],
+  ["All Bay Scans", "Todos los escaneos de bahía"],
+  ["All Bays", "Todas las bahías"],
+  ["All Delivery Lists", "Todas las listas de entrega"],
+  ["All matching", "Todas las coincidencias"],
+  ["All Users", "Todos los usuarios"],
+  ["Ambiguous delivery-list match", "Coincidencia ambigua de lista de entrega"],
+  ["Another active route rule already uses that customer pattern", "Otra regla de ruta activa ya usa ese patrón de cliente"],
+  ["Assigned", "Asignado"],
+  ["Available bay", "Bahía disponible"],
+  ["Bad scans", "Escaneos incorrectos"],
+  ["Bay action", "Acción de bahía"],
+  ["Bay actions", "Acciones de bahía"],
+  ["Bay Actions", "Acciones de bahía"],
+  ["Bay Overrides", "Anulaciones de bahía"],
+  ["Bay row not found.", "No se encontró la fila de la bahía."],
+  ["Blocked", "Bloqueado"],
+  ["Box label", "Etiqueta de caja"],
+  ["Category", "Categoría"],
+  ["Chart data", "Datos de la gráfica"],
+  ["Chart style", "Estilo de gráfica"],
+  ["Choose a dashboard section to view details.", "Elija una sección del panel para ver detalles."],
+  ["Choose a target bay before manual assigning.", "Elija una bahía de destino antes de asignar manualmente."],
+  ["Choose an option", "Elija una opción"],
+  ["Clear filters", "Limpiar filtros"],
+  ["Clear or move the rack contents before deleting this rack", "Quite o mueva el contenido del rack antes de eliminarlo"],
+  ["Customer manifests", "Manifiestos de clientes"],
+  ["Data driven", "Basado en datos"],
+  ["Delete all stages", "Eliminar todas las etapas"],
+  ["Delivery list not found", "No se encontró la lista de entrega"],
+  ["Draft", "Borrador"],
+  ["Email Drafts", "Borradores de correo"],
+  ["Email draft not found", "No se encontró el borrador de correo"],
+  ["Enter a valid BFS email address", "Ingrese un correo BFS válido"],
+  ["Failed", "Fallido"],
+  ["Generate temporary password", "Generar contraseña temporal"],
+  ["Glass/product descriptions used in manual delivery-list edits.", "Descripciones de vidrio/producto usadas en la edición manual de listas."],
+  ["Importing, previewing, editing, printing, reports, and global search.", "Importación, vista previa, edición, impresión, informes y búsqueda global."],
+  ["Inactive", "Inactivo"],
+  ["Indian Trail receiving, bay map, bay actions, SDI, reports, and layout.", "Recepción de Indian Trail, mapa de bahías, acciones, SDI, informes y diseño."],
+  ["Invalid or expired reset code", "Código de restablecimiento inválido o vencido"],
+  ["Line item not found", "No se encontró la línea"],
+  ["Logged in", "Sesión activa"],
+  ["Logged out", "Sesión cerrada"],
+  ["Main scanner access, scan visibility, undo, and reset controls.", "Acceso principal al escáner, visibilidad de escaneos, deshacer y controles de reinicio."],
+  ["Manual adjustments and exception review/resolution.", "Ajustes manuales y revisión/resolución de excepciones."],
+  ["New", "Nuevo"],
+  ["New Stage", "Nueva etapa"],
+  ["No Updates", "Sin cambios"],
+  ["No data", "Sin datos"],
+  ["No matching options", "No hay opciones coincidentes"],
+  ["No updates", "Sin cambios"],
+  ["Operator", "Operador"],
+  ["Indian Trail Operator", "Operador de Indian Trail"],
+  ["Indian Trail Lead", "Líder de Indian Trail"],
+  ["Indian Trail Manager", "Gerente de Indian Trail"],
+  ["Password must be at least 8 characters", "La contraseña debe tener al menos 8 caracteres"],
+  ["Password reset. Sign in with the new password.", "Contraseña restablecida. Inicie sesión con la nueva contraseña."],
+  ["Please sign in to continue.", "Inicie sesión para continuar."],
+  ["Queued", "En cola"],
+  ["Rack and scan management", "Administración de racks y escaneos"],
+  ["Rack overview, rack scanning, and rack management.", "Resumen, escaneo y administración de racks."],
+  ["Ready notices", "Avisos de disponibilidad"],
+  ["Recorded scan activity by user for the selected dashboard range.", "Actividad de escaneo por usuario para el rango seleccionado."],
+  ["Remake lines", "Líneas rehechas"],
+  ["Remake pieces", "Piezas rehechas"],
+  ["Remake pieces and distinct remake lines for the active dashboard filter.", "Piezas rehechas y líneas distintas para el filtro activo del panel."],
+  ["Remakes in selected range", "Rehechos en el rango seleccionado"],
+  ["Request failed:", "La solicitud falló:"],
+  ["Reset all stages", "Restablecer todas las etapas"],
+  ["Reset scans", "Restablecer escaneos"],
+  ["Reset scans?", "¿Restablecer escaneos?"],
+  ["Role not found", "No se encontró el rol"],
+  ["Routing values such as CPU, DTC, GNV, or custom customer routes.", "Valores de ruta como CPU, DTC, GNV o rutas personalizadas de clientes."],
+  ["Save password", "Guardar contraseña"],
+  ["Save role", "Guardar rol"],
+  ["Save route", "Guardar ruta"],
+  ["Save Rule", "Guardar regla"],
+  ["Scanning", "Escaneando"],
+  ["Scanning and list access", "Escaneo y acceso a listas"],
+  ["Search failed:", "La búsqueda falló:"],
+  ["Send status", "Estado de envío"],
+  ["Sent", "Enviado"],
+  ["Show password", "Mostrar contraseña"],
+  ["SMTP live", "SMTP activo"],
+  ["Station setup and customer route rule management.", "Configuración de estaciones y reglas de rutas de clientes."],
+  ["Stations", "Estaciones"],
+  ["Stations & Rules", "Estaciones y reglas"],
+  ["Status values such as New, Updated, Rush, Remake, and SDI.", "Valores de estado como Nuevo, Actualizado, Urgente, Rehacer y SDI."],
+  ["System notice", "Aviso del sistema"],
+  ["Temporary password", "Contraseña temporal"],
+  ["The default admin user cannot be deactivated", "El usuario administrador predeterminado no se puede desactivar"],
+  ["This is a test email from the Delivery List Scanner customer email system.", "Este es un correo de prueba del sistema de correos para clientes del Escáner de listas de entrega."],
+  ["Total Bays", "Bahías totales"],
+  ["Total Qty", "Cantidad total"],
+  ["Truck Pieces", "Piezas en camión"],
+  ["Unable to load delivery list", "No se pudo cargar la lista de entrega"],
+  ["Unassigned", "Sin asignar"],
+  ["Unavailable", "No disponible"],
+  ["Unknown", "Desconocido"],
+  ["Unknown user", "Usuario desconocido"],
+  ["Updated", "Actualizado"],
+  ["Updated at:", "Actualizado:"],
+  ["User actions", "Acciones de usuario"],
+  ["User and system management", "Administración de usuarios y sistema"],
+  ["Users", "Usuarios"],
+  ["Yes", "Sí"],
+  ["No", "No"],
+  ["Remake", "Rehacer"],
+  ["Add Rule", "Agregar regla"],
+  ["Add spacer to which bay group?", "¿A qué grupo de bahías desea agregar un separador?"],
+  ["Add spacer", "Agregar separador"],
+  ["Bay auto-assign thresholds must be greater than zero", "Los límites de asignación automática deben ser mayores que cero"],
+  ["Bay group is required", "El grupo de bahía es obligatorio"],
+  ["Bay group not found", "No se encontró el grupo de bahía"],
+  ["Bay not found", "No se encontró la bahía"],
+  ["Bay status must be Available, ManualAssign, or ScanBlocked", "El estado debe ser Disponible, Asignación manual o Escaneo bloqueado"],
+  ["Clear or move active assignments before deleting this bay", "Quite o mueva las asignaciones activas antes de eliminar esta bahía"],
+  ["Clear or move active assignments before deleting this group", "Quite o mueva las asignaciones activas antes de eliminar este grupo"],
+  ["Customer email contact not found", "No se encontró el contacto de correo del cliente"],
+  ["Customer match text is required", "El texto de coincidencia del cliente es obligatorio"],
+  ["Customer pattern is required", "El patrón del cliente es obligatorio"],
+  ["Customer route rule not found", "No se encontró la regla de ruta del cliente"],
+  ["Default stations cannot be removed", "Las estaciones predeterminadas no se pueden eliminar"],
+  ["DTC customer route rules require a delivery address", "Las reglas DTC requieren una dirección de entrega"],
+  ["Enter a valid recipient email for the test message", "Ingrese un correo de destinatario válido para el mensaje de prueba"],
+  ["Identity, reset code, and new password are required", "Se requieren la identidad, el código y la contraseña nueva"],
+  ["If that account exists, a reset code was created.", "Si la cuenta existe, se creó un código de restablecimiento."],
+  ["Invalid exception status", "Estado de excepción inválido"],
+  ["Lookup type must be product, route, or process", "El tipo de catálogo debe ser producto, ruta o proceso"],
+  ["Lookup value is required", "El valor del catálogo es obligatorio"],
+  ["Manual assignment text is required", "El texto de asignación manual es obligatorio"],
+  ["Manual input pattern is required", "El patrón de entrada manual es obligatorio"],
+  ["Manual input rule type must be exact, contains, or regex", "La regla manual debe ser exacta, contiene o expresión regular"],
+  ["Move amount is required", "La cantidad a mover es obligatoria"],
+  ["No active bay assignment matched that scan", "Ninguna asignación activa de bahía coincidió con ese escaneo"],
+  ["No active Indian Trail inbound list", "No hay una lista de entrada activa de Indian Trail"],
+  ["No delivery lists found for that date", "No se encontraron listas para esa fecha"],
+  ["No outbound delivery list was found for this rack", "No se encontró una lista de salida para este rack"],
+  ["Not on active Indian Trail inbound list. Send to supervisor.", "No está en la lista activa de entrada de Indian Trail. Envíe al supervisor."],
+  ["Only line items already scanned at Staging can be assigned to a rack", "Solo las líneas ya escaneadas en Preparación se pueden asignar a un rack"],
+  ["Only racks marked on the way can be marked Not On The Way", "Solo los racks marcados En camino se pueden marcar No está en camino"],
+  ["Order number was not found on active delivery lists", "No se encontró el número de orden en las listas activas"],
+  ["Oversize minimum must be greater than or equal to tall minimum", "El mínimo sobredimensionado debe ser mayor o igual al mínimo alto"],
+  ["Quantity already received. Send to supervisor.", "La cantidad ya fue recibida. Envíe al supervisor."],
+  ["Rack code is required", "El código del rack es obligatorio"],
+  ["Rack destination could not be determined safely. Clear or split this rack before completing it.", "No se pudo determinar el destino del rack de forma segura. Vacíe o divida el rack antes de completarlo."],
+  ["Rack has no active pieces to scan outbound", "El rack no tiene piezas activas para escanear en salida"],
+  ["Rack item not found", "No se encontró el artículo del rack"],
+  ["Rack line item not found", "No se encontró la línea del rack"],
+  ["Rack must have active pieces before it can be completed", "El rack debe tener piezas activas antes de completarlo"],
+  ["Rack scans must be made from a staging delivery list", "Los escaneos de rack deben hacerse desde una lista de Preparación"],
+  ["Rack set prefix is required", "El prefijo del conjunto de racks es obligatorio"],
+  ["Reset code created. Use it within 30 minutes.", "Código creado. Úselo dentro de 30 minutos."],
+  ["Route is required", "La ruta es obligatoria"],
+  ["Scan barcode is required", "El código de barras es obligatorio"],
+  ["Scanned quantity must be between 0 and total quantity", "La cantidad escaneada debe estar entre 0 y la cantidad total"],
+  ["Select a bay assignment or enter an order number", "Seleccione una asignación de bahía o ingrese un número de orden"],
+  ["Station name is required", "El nombre de la estación es obligatorio"],
+  ["Station not found", "No se encontró la estación"],
+  ["That BFS email is already assigned to another user", "Ese correo BFS ya está asignado a otro usuario"],
+  ["Truck cannot be deleted", "El camión no se puede eliminar"],
+  ["Truck rack code cannot be changed", "El código del rack de camión no se puede cambiar"],
+  ["User already exists", "El usuario ya existe"],
+  ["User not found", "No se encontró el usuario"],
+  ["Username and password are required", "Se requieren el usuario y la contraseña"],
+  ["You cannot delete the user you are currently signed in as", "No puede eliminar el usuario con el que inició sesión"],
+  ["accepted bay barcode rule", "regla aceptada de código de barras de bahía"],
+  ["active | complete", "activos | completos"],
+  ["bays", "bahías"],
+  ["lists", "listas"],
+  ["new, updated, unchanged, failed.", "nuevos, actualizados, sin cambios y fallidos."],
+  ["new, updated, unchanged.", "nuevos, actualizados y sin cambios."],
+  ["occupied | preassigned", "ocupado | preasignado"],
+  ["on time / late", "a tiempo / tarde"],
+  ["open", "abierto"],
+  ["pcs", "pzas"],
+  ["piece", "pieza"],
+  ["pieces", "piezas"],
+  ["pieces on the way | Truck | Racks", "piezas en camino | Camión | Racks"],
+  ["Process", "Proceso"],
+  ["remake row", "fila rehecha"],
+  ["removed.", "eliminado."],
+  ["rows", "filas"],
+  ["SDI | manual assign | blocked", "SDI | asignación manual | bloqueado"],
+  ["sent / received", "enviado / recibido"],
+  ["Tall starts at inches", "Alto comienza en pulgadas"],
+  ["| grouped by rack, then glass type", "| agrupado por rack y luego por tipo de vidrio"],
+]);
+SPANISH_UI_ADDITIONS.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
+const SPANISH_UI_EXTENDED = new Map([
+  ["% of physical bays ready", "% de bahías físicas listas"],
+  ["Accepted bay barcode rule", "Regla aceptada de código de barras de bahía"],
+  ["Accepted bay scanner barcode formats", "Formatos aceptados por el escáner de bahías"],
+  ["Accepted without asking for confirmation.", "Aceptado sin pedir confirmación."],
+  ["Actions", "Acciones"],
+  ["active rule", "regla activa"],
+  ["Add Barcode Rule", "Agregar regla de código de barras"],
+  ["Add bay count", "Cantidad de bahías a agregar"],
+  ["Add Bays To Group", "Agregar bahías al grupo"],
+  ["Add CC", "Agregar CC"],
+  ["Add clean product names, route codes, and process states so the manual editor stays consistent.", "Agregue nombres limpios de productos, códigos de ruta y estados de proceso para mantener consistente el editor manual."],
+  ["Add Customer Email", "Agregar correo de cliente"],
+  ["Add Customer Route", "Agregar ruta de cliente"],
+  ["Add customer-to-route rules here. Custom route codes create custom route stages during import.", "Agregue aquí reglas de cliente a ruta. Los códigos personalizados crean etapas de ruta durante la importación."],
+  ["Add Lookup", "Agregar valor de catálogo"],
+  ["Add lookup value", "Agregar valor de catálogo"],
+  ["Add Memory", "Agregar memoria"],
+  ["Add user", "Agregar usuario"],
+  ["Adjust the search or filters and try again.", "Ajuste la búsqueda o los filtros e inténtelo de nuevo."],
+  ["Admin and bay activity", "Actividad de administración y bahías"],
+  ["All active bay assignments will appear on the left.", "Todas las asignaciones activas de bahía aparecerán a la izquierda."],
+  ["All Glass", "Todo el vidrio"],
+  ["All Glass Types", "Todos los tipos de vidrio"],
+  ["All rack sets at a glance", "Todos los conjuntos de racks de un vistazo"],
+  ["All Stages", "Todas las etapas"],
+  ["Assign behavior", "Comportamiento de asignación"],
+  ["Assigned / occupied", "Asignado / ocupado"],
+  ["Assigned age", "Antigüedad de asignación"],
+  ["Auto assign", "Asignación automática"],
+  ["Auto assign / free for preassign", "Asignación automática / disponible para preasignar"],
+  ["Back to delivery lists", "Volver a listas de entrega"],
+  ["Bad Scans", "Escaneos incorrectos"],
+  ["Barcode", "Código de barras"],
+  ["Bay / User Actions", "Acciones de bahía / usuario"],
+  ["Bay availability", "Disponibilidad de bahía"],
+  ["Bay count", "Cantidad de bahías"],
+  ["Bay Map only", "Solo mapa de bahías"],
+  ["Bay Map scanner and manual assignment rules", "Reglas del escáner del mapa y asignación manual"],
+  ["Bay prefix", "Prefijo de bahía"],
+  ["Bay selected.", "Bahía seleccionada."],
+  ["Bays affected", "Bahías afectadas"],
+  ["BFS Email", "Correo BFS"],
+  ["Block Scans", "Bloquear escaneos"],
+  ["Blocked for all scanning", "Bloqueada para todos los escaneos"],
+  ["Body", "Cuerpo"],
+  ["Cancel scan", "Cancelar escaneo"],
+  ["Capacity", "Capacidad"],
+  ["CC on all customer emails", "CC en todos los correos de clientes"],
+  ["CC optional", "CC opcional"],
+  ["Change the coded rack name, display name, or rack set/type from the same edit area used for rack sets.", "Cambie el código del rack, el nombre visible o el conjunto/tipo desde la misma área usada para los conjuntos de racks."],
+  ["Change the route dropdown, then use the save icon on that row.", "Cambie la ruta y luego use el icono de guardar en esa fila."],
+  ["Checked categories will not be auto-preassigned. They will require manual placement.", "Las categorías marcadas no se preasignarán automáticamente. Requerirán colocación manual."],
+  ["Checking outbound scans against received scans.", "Comparando escaneos de salida con escaneos recibidos."],
+  ["Choose an open rack or truck...", "Elija un rack o camión abierto..."],
+  ["Choose from dropdowns or type a custom value.", "Elija en los menús o escriba un valor personalizado."],
+  ["Clear right now", "Liberar ahora"],
+  ["Clears, moves, edits", "Liberaciones, movimientos y ediciones"],
+  ["Column", "Columna"],
+  ["Complete rack", "Completar rack"],
+  ["Confirm", "Confirmar"],
+  ["Confirm Move", "Confirmar movimiento"],
+  ["Contains text", "Contiene texto"],
+  ["Copy Body", "Copiar cuerpo"],
+  ["Could not load glass type quantities.", "No se pudieron cargar las cantidades por tipo de vidrio."],
+  ["Create a grouped set of bays to begin.", "Cree un conjunto agrupado de bahías para comenzar."],
+  ["Create a grouped set of bays, then move it into the exact map position in Edit Map.", "Cree un conjunto agrupado y luego muévalo a la posición exacta en Editar mapa."],
+  ["Create Group", "Crear grupo"],
+  ["Create grouped set", "Crear conjunto agrupado"],
+  ["Create Rack", "Crear rack"],
+  ["Create Rack Set", "Crear conjunto de racks"],
+  ["Created", "Creado"],
+  ["Current customer rules", "Reglas actuales de clientes"],
+  ["Current SDI Orders", "Órdenes SDI actuales"],
+  ["Current Rush / Remake Orders", "Órdenes urgentes / rehechas actuales"],
+  ["No current Rush or Remake orders.", "No hay órdenes urgentes ni rehechas actuales."],
+  ["Mark Rush / Remake", "Marcar urgente / rehacer"],
+  ["Rush / Remake cleared", "Marca urgente / rehacer eliminada"],
+  ["Customer / match text", "Cliente / texto de coincidencia"],
+  ["Customer email rules", "Reglas de correo de clientes"],
+  ["Customer manifest and ready-notice emails", "Manifiestos de clientes y correos de disponibilidad"],
+  ["Customer match text", "Texto de coincidencia del cliente"],
+  ["customer route rule", "regla de ruta del cliente"],
+  ["Date & Time Scanned", "Fecha y hora del escaneo"],
+  ["days", "días"],
+  ["Deactivate", "Desactivar"],
+  ["Deactivate User", "Desactivar usuario"],
+  ["Deactivate user?", "¿Desactivar usuario?"],
+  ["Delete Group", "Eliminar grupo"],
+  ["Deleted date", "Fecha eliminada"],
+  ["Deleted stage", "Etapa eliminada"],
+  ["delivery date / stage", "fecha de entrega / etapa"],
+  ["delivery list file checked. Existing New/Updated markers were refreshed where applicable.", "archivo de lista revisado. Se actualizaron los indicadores Nuevo/Actualizado donde correspondía."],
+  ["Delivery list stage", "Etapa de lista de entrega"],
+  ["Delivery Progress", "Progreso de entrega"],
+  ["Delivery Scanner Statistics Report", "Informe de estadísticas del escáner de entregas"],
+  ["Destination", "Destino"],
+  ["Destination address", "Dirección de destino"],
+  ["Display label", "Etiqueta visible"],
+  ["Display name", "Nombre visible"],
+  ["Display Name", "Nombre visible"],
+  ["Drop group here", "Suelte el grupo aquí"],
+  ["Duplicate scans", "Escaneos duplicados"],
+  ["Duplicate Scans", "Escaneos duplicados"],
+  ["Edit dropdown choices used by manual list editing", "Editar opciones usadas en la edición manual de listas"],
+  ["Edit individual racks, add rack sets, delete empty racks, or delete empty rack sets.", "Edite racks individuales, agregue conjuntos y elimine racks o conjuntos vacíos."],
+  ["Edit Map Layout", "Editar diseño del mapa"],
+  ["Edit names, capacity, behavior, or remove empty bays.", "Edite nombres, capacidad y comportamiento, o elimine bahías vacías."],
+  ["Edit set", "Editar conjunto"],
+  ["Email", "Correo"],
+  ["email", "correo"],
+  ["Email address", "Dirección de correo"],
+  ["email rule", "regla de correo"],
+  ["Enter an item number to pick one exact row.", "Ingrese un número de artículo para seleccionar una fila exacta."],
+  ["Exact text", "Texto exacto"],
+  ["Existing password cannot be viewed.", "La contraseña existente no se puede ver."],
+  ["Extra barcode formats accepted only on the Bay Map scanner.", "Formatos adicionales aceptados solo en el escáner del mapa de bahías."],
+  ["Filled", "Ocupado"],
+  ["Filtered range", "Rango filtrado"],
+  ["From", "Desde"],
+  ["Generate or enter a new one, then save it.", "Genere o ingrese una nueva y luego guárdela."],
+  ["Generate PDF", "Generar PDF"],
+  ["Glass groups", "Grupos de vidrio"],
+  ["Glass mix by quantity", "Mezcla de vidrio por cantidad"],
+  ["glass type", "tipo de vidrio"],
+  ["Glass Types by Quantity", "Tipos de vidrio por cantidad"],
+  ["Glass types by quantity", "Tipos de vidrio por cantidad"],
+  ["global CC", "CC global"],
+  ["Group", "Grupo"],
+  ["group", "grupo"],
+  ["Group name", "Nombre del grupo"],
+  ["Grouped bay set", "Conjunto agrupado de bahías"],
+  ["grouped set", "conjunto agrupado"],
+  ["Host", "Servidor"],
+  ["If SMTP is not configured, this creates a draft you can open below.", "Si SMTP no está configurado, esto crea un borrador que puede abrir abajo."],
+  ["Import complete.", "Importación completada."],
+  ["Import completed with issues.", "La importación terminó con problemas."],
+  ["Import delivery lists to populate statistics.", "Importe listas de entrega para generar estadísticas."],
+  ["Import delivery lists to populate the glass-type pie chart.", "Importe listas para generar la gráfica de tipos de vidrio."],
+  ["In-Transit Manifest", "Manifiesto en tránsito"],
+  ["Incomplete Delivery Lists", "Listas de entrega incompletas"],
+  ["Indian Trail bay assignments older than 10 days will appear here.", "Las asignaciones de Indian Trail con más de 10 días aparecerán aquí."],
+  ["Indian Trail bay auto-assigner", "Asignador automático de bahías de Indian Trail"],
+  ["Indian Trail Bay Scan History", "Historial de escaneos de bahía de Indian Trail"],
+  ["Indian Trail Receiving", "Recepción de Indian Trail"],
+  ["Individual Bays", "Bahías individuales"],
+  ["Internal email drafts", "Borradores internos de correo"],
+  ["items", "artículos"],
+  ["job group", "grupo de trabajo"],
+  ["Job Nr. groups", "Grupos por núm. de trabajo"],
+  ["Jobs in this bay", "Trabajos en esta bahía"],
+  ["Known phrases and odd labels that will not ask for confirmation.", "Frases conocidas y etiquetas especiales que no pedirán confirmación."],
+  ["Label", "Etiqueta"],
+  ["Largest glass dimension controls Standard / Tall / Oversize.", "La dimensión mayor controla Estándar / Alto / Sobredimensionado."],
+  ["Last seen", "Visto por última vez"],
+  ["latest actions", "acciones recientes"],
+  ["Line items", "Líneas"],
+  ["Load All", "Cargar todo"],
+  ["Load more older delivery lists", "Cargar más listas antiguas"],
+  ["Loading", "Cargando"],
+  ["Loading bays...", "Cargando bahías..."],
+  ["Loading editable rows...", "Cargando filas editables..."],
+  ["Loading glass types...", "Cargando tipos de vidrio..."],
+  ["Loading in-transit manifest...", "Cargando manifiesto en tránsito..."],
+  ["Lookup type", "Tipo de catálogo"],
+  ["manual", "manual"],
+  ["Manual assign only", "Solo asignación manual"],
+  ["Manual assignment categories", "Categorías de asignación manual"],
+  ["Manual edits", "Ediciones manuales"],
+  ["Manual only", "Solo manual"],
+  ["Manual Scans", "Escaneos manuales"],
+  ["Map column", "Columna del mapa"],
+  ["Map row", "Fila del mapa"],
+  ["Match customers to the route they should import into.", "Relacione clientes con la ruta en la que deben importarse."],
+  ["Match each classification to one of your bay groups/types.", "Relacione cada clasificación con un grupo/tipo de bahía."],
+  ["Match terms", "Términos de coincidencia"],
+  ["Match type", "Tipo de coincidencia"],
+  ["Matches:", "Coincidencias:"],
+  ["Message", "Mensaje"],
+  ["Monthly Remakes", "Rehechos mensuales"],
+  ["Move Piece", "Mover pieza"],
+  ["Move to", "Mover a"],
+  ["Name", "Nombre"],
+  ["Name root", "Raíz del nombre"],
+  ["Need walkthrough", "Requiere revisión física"],
+  ["Needs attention", "Requiere atención"],
+  ["Needs review", "Requiere revisión"],
+  ["New Bay Group", "Nuevo grupo de bahías"],
+  ["New bay prefix", "Nuevo prefijo de bahía"],
+  ["New custom routes become their own stage during import when a customer matches that route.", "Las rutas personalizadas se convierten en su propia etapa cuando un cliente coincide."],
+  ["New customer / job match text", "Nuevo texto de coincidencia de cliente / trabajo"],
+  ["New rack set / type", "Nuevo conjunto / tipo de rack"],
+  ["New route code", "Nuevo código de ruta"],
+  ["No active sessions", "No hay sesiones activas"],
+  ["No aged rows", "No hay filas antiguas"],
+  ["No assigned station", "Sin estación asignada"],
+  ["No bay groups found.", "No se encontraron grupos de bahías."],
+  ["No bay items found.", "No se encontraron artículos en la bahía."],
+  ["No bay scan history is available yet.", "Aún no hay historial de escaneos de bahía."],
+  ["No customer route rules", "No hay reglas de rutas de clientes"],
+  ["No data is available for this chart in the selected range.", "No hay datos para esta gráfica en el rango seleccionado."],
+  ["No delivery lists match.", "Ninguna lista de entrega coincide."],
+  ["No editable rows found.", "No se encontraron filas editables."],
+  ["No empty compatible bay found", "No se encontró una bahía compatible vacía"],
+  ["No glass quantity data yet.", "Aún no hay datos de cantidades de vidrio."],
+  ["No glass type quantity data available.", "No hay datos de cantidad por tipo de vidrio."],
+  ["No glass types found for the selected stages.", "No se encontraron tipos de vidrio para las etapas seleccionadas."],
+  ["No import history yet. Imports from the temp folder or single files will appear here.", "Aún no hay historial de importación. Las importaciones aparecerán aquí."],
+  ["No incomplete-list report data available.", "No hay datos de listas incompletas."],
+  ["No old bay orders right now.", "No hay órdenes antiguas de bahía en este momento."],
+  ["No operator scan data available.", "No hay datos de escaneo por operador."],
+  ["No order, item, customer, rack, bay, or route matched that search.", "Ninguna orden, artículo, cliente, rack, bahía o ruta coincidió con la búsqueda."],
+  ["No pieces are currently in transit.", "No hay piezas actualmente en tránsito."],
+  ["No pieces assigned.", "No hay piezas asignadas."],
+  ["No racks available. Create a rack to get started.", "No hay racks disponibles. Cree uno para comenzar."],
+  ["No results", "Sin resultados"],
+  ["No rows match the current filters.", "Ninguna fila coincide con los filtros actuales."],
+  ["No scan data was changed.", "No se modificaron datos de escaneo."],
+  ["No stage data", "Sin datos de etapas"],
+  ["No stage data available.", "No hay datos de etapas disponibles."],
+  ["No stations loaded.", "No hay estaciones cargadas."],
+  ["No updates found.", "No se encontraron cambios."],
+  ["No users loaded.", "No hay usuarios cargados."],
+  ["Nothing needs review", "Nada requiere revisión"],
+  ["Old bay rows", "Filas antiguas de bahía"],
+  ["Oldest row", "Fila más antigua"],
+  ["On-Time Delivery", "Entrega a tiempo"],
+  ["Open a role, review permissions by page/action group, then save that role.", "Abra un rol, revise los permisos por página/acción y guarde el rol."],
+  ["open draft / sent recently", "borrador abierto / enviado recientemente"],
+  ["Open drafts here before SMTP is configured or after a send error.", "Abra borradores aquí antes de configurar SMTP o después de un error."],
+  ["Open in Email App", "Abrir en la aplicación de correo"],
+  ["Open Manage Items", "Abrir Administrar artículos"],
+  ["Outbound safety check", "Verificación de seguridad de salida"],
+  ["Override and scan outbound", "Anular y escanear salida"],
+  ["Oversize starts at inches", "Sobredimensionado comienza en pulgadas"],
+  ["Permissions / Notes", "Permisos / notas"],
+  ["Physical locations", "Ubicaciones físicas"],
+  ["Pieces", "Piezas"],
+  ["Pieces (High-Low)", "Piezas (mayor a menor)"],
+  ["Pieces in", "Piezas en"],
+  ["Pieces on the way", "Piezas en camino"],
+  ["Please wait while the current in-transit jobs are pulled together.", "Espere mientras se cargan los trabajos en tránsito."],
+  ["Port", "Puerto"],
+  ["Prevented by system", "Impedido por el sistema"],
+  ["Primary Job", "Trabajo principal"],
+  ["Print / Save PDF", "Imprimir / guardar PDF"],
+  ["Product", "Producto"],
+  ["Progress", "Progreso"],
+  ["Protected", "Protegido"],
+  ["Qty Scanned", "Cant. escaneada"],
+  ["Quick view of customers that will be split to special/custom stages during import.", "Vista rápida de clientes que se dividirán en etapas especiales durante la importación."],
+  ["Rack Actions", "Acciones del rack"],
+  ["Rack code", "Código del rack"],
+  ["Rack count", "Cantidad de racks"],
+  ["Rack ID (A-Z)", "ID de rack (A-Z)"],
+  ["Rack ID (Z-A)", "ID de rack (Z-A)"],
+  ["Rack Manager", "Administrador de racks"],
+  ["Rack name", "Nombre del rack"],
+  ["Rack set / type", "Conjunto / tipo de rack"],
+  ["Rack Sets", "Conjuntos de racks"],
+  ["Rack type", "Tipo de rack"],
+  ["Racks / truck groups", "Racks / grupos de camiones"],
+  ["Received", "Recibido"],
+  ["Recent bay actions", "Acciones recientes de bahía"],
+  ["recent scan", "escaneo reciente"],
+  ["Regex pattern", "Patrón de expresión regular"],
+  ["Remaining Qty", "Cantidad restante"],
+  ["remembered manual input", "entrada manual recordada"],
+  ["Remembered manual inputs", "Entradas manuales recordadas"],
+  ["Rename the rack set/type and optionally rebuild each rack display name from one shared name root.", "Renombre el conjunto/tipo y opcionalmente reconstruya los nombres visibles desde una raíz compartida."],
+  ["Rename this grouped set, set assign behavior, create more bays inside it, or delete the group after clearing active assignments.", "Renombre este conjunto, configure su asignación, cree más bahías o elimínelo después de liberar asignaciones."],
+  ["Reset cancelled", "Restablecimiento cancelado"],
+  ["Role", "Rol"],
+  ["Role Permissions", "Permisos del rol"],
+  ["Role permissions are loading. Close and reopen this panel if they do not appear.", "Los permisos se están cargando. Cierre y vuelva a abrir el panel si no aparecen."],
+  ["Save Auto Assigner", "Guardar asignador automático"],
+  ["Save Group", "Guardar grupo"],
+  ["Save Rack", "Guardar rack"],
+  ["Save Set", "Guardar conjunto"],
+  ["Scanned", "Escaneado"],
+  ["Scanned Pieces", "Piezas escaneadas"],
+  ["Scans", "Escaneos"],
+  ["Scans by Operator", "Escaneos por operador"],
+  ["Scans reset", "Escaneos restablecidos"],
+  ["Search within stage", "Buscar dentro de la etapa"],
+  ["Select a bay to manage it.", "Seleccione una bahía para administrarla."],
+  ["Select a delivery list to load editable rows.", "Seleccione una lista para cargar filas editables."],
+  ["Select an item", "Seleccione un artículo"],
+  ["Select destination...", "Seleccione destino..."],
+  ["Select the destination before printing the packing list. Indian Trail is the default.", "Seleccione el destino antes de imprimir. Indian Trail es el predeterminado."],
+  ["Selected Job Nr.", "Núm. de trabajo seleccionado"],
+  ["Selected Rack", "Rack seleccionado"],
+  ["Send Test / Save Draft", "Enviar prueba / guardar borrador"],
+  ["Send test email", "Enviar correo de prueba"],
+  ["Send test to", "Enviar prueba a"],
+  ["sent", "enviado"],
+  ["Server-side only. Passwords never belong in app.js or the browser.", "Solo del servidor. Las contraseñas nunca deben estar en app.js ni en el navegador."],
+  ["Set name", "Nombre del conjunto"],
+  ["Set suffix", "Sufijo del conjunto"],
+  ["Size", "Tamaño"],
+  ["Size thresholds", "Límites de tamaño"],
+  ["SMTP setup readiness", "Estado de configuración SMTP"],
+  ["Starting rack number", "Número inicial del rack"],
+  ["Subject", "Asunto"],
+  ["Temporary Holding Area", "Área temporal de espera"],
+  ["Text / pattern", "Texto / patrón"],
+  ["The next two actions will appear here.", "Las dos acciones siguientes aparecerán aquí."],
+  ["These addresses receive every customer manifest and ready notice.", "Estas direcciones reciben todos los manifiestos y avisos de disponibilidad."],
+  ["These categories will not be auto-preassigned.", "Estas categorías no se preasignarán automáticamente."],
+  ["These rules only apply to Indian Trail Bay Map scanning/manual assign. They do not change the main delivery-list scanner.", "Estas reglas solo se aplican al mapa de Indian Trail y no cambian el escáner principal."],
+  ["To", "Para"],
+  ["Top type", "Tipo principal"],
+  ["Total", "Total"],
+  ["total pieces in this range", "piezas totales en este rango"],
+  ["Transportation method for this piece", "Método de transporte para esta pieza"],
+  ["Typed order/item scans", "Escaneos escritos de orden/artículo"],
+  ["Unable to load manifest", "No se pudo cargar el manifiesto"],
+  ["Uncomplete Rack", "Reabrir rack"],
+  ["Unrecognized manual assignment", "Asignación manual no reconocida"],
+  ["Use For Scanner", "Usar para escáner"],
+  ["Use regex for extra labels/barcodes that can be scanned into a target bay.", "Use expresiones regulares para etiquetas/códigos adicionales que se puedan escanear en una bahía."],
+  ["Use the Bay Map to free a bay or pick manually.", "Use el mapa para liberar una bahía o seleccionar manualmente."],
+  ["Use Value for the actual saved code. Use Display label for the cleaner name people see.", "Use Valor para el código guardado y Etiqueta visible para el nombre mostrado."],
+  ["User", "Usuario"],
+  ["Username", "Nombre de usuario"],
+  ["Users appear here after login.", "Los usuarios aparecen aquí después de iniciar sesión."],
+  ["Value / code", "Valor / código"],
+  ["When Outbound scans Indian Trail pieces and they have not been received yet, they will appear here grouped by rack and glass type.", "Cuando Salida escanee piezas de Indian Trail que aún no se recibieron, aparecerán aquí agrupadas por rack y tipo de vidrio."],
+  ["Where is going?", "¿A dónde va?"],
+  ["Yes, assign once", "Sí, asignar una vez"],
+  ["Yes, remember this", "Sí, recordar esto"],
+]);
+SPANISH_UI_EXTENDED.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
+const SPANISH_PLACEHOLDERS = new Map([
+  ["Global search...", "Búsqueda global..."],
+  ["Search date, stage, route...", "Buscar fecha, etapa o ruta..."],
+  ["Search orders, jobs, customers...", "Buscar órdenes, trabajos o clientes..."],
+  ["Scan or enter barcode...", "Escanee o ingrese el código..."],
+  ["Enter password", "Ingrese la contraseña"],
+  ["6-digit code", "Código de 6 dígitos"],
+  ["At least 8 characters", "Al menos 8 caracteres"],
+]);
+[
+  ["Click bay or type code", "Haga clic en una bahía o escriba el código"],
+  ["Optional", "Opcional"],
+  ["Optional bay", "Bahía opcional"],
+  ["Optional, comma-separated", "Opcional, separado por comas"],
+  ["Order, Job Nr., barcode, or label text", "Orden, núm. de trabajo, código de barras o texto de etiqueta"],
+  ["Reason / note", "Motivo / nota"],
+  ["Search bay, order, item, customer, glass type, size...", "Buscar bahía, orden, artículo, cliente, tipo de vidrio o tamaño..."],
+  ["Search glass types, stages, users...", "Buscar tipos de vidrio, etapas o usuarios..."],
+  ["Search order or customer", "Buscar orden o cliente"],
+  ["Search order, item, customer, bay...", "Buscar orden, artículo, cliente o bahía..."],
+  ["Search date, Job Nr., order number, stage...", "Buscar fecha, núm. de trabajo, orden o etapa..."],
+  ["Scan order to add to selected bay...", "Escanee una orden para agregarla a la bahía seleccionada..."],
+  ["Scan order to remove from bay...", "Escanee una orden para quitarla de la bahía..."],
+  ["Temp Delivery Lists folder path", "Ruta de la carpeta temporal de listas de entrega"],
+  ["Showers, Mirror, Coral...", "Regaderas, espejo, coral..."],
+  ["R1S or T2", "R1S o T2"],
+].forEach(([english, spanish]) => SPANISH_PLACEHOLDERS.set(english, spanish));
+
+const languageUi = {
+  observer: null,
+};
+
+const SPANISH_DYNAMIC_PATTERNS = [
+  [/^(Rush|Remake) marked for Job Nr\. (.+)\.$/i, (_, type, job) => `${type.toLowerCase() === "rush" ? "Urgente" : "Rehacer"} marcado para el núm. de trabajo ${job}.`],
+  [/^(Rush|Remake) marked for order (.+)\.$/i, (_, type, order) => `${type.toLowerCase() === "rush" ? "Urgente" : "Rehacer"} marcado para la orden ${order}.`],
+  [/^(\d+) piece on the way$/i, (_, count) => `${count} pieza en camino`],
+  [/^(\d+) pieces on the way$/i, (_, count) => `${count} piezas en camino`],
+  [/^(\d+) stage$/i, (_, count) => `${count} etapa`],
+  [/^(\d+) stages$/i, (_, count) => `${count} etapas`],
+  [/^(\d+) list$/i, (_, count) => `${count} lista`],
+  [/^(\d+) lists$/i, (_, count) => `${count} listas`],
+  [/^(\d+) total items?$/i, (_, count) => `${count} artículos totales`],
+  [/^(\d+) item$/i, (_, count) => `${count} artículo`],
+  [/^(\d+) items$/i, (_, count) => `${count} artículos`],
+  [/^(\d+) piece$/i, (_, count) => `${count} pieza`],
+  [/^(\d+) pieces$/i, (_, count) => `${count} piezas`],
+  [/^(\d+) pcs$/i, (_, count) => `${count} pzas`],
+  [/^(\d+)pcs$/i, (_, count) => `${count}pzas`],
+  [/^(\d+) row$/i, (_, count) => `${count} fila`],
+  [/^(\d+) rows$/i, (_, count) => `${count} filas`],
+  [/^(\d+) rack$/i, (_, count) => `${count} rack`],
+  [/^(\d+) racks$/i, (_, count) => `${count} racks`],
+  [/^(\d+) bay$/i, (_, count) => `${count} bahía`],
+  [/^(\d+) bays$/i, (_, count) => `${count} bahías`],
+  [/^(\d+) user$/i, (_, count) => `${count} usuario`],
+  [/^(\d+) users$/i, (_, count) => `${count} usuarios`],
+  [/^(\d+) scan$/i, (_, count) => `${count} escaneo`],
+  [/^(\d+) scans$/i, (_, count) => `${count} escaneos`],
+  [/^(\d+) order$/i, (_, count) => `${count} orden`],
+  [/^(\d+) orders$/i, (_, count) => `${count} órdenes`],
+  [/^(\d+) active$/i, (_, count) => `${count} activos`],
+  [/^(\d+) inactive$/i, (_, count) => `${count} inactivos`],
+  [/^(\d+) complete$/i, (_, count) => `${count} completos`],
+  [/^(\d+) open$/i, (_, count) => `${count} abiertos`],
+  [/^(\d+) available$/i, (_, count) => `${count} disponibles`],
+  [/^(\d+) occupied$/i, (_, count) => `${count} ocupados`],
+  [/^(\d+) sent$/i, (_, count) => `${count} enviados`],
+  [/^(\d+) draft$/i, (_, count) => `${count} borrador`],
+  [/^(\d+) drafts$/i, (_, count) => `${count} borradores`],
+  [/^(\d+) failed$/i, (_, count) => `${count} fallidos`],
+  [/^(\d+) email rule$/i, (_, count) => `${count} regla de correo`],
+  [/^(\d+) email rules$/i, (_, count) => `${count} reglas de correo`],
+  [/^(\d+) global CC address$/i, (_, count) => `${count} dirección CC global`],
+  [/^(\d+) global CC addresses$/i, (_, count) => `${count} direcciones CC globales`],
+  [/^Progress:\s*(.*)$/i, (_, value) => `Progreso: ${value}`],
+  [/^Staged Qty:\s*(.*)$/i, (_, value) => `Cant. preparada: ${value}`],
+  [/^Outbound Qty:\s*(.*)$/i, (_, value) => `Cant. de salida: ${value}`],
+  [/^Received Qty:\s*(.*)$/i, (_, value) => `Cant. recibida: ${value}`],
+  [/^Delivery on-time\s*(.*)$/i, (_, value) => `Entrega a tiempo ${value}`],
+  [/^Last updated:\s*(.*)$/i, (_, value) => `Última actualización: ${value}`],
+  [/^Updated at:\s*(.*)$/i, (_, value) => `Actualizado: ${value}`],
+  [/^Scanner:\s*(.*)$/i, (_, value) => `Escáner: ${value}`],
+  [/^Assigned station:\s*(.*)$/i, (_, value) => `Estación asignada: ${value}`],
+  [/^In Transit:\s*(.*)$/i, (_, value) => `En tránsito: ${value}`],
+  [/^Racks in transit$/i, () => "Racks en tránsito"],
+  [/^In transit racks:\s*(.*)$/i, (_, value) => `Racks en tránsito: ${value}`],
+  [/^Page\s+(\d+)\s+of\s+(\d+)$/i, (_, page, total) => `Página ${page} de ${total}`],
+  [/^Showing\s+(\d+)\s+of\s+(\d+)$/i, (_, shown, total) => `Mostrando ${shown} de ${total}`],
+  [/^(\d+)\s+rows\s*\/\s*(\d+)\s+pieces$/i, (_, rows, pieces) => `${rows} filas / ${pieces} piezas`],
+  [/^(\d+)\s+racks?\s*\/\s*(\d+)\s+pieces$/i, (_, racks, pieces) => `${racks} racks / ${pieces} piezas`],
+  [/^(\d+)\s+bays?\s*\/\s*(\d+)\s+used$/i, (_, bays, used) => `${bays} bahías / ${used} usadas`],
+  [/^(\d+)\s+racks?\s*\|\s*(\d+)\s+active\s*\|\s*(\d+)\s+complete$/i, (_, racks, active, complete) => `${racks} racks | ${active} activos | ${complete} completos`],
+  [/^(\d+)\s+active\s*\|\s*(\d+)\s+complete$/i, (_, active, complete) => `${active} activos | ${complete} completos`],
+  [/^(\d+)\s+stages?\s*[•|]\s*Delivery on-time\s*(.*)$/i, (_, stages, value) => `${stages} etapas • Entrega a tiempo ${value}`],
+  [/^(\d+)\s+stages?\s*[•|]\s*Updated\s*(.*)$/i, (_, stages, value) => `${stages} etapas • Actualizado ${value}`],
+  [/^All Glass\s*\((\d+)\)$/i, (_, count) => `Todo el vidrio (${count})`],
+  [/^(.+?)\s+(\d+)pcs\s+\((Empty|Open|Complete|On the way)\)$/i, (_, code, qty, status) => `${code} ${qty} pzas (${SPANISH_UI_TEXT.get(status) || status})`],
+  [/^(.+?)\s+\((Empty|Open|Complete|On the way)\)$/i, (_, code, status) => `${code} (${SPANISH_UI_TEXT.get(status) || status})`],
+  [/^(.+?)\s+-\s+(Empty|Open|Complete|On the way)$/i, (_, label, status) => `${label} - ${SPANISH_UI_TEXT.get(status) || status}`],
+  [/^Open\s+(.+)$/i, (_, value) => `Abrir ${value}`],
+  [/^Remove\s+(.+)$/i, (_, value) => `Quitar ${value}`],
+  [/^Edit\s+(.+)$/i, (_, value) => `Editar ${value}`],
+  [/^Save\s+(.+)$/i, (_, value) => `Guardar ${value}`],
+  [/^Delete\s+(.+)$/i, (_, value) => `Eliminar ${value}`],
+  [/^Reset\s+(.+)$/i, (_, value) => `Restablecer ${value}`],
+  [/^Select\s+(.+)$/i, (_, value) => `Seleccione ${value}`],
+  [/^No\s+(.+)\s+yet$/i, (_, value) => `Aún no hay ${value}`],
+  [/^Password updated for\s+(.+)\.$/i, (_, user) => `Contraseña actualizada para ${user}.`],
+  [/^Saved\s+(.+)\.$/i, (_, value) => `Se guardó ${value}.`],
+  [/^Rack code\s+(.+)\s+already exists$/i, (_, code) => `El código de rack ${code} ya existe`],
+  [/^Rack\s+(.+)\s+was not found$/i, (_, code) => `No se encontró el rack ${code}`],
+  [/^Unknown bay:\s*(.+)$/i, (_, code) => `Bahía desconocida: ${code}`],
+  [/^Unknown or blocked bay:\s*(.+)$/i, (_, code) => `Bahía desconocida o bloqueada: ${code}`],
+  [/^Temp Delivery Lists folder not found:\s*(.+)$/i, (_, folder) => `No se encontró la carpeta temporal de listas: ${folder}`],
+  [/^Request failed:\s*(.+)$/i, (_, value) => `La solicitud falló: ${value}`],
+  [/^Search failed:\s*(.+)$/i, (_, value) => `La búsqueda falló: ${value}`],
+  [/^(All|Complete|Partial|Remaining|Remakes|Rushes|Updated|Review)\s*\((\d+)\)$/i, (_, label, count) => `${SPANISH_UI_TEXT.get(label) || label} (${count})`],
+  [/^(\d+)\s+days$/i, (_, count) => `${count} días`],
+  [/^(\d+)\s+bays?\s*\/\s*(\d+)\s+used$/i, (_, bays, used) => `${bays} bahías / ${used} usadas`],
+  [/^(\d+)\s+active\s*\|\s*(\d+)\s+complete$/i, (_, active, complete) => `${active} activos | ${complete} completos`],
+  [/^(\d+)\s+stages?\s*-\s*Delivery on-time\s*(.*)$/i, (_, stages, value) => `${stages} etapas - Entrega a tiempo ${value}`],
+  [/^No delivery lists are loaded for\s+(.+)\.$/i, (_, date) => `No hay listas de entrega cargadas para ${date}.`],
+  [/^(\d+)\s+older delivery date(?:s)? hidden\s*\((\d+)\s+stage(?:s)?\)\.$/i, (_, dates, stages) => `${dates} fechas antiguas ocultas (${stages} etapas).`],
+  [/^(\d+)\s+bay group(?:s)? shown\. Click a bay for tools or use Manage Items for bulk order work\.$/i, (_, count) => `${count} grupos de bahías mostrados. Haga clic en una bahía para usar sus herramientas o use Administrar artículos para trabajo en lote.`],
+  [/^Every stage for\s+(.+)\s+is back to zero scanned quantity\.$/i, (_, date) => `Todas las etapas de ${date} volvieron a cero escaneos.`],
+  [/^(.+)\s+is back to zero scanned quantity\.$/i, (_, label) => `${label} volvió a cero escaneos.`],
+  [/^(\d+)\s+stages? removed\.$/i, (_, count) => `Se eliminaron ${count} etapas.`],
+  [/^Showing\s+(\d+)\s+of\s+(\d+)\s+rows?$/i, (_, shown, total) => `Mostrando ${shown} de ${total} filas`],
+];
+
+function translateDynamicUiText(cleanText) {
+  const exact = SPANISH_UI_TEXT.get(cleanText);
+  if (exact) return exact;
+
+  for (const [pattern, replacement] of SPANISH_DYNAMIC_PATTERNS) {
+    const match = cleanText.match(pattern);
+    if (!match) continue;
+    return typeof replacement === "function"
+      ? replacement(...match)
+      : cleanText.replace(pattern, replacement);
+  }
+
+  return cleanText;
+}
+
+function translatedUiValue(value) {
+  const text = String(value ?? "");
+  const leading = text.match(/^\s*/)?.[0] || "";
+  const trailing = text.match(/\s*$/)?.[0] || "";
+  const clean = text.trim();
+  if (!clean) return text;
+  return `${leading}${translateDynamicUiText(clean)}${trailing}`;
+}
+
+function translateUiTextNode(node) {
+  const current = node.nodeValue || "";
+
+  if (state.language === "es") {
+    if (current === node.__dlsSpanishText) return;
+    node.__dlsEnglishText = current;
+    const translated = translatedUiValue(current);
+    node.__dlsSpanishText = translated;
+    if (translated !== current) node.nodeValue = translated;
+    return;
+  }
+
+  if (node.__dlsEnglishText !== undefined && current !== node.__dlsEnglishText) {
+    node.nodeValue = node.__dlsEnglishText;
+  }
+}
+
+function translateUiAttributes(element) {
+  const attributes = ["placeholder", "title", "aria-label"];
+  if (element.tagName === "OPTGROUP" && element.hasAttribute("label")) attributes.push("label");
+  if (element.tagName === "INPUT" && ["button", "submit", "reset"].includes(String(element.type || "").toLowerCase()) && element.hasAttribute("value")) attributes.push("value");
+
+  for (const attribute of attributes) {
+    if (!element.hasAttribute?.(attribute)) continue;
+    const storageKey = `dls${attribute.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())}En`;
+    const current = element.getAttribute(attribute) || "";
+
+    if (state.language === "es") {
+      const spanishKey = `${storageKey}Es`;
+      if (!element.dataset[storageKey] || current !== element.dataset[spanishKey]) {
+        element.dataset[storageKey] = current;
+      }
+      const translated = attribute === "placeholder"
+        ? (SPANISH_PLACEHOLDERS.get(current) || translatedUiValue(current))
+        : translatedUiValue(current);
+      element.dataset[spanishKey] = translated;
+      element.setAttribute(attribute, translated);
+    } else if (element.dataset[storageKey]) {
+      element.setAttribute(attribute, element.dataset[storageKey]);
+    }
+  }
+}
+
+function shouldSkipUiTranslation(element) {
+  return Boolean(element?.closest?.("script, style, textarea, [contenteditable='true'], [data-no-translate]"));
+}
+
+function applyLanguageToRoot(root = document.body) {
+  if (!root) return;
+
+  if (root.nodeType === Node.TEXT_NODE) {
+    if (!shouldSkipUiTranslation(root.parentElement)) translateUiTextNode(root);
+    return;
+  }
+
+  if (!(root instanceof Element || root instanceof Document || root instanceof DocumentFragment)) return;
+
+  if (root instanceof Element) translateUiAttributes(root);
+  root.querySelectorAll?.("[placeholder], [title], [aria-label], optgroup[label], input[type=button][value], input[type=submit][value], input[type=reset][value]").forEach((element) => translateUiAttributes(element));
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if (!shouldSkipUiTranslation(node.parentElement)) translateUiTextNode(node);
+    node = walker.nextNode();
+  }
+}
+
+function syncLanguageControls() {
+  const spanish = state.language === "es";
+  document.documentElement.lang = spanish ? "es" : "en";
+  document.title = spanish ? "Escáner de Listas de Entrega" : "Delivery List Scanner";
+
+  [els.languageToggleBtn, els.loginLanguageToggleBtn].forEach((button) => {
+    if (!button) return;
+    const label = button.querySelector("span:last-child");
+    if (label) label.textContent = spanish ? "EN" : "ES";
+    const description = spanish ? "Cambiar a Inglés" : "Cambiar a Español";
+    button.title = description;
+    button.setAttribute("aria-label", description);
+  });
+}
+
+function setAppLanguage(language) {
+  state.language = language === "es" ? "es" : "en";
+  try {
+    localStorage.setItem(LANGUAGE_KEY, state.language);
+  } catch {
+    // Language persistence is optional in restricted browser modes.
+  }
+  applyLanguageToRoot(document.body);
+  syncLanguageControls();
+  syncAllCustomSelects();
+}
+
+function toggleAppLanguage() {
+  setAppLanguage(state.language === "es" ? "en" : "es");
+}
+
+function initLanguageSystem() {
+  if (languageUi.observer) return;
+  applyLanguageToRoot(document.body);
+  syncLanguageControls();
+
+  languageUi.observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === "characterData") {
+        applyLanguageToRoot(mutation.target);
+        return;
+      }
+      mutation.addedNodes.forEach((node) => applyLanguageToRoot(node));
+    });
+  });
+  languageUi.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+}
+
+function syncFullscreenControl() {
+  const active = Boolean(document.fullscreenElement);
+  if (!els.fullscreenToggleBtn) return;
+  els.fullscreenToggleBtn.classList.toggle("is-active", active);
+  const label = active ? "Exit fullscreen" : "Enter fullscreen";
+  els.fullscreenToggleBtn.title = state.language === "es"
+    ? (active ? "Salir de pantalla completa" : "Entrar en pantalla completa")
+    : label;
+  els.fullscreenToggleBtn.setAttribute("aria-label", els.fullscreenToggleBtn.title);
+}
+
+async function toggleFullscreen() {
+  if (!document.fullscreenEnabled) {
+    showInlineError(state.language === "es" ? "La pantalla completa no está disponible en este navegador." : "Fullscreen is not available in this browser.");
+    return;
+  }
+
+  if (document.fullscreenElement) await document.exitFullscreen();
+  else await document.documentElement.requestFullscreen();
+}
 
 const customSelectUi = {
   initialized: false,
@@ -1140,6 +2443,7 @@ function updateModalScrollLock() {
     els.manageItemsPanel,
     els.bayEditorPanel,
     document.getElementById("emailDraftPreviewShell"),
+    document.getElementById("actionFeedbackShell"),
     els.statsChartModal,
   ].some((panel) => panel && !panel.hidden);
 
@@ -1824,10 +3128,8 @@ function rackLocationDropdown(item, currentLocation = "") {
   }
 
   const currentRackCode = String(item.rackCode || "").trim().toUpperCase() === "T" ? "T" : String(item.rackCode || "").trim();
-  const rackOptions = (state.racks || [])
-    .filter((rack) => !rackIsLockedForLineAssignment(rack))
-    .map((rack) => `<option value="${escapeHtml(rack.code)}" ${rack.code === currentRackCode ? "selected" : ""}>${rackOptionLabel(rack)}</option>`)
-    .join("");
+  const assignableRacks = (state.racks || []).filter((rack) => !rackIsLockedForLineAssignment(rack));
+  const rackOptions = groupedRackOptionsHtml(assignableRacks, currentRackCode);
 
   return `
     <label class="line-rack-location-control" title="Supervisor/Admin rack recovery assignment">
@@ -2082,15 +3384,41 @@ function renderRackSelects() {
     els.rackListSelect.value = state.rackScanListId;
   }
   if (els.rackSelect) {
-    els.rackSelect.innerHTML = state.racks
-      .map((rack) => `<option value="${escapeHtml(rack.code)}">${rackOptionLabel(rack)}</option>`)
-      .join("");
+    els.rackSelect.innerHTML = groupedRackOptionsHtml(state.racks, state.selectedRackCode);
     els.rackSelect.value = state.selectedRackCode;
+    syncCustomSelect(els.rackSelect);
   }
 }
 
 function rackGroupLabel(rack) {
   return rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks";
+}
+
+function groupedRackOptionsHtml(racks = [], selectedCode = "") {
+  const groups = new Map();
+  for (const rack of racks) {
+    const label = rackGroupLabel(rack);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(rack);
+  }
+
+  const groupEntries = [...groups.entries()].sort(([labelA], [labelB]) => {
+    if (labelA === "Truck") return -1;
+    if (labelB === "Truck") return 1;
+    return labelA.localeCompare(labelB, undefined, { numeric: true, sensitivity: "base" });
+  });
+
+  return groupEntries
+    .map(([label, groupRacks]) => `
+      <optgroup label="${escapeHtml(label)}">
+        ${groupRacks
+          .slice()
+          .sort((rackA, rackB) => String(rackA.code || "").localeCompare(String(rackB.code || ""), undefined, { numeric: true, sensitivity: "base" }))
+          .map((rack) => `<option value="${escapeHtml(rack.code)}" ${String(rack.code) === String(selectedCode) ? "selected" : ""}>${rackOptionLabel(rack)}</option>`)
+          .join("")}
+      </optgroup>
+    `)
+    .join("");
 }
 
 function isTruckRack(rack) {
@@ -2881,7 +4209,7 @@ function printSelectedRackPackingSlip() {
   }
   const activeList = state.lists.find((list) => list.id === state.activeListId);
   const dateParam = isTruckRack(rack) && activeList?.deliveryDate ? activeList.deliveryDate : "";
-  window.open(rackPackingListUrl(state.selectedRackCode, dateParam), "_blank", "noopener");
+  launchManagedPrint(rackPackingListUrl(state.selectedRackCode, dateParam));
 }
 
 async function saveRackDefinition() {
@@ -3318,10 +4646,9 @@ function renderScanRackTools() {
   els.scanRackPanel.classList.toggle("selected-rack-in-transit", selectedInTransit);
   els.scanRackPanel.classList.toggle("selected-rack-loaded", Boolean(selectedRack && Number(selectedRack.qty || 0) > 0 && !selectedClosed && !selectedInTransit));
   if (els.scanRackSelect) {
-    els.scanRackSelect.innerHTML = state.racks
-      .map((rack) => `<option value="${escapeHtml(rack.code)}">${rackOptionLabel(rack)}</option>`)
-      .join("");
+    els.scanRackSelect.innerHTML = groupedRackOptionsHtml(state.racks, state.selectedRackCode);
     els.scanRackSelect.value = state.selectedRackCode;
+    syncCustomSelect(els.scanRackSelect);
   }
   if (els.scanRackCompleteBtn) {
     els.scanRackCompleteBtn.textContent = selectedInTransit ? "Mark Returned" : selectedClosed ? "Uncomplete" : "Complete";
@@ -4087,11 +5414,18 @@ function openHomeStatisticsReport() {
   <table><thead><tr><th>Operator</th><th>Scans</th></tr></thead><tbody>${operatorRows}</tbody></table>
   <h2>Incomplete Delivery Lists</h2>
   <table><thead><tr><th>Delivery List</th><th>Rows</th><th>Remaining Qty</th></tr></thead><tbody>${incompleteRows}</tbody></table>
-  <script>window.addEventListener("load", () => setTimeout(() => window.print(), 300));</script>
+  <script>
+    window.addEventListener("afterprint", () => {
+      if (window.opener && !window.opener.closed) window.opener.postMessage({ type: "delivery-print-complete" }, window.opener.location.origin);
+      setTimeout(() => window.close(), 100);
+    });
+    window.addEventListener("load", () => setTimeout(() => window.print(), 300));
+  </script>
 </body>
 </html>`;
 
-  const win = window.open("", "_blank", "width=1120,height=820");
+  state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
+  const win = window.open("", "deliveryStatisticsPrintWindow", "popup=yes,width=1120,height=820,resizable=yes,scrollbars=yes");
   if (!win) {
     showInlineError("Allow popups to generate the statistics PDF report.");
     return;
@@ -4605,6 +5939,125 @@ function showFloatingNotice(message, kind = "notice") {
   notice._hideTimer = window.setTimeout(() => {
     notice.classList.add("is-hiding");
   }, 5200);
+}
+
+function closeActionFeedback() {
+  document.getElementById("actionFeedbackShell")?.remove();
+  updateModalScrollLock();
+}
+
+function showActionFeedback({
+  kind = "success",
+  eyebrow = "Update complete",
+  title = "Saved successfully",
+  message = "",
+  details = [],
+  primaryLabel = "",
+  secondaryLabel = "Done",
+  onPrimary = null,
+  onSecondary = null,
+} = {}) {
+  closeActionFeedback();
+
+  const shell = document.createElement("div");
+  shell.id = "actionFeedbackShell";
+  shell.className = `action-feedback-shell ${kind}`;
+  const detailRows = details
+    .filter((detail) => detail && detail.value !== undefined && detail.value !== null && String(detail.value).trim())
+    .map((detail) => `
+      <div class="action-feedback-detail">
+        <small>${escapeHtml(detail.label || "Details")}</small>
+        <strong>${escapeHtml(detail.value)}</strong>
+      </div>
+    `)
+    .join("");
+
+  shell.innerHTML = `
+    <button class="action-feedback-backdrop" type="button" data-action-feedback-close aria-label="Close"></button>
+    <section class="action-feedback-panel" role="dialog" aria-modal="true" aria-labelledby="actionFeedbackTitle">
+      <div class="action-feedback-icon" aria-hidden="true"><i></i></div>
+      <div class="action-feedback-copy">
+        <small>${escapeHtml(eyebrow)}</small>
+        <h2 id="actionFeedbackTitle">${escapeHtml(title)}</h2>
+        ${message ? `<p>${escapeHtml(message)}</p>` : ""}
+      </div>
+      ${detailRows ? `<div class="action-feedback-details">${detailRows}</div>` : ""}
+      <div class="action-feedback-actions">
+        ${primaryLabel ? `<button class="action-feedback-primary" type="button" data-action-feedback-primary>${escapeHtml(primaryLabel)}</button>` : ""}
+        <button class="action-feedback-secondary" type="button" data-action-feedback-secondary>${escapeHtml(secondaryLabel)}</button>
+      </div>
+    </section>
+  `;
+
+  document.body.appendChild(shell);
+  applyLanguageToRoot(shell);
+  updateModalScrollLock();
+
+  const closeWithSecondary = async () => {
+    try {
+      if (typeof onSecondary === "function") await onSecondary();
+    } finally {
+      closeActionFeedback();
+    }
+  };
+
+  shell.querySelector("[data-action-feedback-close]")?.addEventListener("click", closeWithSecondary);
+  shell.querySelector("[data-action-feedback-secondary]")?.addEventListener("click", closeWithSecondary);
+  shell.querySelector("[data-action-feedback-primary]")?.addEventListener("click", async () => {
+    try {
+      if (typeof onPrimary === "function") await onPrimary();
+    } finally {
+      closeActionFeedback();
+    }
+  });
+  shell.querySelector("[data-action-feedback-primary], [data-action-feedback-secondary]")?.focus();
+}
+
+async function restoreFullscreenAfterManagedPrint() {
+  const shouldRestore = Boolean(state.restoreFullscreenAfterPrint);
+  state.restoreFullscreenAfterPrint = false;
+  window.focus();
+  if (!shouldRestore || document.fullscreenElement || !document.fullscreenEnabled) return;
+
+  try {
+    await document.documentElement.requestFullscreen();
+  } catch {
+    showActionFeedback({
+      kind: "success",
+      eyebrow: "Print complete",
+      title: "Return to fullscreen",
+      message: "The print window closed. Your browser requires one click to enter fullscreen again.",
+      primaryLabel: "Return to fullscreen",
+      secondaryLabel: "Stay in windowed mode",
+      onPrimary: async () => {
+        if (!document.fullscreenElement && document.fullscreenEnabled) {
+          await document.documentElement.requestFullscreen();
+        }
+      },
+    });
+  }
+}
+
+function launchManagedPrint(url, windowName = "deliveryListPrintWindow") {
+  state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
+  const printWindow = window.open(url, windowName, "popup=yes,width=1180,height=860,resizable=yes,scrollbars=yes");
+  if (!printWindow) {
+    state.restoreFullscreenAfterPrint = false;
+    showInlineError("Allow popups to open the print preview.", false);
+    return null;
+  }
+  printWindow.focus();
+  return printWindow;
+}
+
+function printCurrentPageManaged() {
+  state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
+  const afterPrint = () => {
+    window.removeEventListener("afterprint", afterPrint);
+    restoreFullscreenAfterManagedPrint();
+  };
+  window.addEventListener("afterprint", afterPrint);
+  window.print();
 }
 
 async function runGlobalSearch() {
@@ -6855,13 +8308,25 @@ function openSdiPanel(assignmentId = "") {
   if (found.bay?.bayCode) state.selectedBayCode = found.bay.bayCode;
   const bay = selectedBay();
   const assignment = found.assignment || selectedBayAssignment();
-  if (els.sdiPanel) els.sdiPanel.dataset.assignmentId = assignment?.id || "";
-  if (els.sdiPanel) els.sdiPanel.hidden = false;
+  const assignmentLookup = assignment?.job || assignment?.order || "";
+  if (els.sdiPanel) {
+    els.sdiPanel.dataset.assignmentId = assignment?.id || "";
+    els.sdiPanel.dataset.originalLookup = assignmentLookup;
+    els.sdiPanel.hidden = false;
+  }
   if (els.sdiBackdrop) els.sdiBackdrop.hidden = false;
   updateModalScrollLock();
-  if (els.sdiOrderInput && assignment?.order) els.sdiOrderInput.value = assignment.order;
+  if (els.sdiOrderInput) els.sdiOrderInput.value = assignmentLookup;
   if (els.sdiBayInput) els.sdiBayInput.value = bay?.bayCode || "";
   if (els.sdiReasonInput && !els.sdiReasonInput.value) els.sdiReasonInput.value = "Same-day install";
+  if (els.sdiTypeInput) {
+    els.sdiTypeInput.value = assignment && isRemakeItem(assignment)
+      ? "Remake"
+      : assignment && isRushItem(assignment)
+        ? "Rush"
+        : "";
+    syncCustomSelect(els.sdiTypeInput);
+  }
   renderSdiCurrentList();
   els.sdiOrderInput?.focus();
 }
@@ -6875,12 +8340,16 @@ function renderSdiCurrentList() {
     }
   }
   els.sdiCurrentList.innerHTML = `
-    <strong>Current SDI Orders</strong>
+    <strong>Current Rush / Remake Orders</strong>
     <div>
       ${
         rows.length
-          ? rows.slice(0, 30).map(({ bay, assignment }) => `<button type="button" data-assignment-action="sdi" data-assignment-id="${escapeHtml(assignment.id)}"><span>${escapeHtml(assignment.order)}-${escapeHtml(assignment.item)}</span><small>${escapeHtml(bay.displayName || bay.bayCode)} - ${escapeHtml(assignment.customer || "")}</small></button>`).join("")
-          : `<span class="admin-empty">No current SDI orders.</span>`
+          ? rows.slice(0, 30).map(({ bay, assignment }) => {
+              const typeLabel = isRemakeItem(assignment) ? "Remake" : isRushItem(assignment) ? "Rush" : "SDI";
+              const lookupLabel = assignment.job || `${assignment.order}-${assignment.item}`;
+              return `<button type="button" data-assignment-action="sdi" data-assignment-id="${escapeHtml(assignment.id)}"><span>${escapeHtml(lookupLabel)} <b>${escapeHtml(typeLabel)}</b></span><small>${escapeHtml(bay.displayName || bay.bayCode)} - ${escapeHtml(assignment.customer || "")}</small></button>`;
+            }).join("")
+          : `<span class="admin-empty">No current Rush or Remake orders.</span>`
       }
     </div>
   `;
@@ -6894,23 +8363,57 @@ function closeSdiPanel() {
 
 async function submitSdi(mark = true) {
   const assignment = assignmentById(els.sdiPanel?.dataset.assignmentId || "").assignment || selectedBayAssignment();
+  const orderType = els.sdiTypeInput?.value || "";
+  const lookupText = els.sdiOrderInput?.value.trim() || "";
+  const originalLookup = els.sdiPanel?.dataset.originalLookup || "";
+  const normalizeLookup = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
+  const useSelectedAssignment = Boolean(
+    assignment?.id &&
+    (!lookupText || normalizeLookup(lookupText) === normalizeLookup(originalLookup))
+  );
   const payload = {
-    assignmentId: assignment?.id || "",
-    orderNo: els.sdiOrderInput?.value || "",
+    assignmentId: useSelectedAssignment ? assignment.id : "",
+    orderNo: lookupText,
+    job: lookupText,
     bayCode: els.sdiBayInput?.value || state.selectedBayCode || "",
     truckExempt: Boolean(els.sdiTruckExemptInput?.checked),
-    reason: `${els.sdiTypeInput?.value || "Rush"} - ${els.sdiReasonInput?.value || (mark ? "Same-day install" : "SDI cleared")}`,
+    orderType,
+    reason: els.sdiReasonInput?.value || (mark ? "Same-day install" : "Rush / Remake cleared"),
   };
-  if (mark && !els.sdiTypeInput?.value) {
+  if (mark && !orderType) {
     showInlineError("Select Rush or Remake before marking SDI.", false);
     return;
   }
+  if (!useSelectedAssignment && !lookupText) {
+    showInlineError("Enter a Job Nr., SO number, order number, or barcode.", false);
+    return;
+  }
+
   const result = await postBayAction(mark ? "/api/indian-trail/mark-sdi" : "/api/indian-trail/remove-sdi", payload);
   closeSdiPanel();
-  if (mark && result?.rush && window.confirm(result.message || "A Rush order has been marked. Print rush order?")) {
-    const listId = state.activeListId || selectedBay()?.assignments?.[0]?.deliveryListId || "";
-    if (listId) window.open(`/api/print/package?listId=${encodeURIComponent(listId)}&rushOnly=1`, "_blank", "noopener");
-  }
+
+  const affectedItems = Number(result?.affectedItems || 0);
+  const jobLabel = result?.matchedJob || lookupText;
+  const customerLabel = result?.matchedCustomer || assignment?.customer || "";
+  const listId = result?.listId || assignment?.deliveryListId || state.activeListId || selectedBay()?.assignments?.[0]?.deliveryListId || "";
+  const printUrl = mark && listId
+    ? `/api/print/package?listId=${encodeURIComponent(listId)}&${result?.remake ? "remakeOnly" : "rushOnly"}=1`
+    : "";
+
+  showActionFeedback({
+    kind: "success",
+    eyebrow: mark ? "Bay Map update complete" : "Bay Map update cleared",
+    title: mark ? `${result?.orderType || orderType} marked` : "Rush / Remake cleared",
+    message: result?.message || (mark ? `${orderType} was marked successfully.` : "The Rush / Remake mark was removed."),
+    details: [
+      { label: "Job Nr. / Order", value: jobLabel },
+      { label: "Customer", value: customerLabel },
+      { label: "Items updated", value: affectedItems ? String(affectedItems) : "1" },
+    ],
+    primaryLabel: printUrl ? (result?.remake ? "Print remake sheet" : "Print Rush sheet") : "",
+    secondaryLabel: "Done",
+    onPrimary: printUrl ? () => launchManagedPrint(printUrl) : null,
+  });
 }
 
 async function runBayAction(action) {
@@ -7334,7 +8837,7 @@ function openPrintPackage(printCandidates, filters = {}) {
   for (const [key, value] of Object.entries(filters)) {
     if (value) params.set(key, value);
   }
-  window.open(`/api/print/package?${params.toString()}`, "_blank", "noopener");
+  launchManagedPrint(`/api/print/package?${params.toString()}`);
 }
 
 async function runAssignmentAction(action, assignmentId) {
@@ -7816,7 +9319,7 @@ function submitPrintOptions() {
   }
   if (!state.backend) {
     closePrintOptions();
-    window.print();
+    printCurrentPageManaged();
     return;
   }
   const checkedGlassInputs = [...(els.printOptionsGlassType?.querySelectorAll('.print-glass-choice:not(.print-glass-all-choice) input[type="checkbox"]:checked') || [])];
@@ -7839,7 +9342,7 @@ function submitPrintOptions() {
   if (mode === "export") {
     window.open(`/api/export/package.xlsx?${params.toString()}`, "_blank", "noopener");
   } else {
-    window.open(`/api/print/package?${params.toString()}`, "_blank", "noopener");
+    launchManagedPrint(`/api/print/package?${params.toString()}`);
   }
   closePrintOptions();
 }
@@ -12060,7 +13563,9 @@ function replayExpandableListAnimation(details) {
 function wireEvents() {
   if (state.eventsWired) return;
   state.eventsWired = true;
+  initLanguageSystem();
   initCustomSelectSystem();
+  syncFullscreenControl();
 
   document.addEventListener("toggle", (event) => {
     const details = event.target.closest?.(".delivery-date-group, .admin-import-date-group");
@@ -12082,6 +13587,14 @@ function wireEvents() {
   });
 
   els.logoutBtn?.addEventListener("click", () => logout().catch((error) => showInlineError(error.message)));
+  els.languageToggleBtn?.addEventListener("click", () => toggleAppLanguage());
+  els.loginLanguageToggleBtn?.addEventListener("click", () => toggleAppLanguage());
+  els.fullscreenToggleBtn?.addEventListener("click", () => toggleFullscreen().catch((error) => showInlineError(error.message)));
+  document.addEventListener("fullscreenchange", () => syncFullscreenControl());
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin || event.data?.type !== "delivery-print-complete") return;
+    restoreFullscreenAfterManagedPrint().catch(() => {});
+  });
 
   document.addEventListener("click", (event) => {
     document.querySelectorAll(".user-menu[open]").forEach((menu) => {
@@ -12098,6 +13611,7 @@ function wireEvents() {
     if (event.key !== "Escape") return;
     document.querySelectorAll(".user-menu[open]").forEach((menu) => menu.removeAttribute("open"));
     if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
+    if (document.getElementById("actionFeedbackShell")) closeActionFeedback();
   });
 
   els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
@@ -12403,7 +13917,7 @@ function wireEvents() {
         return;
       }
 
-      window.open(rackPackingListUrl(printButton.dataset.rackPrint, printButton.dataset.rackPrintDate || ""), "_blank", "noopener");
+      launchManagedPrint(rackPackingListUrl(printButton.dataset.rackPrint, printButton.dataset.rackPrintDate || ""));
 
       return;
     }
@@ -13023,7 +14537,7 @@ function wireEvents() {
   els.staleBayCloseBtn?.addEventListener("click", () => closeStaleBayPanel());
   els.staleBayOkBtn?.addEventListener("click", () => closeStaleBayPanel());
   els.staleBayBackdrop?.addEventListener("click", () => closeStaleBayPanel());
-  els.staleBayPrintBtn?.addEventListener("click", () => window.open("/api/indian-trail/stale-bays/print", "_blank", "noopener"));
+  els.staleBayPrintBtn?.addEventListener("click", () => launchManagedPrint("/api/indian-trail/stale-bays/print"));
   els.adminModalClose?.addEventListener("click", () => closeAdminModal());
   els.adminModalBackdrop?.addEventListener("click", () => closeAdminModal());
   els.staleBaySnoozeAllBtn?.addEventListener("click", () => {
@@ -13709,7 +15223,7 @@ function wireEvents() {
     const emailManifestPdfButton = event.target.closest("[data-email-manifest-pdf]");
     if (emailManifestPdfButton) {
       const id = encodeURIComponent(emailManifestPdfButton.dataset.emailManifestPdf || "");
-      if (id) window.open(`/api/admin/customer-emails/${id}/manifest-pdf`, "_blank");
+      if (id) launchManagedPrint(`/api/admin/customer-emails/${id}/manifest-pdf`);
       return;
     }
 

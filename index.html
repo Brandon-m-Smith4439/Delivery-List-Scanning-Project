@@ -10,10 +10,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-  <link rel="stylesheet" href="styles.css?v=20260713-v033">
+  <link rel="stylesheet" href="styles.css?v=20260713-v037">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
+    <button class="login-language-toggle" id="loginLanguageToggleBtn" type="button" aria-label="Cambiar a Español" title="Cambiar a Español">
+      <span class="language-globe-icon" aria-hidden="true"></span>
+      <span>ES</span>
+    </button>
     <div class="login-shell">
       <aside class="login-hero-card">
         <img src="assets/barefoot-logo.jpg" alt="Barefoot & Company" onerror="this.style.display='none'; this.nextElementSibling.hidden=false;">
@@ -104,6 +108,13 @@
         <div class="header-search-results" id="headerGlobalSearchResults" hidden></div>
       </div>
       <div class="header-actions">
+        <button class="tool-button header-utility-button language-toggle-button" id="languageToggleBtn" type="button" aria-label="Cambiar a Español" title="Cambiar a Español">
+          <span class="language-globe-icon" aria-hidden="true"></span>
+          <span>ES</span>
+        </button>
+        <button class="tool-button header-utility-button fullscreen-toggle-button" id="fullscreenToggleBtn" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">
+          <span class="fullscreen-icon" aria-hidden="true"></span>
+        </button>
         <button class="tool-button primary-tool header-action-icon-button print-export-button" id="globalPrintExportBtn" type="button"><span class="button-icon print-export-icon" aria-hidden="true"></span><span>Print/Export</span></button>
         <span class="backend-status" id="backendStatus" hidden>Local demo</span>
         <details class="user-menu">
@@ -626,7 +637,7 @@
           <div class="bay-right-rail">
             <div class="bay-action-buttons bay-action-buttons-v2" id="bayActionButtons" aria-label="Indian Trail bay actions">
               <button type="button" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon old"></span>Old Bays</button>
-              <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi"><span class="bay-action-icon sdi"></span>SDI / Rush</button>
+              <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi"><span class="bay-action-icon sdi"></span>Rush / Remake</button>
               <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay"><span class="bay-action-icon manage"></span>Manage Items</button>
               <button type="button" data-bay-action="bay-editor" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-edit"></span>Edit Bays</button>
               <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout"><span class="bay-action-icon layout"></span>Edit Map</button>
@@ -801,15 +812,16 @@
         <section class="sdi-panel modal-panel" id="sdiPanel" hidden>
           <div class="section-heading">
             <div>
-              <h2>SDI / Rush Order</h2>
+              <h2>Rush / Remake Order</h2>
               <span class="bay-scanner-subtitle">Mark rush, remake, or same-day install handling without mixing this workflow into Manage Items.</span>
             </div>
             <button id="sdiCloseBtn" class="modal-close-x" type="button" aria-label="Close SDI window">×</button>
           </div>
           <form id="sdiForm" class="sdi-form">
-            <label>
-              <span>SO / Order Nr.</span>
-              <input id="sdiOrderInput" type="text" autocomplete="off" placeholder="231707">
+            <label class="sdi-job-lookup">
+              <span>Job Nr. / SO / Order Nr.</span>
+              <input id="sdiOrderInput" type="text" autocomplete="off" placeholder="88418245M LOGAN FARMS 51">
+              <small>Paste the full Job Nr., customer description, SO number, order number, or barcode.</small>
             </label>
             <label>
               <span>Bay Code</span>
@@ -833,8 +845,8 @@
             </label>
             <div class="sdi-current-list" id="sdiCurrentList"></div>
             <div class="sdi-actions">
-              <button type="submit" data-sdi-action="mark">Mark Rush / SDI</button>
-              <button type="button" id="sdiClearBtn">Clear SDI</button>
+              <button type="submit" data-sdi-action="mark">Mark Rush / Remake</button>
+              <button type="button" id="sdiClearBtn">Clear Rush / Remake</button>
             </div>
           </form>
         </section>
@@ -1136,6 +1148,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=20260713-v033"></script>
+  <script src="app.js?v=20260713-v037"></script>
 </body>
 </html>

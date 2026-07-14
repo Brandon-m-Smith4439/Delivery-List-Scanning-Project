@@ -4373,6 +4373,62 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     return con.execute("SELECT * FROM line_items WHERE list_id = ? AND COALESCE(job, '') = ? ORDER BY order_no, item_no", (list_id, job)).fetchall()
         return []
 
+    def find_sdi_line_items(self, con: sqlite3.Connection, lookup_text: str) -> list[sqlite3.Row]:
+        """Resolve an SDI entry as a barcode, SO/order number, or complete Job Nr. label.
+
+        The Bay Map commonly displays Job Nr. values such as
+        ``88418245M LOGAN FARMS 51``. Those values contain both letters and
+        digits, so reducing the input to digits loses the actual job key. Reuse
+        the manual bay resolver first, then apply a normalized fallback so
+        pasted job labels still match when spacing or punctuation differs.
+        """
+        text = str(lookup_text or "").strip()
+        if not text:
+            return []
+
+        rows = self.find_manual_bay_line_items(con, text)
+        if rows:
+            return rows
+
+        normalized_lookup = normalized_match_text(text)
+        if not normalized_lookup:
+            return []
+
+        candidates = con.execute(
+            """
+            SELECT li.*
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            WHERE dl.status = 'active'
+              AND (dl.stage LIKE '%Indian Trail%' OR dl.stage LIKE '%Staging%' OR dl.stage LIKE '%Outbound%')
+            ORDER BY dl.delivery_date DESC, li.job, li.order_no, li.item_no
+            LIMIT 2500
+            """
+        ).fetchall()
+
+        matched = None
+        for row in candidates:
+            job_text = normalized_match_text(row["job"])
+            order_text = normalized_match_text(row["order_no"])
+            customer_text = normalized_match_text(row["customer"])
+            combined_text = normalized_match_text(f"{row['job']} {row['customer']} {row['order_no']}")
+            if normalized_lookup == job_text:
+                matched = row
+                break
+            if normalized_lookup == order_text or normalized_lookup in combined_text:
+                matched = matched or row
+
+        if not matched:
+            return []
+
+        job_value = str(matched["job"] or "").strip()
+        if job_value:
+            return con.execute(
+                "SELECT * FROM line_items WHERE list_id = ? AND COALESCE(job, '') = ? ORDER BY order_no, item_no",
+                (matched["list_id"], job_value),
+            ).fetchall()
+        return [matched]
+
     def ensure_manual_bay_delivery_list(self, con: sqlite3.Connection) -> str:
         today = now_iso()[:10]
         list_id = f"{today}-manual-bay-assignments"
@@ -8713,16 +8769,39 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
     def mark_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         assignment_id = int(data.get("assignmentId") or 0)
-        order_no = digits_only(str(data.get("orderNo") or data.get("order") or ""))
+        lookup_text = str(data.get("orderNo") or data.get("order") or data.get("job") or "").strip()
         bay_code = str(data.get("bayCode") or "").strip()
         truck_exempt = bool(data.get("truckExempt"))
-        reason = str(data.get("reason") or "Same-day install").strip()
-        if not assignment_id and not order_no:
-            raise ValueError("Select a bay assignment or enter an order number")
+        raw_type = str(data.get("orderType") or data.get("type") or "").strip()
+        raw_reason = str(data.get("reason") or "Same-day install").strip()
+
+        normalized_type = normalized_match_text(raw_type)
+        if normalized_type in {"RUSH", "SDI", "URGENT", "URGENTE"}:
+            order_type = "Rush"
+        elif normalized_type in {"REMAKE", "RM", "REHECHO", "REHACER"}:
+            order_type = "Remake"
+        else:
+            # Compatibility with v035 and older clients that placed the type at
+            # the start of the reason instead of sending a dedicated field.
+            reason_prefix = normalized_match_text(raw_reason.split("-", 1)[0])
+            if reason_prefix in {"RUSH", "SDI", "URGENT", "URGENTE"}:
+                order_type = "Rush"
+                raw_reason = raw_reason.split("-", 1)[1].strip() if "-" in raw_reason else "Same-day install"
+            elif reason_prefix in {"REMAKE", "RM", "REHECHO", "REHACER"}:
+                order_type = "Remake"
+                raw_reason = raw_reason.split("-", 1)[1].strip() if "-" in raw_reason else "Remake"
+            else:
+                raise ValueError("Select Rush or Remake before marking the item")
+
+        reason = f"{order_type} - {raw_reason or ('Same-day install' if order_type == 'Rush' else 'Remake')}"
+        if not assignment_id and not lookup_text:
+            raise ValueError("Select a bay assignment or enter a Job Nr., SO number, or order number")
+
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             affected_rows: list[sqlite3.Row] = []
             assignment = None
+
             if assignment_id:
                 assignment = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
                 if not assignment:
@@ -8731,66 +8810,169 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if row:
                     affected_rows.append(row)
                 con.execute("UPDATE bay_assignments SET status = 'SDIOverride', reason = ? WHERE id = ?", (reason, assignment_id))
-                self.insert_bay_event(con, assignment["bay_id"], assignment["line_item_id"], "MarkSDI", user, reason)
-            elif order_no:
-                affected_rows = con.execute(
-                    """
-                    SELECT li.*
-                    FROM line_items li
-                    JOIN delivery_lists dl ON dl.id = li.list_id
-                    WHERE li.order_no = ? AND dl.status = 'active'
-                    ORDER BY dl.delivery_date DESC, li.id
-                    """,
-                    (order_no,),
-                ).fetchall()
+                self.insert_bay_event(
+                    con,
+                    assignment["bay_id"],
+                    assignment["line_item_id"],
+                    "MarkRush" if order_type == "Rush" else "MarkRemake",
+                    user,
+                    reason,
+                )
+            else:
+                affected_rows = self.find_sdi_line_items(con, lookup_text)
                 if not affected_rows:
-                    raise ValueError("Order number was not found on active delivery lists")
-                if bay_code and not truck_exempt:
-                    bay = self.get_bay_by_code(con, bay_code)
-                    row = affected_rows[0]
-                    cur = con.execute(
-                        """
-                        INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
-                        VALUES (?, ?, ?, 1, 'SDIOverride', ?, ?, ?)
-                        """,
-                        (row["list_id"], row["id"], bay["id"], user, now_iso(), reason),
-                    )
-                    assignment_id = int(cur.lastrowid)
-                    self.insert_bay_event(con, bay["id"], row["id"], "MarkSDI", user, reason, new_bay_id=bay["id"])
+                    raise ValueError("Job Nr., SO number, order number, or barcode was not found on active delivery lists")
 
+                target_bay = self.get_bay_by_code(con, bay_code) if bay_code and not truck_exempt else None
+                for row in affected_rows:
+                    existing_assignments = con.execute(
+                        "SELECT * FROM bay_assignments WHERE line_item_id = ? ORDER BY id",
+                        (row["id"],),
+                    ).fetchall()
+
+                    if existing_assignments:
+                        for existing in existing_assignments:
+                            con.execute(
+                                "UPDATE bay_assignments SET status = 'SDIOverride', reason = ? WHERE id = ?",
+                                (reason, existing["id"]),
+                            )
+                            self.insert_bay_event(
+                                con,
+                                existing["bay_id"],
+                                row["id"],
+                                "MarkRush" if order_type == "Rush" else "MarkRemake",
+                                user,
+                                reason,
+                            )
+                            self.insert_audit(
+                                con,
+                                "bay_assignment",
+                                str(existing["id"]),
+                                "mark_sdi",
+                                user,
+                                "",
+                                reason,
+                                {"orderType": order_type, "lookup": lookup_text},
+                            )
+                        assignment_id = assignment_id or int(existing_assignments[0]["id"])
+                    elif target_bay:
+                        cur = con.execute(
+                            """
+                            INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
+                            VALUES (?, ?, ?, ?, 'SDIOverride', ?, ?, ?)
+                            """,
+                            (
+                                row["list_id"],
+                                row["id"],
+                                target_bay["id"],
+                                max(int(row["qty"] or 1), 1),
+                                user,
+                                now_iso(),
+                                reason,
+                            ),
+                        )
+                        new_assignment_id = int(cur.lastrowid)
+                        assignment_id = assignment_id or new_assignment_id
+                        self.insert_bay_event(
+                            con,
+                            target_bay["id"],
+                            row["id"],
+                            "MarkRush" if order_type == "Rush" else "MarkRemake",
+                            user,
+                            reason,
+                            new_bay_id=target_bay["id"],
+                        )
+                        self.insert_audit(
+                            con,
+                            "bay_assignment",
+                            str(new_assignment_id),
+                            "mark_sdi",
+                            user,
+                            "",
+                            reason,
+                            {"orderType": order_type, "lookup": lookup_text, "bayCode": bay_code},
+                        )
+
+            list_id = ""
+            special_pattern = r"\b(?:Rush|SDI|Remake|RM)\b"
             for row in affected_rows:
-                process_state = str(row["process_state"] or "")
-                next_state = process_state if re.search(r"\bRush\b", process_state, flags=re.IGNORECASE) else " ".join(part for part in [process_state, "Rush"] if part).strip()
+                list_id = list_id or str(row["list_id"] or "")
+                process_state = re.sub(special_pattern, "", str(row["process_state"] or ""), flags=re.IGNORECASE)
+                process_state = re.sub(r"\s{2,}", " ", process_state).strip(" -|,")
+                next_state = " ".join(part for part in [process_state, order_type] if part).strip()
                 con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, row["id"]))
-                self.insert_event(con, row["list_id"], row["id"], "SDI", row["barcode"], user, "", "notice", "Rush order marked", reason)
+                message = "Rush order marked" if order_type == "Rush" else "Remake marked"
+                self.insert_event(
+                    con,
+                    row["list_id"],
+                    row["id"],
+                    "SDI" if order_type == "Rush" else "REMAKE",
+                    row["barcode"],
+                    user,
+                    "",
+                    "notice",
+                    message,
+                    reason,
+                )
                 self.insert_audit(
                     con,
                     "line_item",
                     row["id"],
-                    "mark_rush_sdi",
+                    "mark_rush_sdi" if order_type == "Rush" else "mark_remake_sdi",
                     user,
                     "",
                     reason,
-                    {"truckExempt": truck_exempt, "bayCode": bay_code, "assignmentId": assignment_id},
+                    {
+                        "orderType": order_type,
+                        "truckExempt": truck_exempt,
+                        "bayCode": bay_code,
+                        "assignmentId": assignment_id,
+                        "lookup": lookup_text,
+                    },
                 )
-            if assignment_id:
-                self.insert_audit(con, "bay_assignment", str(assignment_id), "mark_sdi", user, "", reason)
+
+            if assignment_id and assignment:
+                self.insert_audit(
+                    con,
+                    "bay_assignment",
+                    str(assignment_id),
+                    "mark_sdi",
+                    user,
+                    "",
+                    reason,
+                    {"orderType": order_type, "lookup": lookup_text},
+                )
             con.commit()
+
+        first_row = affected_rows[0] if affected_rows else None
+        matched_job = str(first_row["job"] or "").strip() if first_row else ""
+        matched_customer = str(first_row["customer"] or "").strip() if first_row else ""
+        matched_order = str(first_row["order_no"] or "").strip() if first_row else ""
+        target_label = f"Job Nr. {matched_job}" if matched_job else f"order {matched_order or lookup_text}"
+        is_rush = order_type == "Rush"
         return {
             "ok": True,
             "assignmentId": assignment_id,
+            "listId": list_id,
             "status": "SDIOverride",
-            "rush": True,
+            "orderType": order_type,
+            "rush": is_rush,
+            "remake": not is_rush,
             "affectedItems": len(affected_rows),
-            "message": "A Rush order has been marked. Print rush order?",
+            "matchedJob": matched_job,
+            "matchedCustomer": matched_customer,
+            "matchedOrder": matched_order,
+            "lookup": lookup_text,
+            "message": f"{order_type} marked for {target_label}.",
         }
 
     def remove_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         assignment_id = int(data.get("assignmentId") or 0)
-        order_no = digits_only(str(data.get("orderNo") or data.get("order") or ""))
+        lookup_text = str(data.get("orderNo") or data.get("order") or data.get("job") or "").strip()
         reason = str(data.get("reason") or "SDI cleared").strip()
-        if not assignment_id and not order_no:
-            raise ValueError("Select a bay assignment or enter an order number")
+        if not assignment_id and not lookup_text:
+            raise ValueError("Select a bay assignment or enter a Job Nr., SO number, or order number")
+
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rows: list[sqlite3.Row] = []
@@ -8804,25 +8986,50 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if row:
                     rows.append(row)
                 self.insert_audit(con, "bay_assignment", str(assignment_id), "remove_sdi", user, "", reason)
-            elif order_no:
-                rows = con.execute(
-                    """
-                    SELECT li.*
-                    FROM line_items li
-                    JOIN delivery_lists dl ON dl.id = li.list_id
-                    WHERE li.order_no = ? AND dl.status = 'active'
-                    """,
-                    (order_no,),
-                ).fetchall()
+            else:
+                rows = self.find_sdi_line_items(con, lookup_text)
                 if not rows:
-                    raise ValueError("Order number was not found on active delivery lists")
+                    raise ValueError("Job Nr., SO number, order number, or barcode was not found on active delivery lists")
+                for row in rows:
+                    assignments = con.execute(
+                        "SELECT * FROM bay_assignments WHERE line_item_id = ? AND status = 'SDIOverride' ORDER BY id",
+                        (row["id"],),
+                    ).fetchall()
+                    for assignment in assignments:
+                        con.execute(
+                            "UPDATE bay_assignments SET status = 'Assigned', reason = ? WHERE id = ?",
+                            (reason, assignment["id"]),
+                        )
+                        self.insert_bay_event(con, assignment["bay_id"], row["id"], "RemoveSDI", user, reason)
+                        self.insert_audit(con, "bay_assignment", str(assignment["id"]), "remove_sdi", user, "", reason)
+
             for row in rows:
-                next_state = re.sub(r"\bRush\b", "", str(row["process_state"] or ""), flags=re.IGNORECASE).strip()
+                next_state = re.sub(
+                    r"\b(?:Rush|SDI|Remake|RM)\b",
+                    "",
+                    str(row["process_state"] or ""),
+                    flags=re.IGNORECASE,
+                ).strip(" -|,")
                 next_state = re.sub(r"\s{2,}", " ", next_state)
                 con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, row["id"]))
-                self.insert_audit(con, "line_item", row["id"], "clear_rush_sdi", user, "", reason)
+                self.insert_audit(con, "line_item", row["id"], "clear_rush_remake_sdi", user, "", reason, {"lookup": lookup_text})
             con.commit()
-        return {"ok": True, "assignmentId": assignment_id, "status": "Assigned", "affectedItems": len(rows)}
+
+        first_row = rows[0] if rows else None
+        matched_job = str(first_row["job"] or "").strip() if first_row else ""
+        matched_customer = str(first_row["customer"] or "").strip() if first_row else ""
+        matched_order = str(first_row["order_no"] or "").strip() if first_row else ""
+        return {
+            "ok": True,
+            "assignmentId": assignment_id,
+            "status": "Assigned",
+            "affectedItems": len(rows),
+            "matchedJob": matched_job,
+            "matchedCustomer": matched_customer,
+            "matchedOrder": matched_order,
+            "lookup": lookup_text,
+            "message": "Rush / Remake mark cleared.",
+        }
 
     def bay_check(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         bay_code = str(data.get("bayCode") or "")
