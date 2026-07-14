@@ -1516,6 +1516,12 @@ SPANISH_UI_EXTENDED.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, s
   ["Scan needs review", "El escaneo requiere revisión"],
   ["Complete - awaiting outbound scan", "Completo - esperando escaneo de salida"],
   ["Scanned outbound", "Escaneado en salida"],
+  ["Outbound scan", "Escaneo de salida"],
+  ["Outbound / Received", "Salida / Recibido"],
+  ["Wrong destination for this rack", "Destino incorrecto para este rack"],
+  ["Yes, override destination", "Sí, omitir destino"],
+  ["No, cancel scan", "No, cancelar escaneo"],
+  ["Rack scan cancelled.", "Escaneo de rack cancelado."],
   ["Not complete", "Incompleto"],
   ["No active pieces are assigned", "No hay piezas activas asignadas"],
   ["Loading complete job and missing-item details...", "Cargando detalles completos del trabajo y artículos faltantes..."],
@@ -1532,6 +1538,49 @@ SPANISH_UI_EXTENDED.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, s
   ["New Rush Submitted", "Nueva orden urgente"],
   ["Acknowledge Rush", "Reconocer urgente"],
   ["Production Priority Alert", "Alerta de prioridad de producción"],
+].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
+
+[
+  ["Indian Trail safety check", "Verificación de seguridad de Indian Trail"],
+  ["This item has not been scanned Outbound", "Este artículo no ha sido escaneado en Salida"],
+  ["Would you like to override the Outbound requirement and receive it anyway?", "¿Desea omitir el requisito de Salida y recibirlo de todos modos?"],
+  ["Receive into bay", "Recibir en la bahía"],
+  ["Choose a bay...", "Elija una bahía..."],
+  ["No, cancel scan", "No, cancelar escaneo"],
+  ["Yes, override and receive", "Sí, omitir y recibir"],
+  ["Yes, override", "Sí, omitir"],
+  ["Indian Trail bay assignment", "Asignación de bahía de Indian Trail"],
+  ["What bay should receive this item?", "¿En qué bahía se debe recibir este artículo?"],
+  ["Cancel scan", "Cancelar escaneo"],
+  ["Receive in selected bay", "Recibir en la bahía seleccionada"],
+  ["Delivery date", "Fecha de entrega"],
+  ["Scanned outbound", "Escaneado en Salida"],
+  ["Outbound scan not recorded", "Escaneo de Salida no registrado"],
+  ["Returned item", "Artículo devuelto"],
+  ["Indian Trail received", "Recibido en Indian Trail"],
+  ["Override bay", "Cambiar bahía"],
+  ["Move to selected bay", "Mover a la bahía seleccionada"],
+  ["Done", "Listo"],
+  ["Manual Scan", "Escaneo manual"],
+  ["Uses the selected Add or Remove mode. Order and item are required.", "Usa el modo Agregar o Quitar seleccionado. Se requieren orden y artículo."],
+  ["Discard unsaved edits?", "¿Descartar cambios sin guardar?"],
+  ["Leave without saving?", "¿Salir sin guardar?"],
+  ["Go back without saving?", "¿Volver sin guardar?"],
+  ["Keep editing", "Continuar editando"],
+  ["Load another stage", "Cargar otra etapa"],
+  ["Leave page", "Salir de la página"],
+  ["Go back", "Volver"],
+  ["Move item to another bay?", "¿Mover el artículo a otra bahía?"],
+  ["Move item", "Mover artículo"],
+  ["No active assignment", "Sin asignación activa"],
+  ["No active bay item", "Sin artículo activo en bahía"],
+  ["Not scanned into this bay yet", "Aún no escaneado en esta bahía"],
+  ["All Bay Scans", "Todos los escaneos de bahía"],
+  ["Indian Trail Bay Scan History", "Historial de escaneos de bahía de Indian Trail"],
+  ["Manual scan requires both an order number and an item number.", "El escaneo manual requiere un número de orden y un número de artículo."],
+  ["Choose a target bay before adding an item.", "Elija una bahía de destino antes de agregar un artículo."],
+  ["No item currently in a bay matched that scan", "Ningún artículo actualmente en una bahía coincidió con ese escaneo"],
+  ["Outbound scan required", "Se requiere escaneo de salida"],
 ].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
 
 const SPANISH_PLACEHOLDERS = new Map([
@@ -1817,9 +1866,9 @@ function initLanguageSystem() {
 
 function syncFullscreenStickyPanelOffset() {
   const headerHeight = Math.ceil(els.appHeader?.getBoundingClientRect().height || 108);
-  const panelGap = 20;
+  const panelGap = 12;
   const panelTop = headerHeight + panelGap;
-  const panelBottomGap = 12;
+  const panelBottomGap = 8;
 
   document.documentElement.style.setProperty("--sticky-scanner-panel-top", `${panelTop}px`);
   document.documentElement.style.setProperty(
@@ -2535,6 +2584,8 @@ function updateModalScrollLock() {
     document.getElementById("emailDraftPreviewShell"),
     document.getElementById("actionFeedbackShell"),
     document.getElementById("rushAlertShell"),
+    document.getElementById("indianTrailOutboundOverrideShell"),
+    document.querySelector(".action-confirm-backdrop"),
     els.statsChartModal,
   ].some((panel) => panel && !panel.hidden);
 
@@ -2707,16 +2758,25 @@ function digitsOnly(value) {
 }
 
 function inferredRoute(item) {
+  // ROUTE is authoritative. Job Nr. is only a fallback when ROUTE is blank.
   const route = String(item.route || "").trim().toUpperCase();
-  const text = [item.route, item.job, item.customer, item.product, item.processState, item.queueState].join(" ");
-  if (/\bCPU[-\s]*(IT|INT)\b/i.test(text) || /\bIT[-\s]*CPU\b/i.test(text)) return "";
-  if (/\bCPU[-\s]*AIR\b/i.test(text)) return "CPU";
-  if (/\b(GNV|GREENVILLE)\b/i.test(text)) return "GNV";
-  if (/\b(DTC|DELIVER\s+TO\s+CUSTOMER)\b/i.test(text)) return "DTC";
-  if (/\b(INT|INDIAN\s+TRAIL)\b/i.test(text)) return "";
-  if (route === "CPU" || /\bCPU\b/i.test(text)) return "CPU";
-  if (["INT", "IT", "INDIAN TRAIL"].includes(route)) return "";
-  return route;
+  const compactRoute = route.replace(/[^A-Z0-9]+/g, "");
+  if (route) {
+    if (["CUSTOMER PICKUP", "PICKUP"].includes(route) || /\bCPU\b/i.test(route) || compactRoute.startsWith("CPU")) return "CPU";
+    if (["GNV", "GRN", "GREENVILLE"].includes(route)) return "GNV";
+    if (["DTC", "DELIVER TO CUSTOMER"].includes(route)) return "DTC";
+    if (["INT", "IT", "INDIAN TRAIL", "INDIANTRAIL"].includes(route)) return "";
+    return route;
+  }
+
+  const job = String(item.job || "").trim().toUpperCase();
+  const compactJob = job.replace(/[^A-Z0-9]+/g, "");
+  if (/\bCPU[-\s]*(IT|INT)\b/i.test(job) || /\b(IT|INT)[-\s]*CPU\b/i.test(job)) return "";
+  if (/\bCPU[-\s]*AIR\b/i.test(job) || compactJob.includes("CPUAIR")) return "CPU";
+
+  // Generic CPU text in Job Nr. remains Indian Trail unless the backend has
+  // already applied a customer-route rule to the ROUTE field.
+  return "";
 }
 
 function routeCategory(item) {
@@ -3077,10 +3137,10 @@ function filteredItems() {
       (state.filter === "rushes" && isRushItem(item)) ||
       (state.filter === "priority" && isRemakeOrRush(item)) ||
       (state.filter === "updated" && isNewOrUpdatedItem(item)) ||
-      (state.filter === "cpu-route" && /\bCPU\b|customer pickup/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`)) ||
-      (state.filter === "dtc-route" && /\bDTC\b|deliver to customer/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`)) ||
-      (state.filter === "greenville-route" && /\bGNV\b|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`)) ||
-      (state.filter === "indian-trail-route" && !/\bCPU\b|\bDTC\b|\bGNV\b|customer pickup|deliver to customer|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`));
+      (state.filter === "cpu-route" && routeCategory(item) === "cpu") ||
+      (state.filter === "dtc-route" && routeCategory(item) === "dtc") ||
+      (state.filter === "greenville-route" && routeCategory(item) === "greenville") ||
+      (state.filter === "indian-trail-route" && routeCategory(item) === "indian_trail");
 
     if (!matchesFilter) return false;
     if (state.glassTypeFilter !== "all" && glassTypeLabel(item) !== state.glassTypeFilter) return false;
@@ -3259,10 +3319,10 @@ function renderCounts() {
   const updatedCount = pieceCount(updatedItems);
 
   const routeCounts = {
-    "indian-trail-route": pieceCount(state.items.filter((item) => !/\bCPU\b|\bDTC\b|\bGNV\b|customer pickup|deliver to customer|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`))),
-    "cpu-route": pieceCount(state.items.filter((item) => /\bCPU\b|customer pickup/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`))),
-    "dtc-route": pieceCount(state.items.filter((item) => /\bDTC\b|deliver to customer/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`))),
-    "greenville-route": pieceCount(state.items.filter((item) => /\bGNV\b|greenville/i.test(`${item.route || ""} ${item.customer || ""} ${item.job || ""}`))),
+    "indian-trail-route": pieceCount(state.items.filter((item) => routeCategory(item) === "indian_trail")),
+    "cpu-route": pieceCount(state.items.filter((item) => routeCategory(item) === "cpu")),
+    "dtc-route": pieceCount(state.items.filter((item) => routeCategory(item) === "dtc")),
+    "greenville-route": pieceCount(state.items.filter((item) => routeCategory(item) === "greenville")),
   };
   if (els.countAll) els.countAll.textContent = `(${totalItems})`;
   if (els.countRemaining) els.countRemaining.textContent = `(${stats.remainingItems})`;
@@ -3899,6 +3959,7 @@ function renderRacksPage() {
         <div class="rack-board-card-meta">
           <b>${escapeHtml(rack.qty || 0)} pcs</b>
           <small class="rack-status-badge ${escapeHtml(statusClass)}">${escapeHtml(statusText)}</small>
+          ${rack.departedAt ? `<time class="rack-departure-time">Outbound ${escapeHtml(formatDateTime(rack.departedAt))}</time>` : ""}
           ${
             rackIsReceived(rack) && hasPermission("scan_racks")
               ? `<button type="button" class="rack-return-inline" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
@@ -4023,6 +4084,7 @@ function renderRacksPage() {
           <div class="rack-detail-stats">
             <span><small>Pieces</small><strong>${escapeHtml(rack.qty || 0)}</strong></span>
             <span><small>Status</small><strong>${escapeHtml(statusText)}</strong></span>
+            ${rack.departedAt ? `<span class="rack-detail-departure"><small>Outbound scan</small><strong>${escapeHtml(formatDateTime(rack.departedAt))}</strong></span>` : ""}
           </div>
         </header>
 
@@ -4110,7 +4172,31 @@ function renderRacksPage() {
   `;
 }
 
-async function submitRackScan() {
+async function showRackDestinationOverrideDialog(payload) {
+  const mismatch = payload?.destinationMismatch || {};
+  const rackCode = mismatch.rackCode || "selected rack";
+  const rackDestination = mismatch.rackDestination || "its current destination";
+  const itemDestination = mismatch.itemDestination || "another destination";
+  const itemLabel = mismatch.order && mismatch.item ? `${mismatch.order}-${mismatch.item}` : "this item";
+  const spanish = state.language === "es";
+
+  return confirmWebAppAction({
+    title: spanish ? "Destino incorrecto para este rack" : "Wrong destination for this rack",
+    message: spanish
+      ? `El rack <strong>${escapeHtml(rackCode)}</strong> está asignado a <strong>${escapeHtml(rackDestination)}</strong>, pero el artículo <strong>${escapeHtml(itemLabel)}</strong> tiene la ruta <strong>${escapeHtml(itemDestination)}</strong>. ¿Desea omitir la verificación y agregarlo de todos modos?`
+      : `Rack <strong>${escapeHtml(rackCode)}</strong> is assigned to <strong>${escapeHtml(rackDestination)}</strong>, but item <strong>${escapeHtml(itemLabel)}</strong> is routed to <strong>${escapeHtml(itemDestination)}</strong>. Would you like to override the destination check and add it anyway?`,
+    details: mismatch.customer
+      ? `${spanish ? "Cliente" : "Customer"}: ${mismatch.customer}`
+      : spanish
+        ? "La omisión mantendrá el destino actual del rack para este artículo."
+        : "The override will keep the rack's current destination for this item.",
+    confirmLabel: spanish ? "Sí, omitir destino" : "Yes, override destination",
+    cancelLabel: spanish ? "No, cancelar escaneo" : "No, cancel scan",
+    danger: false,
+  });
+}
+
+async function submitRackScan(options = {}) {
   const barcode = els.rackScanInput?.value || "";
   const rackCode = els.rackSelect?.value || state.selectedRackCode;
   const listId = els.rackListSelect?.value || state.rackScanListId;
@@ -4120,8 +4206,21 @@ async function submitRackScan() {
   }
   const payload = await fetchJson("/api/racks/scan", {
     method: "POST",
-    body: JSON.stringify({ listId, rackCode, barcode, ...requestContext() }),
+    body: JSON.stringify({
+      listId,
+      rackCode,
+      barcode,
+      destinationOverride: Boolean(options.destinationOverride),
+      ...requestContext(),
+    }),
   });
+  if (payload.destinationOverrideRequired) {
+    const approved = await showRackDestinationOverrideDialog(payload);
+    if (approved) return submitRackScan({ ...options, destinationOverride: true });
+    if (els.rackScanStatus) els.rackScanStatus.textContent = "Rack scan cancelled.";
+    els.rackScanInput?.focus();
+    return;
+  }
   state.racks = payload.racks || state.racks;
   state.rackSummary = payload.summary || state.rackSummary;
   if (els.rackScanStatus) els.rackScanStatus.textContent = payload.message || "Rack scan recorded.";
@@ -4200,12 +4299,29 @@ async function uncompleteRack(code) {
 }
 
 async function returnRack(code) {
-  if (!window.confirm(`Mark ${code} returned and clear it for reuse? Active rack contents will be removed from the rack.`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Mark rack returned?",
+    message: `Mark <strong>${escapeHtml(code)}</strong> returned and clear it for reuse?`,
+    details: "Active rack contents will be removed from the rack. The rack will return to Open status.",
+    confirmLabel: "Mark Returned",
+    danger: false,
+  });
+  if (!confirmed) return;
   const payload = await fetchJson("/api/racks/return", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
   renderScanRackTools();
+  showActionFeedback({
+    eyebrow: "Rack updated",
+    title: `${code} is ready for reuse`,
+    message: "The rack was marked returned and its active contents were cleared.",
+    details: [
+      { label: "Rack", value: code },
+      { label: "Status", value: "Open" },
+    ],
+    secondaryLabel: "Done",
+  });
 }
 
 async function markRackNotOnTheWay(code) {
@@ -4251,17 +4367,36 @@ async function assignLineItemToRack(lineItemId, rackCode) {
 }
 
 async function clearRack(code) {
-  if (!window.confirm(`Clear all active pieces from ${code}?`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Clear rack?",
+    message: `Clear all active pieces from <strong>${escapeHtml(code)}</strong>?`,
+    details: "This removes the rack assignments but does not erase delivery-list scan history.",
+    confirmLabel: "Clear Rack",
+  });
+  if (!confirmed) return;
   const payload = await fetchJson("/api/racks/clear", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
+  showActionFeedback({
+    eyebrow: "Rack reset",
+    title: `${code} was cleared`,
+    message: "The rack assignments were removed. Delivery-list scan history was preserved.",
+    details: [{ label: "Rack", value: code }],
+    secondaryLabel: "Done",
+  });
 }
 
 async function clearRackSet(label) {
   const racks = (state.racks || []).filter((rack) => rackGroupLabel(rack) === label);
   if (!racks.length) return;
-  if (!window.confirm(`Clear all active pieces from every rack in ${label}? Individual pieces will be left as delivery-list scans.`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Clear rack set?",
+    message: `Clear all active pieces from every rack in <strong>${escapeHtml(label)}</strong>?`,
+    details: "Individual pieces remain recorded as delivery-list scans.",
+    confirmLabel: "Clear Rack Set",
+  });
+  if (!confirmed) return;
   let latestPayload = null;
   for (const rack of racks) {
     latestPayload = await fetchJson("/api/racks/clear", { method: "POST", body: JSON.stringify({ rackCode: rack.code }) });
@@ -4271,6 +4406,16 @@ async function clearRackSet(label) {
     state.rackSummary = latestPayload.summary || null;
   }
   renderRacksPage();
+  showActionFeedback({
+    eyebrow: "Rack set reset",
+    title: `${label} was cleared`,
+    message: "All active rack assignments in this set were removed.",
+    details: [
+      { label: "Rack set", value: label },
+      { label: "Racks processed", value: racks.length },
+    ],
+    secondaryLabel: "Done",
+  });
 }
 
 async function moveRackItem(rackItemId) {
@@ -4295,7 +4440,13 @@ async function moveRackItem(rackItemId) {
 }
 
 async function clearRackItem(rackItemId, label = "this piece") {
-  if (!window.confirm(`Clear ${label} from its rack? This does not change scan quantities.`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Clear rack item?",
+    message: `Clear <strong>${escapeHtml(label)}</strong> from its rack?`,
+    details: "This does not change delivery-list scan quantities.",
+    confirmLabel: "Clear Item",
+  });
+  if (!confirmed) return;
   const payload = await fetchJson("/api/racks/clear-item", { method: "POST", body: JSON.stringify({ rackItemId }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
@@ -4382,8 +4533,14 @@ async function saveRackQuickEdit() {
 
 async function deleteRackDefinition(rackCode = state.selectedRackCode) {
   if (!rackCode) return;
-  const typed = window.prompt(`Delete rack ${rackCode}? Empty racks only. Type DELETE RACK to confirm.`);
-  if (typed !== "DELETE RACK") return;
+  const confirmed = await confirmWebAppAction({
+    title: "Delete rack?",
+    message: `Delete <strong>${escapeHtml(rackCode)}</strong>? Only empty racks can be deleted.`,
+    confirmLabel: "Delete Rack",
+    requiredText: "DELETE RACK",
+    requiredTextLabel: "Type this exact phrase to delete the rack",
+  });
+  if (!confirmed) return;
   const payload = await fetchJson("/api/racks/delete", { method: "POST", body: JSON.stringify({ rackCode }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
@@ -4440,7 +4597,13 @@ async function deleteRackSet(label) {
   const racks = state.racks.filter((rack) => (rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks") === label);
   const deletable = racks.filter((rack) => rack.code !== "T");
   if (!deletable.length) return;
-  if (!window.confirm(`Delete ${deletable.length} rack(s) in ${label}? Empty racks only.`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Delete rack set?",
+    message: `Delete <strong>${escapeHtml(deletable.length)}</strong> rack${deletable.length === 1 ? "" : "s"} in <strong>${escapeHtml(label)}</strong>?`,
+    details: "Only empty racks can be deleted.",
+    confirmLabel: "Delete Rack Set",
+  });
+  if (!confirmed) return;
   for (const rack of deletable) {
     await fetchJson("/api/racks/delete", { method: "POST", body: JSON.stringify({ rackCode: rack.code }) });
   }
@@ -6034,6 +6197,187 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
   });
 }
 
+
+function availableIndianTrailBays() {
+  return (state.bays || [])
+    .filter((bay) => bay.active !== false)
+    .filter((bay) => !/blocked|scanblocked/i.test(`${bay.sourceStatus || ""} ${bay.status || ""}`))
+    .sort(bayOverrideSort);
+}
+
+function indianTrailBayOptionsHtml(selectedCode = "") {
+  const grouped = new Map();
+  for (const bay of availableIndianTrailBays()) {
+    const label = bayOverrideGroupLabel(bay);
+    if (!grouped.has(label)) grouped.set(label, []);
+    grouped.get(label).push(bay);
+  }
+  return [...grouped.entries()].map(([label, bays]) => `
+    <optgroup label="${escapeHtml(label)}">
+      ${bays.map((bay) => `<option value="${escapeHtml(bay.bayCode)}" ${bay.bayCode === selectedCode ? "selected" : ""}>${escapeHtml(bay.displayName || bay.bayCode)}${bay.status ? ` - ${escapeHtml(bay.status)}` : ""}</option>`).join("")}
+    </optgroup>
+  `).join("");
+}
+
+async function showIndianTrailOutboundReceiveOverride(payload, scanText, options = {}) {
+  await ensureScanBayOverrideBays().catch(() => {});
+  const bays = availableIndianTrailBays();
+  const item = payload.item || payload.lastScan?.item || {};
+  const itemLabel = `${item.order || "Item"}${item.item ? `-${item.item}` : ""}`;
+  const spanish = state.language === "es";
+
+  const approved = await confirmWebAppAction({
+    title: spanish ? "Este artículo no ha sido escaneado en Salida" : "This item has not been scanned Outbound",
+    message: spanish
+      ? `¿Desea omitir el requisito de Salida y recibir <strong>${escapeHtml(itemLabel)}</strong> de todos modos?`
+      : `Would you like to override the Outbound requirement and receive <strong>${escapeHtml(itemLabel)}</strong> anyway?`,
+    details: spanish
+      ? "Seleccionar No cancela el escaneo sin cambiar la cantidad recibida."
+      : "Selecting No cancels the scan without changing the received quantity.",
+    confirmLabel: spanish ? "Sí, omitir" : "Yes, override",
+    cancelLabel: spanish ? "No, cancelar escaneo" : "No, cancel scan",
+    danger: false,
+  });
+  if (!approved) return null;
+
+  const defaultBay = payload.preassignedBayCode || options.bayCode || state.selectedBayOverrideCode || bays[0]?.bayCode || "";
+  return new Promise((resolve) => {
+    document.getElementById("indianTrailOutboundOverrideShell")?.remove();
+    const shell = document.createElement("div");
+    shell.id = "indianTrailOutboundOverrideShell";
+    shell.className = "action-confirm-backdrop indian-trail-override-backdrop";
+    shell.innerHTML = `
+      <section class="action-confirm-dialog indian-trail-override-dialog" role="dialog" aria-modal="true" aria-labelledby="indianTrailBayOverrideTitle">
+        <button type="button" class="action-confirm-close" data-indian-trail-override-cancel aria-label="Close">&times;</button>
+        <span class="action-confirm-icon" aria-hidden="true"></span>
+        <div class="action-confirm-copy">
+          <small class="dialog-eyebrow">${spanish ? "Asignación de bahía de Indian Trail" : "Indian Trail bay assignment"}</small>
+          <h2 id="indianTrailBayOverrideTitle">${spanish ? "¿En qué bahía se debe recibir este artículo?" : "What bay should receive this item?"}</h2>
+          <p>${spanish ? "Elija la bahía física para" : "Choose the physical bay for"} <strong>${escapeHtml(itemLabel)}</strong> ${spanish ? "antes de completar la omisión." : "before completing the override."}</p>
+        </div>
+        <div class="indian-trail-override-item">
+          <span><small>Order</small><strong>${escapeHtml(item.order || "-")}</strong></span>
+          <span><small>Item</small><strong>${escapeHtml(item.item || "-")}</strong></span>
+          <span><small>Customer</small><strong>${escapeHtml(item.customer || "-")}</strong></span>
+          <span><small>Size</small><strong>${escapeHtml(item.dimensions || "-")}</strong></span>
+        </div>
+        <label class="indian-trail-override-field">
+          <span>${spanish ? "Recibir en la bahía" : "Receive into bay"}</span>
+          <select data-indian-trail-override-bay>
+            <option value="">${spanish ? "Elija una bahía..." : "Choose a bay..."}</option>
+            ${indianTrailBayOptionsHtml(defaultBay)}
+          </select>
+          ${payload.preassignedBayCode ? `<small>${spanish ? "Bahía preasignada" : "Preassigned bay"}: ${escapeHtml(payload.preassignedBayCode)}</small>` : ""}
+        </label>
+        <div class="action-confirm-actions">
+          <button type="button" class="action-confirm-cancel" data-indian-trail-override-cancel>${spanish ? "Cancelar escaneo" : "Cancel scan"}</button>
+          <button type="button" class="action-confirm-confirm" data-indian-trail-override-confirm>${spanish ? "Recibir en la bahía seleccionada" : "Receive in selected bay"}</button>
+        </div>
+      </section>
+    `;
+    const close = (decision = null) => {
+      shell.remove();
+      updateModalScrollLock();
+      resolve(decision);
+    };
+    shell.addEventListener("click", (event) => {
+      if (event.target === shell || event.target.closest("[data-indian-trail-override-cancel]")) {
+        close(null);
+        return;
+      }
+      if (event.target.closest("[data-indian-trail-override-confirm]")) {
+        const bayCode = shell.querySelector("[data-indian-trail-override-bay]")?.value || "";
+        if (!bayCode) {
+          showFloatingNotice("Choose a bay before receiving the item.", "error");
+          shell.querySelector("[data-indian-trail-override-bay]")?.focus();
+          return;
+        }
+        close({ bayCode, outboundOverride: true, scanText });
+      }
+    });
+    document.body.appendChild(shell);
+    applyLanguageToRoot(shell);
+    enhanceCustomSelects(shell);
+    updateModalScrollLock();
+    shell.querySelector("[data-indian-trail-override-bay]")?.focus();
+  });
+}
+
+function closeIndianTrailPlacementPrompt() {
+  const shell = document.getElementById("indianTrailPlacementShell");
+  if (!shell) return;
+  window.clearInterval(shell._countdownTimer);
+  shell.remove();
+  updateModalScrollLock();
+}
+
+async function showIndianTrailPlacementPrompt(result) {
+  if (!result?.ok || !result?.bayCode) return;
+  await ensureScanBayOverrideBays().catch(() => {});
+  closeIndianTrailPlacementPrompt();
+  const item = result.lastScan?.item || {};
+  const oversizeBay = result.oversize
+    ? availableIndianTrailBays().find((bay) => /oversize/i.test(`${bay.bayType || ""} ${bay.bayCategory || ""} ${bay.mapSection || ""} ${bay.displayName || ""}`))
+    : null;
+  const selectedCode = oversizeBay?.bayCode || result.bayCode;
+  const shell = document.createElement("div");
+  shell.id = "indianTrailPlacementShell";
+  shell.className = "indian-trail-placement-shell";
+  shell.innerHTML = `
+    <section class="indian-trail-placement-panel" role="status" aria-live="assertive">
+      <div class="indian-trail-placement-icon" aria-hidden="true"></div>
+      <div class="indian-trail-placement-copy">
+        <small>${result.returnedToBay ? "Returned item" : "Indian Trail received"}</small>
+        <h2>Place ${escapeHtml(item.order || "item")}${item.item ? `-${escapeHtml(item.item)}` : ""} in Bay ${escapeHtml(result.bayCode)}</h2>
+        <p>${escapeHtml(item.customer || "")}${result.oversize ? " • Oversize glass detected—verify the bay below." : ""}</p>
+      </div>
+      <label class="indian-trail-placement-field">
+        <span>Override bay</span>
+        <select data-placement-bay>
+          ${indianTrailBayOptionsHtml(selectedCode)}
+        </select>
+      </label>
+      <div class="indian-trail-placement-actions">
+        <button type="button" data-placement-move ${result.assignmentId ? "" : "disabled"}>Move to selected bay</button>
+        <button type="button" data-placement-close>Done <span data-placement-countdown>12</span></button>
+      </div>
+      <i class="indian-trail-placement-timer" aria-hidden="true"></i>
+    </section>
+  `;
+  document.body.appendChild(shell);
+  applyLanguageToRoot(shell);
+  enhanceCustomSelects(shell);
+  updateModalScrollLock();
+
+  let seconds = 12;
+  const countdown = shell.querySelector("[data-placement-countdown]");
+  shell._countdownTimer = window.setInterval(() => {
+    seconds -= 1;
+    if (countdown) countdown.textContent = String(Math.max(seconds, 0));
+    if (seconds <= 0) closeIndianTrailPlacementPrompt();
+  }, 1000);
+
+  shell.querySelector("[data-placement-close]")?.addEventListener("click", closeIndianTrailPlacementPrompt);
+  shell.querySelector("[data-placement-move]")?.addEventListener("click", async () => {
+    const newBayCode = shell.querySelector("[data-placement-bay]")?.value || "";
+    if (!newBayCode || newBayCode === result.bayCode) {
+      closeIndianTrailPlacementPrompt();
+      return;
+    }
+    try {
+      await postBayAction("/api/indian-trail/move", {
+        assignmentId: result.assignmentId,
+        newBayCode,
+        reason: `Placement popup override from ${result.bayCode}`,
+      });
+      showFloatingNotice(`Moved ${item.order || "item"}-${item.item || ""} to ${newBayCode}.`, "success");
+      closeIndianTrailPlacementPrompt();
+    } catch (error) {
+      showFloatingNotice(error.message, "error");
+    }
+  });
+}
+
 async function processScan(rawScan, options = {}) {
   const scanText = rawScan.trim();
   if (!scanText || !state.activeListId) return;
@@ -6042,7 +6386,7 @@ async function processScan(rawScan, options = {}) {
       hasPermission("indian_trail_receive") &&
       /indian trail/i.test(`${state.meta?.stage || ""} ${currentScanStation()}`);
     if (indianTrailReceive) {
-      if (state.bayOverrideMode === "manual" && !state.selectedBayOverrideCode) {
+      if (state.bayOverrideMode === "manual" && !state.selectedBayOverrideCode && !options.bayCode) {
         showFloatingNotice("Choose a manual Indian Trail bay before scanning, or switch bay assignment back to Auto.", "error");
         els.scanBayOverrideSelect?.focus();
         return;
@@ -6052,23 +6396,41 @@ async function processScan(rawScan, options = {}) {
         body: JSON.stringify({
           listId: state.activeListId,
           barcode: scanText,
-          bayCode: state.bayOverrideMode === "manual" ? state.selectedBayOverrideCode || "" : "",
+          bayCode: options.bayCode || (state.bayOverrideMode === "manual" ? state.selectedBayOverrideCode || "" : ""),
+          outboundOverride: Boolean(options.outboundOverride),
+          allowReceivedOverride: Boolean(options.allowReceivedOverride),
           isManual: Boolean(options.isManual),
           ...requestContext(),
         }),
       });
-      await activateList(state.activeListId, false);
       state.lastScan = result.lastScan || state.lastScan;
+
+      if (result.outboundOverrideRequired) {
+        scanFlash("notice");
+        const decision = await showIndianTrailOutboundReceiveOverride(result, scanText, options);
+        if (decision) {
+          await processScan(scanText, {
+            ...options,
+            bayCode: decision.bayCode,
+            outboundOverride: true,
+          });
+        } else {
+          await activateList(state.activeListId, false);
+          renderScanPage();
+        }
+        return;
+      }
+
+      await activateList(state.activeListId, false);
       scanFlash(result.ok ? "success" : "error");
-      if (result?.message) {
-        const lastItem = result.lastScan?.item || {};
-        const bayPrompt = result.ok && result.bayCode
-          ? `Place order ${lastItem.order || ""}${lastItem.item ? `-${lastItem.item}` : ""} in Bay ${result.bayCode}.`
-          : result.message;
-        showFloatingNotice(bayPrompt, result.ok ? (/\bSDI|Rush\b/i.test(result.message) ? "notice" : "success") : "error");
+      if (!result.ok && result?.message) {
+        showFloatingNotice(result.message, "error");
       }
       renderScanPage();
-      void refreshBayMapPage().catch(() => {});
+      await refreshBayMapPage().catch(() => {});
+      if (result.ok) {
+        await showIndianTrailPlacementPrompt(result);
+      }
       return;
     }
     const payload = await fetchJson("/api/scans", {
@@ -6078,11 +6440,21 @@ async function processScan(rawScan, options = {}) {
         barcode: scanText,
         rackCode: options.rackCode || (isStagingScanContext() ? state.selectedRackCode : ""),
         outboundOverride: Boolean(options.outboundOverride),
+        destinationOverride: Boolean(options.destinationOverride),
         isManual: Boolean(options.isManual),
         ...requestContext(),
       }),
     });
     applyBackendPayload(payload);
+    if (payload.destinationOverrideRequired) {
+      scanFlash("notice");
+      renderScanPage();
+      const approved = await showRackDestinationOverrideDialog(payload);
+      if (approved) {
+        await processScan(scanText, { ...options, destinationOverride: true });
+      }
+      return;
+    }
     if (payload.outboundOverrideRequired) {
       scanFlash("error");
       renderScanPage();
@@ -6371,12 +6743,14 @@ function showRushAlert(notification) {
   const order = String(details.order || "").trim();
   const lookup = String(details.lookup || "").trim();
   const customer = String(details.customer || "").trim();
+  const deliveryDate = String(details.deliveryDate || "").trim();
+  const deliveryDateLabel = deliveryDate ? formatDisplayDate(deliveryDate) : "";
   const itemCount = Math.max(Number(details.items || 0), 1);
   const submittedBy = String(details.submittedBy || notification.createdBy || "").trim();
   const title = spanish ? "Nueva orden urgente" : "New Rush Submitted";
   const message = spanish
-    ? `${job || order || lookup || "Este trabajo"} fue marcado como urgente${customer ? ` para ${customer}` : ""}. Priorice este trabajo.`
-    : `${job || order || lookup || "This work"} was marked as Rush${customer ? ` for ${customer}` : ""}. Prioritize this work.`;
+    ? `${job || order || lookup || "Este trabajo"} fue marcado como urgente${customer ? ` para ${customer}` : ""}${deliveryDateLabel ? ` para la fecha de entrega ${deliveryDateLabel}` : ""}. Priorice este trabajo.`
+    : `${job || order || lookup || "This work"} was marked as Rush${customer ? ` for ${customer}` : ""}${deliveryDateLabel ? ` for delivery date ${deliveryDateLabel}` : ""}. Prioritize this work.`;
 
   const shell = document.createElement("div");
   shell.id = "rushAlertShell";
@@ -6396,6 +6770,7 @@ function showRushAlert(notification) {
         ${job ? `<div><small>${spanish ? "Num. de trabajo" : "Job Nr."}</small><strong>${escapeHtml(job)}</strong></div>` : ""}
         ${order ? `<div><small>${spanish ? "Orden" : "Order"}</small><strong>${escapeHtml(order)}</strong></div>` : ""}
         ${customer ? `<div><small>${spanish ? "Cliente" : "Customer"}</small><strong>${escapeHtml(customer)}</strong></div>` : ""}
+        ${deliveryDateLabel ? `<div><small>${spanish ? "Fecha de entrega" : "Delivery date"}</small><strong>${escapeHtml(deliveryDateLabel)}</strong></div>` : ""}
         <div><small>${spanish ? "Articulos prioritarios" : "Priority items"}</small><strong>${escapeHtml(itemCount)}</strong></div>
         ${submittedBy ? `<div><small>${spanish ? "Enviado por" : "Submitted by"}</small><strong>${escapeHtml(submittedBy)}</strong></div>` : ""}
       </div>
@@ -6838,6 +7213,7 @@ function transitManifestRackGroups(payload) {
         type: rackCode === "T" ? "Truck" : rackCode === "UNASSIGNED" ? "Unassigned" : rackType || "Rack",
         totalQty: 0,
         rowCount: 0,
+        departedAt: String(sourceItem.rackDepartedAt || ""),
         jobSet: new Set(),
         glassMap: new Map(),
       });
@@ -6852,6 +7228,8 @@ function transitManifestRackGroups(payload) {
 
     rack.name = rack.name || rackName;
     rack.type = rack.type || rackType || "Rack";
+    const rackScanTime = String(sourceItem.rackDepartedAt || "");
+    if (rackScanTime && (!rack.departedAt || rackScanTime > rack.departedAt)) rack.departedAt = rackScanTime;
     rack.totalQty += qty;
     rack.rowCount += 1;
     rack.jobSet.add(jobText);
@@ -6918,6 +7296,7 @@ function transitManifestHtml(payload) {
               <div>
                 <strong>${escapeHtml(transitRackDisplayName(rack))}</strong>
                 <small>${escapeHtml(rack.name && rack.name !== rack.code ? rack.name : rack.type || "Transportation method")}</small>
+                <time class="transit-rack-departed">${rack.departedAt ? `Scanned outbound ${escapeHtml(formatDateTime(rack.departedAt))}` : "Outbound rack scan time not recorded"}</time>
               </div>
               <b>${escapeHtml(rack.totalQty)} pcs</b>
               <em>${escapeHtml(rack.glassTypes.length)} glass type${rack.glassTypes.length === 1 ? "" : "s"}</em>
@@ -6936,7 +7315,7 @@ function transitManifestHtml(payload) {
                     </summary>
                     <div class="transit-table-wrap">
                       <table class="transit-table transit-glass-table">
-                        <thead><tr><th>Job Nr.</th><th>Order / Item</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Scan status</th></tr></thead>
+                        <thead><tr><th>Job Nr.</th><th>Order / Item</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Outbound / Received</th></tr></thead>
                         <tbody>${glass.items.map(transitManifestRowHtml).join("")}</tbody>
                       </table>
                     </div>
@@ -7371,7 +7750,8 @@ function groupAssignmentsByJob(assignments = []) {
     const group = groups.get(key);
     group.assignments.push(assignment);
     const assignmentTotal = Number(assignment.assignedQty || assignment.qty || 0);
-    const assignmentScanned = Math.min(Number(assignment.scanned || 0), assignmentTotal || Number(assignment.qty || 0));
+    const assignmentStatus = String(assignment.status || "");
+    const assignmentScanned = assignmentStatus === "PreAssigned" ? 0 : assignmentTotal;
     group.totalQty += assignmentTotal;
     group.scannedQty += assignmentScanned;
     if (!group.customer && assignment.customer) group.customer = assignment.customer;
@@ -7403,6 +7783,7 @@ function selectedBayJobItemsHtml(detail) {
             <div>
               <strong>Order ${escapeHtml(item.order)} / Item ${escapeHtml(item.item)}</strong>
               <span>${escapeHtml(item.product || "Glass item")} ${item.dimensions ? `| ${escapeHtml(item.dimensions)}` : ""}</span>
+              ${item.scannedIntoBayAt ? `<time>Scanned into bay ${escapeHtml(formatDateTime(item.scannedIntoBayAt))}</time>` : `<time>Not scanned into this bay yet</time>`}
             </div>
             <b>${escapeHtml(item.inBayQty)}/${escapeHtml(item.qty)}</b>
             <small>${item.complete ? "In bay" : `${escapeHtml(item.missingQty)} missing`}</small>
@@ -7905,6 +8286,7 @@ function renderBaySidePanels() {
                             <span>${escapeHtml(group.customer || "No customer listed")}</span>
                             <small>${escapeHtml(group.itemCount)} assigned line${group.itemCount === 1 ? "" : "s"} | ${escapeHtml(group.orderLine)}</small>
                             <small>Fulfillment ${escapeHtml(jobInBayQty)}/${escapeHtml(jobRequiredQty)} | ${missingCount ? `${escapeHtml(missingCount)} order item${missingCount === 1 ? "" : "s"} missing` : "Job complete"}</small>
+                            ${detail?.lastScannedIntoBayAt ? `<time>Last scanned into bay ${escapeHtml(formatDateTime(detail.lastScannedIntoBayAt))}</time>` : ""}
                           </div>
                           <span class="selected-bay-job-open"><b>View orders</b><i aria-hidden="true"></i></span>
                         </summary>
@@ -8117,6 +8499,30 @@ function bayEventTone(event) {
   return "ok";
 }
 
+function bayEventMoveOptionsHtml(currentBayCode = "") {
+  const options = availableIndianTrailBays().map((bay) => `
+    <option value="${escapeHtml(bay.bayCode)}" ${bay.bayCode === currentBayCode ? "selected" : ""}>${escapeHtml(bay.displayName || bay.bayCode)}</option>
+  `).join("");
+  return `<option value="">Choose bay...</option>${options}`;
+}
+
+function bayEventMoveControlHtml(event, compact = false) {
+  const assignmentId = Number(event?.assignmentId || 0);
+  if (!assignmentId) return `<span class="bay-event-move-unavailable">${compact ? "-" : "No active assignment"}</span>`;
+  return `
+    <select
+      class="bay-event-move-select ${compact ? "is-compact" : ""}"
+      data-bay-event-move
+      data-assignment-id="${escapeHtml(assignmentId)}"
+      data-current-bay="${escapeHtml(event.currentBayCode || event.bayCode || "")}"
+      data-order-label="${escapeHtml(event.order ? `${event.order}-${event.item || ""}` : "item")}"
+      aria-label="Move ${escapeHtml(event.order ? `${event.order}-${event.item || ""}` : "item")} to another bay"
+    >
+      ${bayEventMoveOptionsHtml(event.currentBayCode || event.bayCode || "")}
+    </select>
+  `;
+}
+
 function renderBayLastScanCard(event) {
   const hasEvent = Boolean(event);
   const tone = hasEvent ? bayEventTone(event) : "notice";
@@ -8136,6 +8542,18 @@ function renderBayLastScanCard(event) {
   if (els.bayLastOrder) els.bayLastOrder.textContent = order;
   if (els.bayLastBay) els.bayLastBay.textContent = bay;
   if (els.bayLastTime) els.bayLastTime.textContent = time;
+  const moveSelect = document.getElementById("bayLastMoveSelect");
+  if (moveSelect) {
+    const assignmentId = Number(event?.assignmentId || 0);
+    moveSelect.disabled = !assignmentId;
+    moveSelect.dataset.assignmentId = assignmentId ? String(assignmentId) : "";
+    moveSelect.dataset.currentBay = event?.currentBayCode || event?.bayCode || "";
+    moveSelect.dataset.orderLabel = event?.order ? `${event.order}-${event.item || ""}` : "item";
+    moveSelect.innerHTML = assignmentId
+      ? bayEventMoveOptionsHtml(event?.currentBayCode || event?.bayCode || "")
+      : `<option value="">No active bay item</option>`;
+    syncCustomSelect(moveSelect);
+  }
   if (els.bayScanOutStatus && !hasEvent) els.bayScanOutStatus.textContent = "Waiting";
   if (els.bayScanOutStatus && hasEvent) els.bayScanOutStatus.textContent = tone === "error" ? "Needs review" : tone === "notice" ? "Notice" : "Just now";
 }
@@ -8159,10 +8577,11 @@ function renderBayRecentActions() {
             <td>${escapeHtml(bay)}</td>
             <td>${escapeHtml(time)}</td>
             <td><span class="check-dot ${escapeHtml(tone)}" role="img" aria-label="${escapeHtml(tone === "error" ? "Needs review" : tone === "notice" ? "Notice" : "Successful")}"></span></td>
+            <td>${bayEventMoveControlHtml(event, true)}</td>
           </tr>
         `;
       }).join("")
-    : `<tr><td colspan="5"><div class="bay-history-empty"><strong>Recent bay actions</strong><span>The next two actions will appear here.</span></div></td></tr>`;
+    : `<tr><td colspan="6"><div class="bay-history-empty"><strong>Recent bay actions</strong><span>The next two actions will appear here.</span></div></td></tr>`;
 }
 
 function scrollToBaySearchMatch() {
@@ -8270,114 +8689,101 @@ async function runBayHistory(direction) {
   showFloatingNotice(`${direction === "undo" ? "Undid" : "Redid"} ${entry.label}.`, "success");
 }
 
-async function submitBayScanOut() {
-  const barcode = els.bayScanOutInput?.value.trim() || "";
-  if (!barcode) return;
-  const bayCode = els.bayScanBayInput?.value.trim() || "";
+async function runBayScan(barcode, { isManual = false, outboundOverride = false, bayCodeOverride = "" } = {}) {
+  const cleanBarcode = String(barcode || "").trim();
+  if (!cleanBarcode) throw new Error("Enter or scan an item before submitting.");
+
+  const selectedBayCode = String(bayCodeOverride || els.bayScanBayInput?.value || "").trim();
   const adding = Boolean(els.bayScanModeToggle?.checked);
-  const result = adding
-    ? await postBayAction("/api/indian-trail/receive", { barcode, bayCode, reason: "Scanned into bay map" })
-    : await postBayAction("/api/indian-trail/scan-out", { barcode, bayCode, reason: "Scanned out from bay map" });
+  if (adding && !selectedBayCode) throw new Error("Choose a target bay before adding an item.");
+
+  const path = adding ? "/api/indian-trail/receive" : "/api/indian-trail/scan-out";
+  const payload = adding
+    ? {
+        barcode: cleanBarcode,
+        bayCode: selectedBayCode,
+        reason: isManual ? "Manual scan into bay map" : "Scanned into bay map",
+        allowReceivedOverride: true,
+        outboundOverride,
+        isManual,
+      }
+    : {
+        barcode: cleanBarcode,
+        // Remove mode follows the item's live assignment. The target-bay field
+        // is only an Add mode destination and must not block a valid scan-out.
+        bayCode: "",
+        reason: isManual ? "Manual scan out from bay map" : "Scanned out from bay map",
+        isManual,
+      };
+
+  const result = await postBayAction(path, payload);
+  if (result.outboundOverrideRequired) {
+    const decision = await showIndianTrailOutboundReceiveOverride(result, cleanBarcode, { bayCode: selectedBayCode, isManual });
+    if (!decision) return null;
+    return runBayScan(cleanBarcode, { isManual, outboundOverride: true, bayCodeOverride: decision.bayCode });
+  }
+  if (!result.ok) throw new Error(result.message || "Bay scan was not accepted.");
 
   if (!adding && result.assignmentId) {
     pushBayHistory({
-      label: `scan-out ${result.order}-${result.item}`,
+      label: `${isManual ? "manual " : ""}scan-out ${result.order}-${result.item}`,
       undo: () => postBayAction("/api/indian-trail/restore-assignment", { assignmentId: result.assignmentId, reason: "Undo bay scan-out" }),
-      redo: () => postBayAction("/api/indian-trail/scan-out", { barcode, bayCode: result.bayCode || bayCode, reason: "Redo bay scan-out" }),
+      redo: () => postBayAction("/api/indian-trail/scan-out", { barcode: cleanBarcode, bayCode: result.bayCode || selectedBayCode, isManual, reason: "Redo bay scan-out" }),
     });
   }
 
   if (adding && Array.isArray(result.assignmentIds) && result.assignmentIds.length) {
     const assignedIds = result.assignmentIds.slice();
     pushBayHistory({
-      label: `bay receive ${barcode}`,
-      undo: () => Promise.all(assignedIds.map((assignmentId) => postBayAction("/api/indian-trail/clear-assignment", { assignmentId, reason: "Undo bay receive/manual assign" }))),
-      redo: () => postBayAction("/api/indian-trail/receive", { barcode, bayCode: result.bayCode || bayCode, reason: "Redo bay receive/manual assign" }),
+      label: `${isManual ? "manual " : ""}bay receive ${cleanBarcode}`,
+      undo: () => Promise.all(assignedIds.map((assignmentId) => postBayAction("/api/indian-trail/clear-assignment", { assignmentId, reason: "Undo bay receive" }))),
+      redo: () => postBayAction("/api/indian-trail/receive", {
+        barcode: cleanBarcode,
+        bayCode: result.bayCode || selectedBayCode,
+        allowReceivedOverride: true,
+        outboundOverride: true,
+        isManual,
+        reason: "Redo bay receive",
+      }),
     });
   }
 
-  if (els.bayScanOutInput) els.bayScanOutInput.value = "";
-  if (els.bayScanOutStatus) els.bayScanOutStatus.textContent = adding ? result.message : `Removed ${result.order}-${result.item} from ${result.bayDisplay || result.bayCode}`;
+  const message = adding
+    ? result.message
+    : `${isManual ? "Manual scan: " : ""}Removed ${result.order}-${result.item} from ${result.bayDisplay || result.bayCode}`;
+  if (els.bayScanOutStatus) els.bayScanOutStatus.textContent = message;
   scanFlash("success");
-  showFloatingNotice(adding ? result.message : `Removed ${result.order}-${result.item} from ${result.bayDisplay || result.bayCode}`, "success");
+
+  if (adding) {
+    await showIndianTrailPlacementPrompt(result);
+  } else {
+    showFloatingNotice(message, "success");
+  }
+  return result;
 }
 
-function manualBayInputText() {
-  return (els.bayManualOrderInput?.value || "").trim();
-}
-
-async function confirmManualBayUnknown(message, details) {
-  return new Promise((resolve) => {
-    const existing = document.querySelector(".manual-bay-confirm-backdrop");
-    if (existing) existing.remove();
-    const dialog = document.createElement("div");
-    dialog.className = "manual-bay-confirm-backdrop action-confirm-backdrop";
-    dialog.innerHTML = `
-      <section class="action-confirm-dialog manual-bay-confirm-dialog" role="dialog" aria-modal="true">
-        <button type="button" class="action-confirm-close" data-manual-bay-choice="no" aria-label="Close">&times;</button>
-        <span class="action-confirm-icon" aria-hidden="true"></span>
-        <div class="action-confirm-copy">
-          <h2>Unrecognized manual assignment</h2>
-          <p>${escapeHtml(message || "This does not match a known order, Job Nr., or accepted bay barcode rule.")}</p>
-          ${details ? `<small>${escapeHtml(details)}</small>` : ""}
-        </div>
-        <div class="action-confirm-actions manual-bay-confirm-actions">
-          <button type="button" class="action-confirm-cancel" data-manual-bay-choice="no">No</button>
-          <button type="button" class="action-confirm-confirm" data-manual-bay-choice="yes">Yes, assign once</button>
-          <button type="button" class="action-confirm-confirm remember" data-manual-bay-choice="remember">Yes, remember this</button>
-        </div>
-      </section>
-    `;
-    const close = (choice) => {
-      dialog.remove();
-      document.body.classList.remove("modal-scroll-locked");
-      updateModalScrollLock();
-      resolve(choice);
-    };
-    dialog.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-manual-bay-choice]");
-      if (button) close(button.dataset.manualBayChoice || "no");
-      else if (event.target === dialog) close("no");
-    });
-    document.body.appendChild(dialog);
-    document.body.classList.add("modal-scroll-locked");
-    dialog.querySelector("[data-manual-bay-choice='no']")?.focus();
-  });
+async function submitBayScanOut() {
+  const barcode = els.bayScanOutInput?.value.trim() || "";
+  if (!barcode) return;
+  const result = await runBayScan(barcode, { isManual: false });
+  if (!result) return;
+  if (els.bayScanOutInput) els.bayScanOutInput.value = "";
+  els.bayScanOutInput?.focus();
 }
 
 async function submitManualBayScan() {
-  const scanText = manualBayInputText();
-  const itemNo = (els.bayManualItemInput?.value || "").trim();
-  const bayCode = (els.bayScanBayInput?.value || "").trim();
-  if (!scanText) throw new Error("Enter an order, Job Nr., barcode, or manual wording.");
-  if (!bayCode) throw new Error("Choose a target bay before manual assigning.");
-
-  const payload = { scanText, itemNo, bayCode, confirmUnrecognized: false, rememberUnrecognized: false };
-  let result = await postBayAction("/api/indian-trail/manual-assign", payload);
-
-  if (result?.needsConfirmation) {
-    const choice = await confirmManualBayUnknown(result.message, `Input: ${scanText} | Target bay: ${bayCode}`);
-    if (choice === "no") return;
-    result = await postBayAction("/api/indian-trail/manual-assign", {
-      ...payload,
-      confirmUnrecognized: true,
-      rememberUnrecognized: choice === "remember",
-    });
+  const order = digitsOnly(els.bayManualOrderInput?.value || "");
+  const item = digitsOnly(els.bayManualItemInput?.value || "");
+  if (!order || !item) {
+    throw new Error("Manual scan requires both an order number and an item number.");
   }
-
-  if (Array.isArray(result.assignmentIds) && result.assignmentIds.length) {
-    const assignedIds = result.assignmentIds.slice();
-    pushBayHistory({
-      label: `manual assign ${scanText}`,
-      undo: () => Promise.all(assignedIds.map((assignmentId) => postBayAction("/api/indian-trail/clear-assignment", { assignmentId, reason: "Undo manual bay assignment" }))),
-      redo: () => postBayAction("/api/indian-trail/manual-assign", { scanText, itemNo, bayCode, confirmUnrecognized: true, rememberUnrecognized: false, reason: "Redo manual bay assignment" }),
-    });
-  }
-
+  const result = await runBayScan(canonicalBarcode(order, item), { isManual: true });
+  if (!result) return;
   if (els.bayManualOrderInput) els.bayManualOrderInput.value = "";
   if (els.bayManualItemInput) els.bayManualItemInput.value = "";
-  showFloatingNotice(result.message || "Manual bay assignment complete.", "success");
+  els.bayManualOrderInput?.focus();
 }
+
 
 function selectedBayAssignment() {
   return selectedBay()?.assignments?.[0] || null;
@@ -8534,7 +8940,13 @@ async function clearManagedItem() {
   if (!selected?.assignment?.id) throw new Error("Select a job to clear.");
   const groupAssignments = selected.assignments || [selected.assignment];
   const label = selected.jobLabel || `${selected.assignment.order}-${selected.assignment.item}`;
-  if (!window.confirm(`Clear ${label} (${groupAssignments.length} item${groupAssignments.length === 1 ? "" : "s"}) from ${selected.bay.displayName || selected.bay.bayCode}?`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Clear job from bay?",
+    message: `Clear <strong>${escapeHtml(label)}</strong> from <strong>${escapeHtml(selected.bay.displayName || selected.bay.bayCode)}</strong>?`,
+    details: `${groupAssignments.length} item${groupAssignments.length === 1 ? "" : "s"} will be removed from the bay assignment.`,
+    confirmLabel: "Clear Job",
+  });
+  if (!confirmed) return;
   for (const assignment of groupAssignments) {
     await fetchJson("/api/indian-trail/clear-assignment", {
       method: "POST",
@@ -8798,7 +9210,13 @@ async function addBaysToEditorGroup() {
 async function deleteBayEditorGroup() {
   const group = bayEditorSelectedGroupObject();
   if (!group) throw new Error("Select a bay group first.");
-  if (!window.confirm(`Delete bay group ${group.label}? Empty bays will be deactivated. Active assignments must be cleared or moved first.`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Delete bay group?",
+    message: `Delete <strong>${escapeHtml(group.label)}</strong>?`,
+    details: "Empty bays will be deactivated. Active assignments must be cleared or moved first.",
+    confirmLabel: "Delete Bay Group",
+  });
+  if (!confirmed) return;
   const payload = await fetchJson("/api/indian-trail/bays/delete-group", {
     method: "POST",
     body: JSON.stringify({ mapSection: group.label, ...requestContext() }),
@@ -8836,7 +9254,13 @@ async function saveBayEditorBay(bayCode) {
 }
 
 async function deleteBayEditorBay(bayCode) {
-  if (!window.confirm(`Delete bay ${bayCode}? Active assignments must be cleared or moved first.`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Delete bay?",
+    message: `Delete <strong>${escapeHtml(bayCode)}</strong>?`,
+    details: "Active assignments must be cleared or moved first.",
+    confirmLabel: "Delete Bay",
+  });
+  if (!confirmed) return;
   const payload = await fetchJson("/api/indian-trail/bays/delete", {
     method: "POST",
     body: JSON.stringify({ bayCode, ...requestContext() }),
@@ -8845,23 +9269,32 @@ async function deleteBayEditorBay(bayCode) {
   showFloatingNotice(`Deleted ${bayCode}.`, "success");
 }
 
-function openBayAllScansModal() {
-  const events = state.bayEvents || [];
+async function openBayAllScansModal() {
+  let events = state.bayEvents || [];
+  if (state.backend) {
+    try {
+      const payload = await fetchJson("/api/indian-trail/events?limit=250");
+      events = payload.events || events;
+      state.bayEvents = events;
+    } catch (error) {
+      showFloatingNotice(`Unable to refresh the full bay scan log: ${error.message}`, "notice");
+    }
+  }
   const rows = events.length
     ? events.map((event) => {
         const when = new Date(event.time || event.createdAt || "");
         const time = Number.isNaN(when.getTime()) ? escapeHtml(event.time || "") : escapeHtml(when.toLocaleString());
         const bay = event.bayDisplay || event.bayCode || event.newBayDisplay || event.newBayCode || event.oldBayDisplay || event.oldBayCode || "";
         const order = event.order ? `${event.order}-${event.item || ""}` : "";
-        return `<tr><td>${escapeHtml(formatEventType(event.eventType))}</td><td>${escapeHtml(order)}</td><td>${escapeHtml(bay)}</td><td>${escapeHtml(event.customer || "")}</td><td>${escapeHtml(event.reason || "")}</td><td>${escapeHtml(event.user || "")}</td><td>${time}</td></tr>`;
+        return `<tr><td>${escapeHtml(formatEventType(event.eventType))}</td><td>${escapeHtml(order)}</td><td>${escapeHtml(bay)}</td><td>${escapeHtml(event.customer || "")}</td><td>${escapeHtml(event.reason || "")}</td><td>${escapeHtml(event.user || "")}</td><td>${time}</td><td>${bayEventMoveControlHtml(event)}</td></tr>`;
       }).join("")
-    : `<tr><td colspan="7">No bay scan history is available yet.</td></tr>`;
+    : `<tr><td colspan="8">No bay scan history is available yet.</td></tr>`;
   openAdminModal("custom", {
     title: "All Bay Scans",
     body: `
       <div class="full-scans-modal bay-full-scans-modal">
         <div class="section-heading"><h3>Indian Trail Bay Scan History</h3><span>${escapeHtml(events.length)} latest actions</span></div>
-        <div class="admin-table full-scans-table"><table><thead><tr><th>Action</th><th>Order</th><th>Bay</th><th>Customer</th><th>Reason</th><th>User</th><th>Time</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="admin-table full-scans-table"><table><thead><tr><th>Action</th><th>Order</th><th>Bay</th><th>Customer</th><th>Reason</th><th>User</th><th>Time</th><th>Move</th></tr></thead><tbody>${rows}</tbody></table></div>
       </div>
     `,
   });
@@ -9019,7 +9452,13 @@ async function runBayAction(action) {
   if (!bay) return;
   const assignment = bay.assignments?.[0];
   if (action === "clear") {
-    if (!window.confirm(`Clear ${bay.displayName || bay.bayCode}?`)) return;
+    const confirmed = await confirmWebAppAction({
+      title: "Clear bay?",
+      message: `Clear <strong>${escapeHtml(bay.displayName || bay.bayCode)}</strong>?`,
+      details: "All active assignments in this bay will be removed.",
+      confirmLabel: "Clear Bay",
+    });
+    if (!confirmed) return;
     await postBayAction("/api/indian-trail/clear", { bayCode: bay.bayCode, reason: "Cleared from bay map" });
     return;
   }
@@ -9306,7 +9745,14 @@ async function addBaysFromForm() {
 
 async function addSpacerBay() {
   const selected = selectedBay();
-  const mapSection = window.prompt("Add spacer to which bay group?", selected?.mapSection || "");
+  const mapSection = await promptWebAppAction({
+    title: "Add bay-map spacer",
+    message: "Choose the bay group where the spacer should be added.",
+    label: "Bay group",
+    value: selected?.mapSection || "",
+    placeholder: "Example: Showers",
+    confirmLabel: "Add Spacer",
+  });
   if (!mapSection) return;
   const before = bayLayoutSnapshot((bay) => bay.mapSection === mapSection);
   const result = await fetchJson("/api/indian-trail/bays/add", {
@@ -9333,7 +9779,13 @@ async function addSpacerBay() {
 async function deleteSelectedBay() {
   const bayCode = els.bayLayoutSelect?.value || state.selectedBayCode;
   if (!bayCode) return;
-  if (!window.confirm(`Delete bay ${bayCode}? Active assignments must be cleared first.`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Delete bay?",
+    message: `Delete <strong>${escapeHtml(bayCode)}</strong>?`,
+    details: "Active assignments must be cleared first.",
+    confirmLabel: "Delete Bay",
+  });
+  if (!confirmed) return;
   const result = await fetchJson("/api/indian-trail/bays/delete", {
     method: "POST",
     body: JSON.stringify({ bayCode, ...requestContext() }),
@@ -9348,7 +9800,13 @@ async function deleteSelectedBay() {
 async function deleteSelectedBayGroup() {
   const mapSection = els.bayAddGroupInput?.value || els.bayLayoutSectionInput?.value || selectedBay()?.mapSection || "";
   if (!mapSection) return;
-  if (!window.confirm(`Delete bay group ${mapSection}? Active assignments must be cleared first.`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Delete bay group?",
+    message: `Delete <strong>${escapeHtml(mapSection)}</strong>?`,
+    details: "Active assignments must be cleared first.",
+    confirmLabel: "Delete Bay Group",
+  });
+  if (!confirmed) return;
   const result = await fetchJson("/api/indian-trail/bays/delete-group", {
     method: "POST",
     body: JSON.stringify({ mapSection, ...requestContext() }),
@@ -10351,8 +10809,16 @@ function openAdminModal(kind, options = null) {
   }
 }
 
-function closeAdminModal() {
-  if (state.manualEditDirty && !window.confirm("You have unsaved manual delivery-list edits. Close without saving?")) return;
+async function closeAdminModal() {
+  if (state.manualEditDirty) {
+    const confirmed = await confirmWebAppAction({
+      title: "Close without saving?",
+      message: "You have unsaved manual delivery-list edits.",
+      details: "Closing now will discard those unsaved changes.",
+      confirmLabel: "Close Without Saving",
+    });
+    if (!confirmed) return false;
+  }
 
   if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".role-permission-editor")) {
     resetRolePermissionUiSession();
@@ -10366,6 +10832,7 @@ function closeAdminModal() {
   }
   if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = true;
   updateModalScrollLock();
+  return true;
 }
 
 function adminModalContent(kind) {
@@ -11197,7 +11664,15 @@ async function saveRolePermissions(roleName) {
 
   const permissions = [...card.querySelectorAll("input[type='checkbox']:checked")].map((input) => input.value);
 
-  if (!permissions.length && !window.confirm(`Save ${roleName} with no permissions?`)) return;
+  if (!permissions.length) {
+    const confirmed = await confirmWebAppAction({
+      title: "Save role with no permissions?",
+      message: `Save <strong>${escapeHtml(roleName)}</strong> with no permissions?`,
+      details: "Users with this role will not be able to access application features.",
+      confirmLabel: "Save Empty Role",
+    });
+    if (!confirmed) return;
+  }
 
   const payload = await fetchJson("/api/admin/roles/permissions", {
     method: "POST",
@@ -12256,9 +12731,76 @@ function confirmWebAppAction({
 
     document.addEventListener("keydown", keyHandler);
     document.body.appendChild(dialog);
+    applyLanguageToRoot(dialog);
     document.body.classList.add("modal-scroll-locked");
     syncTypedConfirmation();
     (input || dialog.querySelector("[data-action-confirm-cancel]"))?.focus();
+  });
+}
+
+function promptWebAppAction({
+  title = "Enter information",
+  message = "",
+  label = "Value",
+  value = "",
+  placeholder = "",
+  confirmLabel = "Continue",
+  cancelLabel = "Cancel",
+  required = true,
+} = {}) {
+  return new Promise((resolve) => {
+    document.querySelector(".action-prompt-backdrop")?.remove();
+    const dialog = document.createElement("div");
+    dialog.className = "action-confirm-backdrop action-prompt-backdrop";
+    dialog.innerHTML = `
+      <section class="action-confirm-dialog action-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="actionPromptTitle">
+        <button type="button" class="action-confirm-close" data-action-prompt-cancel aria-label="Close">&times;</button>
+        <span class="action-confirm-icon" aria-hidden="true"></span>
+        <div class="action-confirm-copy">
+          <h2 id="actionPromptTitle">${escapeHtml(title)}</h2>
+          ${message ? `<p>${escapeHtml(message)}</p>` : ""}
+        </div>
+        <label class="action-prompt-field">
+          <span>${escapeHtml(label)}</span>
+          <input type="text" data-action-prompt-input value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off">
+        </label>
+        <div class="action-confirm-actions">
+          <button type="button" class="action-confirm-cancel" data-action-prompt-cancel>${escapeHtml(cancelLabel)}</button>
+          <button type="button" class="action-confirm-confirm" data-action-prompt-confirm>${escapeHtml(confirmLabel)}</button>
+        </div>
+      </section>
+    `;
+    const input = dialog.querySelector("[data-action-prompt-input]");
+    const close = (result = null) => {
+      dialog.remove();
+      updateModalScrollLock();
+      resolve(result);
+    };
+    const submit = () => {
+      const result = String(input?.value || "").trim();
+      if (required && !result) {
+        input?.classList.add("is-invalid");
+        input?.focus();
+        return;
+      }
+      close(result);
+    };
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-action-prompt-cancel]")) close(null);
+      if (event.target.closest("[data-action-prompt-confirm]")) submit();
+    });
+    input?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      }
+      if (event.key === "Escape") close(null);
+    });
+    document.body.appendChild(dialog);
+    applyLanguageToRoot(dialog);
+    updateModalScrollLock();
+    input?.focus();
+    input?.select();
   });
 }
 
@@ -13427,7 +13969,12 @@ async function removeCustomerRouteRule(ruleId) {
   const rule = state.adminCustomerRouteRules.find((item) => String(item.id) === String(ruleId));
   const label = rule?.customerPattern || "this customer route";
 
-  if (!window.confirm(`Delete the customer route for ${label}?`)) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Delete customer route?",
+    message: `Delete the route rule for <strong>${escapeHtml(label)}</strong>?`,
+    confirmLabel: "Delete Route",
+  });
+  if (!confirmed) return;
 
   if (state.backend) {
     const payload = await fetchJson("/api/admin/customer-route-rules/remove", {
@@ -13761,10 +14308,11 @@ function manualEditLocationOptions(item) {
 }
 
 function manualEditRouteOptions() {
-  const lookupRoutes = lookupOptions(state.manualEditLookups?.routes || [], "Indian Trail / Standard");
+  const lookupRoutes = lookupOptions(state.manualEditLookups?.routes || [], "Indian Trail / Standard")
+    .map(([value, label]) => [String(value || "").trim() || "IT", label]);
   if (lookupRoutes.length > 1) return lookupRoutes;
   return [
-    ["", "Indian Trail / Standard"],
+    ["IT", "Indian Trail / Standard"],
     ["CPU", "Customer Pickup"],
     ["GNV", "Greenville"],
     ["DTC", "Deliver to Customer"],
@@ -13946,7 +14494,7 @@ function manualEditResultsHtml(results) {
                   ${manualEditChoiceFieldHtml({
                     field: "route",
                     label: "Route",
-                    value: item.route || "",
+                    value: item.route || "IT",
                     options: manualEditRouteOptions(),
                     customLabel: "Custom route...",
                   })}
@@ -14012,9 +14560,8 @@ async function saveManualLineItem(lineItemId) {
     body: JSON.stringify(data),
   });
 
-  if (payload.meta?.id === state.activeListId) {
-    applyBackendPayload(payload);
-  }
+  const preferredListId = state.activeListId || payload.meta?.id || "";
+  await loadDeliveryLists(preferredListId);
 
   if (!els.adminModal?.hidden && state.manualEditListId) {
     await runManualEditModalSearch(!state.manualEditQuery);
@@ -14023,11 +14570,18 @@ async function saveManualLineItem(lineItemId) {
   }
 
   state.manualEditDirty = false;
+  showFloatingNotice(payload.message || "Line item updated across its delivery-list stages.", "success");
   renderScanPage();
 }
 
 async function deleteManualLineItem(lineItemId) {
-  if (!window.confirm("Delete this line item from its delivery list?")) return;
+  const confirmed = await confirmWebAppAction({
+    title: "Delete delivery-list item?",
+    message: "Delete this line item from its delivery list?",
+    details: "This removes the line from the selected delivery-list stage.",
+    confirmLabel: "Delete Line Item",
+  });
+  if (!confirmed) return;
   const payload = await fetchJson("/api/admin/line-item/delete", {
     method: "POST",
     body: JSON.stringify({ lineItemId }),
@@ -14171,6 +14725,44 @@ function wireEvents() {
   });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) void pollUserNotifications();
+  });
+
+  document.addEventListener("change", async (event) => {
+    const moveSelect = event.target.closest?.("[data-bay-event-move]");
+    if (!moveSelect) return;
+    const assignmentId = Number(moveSelect.dataset.assignmentId || 0);
+    const currentBay = moveSelect.dataset.currentBay || "";
+    const newBayCode = moveSelect.value || "";
+    const label = moveSelect.dataset.orderLabel || "item";
+    if (!assignmentId || !newBayCode || newBayCode === currentBay) return;
+
+    const confirmed = await confirmWebAppAction({
+      title: "Move scanned item?",
+      message: `Move <strong>${escapeHtml(label)}</strong> from <strong>${escapeHtml(currentBay || "its current bay")}</strong> to <strong>${escapeHtml(newBayCode)}</strong>?`,
+      details: "This updates the current Bay Map assignment and keeps the movement in the bay history log.",
+      confirmLabel: "Move Item",
+      danger: false,
+    });
+    if (!confirmed) {
+      moveSelect.value = currentBay;
+      syncCustomSelect(moveSelect);
+      return;
+    }
+
+    try {
+      await postBayAction("/api/indian-trail/move", {
+        assignmentId,
+        newBayCode,
+        reason: `Moved from scan history selector (${currentBay || "unknown bay"})`,
+      });
+      showFloatingNotice(`Moved ${label} to ${newBayCode}.`, "success");
+      renderBayRecentActions();
+      if (!els.adminModal?.hidden && els.adminModal?.dataset.kind === "custom") await openBayAllScansModal();
+    } catch (error) {
+      moveSelect.value = currentBay;
+      syncCustomSelect(moveSelect);
+      showFloatingNotice(error.message, "error");
+    }
   });
 
   document.addEventListener("click", (event) => {
@@ -14342,8 +14934,13 @@ function wireEvents() {
   els.deliveryListSelect?.addEventListener("change", () => activateList(els.deliveryListSelect.value).catch((error) => showInlineError(error.message)));
   els.deliveryDateSelect?.addEventListener("change", () => {
     const date = els.deliveryDateSelect.value;
-    const firstStage = listsByDeliveryDate().find((group) => group.date === date)?.lists?.[0];
-    if (firstStage) activateList(firstStage.id).catch((error) => showInlineError(error.message));
+    const dateGroup = listsByDeliveryDate().find((group) => group.date === date);
+    const currentStage = String(state.meta?.stage || "").trim().toLowerCase();
+    const currentScanner = String(state.meta?.scanner || "").trim().toLowerCase();
+    const matchingStage = dateGroup?.lists?.find((list) => String(list.stage || "").trim().toLowerCase() === currentStage)
+      || dateGroup?.lists?.find((list) => String(list.scanner || "").trim().toLowerCase() === currentScanner)
+      || dateGroup?.lists?.[0];
+    if (matchingStage) activateList(matchingStage.id).catch((error) => showInlineError(error.message));
   });
   els.deliveryStageSelect?.addEventListener("change", () => {
     activateList(els.deliveryStageSelect.value).catch((error) => showInlineError(error.message));
@@ -14871,7 +15468,7 @@ function wireEvents() {
     }
   });
 
-  document.addEventListener("change", (event) => {
+  document.addEventListener("change", async (event) => {
     const customerRouteCodeField = event.target.closest("#customerRouteSelectModal, [data-customer-route-route]");
 
     if (customerRouteCodeField) {
@@ -14938,9 +15535,20 @@ function wireEvents() {
     }
 
     if (event.target.closest("#manualEditModalStage")) {
-      if (state.manualEditDirty && !window.confirm("You have unsaved manual delivery-list edits. Load another stage without saving?")) {
-        event.target.value = state.manualEditListId || "";
-        return;
+      if (state.manualEditDirty) {
+        const confirmed = await confirmWebAppAction({
+          title: "Discard unsaved edits?",
+          message: "You have unsaved manual delivery-list edits. Loading another stage will discard those changes.",
+          confirmLabel: "Load another stage",
+          cancelLabel: "Keep editing",
+          danger: false,
+        });
+
+        if (!confirmed) {
+          event.target.value = state.manualEditListId || "";
+          syncCustomSelect(event.target);
+          return;
+        }
       }
 
       state.manualEditDirty = false;
@@ -15006,7 +15614,7 @@ function wireEvents() {
   });
   els.bayUndoBtn?.addEventListener("click", () => runBayHistory("undo").catch((error) => showInlineError(error.message, true)));
   els.bayRedoBtn?.addEventListener("click", () => runBayHistory("redo").catch((error) => showInlineError(error.message, true)));
-  els.bayMapCanvas?.addEventListener("click", (event) => {
+  els.bayMapCanvas?.addEventListener("click", async (event) => {
     const bayEditorOpenButton = event.target.closest("[data-bay-editor-open]");
     if (bayEditorOpenButton) {
       event.preventDefault();
@@ -15030,13 +15638,23 @@ function wireEvents() {
       const pendingMove = { ...state.pendingBayMove };
       const newBayCode = target.dataset.bayCode || "";
       const label = `${pendingMove.order}-${pendingMove.item}`;
-      if (newBayCode && window.confirm(`Move ${label} to ${newBayCode}?`)) {
-        postBayAction("/api/indian-trail/move", {
-          assignmentId: pendingMove.assignmentId,
-          newBayCode,
-          reason: `Moved from ${pendingMove.fromBay}`,
-        })
-          .then(() => {
+      if (newBayCode) {
+        const confirmed = await confirmWebAppAction({
+          title: "Move item to another bay?",
+          message: `Move ${label} from ${pendingMove.fromBay || "its current bay"} to ${newBayCode}?`,
+          confirmLabel: "Move item",
+          cancelLabel: "Cancel",
+          danger: false,
+        });
+
+        if (confirmed) {
+          try {
+            await postBayAction("/api/indian-trail/move", {
+              assignmentId: pendingMove.assignmentId,
+              newBayCode,
+              reason: `Moved from ${pendingMove.fromBay}`,
+            });
+
             if (pendingMove.fromBay) {
               pushBayHistory({
                 label: `move ${label}`,
@@ -15044,10 +15662,13 @@ function wireEvents() {
                 redo: () => postBayAction("/api/indian-trail/move", { assignmentId: pendingMove.assignmentId, newBayCode, reason: `Redo move from ${pendingMove.fromBay}` }),
               });
             }
+
             showFloatingNotice(`Moved ${label} to ${newBayCode}.`, "success");
             scanFlash("success");
-          })
-          .catch((error) => showInlineError(error.message, true));
+          } catch (error) {
+            showInlineError(error.message, true);
+          }
+        }
       }
       state.pendingBayMove = null;
       document.body.classList.remove("bay-move-mode");
@@ -15094,7 +15715,7 @@ function wireEvents() {
       action === "delete-bay" ? () => deleteBayEditorBay(bayCode) : null;
     if (runner) runner().catch((error) => showInlineError(error.message, true));
   });
-  els.bayAllScansBtn?.addEventListener("click", () => openBayAllScansModal());
+  els.bayAllScansBtn?.addEventListener("click", () => openBayAllScansModal().catch((error) => showInlineError(error.message, true)));
   els.manageItemsSearch?.addEventListener("input", () => {
     state.manageItemsQuery = els.manageItemsSearch.value;
     renderManageItemsPanel();
@@ -15157,12 +15778,6 @@ function wireEvents() {
     renderBayMapPage();
   });
   els.bayHoldAllBtn?.addEventListener("click", () => holdAllBaySections());
-  window.addEventListener("beforeunload", (event) => {
-    if ((state.bayEditMode && state.bayHoldingSections.size) || state.manualEditDirty) {
-      event.preventDefault();
-      event.returnValue = "";
-    }
-  });
   for (const container of [els.bayMapCanvas, els.bayAllBaysList]) {
     container?.addEventListener("dragstart", (event) => {
       const groupTarget = event.target.closest("[data-bay-group-drag]");
@@ -15211,7 +15826,7 @@ function wireEvents() {
     });
   }
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     if (
       els.headerGlobalSearchResults &&
       !event.target.closest(".global-search") &&
@@ -15264,7 +15879,18 @@ function wireEvents() {
 
     const pageButton = event.target.closest("[data-page-target]");
     if (pageButton) {
-      if (state.manualEditDirty && !window.confirm("You have unsaved manual delivery-list edits. Leave without saving?")) return;
+      if (state.manualEditDirty) {
+        const confirmed = await confirmWebAppAction({
+          title: "Leave without saving?",
+          message: "You have unsaved manual delivery-list edits. Leaving this page will discard those changes.",
+          confirmLabel: "Leave page",
+          cancelLabel: "Keep editing",
+          danger: false,
+        });
+
+        if (!confirmed) return;
+      }
+
       state.manualEditDirty = false;
       showPage(pageButton.dataset.pageTarget);
       return;
@@ -15391,8 +16017,16 @@ function wireEvents() {
     if (manualEditBackButton) {
       event.preventDefault();
 
-      if (state.manualEditDirty && !window.confirm("You have unsaved manual delivery-list edits. Go back without saving?")) {
-        return;
+      if (state.manualEditDirty) {
+        const confirmed = await confirmWebAppAction({
+          title: "Go back without saving?",
+          message: "You have unsaved manual delivery-list edits. Going back will discard those changes.",
+          confirmLabel: "Go back",
+          cancelLabel: "Keep editing",
+          danger: false,
+        });
+
+        if (!confirmed) return;
       }
 
       state.manualEditDirty = false;

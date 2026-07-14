@@ -339,9 +339,12 @@ def fuzzy_contains(text: str, needle: str) -> bool:
 
 
 def default_customer_route(item: dict[str, Any]) -> str:
-    signal = " ".join(str(item.get(key, "")) for key in ("customer", "job", "product", "route"))
+    # Customer routing rules must match the customer field only. Job numbers can
+    # legitimately contain text such as CPU even when the ROUTE column still
+    # sends the glass to Indian Trail.
+    customer_name = str(item.get("customer", ""))
     for customer, route, _address in DEFAULT_CUSTOMER_ROUTE_RULES:
-        if fuzzy_contains(signal, customer):
+        if fuzzy_contains(customer_name, customer):
             return route
     return ""
 
@@ -384,25 +387,54 @@ def route_signal_text(item: dict[str, Any]) -> str:
     ).upper()
 
 
+def normalize_route_column(value: Any) -> tuple[bool, str]:
+    """Return whether ROUTE was explicitly supplied and its canonical route.
+
+    The ROUTE column is authoritative. Any explicit ROUTE containing CPU is a
+    CPU route, even when the Job Nr. contains CPU-IT or CPU-INT.
+    """
+    route = str(value or "").strip().upper()
+    compact = normalized_match_text(route)
+    if not route:
+        return False, ""
+    if route in {"CUSTOMER PICKUP", "PICKUP"} or re.search(r"\bCPU\b", route) or compact.startswith("CPU"):
+        return True, "CPU"
+    if route in {"GNV", "GRN", "GREENVILLE"}:
+        return True, "GNV"
+    if route in {"DTC", "DELIVER TO CUSTOMER"}:
+        return True, "DTC"
+    if route in {"INT", "IT", "INDIAN TRAIL", "INDIANTRAIL"}:
+        return True, ""
+    return True, route
+
+
+def job_number_route_hint(item: dict[str, Any]) -> str | None:
+    """Return a route hint from Job Nr. only when ROUTE is blank."""
+    job = str(item.get("job", "")).strip().upper()
+    compact = normalized_match_text(job)
+    if re.search(r"\bCPU[-\s]*(IT|INT)\b", job) or re.search(r"\b(IT|INT)[-\s]*CPU\b", job):
+        return ""
+    if re.search(r"\bCPU[-\s]*AIR\b", job) or "CPUAIR" in compact:
+        return "CPU"
+    return None
+
+
 def inferred_route(item: dict[str, Any]) -> str:
-    route = str(item.get("route", "")).strip().upper()
-    text = route_signal_text(item)
-    compact = normalized_match_text(text)
-    if re.search(r"\bCPU[-\s]*(IT|INT)\b", text) or re.search(r"\bIT[-\s]*CPU\b", text):
-        return ""
-    if re.search(r"\bCPU[-\s]*AIR\b", text) or "CPUAIR" in compact:
-        return "CPU"
-    if re.search(r"\b(GNV|GREENVILLE)\b", text):
-        return "GNV"
-    if re.search(r"\b(DTC|DELIVER\s+TO\s+CUSTOMER)\b", text):
-        return "DTC"
-    if re.search(r"\b(INT|INDIAN\s+TRAIL)\b", text):
-        return ""
-    if route == "CPU" or re.search(r"\bCPU\b", text):
-        return "CPU"
-    if route in {"INT", "IT", "INDIAN TRAIL"}:
-        return ""
-    return route or default_customer_route(item)
+    explicit, route = normalize_route_column(item.get("route", ""))
+    if explicit:
+        return route
+
+    job_hint = job_number_route_hint(item)
+    if job_hint is not None:
+        return job_hint
+
+    customer_route = default_customer_route(item)
+    if customer_route:
+        return normalize_route_column(customer_route)[1]
+
+    # Generic CPU text in Job Nr. remains Indian Trail unless an explicit ROUTE
+    # or customer-route rule says otherwise.
+    return ""
 
 
 def route_category(item: dict[str, Any]) -> str:
@@ -2298,6 +2330,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 removed_by TEXT NOT NULL DEFAULT '',
                 removed_at TEXT NOT NULL DEFAULT '',
                 reason TEXT NOT NULL DEFAULT '',
+                destination_override TEXT NOT NULL DEFAULT '',
                 UNIQUE(rack_id, line_item_id)
             );
 
@@ -2428,6 +2461,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.ensure_column(con, "racks", "completed_at", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "racks", "departed_at", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "racks", "returned_at", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "rack_items", "destination_override", "TEXT NOT NULL DEFAULT ''")
         con.commit()
 
     def ensure_column(self, con: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -2438,7 +2472,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
     def clone_item_for_list(self, item: dict[str, Any], list_id: str, index: int, auto_assign_settings: dict[str, Any] | None = None) -> dict[str, Any]:
         order_no = str(item["order"])
         item_no = str(item["item"]).zfill(3)
-        route = inferred_route(item)
+        explicit, canonical_route = normalize_route_column(item.get("route", ""))
+        if explicit:
+            route = canonical_route or "IT"
+        else:
+            inferred = inferred_route(item)
+            route = inferred or ("IT" if job_number_route_hint(item) is not None else "")
         product = str(item.get("product", ""))
         dimensions = str(item.get("dimensions", ""))
         return {
@@ -4741,27 +4780,34 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
 
     def route_from_customer_rules(self, item: dict[str, Any], rules: list[dict[str, Any]]) -> str:
-        signal = " ".join(str(item.get(key, "")) for key in ("customer", "job", "product", "route"))
+        customer_name = str(item.get("customer", ""))
         for rule in rules:
-            if fuzzy_contains(signal, rule.get("customerPattern", "")):
+            if fuzzy_contains(customer_name, rule.get("customerPattern", "")):
                 return str(rule.get("route") or "").strip().upper()
         return ""
 
     def apply_customer_route_rules_to_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         rules = self.get_customer_route_rules()
-        if not rules:
-            return payload
         next_payload = dict(payload)
         next_items = []
         for item in payload.get("items") or []:
             next_item = dict(item)
-            explicit = inferred_route(next_item)
-            if not explicit:
-                ruled_route = self.route_from_customer_rules(next_item, rules)
-                if ruled_route:
-                    next_item["route"] = ruled_route
+            explicit, explicit_route = normalize_route_column(next_item.get("route", ""))
+            if explicit:
+                next_item["route"] = explicit_route or "IT"
             else:
-                next_item["route"] = explicit
+                job_hint = job_number_route_hint(next_item)
+                if job_hint is not None:
+                    next_item["route"] = job_hint or "IT"
+                else:
+                    ruled_route = self.route_from_customer_rules(next_item, rules) or default_customer_route(next_item)
+                    if ruled_route:
+                        canonical = normalize_route_column(ruled_route)[1]
+                        next_item["route"] = canonical or "IT"
+                    elif "CPU" in normalized_match_text(next_item.get("job", "")):
+                        next_item["route"] = "IT"
+                    else:
+                        next_item["route"] = ""
             next_items.append(next_item)
         next_payload["items"] = next_items
         return next_payload
@@ -5442,8 +5488,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return outbound_gate_payload
 
             rack_code_for_scan = normalize_rack_code(str(scan_request.get("rackCode") or ""))
+            destination_override_requested = str(scan_request.get("destinationOverride") or "").lower() in {"1", "true", "yes"}
             list_row_for_rack = con.execute("SELECT stage FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
             rack_for_scan = None
+            destination_override = ""
             if rack_code_for_scan and list_row_for_rack and "staging" in str(list_row_for_rack["stage"]).lower():
                 rack_for_scan = self.get_rack_by_code(con, rack_code_for_scan)
                 if str(rack_for_scan["status"] or "").lower() == "closed":
@@ -5465,9 +5513,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     payload["racks"] = racks_payload.get("racks", [])
                     payload["rackSummary"] = racks_payload.get("summary")
                     return payload
-                try:
-                    self.validate_rack_destination_for_item(con, rack_for_scan, row)
-                except ValueError as exc:
+
+                item_destination = self.destination_for_line_item(row)
+                rack_destinations = self.rack_destinations_from_items(con, int(rack_for_scan["id"]))
+                rack_destination = rack_destinations[0] if len(rack_destinations) == 1 else self.rack_destination_value(rack_for_scan["destination"])
+                mismatch = bool(rack_destinations and rack_destinations != [item_destination])
+                if mismatch and not destination_override_requested:
+                    reason_text = (
+                        f"Rack {rack_for_scan['rack_code']} is assigned to {rack_destination}. "
+                        f"This item is marked for {item_destination}."
+                    )
                     last = self.insert_event(
                         con,
                         list_id,
@@ -5476,22 +5531,41 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         canonical,
                         user,
                         station,
-                        "error",
+                        "notice",
                         "Rack destination mismatch",
-                        str(exc),
+                        reason_text,
                     )
                     con.commit()
                     payload = self._get_payload(con, list_id, last)
                     racks_payload = self.get_racks()
                     payload["racks"] = racks_payload.get("racks", [])
                     payload["rackSummary"] = racks_payload.get("summary")
+                    payload.update(
+                        {
+                            "destinationOverrideRequired": True,
+                            "destinationMismatch": {
+                                "rackCode": rack_for_scan["rack_code"],
+                                "rackDestination": rack_destination,
+                                "itemDestination": item_destination,
+                                "order": row["order_no"],
+                                "item": row["item_no"],
+                                "customer": row["customer"],
+                            },
+                        }
+                    )
                     return payload
+                if mismatch:
+                    destination_override = rack_destination
+
             con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
             if rack_for_scan:
                 con.execute(
                     """
-                    INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
-                    VALUES (?, ?, 1, 'Active', ?, ?, 'Scanned on staging')
+                    INSERT INTO rack_items (
+                        rack_id, line_item_id, qty, status, added_by, added_at,
+                        reason, destination_override
+                    )
+                    VALUES (?, ?, 1, 'Active', ?, ?, ?, ?)
                     ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
                         qty = CASE
                             WHEN rack_items.status = 'Active' THEN MIN(rack_items.qty + 1, (SELECT qty FROM line_items WHERE id = excluded.line_item_id))
@@ -5500,11 +5574,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         status = 'Active',
                         removed_by = '',
                         removed_at = '',
-                        reason = 'Scanned on staging',
+                        reason = excluded.reason,
+                        destination_override = excluded.destination_override,
                         added_by = excluded.added_by,
                         added_at = excluded.added_at
                     """,
-                    (rack_for_scan["id"], row["id"], user, now_iso()),
+                    (
+                        rack_for_scan["id"],
+                        row["id"],
+                        user,
+                        now_iso(),
+                        "Scanned on staging with destination override" if destination_override else "Scanned on staging",
+                        destination_override,
+                    ),
                 )
                 self.refresh_rack_destination(con, rack_for_scan["id"])
             preassigned_bay = self.preassign_bay_for_outbound(con, list_id, row, user, station)
@@ -6462,6 +6544,175 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             cleaned_results.append(result)
         return cleaned_results[:30]
 
+    def manual_edit_sibling_rows(self, con: sqlite3.Connection, row: sqlite3.Row) -> list[sqlite3.Row]:
+        context = con.execute(
+            "SELECT delivery_date FROM delivery_lists WHERE id = ?",
+            (row["list_id"],),
+        ).fetchone()
+        if not context:
+            return [row]
+        if str(row["source_id"] or "").strip():
+            return con.execute(
+                """
+                SELECT li.*, dl.delivery_date, dl.stage, dl.scanner
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE dl.delivery_date = ? AND li.source_id = ?
+                ORDER BY dl.stage, li.id
+                """,
+                (context["delivery_date"], row["source_id"]),
+            ).fetchall()
+        return con.execute(
+            """
+            SELECT li.*, dl.delivery_date, dl.stage, dl.scanner
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            WHERE dl.delivery_date = ? AND li.order_no = ? AND li.item_no = ?
+            ORDER BY dl.stage, li.id
+            """,
+            (context["delivery_date"], row["order_no"], row["item_no"]),
+        ).fetchall()
+
+    def manual_route_profile(self, delivery_date: str, destination: str) -> tuple[str, str, str]:
+        profiles = {
+            "Indian Trail": ("inbound-indian-trail", "Inbound - Indian Trail", "Indian Trail"),
+            "CPU": ("customer-pickup", "Customer Pickup", "Customer Pickup"),
+            "Greenville": ("bfs-greenville", "BFS Greenville", "Greenville"),
+            "DTC": ("dtc", "DTC - Deliver to Customer", "DTC"),
+        }
+        if destination in profiles:
+            suffix, stage, scanner = profiles[destination]
+        else:
+            route_code = re.sub(r"[^a-z0-9]+", "-", str(destination or "route").lower()).strip("-") or "route"
+            suffix, stage, scanner = f"route-{route_code}", str(destination or "Route"), str(destination or "Route")
+        return f"{delivery_date}-{suffix}", stage, scanner
+
+    def ensure_manual_route_list(self, con: sqlite3.Connection, delivery_date: str, destination: str) -> str:
+        list_id, stage, scanner = self.manual_route_profile(delivery_date, destination)
+        con.execute(
+            """
+            INSERT INTO delivery_lists (id, label, delivery_date, stage, scanner, status, revision, created_at)
+            VALUES (?, ?, ?, ?, ?, 'active', 1, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                label = excluded.label,
+                delivery_date = excluded.delivery_date,
+                stage = excluded.stage,
+                scanner = excluded.scanner,
+                status = 'active'
+            """,
+            (list_id, f"{format_display_date(delivery_date)} - {stage}", delivery_date, stage, scanner, now_iso()),
+        )
+        return list_id
+
+    def merge_manual_receiving_row(
+        self,
+        con: sqlite3.Connection,
+        source_id: str,
+        target_id: str,
+        target_list_id: str,
+    ) -> None:
+        if source_id == target_id:
+            return
+        source = con.execute("SELECT * FROM line_items WHERE id = ?", (source_id,)).fetchone()
+        target = con.execute("SELECT * FROM line_items WHERE id = ?", (target_id,)).fetchone()
+        if not source or not target:
+            return
+        con.execute(
+            "UPDATE line_items SET scanned_qty = MAX(scanned_qty, ?), qty = MAX(qty, ?) WHERE id = ?",
+            (int(source["scanned_qty"] or 0), int(source["qty"] or 0), target_id),
+        )
+        con.execute(
+            "UPDATE scan_events SET line_item_id = ?, list_id = ? WHERE line_item_id = ?",
+            (target_id, target_list_id, source_id),
+        )
+        con.execute("UPDATE bay_events SET line_item_id = ? WHERE line_item_id = ?", (target_id, source_id))
+        con.execute(
+            "UPDATE bay_assignments SET line_item_id = ?, delivery_list_id = ? WHERE line_item_id = ?",
+            (target_id, target_list_id, source_id),
+        )
+        rack_rows = con.execute("SELECT * FROM rack_items WHERE line_item_id = ?", (source_id,)).fetchall()
+        for rack_row in rack_rows:
+            existing = con.execute(
+                "SELECT * FROM rack_items WHERE rack_id = ? AND line_item_id = ?",
+                (rack_row["rack_id"], target_id),
+            ).fetchone()
+            if existing:
+                status = "Active" if "Active" in {str(existing["status"]), str(rack_row["status"])} else str(existing["status"])
+                con.execute(
+                    "UPDATE rack_items SET qty = MAX(qty, ?), status = ? WHERE id = ?",
+                    (int(rack_row["qty"] or 0), status, existing["id"]),
+                )
+                con.execute("DELETE FROM rack_items WHERE id = ?", (rack_row["id"],))
+            else:
+                con.execute("UPDATE rack_items SET line_item_id = ? WHERE id = ?", (target_id, rack_row["id"]))
+        con.execute("DELETE FROM line_items WHERE id = ?", (source_id,))
+
+    def sync_manual_route_membership(self, con: sqlite3.Connection, row: sqlite3.Row) -> str:
+        siblings = self.manual_edit_sibling_rows(con, row)
+        if not siblings:
+            return ""
+        delivery_date = str(siblings[0]["delivery_date"] or "")
+        destination = self.destination_for_line_item(row)
+        target_list_id = self.ensure_manual_route_list(con, delivery_date, destination)
+        receiving_rows = [
+            sibling
+            for sibling in siblings
+            if not str(sibling["stage"] or "").lower().startswith("staging")
+            and not str(sibling["stage"] or "").lower().startswith("outbound")
+        ]
+        target_row = next((item for item in receiving_rows if item["list_id"] == target_list_id), None)
+        if not target_row:
+            if receiving_rows:
+                target_row = receiving_rows[0]
+                con.execute("UPDATE line_items SET list_id = ? WHERE id = ?", (target_list_id, target_row["id"]))
+                con.execute("UPDATE scan_events SET list_id = ? WHERE line_item_id = ?", (target_list_id, target_row["id"]))
+                con.execute("UPDATE bay_assignments SET delivery_list_id = ? WHERE line_item_id = ?", (target_list_id, target_row["id"]))
+            else:
+                source = next(
+                    (item for item in siblings if str(item["stage"] or "").lower().startswith("staging")),
+                    siblings[0],
+                )
+                new_id = f"{target_list_id}-manual-{secrets.token_hex(6)}"
+                con.execute(
+                    """
+                    INSERT INTO line_items (
+                        id, list_id, source_id, barcode, order_no, item_no, qty, scanned_qty,
+                        dimensions, customer, route, job, product, process_state, queue_state, suggested_bay
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id,
+                        target_list_id,
+                        source["source_id"],
+                        source["barcode"],
+                        source["order_no"],
+                        source["item_no"],
+                        source["qty"],
+                        source["dimensions"],
+                        source["customer"],
+                        source["route"],
+                        source["job"],
+                        source["product"],
+                        source["process_state"],
+                        source["queue_state"],
+                        source["suggested_bay"],
+                    ),
+                )
+                target_row = con.execute(
+                    """
+                    SELECT li.*, dl.delivery_date, dl.stage, dl.scanner
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE li.id = ?
+                    """,
+                    (new_id,),
+                ).fetchone()
+        if target_row:
+            for other in receiving_rows:
+                if other["id"] != target_row["id"]:
+                    self.merge_manual_receiving_row(con, other["id"], target_row["id"], target_list_id)
+        return target_list_id
+
     def update_line_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         line_item_id = str(data.get("lineItemId") or "")
         if not line_item_id:
@@ -6481,17 +6732,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "queueState": "queue_state",
             "suggestedBay": "suggested_bay",
         }
-        updates = []
-        params: list[Any] = []
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute("SELECT * FROM line_items WHERE id = ?", (line_item_id,)).fetchone()
             if not row:
                 raise ValueError("Line item not found")
+            original_list_id = str(row["list_id"])
+            siblings = self.manual_edit_sibling_rows(con, row)
+            sibling_ids = [str(item["id"]) for item in siblings] or [line_item_id]
             next_qty = int(data.get("qty", row["qty"]) or 0)
             next_scanned = int(data.get("scanned", row["scanned_qty"]) or 0)
+            max_existing_scanned = max((int(item["scanned_qty"] or 0) for item in siblings), default=0)
             if next_qty < 0 or next_scanned < 0 or next_scanned > next_qty:
                 raise ValueError("Scanned quantity must be between 0 and total quantity")
+            if "qty" in data and max_existing_scanned > next_qty:
+                raise ValueError("Qty cannot be lower than a scanned quantity on another stage for this item")
+
+            business_updates: dict[str, Any] = {}
+            current_updates: dict[str, Any] = {}
             for input_key, column in allowed_fields.items():
                 if input_key not in data:
                     continue
@@ -6504,21 +6762,68 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         value = str(parse_int_text(value) or value).zfill(3)
                     elif column == "order_no":
                         value = str(parse_int_text(value) or value)
-                updates.append(f"{column} = ?")
-                params.append(value)
+                    elif column == "route":
+                        explicit, canonical = normalize_route_column(value)
+                        value = (canonical or "IT") if explicit else "IT"
+                if column == "scanned_qty":
+                    current_updates[column] = value
+                else:
+                    business_updates[column] = value
+
             if ("order" in data or "item" in data) and "barcode" not in data:
                 next_order = str(parse_int_text(data.get("order", row["order_no"])) or row["order_no"])
                 next_item = str(parse_int_text(data.get("item", row["item_no"])) or row["item_no"]).zfill(3)
-                updates.append("barcode = ?")
-                params.append(canonical_barcode(next_order, next_item))
-            if updates:
-                params.append(line_item_id)
-                con.execute(f"UPDATE line_items SET {', '.join(updates)} WHERE id = ?", params)
-                self.insert_audit(con, "line_item", line_item_id, "manual_edit", user, "", "", {"fields": list(data.keys())})
-            if "location" in data:
-                self.update_line_item_location(con, row, str(data.get("location") or ""), user)
+                business_updates["barcode"] = canonical_barcode(next_order, next_item)
+
+            if business_updates:
+                assignments = ", ".join(f"{column} = ?" for column in business_updates)
+                placeholders = ",".join("?" for _ in sibling_ids)
+                con.execute(
+                    f"UPDATE line_items SET {assignments} WHERE id IN ({placeholders})",
+                    [*business_updates.values(), *sibling_ids],
+                )
+            if current_updates:
+                assignments = ", ".join(f"{column} = ?" for column in current_updates)
+                con.execute(
+                    f"UPDATE line_items SET {assignments} WHERE id = ?",
+                    [*current_updates.values(), line_item_id],
+                )
+
+            updated_row = con.execute("SELECT * FROM line_items WHERE id = ?", (line_item_id,)).fetchone()
+            if updated_row and "location" in data:
+                self.update_line_item_location(con, updated_row, str(data.get("location") or ""), user)
+                updated_row = con.execute("SELECT * FROM line_items WHERE id = ?", (line_item_id,)).fetchone()
+
+            target_list_id = ""
+            if updated_row and any(key in data for key in ("route", "job", "customer")):
+                target_list_id = self.sync_manual_route_membership(con, updated_row)
+
+            affected_racks = con.execute(
+                f"SELECT DISTINCT rack_id FROM rack_items WHERE line_item_id IN ({','.join('?' for _ in sibling_ids)}) AND status = 'Active'",
+                sibling_ids,
+            ).fetchall()
+            for rack_row in affected_racks:
+                self.refresh_rack_destination(con, int(rack_row["rack_id"]))
+
+            self.insert_audit(
+                con,
+                "line_item",
+                line_item_id,
+                "manual_edit",
+                user,
+                "",
+                "",
+                {
+                    "fields": list(data.keys()),
+                    "syncedCopies": len(sibling_ids),
+                    "destinationListId": target_list_id,
+                },
+            )
             con.commit()
-            return self._get_payload(con, row["list_id"])
+            payload = self._get_payload(con, original_list_id)
+            payload["message"] = f"Updated {len(sibling_ids)} matching stage record{'s' if len(sibling_ids) != 1 else ''}."
+            payload["destinationListId"] = target_list_id
+            return payload
 
     def update_line_item_location(self, con: sqlite3.Connection, row: sqlite3.Row, location: str, user: str) -> None:
         clean = str(location or "").strip()
@@ -7054,14 +7359,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchall()
             return [self.bay_from_row(con, row) for row in rows]
 
+
     def get_bay_job_details(self, bay_code: str) -> dict[str, Any]:
+        """Return live job fulfillment for one bay, including scan-in timestamps.
+
+        Fulfillment is based on physical bay assignments, not the delivery-list
+        received quantity. That distinction matters when a received item is
+        scanned out and later returned to a bay.
+        """
         clean_code = str(bay_code or "").strip()
         if not clean_code:
             raise ValueError("bayCode is required")
+
         with self.connect() as con:
             bay = con.execute("SELECT * FROM bays WHERE bay_code = ?", (clean_code,)).fetchone()
             if not bay:
                 raise ValueError(f"Bay {clean_code} was not found")
+
             assignments = con.execute(
                 """
                 SELECT ba.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.customer,
@@ -7070,12 +7384,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 JOIN line_items li ON li.id = ba.line_item_id
                 JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE ba.bay_id = ? AND ba.status NOT IN ('Cleared', 'Cancelled')
-                ORDER BY ba.assigned_at DESC
+                ORDER BY ba.assigned_at DESC, ba.id DESC
                 """,
                 (bay["id"],),
             ).fetchall()
+
+            assignment_by_line: dict[str, sqlite3.Row] = {}
+            for assignment in assignments:
+                assignment_by_line.setdefault(str(assignment["line_item_id"]), assignment)
+
             job_details: list[dict[str, Any]] = []
             seen_job_keys: set[tuple[str, str]] = set()
+
             for assignment in assignments:
                 delivery_list_id = str(assignment["delivery_list_id"] or "")
                 job_value = str(assignment["job"] or "").strip()
@@ -7085,6 +7405,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if group_key in seen_job_keys:
                     continue
                 seen_job_keys.add(group_key)
+
                 if job_value:
                     group_rows = con.execute(
                         """
@@ -7103,19 +7424,38 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         """,
                         (delivery_list_id, order_value),
                     ).fetchall()
+
                 required_qty = sum(max(int(row["qty"] or 0), 0) for row in group_rows)
-                in_bay_qty = sum(
-                    min(max(int(row["scanned_qty"] or 0), 0), max(int(row["qty"] or 0), 0))
-                    for row in group_rows
-                )
+                in_bay_qty = 0
+                latest_scan_in = ""
                 all_items: list[dict[str, Any]] = []
                 missing_items: list[dict[str, Any]] = []
+
                 for row in group_rows:
                     needed_qty = max(int(row["qty"] or 0), 0)
-                    present_qty = min(max(int(row["scanned_qty"] or 0), 0), needed_qty)
+                    current_assignment = assignment_by_line.get(str(row["id"]))
+                    assignment_status = str(current_assignment["status"] or "") if current_assignment else ""
+                    physically_in_bay = bool(current_assignment) and assignment_status not in {
+                        "PreAssigned",
+                        "Cancelled",
+                        "Cleared",
+                    }
+                    present_qty = (
+                        min(max(int(current_assignment["assigned_qty"] or 0), 0), needed_qty)
+                        if physically_in_bay
+                        else 0
+                    )
                     missing_qty = max(needed_qty - present_qty, 0)
+                    scanned_into_bay_at = (
+                        str(current_assignment["assigned_at"] or "") if physically_in_bay else ""
+                    )
+                    if scanned_into_bay_at and scanned_into_bay_at > latest_scan_in:
+                        latest_scan_in = scanned_into_bay_at
+                    in_bay_qty += present_qty
+
                     item_payload = {
                         "lineItemId": row["id"],
+                        "assignmentId": int(current_assignment["id"]) if current_assignment else 0,
                         "order": row["order_no"],
                         "item": row["item_no"],
                         "qty": needed_qty,
@@ -7124,11 +7464,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "dimensions": row["dimensions"],
                         "product": row["product"],
                         "customer": row["customer"],
+                        "bayStatus": assignment_status,
+                        "scannedIntoBayAt": scanned_into_bay_at,
                         "complete": missing_qty == 0,
                     }
                     all_items.append(item_payload)
                     if missing_qty > 0:
                         missing_items.append(item_payload)
+
                 job_details.append(
                     {
                         "key": f"job:{job_value.lower()}" if job_value else f"order:{order_value}",
@@ -7140,20 +7483,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "inBayQty": in_bay_qty,
                         "missingQty": max(required_qty - in_bay_qty, 0),
                         "complete": required_qty > 0 and in_bay_qty >= required_qty,
+                        "lastScannedIntoBayAt": latest_scan_in,
                         "items": all_items,
                         "missingItems": missing_items,
                     }
                 )
-        return {"bayCode": clean_code, "jobDetails": job_details}
 
+        return {"bayCode": clean_code, "jobDetails": job_details}
     def get_bay_layout(self) -> dict[str, Any]:
         layout_path = self.config.root / "data" / "indian-trail-bay-layout.json"
         if not layout_path.exists():
             return {"bays": [], "cells": [], "sections": [], "grid": {"minRow": 1, "maxRow": 1, "minCol": 1, "maxCol": 1}}
         return json.loads(layout_path.read_text(encoding="utf-8"))
 
+
     def get_bay_events(self, limit: int = 20) -> list[dict[str, Any]]:
-        safe_limit = max(1, min(int(limit or 20), 100))
+        """Return detailed Bay Map history with each item's current move target."""
+        safe_limit = max(1, min(int(limit or 20), 250))
         with self.connect() as con:
             rows = con.execute(
                 """
@@ -7164,17 +7510,30 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                        old_bay.display_name AS old_bay_display,
                        new_bay.bay_code AS new_bay_code,
                        new_bay.display_name AS new_bay_display,
-                       li.order_no, li.item_no, li.customer, li.dimensions, li.product
+                       li.order_no, li.item_no, li.customer, li.dimensions, li.product,
+                       current_ba.id AS current_assignment_id,
+                       current_bay.bay_code AS current_bay_code,
+                       current_bay.display_name AS current_bay_display
                 FROM bay_events be
                 LEFT JOIN bays b ON b.id = be.bay_id
                 LEFT JOIN bays old_bay ON old_bay.id = be.old_bay_id
                 LEFT JOIN bays new_bay ON new_bay.id = be.new_bay_id
                 LEFT JOIN line_items li ON li.id = be.line_item_id
+                LEFT JOIN bay_assignments current_ba ON current_ba.id = (
+                    SELECT ba2.id
+                    FROM bay_assignments ba2
+                    WHERE ba2.line_item_id = be.line_item_id
+                      AND ba2.status NOT IN ('Cleared', 'Cancelled')
+                    ORDER BY ba2.id DESC
+                    LIMIT 1
+                )
+                LEFT JOIN bays current_bay ON current_bay.id = current_ba.bay_id
                 ORDER BY be.id DESC
                 LIMIT ?
                 """,
                 (safe_limit,),
             ).fetchall()
+
         return [
             {
                 "id": row["id"],
@@ -7185,6 +7544,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "oldBayDisplay": row["old_bay_display"] or row["old_bay_code"] or "",
                 "newBayCode": row["new_bay_code"] or "",
                 "newBayDisplay": row["new_bay_display"] or row["new_bay_code"] or "",
+                "assignmentId": int(row["current_assignment_id"] or 0),
+                "currentBayCode": row["current_bay_code"] or "",
+                "currentBayDisplay": row["current_bay_display"] or row["current_bay_code"] or "",
                 "order": row["order_no"] or "",
                 "item": row["item_no"] or "",
                 "customer": row["customer"] or "",
@@ -7196,7 +7558,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             }
             for row in rows
         ]
-
     def get_stale_bay_orders(self, include_snoozed: bool = False) -> list[dict[str, Any]]:
         now = datetime.now(timezone.utc)
         with self.connect() as con:
@@ -7453,20 +7814,46 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 payload = self.get_racks()
                 payload.update({"ok": False, "message": reason, "lastScan": last})
                 return payload
-            try:
-                self.validate_rack_destination_for_item(con, rack, row)
-            except ValueError as exc:
-                last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "error", "Rack destination mismatch", str(exc))
+            destination_override_requested = str(data.get("destinationOverride") or "").lower() in {"1", "true", "yes"}
+            item_destination = self.destination_for_line_item(row)
+            rack_destinations = self.rack_destinations_from_items(con, int(rack["id"]))
+            rack_destination = rack_destinations[0] if len(rack_destinations) == 1 else self.rack_destination_value(rack["destination"])
+            mismatch = bool(rack_destinations and rack_destinations != [item_destination])
+            if mismatch and not destination_override_requested:
+                reason_text = (
+                    f"Rack {rack['rack_code']} is assigned to {rack_destination}. "
+                    f"This item is marked for {item_destination}."
+                )
+                last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "notice", "Rack destination mismatch", reason_text)
                 con.commit()
                 payload = self.get_racks()
-                payload.update({"ok": False, "message": str(exc), "lastScan": last})
+                payload.update(
+                    {
+                        "ok": False,
+                        "message": reason_text,
+                        "lastScan": last,
+                        "destinationOverrideRequired": True,
+                        "destinationMismatch": {
+                            "rackCode": rack["rack_code"],
+                            "rackDestination": rack_destination,
+                            "itemDestination": item_destination,
+                            "order": row["order_no"],
+                            "item": row["item_no"],
+                            "customer": row["customer"],
+                        },
+                    }
+                )
                 return payload
+            destination_override = rack_destination if mismatch else ""
             if row["scanned_qty"] < row["qty"]:
                 con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
             con.execute(
                 """
-                INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
-                VALUES (?, ?, 1, 'Active', ?, ?, 'Scanned into rack')
+                INSERT INTO rack_items (
+                    rack_id, line_item_id, qty, status, added_by, added_at,
+                    reason, destination_override
+                )
+                VALUES (?, ?, 1, 'Active', ?, ?, ?, ?)
                 ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
                     qty = CASE
                         WHEN rack_items.status = 'Active' THEN MIN(rack_items.qty + 1, (SELECT qty FROM line_items WHERE id = excluded.line_item_id))
@@ -7475,11 +7862,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     status = 'Active',
                     removed_by = '',
                     removed_at = '',
-                    reason = 'Scanned into rack',
+                    reason = excluded.reason,
+                    destination_override = excluded.destination_override,
                     added_by = excluded.added_by,
                     added_at = excluded.added_at
                 """,
-                (rack["id"], row["id"], user, now_iso()),
+                (
+                    rack["id"],
+                    row["id"],
+                    user,
+                    now_iso(),
+                    "Scanned into rack with destination override" if destination_override else "Scanned into rack",
+                    destination_override,
+                ),
             )
             destination = self.refresh_rack_destination(con, rack["id"])
             last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", f"Added to {rack['rack_code']}", f"{reason} Destination: {destination}".strip(), 1)
@@ -7597,7 +7992,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
     def rack_destinations_from_items(self, con: sqlite3.Connection, rack_id: int, extra_item: sqlite3.Row | dict[str, Any] | None = None) -> list[str]:
         rows = con.execute(
             """
-            SELECT li.*
+            SELECT li.*, COALESCE(ri.destination_override, '') AS rack_destination_override
             FROM rack_items ri
             JOIN line_items li ON li.id = ri.line_item_id
             WHERE ri.rack_id = ?
@@ -7605,7 +8000,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             """,
             (rack_id,),
         ).fetchall()
-        destinations = {self.destination_for_line_item(row) for row in rows}
+        destinations = {
+            self.rack_destination_value(row["rack_destination_override"])
+            if str(row["rack_destination_override"] or "").strip()
+            else self.destination_for_line_item(row)
+            for row in rows
+        }
         if extra_item is not None:
             destinations.add(self.destination_for_line_item(extra_item))
         return sorted(destination for destination in destinations if destination)
@@ -8069,15 +8469,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 JOIN line_items src ON src.id = ri.line_item_id
                 JOIN delivery_lists src_dl ON src_dl.id = src.list_id
                 JOIN line_items out_li
-                  ON out_li.source_id = src.source_id
+                  ON out_li.list_id = ?
                  AND out_li.order_no = src.order_no
                  AND out_li.item_no = src.item_no
                 WHERE ri.rack_id = ?
                   AND ri.status = 'Active'
-                  AND out_li.list_id = ?
                   AND src_dl.delivery_date = ?
                 """,
-                (rack["id"], list_id, list_row["delivery_date"]),
+                (list_id, rack["id"], list_row["delivery_date"]),
             ).fetchall()
             if not rows:
                 last = self.insert_event(con, list_id, None, barcode, f"RACK-{rack['rack_code']}", user, station, "error", "Rack has no outbound items", "No active rack items matched this outbound list")
@@ -8086,6 +8485,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             last = None
             scanned_count = 0
             capped_count = 0
+            departure_timestamp = now_iso()
             for row in rows:
                 remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
                 if remaining_qty <= 0:
@@ -8105,13 +8505,32 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 scanned_count += delta
             if scanned_count == 0:
                 last = self.insert_event(con, list_id, None, barcode, f"RACK-{rack['rack_code']}", user, station, "duplicate", "Rack already scanned outbound", "All rack items were already complete")
-            con.execute("UPDATE racks SET status = 'In Transit', departed_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), rack["id"]))
-            self.insert_audit(con, "rack", rack["rack_code"], "rack_outbound_scan", user, station, "", {"scannedCount": scanned_count, "cappedRows": capped_count})
+                con.execute(
+                    "UPDATE racks SET status = 'In Transit', updated_at = ? WHERE id = ?",
+                    (departure_timestamp, rack["id"]),
+                )
+            else:
+                con.execute(
+                    "UPDATE racks SET status = 'In Transit', departed_at = ?, returned_at = '', updated_at = ? WHERE id = ?",
+                    (departure_timestamp, departure_timestamp, rack["id"]),
+                )
+            self.insert_audit(
+                con,
+                "rack",
+                rack["rack_code"],
+                "rack_outbound_scan",
+                user,
+                station,
+                "Rack barcode applied Outbound quantity, preassignment, and departure timestamp.",
+                {"scannedCount": scanned_count, "cappedRows": capped_count, "departedAt": departure_timestamp if scanned_count else str(rack["departed_at"] or "")},
+            )
             con.commit()
             payload = self._get_payload(con, list_id, last)
             payload["redirectListId"] = list_id
             cap_message = f" {capped_count} row{'s' if capped_count != 1 else ''} capped at remaining quantity." if capped_count else ""
             payload["message"] = f"Rack {rack['rack_code']} scanned outbound for {scanned_count} piece{'s' if scanned_count != 1 else ''}.{cap_message}"
+            payload["rackDepartureAt"] = departure_timestamp if scanned_count else str(rack["departed_at"] or "")
+            payload["rackCode"] = rack["rack_code"]
             return payload
 
 
@@ -8178,7 +8597,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 MAX(ri.qty - COALESCE(in_li.scanned_qty, 0), 0) AS in_transit_qty,
                 r.rack_code AS rack_code,
                 COALESCE(NULLIF(r.display_name, ''), r.rack_code) AS rack_name,
-                COALESCE(NULLIF(r.rack_type, ''), CASE WHEN r.rack_code = 'T' THEN 'Truck' ELSE 'Rack' END) AS rack_type
+                COALESCE(NULLIF(r.rack_type, ''), CASE WHEN r.rack_code = 'T' THEN 'Truck' ELSE 'Rack' END) AS rack_type,
+                COALESCE(r.departed_at, '') AS rack_departed_at
             FROM rack_items ri
             JOIN racks r ON r.id = ri.rack_id AND r.active = 1
             JOIN line_items src_li ON src_li.id = ri.line_item_id
@@ -8189,7 +8609,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
              AND recv_dl.stage LIKE '%Indian Trail%'
             LEFT JOIN line_items in_li
               ON in_li.list_id = recv_dl.id
-             AND in_li.source_id = src_li.source_id
              AND in_li.order_no = src_li.order_no
              AND in_li.item_no = src_li.item_no
             LEFT JOIN delivery_lists out_dl
@@ -8198,7 +8617,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
              AND out_dl.stage LIKE '%Outbound%'
             LEFT JOIN line_items out_li
               ON out_li.list_id = out_dl.id
-             AND out_li.source_id = src_li.source_id
              AND out_li.order_no = src_li.order_no
              AND out_li.item_no = src_li.item_no
             WHERE ri.status = 'Active'
@@ -8238,7 +8656,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                       AND r.active = 1
                       AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
                       AND src_dl.delivery_date = ?
-                      AND src_li.source_id = in_li.source_id
                       AND src_li.order_no = in_li.order_no
                       AND src_li.item_no = in_li.item_no
                     ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
@@ -8254,7 +8671,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                       AND r.active = 1
                       AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
                       AND src_dl.delivery_date = ?
-                      AND src_li.source_id = in_li.source_id
                       AND src_li.order_no = in_li.order_no
                       AND src_li.item_no = in_li.item_no
                     ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
@@ -8270,23 +8686,43 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                       AND r.active = 1
                       AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
                       AND src_dl.delivery_date = ?
-                      AND src_li.source_id = in_li.source_id
                       AND src_li.order_no = in_li.order_no
                       AND src_li.item_no = in_li.item_no
                     ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
                     LIMIT 1
-                ), '') AS rack_type
+                ), '') AS rack_type,
+                COALESCE((
+                    SELECT r.departed_at
+                    FROM rack_items ri
+                    JOIN racks r ON r.id = ri.rack_id
+                    JOIN line_items src_li ON src_li.id = ri.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
+                    WHERE ri.status = 'Active'
+                      AND r.active = 1
+                      AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
+                      AND src_dl.delivery_date = ?
+                      AND src_li.order_no = in_li.order_no
+                      AND src_li.item_no = in_li.item_no
+                    ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
+                    LIMIT 1
+                ), '') AS rack_departed_at
             FROM line_items in_li
             JOIN line_items out_li
               ON out_li.list_id = ?
-             AND out_li.source_id = in_li.source_id
              AND out_li.order_no = in_li.order_no
              AND out_li.item_no = in_li.item_no
             WHERE in_li.list_id = ?
               AND out_li.scanned_qty > in_li.scanned_qty
             ORDER BY COALESCE(NULLIF(in_li.job, ''), in_li.order_no), rack_code, in_li.order_no, in_li.item_no
             """,
-            (inbound["delivery_date"], inbound["delivery_date"], inbound["delivery_date"], outbound_id, inbound["id"]),
+            (
+                inbound["delivery_date"],
+                inbound["delivery_date"],
+                inbound["delivery_date"],
+                inbound["delivery_date"],
+                outbound_id,
+                inbound["id"],
+            ),
         ).fetchall()
 
         job_map: dict[str, dict[str, Any]] = {}
@@ -8331,6 +8767,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "rackCode": rack_code,
                 "rackName": rack_name,
                 "rackType": rack_type,
+                "rackDepartedAt": str(row["rack_departed_at"] or ""),
             }
             flat_rows.append(item)
 
@@ -8640,69 +9077,110 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"ok": True, "assignmentId": cur.lastrowid, "bayCode": bay_code}
 
+
     def receive_indian_trail_scan(self, data: dict[str, Any], user: str) -> dict[str, Any]:
-        list_id = str(data.get("listId") or "")
+        """Receive or return an item into an Indian Trail bay.
+
+        Regular receiving requires an Outbound scan. Bay Map Add mode may return
+        an already-received item to a bay without increasing received quantity.
+        """
+        list_id = str(data.get("listId") or "").strip()
         station = request_station(data) or "Indian Trail"
-        barcode = str(data.get("barcode") or "")
+        barcode = str(data.get("barcode") or "").strip()
         requested_bay_code = str(data.get("bayCode") or "").strip()
         is_manual = str(data.get("isManual") or "").lower() in {"1", "true", "yes"}
+        outbound_override = str(data.get("outboundOverride") or "").lower() in {"1", "true", "yes"}
+        allow_received_override = str(data.get("allowReceivedOverride") or "").lower() in {"1", "true", "yes"}
+
+        if not barcode:
+            raise ValueError("Scan barcode is required")
+
         with self.connect() as con:
             if not list_id:
                 inbound = con.execute(
-                    "SELECT id FROM delivery_lists WHERE stage LIKE '%Indian Trail%' AND status = 'active' ORDER BY delivery_date DESC LIMIT 1"
+                    """
+                    SELECT id
+                    FROM delivery_lists
+                    WHERE stage LIKE '%Indian Trail%' AND status = 'active'
+                    ORDER BY delivery_date DESC, id DESC
+                    LIMIT 1
+                    """
                 ).fetchone()
                 list_id = inbound["id"] if inbound else ""
             if not list_id:
                 raise ValueError("No active Indian Trail inbound list")
+
             con.execute("BEGIN IMMEDIATE")
+            list_row = con.execute(
+                "SELECT * FROM delivery_lists WHERE id = ?",
+                (list_id,),
+            ).fetchone()
+            if not list_row:
+                raise ValueError("Indian Trail delivery list was not found")
+
             rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall()
             row, canonical, reason = self.recover_scan(barcode, rows)
             if row is None:
-                # Bay Map-only extension: if the scan matches an accepted bay barcode rule
-                # and a target bay is selected, create a manual bay assignment instead of
-                # rejecting. This does not affect the main delivery-list scanner.
                 if requested_bay_code and self.bay_manual_text_is_known(con, barcode):
                     target_bay = self.get_bay_by_code(con, requested_bay_code)
                     manual_row = self.create_manual_bay_line_item(con, barcode, requested_bay_code)
-                    assignment_ids = self.assign_line_items_to_bay(con, [manual_row], target_bay, user, "Accepted Bay Map barcode rule")
-                    last = self.insert_event(con, list_id, manual_row["id"], barcode, barcode, user, station, "manual_scan", "Manual bay barcode accepted", "Bay Map accepted barcode rule", 1)
-                    self.insert_audit(con, "bay_manual_assign", requested_bay_code, "bay_scanner_rule_assign", user, station, "Accepted Bay Map barcode rule", {"barcode": barcode, "assignmentIds": assignment_ids})
+                    assignment_ids = self.assign_line_items_to_bay(
+                        con,
+                        [manual_row],
+                        target_bay,
+                        user,
+                        "Accepted Bay Map barcode rule",
+                    )
+                    last = self.insert_event(
+                        con,
+                        list_id,
+                        manual_row["id"],
+                        barcode,
+                        barcode,
+                        user,
+                        station,
+                        "manual_scan",
+                        "Manual bay barcode accepted",
+                        "Bay Map accepted barcode rule",
+                        1,
+                    )
+                    self.insert_audit(
+                        con,
+                        "bay_manual_assign",
+                        requested_bay_code,
+                        "bay_scanner_rule_assign",
+                        user,
+                        station,
+                        "Accepted Bay Map barcode rule",
+                        {"barcode": barcode, "assignmentIds": assignment_ids},
+                    )
                     con.commit()
-                    return {"ok": True, "message": f"Accepted Bay Map barcode and assigned it to {target_bay['display_name'] or requested_bay_code}.", "bayCode": requested_bay_code, "assignmentIds": assignment_ids, "lastScan": last}
+                    return {
+                        "ok": True,
+                        "message": f"Accepted Bay Map barcode and assigned it to {target_bay['display_name'] or requested_bay_code}.",
+                        "bayCode": requested_bay_code,
+                        "assignmentId": assignment_ids[0] if assignment_ids else 0,
+                        "assignmentIds": assignment_ids,
+                        "lastScan": last,
+                    }
+
                 if reason == "No unique delivery-list match":
                     canonical, reason = self.scan_other_list_hint(con, list_id, barcode)
-                last = self.insert_event(con, list_id, None, barcode, canonical, user, station, "error", "Item is not on this delivery list", reason)
+                last = self.insert_event(
+                    con,
+                    list_id,
+                    None,
+                    barcode,
+                    canonical,
+                    user,
+                    station,
+                    "error",
+                    "Item is not on this delivery list",
+                    reason,
+                )
                 con.commit()
                 return {"ok": False, "message": reason, "lastScan": last}
-            if row["scanned_qty"] >= row["qty"]:
-                last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "duplicate", "Item already complete", "Quantity already received")
-                con.commit()
-                return {"ok": False, "message": "Quantity already received. Send to supervisor.", "lastScan": last}
 
-            con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
-            con.execute(
-                """
-                UPDATE rack_items
-                SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Received at Indian Trail'
-                WHERE id IN (
-                    SELECT ri.id
-                    FROM rack_items ri
-                    JOIN line_items src ON src.id = ri.line_item_id
-                    JOIN delivery_lists src_dl ON src_dl.id = src.list_id
-                    WHERE ri.status = 'Active'
-                      AND src_dl.delivery_date = (SELECT delivery_date FROM delivery_lists WHERE id = ?)
-                      AND src.source_id = ?
-                      AND src.order_no = ?
-                      AND src.item_no = ?
-                    LIMIT 1
-                )
-                """,
-                (user, now_iso(), list_id, row["source_id"], row["order_no"], row["item_no"]),
-            )
-            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", "Indian Trail received", reason, 1)
-
-            # Job-based bay logic: one Job Nr. should be staged/received into one bay.
-            # This keeps every line item for the same job together instead of scattering pieces across bays.
             job_key = str(row["job"] or "").strip()
             if job_key:
                 group_rows = con.execute(
@@ -8738,39 +9216,189 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 [*group_ids, row["id"]],
             ).fetchone()
-            existing = bool(existing_group_assignment)
+
             override_bay = self.get_bay_by_code(con, requested_bay_code) if requested_bay_code else None
-            used_override = bool(override_bay)
+            row_item = {
+                "route": row["route"],
+                "job": row["job"],
+                "customer": row["customer"],
+                "product": row["product"],
+                "processState": row["process_state"],
+                "queueState": row["queue_state"],
+            }
+            suggested_bay_type = (
+                "CPU"
+                if is_cpu_item(row_item)
+                else self.suggested_bay_from_settings(con, row["product"], row["dimensions"], row["route"])
+            )
+
             if override_bay:
                 target_bay = override_bay
                 receive_reason = "Received at Indian Trail with bay override"
             elif existing_group_assignment:
-                target_bay = con.execute("SELECT * FROM bays WHERE id = ?", (existing_group_assignment["bay_id"],)).fetchone()
+                target_bay = con.execute(
+                    "SELECT * FROM bays WHERE id = ?",
+                    (existing_group_assignment["bay_id"],),
+                ).fetchone()
                 receive_reason = "Received at Indian Trail with existing job bay"
+            elif self.bay_type_requires_manual_assignment(con, suggested_bay_type):
+                # Tall and oversize pieces still receive a concrete suggested bay so
+                # the timed placement popup can tell the operator where to put them.
+                # The operator can override that suggestion before the popup closes.
+                target_bay = (
+                    self.find_bay_for_assignment(con, suggested_bay_type)
+                    or self.find_bay_for_assignment(con, "Standard")
+                )
+                receive_reason = f"{suggested_bay_type} suggested during receive; verify placement"
             else:
-                row_item = {
-                    "route": row["route"],
-                    "job": row["job"],
-                    "customer": row["customer"],
-                    "product": row["product"],
-                    "processState": row["process_state"],
-                    "queueState": row["queue_state"],
+                target_bay = (
+                    self.find_bay_for_assignment(con, suggested_bay_type)
+                    or self.find_bay_for_assignment(con, "Standard")
+                )
+                receive_reason = "Auto suggested during receive"
+
+            preassigned_bay_code = str(target_bay["bay_code"] or "") if target_bay else ""
+            already_received = int(row["scanned_qty"] or 0) >= int(row["qty"] or 0)
+            returned_to_bay = already_received and allow_received_override
+
+            if already_received and not returned_to_bay:
+                last = self.insert_event(
+                    con,
+                    list_id,
+                    row["id"],
+                    barcode,
+                    canonical,
+                    user,
+                    station,
+                    "duplicate",
+                    "Item already complete",
+                    "Quantity already received",
+                )
+                con.commit()
+                return {
+                    "ok": False,
+                    "message": "Quantity already received. Send to supervisor.",
+                    "lastScan": last,
                 }
-                bay_type = "CPU" if is_cpu_item(row_item) else self.suggested_bay_from_settings(con, row["product"], row["dimensions"], row["route"])
-                if self.bay_type_requires_manual_assignment(con, bay_type):
-                    target_bay = None
-                    receive_reason = f"{bay_type} requires manual bay assignment"
-                else:
-                    target_bay = self.find_bay_for_assignment(con, bay_type) or self.find_bay_for_assignment(con, "Standard")
-                    receive_reason = "Auto suggested during receive"
+
+            outbound_scanned_qty = int(
+                con.execute(
+                    """
+                    SELECT COALESCE(MAX(out_li.scanned_qty), 0) AS scanned_qty
+                    FROM delivery_lists out_dl
+                    JOIN line_items out_li ON out_li.list_id = out_dl.id
+                    WHERE out_dl.delivery_date = ?
+                      AND out_dl.status = 'active'
+                      AND out_dl.stage LIKE '%Outbound%'
+                      AND out_li.order_no = ?
+                      AND out_li.item_no = ?
+                    """,
+                    (list_row["delivery_date"], row["order_no"], row["item_no"]),
+                ).fetchone()["scanned_qty"]
+                or 0
+            )
+
+            if not returned_to_bay and outbound_scanned_qty <= 0 and not outbound_override:
+                override_reason = (
+                    f"Order {row['order_no']} / Item {row['item_no']} has not been scanned Outbound. "
+                    "Choose whether to cancel or override and receive it anyway."
+                )
+                last = self.insert_event(
+                    con,
+                    list_id,
+                    row["id"],
+                    barcode,
+                    canonical,
+                    user,
+                    station,
+                    "notice",
+                    "Outbound scan required",
+                    override_reason,
+                    0,
+                )
+                con.commit()
+                return {
+                    "ok": False,
+                    "outboundOverrideRequired": True,
+                    "message": override_reason,
+                    "preassignedBayCode": requested_bay_code or preassigned_bay_code,
+                    "suggestedBayType": suggested_bay_type,
+                    "oversize": "oversize" in suggested_bay_type.lower(),
+                    "item": {
+                        "order": row["order_no"],
+                        "item": row["item_no"],
+                        "customer": row["customer"],
+                        "dimensions": row["dimensions"],
+                        "job": row["job"],
+                    },
+                    "lastScan": last,
+                }
+
+            timestamp = now_iso()
+            qty_delta = 0 if returned_to_bay else 1
+            if qty_delta:
+                con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
+                con.execute(
+                    """
+                    UPDATE rack_items
+                    SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Received at Indian Trail'
+                    WHERE id IN (
+                        SELECT ri.id
+                        FROM rack_items ri
+                        JOIN line_items src ON src.id = ri.line_item_id
+                        JOIN delivery_lists src_dl ON src_dl.id = src.list_id
+                        WHERE ri.status = 'Active'
+                          AND src_dl.delivery_date = ?
+                          AND src.order_no = ?
+                          AND src.item_no = ?
+                        LIMIT 1
+                    )
+                    """,
+                    (user, timestamp, list_row["delivery_date"], row["order_no"], row["item_no"]),
+                )
+
+            event_type = "manual_scan" if is_manual else "scan"
+            event_message = (
+                "Manual item returned to bay"
+                if returned_to_bay and is_manual
+                else "Item returned to bay"
+                if returned_to_bay
+                else "Manual Indian Trail received"
+                if is_manual
+                else "Indian Trail received"
+            )
+            event_reason = (
+                "Returned received item to Bay Map without changing received quantity"
+                if returned_to_bay
+                else reason
+            )
+            last = self.insert_event(
+                con,
+                list_id,
+                row["id"],
+                barcode,
+                canonical,
+                user,
+                station,
+                event_type,
+                event_message,
+                event_reason,
+                qty_delta,
+            )
+
             assignment_ids: list[int] = []
+            scanned_assignment_id = 0
+            bay_code = ""
             if not target_bay:
                 self.insert_exception(con, list_id, None, "bay_assignment_conflict", "No safe bay available")
-                bay_code = ""
             else:
-                bay_code = target_bay["bay_code"]
-                for group_row in group_rows:
-                    assignment = con.execute(
+                bay_code = str(target_bay["bay_code"] or "")
+                # Keep the actual scanned item as the newest Bay Map event so
+                # Last Scan and Recent Scans describe the operator's scan, not
+                # a companion line that was only preassigned with the same job.
+                assignment_rows = [item for item in group_rows if item["id"] != row["id"]] + [row]
+                for group_row in assignment_rows:
+                    active_assignment = con.execute(
                         """
                         SELECT * FROM bay_assignments
                         WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled')
@@ -8779,58 +9407,169 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         """,
                         (group_row["id"],),
                     ).fetchone()
+                    cleared_assignment = None
+                    if not active_assignment:
+                        cleared_assignment = con.execute(
+                            """
+                            SELECT * FROM bay_assignments
+                            WHERE line_item_id = ? AND status IN ('Cleared', 'Cancelled')
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """,
+                            (group_row["id"],),
+                        ).fetchone()
+
                     is_scanned_row = group_row["id"] == row["id"]
-                    next_status = "Received" if is_scanned_row else (assignment["status"] if assignment else "PreAssigned")
+                    next_status = (
+                        "Received"
+                        if is_scanned_row
+                        else str(active_assignment["status"] or "PreAssigned")
+                        if active_assignment
+                        else "PreAssigned"
+                    )
                     if next_status == "SDIOverride" and not is_scanned_row:
                         continue
+
+                    assignment = active_assignment or cleared_assignment
                     if assignment:
                         old_bay_id = assignment["bay_id"]
                         con.execute(
                             """
                             UPDATE bay_assignments
-                            SET bay_id = ?, status = ?, reason = ?, assigned_by = ?, assigned_at = ?
+                            SET bay_id = ?, assigned_qty = ?, status = ?, reason = ?,
+                                assigned_by = ?, assigned_at = ?, cleared_by = '', cleared_at = ''
                             WHERE id = ?
                             """,
-                            (target_bay["id"], next_status, receive_reason, user, now_iso(), assignment["id"]),
+                            (
+                                target_bay["id"],
+                                max(int(group_row["qty"] or 1), 1),
+                                next_status,
+                                receive_reason,
+                                user,
+                                timestamp,
+                                assignment["id"],
+                            ),
                         )
-                        event_type = "ReceiveOverrideBay" if old_bay_id != target_bay["id"] else "ReceiveBay"
-                        self.insert_bay_event(con, target_bay["id"], group_row["id"], event_type, user, receive_reason, old_bay_id=old_bay_id, new_bay_id=target_bay["id"])
-                        assignment_ids.append(int(assignment["id"]))
+                        event_name = (
+                            "ReturnToBay"
+                            if returned_to_bay and is_scanned_row
+                            else "ReceiveOverrideBay"
+                            if old_bay_id != target_bay["id"]
+                            else "ReceiveBay"
+                        )
+                        self.insert_bay_event(
+                            con,
+                            target_bay["id"],
+                            group_row["id"],
+                            event_name,
+                            user,
+                            receive_reason,
+                            old_bay_id=old_bay_id,
+                            new_bay_id=target_bay["id"],
+                        )
+                        assignment_id = int(assignment["id"])
                     else:
                         cur = con.execute(
                             """
-                            INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
+                            INSERT INTO bay_assignments (
+                                delivery_list_id, line_item_id, bay_id, assigned_qty,
+                                status, assigned_by, assigned_at, reason
+                            )
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             """,
-                            (list_id, group_row["id"], target_bay["id"], int(group_row["qty"] or 1), next_status, user, now_iso(), receive_reason),
+                            (
+                                list_id,
+                                group_row["id"],
+                                target_bay["id"],
+                                max(int(group_row["qty"] or 1), 1),
+                                next_status,
+                                user,
+                                timestamp,
+                                receive_reason,
+                            ),
                         )
-                        assignment_ids.append(int(cur.lastrowid))
-                        self.insert_bay_event(con, target_bay["id"], group_row["id"], "ReceiveAssignBay", user, receive_reason, new_bay_id=target_bay["id"])
+                        assignment_id = int(cur.lastrowid)
+                        self.insert_bay_event(
+                            con,
+                            target_bay["id"],
+                            group_row["id"],
+                            "ReturnToBay" if returned_to_bay and is_scanned_row else "ReceiveAssignBay",
+                            user,
+                            receive_reason,
+                            new_bay_id=target_bay["id"],
+                        )
+
+                    assignment_ids.append(assignment_id)
+                    if is_scanned_row:
+                        scanned_assignment_id = assignment_id
+
+            used_override = bool(override_bay)
+            audit_action = (
+                "manual_return_to_bay"
+                if returned_to_bay and is_manual
+                else "return_to_bay"
+                if returned_to_bay
+                else "indian_trail_receive_job_bay_override"
+                if used_override
+                else "indian_trail_receive_job_bay"
+            )
             self.insert_audit(
                 con,
                 "line_item",
                 row["id"],
-                "indian_trail_receive_job_bay_override" if used_override else "indian_trail_receive_job_bay",
+                audit_action,
                 user,
                 station,
-                reason,
-                {"bayCode": bay_code, "requestedBayCode": requested_bay_code, "manual": is_manual, "job": job_key, "groupItemCount": len(group_rows)},
+                event_reason,
+                {
+                    "bayCode": bay_code,
+                    "requestedBayCode": requested_bay_code,
+                    "manual": is_manual,
+                    "job": job_key,
+                    "groupItemCount": len(group_rows),
+                    "outboundOverride": outbound_override,
+                    "returnedToBay": returned_to_bay,
+                    "qtyDelta": qty_delta,
+                },
             )
-            if is_manual:
-                self.insert_audit(con, "line_item", row["id"], "manual_scan", user, station, reason, {"barcode": barcode, "canonical": canonical, "bayCode": bay_code})
             con.commit()
-            scanned_after = int(row["scanned_qty"]) + 1
-        message = (
-            f"Order {row['order_no']} / Item {row['item_no']} received. Override Bay: {bay_code}. Qty Received: {scanned_after}/{row['qty']}. Keep Job Nr. {job_key or row['order_no']} together in Bay {bay_code}."
-            if used_override
-            else (
-                f"Order {row['order_no']} / Item {row['item_no']} received. Existing Job Bay: {bay_code}. Keep this job together."
-                if existing
-                else f"Order {row['order_no']} / Item {row['item_no']} received. Suggested Bay: {bay_code}. Qty Received: {scanned_after}/{row['qty']}. Keep Job Nr. {job_key or row['order_no']} together in Bay {bay_code}."
-            )
-        )
-        return {"ok": True, "message": message, "bayCode": bay_code, "existingBay": existing, "assignmentIds": assignment_ids, "lastScan": last}
 
+            scanned_after = int(row["scanned_qty"] or 0) + qty_delta
+
+        if returned_to_bay:
+            message = (
+                f"Order {row['order_no']} / Item {row['item_no']} returned to Bay {bay_code}. "
+                "Received quantity was not changed."
+            )
+        elif used_override:
+            message = (
+                f"Order {row['order_no']} / Item {row['item_no']} received with override into Bay {bay_code}. "
+                f"Qty Received: {scanned_after}/{row['qty']}."
+            )
+        elif existing_group_assignment:
+            message = (
+                f"Order {row['order_no']} / Item {row['item_no']} received into existing Job Bay {bay_code}."
+            )
+        else:
+            message = (
+                f"Order {row['order_no']} / Item {row['item_no']} received. Suggested Bay: {bay_code}. "
+                f"Qty Received: {scanned_after}/{row['qty']}."
+            )
+
+        return {
+            "ok": True,
+            "message": message,
+            "bayCode": bay_code,
+            "preassignedBayCode": preassigned_bay_code,
+            "existingBay": bool(existing_group_assignment),
+            "assignmentId": scanned_assignment_id,
+            "assignmentIds": assignment_ids,
+            "returnedToBay": returned_to_bay,
+            "outboundOverrideUsed": outbound_override,
+            "suggestedBayType": suggested_bay_type,
+            "oversize": "oversize" in suggested_bay_type.lower(),
+            "lastScan": last,
+        }
     def move_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         assignment_id = int(data.get("assignmentId") or 0)
         new_bay_code = str(data.get("newBayCode") or data.get("bayCode") or "")
@@ -8937,54 +9676,90 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"ok": True, "bayCode": bay_code, "status": status, "bays": self.get_bays()}
 
+
     def scan_out_bay_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Scan an item out of its current bay and preserve a dated movement log."""
         barcode = str(data.get("barcode") or data.get("scan") or "").strip()
         bay_code_filter = str(data.get("bayCode") or "").strip()
+        is_manual = str(data.get("isManual") or "").lower() in {"1", "true", "yes"}
+        reason = str(data.get("reason") or ("Manual scan out from bay map" if is_manual else "Scanned out from bay map")).strip()
         if not barcode:
             raise ValueError("Scan barcode is required")
+
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             assignments = con.execute(
                 """
-                SELECT ba.*, li.barcode, li.order_no, li.item_no, li.customer, b.bay_code, b.display_name
+                SELECT ba.*, li.barcode, li.order_no, li.item_no, li.customer,
+                       b.bay_code, b.display_name
                 FROM bay_assignments ba
                 JOIN line_items li ON li.id = ba.line_item_id
                 JOIN bays b ON b.id = ba.bay_id
-                WHERE ba.status NOT IN ('Cleared', 'Cancelled')
+                WHERE ba.status NOT IN ('Cleared', 'Cancelled', 'PreAssigned')
                   AND (? = '' OR b.bay_code = ? OR b.display_name = ?)
-                """
-                ,
+                ORDER BY ba.id DESC
+                """,
                 (bay_code_filter, bay_code_filter, bay_code_filter),
             ).fetchall()
-            row = None
+
+            matched = None
             clean = clean_barcode(barcode)
             digits = digits_only(clean)
             for assignment in assignments:
                 if clean and clean == clean_barcode(assignment["barcode"]):
-                    row = assignment
+                    matched = assignment
                     break
-                if assignment["order_no"] in barcode and assignment["item_no"].lstrip("0") in digits:
-                    row = assignment
+                order_text = str(assignment["order_no"] or "")
+                item_text = str(assignment["item_no"] or "").lstrip("0") or "0"
+                if order_text and order_text in barcode and item_text in digits:
+                    matched = assignment
                     break
-            if not row:
-                raise ValueError("No active bay assignment matched that scan")
+
+            if not matched:
+                raise ValueError("No item currently in a bay matched that scan")
+
+            timestamp = now_iso()
             con.execute(
-                "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = ? WHERE id = ?",
-                (user, now_iso(), "Scanned out from bay map", row["id"]),
+                """
+                UPDATE bay_assignments
+                SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = ?
+                WHERE id = ?
+                """,
+                (user, timestamp, reason, matched["id"]),
             )
-            self.insert_bay_event(con, row["bay_id"], row["line_item_id"], "ScanOutBay", user, "Scanned out from bay map", old_bay_id=row["bay_id"])
-            self.insert_audit(con, "bay_assignment", str(row["id"]), "scan_out_bay", user, "", "Scanned out from bay map")
+            event_type = "ManualScanOutBay" if is_manual else "ScanOutBay"
+            self.insert_bay_event(
+                con,
+                matched["bay_id"],
+                matched["line_item_id"],
+                event_type,
+                user,
+                reason,
+                old_bay_id=matched["bay_id"],
+            )
+            self.insert_audit(
+                con,
+                "bay_assignment",
+                str(matched["id"]),
+                "manual_scan_out_bay" if is_manual else "scan_out_bay",
+                user,
+                request_station(data),
+                reason,
+                {"barcode": barcode, "bayCode": matched["bay_code"], "manual": is_manual},
+            )
             con.commit()
+
         return {
             "ok": True,
-            "assignmentId": row["id"],
-            "bayCode": row["bay_code"],
-            "bayDisplay": row["display_name"] or row["bay_code"],
-            "order": row["order_no"],
-            "item": row["item_no"],
-            "customer": row["customer"],
+            "assignmentId": int(matched["id"]),
+            "bayCode": matched["bay_code"],
+            "bayDisplay": matched["display_name"] or matched["bay_code"],
+            "order": matched["order_no"],
+            "item": matched["item_no"],
+            "customer": matched["customer"],
+            "manual": is_manual,
+            "time": timestamp,
         }
-
     def update_bay_layout(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         bay_code = str(data.get("bayCode") or "").strip()
         if not bay_code:
@@ -9373,9 +10148,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     }
                 )
                 notice_target = notice_job or notice_order or lookup_text
+                notice_date_row = con.execute(
+                    "SELECT delivery_date FROM delivery_lists WHERE id = ?",
+                    (str(first_notice_row["list_id"] or ""),),
+                ).fetchone()
+                notice_delivery_date = str(notice_date_row["delivery_date"] or "") if notice_date_row else ""
                 notice_message = (
                     f"{notice_target} was marked as Rush"
-                    f"{f' for {notice_customer}' if notice_customer else ''}. Prioritize this work."
+                    f"{f' for {notice_customer}' if notice_customer else ''}"
+                    f"{f' on delivery date {notice_delivery_date}' if notice_delivery_date else ''}. Prioritize this work."
                 )
                 notification_id = self.create_app_notification(
                     con,
@@ -9387,6 +10168,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "job": notice_job,
                         "order": notice_order,
                         "customer": notice_customer,
+                        "deliveryDate": notice_delivery_date,
                         "items": priority_items,
                         "lookup": lookup_text,
                         "listId": list_id,
@@ -9416,6 +10198,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         matched_job = str(first_row["job"] or "").strip() if first_row else ""
         matched_customer = str(first_row["customer"] or "").strip() if first_row else ""
         matched_order = str(first_row["order_no"] or "").strip() if first_row else ""
+        matched_delivery_date = ""
+        if first_row:
+            with self.connect() as lookup_con:
+                delivery_row = lookup_con.execute(
+                    "SELECT delivery_date FROM delivery_lists WHERE id = ?",
+                    (str(first_row["list_id"] or ""),),
+                ).fetchone()
+                matched_delivery_date = str(delivery_row["delivery_date"] or "") if delivery_row else ""
         target_label = f"Job Nr. {matched_job}" if matched_job else f"order {matched_order or lookup_text}"
         is_rush = order_type == "Rush"
         return {
@@ -9430,6 +10220,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "matchedJob": matched_job,
             "matchedCustomer": matched_customer,
             "matchedOrder": matched_order,
+            "matchedDeliveryDate": matched_delivery_date,
             "lookup": lookup_text,
             "notificationId": notification_id,
             "message": f"{order_type} marked for {target_label}.",

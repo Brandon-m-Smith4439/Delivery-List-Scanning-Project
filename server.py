@@ -839,6 +839,17 @@ class Handler(SimpleHTTPRequestHandler):
             return None
         return user
 
+    def require_any_permission(self, *permissions: str) -> dict | None:
+        user = self.current_user()
+        if not user:
+            self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+            return None
+        granted = set(user.get("permissions", []))
+        if not any(permission in granted for permission in permissions):
+            self.send_json({"error": "Permission denied", "permissions": list(permissions)}, HTTPStatus.FORBIDDEN)
+            return None
+        return user
+
 
     def require_confirmation_text(self, data: dict, required_text: str) -> bool:
         typed = str(data.get("confirmText") or "").strip()
@@ -1547,7 +1558,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/indian-trail/move":
-                user = self.require_permission("move_bay")
+                user = self.require_any_permission("move_bay", "indian_trail_receive")
                 if not user:
                     return
                 self.send_json(STORE.move_bay_assignment(data, user["username"]))
@@ -1561,14 +1572,14 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/indian-trail/clear-assignment":
-                user = self.require_permission("clear_bay")
+                user = self.require_any_permission("clear_bay", "indian_trail_receive")
                 if not user:
                     return
                 self.send_json(STORE.clear_bay_assignment(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/restore-assignment":
-                user = self.require_permission("clear_bay")
+                user = self.require_any_permission("clear_bay", "indian_trail_receive")
                 if not user:
                     return
                 self.send_json(STORE.restore_bay_assignment(data, user["username"]))
@@ -1582,7 +1593,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/indian-trail/scan-out":
-                user = self.require_permission("clear_bay")
+                user = self.require_any_permission("clear_bay", "indian_trail_receive")
                 if not user:
                     return
                 self.send_json(STORE.scan_out_bay_item(data, user["username"]))

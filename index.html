@@ -10,7 +10,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-  <link rel="stylesheet" href="styles.css?v=20260714-v043">
+  <link rel="stylesheet" href="styles.css?v=20260714-v047">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <section class="login-screen" id="loginPanel" hidden>
@@ -430,11 +430,11 @@
               <div class="manual-scan-row">
                 <label>
                   <span>Order Nr.</span>
-                  <input id="manualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="231707">
+                  <input id="manualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="231707" required>
                 </label>
                 <label>
                   <span>Item Nr.</span>
-                  <input id="manualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="003">
+                  <input id="manualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="003" required>
                 </label>
                 <button type="submit">Submit</button>
               </div>
@@ -719,20 +719,20 @@
     
                   <section class="manual-scan-form bay-manual-card bay-manual-card-v2 bay-manual-card-v35 bay-manual-card-v37">
                     <div class="section-heading">
-                      <h3>Manual Assign</h3>
-                      <span>Assign order, Job Nr., barcode, or wording into target bay.</span>
+                      <h3>Manual Scan</h3>
+                      <span>Uses the selected Add or Remove mode. Order and item are required.</span>
                     </div>
                     <div class="manual-scan-row bay-manual-row-v35 bay-manual-row-v37">
                       <label>
-                        <span>Order / Job / Scan Text</span>
-                        <input id="bayManualOrderInput" type="text" autocomplete="off" placeholder="Order, Job Nr., barcode, or label text">
+                        <span>Order Nr.</span>
+                        <input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="231707" required>
                       </label>
                       <label>
-                        <span>Item Nr. optional</span>
-                        <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="001">
+                        <span>Item Nr.</span>
+                        <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="001" required>
                       </label>
                       <input id="bayManualQtyInput" type="hidden" value="1">
-                      <button id="bayManualSubmitBtn" type="button">Assign</button>
+                      <button id="bayManualSubmitBtn" type="button">Submit</button>
                     </div>
                   </section>
                 </form>
@@ -751,6 +751,7 @@
                       <span><small>Order</small><b id="bayLastOrder">-</b></span>
                       <span><small>Bay</small><b id="bayLastBay">-</b></span>
                       <span><small>Time</small><b id="bayLastTime">-</b></span>
+                      <span class="bay-history-move-field"><small>Move</small><select id="bayLastMoveSelect" data-bay-event-move disabled><option value="">No active bay item</option></select></span>
                     </div>
                   </div>
     
@@ -768,6 +769,7 @@
                             <th>Bay</th>
                             <th>Time</th>
                             <th>Check</th>
+                            <th>Move</th>
                           </tr>
                         </thead>
                         <tbody id="bayScanOutRecent"></tbody>
@@ -1160,6 +1162,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=20260714-v043"></script>
+  <script src="app.js?v=20260714-v047"></script>
 </body>
 </html>
