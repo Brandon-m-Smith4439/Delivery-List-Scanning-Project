@@ -10,9 +10,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-  <link rel="stylesheet" href="styles.css?v=20260714-v047">
+  <link rel="stylesheet" href="styles.css?v=20260715-v064">
 </head>
 <body data-page="home" data-mobile-view="scan">
+  <!-- SECTION: Authentication and password reset -->
   <section class="login-screen" id="loginPanel" hidden>
     <button class="login-language-toggle" id="loginLanguageToggleBtn" type="button" aria-label="Cambiar a Español" title="Cambiar a Español">
       <span class="language-globe-icon" aria-hidden="true"></span>
@@ -87,6 +88,7 @@
   </section>
 
   <div class="app">
+    <!-- SECTION: Global header, navigation, search, and user controls -->
     <header class="app-header">
       <div class="brand">
         <img class="brand-icon" src="assets/barefoot-logo.jpg" alt="Barefoot & Company">
@@ -112,6 +114,9 @@
           <span class="language-globe-icon" aria-hidden="true"></span>
           <span>ES</span>
         </button>
+        <button class="tool-button header-utility-button refresh-page-button" id="refreshPageBtn" type="button" aria-label="Refresh page" title="Refresh page">
+          <span class="refresh-page-icon" aria-hidden="true"></span>
+        </button>
         <button class="tool-button header-utility-button fullscreen-toggle-button" id="fullscreenToggleBtn" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">
           <span class="fullscreen-icon" aria-hidden="true"></span>
         </button>
@@ -133,6 +138,7 @@
     </header>
 
     <main>
+      <!-- SECTION: Home dashboard and delivery-list overview -->
       <section class="page-view home-page" id="homePage">
         <div class="page-heading">
           <div>
@@ -198,8 +204,10 @@
                     <label class="overview-range-control statistics-range-control statistics-range-pill-control">
                       <span>Range</span>
                       <select id="overviewRangeSelect">
-                        <option value="30">Last 30 days</option>
+                        <option value="1">Today</option>
                         <option value="7">Last week</option>
+                        <option value="30">Last 30 days</option>
+                        <option value="90">Last 90 days</option>
                         <option value="365">Full year</option>
                         <option value="all">All lists</option>
                       </select>
@@ -238,6 +246,7 @@
         </div>
       </section>
 
+      <!-- SECTION: Main stage scanning workflow -->
       <section class="page-view scan-page" id="scanPage" hidden>
         <div class="scan-heading">
           <div>
@@ -351,15 +360,18 @@
           </section>
 
           <aside class="scanner-panel" id="scanPanel">
-            <section class="progress-band">
-              <div class="progress-title">
-                <span class="cube-icon"></span>
-                <strong id="progressText">Staged Qty: 0/0 - 0.0% Complete</strong>
+            <section class="progress-band scanner-summary-header">
+              <div class="scanner-panel-title-row">
+                <h2 id="stageHeading">Select a delivery list</h2>
               </div>
-              <div class="progress-track"><span id="progressFill"></span></div>
+              <div class="scanner-progress-row">
+                <div class="progress-title">
+                  <span class="cube-icon"></span>
+                  <strong id="progressText">Staged Qty: 0/0 - 0.0% Complete</strong>
+                </div>
+                <div class="progress-track"><span id="progressFill"></span></div>
+              </div>
             </section>
-
-            <h2 id="stageHeading">Select a delivery list</h2>
 
             <section class="scan-rack-panel" id="scanRackPanel" hidden>
               <div class="scan-rack-row">
@@ -484,7 +496,7 @@
               <div class="recent-inline-block">
                 <div class="recent-inline-heading">
                   <h4>Recent scans</h4>
-                  <span>Latest 2</span>
+                  <span id="recentScanCountLabel">Latest 2</span>
                 </div>
                 <div class="recent-table-wrap compact">
                   <table class="recent-table">
@@ -529,6 +541,7 @@
         </main>
       </section>
 
+      <!-- SECTION: Rack status and rack-management workflow -->
       <section class="page-view racks-page" id="racksPage" hidden>
         <div class="page-heading">
           <div>
@@ -546,6 +559,7 @@
         <section class="rack-grid" id="rackGrid"></section>
       </section>
 
+      <!-- SECTION: Indian Trail bay map, receiving scanner, and bay modals -->
       <section class="page-view bay-map-page bay-map-page-v2" id="bayMapPage" hidden>
         <!-- Bay Map v16: command-center layout keeps the scanner available while giving users faster search, filters, and bay actions. -->
         <section class="bay-command-center">
@@ -567,7 +581,7 @@
             <div>
               <span class="bay-page-eyebrow">Map layout edit mode</span>
               <h2>Edit Physical Bay Map</h2>
-              <p>Drag whole bay groups into the layout you want. Bay names, bay counts, and bay rules are handled in the separate Edit Bays GUI.</p>
+              <p>Drag compact bay-group cards between the insertion lines. Drop above, between, or below other groups to control the exact top-to-bottom order in each column. Bay names, bay counts, and bay rules remain in Edit Bays.</p>
             </div>
             <button id="bayLayoutCloseBtn" type="button">Close</button>
           </div>
@@ -656,7 +670,7 @@
             </div>
 
             <div class="bay-scanner-sticky-slot">
-              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v2" aria-label="Indian Trail bay scanner">
+              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v2 bay-scanner-panel-compact-v57" aria-label="Indian Trail bay scanner">
                 <div class="progress-band bay-panel-route-band bay-panel-route-band-v2">
                   <div class="progress-title">
                     <span class="cube-icon"></span>
@@ -743,15 +757,18 @@
                     <span id="bayScanOutStatus">Waiting</span>
                     <button id="bayAllScansBtn" type="button">All scans</button>
                   </div>
-                  <div class="last-card" id="bayLastCard">
+                  <div class="last-card bay-last-card-v52" id="bayLastCard">
                     <div class="last-card-status"></div>
-                    <strong id="bayLastTitle">No bay scans yet</strong>
-                    <div class="last-fields">
+                    <div class="bay-last-location-v52">
+                      <span>Current bay location</span>
+                      <b id="bayLastBay">-</b>
+                      <strong id="bayLastTitle">No bay scans yet</strong>
+                    </div>
+                    <div class="bay-last-meta-v52">
                       <span><small>Action</small><b id="bayLastAction">-</b></span>
                       <span><small>Order</small><b id="bayLastOrder">-</b></span>
-                      <span><small>Bay</small><b id="bayLastBay">-</b></span>
                       <span><small>Time</small><b id="bayLastTime">-</b></span>
-                      <span class="bay-history-move-field"><small>Move</small><select id="bayLastMoveSelect" data-bay-event-move disabled><option value="">No active bay item</option></select></span>
+                      <span class="bay-history-move-field"><small>Change Location</small><select id="bayLastMoveSelect" data-bay-event-move disabled><option value="">No active bay item</option></select></span>
                     </div>
                   </div>
     
@@ -766,10 +783,10 @@
                           <tr>
                             <th>Action</th>
                             <th>Order</th>
-                            <th>Bay</th>
+                            <th>Current Bay</th>
                             <th>Time</th>
                             <th>Check</th>
-                            <th>Move</th>
+                            <th>Change Location</th>
                           </tr>
                         </thead>
                         <tbody id="bayScanOutRecent"></tbody>
@@ -849,6 +866,11 @@
               <span>Reason</span>
               <input id="sdiReasonInput" type="text" autocomplete="off" value="Same-day install">
             </label>
+            <label class="sdi-delivery-date">
+              <span>Rush / Remake Delivery Date</span>
+              <input id="sdiDeliveryDateInput" type="date">
+              <small>Leave unchanged to keep the current date, or select the new priority delivery date.</small>
+            </label>
             <label>
               <span>Order Type</span>
               <select id="sdiTypeInput" required>
@@ -926,6 +948,7 @@
         </section>
       </section>
 
+      <!-- SECTION: Administration, users, rules, imports, and configuration -->
       <section class="page-view admin-page" id="adminPage" hidden>
         <div class="page-heading admin-dashboard-heading">
           <div>
@@ -1055,6 +1078,7 @@
       <button data-mobile-target="menu" type="button"><span class="nav-icon menu"></span>Menu</button>
     </nav>
 
+    <!-- SECTION: Global print and export modal -->
     <div class="print-options-backdrop" id="printOptionsBackdrop" hidden></div>
     <section class="print-options-panel" id="printOptionsPanel" hidden>
       <div class="section-heading">
@@ -1093,6 +1117,7 @@
       <button id="printOptionsSubmit" type="button">Run Print/Export</button>
     </section>
 
+    <!-- SECTION: Interactive statistics chart modal -->
     <div class="modal-backdrop statistics-chart-backdrop" id="statsChartBackdrop" hidden></div>
     <section class="modal-panel statistics-chart-modal" id="statsChartModal" hidden>
       <div class="statistics-chart-modal-header">
@@ -1105,8 +1130,23 @@
       </div>
       <div class="statistics-chart-modal-controls">
         <label>
+          <span>Date range</span>
+          <select id="statsChartRangeSelect">
+            <option value="1">Today</option>
+            <option value="7">Last week</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="365">Full year</option>
+            <option value="all">All lists</option>
+          </select>
+        </label>
+        <label>
           <span>Chart data</span>
           <select id="statsChartMetricSelect">
+            <option value="delivery">Delivery completion by list</option>
+            <option value="remaining">Open pieces by delivery list</option>
+            <option value="timeliness">On-time completion by list</option>
+            <option value="stage-volume">Stage workload</option>
             <option value="glass">All glass types</option>
             <option value="stages">Stage completion</option>
             <option value="work">Scanned vs open work</option>
@@ -1146,12 +1186,14 @@
         </label>
         <button id="statsChartResetBtn" class="statistics-chart-reset" type="button">Reset filters</button>
       </div>
+      <div id="statsChartKpis" class="statistics-chart-kpis" aria-label="Chart range summary"></div>
       <div class="statistics-chart-result-bar">
         <span id="statsChartResultCount">Showing all chart categories</span>
       </div>
       <div id="statsChartModalCanvas" class="statistics-chart-modal-canvas"></div>
     </section>
 
+    <!-- SECTION: Shared administration editor modal -->
     <div class="modal-backdrop" id="adminModalBackdrop" hidden></div>
     <section class="modal-panel admin-modal-panel" id="adminModal" hidden>
       <div class="section-heading">
@@ -1162,6 +1204,7 @@
     </section>
   </div>
 
-  <script src="app.js?v=20260714-v047"></script>
+  <!-- SECTION: Browser application bootstrap -->
+  <script src="app.js?v=20260715-v064"></script>
 </body>
 </html>

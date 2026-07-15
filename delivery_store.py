@@ -10,8 +10,8 @@
 """Data-access layer for the delivery-list scanner.
 
 The web/API layer should call these store methods instead of issuing SQL
-directly. SQLite is the current implementation; SQL Server/PostgreSQL can be
-added later by implementing the same method contract.
+directly. SQLite is used for local/offline deployments, while Azure SQL uses
+the same business workflows through a compatibility adapter at the connection boundary.
 """
 
 from __future__ import annotations
@@ -36,6 +36,27 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 
 from scanner_config import AppConfig
+from azure_sql_compat import AzureSqlConnection, connect_azure_sql
+
+
+class ClosingSQLiteConnection(sqlite3.Connection):
+    """Commit or roll back a context-managed SQLite transaction, then close it.
+
+    Effects: Centralizes connection cleanup for every ``with self.connect()``
+    workflow so database handles cannot accumulate during long-running scanner
+    sessions.
+    """
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> bool | None:
+        """Purpose: Finish the closing SQLite connection context and release its resources.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
 
 
 DEFAULT_STATIONS = ["Airport Rd", "Indian Trail", "Greenville", "Customer Pickup", "DTC"]
@@ -211,14 +232,29 @@ XLSX_PACKAGE_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relations
 
 
 def now_iso() -> str:
+    """Purpose: Run the now iso workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def parse_iso(value: str) -> datetime:
+    """Purpose: Parse iso for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     return datetime.fromisoformat(value)
 
 
 def hash_password(password: str) -> str:
+    """Purpose: Run the hash password workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
     return "pbkdf2_sha256${}${}${}".format(
@@ -229,6 +265,11 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
+    """Purpose: Run the verify password workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     try:
         algorithm, iterations, salt_text, digest_text = stored_hash.split("$", 3)
         if algorithm != "pbkdf2_sha256":
@@ -242,10 +283,20 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 
 def session_token_hash(token: str, secret: str) -> str:
+    """Purpose: Run the session token hash workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return hmac.new(secret.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def stage_access_for_roles(roles: list[str]) -> list[str]:
+    """Purpose: Run the stage access for roles workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     access: list[str] = []
     for role in roles:
         for stage in ROLE_STAGE_ACCESS.get(role, []):
@@ -257,6 +308,11 @@ def stage_access_for_roles(roles: list[str]) -> list[str]:
 
 
 def user_can_access_stage(user: dict[str, Any] | None, stage: str, scanner: str = "") -> bool:
+    """Purpose: Run the user can access stage workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     if not user:
         return False
     allowed = user.get("stageAccess") or stage_access_for_roles(user.get("roles") or [])
@@ -267,11 +323,21 @@ def user_can_access_stage(user: dict[str, Any] | None, stage: str, scanner: str 
 
 
 def clean_barcode(value: str) -> str:
+    """Purpose: Run the clean barcode workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     trimmed = str(value or "").replace("*", "").replace("\r", "").replace("\n", "").strip()
     return "".join(ch for ch in trimmed if ch.isalnum()).upper()
 
 
 def normalize_rack_code(value: str) -> str:
+    """Purpose: Normalize rack code for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     text = clean_barcode(value)
     if text.startswith("RACK"):
         text = text[4:]
@@ -281,6 +347,11 @@ def normalize_rack_code(value: str) -> str:
 
 
 def parse_rack_barcode(value: str) -> tuple[str, str]:
+    """Purpose: Parse rack barcode for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     text = clean_barcode(value)
     if not text.startswith("RACK"):
         return "", ""
@@ -301,20 +372,40 @@ def parse_rack_barcode(value: str) -> tuple[str, str]:
 
 
 def rack_barcode_text(rack_code: str, delivery_date: str = "") -> str:
+    """Purpose: Run the rack barcode text workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     clean_rack = normalize_rack_code(rack_code)
     date_digits = digits_only(delivery_date)[:8]
     return f"RACK-{clean_rack}-{date_digits}" if date_digits else f"RACK-{clean_rack}"
 
 
 def digits_only(value: str) -> str:
+    """Purpose: Run the digits only workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
 def normalized_match_text(value: Any) -> str:
+    """Purpose: Run the normalized match text workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
 
 
 def simplified_match_text(value: Any) -> str:
+    """Purpose: Run the simplified match text workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     text = normalized_match_text(value)
     for token in ("AND", "THE", "INC", "LLC", "COMPANY", "CO"):
         text = text.replace(token, "")
@@ -322,11 +413,21 @@ def simplified_match_text(value: Any) -> str:
 
 
 def is_valid_email(value: str) -> bool:
+    """Purpose: Validate valid email for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     text = str(value or "").strip()
     return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text))
 
 
 def fuzzy_contains(text: str, needle: str) -> bool:
+    """Purpose: Run the fuzzy contains workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     haystack = normalized_match_text(text)
     clean_needle = normalized_match_text(needle)
     if not clean_needle:
@@ -342,6 +443,11 @@ def default_customer_route(item: dict[str, Any]) -> str:
     # Customer routing rules must match the customer field only. Job numbers can
     # legitimately contain text such as CPU even when the ROUTE column still
     # sends the glass to Indian Trail.
+    """Purpose: Run the default customer route workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     customer_name = str(item.get("customer", ""))
     for customer, route, _address in DEFAULT_CUSTOMER_ROUTE_RULES:
         if fuzzy_contains(customer_name, customer):
@@ -350,10 +456,20 @@ def default_customer_route(item: dict[str, Any]) -> str:
 
 
 def canonical_barcode(order_no: int | str, item_no: int | str) -> str:
+    """Purpose: Run the canonical barcode workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return f"T200{int(order_no):06d}{int(item_no):03d}000"
 
 
 def format_display_date(value: str) -> str:
+    """Purpose: Normalize display date for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     parts = str(value).split("-")
     if len(parts) == 3:
         return f"{int(parts[1])}/{int(parts[2])}/{int(parts[0])}"
@@ -361,6 +477,11 @@ def format_display_date(value: str) -> str:
 
 
 def parse_dimension_number(part: str) -> float:
+    """Purpose: Parse dimension number for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     pieces = part.strip().split()
     if not pieces:
         return 0.0
@@ -381,50 +502,136 @@ def parse_dimension_number(part: str) -> float:
 
 
 def route_signal_text(item: dict[str, Any]) -> str:
+    """Purpose: Run the route signal text workflow for the delivery-list scanner.
+
+    Effects: This function reads or updates shared application state.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return " ".join(
         str(item.get(key, ""))
         for key in ("route", "job", "customer", "product", "processState", "queueState")
     ).upper()
 
 
-def normalize_route_column(value: Any) -> tuple[bool, str]:
-    """Return whether ROUTE was explicitly supplied and its canonical route.
+ROUTE_GREENVILLE_ALIASES = {
+    "GNV",
+    "GRN",
+    "GRVLLE",
+    "GRVILLE",
+    "GRVLE",
+    "GVLLE",
+    "GREENVILLE",
+}
+ROUTE_CPU_INDIAN_TRAIL_COMPACT = {"CPUIT", "CPUINT", "ITCPU", "INTCPU"}
+ROUTE_CPU_AIR_COMPACT = {"CPUAIR", "AIRCPU"}
+ROUTE_STAGE_REPAIR_VERSION = "v060-customer-route-primary-1"
 
-    The ROUTE column is authoritative. Any explicit ROUTE containing CPU is a
-    CPU route, even when the Job Nr. contains CPU-IT or CPU-INT.
+
+def cpu_job_route_hint(value: Any) -> str | None:
+    """Return the only supported Job Nr. destination overrides.
+
+    CPU-Air sends the item to Customer Pickup. CPU-IT/CPU-INT explicitly keeps
+    the item on the Indian Trail route. DTC and Greenville are intentionally
+    not inferred from Job Nr.; active Customer Route Rules own those routes.
     """
-    route = str(value or "").strip().upper()
-    compact = normalized_match_text(route)
-    if not route:
-        return False, ""
-    if route in {"CUSTOMER PICKUP", "PICKUP"} or re.search(r"\bCPU\b", route) or compact.startswith("CPU"):
-        return True, "CPU"
-    if route in {"GNV", "GRN", "GREENVILLE"}:
-        return True, "GNV"
-    if route in {"DTC", "DELIVER TO CUSTOMER"}:
-        return True, "DTC"
-    if route in {"INT", "IT", "INDIAN TRAIL", "INDIANTRAIL"}:
-        return True, ""
-    return True, route
-
-
-def job_number_route_hint(item: dict[str, Any]) -> str | None:
-    """Return a route hint from Job Nr. only when ROUTE is blank."""
-    job = str(item.get("job", "")).strip().upper()
-    compact = normalized_match_text(job)
-    if re.search(r"\bCPU[-\s]*(IT|INT)\b", job) or re.search(r"\b(IT|INT)[-\s]*CPU\b", job):
+    text = str(value or "").strip().upper()
+    if not text:
+        return None
+    compact = normalized_match_text(text)
+    separator = r"[^A-Z0-9]*"
+    token_start = r"(?:^|[^A-Z0-9])"
+    token_end = r"(?![A-Z0-9])"
+    cpu_indian_trail = re.compile(
+        rf"(?:{token_start}CPU{separator}(?:IT|INT){token_end}|"
+        rf"{token_start}(?:IT|INT){separator}CPU{token_end})"
+    )
+    cpu_air = re.compile(
+        rf"(?:{token_start}CPU{separator}AIR{token_end}|"
+        rf"{token_start}AIR{separator}CPU{token_end})"
+    )
+    if compact in ROUTE_CPU_INDIAN_TRAIL_COMPACT or cpu_indian_trail.search(text):
         return ""
-    if re.search(r"\bCPU[-\s]*AIR\b", job) or "CPUAIR" in compact:
+    if compact in ROUTE_CPU_AIR_COMPACT or cpu_air.search(text):
         return "CPU"
     return None
 
 
+def canonical_route_designation(value: Any, *, job_context: bool = False) -> tuple[bool, str]:
+    """Resolve an operational route designation to the stored route code.
+
+    Route values and Job Nr. suffixes are typed by people, so matching accepts
+    capitalization and separator differences while retaining strict token
+    boundaries. In Job Nr. context, only CPU-Air and CPU-IT/INT are treated as
+    destination overrides; DTC and Greenville come from Customer Route Rules.
+    """
+    text = str(value or "").strip().upper()
+    if not text:
+        return False, ""
+
+    compact = normalized_match_text(text)
+    token_start = r"(?:^|[^A-Z0-9])"
+    token_end = r"(?![A-Z0-9])"
+
+    cpu_hint = cpu_job_route_hint(text)
+    if cpu_hint is not None:
+        return True, cpu_hint
+    if job_context:
+        return False, ""
+
+    if compact in {"DTC", "DELIVERTOCUSTOMER"} or re.search(
+        rf"{token_start}DTC{token_end}",
+        text,
+    ):
+        return True, "DTC"
+
+    if compact in ROUTE_GREENVILLE_ALIASES or any(
+        re.search(rf"{token_start}{re.escape(alias)}{token_end}", text)
+        for alias in ROUTE_GREENVILLE_ALIASES
+    ):
+        return True, "GNV"
+
+    if compact in {"CUSTOMERPICKUP", "PICKUP"}:
+        return True, "CPU"
+
+    if compact == "CPU" or re.search(rf"{token_start}CPU{token_end}", text):
+        return True, "CPU"
+    if compact in {"INT", "IT", "INDIANTRAIL"}:
+        return True, ""
+    return False, ""
+
+
+def normalize_route_column(value: Any) -> tuple[bool, str]:
+    """Return whether ROUTE was supplied and its canonical route code."""
+    route = str(value or "").strip().upper()
+    if not route:
+        return False, ""
+    matched, canonical = canonical_route_designation(route)
+    return (True, canonical) if matched else (True, route)
+
+
+def job_number_route_hint(item: dict[str, Any]) -> str | None:
+    """Return the supported CPU-Air/CPU-IT override from Job Nr."""
+    return cpu_job_route_hint(item.get("job", ""))
+
+
 def inferred_route(item: dict[str, Any]) -> str:
-    explicit, route = normalize_route_column(item.get("route", ""))
+    """Purpose: Run the inferred route workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
+    raw_route = str(item.get("route", "")).strip()
+    explicit, route = normalize_route_column(raw_route)
+    job_hint = job_number_route_hint(item)
     if explicit:
+        # Imports historically stored the fallback Indian Trail value as IT.
+        # A strong DTC, Greenville, or CPU-Air Job Nr. designation repairs that
+        # generated fallback while an explicitly written Indian Trail phrase or
+        # CPU-IT designation remains Indian Trail.
+        if normalized_match_text(raw_route) == "IT" and job_hint in {"CPU", "GNV", "DTC"}:
+            return job_hint
         return route
 
-    job_hint = job_number_route_hint(item)
     if job_hint is not None:
         return job_hint
 
@@ -438,6 +645,11 @@ def inferred_route(item: dict[str, Any]) -> str:
 
 
 def route_category(item: dict[str, Any]) -> str:
+    """Purpose: Run the route category workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     route = inferred_route(item)
     if route == "CPU":
         return "cpu"
@@ -451,6 +663,11 @@ def route_category(item: dict[str, Any]) -> str:
 
 
 def custom_route_codes(base_items: list[dict[str, Any]]) -> list[str]:
+    """Purpose: Run the custom route codes workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     codes = {
         inferred_route(item)
         for item in base_items
@@ -460,6 +677,11 @@ def custom_route_codes(base_items: list[dict[str, Any]]) -> list[str]:
 
 
 def route_stage_label(route: str) -> str:
+    """Purpose: Run the route stage label workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     clean = str(route or "").strip().upper()
     if clean == "CPU":
         return "Customer Pickup"
@@ -470,7 +692,32 @@ def route_stage_label(route: str) -> str:
     return clean
 
 
+def public_route_label(value: Any) -> str:
+    """Return the route label that may appear on printed or exported documents.
+
+    Effects: Does not modify the stored route. Standard Indian Trail designations are
+    intentionally hidden so exception routes such as CPU, DTC, Greenville, and custom
+    destinations remain visually meaningful on floor paperwork and exported files.
+    Flow: Canonicalizes common operational aliases, returns an empty label for the
+    standard Indian Trail route, and preserves nonstandard/custom route text.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    matched, canonical = canonical_route_designation(raw)
+    if matched:
+        if canonical == "":
+            return ""
+        return canonical
+    return raw
+
+
 def receiving_stage_destination(stage: Any, scanner: Any = "") -> str:
+    """Purpose: Run the receiving stage destination workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     text = f"{stage or ''} {scanner or ''}".strip().lower()
     if "indian trail" in text or "inbound" in text:
         return "Indian Trail"
@@ -484,10 +731,20 @@ def receiving_stage_destination(stage: Any, scanner: Any = "") -> str:
 
 
 def is_cpu_item(item: dict[str, Any]) -> bool:
+    """Purpose: Validate CPU item for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return route_category(item) == "cpu"
 
 
 def normalized_bay_auto_assign_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Purpose: Run the normalized bay auto assign settings workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     merged = dict(DEFAULT_BAY_AUTO_ASSIGN_SETTINGS)
     if isinstance(settings, dict):
         merged.update(settings)
@@ -506,6 +763,11 @@ def normalized_bay_auto_assign_settings(settings: dict[str, Any] | None = None) 
 
 
 def suggested_bay(product: str, dimensions: str, route: str, settings: dict[str, Any] | None = None) -> str:
+    """Purpose: Run the suggested bay workflow for the delivery-list scanner.
+
+    Effects: This function reads or updates shared application state.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     config = normalized_bay_auto_assign_settings(settings)
     if str(route).upper() == "CPU":
         return str(config.get("cpuBayType") or "CPU")
@@ -524,6 +786,11 @@ def suggested_bay(product: str, dimensions: str, route: str, settings: dict[str,
 
 
 def items_for_profile(profile: str, base_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Purpose: Run the items for profile workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     if profile == "cpu":
         return [item for item in base_items if is_cpu_item(item)]
     if profile == "indian_trail":
@@ -539,6 +806,11 @@ def items_for_profile(profile: str, base_items: list[dict[str, Any]]) -> list[di
 
 
 def build_delivery_lists(sample: dict[str, Any]) -> list[tuple[str, str, str, str, list[dict[str, Any]]]]:
+    """Purpose: Build delivery lists for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+    """
     delivery_date = str(sample.get("deliveryDate") or now_iso()[:10])
     base_items = sample.get("items") or []
     definitions: list[tuple[str, str, str, str, list[dict[str, Any]]]] = []
@@ -574,10 +846,20 @@ def build_delivery_lists(sample: dict[str, Any]) -> list[tuple[str, str, str, st
 
 
 def all_profile_list_ids(delivery_date: str) -> list[str]:
+    """Purpose: Run the all profile list IDs workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+    """
     return [f"{delivery_date}-{suffix}" for suffix, _, _, _ in LIST_PROFILES]
 
 
 def parse_int_text(value: Any) -> int | None:
+    """Purpose: Parse int text for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     text = str(value or "").strip()
     if not text:
         return None
@@ -589,6 +871,11 @@ def parse_int_text(value: Any) -> int | None:
 
 
 def clean_excel_text(value: Any) -> str:
+    """Purpose: Run the clean excel text workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     text = str(value or "")
     text = re.sub(r"_x000[dD]_", "\r", text)
     text = re.sub(r"_x000[aA]_", "\n", text)
@@ -596,12 +883,22 @@ def clean_excel_text(value: Any) -> str:
 
 
 def format_delivery_date(month: int, day: int, year: int) -> str:
+    """Purpose: Normalize delivery date for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     if year < 100:
         year += 2000
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
 def delivery_date_from_text(text: str) -> str:
+    """Purpose: Run the delivery date from text workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     match = re.search(r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})(?!\d)", text)
     if not match:
         return ""
@@ -610,11 +907,21 @@ def delivery_date_from_text(text: str) -> str:
 
 
 def column_label(ref: str) -> str:
+    """Purpose: Run the column label workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     match = re.match(r"([A-Z]+)", ref.upper())
     return match.group(1) if match else ""
 
 
 def first_xlsx_sheet_path(archive: zipfile.ZipFile) -> str:
+    """Purpose: Run the first XLSX sheet path workflow for the delivery-list scanner.
+
+    Effects: This function reads or changes files.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     try:
         workbook = ET.fromstring(archive.read("xl/workbook.xml"))
         first_sheet = workbook.find(f"{XLSX_MAIN_NS}sheets/{XLSX_MAIN_NS}sheet")
@@ -633,6 +940,11 @@ def first_xlsx_sheet_path(archive: zipfile.ZipFile) -> str:
 
 
 def read_xlsx_rows(path: Path, max_rows: int | None = None) -> list[tuple[int, dict[str, str]]]:
+    """Purpose: Read XLSX rows for the delivery-list scanner workflow.
+
+    Effects: This function reads or changes files.
+    Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+    """
     with zipfile.ZipFile(path) as archive:
         shared_strings: list[str] = []
         if "xl/sharedStrings.xml" in archive.namelist():
@@ -669,6 +981,11 @@ def read_xlsx_rows(path: Path, max_rows: int | None = None) -> list[tuple[int, d
 
 
 def delivery_date_from_rows_or_name(rows: list[tuple[int, dict[str, str]]], path: Path) -> str:
+    """Purpose: Run the delivery date from rows or name workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     for _, row in rows[:12]:
         date_text = delivery_date_from_text(" ".join(row.values()))
         if date_text:
@@ -680,6 +997,11 @@ def delivery_date_from_rows_or_name(rows: list[tuple[int, dict[str, str]]], path
 
 
 def delivery_date_from_source_header(path: Path) -> str:
+    """Purpose: Run the delivery date from source header workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     suffix = path.suffix.lower()
     if suffix in {".xlsx", ".xlsm"}:
         try:
@@ -697,6 +1019,11 @@ def delivery_date_from_source_header(path: Path) -> str:
 
 
 def parse_aw_delivery_workbook(path: Path) -> dict[str, Any]:
+    """Purpose: Parse aw delivery workbook for the delivery-list scanner workflow.
+
+    Effects: This function reads or updates shared application state.
+    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    """
     rows = read_xlsx_rows(path)
     delivery_date = delivery_date_from_rows_or_name(rows, path)
     current_product = ""
@@ -735,7 +1062,6 @@ def parse_aw_delivery_workbook(path: Path) -> dict[str, Any]:
             "queueState": remake,
             "sourceRow": row_number,
         }
-        item["route"] = inferred_route(item)
         items.append(item)
     if not items:
         raise ValueError(f"No delivery-list rows found in {path.name}")
@@ -743,8 +1069,28 @@ def parse_aw_delivery_workbook(path: Path) -> dict[str, Any]:
 
 
 def parse_delivery_csv(path: Path) -> dict[str, Any]:
+    """Parse a delivery-list CSV while honoring an in-file delivery date.
+
+    CSV exports may carry the delivery date in a column instead of the file
+    name. The first valid row date is authoritative; the file name and current
+    date are fallbacks for legacy files that omit it.
+    """
     with path.open(newline="", encoding="utf-8-sig") as handle:
         rows = list(csv.DictReader(handle))
+    delivery_date = ""
+    for row in rows:
+        date_value = (
+            row.get("deliveryDate")
+            or row.get("Delivery Date")
+            or row.get("Delivery Date:")
+            or row.get("delivery_date")
+            or row.get("Date")
+            or row.get("date")
+            or ""
+        )
+        delivery_date = delivery_date_from_text(str(date_value))
+        if delivery_date:
+            break
     items = []
     for index, row in enumerate(rows, start=1):
         order_no = row.get("order") or row.get("Order Nr.") or row.get("Order Nr") or row.get("Order")
@@ -765,14 +1111,22 @@ def parse_delivery_csv(path: Path) -> dict[str, Any]:
             "processState": row.get("processState") or row.get("Process State") or "",
             "queueState": row.get("queueState") or row.get("Queue State") or "",
         }
-        item["route"] = inferred_route(item)
         items.append(item)
     if not items:
         raise ValueError(f"No delivery-list rows found in {path.name}")
-    return {"deliveryDate": delivery_date_from_text(path.stem) or now_iso()[:10], "sourceName": path.name, "items": items}
+    return {
+        "deliveryDate": delivery_date or delivery_date_from_text(path.stem) or now_iso()[:10],
+        "sourceName": path.name,
+        "items": items,
+    }
 
 
 def load_delivery_source_payload(path: Path) -> dict[str, Any]:
+    """Purpose: Load delivery source payload for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     suffix = path.suffix.lower()
     if suffix == ".json":
         return json.loads(path.read_text(encoding="utf-8"))
@@ -784,6 +1138,11 @@ def load_delivery_source_payload(path: Path) -> dict[str, Any]:
 
 
 def source_file_hash(path: Path) -> str:
+    """Purpose: Run the source file hash workflow for the delivery-list scanner.
+
+    Effects: This function reads or changes files.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -792,21 +1151,41 @@ def source_file_hash(path: Path) -> str:
 
 
 def is_remake_item(item: dict[str, Any]) -> bool:
+    """Purpose: Validate remake item for the delivery-list scanner workflow.
+
+    Effects: This function reads or updates shared application state.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     text = " ".join(str(item.get(key, "")) for key in ("remake", "processState", "queueState")).upper()
     return "REMAKE" in text or re.search(r"\bRM\b", text) is not None
 
 
 def is_rush_item(item: dict[str, Any]) -> bool:
+    """Purpose: Validate rush item for the delivery-list scanner workflow.
+
+    Effects: This function reads or updates shared application state.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     text = " ".join(str(item.get(key, "")) for key in ("remake", "processState", "queueState")).upper()
     return "SDI" in text or re.search(r"\bRUSH\b", text) is not None
 
 
 def is_mirror_item(item: dict[str, Any]) -> bool:
+    """Purpose: Validate mirror item for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     text = " ".join(str(item.get(key, "")) for key in ("product", "job", "customer", "route")).upper()
     return "MIRROR" in text or re.search(r"\bMIR\b", text) is not None
 
 
 def should_print_delivery_item(item: dict[str, Any], exclude_mirrors: bool = True, include_mirror_remakes: bool = True) -> bool:
+    """Purpose: Run the should print delivery item workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+    """
     if not exclude_mirrors:
         return True
     if not is_mirror_item(item):
@@ -815,6 +1194,11 @@ def should_print_delivery_item(item: dict[str, Any], exclude_mirrors: bool = Tru
 
 
 def print_counts_for_items(items: list[dict[str, Any]]) -> dict[str, int]:
+    """Purpose: Run the print counts for items workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+    """
     printable = [item for item in items if should_print_delivery_item(item)]
     return {
         "rowCount": len(printable),
@@ -824,7 +1208,23 @@ def print_counts_for_items(items: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def row_value(row: Any, key: str, default: Any = "") -> Any:
+    """Read a named value from sqlite3.Row, AzureSqlRow, or a dictionary."""
+
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key] if key in row.keys() else default
+    except (AttributeError, KeyError, TypeError, IndexError):
+        return default
+
+
 def item_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    """Purpose: Run the item from row workflow for the delivery-list scanner.
+
+    Effects: This function reads or updates shared application state.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return {
         "id": row["id"],
         "sourceId": row["source_id"],
@@ -841,6 +1241,8 @@ def item_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "processState": row["process_state"],
         "queueState": row["queue_state"],
         "suggestedBay": row["suggested_bay"],
+        "priorityDeliveryDate": row_value(row, "priority_delivery_date"),
+        "priorityDirectToTruck": bool(row_value(row, "priority_direct_to_truck", 0)),
         "rackCode": row["rack_code"] if "rack_code" in row.keys() else "",
         "rackName": row["rack_name"] if "rack_name" in row.keys() else "",
         "rackType": row["rack_type"] if "rack_type" in row.keys() else "",
@@ -851,6 +1253,11 @@ def item_from_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    """Purpose: Run the event from row workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     item = None
     if row["line_item_id"]:
         item = {
@@ -883,6 +1290,11 @@ def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def list_meta(row: sqlite3.Row) -> dict[str, Any]:
+    """Purpose: Read meta for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+    """
     return {
         "id": row["id"],
         "label": row["label"],
@@ -895,10 +1307,20 @@ def list_meta(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def request_user_name(data: dict[str, Any]) -> str:
+    """Purpose: Run the request user name workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return str(data.get("user") or data.get("operator") or "Scanner").strip()[:80]
 
 
 def request_station(data: dict[str, Any]) -> str:
+    """Purpose: Run the request station workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return str(data.get("station") or "").strip()[:80]
 
 
@@ -906,18 +1328,43 @@ class BaseDeliveryStore:
     database_type = "base"
 
     def initialize(self) -> None:
+        """Purpose: Run the initialize workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def health(self) -> dict[str, Any]:
+        """Purpose: Run the health workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def get_delivery_lists(self, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Purpose: Read delivery lists for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def get_delivery_list(self, list_id: str, last_scan: dict[str, Any] | None = None, user: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Purpose: Read delivery list for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def get_line_items(self, list_id: str) -> list[dict[str, Any]]:
+        """Purpose: Read line items for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def create_app_notification(
@@ -931,6 +1378,11 @@ class BaseDeliveryStore:
         expires_in_hours: int = 24,
         acknowledge_creator: bool = False,
     ) -> int:
+        """Purpose: Create app notification for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         created_at = now_iso()
         expires_at = (
             datetime.now(timezone.utc) + timedelta(hours=max(int(expires_in_hours or 24), 1))
@@ -972,6 +1424,11 @@ class BaseDeliveryStore:
         return notification_id
 
     def get_pending_notifications(self, username: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Purpose: Read pending notifications for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         clean_username = str(username or "").strip()
         if not clean_username:
             return []
@@ -1017,6 +1474,11 @@ class BaseDeliveryStore:
         return notifications
 
     def acknowledge_notification(self, notification_id: int, username: str) -> dict[str, Any]:
+        """Purpose: Run the acknowledge notification workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean_username = str(username or "").strip()
         clean_id = int(notification_id or 0)
         if not clean_id or not clean_username:
@@ -1045,21 +1507,51 @@ class BaseDeliveryStore:
         return {"ok": True, "notificationId": clean_id}
 
     def record_scan(self, scan_request: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Process scan for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         raise NotImplementedError
 
     def undo_last_scan(self, list_id: str, user: str, station: str) -> dict[str, Any]:
+        """Purpose: Undo last scan for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         raise NotImplementedError
 
     def redo_last_undo(self, list_id: str, user: str, station: str) -> dict[str, Any]:
+        """Purpose: Redo last undo for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         raise NotImplementedError
 
     def reset_stage(self, list_id: str, user: str, station: str) -> dict[str, Any]:
+        """Purpose: Run the reset stage workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def import_delivery_list(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Load delivery list for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def import_delivery_folder(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Load delivery folder for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         user = request_user_name(data)
         folder = Path(str(data.get("sourceFolder") or self.config.temp_delivery_lists_dir)).expanduser()
         date_from = str(data.get("dateFrom") or "").strip()
@@ -1283,87 +1775,227 @@ class BaseDeliveryStore:
         }
 
     def get_print_package(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Purpose: Read print package for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def get_scan_events(self, list_id: str, only_errors: bool = False) -> list[dict[str, Any]]:
+        """Purpose: Read scan events for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def get_exceptions(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Purpose: Read exceptions for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def get_stations(self) -> list[str]:
+        """Purpose: Read stations for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def add_station(self, name: str) -> dict[str, Any]:
+        """Purpose: Create station for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def rename_station(self, old_name: str, new_name: str) -> dict[str, Any]:
+        """Purpose: Update station for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def remove_station(self, name: str) -> dict[str, Any]:
+        """Purpose: Remove station for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def export_csv(self, list_id: str) -> str:
+        """Purpose: Export CSV for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+        """
         raise NotImplementedError
 
     def export_xlsx(self, list_id: str) -> bytes:
+        """Purpose: Export XLSX for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+        """
         raise NotImplementedError
 
     def export_package_xlsx(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> bytes:
+        """Purpose: Export package XLSX for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+        """
         raise NotImplementedError
 
     def authenticate_user(self, username: str, password: str) -> dict[str, Any]:
+        """Purpose: Run the authenticate user workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def get_user_by_session(self, token: str) -> dict[str, Any] | None:
+        """Purpose: Read user by session for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def delete_session(self, token: str) -> None:
+        """Purpose: Remove session for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def create_user(self, data: dict[str, Any], created_by: str = "system") -> dict[str, Any]:
+        """Purpose: Create user for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def list_users(self) -> list[dict[str, Any]]:
+        """Purpose: Read users for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def deactivate_user(self, username: str, deactivated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Run the deactivate user workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def reactivate_user(self, username: str, activated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Run the reactivate user workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def delete_user(self, username: str, deleted_by: str = "system") -> dict[str, Any]:
+        """Purpose: Remove user for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def update_user_password(self, username: str, password: str, updated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Update user password for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def update_user_roles(self, username: str, roles: list[str], station: str | None = None, email: str | None = None, updated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Update user roles for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def list_active_sessions(self) -> list[dict[str, Any]]:
+        """Purpose: Read active sessions for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def get_permissions(self) -> list[str]:
+        """Purpose: Read permissions for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def list_roles(self) -> list[dict[str, Any]]:
+        """Purpose: Read roles for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def update_role_permissions(self, role_name: str, permissions: list[str], updated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Update role permissions for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def preview_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Run the preview import workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def admin_summary(self) -> dict[str, Any]:
+        """Purpose: Run the admin summary workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def resolve_exception(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Resolve exception for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def global_search(self, query: str, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Purpose: Run the global search workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean = str(query or "").strip()
         if len(clean) < 2:
             return []
@@ -1410,6 +2042,11 @@ class BaseDeliveryStore:
             ).fetchall()
 
         def stage_kind(row: sqlite3.Row) -> str:
+            """Purpose: Run the stage kind workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             text = f"{row['stage']} {row['scanner']}".lower()
             if "outbound" in text:
                 return "outbound"
@@ -1426,6 +2063,11 @@ class BaseDeliveryStore:
             return "other"
 
         def representative_rank(row: sqlite3.Row) -> int:
+            """Purpose: Run the representative rank workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             scanned = int(row["scanned_qty"] or 0)
             kind = stage_kind(row)
             if scanned and kind == "indian_trail":
@@ -1449,6 +2091,11 @@ class BaseDeliveryStore:
             return 0
 
         def rack_location_label(code: Any) -> str:
+            """Purpose: Run the rack location label workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             clean_code = normalize_rack_code(str(code or ""))
             if not clean_code:
                 return ""
@@ -1459,6 +2106,11 @@ class BaseDeliveryStore:
             return f"Rack {clean_code}"
 
         def airport_label(scanner: Any) -> str:
+            """Purpose: Run the airport label workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             return str(scanner or "Airport Rd").replace(" - ", " ").strip() or "Airport Rd"
 
         grouped: dict[str, dict[str, Any]] = {}
@@ -1583,27 +2235,67 @@ class BaseDeliveryStore:
         return cleaned_results[:30]
 
     def update_line_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Update line item for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def delete_delivery_list(self, list_id: str, user: str) -> dict[str, Any]:
+        """Purpose: Remove delivery list for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def delete_delivery_date(self, delivery_date: str, user: str) -> dict[str, Any]:
+        """Purpose: Remove delivery date for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def delete_line_item(self, line_item_id: str, user: str) -> dict[str, Any]:
+        """Purpose: Remove line item for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def get_customer_route_rules(self) -> list[dict[str, Any]]:
+        """Purpose: Read customer route rules for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def add_customer_route_rule(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Create customer route rule for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def remove_customer_route_rule(self, rule_id: int, user: str) -> dict[str, Any]:
+        """Purpose: Remove customer route rule for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def get_customer_email_settings(self) -> dict[str, Any]:
+        """Purpose: Read customer email settings for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         with self.connect() as con:
             contacts = con.execute(
                 """
@@ -1674,6 +2366,11 @@ class BaseDeliveryStore:
         }
 
     def upsert_customer_email_contact(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the upsert customer email contact workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         customer = " ".join(str(data.get("customerPattern") or data.get("customer") or "").split())[:160]
         email = str(data.get("email") or "").strip().lower()
         contact_id = int(data.get("id") or 0)
@@ -1708,6 +2405,11 @@ class BaseDeliveryStore:
         return self.get_customer_email_settings()
 
     def remove_customer_email_contact(self, contact_id: int, user: str) -> dict[str, Any]:
+        """Purpose: Remove customer email contact for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         if not contact_id:
             raise ValueError("contact id is required")
         with self.connect() as con:
@@ -1721,6 +2423,11 @@ class BaseDeliveryStore:
         return self.get_customer_email_settings()
 
     def upsert_customer_email_cc(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the upsert customer email cc workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         email = str(data.get("email") or "").strip().lower()
         if not is_valid_email(email):
             raise ValueError("A valid CC email is required")
@@ -1739,6 +2446,11 @@ class BaseDeliveryStore:
         return self.get_customer_email_settings()
 
     def remove_customer_email_cc(self, cc_id: int, user: str) -> dict[str, Any]:
+        """Purpose: Remove customer email cc for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         if not cc_id:
             raise ValueError("cc id is required")
         with self.connect() as con:
@@ -1806,6 +2518,11 @@ class BaseDeliveryStore:
         return payload
 
     def customer_email_matches(self, con: sqlite3.Connection, customer_name: str) -> list[sqlite3.Row]:
+        """Purpose: Run the customer email matches workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rows = con.execute(
             """
             SELECT * FROM customer_email_contacts
@@ -1816,9 +2533,19 @@ class BaseDeliveryStore:
         return [row for row in rows if fuzzy_contains(customer_name, row["customer_pattern"]) or fuzzy_contains(row["customer_pattern"], customer_name)]
 
     def customer_cc_emails(self, con: sqlite3.Connection) -> list[str]:
+        """Purpose: Run the customer cc emails workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         return [row["email"] for row in con.execute("SELECT email FROM customer_email_cc WHERE active = 1 ORDER BY email").fetchall()]
 
     def queue_email_message(self, con: sqlite3.Connection, email_type: str, customer_name: str, customer_pattern: str, delivery_date: str, to_emails: list[str], cc_emails: list[str], subject: str, body: str, payload: dict[str, Any]) -> None:
+        """Purpose: Send email message for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean_to = sorted({email.strip().lower() for email in to_emails if is_valid_email(email)})
         clean_cc = sorted({email.strip().lower() for email in cc_emails if is_valid_email(email) and email.strip().lower() not in clean_to})
         if not clean_to:
@@ -1873,6 +2600,11 @@ class BaseDeliveryStore:
         )
 
     def try_send_email(self, to_emails: list[str], cc_emails: list[str], subject: str, body: str) -> None:
+        """Purpose: Run the try send email workflow for the delivery-list scanner.
+
+        Effects: This function may send email.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         smtp_host = os.environ.get("DLS_SMTP_HOST", "").strip()
         smtp_from = os.environ.get("DLS_SMTP_FROM", "").strip()
         if not smtp_host or not smtp_from:
@@ -1896,6 +2628,11 @@ class BaseDeliveryStore:
             smtp.send_message(msg)
 
     def send_customer_manifests_for_import(self, con: sqlite3.Connection, payload: dict[str, Any], user: str) -> None:
+        """Purpose: Send customer manifests for import for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         delivery_date = str(payload.get("deliveryDate") or "")
         items = [item for item in payload.get("items") or [] if isinstance(item, dict)]
         customer_map: dict[str, list[dict[str, Any]]] = {}
@@ -1950,6 +2687,11 @@ class BaseDeliveryStore:
             )
 
     def queue_ready_email_if_customer_complete(self, con: sqlite3.Connection, list_id: str, scanned_row: sqlite3.Row, user: str) -> None:
+        """Purpose: Send ready email if customer complete for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
         if not list_row or "staging" not in str(list_row["stage"] or "").lower():
             return
@@ -1981,84 +2723,219 @@ class BaseDeliveryStore:
         self.queue_email_message(con, "ready", customer, contacts[0]["customer_pattern"], delivery_date, [row["email"] for row in contacts], self.customer_cc_emails(con), subject, body, {"listId": list_id, "user": user})
 
     def get_manual_edit_lookups(self) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Read manual edit lookups for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def add_manual_edit_lookup(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Create manual edit lookup for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def get_bay_scan_settings(self) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Read bay scan settings for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def upsert_bay_manual_input_rule(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Run the upsert bay manual input rule workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def remove_bay_manual_input_rule(self, rule_id: int, user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Remove bay manual input rule for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def upsert_bay_scan_barcode_rule(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Run the upsert bay scan barcode rule workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         raise NotImplementedError
 
     def remove_bay_scan_barcode_rule(self, rule_id: int, user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Remove bay scan barcode rule for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def manual_assign_bay_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the manual assign bay item workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def reports_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Purpose: Run the reports summary workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def get_bays(self) -> list[dict[str, Any]]:
+        """Purpose: Read bays for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def get_bay_job_details(self, bay_code: str) -> dict[str, Any]:
+        """Purpose: Read bay job details for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def get_bay_layout(self) -> dict[str, Any]:
+        """Purpose: Read bay layout for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def get_bay_events(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Purpose: Read bay events for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         raise NotImplementedError
 
     def indian_trail_summary(self) -> dict[str, Any]:
+        """Purpose: Run the indian trail summary workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def indian_trail_in_transit(self) -> dict[str, Any]:
+        """Purpose: Run the indian trail in transit workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def receive_indian_trail_scan(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Process indian trail scan for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         raise NotImplementedError
 
     def assign_bay(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the assign bay workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def move_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the move bay assignment workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def clear_bay(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove bay for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def mark_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the mark SDI workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def remove_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove SDI for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def bay_check(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the bay check workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def scan_out_bay_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Process out bay item for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         raise NotImplementedError
 
     def clear_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove bay assignment for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def restore_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the restore bay assignment workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         raise NotImplementedError
 
     def update_bay_layout(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Update bay layout for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
     def set_bay_group_position(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Update bay group position for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         raise NotImplementedError
 
 
@@ -2066,19 +2943,40 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
     database_type = "sqlite"
 
     def __init__(self, config: AppConfig):
+        """Purpose: Initialize a SQLite delivery store instance and its required state.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         self.config = config
         self.database_path = Path(config.database_path)
         self.sample_path = Path(config.sample_path)
 
     def connect(self) -> sqlite3.Connection:
+        """Purpose: Run the connect workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records, reads or changes files.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         self.database_path.parent.mkdir(exist_ok=True)
-        con = sqlite3.connect(self.database_path)
+        timeout_seconds = max(int(self.config.database_timeout_seconds or 30), 1)
+        con = sqlite3.connect(
+            self.database_path,
+            timeout=timeout_seconds,
+            factory=ClosingSQLiteConnection,
+        )
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys = ON")
+        con.execute(f"PRAGMA busy_timeout = {timeout_seconds * 1000}")
         con.execute("PRAGMA journal_mode = WAL")
         return con
 
     def health(self) -> dict[str, Any]:
+        """Purpose: Run the health workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         return {
             "ok": True,
             "mode": self.database_type,
@@ -2088,6 +2986,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def initialize(self) -> None:
+        """Purpose: Run the initialize workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         with self.connect() as con:
             self.create_schema(con)
             self.seed_customer_route_rules(con)
@@ -2097,8 +3000,186 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             self.repair_manual_assign_bay_visibility(con)
             self.seed_bay_auto_assign_settings(con)
             self.seed_racks(con)
+            self.repair_route_stage_memberships_if_needed(con)
+
+    def customer_route_rules_from_connection(self, con: Any) -> list[dict[str, Any]]:
+        """Purpose: Run the customer route rules from connection workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
+        rows = con.execute(
+            "SELECT * FROM customer_route_rules WHERE active = 1 ORDER BY customer_pattern"
+        ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "customerPattern": row["customer_pattern"],
+                "route": row["route"],
+                "customerAddress": row_value(row, "customer_address", ""),
+                "active": bool(row["active"]),
+            }
+            for row in rows
+        ]
+
+    def route_stage_repair_signature(self, con: Any) -> str:
+        """Purpose: Run the route stage repair signature workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
+        rules = self.customer_route_rules_from_connection(con)
+        route_rules = [
+            {
+                "customer": normalized_match_text(rule.get("customerPattern", "")),
+                "route": str(rule.get("route") or "").strip().upper(),
+            }
+            for rule in rules
+        ]
+        payload = json.dumps(
+            {"version": ROUTE_STAGE_REPAIR_VERSION, "rules": route_rules},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def system_metadata_value(self, con: Any, key: str) -> str:
+        """Purpose: Run the system metadata value workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
+        row = con.execute("SELECT value FROM system_metadata WHERE metadata_key = ?", (key,)).fetchone()
+        return str(row["value"] or "") if row else ""
+
+    def set_system_metadata_value(self, con: Any, key: str, value: str) -> None:
+        """Purpose: Update system metadata value for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
+        con.execute(
+            """
+            INSERT INTO system_metadata (metadata_key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(metadata_key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, value, now_iso()),
+        )
+
+    def repair_route_stage_memberships_if_needed(self, con: Any, *, force: bool = False) -> int:
+        """Purpose: Reconcile route stage memberships if needed for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
+        signature = self.route_stage_repair_signature(con)
+        metadata_key = "route_stage_repair_signature"
+        if not force and self.system_metadata_value(con, metadata_key) == signature:
+            return 0
+        repaired = self.repair_route_stage_memberships(
+            con,
+            rules=self.customer_route_rules_from_connection(con),
+        )
+        self.set_system_metadata_value(con, metadata_key, signature)
+        con.commit()
+        return repaired
+
+    def repair_route_stage_memberships(
+        self,
+        con: Any,
+        *,
+        rules: list[dict[str, Any]] | None = None,
+    ) -> int:
+        """Repair active route copies using customer rules without slowing every startup.
+
+        Rows are loaded once and grouped in memory. Unchanged groups require no
+        follow-up queries. The expensive repair runs only when the route logic or
+        active Customer Route Rules change.
+        """
+        active_rules = rules if rules is not None else self.customer_route_rules_from_connection(con)
+        rows = con.execute(
+            """
+            SELECT li.*, dl.delivery_date, dl.stage, dl.scanner
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            WHERE dl.status = 'active'
+            ORDER BY dl.delivery_date, li.source_id, li.order_no, li.item_no, dl.stage
+            """
+        ).fetchall()
+        grouped: dict[tuple[str, str], list[Any]] = {}
+        for row in rows:
+            source_key = str(row["source_id"] or "").strip() or f"{row['order_no']}::{row['item_no']}"
+            grouped.setdefault((str(row["delivery_date"] or ""), source_key), []).append(row)
+
+        repaired = 0
+        for (delivery_date, _source_key), siblings in grouped.items():
+            representative = next(
+                (row for row in siblings if str(row["stage"] or "").lower().startswith("staging")),
+                next(
+                    (row for row in siblings if str(row["stage"] or "").lower().startswith("outbound")),
+                    siblings[0],
+                ),
+            )
+            route_source = {
+                "route": row_value(representative, "source_route", "") or representative["route"],
+                "sourceRoute": row_value(representative, "source_route", ""),
+                "job": representative["job"],
+                "customer": representative["customer"],
+                "product": representative["product"],
+                "processState": representative["process_state"],
+                "queueState": representative["queue_state"],
+            }
+            canonical_route = self.resolve_item_route(route_source, active_rules) or "IT"
+            receiving_before = {
+                str(row["list_id"])
+                for row in siblings
+                if not str(row["stage"] or "").lower().startswith("staging")
+                and not str(row["stage"] or "").lower().startswith("outbound")
+            }
+            expected_destination = self.destination_for_line_item({**route_source, "route": canonical_route})
+            expected_list_id = self.manual_route_profile(delivery_date, expected_destination)[0]
+            route_changed = any(str(row["route"] or "").strip().upper() != canonical_route for row in siblings)
+            membership_changed = receiving_before != {expected_list_id}
+            if not route_changed and not membership_changed:
+                continue
+
+            sibling_ids = [str(row["id"]) for row in siblings]
+            placeholders = ",".join("?" for _ in sibling_ids)
+            affected_racks = con.execute(
+                f"SELECT DISTINCT rack_id FROM rack_items WHERE line_item_id IN ({placeholders}) AND status = 'Active'",
+                sibling_ids,
+            ).fetchall()
+            if route_changed:
+                con.execute(
+                    f"UPDATE line_items SET route = ? WHERE id IN ({placeholders})",
+                    [canonical_route, *sibling_ids],
+                )
+            if membership_changed:
+                refreshed = con.execute(
+                    """
+                    SELECT li.*, dl.delivery_date, dl.stage, dl.scanner
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE li.id = ?
+                    """,
+                    (representative["id"],),
+                ).fetchone()
+                if refreshed:
+                    self.sync_manual_route_membership(con, refreshed)
+            for rack_row in affected_racks:
+                self.refresh_rack_destination(con, int(rack_row["rack_id"]))
+            repaired += 1
+        return repaired
 
     def create_schema(self, con: sqlite3.Connection) -> None:
+        """Purpose: Create schema for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         con.executescript(
             """
             CREATE TABLE IF NOT EXISTS delivery_lists (
@@ -2124,11 +3205,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 dimensions TEXT NOT NULL DEFAULT '',
                 customer TEXT NOT NULL DEFAULT '',
                 route TEXT NOT NULL DEFAULT '',
+                source_route TEXT NOT NULL DEFAULT '',
                 job TEXT NOT NULL DEFAULT '',
                 product TEXT NOT NULL DEFAULT '',
                 process_state TEXT NOT NULL DEFAULT '',
                 queue_state TEXT NOT NULL DEFAULT '',
-                suggested_bay TEXT NOT NULL DEFAULT ''
+                suggested_bay TEXT NOT NULL DEFAULT '',
+                priority_delivery_date TEXT NOT NULL DEFAULT '',
+                priority_direct_to_truck INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS scan_events (
@@ -2161,6 +3245,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 customer_address TEXT NOT NULL DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS system_metadata (
+                metadata_key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL DEFAULT ''
             );
 
@@ -2429,6 +3519,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ON app_notifications(active, created_at DESC, id DESC);
             """
         )
+        self.apply_schema_migrations(con)
+
+    def apply_schema_migrations(self, con: Any) -> None:
+        """Purpose: Run the apply schema migrations workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         self.ensure_column(con, "bays", "display_name", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "bays", "map_section", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "bays", "bay_category", "TEXT NOT NULL DEFAULT ''")
@@ -2462,14 +3560,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.ensure_column(con, "racks", "departed_at", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "racks", "returned_at", "TEXT NOT NULL DEFAULT ''")
         self.ensure_column(con, "rack_items", "destination_override", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "line_items", "source_route", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "line_items", "priority_delivery_date", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, "line_items", "priority_direct_to_truck", "INTEGER NOT NULL DEFAULT 0")
         con.commit()
 
     def ensure_column(self, con: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        """Purpose: Validate column for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
         columns = {row["name"] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
         if column not in columns:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def clone_item_for_list(self, item: dict[str, Any], list_id: str, index: int, auto_assign_settings: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Purpose: Run the clone item for list workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         order_no = str(item["order"])
         item_no = str(item["item"]).zfill(3)
         explicit, canonical_route = normalize_route_column(item.get("route", ""))
@@ -2490,6 +3601,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "dimensions": dimensions,
             "customer": str(item.get("customer", "")),
             "route": route,
+            "source_route": str(item.get("sourceRoute", item.get("route", ""))),
             "job": str(item.get("job", "")),
             "product": product,
             "process_state": str(item.get("processState", "")),
@@ -2497,20 +3609,64 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "suggested_bay": suggested_bay(product, dimensions, route, auto_assign_settings),
         }
 
+    def available_line_item_id(
+        self,
+        con: sqlite3.Connection,
+        desired_id: str,
+        list_id: str,
+        source_id: str,
+        index: int,
+    ) -> str:
+        """Return a stable, unused line-item ID when an older stage move owns the desired ID.
+
+        Effects: Reads the global line-item ID namespace but does not modify database state.
+        Flow: Uses the normal deterministic ID when available. If that ID belongs to another
+        delivery list, derives a stable suffix from the intended list/source/index and checks
+        progressively numbered fallbacks. A collision inside the same list remains an error
+        because inserting it would duplicate one line within that delivery list.
+        """
+        existing = con.execute("SELECT list_id FROM line_items WHERE id = ?", (desired_id,)).fetchone()
+        if not existing:
+            return desired_id
+        if str(existing["list_id"] or "") == str(list_id):
+            raise sqlite3.IntegrityError(f"Duplicate line item ID within delivery list: {desired_id}")
+
+        identity = f"{list_id}{source_id}{index}".encode("utf-8")
+        suffix = hashlib.sha1(identity).hexdigest()[:10]
+        candidate = f"{desired_id}-copy-{suffix}"
+        attempt = 1
+        while con.execute("SELECT 1 FROM line_items WHERE id = ?", (candidate,)).fetchone():
+            attempt += 1
+            candidate = f"{desired_id}-copy-{suffix}-{attempt}"
+        return candidate
+
     def insert_line_items(self, con: sqlite3.Connection, list_id: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Purpose: Create line items for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, assigns a globally safe line-item ID, inserts each normalized
+        row, and returns the inserted records to the import/update preservation workflow.
+        """
         cloned_items = []
         auto_assign_settings = self.get_bay_auto_assign_settings_con(con)
         for index, item in enumerate(items, start=1):
             cloned = self.clone_item_for_list(item, list_id, index, auto_assign_settings)
+            cloned["id"] = self.available_line_item_id(
+                con,
+                str(cloned["id"]),
+                list_id,
+                str(cloned["source_id"]),
+                index,
+            )
             cloned_items.append(cloned)
             con.execute(
                 """
                 INSERT INTO line_items (
                     id, list_id, source_id, barcode, order_no, item_no, qty,
-                    dimensions, customer, route, job, product, process_state,
+                    dimensions, customer, route, source_route, job, product, process_state,
                     queue_state, suggested_bay
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     cloned["id"],
@@ -2523,6 +3679,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     cloned["dimensions"],
                     cloned["customer"],
                     cloned["route"],
+                    cloned["source_route"],
                     cloned["job"],
                     cloned["product"],
                     cloned["process_state"],
@@ -2533,6 +3690,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return cloned_items
 
     def import_order_item_key(self, value: Any, order_no: Any, item_no: Any) -> str:
+        """Purpose: Load order item key for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         source_text = str(value or "").strip()
         parts = source_text.split(":")
         if len(parts) >= 2 and parts[-2].strip().isdigit() and parts[-1].strip().isdigit():
@@ -2540,7 +3702,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return f"{str(order_no or '').strip()}-{str(item_no or '').strip().zfill(3)}"
 
     def import_business_key(self, values: dict[str, Any]) -> str:
+        """Purpose: Load business key for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         def field(name: str) -> Any:
+            """Purpose: Run the field workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             if hasattr(values, "keys") and name in values.keys():
                 return values[name]
             return values.get(name) if isinstance(values, dict) else ""
@@ -2565,6 +3737,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         items: list[dict[str, Any]],
         replace_items: bool,
     ) -> dict[str, Any]:
+        """Purpose: Run the upsert delivery list workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         existing = con.execute("SELECT revision, created_at FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
         created = existing["created_at"] if existing else now_iso()
         revision = int(existing["revision"]) + 1 if existing and replace_items else int(existing["revision"]) if existing else 1
@@ -2605,6 +3782,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             original_total_qty = 0
 
             def add_previous_to_pool(pool_name: str, key: str, record: dict[str, Any]) -> None:
+                """Purpose: Create previous to pool for the delivery-list scanner workflow.
+
+                Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+                Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+                """
                 if not key:
                     return
                 previous_pools[pool_name].setdefault(key, []).append(record)
@@ -2620,10 +3802,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "dimensions": str(row["dimensions"] or ""),
                     "customer": str(row["customer"] or ""),
                     "route": str(row["route"] or ""),
+                    "source_route": str(row_value(row, "source_route", "") or ""),
                     "job": str(row["job"] or ""),
                     "product": str(row["product"] or ""),
                     "process_state": str(row["process_state"] or ""),
                     "queue_state": str(row["queue_state"] or ""),
+                    "priority_delivery_date": str(row_value(row, "priority_delivery_date") or ""),
+                    "priority_direct_to_truck": int(row_value(row, "priority_direct_to_truck", 0) or 0),
                 }
                 record = {
                     "id": line_key,
@@ -2674,6 +3859,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             used_previous_ids: set[str] = set()
 
             def pop_previous(pool_name: str, key: str) -> dict[str, Any] | None:
+                """Purpose: Run the pop previous workflow for the delivery-list scanner.
+
+                Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+                Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+                """
                 pool = previous_pools[pool_name].get(key) or []
                 while pool:
                     candidate = pool.pop(0)
@@ -2683,6 +3873,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return None
 
             def match_previous(cloned: dict[str, Any]) -> dict[str, Any] | None:
+                """Purpose: Resolve previous for the delivery-list scanner workflow.
+
+                Effects: This function reads or updates shared application state.
+                Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+                """
                 cloned_line_key = str(cloned["id"])
                 exact = previous_by_id.get(cloned_line_key)
                 if exact and exact["id"] not in used_previous_ids:
@@ -2704,6 +3899,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "UPDATE line_items SET scanned_qty = ? WHERE id = ?",
                         (min(int(preserved), int(cloned["qty"])), cloned["id"]),
                     )
+                priority_delivery_date = str(previous.get("priority_delivery_date") or "") if previous else ""
+                priority_direct_to_truck = int(previous.get("priority_direct_to_truck") or 0) if previous else 0
+                previous_priority_state = str(previous.get("process_state") or "") if previous else ""
+                cloned_priority_state = str(cloned.get("process_state") or "")
+                preserved_priority_labels: list[str] = []
+                if is_rush_item({"processState": previous_priority_state}) and not is_rush_item({"processState": cloned_priority_state}):
+                    preserved_priority_labels.append("Rush")
+                if is_remake_item({"processState": previous_priority_state}) and not is_remake_item({"processState": cloned_priority_state}):
+                    preserved_priority_labels.append("Remake")
+                if preserved_priority_labels:
+                    cloned_priority_state = " ".join([cloned_priority_state, *preserved_priority_labels]).strip()
+                if priority_delivery_date or priority_direct_to_truck or preserved_priority_labels:
+                    con.execute(
+                        """
+                        UPDATE line_items
+                        SET process_state = ?, priority_delivery_date = ?, priority_direct_to_truck = ?
+                        WHERE id = ?
+                        """,
+                        (cloned_priority_state, priority_delivery_date, priority_direct_to_truck, cloned["id"]),
+                    )
                 if existing and not previous:
                     next_state = " ".join(part for part in [cloned["process_state"], "New Line"] if part).strip()
                     con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
@@ -2717,6 +3932,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "dimensions": str(cloned["dimensions"] or ""),
                         "customer": str(cloned["customer"] or ""),
                         "route": str(cloned["route"] or ""),
+                        "source_route": str(cloned["source_route"] or ""),
                         "job": str(cloned["job"] or ""),
                         "product": str(cloned["product"] or ""),
                         "queue_state": str(cloned["queue_state"] or ""),
@@ -2760,7 +3976,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return summary
 
     def seed_demo_data(self, con: sqlite3.Connection) -> None:
+        """Seed the optional sample file only into a completely empty scanner database.
+
+        Effects: May create starter delivery lists and stations on a first-run demo database.
+        Flow: Returns immediately when the sample file is absent or any delivery list already
+        exists. This prevents an old ``data/sample-delivery-list.json`` file from rewriting or
+        colliding with production rows during every startup. Fresh empty databases retain the
+        original optional demo-seeding behavior.
+        """
         if not self.sample_path.exists():
+            return
+        if con.execute("SELECT 1 FROM delivery_lists LIMIT 1").fetchone():
+            self.seed_stations(con)
             return
         sample = json.loads(self.sample_path.read_text(encoding="utf-8"))
         for list_id, label, stage, scanner, items in build_delivery_lists(sample):
@@ -2779,11 +4006,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         con.commit()
 
     def seed_stations(self, con: sqlite3.Connection) -> None:
+        """Purpose: Create stations for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
         created = now_iso()
         for station in DEFAULT_STATIONS:
             con.execute("INSERT OR IGNORE INTO stations (name, created_at) VALUES (?, ?)", (station, created))
 
     def seed_customer_route_rules(self, con: sqlite3.Connection) -> None:
+        """Purpose: Create customer route rules for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
         created = now_iso()
         for customer, route, address in DEFAULT_CUSTOMER_ROUTE_RULES:
             con.execute(
@@ -2795,6 +4032,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
 
     def seed_security_data(self, con: sqlite3.Connection) -> None:
+        """Purpose: Create security data for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
         for permission in PERMISSIONS:
             con.execute(
                 "INSERT OR IGNORE INTO permissions (name, description) VALUES (?, ?)",
@@ -2847,6 +4089,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         con.commit()
 
     def seed_user_if_missing(self, con: sqlite3.Connection, username: str, display_name: str, password: str, roles: list[str]) -> None:
+        """Purpose: Create user if missing for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
         existing = self.get_user_by_username(con, username)
         if existing:
             return
@@ -2864,6 +4111,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.insert_audit(con, "user", username, "seed_demo_user", "system", "", "", {"roles": roles})
 
     def seed_bays(self, con: sqlite3.Connection) -> None:
+        """Purpose: Create bays for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
         layout = self.get_bay_layout()
         if layout.get("bays"):
             self.seed_layout_bays(con, layout["bays"])
@@ -2894,6 +4146,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         con.commit()
 
     def seed_racks(self, con: sqlite3.Connection) -> None:
+        """Purpose: Create racks for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
         created = now_iso()
         rack_defs: list[tuple[str, str, str, int]] = []
         for index in range(1, 11):
@@ -2912,6 +4169,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         con.commit()
 
     def layout_bay_policy_status(self, bay: dict[str, Any]) -> str:
+        """Purpose: Run the layout bay policy status workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         source_status = str(bay.get("sourceStatus") or "").strip()
         normalized = source_status.replace(" ", "").replace("-", "").lower()
         if normalized in {"deleted", "inactive"}:
@@ -2923,6 +4185,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return "Available"
 
     def seed_layout_bays(self, con: sqlite3.Connection, bays: list[dict[str, Any]]) -> None:
+        """Purpose: Create layout bays for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
         con.execute(
             """
             UPDATE bays
@@ -2998,6 +4265,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         # Repair for databases touched by older Bay Map builds:
         # active=0 used to mean "manual/hold bay", but active now means "hidden/deleted".
         # Any mapped inactive bay that is not explicitly Deleted should be visible again as Manual Assign.
+        """Purpose: Reconcile manual assign bay visibility for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
         repaired = con.execute(
             """
             UPDATE bays
@@ -3034,6 +4306,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         con.commit()
 
     def list_timing_metrics(self, con: sqlite3.Connection, list_id: str, delivery_date: str) -> dict[str, Any]:
+        """Purpose: Read timing metrics for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         rows = con.execute(
             """
             SELECT li.id, li.qty, li.scanned_qty,
@@ -3041,7 +4318,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             FROM line_items li
             LEFT JOIN scan_events se ON se.line_item_id = li.id AND se.list_id = li.list_id
             WHERE li.list_id = ?
-            GROUP BY li.id
+            GROUP BY li.id, li.qty, li.scanned_qty
             """,
             (list_id,),
         ).fetchall()
@@ -3065,22 +4342,40 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def get_delivery_lists(self, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Purpose: Read delivery lists for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             rows = con.execute(
                 """
                 SELECT dl.*,
                        COALESCE(SUM(li.qty), 0) AS total_qty,
                        COALESCE(SUM(li.scanned_qty), 0) AS scanned_qty,
-                       COUNT(li.id) AS item_count,
-                       GROUP_CONCAT(DISTINCT CASE WHEN li.product <> '' THEN li.product ELSE li.job END) AS glass_types
+                       COUNT(li.id) AS item_count
                 FROM delivery_lists dl
                 LEFT JOIN line_items li ON li.list_id = dl.id
                 WHERE dl.status = 'active'
-                GROUP BY dl.id
+                GROUP BY dl.id, dl.label, dl.delivery_date, dl.stage, dl.scanner, dl.status, dl.revision, dl.created_at
                 HAVING COUNT(li.id) > 0
                 ORDER BY dl.delivery_date DESC, dl.label
                 """
             ).fetchall()
+            glass_type_rows = con.execute(
+                """
+                SELECT DISTINCT list_id,
+                       CASE WHEN product <> '' THEN product ELSE job END AS glass_type
+                FROM line_items
+                WHERE product <> '' OR job <> ''
+                """
+            ).fetchall()
+            glass_types_by_list: dict[str, list[str]] = {}
+            for glass_row in glass_type_rows:
+                glass_type = str(glass_row["glass_type"] or "").strip()
+                if glass_type:
+                    glass_types_by_list.setdefault(str(glass_row["list_id"]), []).append(glass_type)
+
             result = []
             for row in rows:
                 meta = list_meta(row)
@@ -3091,7 +4386,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "totalQty": total_qty,
                         "scannedQty": scanned_qty,
                         "itemCount": row["item_count"],
-                        "glassTypes": [value for value in str(row["glass_types"] or "").split(",") if value],
+                        "glassTypes": sorted(set(glass_types_by_list.get(str(row["id"]), []))),
                         "deliveryPercent": (scanned_qty / total_qty * 100) if total_qty else 0,
                     }
                 )
@@ -3101,10 +4396,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return result
 
     def get_line_items(self, list_id: str) -> list[dict[str, Any]]:
+        """Purpose: Read line items for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             return self._get_line_items(con, list_id)
 
     def _get_line_items(self, con: sqlite3.Connection, list_id: str) -> list[dict[str, Any]]:
+        """Purpose: Read line items for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         list_row = con.execute(
             "SELECT id, delivery_date, stage, scanner FROM delivery_lists WHERE id = ?",
             (list_id,),
@@ -3311,10 +4616,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return items
 
     def get_scan_events(self, list_id: str, only_errors: bool = False) -> list[dict[str, Any]]:
+        """Purpose: Read scan events for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             return self._get_scan_events(con, list_id, only_errors=only_errors)
 
     def _get_scan_events(self, con: sqlite3.Connection, list_id: str, only_errors: bool = False) -> list[dict[str, Any]]:
+        """Purpose: Read scan events for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         condition = "AND se.event_type = 'error'" if only_errors else ""
         rows = con.execute(
             f"""
@@ -3331,10 +4646,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return [event_from_row(row) for row in rows]
 
     def get_delivery_list(self, list_id: str, last_scan: dict[str, Any] | None = None, user: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Purpose: Read delivery list for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             return self._get_payload(con, list_id, last_scan=last_scan, user=user)
 
     def _get_payload(self, con: sqlite3.Connection, list_id: str, last_scan: dict[str, Any] | None = None, user: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Purpose: Read payload for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         meta_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
         if not meta_row:
             raise KeyError("Delivery list not found")
@@ -3350,6 +4675,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def user_can_access_list(self, user: dict[str, Any], list_id: str) -> bool:
+        """Purpose: Run the user can access list workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             row = con.execute("SELECT stage, scanner FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
             if not row:
@@ -3357,11 +4687,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return user_can_access_stage(user, row["stage"], row["scanner"])
 
     def get_stations(self) -> list[str]:
+        """Purpose: Read stations for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             rows = con.execute("SELECT name FROM stations ORDER BY name").fetchall()
             return [str(row["name"]) for row in rows]
 
     def add_station(self, name: str) -> dict[str, Any]:
+        """Purpose: Create station for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_name = " ".join(str(name or "").split())[:80]
         if not clean_name:
             raise ValueError("Station name is required")
@@ -3372,6 +4712,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"stations": self.get_stations(), "station": clean_name}
 
     def rename_station(self, old_name: str, new_name: str) -> dict[str, Any]:
+        """Purpose: Update station for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean_old = " ".join(str(old_name or "").split())[:80]
         clean_new = " ".join(str(new_name or "").split())[:80]
         if not clean_old or not clean_new:
@@ -3389,6 +4734,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"stations": self.get_stations(), "station": clean_new, "oldStation": clean_old}
 
     def remove_station(self, name: str) -> dict[str, Any]:
+        """Purpose: Remove station for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_name = " ".join(str(name or "").split())[:80]
         if not clean_name:
             raise ValueError("Station name is required")
@@ -3401,9 +4751,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"stations": self.get_stations(), "station": clean_name}
 
     def get_permissions(self) -> list[str]:
+        """Purpose: Read permissions for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         return list(PERMISSIONS)
 
     def list_roles(self) -> list[dict[str, Any]]:
+        """Purpose: Read roles for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             rows = con.execute("SELECT * FROM roles ORDER BY name").fetchall()
             roles: list[dict[str, Any]] = []
@@ -3422,6 +4782,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return roles
 
     def update_role_permissions(self, role_name: str, permissions: list[str], updated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Update role permissions for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_role = str(role_name or "").strip()
         clean_permissions = sorted({str(permission).strip() for permission in permissions if str(permission).strip()})
         unknown = [permission for permission in clean_permissions if permission not in PERMISSIONS]
@@ -3451,6 +4816,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"roles": self.list_roles(), "permissions": self.get_permissions()}
 
     def user_from_row(self, con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+        """Purpose: Run the user from row workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         role_rows = con.execute(
             """
             SELECT r.name
@@ -3488,6 +4858,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def get_user_by_username(self, con: sqlite3.Connection, username: str) -> sqlite3.Row | None:
+        """Purpose: Read user by username for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         clean = username.strip()
         return con.execute(
             """
@@ -3499,6 +4874,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ).fetchone()
 
     def authenticate_user(self, username: str, password: str) -> dict[str, Any]:
+        """Purpose: Run the authenticate user workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean_username = str(username or "").strip()
         if not clean_username or not password:
             raise ValueError("Username and password are required")
@@ -3523,6 +4903,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return {"token": token, "expiresAt": expires_at, "user": self.user_from_row(con, row)}
 
     def get_user_by_session(self, token: str) -> dict[str, Any] | None:
+        """Purpose: Read user by session for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         if not token:
             return None
         token_digest = session_token_hash(token, self.config.session_secret)
@@ -3547,6 +4932,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return self.user_from_row(con, row)
 
     def delete_session(self, token: str) -> None:
+        """Purpose: Remove session for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         if not token:
             return
         token_digest = session_token_hash(token, self.config.session_secret)
@@ -3555,6 +4945,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
 
     def request_password_reset(self, identity: str, requested_by: str = "self-service") -> dict[str, Any]:
+        """Purpose: Run the request password reset workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_identity = " ".join(str(identity or "").split())
         if not clean_identity:
             raise ValueError("BFS email or username is required")
@@ -3585,6 +4980,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return payload
 
     def confirm_password_reset(self, identity: str, reset_code: str, new_password: str) -> dict[str, Any]:
+        """Purpose: Run the confirm password reset workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_identity = " ".join(str(identity or "").split())
         clean_code = re.sub(r"\D", "", str(reset_code or ""))
         if not clean_identity or not clean_code or not new_password:
@@ -3617,11 +5017,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "message": "Password reset. Sign in with the new password."}
 
     def list_users(self) -> list[dict[str, Any]]:
+        """Purpose: Read users for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             rows = con.execute("SELECT * FROM users ORDER BY username").fetchall()
             return [self.user_from_row(con, row) for row in rows]
 
     def deactivate_user(self, username: str, deactivated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Run the deactivate user workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean_username = str(username or "").strip()
         if not clean_username:
             raise ValueError("username is required")
@@ -3639,6 +5049,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"users": self.list_users(), "username": clean_username}
 
     def reactivate_user(self, username: str, activated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Run the reactivate user workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean_username = str(username or "").strip()
         if not clean_username:
             raise ValueError("username is required")
@@ -3653,6 +5068,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"users": self.list_users(), "username": clean_username}
 
     def delete_user(self, username: str, deleted_by: str = "system") -> dict[str, Any]:
+        """Purpose: Remove user for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_username = str(username or "").strip()
         if not clean_username:
             raise ValueError("username is required")
@@ -3671,6 +5091,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"users": self.list_users(), "username": clean_username}
 
     def update_user_password(self, username: str, password: str, updated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Update user password for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_username = str(username or "").strip()
         if not clean_username or not password:
             raise ValueError("username and password are required")
@@ -3688,6 +5113,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"users": self.list_users(), "username": clean_username}
 
     def update_user_roles(self, username: str, roles: list[str], station: str | None = None, email: str | None = None, updated_by: str = "system") -> dict[str, Any]:
+        """Purpose: Update user roles for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_username = str(username or "").strip()
         clean_roles = [str(role).strip() for role in roles if str(role).strip()]
         station_supplied = station is not None
@@ -3769,6 +5199,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"users": self.list_users(), "username": clean_username, "roles": clean_roles, "station": clean_station, "email": clean_email if email_supplied else None}
 
     def list_active_sessions(self) -> list[dict[str, Any]]:
+        """Purpose: Read active sessions for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         now = now_iso()
         with self.connect() as con:
             rows = con.execute(
@@ -3796,6 +5231,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ]
 
     def create_user(self, data: dict[str, Any], created_by: str = "system") -> dict[str, Any]:
+        """Purpose: Create user for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         email = " ".join(str(data.get("email") or data.get("bfsEmail") or "").split()).lower()[:160]
         username = " ".join(str(data.get("username") or email).split())[:160]
         display_name = " ".join(str(data.get("displayName") or username).split())[:120]
@@ -3830,36 +5270,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return self.user_from_row(con, user_row)
 
     def get_customer_route_rules(self) -> list[dict[str, Any]]:
+        """Purpose: Read customer route rules for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
-            rows = con.execute(
-                "SELECT * FROM customer_route_rules WHERE active = 1 ORDER BY route, customer_pattern"
-            ).fetchall()
-        return [
-            {
-                "id": row["id"],
-                "customerPattern": row["customer_pattern"],
-                "route": row["route"],
-                "customerAddress": row["customer_address"] if "customer_address" in row.keys() else "",
-                "active": bool(row["active"]),
-            }
-            for row in rows
-        ]
+            return self.customer_route_rules_from_connection(con)
 
     def add_customer_route_rule(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Create customer route rule for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         customer = " ".join(str(data.get("customerPattern") or data.get("customer") or "").split())[:160]
         customer_address = " ".join(str(data.get("customerAddress") or data.get("address") or "").split())[:240]
         raw_route = str(data.get("route") or "").strip().upper()
         rule_id = int(data.get("ruleId") or data.get("id") or 0)
-        if raw_route in {"CPU", "CUSTOMER PICKUP"}:
-            route = "CPU"
-        elif raw_route in {"DTC", "DELIVER TO CUSTOMER"}:
-            route = "DTC"
-        elif raw_route in {"GRN", "GNV", "GREENVILLE"}:
-            route = "GNV"
-        else:
-            route = re.sub(r"[^A-Z0-9_-]+", "-", raw_route).strip("-")[:24]
-        if route == "CUSTOMER-PICKUP":
-            route = "CPU"
+        matched_route, canonical_route = canonical_route_designation(raw_route)
+        route = (canonical_route or "IT") if matched_route else re.sub(r"[^A-Z0-9_-]+", "-", raw_route).strip("-")[:24]
         if not route:
             raise ValueError("Route is required")
         if not customer:
@@ -3912,10 +5342,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 audit_id = customer
                 audit_action = "upsert_customer_route_rule"
             self.insert_audit(con, "customer_route_rule", audit_id, audit_action, user, "", "", {"customer": customer, "route": route, "address": customer_address})
+            repaired_items = self.repair_route_stage_memberships_if_needed(con, force=True)
             con.commit()
-        return {"rules": self.get_customer_route_rules()}
+        return {"rules": self.get_customer_route_rules(), "repairedItems": repaired_items}
 
     def remove_customer_route_rule(self, rule_id: int, user: str) -> dict[str, Any]:
+        """Purpose: Remove customer route rule for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         if not rule_id:
             raise ValueError("ruleId is required")
         with self.connect() as con:
@@ -3925,302 +5361,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 raise ValueError("Customer route rule not found")
             con.execute("UPDATE customer_route_rules SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), rule_id))
             self.insert_audit(con, "customer_route_rule", str(rule_id), "remove_customer_route_rule", user, "", "", {"customer": row["customer_pattern"]})
+            repaired_items = self.repair_route_stage_memberships_if_needed(con, force=True)
             con.commit()
-        return {"rules": self.get_customer_route_rules()}
+        return {"rules": self.get_customer_route_rules(), "repairedItems": repaired_items}
 
-    def get_customer_email_settings(self) -> dict[str, Any]:
-        with self.connect() as con:
-            contacts = con.execute(
-                """
-                SELECT * FROM customer_email_contacts
-                WHERE active = 1
-                ORDER BY customer_pattern, email
-                """
-            ).fetchall()
-            cc_rows = con.execute(
-                """
-                SELECT * FROM customer_email_cc
-                WHERE active = 1
-                ORDER BY email
-                """
-            ).fetchall()
-            outbox = con.execute(
-                """
-                SELECT * FROM email_outbox
-                ORDER BY id DESC
-                LIMIT 20
-                """
-            ).fetchall()
-        return {
-            "contacts": [
-                {
-                    "id": row["id"],
-                    "customerPattern": row["customer_pattern"],
-                    "email": row["email"],
-                    "active": bool(row["active"]),
-                    "updatedAt": row["updated_at"] or row["created_at"],
-                }
-                for row in contacts
-            ],
-            "cc": [
-                {
-                    "id": row["id"],
-                    "email": row["email"],
-                    "active": bool(row["active"]),
-                    "updatedAt": row["updated_at"] or row["created_at"],
-                }
-                for row in cc_rows
-            ],
-            "outbox": [
-                {
-                    "id": row["id"],
-                    "emailType": row["email_type"],
-                    "customerName": row["customer_name"],
-                    "deliveryDate": row["delivery_date"],
-                    "toEmails": json.loads(row["to_emails"] or "[]"),
-                    "ccEmails": json.loads(row["cc_emails"] or "[]"),
-                    "subject": row["subject"],
-                    "body": row["body"],
-                    "status": row["status"],
-                    "createdAt": row["created_at"],
-                    "sentAt": row["sent_at"],
-                    "error": row["error"],
-                }
-                for row in outbox
-            ],
-            "smtpConfigured": bool(os.environ.get("DLS_SMTP_HOST") and os.environ.get("DLS_SMTP_FROM")),
-            "smtpConfig": {
-                "host": os.environ.get("DLS_SMTP_HOST", ""),
-                "port": os.environ.get("DLS_SMTP_PORT", "587"),
-                "from": os.environ.get("DLS_SMTP_FROM", ""),
-                "user": os.environ.get("DLS_SMTP_USER", ""),
-                "ssl": os.environ.get("DLS_SMTP_SSL", "").strip().lower() in {"1", "true", "yes"},
-            },
-        }
-
-    def upsert_customer_email_contact(self, data: dict[str, Any], user: str) -> dict[str, Any]:
-        customer = " ".join(str(data.get("customerPattern") or data.get("customer") or "").split())[:160]
-        email = str(data.get("email") or "").strip().lower()
-        contact_id = int(data.get("id") or 0)
-        if not customer:
-            raise ValueError("Customer match text is required")
-        if not is_valid_email(email):
-            raise ValueError("A valid customer email is required")
-        with self.connect() as con:
-            con.execute("BEGIN IMMEDIATE")
-            if contact_id:
-                con.execute(
-                    """
-                    UPDATE customer_email_contacts
-                    SET customer_pattern = ?, email = ?, active = 1, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (customer, email, now_iso(), contact_id),
-                )
-                audit_id = str(contact_id)
-            else:
-                con.execute(
-                    """
-                    INSERT INTO customer_email_contacts (customer_pattern, email, active, created_at, updated_at)
-                    VALUES (?, ?, 1, ?, ?)
-                    ON CONFLICT(customer_pattern, email) DO UPDATE SET active = 1, updated_at = excluded.updated_at
-                    """,
-                    (customer, email, now_iso(), now_iso()),
-                )
-                audit_id = customer
-            self.insert_audit(con, "customer_email", audit_id, "upsert_customer_email", user, "", "", {"customer": customer, "email": email})
-            con.commit()
-        return self.get_customer_email_settings()
-
-    def remove_customer_email_contact(self, contact_id: int, user: str) -> dict[str, Any]:
-        if not contact_id:
-            raise ValueError("contact id is required")
-        with self.connect() as con:
-            con.execute("BEGIN IMMEDIATE")
-            row = con.execute("SELECT * FROM customer_email_contacts WHERE id = ?", (contact_id,)).fetchone()
-            if not row:
-                raise ValueError("Customer email contact not found")
-            con.execute("UPDATE customer_email_contacts SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), contact_id))
-            self.insert_audit(con, "customer_email", str(contact_id), "remove_customer_email", user, "", "", {"customer": row["customer_pattern"], "email": row["email"]})
-            con.commit()
-        return self.get_customer_email_settings()
-
-    def upsert_customer_email_cc(self, data: dict[str, Any], user: str) -> dict[str, Any]:
-        email = str(data.get("email") or "").strip().lower()
-        if not is_valid_email(email):
-            raise ValueError("A valid CC email is required")
-        with self.connect() as con:
-            con.execute("BEGIN IMMEDIATE")
-            con.execute(
-                """
-                INSERT INTO customer_email_cc (email, active, created_at, updated_at)
-                VALUES (?, 1, ?, ?)
-                ON CONFLICT(email) DO UPDATE SET active = 1, updated_at = excluded.updated_at
-                """,
-                (email, now_iso(), now_iso()),
-            )
-            self.insert_audit(con, "customer_email_cc", email, "upsert_customer_email_cc", user, "", "", {"email": email})
-            con.commit()
-        return self.get_customer_email_settings()
-
-    def remove_customer_email_cc(self, cc_id: int, user: str) -> dict[str, Any]:
-        if not cc_id:
-            raise ValueError("cc id is required")
-        with self.connect() as con:
-            con.execute("BEGIN IMMEDIATE")
-            row = con.execute("SELECT * FROM customer_email_cc WHERE id = ?", (cc_id,)).fetchone()
-            if not row:
-                raise ValueError("CC email not found")
-            con.execute("UPDATE customer_email_cc SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), cc_id))
-            self.insert_audit(con, "customer_email_cc", str(cc_id), "remove_customer_email_cc", user, "", "", {"email": row["email"]})
-            con.commit()
-        return self.get_customer_email_settings()
-
-    def queue_customer_email_test(self, data: dict[str, Any], user: str) -> dict[str, Any]:
-        """Create or send a customer-email test message.
-
-        This deliberately writes to email_outbox even when SMTP is missing, so the
-        Admin Email Drafts section can preview exactly what would have been sent.
-        SMTP credentials stay server-side through DLS_SMTP_* environment variables.
-        """
-        to_email = str(data.get("toEmail") or data.get("email") or "").strip().lower()
-        cc_text = str(data.get("ccEmails") or "").replace(";", ",")
-        cc_emails = [part.strip().lower() for part in cc_text.split(",") if part.strip()]
-        subject = str(data.get("subject") or "Delivery Scanner test email").strip()[:180]
-        body = str(data.get("body") or "This is a test email from the Delivery List Scanner customer email system.").strip()
-        if not is_valid_email(to_email):
-            raise ValueError("Enter a valid recipient email for the test message")
-        clean_cc = sorted({email for email in cc_emails if is_valid_email(email) and email != to_email})
-        status = "queued"
-        sent_at = ""
-        error = ""
-        try:
-            self.try_send_email([to_email], clean_cc, subject, body)
-            status = "sent"
-            sent_at = now_iso()
-        except RuntimeError as exc:
-            status = "draft"
-            error = str(exc)
-        except Exception as exc:
-            status = "failed"
-            error = str(exc)
-        with self.connect() as con:
-            con.execute("BEGIN IMMEDIATE")
-            con.execute(
-                """
-                INSERT INTO email_outbox (email_type, customer_name, customer_pattern, delivery_date, to_emails, cc_emails, subject, body, status, created_at, sent_at, error, payload_json)
-                VALUES ('test', 'SMTP Test', 'SMTP Test', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    now_iso()[:10],
-                    json.dumps([to_email]),
-                    json.dumps(clean_cc),
-                    subject,
-                    body,
-                    status,
-                    now_iso(),
-                    sent_at,
-                    error,
-                    json.dumps({"user": user, "smtpConfigured": bool(os.environ.get("DLS_SMTP_HOST") and os.environ.get("DLS_SMTP_FROM"))}, separators=(",", ":")),
-                ),
-            )
-            self.insert_audit(con, "customer_email", to_email, "send_test_email", user, "", error, {"status": status, "subject": subject})
-            con.commit()
-        payload = self.get_customer_email_settings()
-        payload["testResult"] = {"status": status, "error": error, "toEmail": to_email}
-        return payload
-
-    def customer_email_matches(self, con: sqlite3.Connection, customer_name: str) -> list[sqlite3.Row]:
-        rows = con.execute(
-            """
-            SELECT * FROM customer_email_contacts
-            WHERE active = 1
-            ORDER BY LENGTH(customer_pattern) DESC, customer_pattern
-            """
-        ).fetchall()
-        return [row for row in rows if fuzzy_contains(customer_name, row["customer_pattern"]) or fuzzy_contains(row["customer_pattern"], customer_name)]
-
-    def customer_cc_emails(self, con: sqlite3.Connection) -> list[str]:
-        return [row["email"] for row in con.execute("SELECT email FROM customer_email_cc WHERE active = 1 ORDER BY email").fetchall()]
-
-    def queue_email_message(self, con: sqlite3.Connection, email_type: str, customer_name: str, customer_pattern: str, delivery_date: str, to_emails: list[str], cc_emails: list[str], subject: str, body: str, payload: dict[str, Any]) -> None:
-        clean_to = sorted({email.strip().lower() for email in to_emails if is_valid_email(email)})
-        clean_cc = sorted({email.strip().lower() for email in cc_emails if is_valid_email(email) and email.strip().lower() not in clean_to})
-        if not clean_to:
-            return
-        existing = con.execute(
-            """
-            SELECT * FROM email_outbox
-            WHERE email_type = ? AND customer_name = ? AND delivery_date = ? AND subject = ? AND status IN ('queued', 'draft', 'sent')
-            LIMIT 1
-            """,
-            (email_type, customer_name, delivery_date, subject),
-        ).fetchone()
-        if existing and existing["status"] == "sent":
-            return
-
-        status = "queued"
-        sent_at = ""
-        error = ""
-        try:
-            self.try_send_email(clean_to, clean_cc, subject, body)
-            status = "sent"
-            sent_at = now_iso()
-        except RuntimeError as exc:
-            status = "draft"
-            error = str(exc)
-        except Exception as exc:
-            status = "failed"
-            error = str(exc)
-
-        if existing:
-            # If a previous run saved a draft because SMTP was not configured, retry it
-            # on the next import/ready check after SMTP is configured instead of silently
-            # leaving the old draft forever. If SMTP is still unavailable, keep the draft.
-            if status != "sent":
-                return
-            con.execute(
-                """
-                UPDATE email_outbox
-                SET to_emails = ?, cc_emails = ?, body = ?, status = 'sent', sent_at = ?, error = '', payload_json = ?
-                WHERE id = ?
-                """,
-                (json.dumps(clean_to), json.dumps(clean_cc), body, sent_at, json.dumps(payload, separators=(",", ":")), existing["id"]),
-            )
-            return
-
-        con.execute(
-            """
-            INSERT INTO email_outbox (email_type, customer_name, customer_pattern, delivery_date, to_emails, cc_emails, subject, body, status, created_at, sent_at, error, payload_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (email_type, customer_name, customer_pattern, delivery_date, json.dumps(clean_to), json.dumps(clean_cc), subject, body, status, now_iso(), sent_at, error, json.dumps(payload, separators=(",", ":"))),
-        )
-
-    def try_send_email(self, to_emails: list[str], cc_emails: list[str], subject: str, body: str) -> None:
-        smtp_host = os.environ.get("DLS_SMTP_HOST", "").strip()
-        smtp_from = os.environ.get("DLS_SMTP_FROM", "").strip()
-        if not smtp_host or not smtp_from:
-            raise RuntimeError("SMTP is not configured; message saved as draft")
-        msg = EmailMessage()
-        msg["From"] = smtp_from
-        msg["To"] = ", ".join(to_emails)
-        if cc_emails:
-            msg["Cc"] = ", ".join(cc_emails)
-        msg["Subject"] = subject
-        msg.set_content(body)
-        port = int(os.environ.get("DLS_SMTP_PORT", "587") or 587)
-        username = os.environ.get("DLS_SMTP_USER", "").strip()
-        password = os.environ.get("DLS_SMTP_PASSWORD", "")
-        use_ssl = os.environ.get("DLS_SMTP_SSL", "").strip().lower() in {"1", "true", "yes"}
-        with (smtplib.SMTP_SSL(smtp_host, port, timeout=20) if use_ssl else smtplib.SMTP(smtp_host, port, timeout=20)) as smtp:
-            if not use_ssl:
-                smtp.starttls()
-            if username:
-                smtp.login(username, password)
-            smtp.send_message(msg)
 
     def send_customer_manifests_for_import(self, con: sqlite3.Connection, payload: dict[str, Any], user: str) -> None:
+        """Purpose: Send customer manifests for import for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         delivery_date = str(payload.get("deliveryDate") or "")
         items = [item for item in payload.get("items") or [] if isinstance(item, dict)]
         customer_map: dict[str, list[dict[str, Any]]] = {}
@@ -4236,7 +5387,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 continue
             to_emails = [row["email"] for row in contacts]
             rows = "\n".join(
-                f"- Job {item.get('job') or item.get('product') or '-'} | Order {item.get('order')}-{item.get('item')} | Qty {item.get('qty')} | {item.get('dimensions') or '-'} | Route {item.get('route') or '-'}"
+                f"- Job {item.get('job') or item.get('product') or '-'} | Order {item.get('order')}-{item.get('item')} | Qty {item.get('qty')} | {item.get('dimensions') or '-'}{f' | Route {public_route_label(item.get("route"))}' if public_route_label(item.get('route')) else ''}"
                 for item in customer_items
             )
             subject = f"Delivery manifest for {customer} - {format_display_date(delivery_date)}"
@@ -4248,38 +5399,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
             self.queue_email_message(con, "manifest", customer, contacts[0]["customer_pattern"], delivery_date, to_emails, cc_emails, subject, body, {"itemCount": len(customer_items), "user": user})
 
-    def queue_ready_email_if_customer_complete(self, con: sqlite3.Connection, list_id: str, scanned_row: sqlite3.Row, user: str) -> None:
-        list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
-        if not list_row or "staging" not in str(list_row["stage"] or "").lower():
-            return
-        customer = str(scanned_row["customer"] or "").strip()
-        if not customer:
-            return
-        contacts = self.customer_email_matches(con, customer)
-        if not contacts:
-            return
-        rows = con.execute(
-            """
-            SELECT * FROM line_items
-            WHERE list_id = ? AND customer = ?
-            ORDER BY COALESCE(NULLIF(job, ''), product, order_no), order_no, item_no
-            """,
-            (list_id, customer),
-        ).fetchall()
-        if not rows or any(int(row["scanned_qty"] or 0) < int(row["qty"] or 0) for row in rows):
-            return
-        delivery_date = list_row["delivery_date"]
-        subject = f"Order ready - {customer} - {format_display_date(delivery_date)}"
-        item_lines = "\n".join(f"- Job {row['job'] or row['product'] or '-'} | Order {row['order_no']}-{row['item_no']} | Qty {row['qty']} | {row['dimensions']}" for row in rows)
-        body = (
-            f"Hello,\n\nAll staging pieces for {customer} on {format_display_date(delivery_date)} have been scanned.\n"
-            "Your order is ready for pickup or shipment based on the assigned route.\n\n"
-            f"Pieces:\n{item_lines}\n\n"
-            "This is an automated readiness notice from Barefoot Facility Services."
-        )
-        self.queue_email_message(con, "ready", customer, contacts[0]["customer_pattern"], delivery_date, [row["email"] for row in contacts], self.customer_cc_emails(con), subject, body, {"listId": list_id, "user": user})
 
     def get_manual_edit_lookups(self) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Read manual edit lookups for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         buckets: dict[str, dict[str, dict[str, Any]]] = {
             "product": {},
             "route": {},
@@ -4287,6 +5413,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
         def add_lookup(kind: str, value: Any, label: Any = "", category: Any = "", match_terms: Any = "", source: str = "discovered", lookup_id: int | None = None) -> None:
+            """Purpose: Create lookup for the delivery-list scanner workflow.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+            """
             clean_kind = str(kind or "").strip().lower()
             clean_value = str(value or "").strip()
             if clean_kind not in buckets or not clean_value:
@@ -4329,6 +5460,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def add_manual_edit_lookup(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Create manual edit lookup for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         lookup_type = str(data.get("type") or "").strip().lower()
         if lookup_type not in {"product", "route", "process"}:
             raise ValueError("Lookup type must be product, route, or process")
@@ -4366,6 +5502,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_manual_edit_lookups()
 
     def seed_bay_auto_assign_settings(self, con: sqlite3.Connection) -> None:
+        """Purpose: Create bay auto assign settings for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         created = now_iso()
         for key, value in DEFAULT_BAY_AUTO_ASSIGN_SETTINGS.items():
             stored = json.dumps(value) if isinstance(value, (list, dict)) else str(value)
@@ -4378,6 +5519,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
 
     def bay_auto_assign_settings_from_rows(self, rows: list[sqlite3.Row]) -> dict[str, Any]:
+        """Purpose: Run the bay auto assign settings from rows workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         settings = dict(DEFAULT_BAY_AUTO_ASSIGN_SETTINGS)
         for row in rows:
             key = str(row["key"] or "")
@@ -4398,17 +5544,32 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return normalized_bay_auto_assign_settings(settings)
 
     def get_bay_auto_assign_settings(self) -> dict[str, Any]:
+        """Purpose: Read bay auto assign settings for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         with self.connect() as con:
             self.seed_bay_auto_assign_settings(con)
             rows = con.execute("SELECT * FROM bay_auto_assign_settings").fetchall()
         return self.bay_auto_assign_settings_from_rows(rows)
 
     def get_bay_auto_assign_settings_con(self, con: sqlite3.Connection) -> dict[str, Any]:
+        """Purpose: Read bay auto assign settings con for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         self.seed_bay_auto_assign_settings(con)
         rows = con.execute("SELECT * FROM bay_auto_assign_settings").fetchall()
         return self.bay_auto_assign_settings_from_rows(rows)
 
     def update_bay_auto_assign_settings(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Update bay auto assign settings for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         current = normalized_bay_auto_assign_settings(data)
         if current["tallMinInches"] <= 0 or current["oversizeMinInches"] <= 0:
             raise ValueError("Bay auto-assign thresholds must be greater than zero")
@@ -4443,14 +5604,29 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_bay_auto_assign_settings()
 
     def bay_type_requires_manual_assignment(self, con: sqlite3.Connection, bay_type: str) -> bool:
+        """Purpose: Run the bay type requires manual assignment workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         settings = self.get_bay_auto_assign_settings_con(con)
         manual_types = {str(value).strip().lower() for value in settings.get("manualAssignTypes", [])}
         return str(bay_type or "").strip().lower() in manual_types
 
     def suggested_bay_from_settings(self, con: sqlite3.Connection, product: str, dimensions: str, route: str) -> str:
+        """Purpose: Run the suggested bay from settings workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         return suggested_bay(product, dimensions, route, self.get_bay_auto_assign_settings_con(con))
 
     def bay_manual_rule_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        """Purpose: Run the bay manual rule from row workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         return {
             "id": row["id"],
             "matchType": row["match_type"],
@@ -4460,6 +5636,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def bay_barcode_rule_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        """Purpose: Run the bay barcode rule from row workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         return {
             "id": row["id"],
             "pattern": row["pattern"],
@@ -4468,6 +5649,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def get_bay_scan_settings(self) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Read bay scan settings for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         with self.connect() as con:
             manual_rows = con.execute(
                 """
@@ -4489,6 +5675,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def upsert_bay_manual_input_rule(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Run the upsert bay manual input rule workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         match_type = str(data.get("matchType") or data.get("match_type") or "exact").strip().lower()
         if match_type not in {"exact", "contains", "regex"}:
             raise ValueError("Manual input rule type must be exact, contains, or regex")
@@ -4513,6 +5704,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_bay_scan_settings()
 
     def remove_bay_manual_input_rule(self, rule_id: int, user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Remove bay manual input rule for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             con.execute("UPDATE bay_manual_input_rules SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), int(rule_id or 0)))
@@ -4521,6 +5717,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_bay_scan_settings()
 
     def upsert_bay_scan_barcode_rule(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Run the upsert bay scan barcode rule workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         pattern = str(data.get("pattern") or "").strip()
         label = str(data.get("label") or "").strip()
         if not pattern:
@@ -4541,6 +5742,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_bay_scan_settings()
 
     def remove_bay_scan_barcode_rule(self, rule_id: int, user: str) -> dict[str, list[dict[str, Any]]]:
+        """Purpose: Remove bay scan barcode rule for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             con.execute("UPDATE bay_scan_barcode_rules SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), int(rule_id or 0)))
@@ -4549,6 +5755,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_bay_scan_settings()
 
     def bay_manual_text_is_known(self, con: sqlite3.Connection, value: str) -> bool:
+        """Purpose: Run the bay manual text is known workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         text = str(value or "").strip()
         clean = normalized_match_text(text)
         if not text:
@@ -4577,6 +5788,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return False
 
     def find_manual_bay_line_items(self, con: sqlite3.Connection, scan_text: str, item_no: str = "") -> list[sqlite3.Row]:
+        """Purpose: Resolve manual bay line items for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         text = str(scan_text or "").strip()
         clean = clean_barcode(text)
         digits = digits_only(text)
@@ -4670,7 +5886,124 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchall()
         return [matched]
 
+    def expand_priority_line_items(self, con: Any, seed_rows: list[Any]) -> list[Any]:
+        """Return every active stage clone for the selected physical glass items.
+
+        Imported Staging, Outbound, and destination rows retain the same source_id.
+        Expanding by delivery date plus source_id lets Rush/Remake state follow the
+        glass through only the stages generated for its actual route.
+        """
+        expanded: dict[str, Any] = {}
+        for seed in seed_rows:
+            list_context = con.execute(
+                "SELECT delivery_date FROM delivery_lists WHERE id = ? AND status = 'active'",
+                (str(seed["list_id"] or ""),),
+            ).fetchone()
+            if not list_context:
+                continue
+            delivery_date = str(list_context["delivery_date"] or "")
+            source_id = str(seed["source_id"] or "").strip()
+            if source_id:
+                rows = con.execute(
+                    """
+                    SELECT li.*, dl.stage AS delivery_stage, dl.scanner AS delivery_scanner,
+                           dl.delivery_date AS delivery_date
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE dl.status = 'active'
+                      AND dl.delivery_date = ?
+                      AND li.source_id = ?
+                    ORDER BY dl.delivery_date, dl.id, li.order_no, li.item_no
+                    """,
+                    (delivery_date, source_id),
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    """
+                    SELECT li.*, dl.stage AS delivery_stage, dl.scanner AS delivery_scanner,
+                           dl.delivery_date AS delivery_date
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE dl.status = 'active'
+                      AND dl.delivery_date = ?
+                      AND li.order_no = ?
+                      AND li.item_no = ?
+                      AND COALESCE(li.job, '') = ?
+                      AND COALESCE(li.customer, '') = ?
+                    ORDER BY dl.delivery_date, dl.id, li.order_no, li.item_no
+                    """,
+                    (
+                        delivery_date,
+                        str(seed["order_no"] or ""),
+                        str(seed["item_no"] or ""),
+                        str(seed["job"] or ""),
+                        str(seed["customer"] or ""),
+                    ),
+                ).fetchall()
+            for row in rows:
+                expanded[str(row["id"])] = row
+
+        def stage_rank(row: Any) -> tuple[int, str, str]:
+            """Purpose: Run the stage rank workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
+            text = f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
+            if "staging" in text:
+                rank = 1
+            elif "outbound" in text:
+                rank = 2
+            elif "indian trail" in text or "inbound" in text:
+                rank = 3
+            elif "greenville" in text or re.search(r"\bgnv\b", text):
+                rank = 4
+            elif "customer pickup" in text or re.search(r"\bcpu\b", text):
+                rank = 5
+            elif "dtc" in text or "deliver to customer" in text:
+                rank = 6
+            else:
+                rank = 7
+            return rank, str(row["order_no"] or ""), str(row["item_no"] or "")
+
+        return sorted(expanded.values(), key=stage_rank)
+
+    def priority_list_context(self, con: Any, rows: list[Any]) -> list[dict[str, Any]]:
+        """Purpose: Run the priority list context workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
+        contexts: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            list_id = str(row["list_id"] or "")
+            if not list_id or list_id in seen:
+                continue
+            seen.add(list_id)
+            list_row = con.execute(
+                "SELECT id, label, delivery_date, stage, scanner FROM delivery_lists WHERE id = ?",
+                (list_id,),
+            ).fetchone()
+            if not list_row:
+                continue
+            contexts.append(
+                {
+                    "id": list_row["id"],
+                    "label": list_row["label"],
+                    "deliveryDate": list_row["delivery_date"],
+                    "stage": list_row["stage"],
+                    "scanner": list_row["scanner"],
+                }
+            )
+        return contexts
+
     def ensure_manual_bay_delivery_list(self, con: sqlite3.Connection) -> str:
+        """Purpose: Validate manual bay delivery list for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         today = now_iso()[:10]
         list_id = f"{today}-manual-bay-assignments"
         con.execute(
@@ -4684,6 +6017,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return list_id
 
     def create_manual_bay_line_item(self, con: sqlite3.Connection, scan_text: str, bay_code: str) -> sqlite3.Row:
+        """Purpose: Create manual bay line item for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         list_id = self.ensure_manual_bay_delivery_list(con)
         clean = clean_barcode(scan_text) or f"MANUAL{secrets.token_hex(4).upper()}"
         digits = digits_only(scan_text)
@@ -4700,6 +6038,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return con.execute("SELECT * FROM line_items WHERE id = ?", (line_id,)).fetchone()
 
     def assign_line_items_to_bay(self, con: sqlite3.Connection, rows: list[sqlite3.Row], bay: sqlite3.Row, user: str, reason: str) -> list[int]:
+        """Purpose: Run the assign line items to bay workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         assignment_ids: list[int] = []
         for row in rows:
             existing = con.execute(
@@ -4735,6 +6078,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return assignment_ids
 
     def manual_assign_bay_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the manual assign bay item workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         scan_text = str(data.get("scanText") or data.get("barcode") or data.get("order") or "").strip()
         item_no = str(data.get("itemNo") or data.get("item") or "").strip()
         bay_code = str(data.get("bayCode") or "").strip()
@@ -4780,39 +6128,75 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
 
     def route_from_customer_rules(self, item: dict[str, Any], rules: list[dict[str, Any]]) -> str:
+        """Purpose: Run the route from customer rules workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         customer_name = str(item.get("customer", ""))
-        for rule in rules:
-            if fuzzy_contains(customer_name, rule.get("customerPattern", "")):
-                return str(rule.get("route") or "").strip().upper()
-        return ""
+        normalized_customer = normalized_match_text(customer_name)
+        matches = [
+            rule
+            for rule in rules
+            if fuzzy_contains(customer_name, str(rule.get("customerPattern") or ""))
+        ]
+        if not matches:
+            return ""
+        matches.sort(
+            key=lambda rule: (
+                normalized_match_text(rule.get("customerPattern", "")) == normalized_customer,
+                len(normalized_match_text(rule.get("customerPattern", ""))),
+                -int(rule.get("id") or 0),
+            ),
+            reverse=True,
+        )
+        return str(matches[0].get("route") or "").strip().upper()
+
+    def resolve_item_route(self, item: dict[str, Any], rules: list[dict[str, Any]]) -> str:
+        """Resolve one item using the authoritative route order.
+
+        1. CPU-Air/CPU-IT Job Nr. override.
+        2. Active Customer Route Rule matched against customer name.
+        3. Imported ROUTE value as a fallback for custom/manual routes.
+        4. Blank route, which means Indian Trail in stage generation.
+        """
+        job_hint = job_number_route_hint(item)
+        if job_hint is not None:
+            return job_hint
+        ruled_route = self.route_from_customer_rules(item, rules)
+        if ruled_route:
+            matched, canonical = canonical_route_designation(ruled_route)
+            return canonical if matched else ruled_route
+        raw_route = str(item.get("sourceRoute") or item.get("route") or "").strip()
+        explicit, canonical = normalize_route_column(raw_route)
+        return canonical if explicit else ""
 
     def apply_customer_route_rules_to_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Run the apply customer route rules to payload workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rules = self.get_customer_route_rules()
         next_payload = dict(payload)
         next_items = []
         for item in payload.get("items") or []:
             next_item = dict(item)
-            explicit, explicit_route = normalize_route_column(next_item.get("route", ""))
-            if explicit:
-                next_item["route"] = explicit_route or "IT"
-            else:
-                job_hint = job_number_route_hint(next_item)
-                if job_hint is not None:
-                    next_item["route"] = job_hint or "IT"
-                else:
-                    ruled_route = self.route_from_customer_rules(next_item, rules) or default_customer_route(next_item)
-                    if ruled_route:
-                        canonical = normalize_route_column(ruled_route)[1]
-                        next_item["route"] = canonical or "IT"
-                    elif "CPU" in normalized_match_text(next_item.get("job", "")):
-                        next_item["route"] = "IT"
-                    else:
-                        next_item["route"] = ""
+            next_item["sourceRoute"] = str(
+                next_item.get("sourceRoute", next_item.get("route", "")) or ""
+            ).strip()
+            resolved_route = self.resolve_item_route(next_item, rules)
+            next_item["route"] = resolved_route or "IT"
             next_items.append(next_item)
         next_payload["items"] = next_items
         return next_payload
 
     def validate_import_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Validate import payload for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         if not isinstance(payload, dict):
             raise ValueError("Import payload must be a JSON object")
         delivery_date = str(payload.get("deliveryDate") or "").strip()
@@ -4828,6 +6212,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return payload
 
     def import_delivery_list(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Load delivery list for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         payload = self.validate_import_payload(data.get("payload") or data)
         payload = self.apply_customer_route_rules_to_payload(payload)
         user = request_user_name(data)
@@ -4925,6 +6314,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def print_candidates_from_payload(self, payload: dict[str, Any], list_ids: list[str], source_name: str, stage_summaries: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        """Purpose: Run the print candidates from payload workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+        """
         counts = print_counts_for_items(payload.get("items") or [])
         stage_summaries = stage_summaries or []
         changed_piece_qty = sum(int(summary.get("changedPieceQty") or 0) for summary in stage_summaries if summary.get("listId") in set(list_ids))
@@ -4944,6 +6338,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ]
 
     def import_delivery_folder(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Load delivery folder for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         user = request_user_name(data)
         folder = Path(str(data.get("sourceFolder") or self.config.temp_delivery_lists_dir)).expanduser()
         date_from = str(data.get("dateFrom") or "").strip()
@@ -5115,6 +6514,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def get_print_package(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Purpose: Read print package for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         filters = filters or {}
         rush_only = str(filters.get("rushOnly") or "").lower() in {"1", "true", "yes"}
         remake_only = str(filters.get("remakeOnly") or "").lower() in {"1", "true", "yes"}
@@ -5127,14 +6531,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         selected_mirror_glass = any(re.search(r"mirror|mirr|\bmir\b", glass_type) for glass_type in glass_types)
         customer_filter = str(filters.get("customers") or "").strip().lower()
         order_filter = str(filters.get("orders") or "").strip()
+        source_id_filter = str(filters.get("sourceIds") or "").strip()
         customer_terms = [term.strip() for term in re.split(r"[,;\n]+", customer_filter) if term.strip()]
         order_terms = [digits_only(term) for term in re.split(r"[,;\s\n]+", order_filter) if digits_only(term)]
+        source_id_terms = {term.strip() for term in re.split(r"[,;\n]+", source_id_filter) if term.strip()}
 
         def has_update_marker(item: dict[str, Any]) -> bool:
+            """Purpose: Validate update marker for the delivery-list scanner workflow.
+
+            Effects: This function reads or updates shared application state.
+            Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+            """
             text = f"{item.get('processState', '')} {item.get('queueState', '')}"
             return re.search(r"\b(update|updated|new|change|changed|added|add)\b", text, flags=re.IGNORECASE) is not None
 
         def route_matches(item: dict[str, Any]) -> bool:
+            """Purpose: Run the route matches workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             if cpu_only and not is_cpu_item(item):
                 return False
             if dtc_only and route_category(item) != "dtc":
@@ -5142,6 +6558,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return True
 
         def glass_filter_matches(item: dict[str, Any]) -> bool:
+            """Purpose: Run the glass filter matches workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             if not glass_types:
                 return True
             glass_signal = f"{item.get('product', '')} {item.get('job', '')}".lower()
@@ -5150,15 +6571,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return include_mirror_remakes and not selected_mirror_glass and is_mirror_item(item) and is_remake_item(item)
 
         def search_filters_match(item: dict[str, Any]) -> bool:
+            """Purpose: Run the search filters match workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             if not glass_filter_matches(item):
                 return False
             if customer_terms and not any(term in str(item.get("customer", "")).lower() for term in customer_terms):
                 return False
             if order_terms and digits_only(str(item.get("order", ""))) not in order_terms:
                 return False
+            if source_id_terms and str(item.get("sourceId") or "").strip() not in source_id_terms:
+                return False
             return True
 
         def normal_printable(item: dict[str, Any]) -> bool:
+            """Purpose: Run the normal printable workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+            """
             if is_remake_item(item):
                 return False
             if mirror_mode == "only":
@@ -5168,6 +6601,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return should_print_delivery_item(item, exclude_mirrors=True, include_mirror_remakes=False)
 
         def stage_sheet_kind(meta: dict[str, Any]) -> str:
+            """Purpose: Run the stage sheet kind workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             text = f"{meta.get('stage', '')} {meta.get('scanner', '')} {meta.get('label', '')}".lower()
             if "customer pickup" in text or " cpu" in f" {text}" or "cpu" in text:
                 return "cpu"
@@ -5239,6 +6677,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ]
 
             stage_kind = stage_sheet_kind(meta)
+            original_delivery_date = str(meta["deliveryDate"] or "")
+            rush_delivery_dates = sorted({
+                str(item.get("priorityDeliveryDate") or "").strip()
+                for item in rush_items
+                if str(item.get("priorityDeliveryDate") or "").strip()
+            })
+            effective_delivery_date = rush_delivery_dates[0] if rush_only and len(rush_delivery_dates) == 1 else original_delivery_date
             package_lists.append(
                 {
                     "id": meta["id"],
@@ -5246,7 +6691,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "stage": meta["stage"],
                     "scanner": meta.get("scanner", ""),
                     "stages": [meta["stage"]],
-                    "deliveryDate": meta["deliveryDate"],
+                    "deliveryDate": effective_delivery_date,
+                    "originalDeliveryDate": original_delivery_date,
+                    "priorityDirectToTruck": any(bool(item.get("priorityDirectToTruck")) for item in rush_items),
                     "items": package_items,
                     "normalItems": normal_items,
                     "remakes": remake_items,
@@ -5260,6 +6707,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"lists": package_lists, "generatedAt": now_iso(), "filters": filters}
 
     def find_unique_suffix_item(self, rows: list[sqlite3.Row], suffix: str, item_no: int) -> sqlite3.Row | None:
+        """Purpose: Resolve unique suffix item for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         matches = []
         for row in rows:
             if int(row["item_no"]) == item_no and f"{int(row['order_no']):06d}".endswith(suffix):
@@ -5267,10 +6719,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return matches[0] if len(matches) == 1 else None
 
     def find_unique_order(self, rows: list[sqlite3.Row], order_no: int) -> sqlite3.Row | None:
+        """Purpose: Resolve unique order for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         matches = [row for row in rows if int(row["order_no"]) == order_no]
         return matches[0] if len(matches) == 1 else None
 
     def recover_scan(self, raw_scan: str, rows: list[sqlite3.Row]) -> tuple[sqlite3.Row | None, str, str]:
+        """Purpose: Run the recover scan workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         clean_text = clean_barcode(raw_scan)
         by_order_item: dict[tuple[int, int], list[sqlite3.Row]] = {}
         for row in rows:
@@ -5319,6 +6781,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return None, clean_text, "No unique delivery-list match"
 
     def scan_other_list_hint(self, con: sqlite3.Connection, current_list_id: str, raw_scan: str) -> tuple[str, str]:
+        """Purpose: Process other list hint for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         list_rows = con.execute(
             """
             SELECT id, label, delivery_date, stage, scanner
@@ -5382,6 +6849,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         reason: str = "",
         qty_delta: int = 0,
     ) -> dict[str, Any]:
+        """Purpose: Create event for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         created = now_iso()
         cur = con.execute(
             """
@@ -5408,6 +6880,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return event_from_row(row)
 
     def insert_exception(self, con: sqlite3.Connection, list_id: str, event_id: int | None, exception_type: str, reason: str) -> None:
+        """Purpose: Create exception for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         con.execute(
             """
             INSERT INTO exceptions (list_id, scan_event_id, exception_type, status, reason, created_at)
@@ -5427,6 +6904,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         reason: str,
         payload: dict[str, Any] | None = None,
     ) -> None:
+        """Purpose: Create audit for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         con.execute(
             """
             INSERT INTO audit_events (entity_type, entity_id, action, user_name, station, reason, payload_json, created_at)
@@ -5436,6 +6918,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         )
 
     def record_scan(self, scan_request: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Process scan for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         list_id = str(scan_request.get("listId") or "")
         barcode = str(scan_request.get("barcode") or "")
         user = request_user_name(scan_request)
@@ -5613,6 +7100,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return payload
 
     def matching_staging_row_for_outbound(self, con: sqlite3.Connection, current_list: sqlite3.Row, outbound_row: sqlite3.Row) -> sqlite3.Row | None:
+        """Purpose: Run the matching staging row for outbound workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         staging_list = con.execute(
             """
             SELECT id FROM delivery_lists
@@ -5639,6 +7131,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ).fetchone()
 
     def transportation_for_staging_row(self, con: sqlite3.Connection, staging_line_item_id: str) -> sqlite3.Row | None:
+        """Purpose: Run the transportation for staging row workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         return con.execute(
             """
             SELECT r.*
@@ -5661,6 +7158,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         user: str,
         station: str,
     ) -> str:
+        """Purpose: Run the assign transportation from outbound override workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean_rack_code = normalize_rack_code(rack_code)
         if not clean_rack_code:
             raise ValueError("Choose a transportation method before overriding outbound scan safety.")
@@ -5855,6 +7357,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         user: str,
         station: str,
     ) -> bool:
+        """Purpose: Run the auto stage for outbound workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         current_list = con.execute("SELECT delivery_date, stage, scanner FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
         if not current_list or "outbound" not in str(current_list["stage"]).lower():
             return False
@@ -5920,6 +7427,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return True
 
     def preassign_bay_for_outbound(self, con: sqlite3.Connection, list_id: str, outbound_row: sqlite3.Row, user: str, station: str) -> str:
+        """Purpose: Run the preassign bay for outbound workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         current_list = con.execute("SELECT delivery_date, stage FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
         if not current_list or "outbound" not in str(current_list["stage"]).lower():
             return ""
@@ -6019,6 +7531,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return str(bay["bay_code"])
 
     def reset_stage(self, list_id: str, user: str, station: str) -> dict[str, Any]:
+        """Purpose: Run the reset stage workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             con.execute("UPDATE line_items SET scanned_qty = 0 WHERE list_id = ?", (list_id,))
@@ -6040,12 +7557,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return self._get_payload(con, list_id, last)
 
     def undo_last_scan(self, list_id: str, user: str, station: str) -> dict[str, Any]:
+        """Purpose: Undo last scan for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute(
                 """
                 SELECT * FROM scan_events
-                WHERE list_id = ? AND event_type = 'scan' AND line_item_id IS NOT NULL
+                WHERE list_id = ? AND event_type IN ('scan', 'redo') AND line_item_id IS NOT NULL
                 ORDER BY id DESC
                 LIMIT 1
                 """,
@@ -6075,6 +7597,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return self._get_payload(con, list_id, last)
 
     def redo_last_undo(self, list_id: str, user: str, station: str) -> dict[str, Any]:
+        """Purpose: Redo last undo for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute(
@@ -6082,7 +7609,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 SELECT se.*, li.qty, li.scanned_qty
                 FROM scan_events se
                 JOIN line_items li ON li.id = se.line_item_id
-                WHERE se.list_id = ? AND se.event_type IN ('undo', 'scan') AND se.line_item_id IS NOT NULL
+                WHERE se.list_id = ? AND se.event_type IN ('undo', 'scan', 'redo') AND se.line_item_id IS NOT NULL
                 ORDER BY se.id DESC
                 LIMIT 1
                 """,
@@ -6105,7 +7632,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 row["canonical_barcode"],
                 user,
                 station,
-                "scan",
+                "redo",
                 "Undo redone",
                 "Last undo was re-applied",
                 1,
@@ -6115,6 +7642,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return self._get_payload(con, list_id, last)
 
     def get_exceptions(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Purpose: Read exceptions for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         filters = filters or {}
         list_id = str(filters.get("listId") or "")
         params: list[Any] = []
@@ -6152,6 +7684,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ]
 
     def preview_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Run the preview import workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         if isinstance(payload, dict):
             payload = self.apply_customer_route_rules_to_payload(payload)
         items = payload.get("items") if isinstance(payload, dict) else None
@@ -6213,6 +7750,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def admin_summary(self) -> dict[str, Any]:
+        """Purpose: Run the admin summary workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         with self.connect() as con:
             list_count = con.execute(
                 "SELECT COUNT(*) FROM delivery_lists dl WHERE dl.status = 'active' AND EXISTS (SELECT 1 FROM line_items li WHERE li.list_id = dl.id)"
@@ -6304,6 +7846,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def resolve_exception(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Resolve exception for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         exception_id = int(data.get("id") or 0)
         status = str(data.get("status") or "Resolved").strip()
         comment = str(data.get("comment") or data.get("reason") or "").strip()
@@ -6326,6 +7873,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "id": exception_id, "status": status}
 
     def global_search(self, query: str, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Purpose: Run the global search workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean = str(query or "").strip()
         if len(clean) < 2:
             return []
@@ -6372,6 +7924,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchall()
 
         def stage_kind(row: sqlite3.Row) -> str:
+            """Purpose: Run the stage kind workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             text = f"{row['stage']} {row['scanner']}".lower()
             if "outbound" in text:
                 return "outbound"
@@ -6388,6 +7945,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return "other"
 
         def representative_rank(row: sqlite3.Row) -> int:
+            """Purpose: Run the representative rank workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             scanned = int(row["scanned_qty"] or 0)
             kind = stage_kind(row)
             if scanned and kind == "indian_trail":
@@ -6411,6 +7973,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return 0
 
         def rack_location_label(code: Any) -> str:
+            """Purpose: Run the rack location label workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             clean_code = normalize_rack_code(str(code or ""))
             if not clean_code:
                 return ""
@@ -6421,6 +7988,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return f"Rack {clean_code}"
 
         def airport_label(scanner: Any) -> str:
+            """Purpose: Run the airport label workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             return str(scanner or "Airport Rd").replace(" - ", " ").strip() or "Airport Rd"
 
         grouped: dict[str, dict[str, Any]] = {}
@@ -6545,6 +8117,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return cleaned_results[:30]
 
     def manual_edit_sibling_rows(self, con: sqlite3.Connection, row: sqlite3.Row) -> list[sqlite3.Row]:
+        """Purpose: Run the manual edit sibling rows workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         context = con.execute(
             "SELECT delivery_date FROM delivery_lists WHERE id = ?",
             (row["list_id"],),
@@ -6574,6 +8151,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ).fetchall()
 
     def manual_route_profile(self, delivery_date: str, destination: str) -> tuple[str, str, str]:
+        """Purpose: Run the manual route profile workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         profiles = {
             "Indian Trail": ("inbound-indian-trail", "Inbound - Indian Trail", "Indian Trail"),
             "CPU": ("customer-pickup", "Customer Pickup", "Customer Pickup"),
@@ -6588,6 +8170,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return f"{delivery_date}-{suffix}", stage, scanner
 
     def ensure_manual_route_list(self, con: sqlite3.Connection, delivery_date: str, destination: str) -> str:
+        """Purpose: Validate manual route list for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         list_id, stage, scanner = self.manual_route_profile(delivery_date, destination)
         con.execute(
             """
@@ -6611,6 +8198,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         target_id: str,
         target_list_id: str,
     ) -> None:
+        """Purpose: Run the merge manual receiving row workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         if source_id == target_id:
             return
         source = con.execute("SELECT * FROM line_items WHERE id = ?", (source_id,)).fetchone()
@@ -6648,6 +8240,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         con.execute("DELETE FROM line_items WHERE id = ?", (source_id,))
 
     def sync_manual_route_membership(self, con: sqlite3.Connection, row: sqlite3.Row) -> str:
+        """Purpose: Run the sync manual route membership workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         siblings = self.manual_edit_sibling_rows(con, row)
         if not siblings:
             return ""
@@ -6677,8 +8274,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     """
                     INSERT INTO line_items (
                         id, list_id, source_id, barcode, order_no, item_no, qty, scanned_qty,
-                        dimensions, customer, route, job, product, process_state, queue_state, suggested_bay
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+                        dimensions, customer, route, source_route, job, product, process_state, queue_state, suggested_bay
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         new_id,
@@ -6691,6 +8288,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         source["dimensions"],
                         source["customer"],
                         source["route"],
+                        row_value(source, "source_route", ""),
                         source["job"],
                         source["product"],
                         source["process_state"],
@@ -6714,6 +8312,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return target_list_id
 
     def update_line_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Update line item for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         line_item_id = str(data.get("lineItemId") or "")
         if not line_item_id:
             raise ValueError("lineItemId is required")
@@ -6826,6 +8429,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return payload
 
     def update_line_item_location(self, con: sqlite3.Connection, row: sqlite3.Row, location: str, user: str) -> None:
+        """Purpose: Update line item location for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean = str(location or "").strip()
         line_item_id = row["id"]
         if not clean:
@@ -6906,6 +8514,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         raise ValueError(f"Location '{clean}' was not found as an active rack or bay")
 
     def delete_line_item(self, line_item_id: str, user: str) -> dict[str, Any]:
+        """Purpose: Remove line item for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_id = str(line_item_id or "").strip()
         if not clean_id:
             raise ValueError("lineItemId is required")
@@ -6921,6 +8534,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return self._get_payload(con, row["list_id"])
 
     def delete_delivery_list(self, list_id: str, user: str) -> dict[str, Any]:
+        """Purpose: Remove delivery list for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_id = str(list_id or "").strip()
         if not clean_id:
             raise ValueError("listId is required")
@@ -6936,6 +8554,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "deletedListId": clean_id, "lists": self.get_delivery_lists()}
 
     def delete_delivery_date(self, delivery_date: str, user: str) -> dict[str, Any]:
+        """Purpose: Remove delivery date for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         clean_date = str(delivery_date or "").strip()
         if not clean_date:
             raise ValueError("deliveryDate is required")
@@ -6953,11 +8576,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "deliveryDate": clean_date, "deletedCount": len(list_ids), "lists": self.get_delivery_lists()}
 
     def reports_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Purpose: Run the reports summary workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         filters = filters or {}
         date_from = str(filters.get("dateFrom") or "").strip()
         date_to = str(filters.get("dateTo") or "").strip()
 
         def date_clause(alias: str = "") -> tuple[str, list[str]]:
+            """Purpose: Run the date clause workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             column = f"{alias}.created_at" if alias else "created_at"
             parts: list[str] = []
             params: list[str] = []
@@ -6971,6 +8604,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         def delivery_list_date_clause(alias: str = "dl") -> tuple[str, list[str]]:
             # Dashboard inventory stats are based on delivery-list dates, not scan timestamps.
+            """Purpose: Run the delivery list date clause workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+            """
             column = f"{alias}.delivery_date" if alias else "delivery_date"
             parts: list[str] = []
             params: list[str] = []
@@ -7009,7 +8647,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE li.scanned_qty < li.qty
-                GROUP BY dl.id
+                GROUP BY dl.id, dl.label, dl.delivery_date
                 ORDER BY dl.delivery_date DESC, dl.label
                 """
             ).fetchall()
@@ -7087,7 +8725,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     GROUP BY dl.delivery_date, li.source_id
                 ) unique_items
                 GROUP BY glass_type
-                HAVING qty > 0
+                HAVING SUM(qty) > 0
                 ORDER BY qty DESC, glass_type
                 """,
                 list_date_params,
@@ -7152,6 +8790,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Purpose: Read audit events for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         clean_limit = max(1, min(int(limit or 100), 500))
         with self.connect() as con:
             rows = con.execute(
@@ -7185,6 +8828,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return events
 
     def get_email_outbox_item(self, email_id: int) -> dict[str, Any]:
+        """Purpose: Read email outbox item for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             row = con.execute("SELECT * FROM email_outbox WHERE id = ?", (int(email_id),)).fetchone()
         if not row:
@@ -7211,10 +8859,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def bay_from_row(self, con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+        """Purpose: Run the bay from row workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         assignments = con.execute(
             """
             SELECT ba.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.customer,
                    li.dimensions, li.product, li.job, li.process_state, li.queue_state,
+                   li.priority_delivery_date, li.priority_direct_to_truck,
                    dl.delivery_date, dl.stage, bss.snoozed_until,
                    (
                     SELECT se.created_at
@@ -7304,7 +8958,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "job": item["job"],
                     "processState": item["process_state"],
                     "queueState": item["queue_state"],
-                    "deliveryDate": item["delivery_date"],
+                    "deliveryDate": row_value(item, "priority_delivery_date") or item["delivery_date"],
+                    "originalDeliveryDate": item["delivery_date"],
+                    "priorityDirectToTruck": bool(row_value(item, "priority_direct_to_truck", 0)),
                     "lastStage": item["stage"],
                     "lastScannedAt": item["last_scanned_at"],
                     "lastScannedStation": item["last_scanned_station"],
@@ -7344,6 +9000,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def get_bays(self) -> list[dict[str, Any]]:
+        """Purpose: Read bays for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             # Deleted bays are soft-deactivated so old bay events remain intact.
             # Manual/blocked policy bays must still render on the live map even if
@@ -7491,6 +9152,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         return {"bayCode": clean_code, "jobDetails": job_details}
     def get_bay_layout(self) -> dict[str, Any]:
+        """Purpose: Read bay layout for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         layout_path = self.config.root / "data" / "indian-trail-bay-layout.json"
         if not layout_path.exists():
             return {"bays": [], "cells": [], "sections": [], "grid": {"minRow": 1, "maxRow": 1, "minCol": 1, "maxCol": 1}}
@@ -7559,6 +9225,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             for row in rows
         ]
     def get_stale_bay_orders(self, include_snoozed: bool = False) -> list[dict[str, Any]]:
+        """Purpose: Read stale bay orders for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         now = datetime.now(timezone.utc)
         with self.connect() as con:
             rows = con.execute(
@@ -7632,6 +9303,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return result
 
     def snooze_stale_bay_orders(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the snooze stale bay orders workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         ids = data.get("assignmentIds")
         if ids is None:
             ids = [data.get("assignmentId")]
@@ -7664,6 +9340,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         row: sqlite3.Row,
         destination: str,
     ) -> int:
+        """Purpose: Run the received qty for rack item workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         clean_destination = self.rack_destination_value(destination)
         if clean_destination not in {"Indian Trail", "CPU", "Greenville", "DTC"}:
             return 0
@@ -7696,6 +9377,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return min(max(int(row["rack_qty"] or 0), 0), received_qty)
 
     def rack_from_row(self, con: sqlite3.Connection, rack: sqlite3.Row) -> dict[str, Any]:
+        """Purpose: Run the rack from row workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rows = con.execute(
             """
             SELECT ri.id AS rack_item_id, ri.qty AS rack_qty, ri.status AS rack_item_status,
@@ -7762,6 +9448,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def rack_summary(self, con: sqlite3.Connection) -> dict[str, Any]:
+        """Purpose: Run the rack summary workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         row = con.execute(
             """
             SELECT
@@ -7776,12 +9467,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"truckQty": row["truck_qty"], "rackQty": row["rack_qty"], "rackCount": row["rack_count"]}
 
     def get_racks(self) -> dict[str, Any]:
+        """Purpose: Read racks for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             self.seed_racks(con)
             racks = [self.rack_from_row(con, row) for row in con.execute("SELECT * FROM racks WHERE active = 1 ORDER BY sort_order, rack_code").fetchall()]
             return {"racks": racks, "summary": self.rack_summary(con)}
 
     def get_rack_by_code(self, con: sqlite3.Connection, code: str) -> sqlite3.Row:
+        """Purpose: Read rack by code for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         rack_code = normalize_rack_code(code)
         row = con.execute("SELECT * FROM racks WHERE rack_code = ? AND active = 1", (rack_code,)).fetchone()
         if not row:
@@ -7789,6 +9490,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return row
 
     def scan_item_to_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Process item to rack for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         list_id = str(data.get("listId") or "")
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
         barcode = str(data.get("barcode") or "")
@@ -7885,6 +9591,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return payload
 
     def move_rack_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the move rack item workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rack_item_id = int(data.get("rackItemId") or 0)
         target_code = normalize_rack_code(str(data.get("targetRackCode") or data.get("rackCode") or ""))
         if not rack_item_id or not target_code:
@@ -7908,6 +9619,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_racks()
 
     def clear_rack_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove rack item for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         rack_item_id = int(data.get("rackItemId") or 0)
         if not rack_item_id:
             raise ValueError("rackItemId is required")
@@ -7944,6 +9660,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_racks()
 
     def clear_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove rack for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -7955,6 +9676,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_racks()
 
     def rack_destination_value(self, value: Any) -> str:
+        """Purpose: Run the rack destination value workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         text = str(value or "").strip()
         aliases = {
             "": "Indian Trail",
@@ -7969,14 +9695,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
         return aliases.get(text.upper(), text[:40] or "Indian Trail")
 
-    def destination_for_line_item(self, item: sqlite3.Row | dict[str, Any]) -> str:
+    def destination_for_line_item(self, item: Any) -> str:
+        """Purpose: Run the destination for line item workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         source = {
-            "route": item["route"] if isinstance(item, sqlite3.Row) else item.get("route", ""),
-            "job": item["job"] if isinstance(item, sqlite3.Row) else item.get("job", ""),
-            "customer": item["customer"] if isinstance(item, sqlite3.Row) else item.get("customer", ""),
-            "product": item["product"] if isinstance(item, sqlite3.Row) else item.get("product", ""),
-            "processState": item["process_state"] if isinstance(item, sqlite3.Row) and "process_state" in item.keys() else (item.get("processState") or item.get("process_state", "") if isinstance(item, dict) else ""),
-            "queueState": item["queue_state"] if isinstance(item, sqlite3.Row) and "queue_state" in item.keys() else (item.get("queueState") or item.get("queue_state", "") if isinstance(item, dict) else ""),
+            "route": row_value(item, "route"),
+            "job": row_value(item, "job"),
+            "customer": row_value(item, "customer"),
+            "product": row_value(item, "product"),
+            "processState": row_value(item, "processState") or row_value(item, "process_state"),
+            "queueState": row_value(item, "queueState") or row_value(item, "queue_state"),
         }
         category = route_category(source)
         if category == "cpu":
@@ -7990,6 +9721,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return "Indian Trail"
 
     def rack_destinations_from_items(self, con: sqlite3.Connection, rack_id: int, extra_item: sqlite3.Row | dict[str, Any] | None = None) -> list[str]:
+        """Purpose: Run the rack destinations from items workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rows = con.execute(
             """
             SELECT li.*, COALESCE(ri.destination_override, '') AS rack_destination_override
@@ -8011,15 +9747,30 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return sorted(destination for destination in destinations if destination)
 
     def computed_rack_destination(self, con: sqlite3.Connection, rack_id: int) -> str:
+        """Purpose: Run the computed rack destination workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         destinations = self.rack_destinations_from_items(con, rack_id)
         return destinations[0] if len(destinations) == 1 else ""
 
     def refresh_rack_destination(self, con: sqlite3.Connection, rack_id: int) -> str:
+        """Purpose: Run the refresh rack destination workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         destination = self.computed_rack_destination(con, rack_id)
         con.execute("UPDATE racks SET destination = ?, updated_at = ? WHERE id = ?", (destination, now_iso(), rack_id))
         return destination
 
     def validate_rack_destination_for_item(self, con: sqlite3.Connection, rack: sqlite3.Row, item: sqlite3.Row | dict[str, Any]) -> str:
+        """Purpose: Validate rack destination for item for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         destination = self.destination_for_line_item(item)
         current_destinations = self.rack_destinations_from_items(con, int(rack["id"]))
         if current_destinations and current_destinations != [destination]:
@@ -8031,6 +9782,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return destination
 
     def complete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the complete rack workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -8053,6 +9809,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return payload
 
     def uncomplete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the uncomplete rack workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -8063,6 +9824,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_racks()
 
     def return_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the return rack workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -8074,6 +9840,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_racks()
 
     def not_on_way_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the not on way rack workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -8116,7 +9887,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                  AND se.canonical_barcode = ?
                  AND se.qty_delta <> 0
                 GROUP BY rt.outbound_line_item_id, rt.outbound_list_id, li.scanned_qty
-                HAVING rack_outbound_qty > 0
+                HAVING COALESCE(SUM(se.qty_delta), 0) > 0
                 """,
                 (rack["id"], canonical),
             ).fetchall()
@@ -8176,6 +9947,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return payload
 
     def assign_line_item_to_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the assign line item to rack workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         line_item_id = str(data.get("lineItemId") or "").strip()
         rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
         if not line_item_id:
@@ -8258,6 +10034,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return payload
 
     def update_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Update rack for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         code = normalize_rack_code(str(data.get("rackCode") or data.get("code") or ""))
         old_code = normalize_rack_code(str(data.get("oldRackCode") or data.get("oldCode") or code))
         name = str(data.get("name") or data.get("displayName") or code).strip()[:80]
@@ -8292,6 +10073,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return payload
 
     def create_rack_set(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Create rack set for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         prefix = re.sub(r"[^A-Za-z0-9]", "", str(data.get("prefix") or "")).upper()[:8]
         rack_type = str(data.get("type") or data.get("rackType") or prefix or "Rack").strip()[:40]
         name_root = str(data.get("nameRoot") or rack_type or prefix or "Rack").strip()[:60]
@@ -8323,6 +10109,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return payload
 
     def delete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove rack for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         code = normalize_rack_code(str(data.get("rackCode") or ""))
         if code == "T":
             raise ValueError("Truck cannot be deleted")
@@ -8338,6 +10129,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_racks()
 
     def destination_address_for_rack(self, con: sqlite3.Connection, rack_payload: dict[str, Any]) -> dict[str, Any]:
+        """Purpose: Run the destination address for rack workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         destination = self.rack_destination_value(rack_payload.get("destination") or "Indian Trail")
 
         if destination == "Indian Trail":
@@ -8386,6 +10182,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"destination": destination, "address": "Address not configured", "stops": []}
 
     def rack_packing_list(self, rack_code: str, delivery_date: str = "") -> dict[str, Any]:
+        """Purpose: Run the rack packing list workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         with self.connect() as con:
             rack = self.get_rack_by_code(con, rack_code)
             rack_payload = self.rack_from_row(con, rack)
@@ -8419,6 +10220,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return {"rack": rack_payload}
 
     def scan_rack_outbound(self, scan_request: dict[str, Any], rack_code: str) -> dict[str, Any]:
+        """Purpose: Process rack outbound for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        """
         list_id = str(scan_request.get("listId") or "")
         barcode = str(scan_request.get("barcode") or "")
         parsed_rack_code, barcode_delivery_date = parse_rack_barcode(barcode)
@@ -8486,6 +10292,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             scanned_count = 0
             capped_count = 0
             departure_timestamp = now_iso()
+            effective_departure_timestamp = departure_timestamp
             for row in rows:
                 remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
                 if remaining_qty <= 0:
@@ -8505,9 +10312,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 scanned_count += delta
             if scanned_count == 0:
                 last = self.insert_event(con, list_id, None, barcode, f"RACK-{rack['rack_code']}", user, station, "duplicate", "Rack already scanned outbound", "All rack items were already complete")
+                effective_departure_timestamp = str(rack["departed_at"] or departure_timestamp)
                 con.execute(
-                    "UPDATE racks SET status = 'In Transit', updated_at = ? WHERE id = ?",
-                    (departure_timestamp, rack["id"]),
+                    "UPDATE racks SET status = 'In Transit', departed_at = ?, updated_at = ? WHERE id = ?",
+                    (effective_departure_timestamp, departure_timestamp, rack["id"]),
                 )
             else:
                 con.execute(
@@ -8522,19 +10330,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 user,
                 station,
                 "Rack barcode applied Outbound quantity, preassignment, and departure timestamp.",
-                {"scannedCount": scanned_count, "cappedRows": capped_count, "departedAt": departure_timestamp if scanned_count else str(rack["departed_at"] or "")},
+                {"scannedCount": scanned_count, "cappedRows": capped_count, "departedAt": effective_departure_timestamp},
             )
+            rack_snapshot = self.rack_from_row(con, self.get_rack_by_code(con, rack["rack_code"]))
             con.commit()
             payload = self._get_payload(con, list_id, last)
             payload["redirectListId"] = list_id
             cap_message = f" {capped_count} row{'s' if capped_count != 1 else ''} capped at remaining quantity." if capped_count else ""
             payload["message"] = f"Rack {rack['rack_code']} scanned outbound for {scanned_count} piece{'s' if scanned_count != 1 else ''}.{cap_message}"
-            payload["rackDepartureAt"] = departure_timestamp if scanned_count else str(rack["departed_at"] or "")
+            payload["rackDepartureAt"] = effective_departure_timestamp
             payload["rackCode"] = rack["rack_code"]
+            payload["rackDestination"] = self.rack_destination_value(rack_snapshot.get("destination"))
+            payload["rackPieceCount"] = int(rack_snapshot.get("qty") or 0)
+            payload["outboundScannedQty"] = scanned_count
             return payload
 
 
     def indian_trail_in_transit(self) -> dict[str, Any]:
+        """Purpose: Run the indian trail in transit workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         with self.connect() as con:
             return self._indian_trail_in_transit_payload(con)
 
@@ -8578,7 +10395,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         # below still catches legacy scans without a rack/truck assignment.
         rack_rows = con.execute(
             """
-            SELECT
+            SELECT DISTINCT
                 COALESCE(in_li.id, src_li.id) AS inbound_line_id,
                 COALESCE(out_li.id, '') AS outbound_line_id,
                 src_li.source_id,
@@ -8621,8 +10438,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
              AND out_li.item_no = src_li.item_no
             WHERE ri.status = 'Active'
               AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
-            GROUP BY ri.id
-            HAVING in_transit_qty > 0
+              AND ri.qty - COALESCE(in_li.scanned_qty, 0) > 0
             ORDER BY src_dl.delivery_date DESC, COALESCE(NULLIF(src_li.job, ''), src_li.order_no), r.rack_code, src_li.order_no, src_li.item_no
             """
         ).fetchall()
@@ -8826,6 +10642,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def indian_trail_summary(self) -> dict[str, Any]:
+        """Purpose: Run the indian trail summary workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         with self.connect() as con:
             inbound = con.execute(
                 "SELECT id, delivery_date FROM delivery_lists WHERE stage LIKE '%Indian Trail%' AND status = 'active' ORDER BY delivery_date DESC LIMIT 1"
@@ -8881,13 +10702,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             assigned = con.execute("SELECT COALESCE(SUM(assigned_qty),0) FROM bay_assignments WHERE status NOT IN ('Cleared', 'Cancelled')").fetchone()[0]
             sdi = con.execute("SELECT COUNT(*) FROM bay_assignments WHERE status = 'SDIOverride'").fetchone()[0]
             conflicts = con.execute("SELECT COUNT(*) FROM exceptions WHERE exception_type LIKE '%bay%' AND status = 'Open'").fetchone()[0]
-            cleared_today = con.execute("SELECT COUNT(*) FROM bay_events WHERE event_type = 'ClearBay' AND created_at >= date('now')").fetchone()[0]
-            needs_check = con.execute("SELECT COUNT(*) FROM bay_events WHERE event_type = 'NeedsReview' AND created_at >= date('now')").fetchone()[0]
+            today_start = datetime.now(timezone.utc).date().isoformat()
+            cleared_today = con.execute(
+                "SELECT COUNT(*) FROM bay_events WHERE event_type = 'ClearBay' AND created_at >= ?",
+                (today_start,),
+            ).fetchone()[0]
+            needs_check = con.execute(
+                "SELECT COUNT(*) FROM bay_events WHERE event_type = 'NeedsReview' AND created_at >= ?",
+                (today_start,),
+            ).fetchone()[0]
             rack_summary = self.rack_summary(con)
             in_transit_payload = self._indian_trail_in_transit_payload(con)
             transit_rows = in_transit_payload.get("rows", []) if isinstance(in_transit_payload, dict) else []
 
             def transit_row_is_truck(row: dict[str, Any]) -> bool:
+                """Purpose: Run the transit row is truck workflow for the delivery-list scanner.
+
+                Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+                Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+                """
                 rack_code = str(row.get("rackCode") or "").upper()
                 rack_type = str(row.get("rackType") or "").upper()
                 return rack_code == "T" or re.fullmatch(r"T\d+", rack_code) is not None or "TRUCK" in rack_type
@@ -8952,6 +10785,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def admin_search_line_items(self, query: str, stage_filter: str = "") -> list[dict[str, Any]]:
+        """Purpose: Run the admin search line items workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         clean = str(query or "").strip()
         stage_filter = str(stage_filter or "").strip()
         if len(clean) < 2 and not stage_filter:
@@ -9011,16 +10849,29 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return results
 
     def find_bay_for_assignment(self, con: sqlite3.Connection, bay_type: str) -> sqlite3.Row | None:
+        """Purpose: Resolve bay for assignment for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         rows = con.execute(
             """
-            SELECT b.*,
-                   COALESCE(SUM(CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN ba.assigned_qty ELSE 0 END), 0) AS used_qty
-            FROM bays b
-            LEFT JOIN bay_assignments ba ON ba.bay_id = b.id
-            WHERE b.active = 1 AND b.bay_type = ? AND COALESCE(b.status, 'Available') = 'Available'
-            GROUP BY b.id
-            HAVING used_qty < b.capacity_qty OR b.capacity_qty = 0
-            ORDER BY used_qty, b.sort_order
+            SELECT candidate.*
+            FROM (
+                SELECT b.*,
+                       COALESCE((
+                           SELECT SUM(ba.assigned_qty)
+                           FROM bay_assignments ba
+                           WHERE ba.bay_id = b.id
+                             AND ba.status NOT IN ('Cleared', 'Cancelled')
+                       ), 0) AS used_qty
+                FROM bays b
+                WHERE b.active = 1
+                  AND b.bay_type = ?
+                  AND COALESCE(b.status, 'Available') = 'Available'
+            ) candidate
+            WHERE candidate.used_qty < candidate.capacity_qty OR candidate.capacity_qty = 0
+            ORDER BY candidate.used_qty, candidate.sort_order
             LIMIT 1
             """,
             (bay_type,),
@@ -9028,6 +10879,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return rows
 
     def get_bay_by_code(self, con: sqlite3.Connection, bay_code: str) -> sqlite3.Row:
+        """Purpose: Read bay by code for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         row = con.execute("SELECT * FROM bays WHERE bay_code = ?", (bay_code,)).fetchone()
         if not row or str(row["status"] or "") in {"ScanBlocked", "BlockedAll"}:
             raise ValueError(f"Unknown or blocked bay: {bay_code}")
@@ -9044,6 +10900,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         old_bay_id: int | None = None,
         new_bay_id: int | None = None,
     ) -> None:
+        """Purpose: Create bay event for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         con.execute(
             """
             INSERT INTO bay_events (bay_id, line_item_id, event_type, old_bay_id, new_bay_id, reason, user_name, created_at)
@@ -9053,6 +10914,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         )
 
     def assign_bay(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the assign bay workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         line_item_id = str(data.get("lineItemId") or "")
         bay_code = str(data.get("bayCode") or "")
         reason = str(data.get("reason") or "").strip()
@@ -9226,13 +11092,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "processState": row["process_state"],
                 "queueState": row["queue_state"],
             }
+            rush_item = is_rush_item(row_item)
+            rush_direct_to_truck = rush_item and bool(row_value(row, "priority_direct_to_truck", 0))
+            priority_delivery_date = str(row_value(row, "priority_delivery_date") or list_row["delivery_date"] or "")
             suggested_bay_type = (
                 "CPU"
                 if is_cpu_item(row_item)
                 else self.suggested_bay_from_settings(con, row["product"], row["dimensions"], row["route"])
             )
 
-            if override_bay:
+            if rush_direct_to_truck:
+                target_bay = None
+                receive_reason = "Rush received at Indian Trail; send straight to installer truck"
+            elif override_bay:
                 target_bay = override_bay
                 receive_reason = "Received at Indian Trail with bay override"
             elif existing_group_assignment:
@@ -9359,7 +11231,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             event_type = "manual_scan" if is_manual else "scan"
             event_message = (
-                "Manual item returned to bay"
+                "Rush received - direct to installer truck"
+                if rush_direct_to_truck
+                else "Rush received - priority bay"
+                if rush_item
+                else "Manual item returned to bay"
                 if returned_to_bay and is_manual
                 else "Item returned to bay"
                 if returned_to_bay
@@ -9368,7 +11244,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 else "Indian Trail received"
             )
             event_reason = (
-                "Returned received item to Bay Map without changing received quantity"
+                receive_reason
+                if rush_item
+                else "Returned received item to Bay Map without changing received quantity"
                 if returned_to_bay
                 else reason
             )
@@ -9389,7 +11267,49 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             assignment_ids: list[int] = []
             scanned_assignment_id = 0
             bay_code = ""
-            if not target_bay:
+            if rush_direct_to_truck:
+                direct_to_truck_item_ids = [
+                    group_row["id"]
+                    for group_row in group_rows
+                    if bool(row_value(group_row, "priority_direct_to_truck", 0))
+                    and is_rush_item(
+                        {
+                            "processState": row_value(group_row, "process_state", ""),
+                            "queueState": row_value(group_row, "queue_state", ""),
+                        }
+                    )
+                ]
+                if not direct_to_truck_item_ids:
+                    direct_to_truck_item_ids = [row["id"]]
+                direct_placeholders = ",".join("?" for _ in direct_to_truck_item_ids)
+                active_assignments = con.execute(
+                    f"""
+                    SELECT * FROM bay_assignments
+                    WHERE line_item_id IN ({direct_placeholders})
+                      AND status NOT IN ('Cleared', 'Cancelled')
+                    ORDER BY id
+                    """,
+                    direct_to_truck_item_ids,
+                ).fetchall()
+                for active_assignment in active_assignments:
+                    con.execute(
+                        """
+                        UPDATE bay_assignments
+                        SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = ?
+                        WHERE id = ?
+                        """,
+                        (user, timestamp, receive_reason, active_assignment["id"]),
+                    )
+                    self.insert_bay_event(
+                        con,
+                        active_assignment["bay_id"],
+                        active_assignment["line_item_id"],
+                        "RushDirectToTruck",
+                        user,
+                        receive_reason,
+                        old_bay_id=active_assignment["bay_id"],
+                    )
+            elif not target_bay:
                 self.insert_exception(con, list_id, None, "bay_assignment_conflict", "No safe bay available")
             else:
                 bay_code = str(target_bay["bay_code"] or "")
@@ -9505,7 +11425,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             used_override = bool(override_bay)
             audit_action = (
-                "manual_return_to_bay"
+                "indian_trail_receive_rush_direct_to_truck"
+                if rush_direct_to_truck
+                else "indian_trail_receive_rush_priority_bay"
+                if rush_item
+                else "manual_return_to_bay"
                 if returned_to_bay and is_manual
                 else "return_to_bay"
                 if returned_to_bay
@@ -9530,13 +11454,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "outboundOverride": outbound_override,
                     "returnedToBay": returned_to_bay,
                     "qtyDelta": qty_delta,
+                    "rush": rush_item,
+                    "rushDirectToTruck": rush_direct_to_truck,
+                    "priorityDeliveryDate": priority_delivery_date,
                 },
             )
             con.commit()
 
             scanned_after = int(row["scanned_qty"] or 0) + qty_delta
 
-        if returned_to_bay:
+        if rush_direct_to_truck:
+            message = (
+                f"Rush order {row['order_no']} / Item {row['item_no']} received at Indian Trail. "
+                "Send this glass straight to the installer truck and do not place it in a bay."
+            )
+        elif returned_to_bay:
             message = (
                 f"Order {row['order_no']} / Item {row['item_no']} returned to Bay {bay_code}. "
                 "Received quantity was not changed."
@@ -9568,9 +11500,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "outboundOverrideUsed": outbound_override,
             "suggestedBayType": suggested_bay_type,
             "oversize": "oversize" in suggested_bay_type.lower(),
+            "rush": rush_item,
+            "rushDirectToTruck": rush_direct_to_truck,
+            "priorityDeliveryDate": priority_delivery_date,
             "lastScan": last,
         }
     def move_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the move bay assignment workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         assignment_id = int(data.get("assignmentId") or 0)
         new_bay_code = str(data.get("newBayCode") or data.get("bayCode") or "")
         reason = str(data.get("reason") or "").strip()
@@ -9589,6 +11529,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "assignmentId": assignment_id, "bayCode": new_bay_code}
 
     def clear_bay(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove bay for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         bay_code = str(data.get("bayCode") or "")
         reason = str(data.get("reason") or "Bay cleared").strip()
         with self.connect() as con:
@@ -9606,6 +11551,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "bayCode": bay_code, "clearedAssignments": len(rows)}
 
     def clear_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove bay assignment for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         assignment_id = int(data.get("assignmentId") or 0)
         reason = str(data.get("reason") or "Assignment cleared").strip()
         if not assignment_id:
@@ -9625,6 +11575,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "assignmentId": assignment_id}
 
     def restore_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the restore bay assignment workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         assignment_id = int(data.get("assignmentId") or 0)
         reason = str(data.get("reason") or "Assignment restored").strip()
         if not assignment_id:
@@ -9638,7 +11593,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not bay:
                 raise ValueError("Assignment bay not found")
             con.execute(
-                "UPDATE bay_assignments SET status = 'Assigned', cleared_by = NULL, cleared_at = NULL, reason = ? WHERE id = ?",
+                "UPDATE bay_assignments SET status = 'Assigned', cleared_by = '', cleared_at = '', reason = ? WHERE id = ?",
                 (reason, assignment_id),
             )
             self.insert_bay_event(con, row["bay_id"], row["line_item_id"], "RestoreAssignment", user, reason, new_bay_id=row["bay_id"])
@@ -9647,6 +11602,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "assignmentId": assignment_id, "bayCode": bay["bay_code"]}
 
     def set_bay_status(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Update bay status for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         bay_code = str(data.get("bayCode") or "").strip()
         raw_status = str(data.get("status") or "Available").strip()
         status_lookup = {
@@ -9761,6 +11721,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "time": timestamp,
         }
     def update_bay_layout(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Update bay layout for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         bay_code = str(data.get("bayCode") or "").strip()
         if not bay_code:
             raise ValueError("bayCode is required")
@@ -9812,6 +11777,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "bayCode": bay_code, "bays": self.get_bays()}
 
     def set_bay_group_position(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Update bay group position for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         map_section = " ".join(str(data.get("mapSection") or "").split())[:120]
         layout_row = int(data.get("layoutRow") or 0)
         layout_col = int(data.get("layoutCol") or 0)
@@ -9830,6 +11800,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "mapSection": map_section, "bays": self.get_bays()}
 
     def create_bays(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Create bays for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         map_section = " ".join(str(data.get("mapSection") or data.get("group") or "").split())[:120]
         bay_category = " ".join(str(data.get("bayCategory") or data.get("category") or "Standard").split())[:120]
         prefix = " ".join(str(data.get("prefix") or map_section or bay_category or "BAY").split())[:60]
@@ -9882,6 +11857,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "created": created, "bays": self.get_bays()}
 
     def delete_bay(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove bay for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         bay_code = str(data.get("bayCode") or "").strip()
         if not bay_code:
             raise ValueError("bayCode is required")
@@ -9903,6 +11883,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "bayCode": bay_code, "bays": self.get_bays()}
 
     def delete_bay_group(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove bay group for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         map_section = " ".join(str(data.get("mapSection") or data.get("group") or "").split())[:120]
         if not map_section:
             raise ValueError("Bay group is required")
@@ -9929,6 +11914,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "mapSection": map_section, "deletedCount": len(rows), "bays": self.get_bays()}
 
     def move_bay_group(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the move bay group workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         map_section = " ".join(str(data.get("mapSection") or "").split())[:120]
         target_section = " ".join(str(data.get("targetMapSection") or "").split())[:120]
         row_delta = int(data.get("rowDelta") or 0)
@@ -9972,12 +11962,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "mapSection": map_section, "moved": len(rows), "bays": self.get_bays()}
 
     def mark_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the mark SDI workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         assignment_id = int(data.get("assignmentId") or 0)
         lookup_text = str(data.get("orderNo") or data.get("order") or data.get("job") or "").strip()
         bay_code = str(data.get("bayCode") or "").strip()
         truck_exempt = bool(data.get("truckExempt"))
         raw_type = str(data.get("orderType") or data.get("type") or "").strip()
         raw_reason = str(data.get("reason") or "Same-day install").strip()
+        requested_delivery_date = str(data.get("deliveryDate") or "").strip()
+        if requested_delivery_date:
+            try:
+                datetime.strptime(requested_delivery_date, "%Y-%m-%d")
+            except ValueError as exc:
+                raise ValueError("Delivery date must use YYYY-MM-DD format") from exc
 
         normalized_type = normalized_match_text(raw_type)
         if normalized_type in {"RUSH", "SDI", "URGENT", "URGENTE"}:
@@ -9985,8 +11986,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         elif normalized_type in {"REMAKE", "RM", "REHECHO", "REHACER"}:
             order_type = "Remake"
         else:
-            # Compatibility with v035 and older clients that placed the type at
-            # the start of the reason instead of sending a dedicated field.
             reason_prefix = normalized_match_text(raw_reason.split("-", 1)[0])
             if reason_prefix in {"RUSH", "SDI", "URGENT", "URGENTE"}:
                 order_type = "Rush"
@@ -10003,7 +12002,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            affected_rows: list[sqlite3.Row] = []
+            seed_rows: list[Any] = []
             assignment = None
 
             if assignment_id:
@@ -10012,7 +12011,29 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     raise ValueError("Assignment not found")
                 row = con.execute("SELECT * FROM line_items WHERE id = ?", (assignment["line_item_id"],)).fetchone()
                 if row:
-                    affected_rows.append(row)
+                    seed_rows.append(row)
+            else:
+                seed_rows = self.find_sdi_line_items(con, lookup_text)
+                if not seed_rows:
+                    raise ValueError("Job Nr., SO number, order number, or barcode was not found on active delivery lists")
+
+            affected_rows = self.expand_priority_line_items(con, seed_rows) or seed_rows
+            affected_lists = self.priority_list_context(con, affected_rows)
+            affected_list_ids = [str(item["id"]) for item in affected_lists]
+            source_ids = sorted({str(row["source_id"] or "") for row in affected_rows if str(row["source_id"] or "")})
+            logical_item_keys = {
+                str(row["source_id"] or "") or f"{row['order_no']}::{row['item_no']}"
+                for row in affected_rows
+            }
+
+            bay_rows = [
+                row
+                for row in affected_rows
+                if "indian trail" in f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
+                or "inbound" in f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
+            ]
+
+            if assignment_id and assignment:
                 con.execute("UPDATE bay_assignments SET status = 'SDIOverride', reason = ? WHERE id = ?", (reason, assignment_id))
                 self.insert_bay_event(
                     con,
@@ -10022,18 +12043,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     user,
                     reason,
                 )
-            else:
-                affected_rows = self.find_sdi_line_items(con, lookup_text)
-                if not affected_rows:
-                    raise ValueError("Job Nr., SO number, order number, or barcode was not found on active delivery lists")
-
+                self.insert_audit(
+                    con,
+                    "bay_assignment",
+                    str(assignment_id),
+                    "mark_sdi",
+                    user,
+                    "",
+                    reason,
+                    {"orderType": order_type, "lookup": lookup_text, "directToTruck": truck_exempt},
+                )
+            elif bay_rows:
                 target_bay = self.get_bay_by_code(con, bay_code) if bay_code and not truck_exempt else None
-                for row in affected_rows:
+                for row in bay_rows:
                     existing_assignments = con.execute(
                         "SELECT * FROM bay_assignments WHERE line_item_id = ? ORDER BY id",
                         (row["id"],),
                     ).fetchall()
-
                     if existing_assignments:
                         for existing in existing_assignments:
                             con.execute(
@@ -10056,7 +12082,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                                 user,
                                 "",
                                 reason,
-                                {"orderType": order_type, "lookup": lookup_text},
+                                {
+                                    "orderType": order_type,
+                                    "lookup": lookup_text,
+                                    "directToTruck": truck_exempt,
+                                },
                             )
                         assignment_id = assignment_id or int(existing_assignments[0]["id"])
                     elif target_bay:
@@ -10097,14 +12127,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                             {"orderType": order_type, "lookup": lookup_text, "bayCode": bay_code},
                         )
 
-            list_id = ""
             special_pattern = r"\b(?:Rush|SDI|Remake|RM)\b"
+            has_indian_trail_destination = any(
+                "indian trail" in f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
+                or "inbound" in f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
+                for row in affected_rows
+            )
+            direct_to_truck_value = (
+                1
+                if order_type == "Rush" and truck_exempt and has_indian_trail_destination
+                else 0
+            )
             for row in affected_rows:
-                list_id = list_id or str(row["list_id"] or "")
                 process_state = re.sub(special_pattern, "", str(row["process_state"] or ""), flags=re.IGNORECASE)
                 process_state = re.sub(r"\s{2,}", " ", process_state).strip(" -|,")
                 next_state = " ".join(part for part in [process_state, order_type] if part).strip()
-                con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, row["id"]))
+                con.execute(
+                    "UPDATE line_items SET process_state = ?, priority_direct_to_truck = ? WHERE id = ?",
+                    (next_state, direct_to_truck_value, row["id"]),
+                )
                 message = "Rush order marked" if order_type == "Rush" else "Remake marked"
                 self.insert_event(
                     con,
@@ -10128,12 +12169,53 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     reason,
                     {
                         "orderType": order_type,
-                        "truckExempt": truck_exempt,
+                        "truckExempt": bool(direct_to_truck_value),
                         "bayCode": bay_code,
                         "assignmentId": assignment_id,
                         "lookup": lookup_text,
+                        "affectedListIds": affected_list_ids,
                     },
                 )
+
+            first_notice_row = affected_rows[0] if affected_rows else None
+            original_delivery_date = ""
+            previous_delivery_date = ""
+            effective_delivery_date = requested_delivery_date
+            if first_notice_row:
+                original_delivery_date = str(row_value(first_notice_row, "delivery_date") or "")
+                if not original_delivery_date:
+                    notice_date_row = con.execute(
+                        "SELECT delivery_date FROM delivery_lists WHERE id = ?",
+                        (str(first_notice_row["list_id"] or ""),),
+                    ).fetchone()
+                    original_delivery_date = str(notice_date_row["delivery_date"] or "") if notice_date_row else ""
+                previous_delivery_date = str(row_value(first_notice_row, "priority_delivery_date") or original_delivery_date)
+                effective_delivery_date = requested_delivery_date or previous_delivery_date or original_delivery_date
+
+            if requested_delivery_date:
+                for row in affected_rows:
+                    row_original_date = str(row_value(row, "delivery_date") or original_delivery_date)
+                    row_previous_date = str(row_value(row, "priority_delivery_date") or row_original_date)
+                    if row_previous_date == requested_delivery_date:
+                        continue
+                    con.execute(
+                        "UPDATE line_items SET priority_delivery_date = ? WHERE id = ?",
+                        (requested_delivery_date, row["id"]),
+                    )
+                    self.insert_audit(
+                        con,
+                        "line_item",
+                        row["id"],
+                        "change_priority_delivery_date",
+                        user,
+                        "",
+                        reason,
+                        {
+                            "previousDeliveryDate": row_previous_date,
+                            "deliveryDate": requested_delivery_date,
+                            "orderType": order_type,
+                        },
+                    )
 
             notification_id = 0
             if order_type == "Rush" and affected_rows:
@@ -10141,22 +12223,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 notice_job = str(first_notice_row["job"] or "").strip()
                 notice_customer = str(first_notice_row["customer"] or "").strip()
                 notice_order = str(first_notice_row["order_no"] or "").strip()
-                priority_items = len(
+                notice_route = str(first_notice_row["route"] or "").strip()
+                item_pairs = sorted(
                     {
-                        (str(row["order_no"] or ""), str(row["item_no"] or ""))
+                        (str(row["order_no"] or "").strip(), str(row["item_no"] or "").strip())
                         for row in affected_rows
                     }
                 )
+                item_labels = [f"{order}-{item}" if order else item for order, item in item_pairs]
+                products: list[str] = []
+                for row in affected_rows:
+                    product_label = " - ".join(
+                        value for value in [str(row["product"] or "").strip(), str(row["dimensions"] or "").strip()] if value
+                    )
+                    if product_label and product_label not in products:
+                        products.append(product_label)
                 notice_target = notice_job or notice_order or lookup_text
-                notice_date_row = con.execute(
-                    "SELECT delivery_date FROM delivery_lists WHERE id = ?",
-                    (str(first_notice_row["list_id"] or ""),),
-                ).fetchone()
-                notice_delivery_date = str(notice_date_row["delivery_date"] or "") if notice_date_row else ""
                 notice_message = (
                     f"{notice_target} was marked as Rush"
                     f"{f' for {notice_customer}' if notice_customer else ''}"
-                    f"{f' on delivery date {notice_delivery_date}' if notice_delivery_date else ''}. Prioritize this work."
+                    f"{f' for the new delivery date {effective_delivery_date}' if effective_delivery_date else ''}. Prioritize this work."
                 )
                 notification_id = self.create_app_notification(
                     con,
@@ -10168,65 +12254,64 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "job": notice_job,
                         "order": notice_order,
                         "customer": notice_customer,
-                        "deliveryDate": notice_delivery_date,
-                        "items": priority_items,
+                        "route": notice_route,
+                        "deliveryDate": effective_delivery_date,
+                        "previousDeliveryDate": previous_delivery_date if previous_delivery_date != effective_delivery_date else "",
+                        "items": len(item_pairs),
+                        "itemLabels": item_labels,
+                        "products": products[:12],
+                        "reason": raw_reason,
                         "lookup": lookup_text,
-                        "listId": list_id,
+                        "listId": affected_list_ids[0] if affected_list_ids else "",
+                        "affectedListIds": affected_list_ids,
+                        "affectedLists": affected_lists,
+                        "sourceIds": source_ids,
+                        "directToTruck": bool(direct_to_truck_value),
                         "submittedBy": user,
                     },
                     expires_in_hours=24,
-                    # The submitting user receives the polished success popup
-                    # immediately; acknowledge their broadcast copy so it does
-                    # not replace that confirmation with a duplicate alert.
-                    acknowledge_creator=True,
+                    acknowledge_creator=False,
                 )
 
-            if assignment_id and assignment:
-                self.insert_audit(
-                    con,
-                    "bay_assignment",
-                    str(assignment_id),
-                    "mark_sdi",
-                    user,
-                    "",
-                    reason,
-                    {"orderType": order_type, "lookup": lookup_text},
-                )
             con.commit()
 
         first_row = affected_rows[0] if affected_rows else None
         matched_job = str(first_row["job"] or "").strip() if first_row else ""
         matched_customer = str(first_row["customer"] or "").strip() if first_row else ""
         matched_order = str(first_row["order_no"] or "").strip() if first_row else ""
-        matched_delivery_date = ""
-        if first_row:
-            with self.connect() as lookup_con:
-                delivery_row = lookup_con.execute(
-                    "SELECT delivery_date FROM delivery_lists WHERE id = ?",
-                    (str(first_row["list_id"] or ""),),
-                ).fetchone()
-                matched_delivery_date = str(delivery_row["delivery_date"] or "") if delivery_row else ""
+        matched_delivery_date = effective_delivery_date if first_row else ""
         target_label = f"Job Nr. {matched_job}" if matched_job else f"order {matched_order or lookup_text}"
         is_rush = order_type == "Rush"
         return {
             "ok": True,
             "assignmentId": assignment_id,
-            "listId": list_id,
+            "listId": affected_list_ids[0] if affected_list_ids else "",
+            "affectedListIds": affected_list_ids,
+            "affectedLists": affected_lists,
+            "affectedSourceIds": source_ids,
             "status": "SDIOverride",
             "orderType": order_type,
             "rush": is_rush,
             "remake": not is_rush,
-            "affectedItems": len(affected_rows),
+            "directToTruck": bool(direct_to_truck_value),
+            "affectedItems": len(logical_item_keys),
+            "affectedStageRows": len(affected_rows),
             "matchedJob": matched_job,
             "matchedCustomer": matched_customer,
             "matchedOrder": matched_order,
             "matchedDeliveryDate": matched_delivery_date,
+            "previousDeliveryDate": previous_delivery_date if first_row else "",
             "lookup": lookup_text,
             "notificationId": notification_id,
-            "message": f"{order_type} marked for {target_label}.",
+            "message": f"{order_type} marked for {target_label} across {len(affected_lists)} applicable stage(s).",
         }
 
     def remove_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Remove SDI for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes database records.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         assignment_id = int(data.get("assignmentId") or 0)
         lookup_text = str(data.get("orderNo") or data.get("order") or data.get("job") or "").strip()
         reason = str(data.get("reason") or "SDI cleared").strip()
@@ -10235,35 +12320,39 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            rows: list[sqlite3.Row] = []
+            seed_rows: list[Any] = []
             if assignment_id:
                 assignment = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
                 if not assignment:
                     raise ValueError("Assignment not found")
-                con.execute("UPDATE bay_assignments SET status = 'Assigned', reason = ? WHERE id = ?", (reason, assignment_id))
-                self.insert_bay_event(con, assignment["bay_id"], assignment["line_item_id"], "RemoveSDI", user, reason)
                 row = con.execute("SELECT * FROM line_items WHERE id = ?", (assignment["line_item_id"],)).fetchone()
                 if row:
-                    rows.append(row)
-                self.insert_audit(con, "bay_assignment", str(assignment_id), "remove_sdi", user, "", reason)
+                    seed_rows.append(row)
             else:
-                rows = self.find_sdi_line_items(con, lookup_text)
-                if not rows:
+                seed_rows = self.find_sdi_line_items(con, lookup_text)
+                if not seed_rows:
                     raise ValueError("Job Nr., SO number, order number, or barcode was not found on active delivery lists")
-                for row in rows:
-                    assignments = con.execute(
-                        "SELECT * FROM bay_assignments WHERE line_item_id = ? AND status = 'SDIOverride' ORDER BY id",
-                        (row["id"],),
-                    ).fetchall()
-                    for assignment in assignments:
-                        con.execute(
-                            "UPDATE bay_assignments SET status = 'Assigned', reason = ? WHERE id = ?",
-                            (reason, assignment["id"]),
-                        )
-                        self.insert_bay_event(con, assignment["bay_id"], row["id"], "RemoveSDI", user, reason)
-                        self.insert_audit(con, "bay_assignment", str(assignment["id"]), "remove_sdi", user, "", reason)
+
+            rows = self.expand_priority_line_items(con, seed_rows) or seed_rows
+            affected_lists = self.priority_list_context(con, rows)
+            logical_item_keys = {
+                str(row["source_id"] or "") or f"{row['order_no']}::{row['item_no']}"
+                for row in rows
+            }
 
             for row in rows:
+                assignments = con.execute(
+                    "SELECT * FROM bay_assignments WHERE line_item_id = ? AND status = 'SDIOverride' ORDER BY id",
+                    (row["id"],),
+                ).fetchall()
+                for assignment in assignments:
+                    con.execute(
+                        "UPDATE bay_assignments SET status = 'Assigned', reason = ? WHERE id = ?",
+                        (reason, assignment["id"]),
+                    )
+                    self.insert_bay_event(con, assignment["bay_id"], row["id"], "RemoveSDI", user, reason)
+                    self.insert_audit(con, "bay_assignment", str(assignment["id"]), "remove_sdi", user, "", reason)
+
                 next_state = re.sub(
                     r"\b(?:Rush|SDI|Remake|RM)\b",
                     "",
@@ -10271,8 +12360,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     flags=re.IGNORECASE,
                 ).strip(" -|,")
                 next_state = re.sub(r"\s{2,}", " ", next_state)
-                con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, row["id"]))
-                self.insert_audit(con, "line_item", row["id"], "clear_rush_remake_sdi", user, "", reason, {"lookup": lookup_text})
+                con.execute(
+                    """
+                    UPDATE line_items
+                    SET process_state = ?, priority_delivery_date = '', priority_direct_to_truck = 0
+                    WHERE id = ?
+                    """,
+                    (next_state, row["id"]),
+                )
+                self.insert_audit(
+                    con,
+                    "line_item",
+                    row["id"],
+                    "clear_rush_remake_sdi",
+                    user,
+                    "",
+                    reason,
+                    {"lookup": lookup_text, "affectedListIds": [item["id"] for item in affected_lists]},
+                )
             con.commit()
 
         first_row = rows[0] if rows else None
@@ -10283,15 +12388,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "ok": True,
             "assignmentId": assignment_id,
             "status": "Assigned",
-            "affectedItems": len(rows),
+            "affectedItems": len(logical_item_keys),
+            "affectedStageRows": len(rows),
+            "affectedListIds": [item["id"] for item in affected_lists],
+            "affectedLists": affected_lists,
             "matchedJob": matched_job,
             "matchedCustomer": matched_customer,
             "matchedOrder": matched_order,
             "lookup": lookup_text,
-            "message": "Rush / Remake mark cleared.",
+            "message": "Rush / Remake mark cleared from every applicable stage.",
         }
 
     def bay_check(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Purpose: Run the bay check workflow for the delivery-list scanner.
+
+        Effects: This function reads or changes database records.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         bay_code = str(data.get("bayCode") or "")
         action = str(data.get("action") or "").strip()
         reason = str(data.get("reason") or action or "Bay check").strip()
@@ -10307,6 +12420,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "bayCode": bay_code, "action": action}
 
     def export_csv(self, list_id: str) -> str:
+        """Purpose: Export CSV for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+        """
         rows = self.get_line_items(list_id)
         output = StringIO()
         fieldnames = [
@@ -10336,7 +12454,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "remaining": max(int(row["qty"]) - int(row["scanned"]), 0),
                     "dimensions": row["dimensions"],
                     "customer": row["customer"],
-                    "route": row["route"],
+                    "route": public_route_label(row["route"]),
                     "job": row["job"],
                     "product": row["product"],
                     "suggestedBay": row["suggestedBay"],
@@ -10345,6 +12463,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return output.getvalue()
 
     def export_package_xlsx(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> bytes:
+        """Purpose: Export package XLSX for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes files.
+        Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+        """
         package = self.get_print_package(list_ids, user=user, filters=filters)
         headers = [
             "Delivery Date",
@@ -10377,13 +12500,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     max(int(item.get("qty") or 0) - int(item.get("scanned") or 0), 0),
                     item.get("dimensions", ""),
                     item.get("customer", ""),
-                    item.get("route", ""),
+                    public_route_label(item.get("route", "")),
                     item.get("job", ""),
                     item.get("product", ""),
                     item.get("suggestedBay", ""),
                 ])
 
         def cell_ref(col: int, row: int) -> str:
+            """Purpose: Run the cell ref workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             letters = ""
             value = col
             while value:
@@ -10392,6 +12520,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return f"{letters}{row}"
 
         def inline_cell(col: int, row: int, value: Any) -> str:
+            """Purpose: Run the inline cell workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             text = xml_escape(str(value if value is not None else ""))
             return f'<c r="{cell_ref(col, row)}" t="inlineStr"><is><t>{text}</t></is></c>'
 
@@ -10445,6 +12578,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return output.getvalue()
 
     def export_xlsx(self, list_id: str) -> bytes:
+        """Purpose: Export XLSX for the delivery-list scanner workflow.
+
+        Effects: This function reads or changes files.
+        Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+        """
         rows = self.get_line_items(list_id)
         headers = [
             "Barcode",
@@ -10462,6 +12600,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ]
 
         def cell_ref(col: int, row: int) -> str:
+            """Purpose: Run the cell ref workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             letters = ""
             value = col
             while value:
@@ -10470,6 +12613,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return f"{letters}{row}"
 
         def inline_cell(col: int, row: int, value: Any) -> str:
+            """Purpose: Run the inline cell workflow for the delivery-list scanner.
+
+            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            """
             text = xml_escape(str(value if value is not None else ""))
             return f'<c r="{cell_ref(col, row)}" t="inlineStr"><is><t>{text}</t></is></c>'
 
@@ -10486,7 +12634,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 max(int(item["qty"]) - int(item["scanned"]), 0),
                 item["dimensions"],
                 item["customer"],
-                item["route"],
+                public_route_label(item["route"]),
                 item["job"],
                 item["product"],
                 item["suggestedBay"],
@@ -10537,10 +12685,146 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return output.getvalue()
 
 
+
+class AzureSqlDeliveryStore(SQLiteDeliveryStore):
+    """Azure SQL implementation that reuses the shared scanner business workflows."""
+
+    database_type = "azure-sql"
+
+    def __init__(self, config: AppConfig):
+        """Purpose: Initialize a Azure SQL delivery store instance and its required state.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
+        self.config = config
+        self.database_path = Path(config.database_path)
+        self.sample_path = Path(config.sample_path)
+        self.connection_string = str(config.database_connection_string or "").strip()
+
+    def connect(self) -> AzureSqlConnection:
+        """Purpose: Run the connect workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
+        return connect_azure_sql(
+            self.connection_string,
+            timeout_seconds=self.config.database_timeout_seconds,
+        )
+
+    def initialize(self) -> None:
+        """Purpose: Run the initialize workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
+        with self.connect() as con:
+            if self.config.database_auto_schema:
+                self.create_schema(con)
+            else:
+                required_tables = {"delivery_lists", "line_items", "users", "roles", "racks", "bays", "system_metadata"}
+                rows = con.execute_tsql(
+                    "SELECT name FROM sys.tables WHERE schema_id = SCHEMA_ID('dbo')"
+                ).fetchall()
+                existing_tables = {str(row["name"]) for row in rows}
+                missing = sorted(required_tables - existing_tables)
+                if missing:
+                    raise RuntimeError(
+                        "Azure SQL schema initialization is disabled, but required tables are missing: "
+                        + ", ".join(missing)
+                    )
+            self.seed_customer_route_rules(con)
+            self.seed_demo_data(con)
+            self.seed_security_data(con)
+            self.seed_bays(con)
+            self.repair_manual_assign_bay_visibility(con)
+            self.seed_bay_auto_assign_settings(con)
+            self.seed_racks(con)
+            self.repair_route_stage_memberships_if_needed(con)
+
+    def health(self) -> dict[str, Any]:
+        """Purpose: Run the health workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
+        with self.connect() as con:
+            row = con.execute_tsql(
+                "SELECT DB_NAME() AS database_name, CAST(SERVERPROPERTY('ServerName') AS nvarchar(256)) AS server_name"
+            ).fetchone()
+        return {
+            "ok": True,
+            "mode": self.database_type,
+            "database": row["database_name"] if row else "Azure SQL",
+            "server": row["server_name"] if row else "",
+            "environment": self.config.environment,
+            "authMode": self.config.auth_mode,
+        }
+
+    def create_schema(self, con: AzureSqlConnection) -> None:
+        """Purpose: Create schema for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
+        schema_path = self.config.root / "azure_sql_schema.sql"
+        if not schema_path.exists():
+            raise FileNotFoundError(f"Azure SQL schema file was not found: {schema_path}")
+        script = schema_path.read_text(encoding="utf-8")
+        batches = re.split(r"^\s*GO\s*$", script, flags=re.IGNORECASE | re.MULTILINE)
+        for batch in batches:
+            if batch.strip():
+                con.execute_tsql(batch)
+        self.apply_schema_migrations(con)
+
+    def ensure_column(self, con: AzureSqlConnection, table: str, column: str, definition: str) -> None:
+        """Purpose: Validate column for the delivery-list scanner workflow.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
+        """
+        exists = con.execute_tsql(
+            """
+            SELECT 1 AS present
+            FROM sys.columns
+            WHERE object_id = OBJECT_ID(?) AND name = ?
+            """,
+            (f"dbo.{table}", column),
+        ).fetchone()
+        if exists:
+            return
+
+        clean_definition = " ".join(str(definition or "").split())
+        clean_definition = re.sub(r"^TEXT\b", "nvarchar(max)", clean_definition, flags=re.IGNORECASE)
+        clean_definition = re.sub(r"^INTEGER\b", "int", clean_definition, flags=re.IGNORECASE)
+        clean_definition = re.sub(r"^REAL\b", "float", clean_definition, flags=re.IGNORECASE)
+        clean_definition = re.sub(
+            r"DEFAULT\s+'([^']*)'",
+            lambda match: f"DEFAULT (N'{match.group(1)}')",
+            clean_definition,
+            flags=re.IGNORECASE,
+        )
+        clean_definition = re.sub(
+            r"DEFAULT\s+(\d+)",
+            lambda match: f"DEFAULT ({match.group(1)})",
+            clean_definition,
+            flags=re.IGNORECASE,
+        )
+        con.execute_tsql(f"ALTER TABLE dbo.[{table}] ADD [{column}] {clean_definition}")
+
 def create_store(config: AppConfig) -> BaseDeliveryStore:
-    if config.database_type == "sqlite":
+    """Purpose: Create store for the delivery-list scanner workflow.
+
+    Effects: This function reads or updates shared application state.
+    Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+    """
+    database_type = str(config.database_type or "sqlite").strip().lower()
+    if database_type == "sqlite":
         return SQLiteDeliveryStore(config)
+    if database_type in {"azure-sql", "azure_sql", "sqlserver", "sql-server", "mssql"}:
+        return AzureSqlDeliveryStore(config)
     raise NotImplementedError(
-        f"Database type {config.database_type!r} is not implemented yet. "
-        "Add a store adapter that implements BaseDeliveryStore."
+        f"Database type {config.database_type!r} is not supported. "
+        "Use 'sqlite' for local development or 'azure-sql' for Microsoft Azure SQL."
     )

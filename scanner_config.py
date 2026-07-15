@@ -20,6 +20,8 @@ class AppConfig:
     database_type: str
     database_path: Path
     database_connection_string: str
+    database_timeout_seconds: int
+    database_auto_schema: bool
     host: str
     port: int
     base_url: str
@@ -31,10 +33,20 @@ class AppConfig:
 
     @property
     def production(self) -> bool:
+        """Purpose: Run the production workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         return self.environment.lower() in {"prod", "production"}
 
 
 def _int_env(name: str, default: int) -> int:
+    """Purpose: Run the int env workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     value = os.environ.get(name, "").strip()
     if not value:
         return default
@@ -44,7 +56,24 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    """Purpose: Run the bool env workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
+    value = os.environ.get(name, "").strip().lower()
+    if not value:
+        return default
+    return value in {"1", "true", "yes", "on"}
+
+
 def load_config(root: Path) -> AppConfig:
+    """Purpose: Load config for the delivery-list scanner workflow.
+
+    Effects: This function reads or updates shared application state.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     root = root.resolve()
     data_dir = root / "data"
     default_db_path = data_dir / "delivery-scanner-pilot.db"
@@ -68,6 +97,8 @@ def load_config(root: Path) -> AppConfig:
         database_type=os.environ.get("DLS_DATABASE_TYPE", "sqlite").strip().lower() or "sqlite",
         database_path=database_path,
         database_connection_string=os.environ.get("DLS_DATABASE_CONNECTION_STRING", "").strip(),
+        database_timeout_seconds=_int_env("DLS_DATABASE_TIMEOUT_SECONDS", 30),
+        database_auto_schema=_bool_env("DLS_DATABASE_AUTO_SCHEMA", True),
         host=host,
         port=port,
         base_url=base_url,

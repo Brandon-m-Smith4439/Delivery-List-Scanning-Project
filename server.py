@@ -17,6 +17,8 @@ import os
 import re
 import threading
 import time
+import traceback
+import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from http.cookies import SimpleCookie
@@ -25,7 +27,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from delivery_store import SESSION_COOKIE_NAME, create_store, request_station, request_user_name
+from delivery_store import SESSION_COOKIE_NAME, create_store, public_route_label, request_station, request_user_name
 from scanner_config import load_config
 
 
@@ -35,6 +37,11 @@ STORE = create_store(CONFIG)
 
 
 def esc(value: object) -> str:
+    """Purpose: Run the esc workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     return html.escape(str(value if value is not None else ""))
 
 
@@ -97,6 +104,11 @@ CODE39 = {
 
 
 def code39_svg(value: str) -> str:
+    """Purpose: Run the code39 SVG workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     text = "".join(ch for ch in str(value or "").upper() if ch in CODE39 and ch != "*")
     encoded = f"*{text}*"
     narrow, wide, gap, height = 2, 5, 2, 72
@@ -114,6 +126,11 @@ def code39_svg(value: str) -> str:
 
 
 def render_item_row(item: dict) -> str:
+    """Purpose: Render item row for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+    """
     job_text = item.get("job") or item.get("product")
     customer_text = item.get("customer")
     # Keep printed list rows to one visual line per item. Long job/customer names
@@ -127,7 +144,7 @@ def render_item_row(item: dict) -> str:
               <td class="print-nowrap qty-cell">{esc(item.get("qty"))}</td>
               <td class="print-truncate dimensions-cell" title="{esc(item.get("dimensions"))}">{esc(item.get("dimensions"))}</td>
               <td class="print-truncate customer-cell" title="{esc(customer_text)}">{esc(customer_text)}</td>
-              <td class="print-nowrap route-cell">{esc(item.get("route"))}</td>
+              <td class="print-nowrap route-cell">{esc(public_route_label(item.get("route")))}</td>
               <td class="check-cell">&#9744;</td>
             </tr>
             """
@@ -155,9 +172,19 @@ def paginate_item_rows(items: list[dict], rows_per_page: int = 23, first_page_ro
     current_product = object()
 
     def current_row_limit() -> int:
+        """Purpose: Run the current row limit workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         return first_page_limit if not pages else continuation_limit
 
     def flush_page() -> None:
+        """Purpose: Run the flush page workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         nonlocal current_rows, current_count, current_product
         if current_rows:
             pages.append("".join(current_rows))
@@ -207,6 +234,11 @@ def render_sheet(
     badge: str = "",
     printed_at: str = "",
 ) -> str:
+    """Purpose: Render sheet for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+    """
     badge_html = f'<span class="sheet-badge">{esc(badge)}</span>' if badge else ""
     printed_at_html = f'<p class="printed-at">Printed at: {esc(printed_at)}</p>' if printed_at else ""
     item_pages = paginate_item_rows(items)
@@ -280,6 +312,11 @@ def printed_item_is_remake(item: dict) -> bool:
     return "REMAKE" in text or re.search(r"\bRM\b", text) is not None
 
 def render_rack_packing_list(payload: dict) -> str:
+    """Purpose: Render rack packing list for the delivery-list scanner workflow.
+
+    Effects: This function reads or updates shared application state.
+    Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+    """
     rack = payload.get("rack") or {}
     barcode = rack.get("barcode") or f"RACK-{rack.get('code', '')}"
     destination = rack.get("destination") or "Indian Trail"
@@ -290,6 +327,11 @@ def render_rack_packing_list(payload: dict) -> str:
     default_address = destination_payload.get("address") or "Address not configured"
 
     def customer_date_groups() -> list[dict]:
+        """Purpose: Run the customer date groups workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         if not is_dtc:
             return [
                 {
@@ -330,6 +372,11 @@ def render_rack_packing_list(payload: dict) -> str:
         ]
 
     def rows_for_items(items: list[dict]) -> str:
+        """Purpose: Run the rows for items workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         rows = []
         for item in items:
             rows.append(
@@ -342,7 +389,7 @@ def render_rack_packing_list(payload: dict) -> str:
                   <td>{esc(item.get("rackQty") or item.get("qty"))}</td>
                   <td>{esc(item.get("dimensions"))}</td>
                   <td>{esc(item.get("customer"))}</td>
-                  <td>{esc(item.get("route"))}</td>
+                  <td>{esc(public_route_label(item.get("route")))}</td>
                   <td class="flag-cell">{'RM' if printed_item_is_remake(item) else ''}</td>
                   <td class="check-cell">&#9744;</td>
                 </tr>
@@ -354,6 +401,11 @@ def render_rack_packing_list(payload: dict) -> str:
     group_count = len(groups)
 
     def sheet_html(group: dict, index: int) -> str:
+        """Purpose: Run the sheet HTML workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         delivery_label = group.get("deliveryLabel") or rack.get("deliveryLabel") or ""
         delivery_suffix = f" - {esc(delivery_label)}" if delivery_label else ""
         title = group.get("title") or rack.get("name") or rack.get("code")
@@ -480,6 +532,11 @@ def render_rack_packing_list(payload: dict) -> str:
     """
 
 def render_customer_email_manifest_pdf_page(email: dict) -> str:
+    """Purpose: Render customer email manifest PDF page for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+    """
     payload = email.get("payload") or {}
     items = payload.get("items") or []
     customer = email.get("customerName") or "Customer"
@@ -498,7 +555,7 @@ def render_customer_email_manifest_pdf_page(email: dict) -> str:
               <td>{esc(item.get('item'))}</td>
               <td>{esc(item.get('qty'))}</td>
               <td>{esc(item.get('dimensions') or '-')}</td>
-              <td>{esc(item.get('route') or '-')}</td>
+              <td>{esc(public_route_label(item.get('route')))}</td>
             </tr>
             """
             for item in items
@@ -571,6 +628,11 @@ def render_customer_email_manifest_pdf_page(email: dict) -> str:
 </html>"""
 
 def render_stale_bay_report(rows: list[dict]) -> str:
+    """Purpose: Render stale bay report for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+    """
     body_rows = []
     for row in rows:
         body_rows.append(
@@ -635,6 +697,11 @@ def render_stale_bay_report(rows: list[dict]) -> str:
 
 
 def render_print_package(package: dict) -> str:
+    """Purpose: Render print package for the delivery-list scanner workflow.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
+    """
     sections = []
     printed_at = datetime.now().strftime("%m/%d/%Y %I:%M %p")
     filters = package.get("filters", {}) or {}
@@ -662,6 +729,11 @@ def render_print_package(package: dict) -> str:
         return stage
 
     def sheet_title(delivery_list: dict, mode: str = "") -> str:
+        """Purpose: Run the sheet title workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         date_text = print_display_date(delivery_list.get("deliveryDate"))
         stage_name = stage_print_name(delivery_list)
         if mode == "remake":
@@ -673,6 +745,11 @@ def render_print_package(package: dict) -> str:
         return f"{stage_name} Delivery List for {date_text}"
 
     def sheet_badge(delivery_list: dict, mode: str = "") -> str:
+        """Purpose: Run the sheet badge workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         if mode == "remake":
             return "REMAKE"
         if mode == "rush":
@@ -681,7 +758,27 @@ def render_print_package(package: dict) -> str:
             return "UPDATED"
         return ""
 
-    def sheet_subtitle(delivery_list: dict) -> str:
+    def sheet_subtitle(delivery_list: dict, mode: str = "") -> str:
+        """Purpose: Run the sheet subtitle workflow for the delivery-list scanner.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
+        if mode == "rush":
+            priority_date = str(delivery_list.get("deliveryDate") or "")
+            original_date = str(delivery_list.get("originalDeliveryDate") or "")
+            details = []
+            if original_date and original_date != priority_date:
+                details.append(f"Original delivery-list date: {print_display_date(original_date)}")
+            stage_kind = str(delivery_list.get("stageKind") or delivery_list.get("sheetKind") or "").lower()
+            if stage_kind == "indian-trail" and delivery_list.get("priorityDirectToTruck"):
+                handling = "Handling: Send straight to installer truck / skip bay"
+            elif stage_kind == "indian-trail":
+                handling = "Handling: Receive into the indicated priority Rush bay"
+            else:
+                handling = "Handling: Expedite through this stage"
+            details.append(handling)
+            return " | ".join(details)
         mirror_count = int(delivery_list.get("excludedMirrorCount") or 0)
         if mirror_count:
             return f"Regular mirror rows excluded: {mirror_count}"
@@ -702,7 +799,16 @@ def render_print_package(package: dict) -> str:
             # If the shop later wants duplicate physical copies again, add a second render_sheet call here.
             sections.append(render_sheet(title, sheet_subtitle(delivery_list), normal_items, f"regular {sheet_kind} {updated_class}", badge, printed_at))
         if rushes and not remake_only:
-            sections.append(render_sheet(sheet_title(delivery_list, "rush"), "", rushes, "rush", sheet_badge(delivery_list, "rush"), printed_at))
+            sections.append(
+                render_sheet(
+                    sheet_title(delivery_list, "rush"),
+                    sheet_subtitle(delivery_list, "rush"),
+                    rushes,
+                    "rush",
+                    sheet_badge(delivery_list, "rush"),
+                    printed_at,
+                )
+            )
         if remakes and not rush_only:
             title = sheet_title(delivery_list, "remake")
             # Remake sheets also print one physical copy by default.
@@ -786,15 +892,30 @@ def render_print_package(package: dict) -> str:
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
+        """Purpose: Initialize a handler instance and its required state.
+
+        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def end_headers(self) -> None:
+        """Purpose: Run the end headers workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
         super().end_headers()
 
     def send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
+        """Purpose: Send JSON for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -804,6 +925,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def send_html(self, markup: str, status: HTTPStatus = HTTPStatus.OK) -> None:
+        """Purpose: Send HTML for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         body = markup.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -813,12 +939,22 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def read_json(self) -> dict:
+        """Purpose: Read JSON for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length <= 0:
             return {}
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def session_token(self) -> str:
+        """Purpose: Run the session token workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         cookie_header = self.headers.get("Cookie", "")
         if not cookie_header:
             return ""
@@ -827,9 +963,19 @@ class Handler(SimpleHTTPRequestHandler):
         return morsel.value if morsel else ""
 
     def current_user(self) -> dict | None:
+        """Purpose: Run the current user workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         return STORE.get_user_by_session(self.session_token())
 
     def require_permission(self, permission: str) -> dict | None:
+        """Purpose: Run the require permission workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         user = self.current_user()
         if not user:
             self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
@@ -840,6 +986,11 @@ class Handler(SimpleHTTPRequestHandler):
         return user
 
     def require_any_permission(self, *permissions: str) -> dict | None:
+        """Purpose: Run the require any permission workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         user = self.current_user()
         if not user:
             self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
@@ -852,6 +1003,11 @@ class Handler(SimpleHTTPRequestHandler):
 
 
     def require_confirmation_text(self, data: dict, required_text: str) -> bool:
+        """Purpose: Run the require confirmation text workflow for the delivery-list scanner.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         typed = str(data.get("confirmText") or "").strip()
         if typed == required_text:
             return True
@@ -875,6 +1031,11 @@ class Handler(SimpleHTTPRequestHandler):
         return user
 
     def set_session_cookie(self, token: str, expires_at: str) -> None:
+        """Purpose: Update session cookie for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         secure = "; Secure" if CONFIG.production else ""
         self.send_header(
             "Set-Cookie",
@@ -882,12 +1043,22 @@ class Handler(SimpleHTTPRequestHandler):
         )
 
     def clear_session_cookie(self) -> None:
+        """Purpose: Remove session cookie for the delivery-list scanner workflow.
+
+        Effects: This function reads or updates shared application state.
+        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        """
         self.send_header(
             "Set-Cookie",
             f"{SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
         )
 
     def do_GET(self) -> None:
+        """Purpose: Handle get for the delivery-list scanner workflow.
+
+        Effects: This function writes an HTTP response.
+        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
         parsed = urlparse(self.path)
 
         if parsed.path == "/api/health":
@@ -1186,6 +1357,11 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        """Purpose: Handle post for the delivery-list scanner workflow.
+
+        Effects: This function writes an HTTP response.
+        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        """
         parsed = urlparse(self.path)
         try:
             data = self.read_json()
@@ -1781,20 +1957,73 @@ def daily_import_loop() -> None:
 
 
 def start_daily_import_scheduler() -> None:
+    """Purpose: Run the start daily import scheduler workflow for the delivery-list scanner.
+
+    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
+    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    """
     thread = threading.Thread(target=daily_import_loop, name="daily-delivery-list-import", daemon=True)
     thread.start()
 
 
+def write_startup_failure_log(exc: BaseException) -> Path:
+    """Persist startup failures so the Windows launcher can show a useful diagnosis.
+
+    Effects: Creates or appends ``logs/startup-error.log`` beside the application.
+    Flow: Records the timestamp, Python/runtime details, configured database path,
+    and the complete traceback without modifying the SQLite database.
+    """
+    log_dir = ROOT / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "startup-error.log"
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    details = [
+        "=" * 80,
+        f"Startup failure: {timestamp}",
+        f"Python: {sys.version}",
+        f"Executable: {sys.executable}",
+        f"Application root: {ROOT}",
+        f"Database type: {CONFIG.database_type}",
+        f"Database path: {CONFIG.database_path}",
+        "",
+        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).rstrip(),
+        "",
+    ]
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(details))
+    return log_path
+
+
 def main() -> int:
+    """Start the database, scheduler, and HTTP server in a diagnosable order.
+
+    Effects: Initializes the configured store, starts the optional daily import
+    scheduler, binds the local HTTP port, and serves the browser application.
+    Flow: Emits flushed startup milestones so launchers can distinguish database
+    initialization from port-binding failures.
+    """
+    print("Initializing Delivery List Scanner database...", flush=True)
     STORE.initialize()
+    print("Database initialization complete.", flush=True)
     start_daily_import_scheduler()
+    print(f"Binding web server to {CONFIG.host}:{CONFIG.port}...", flush=True)
     server = ThreadingHTTPServer((CONFIG.host, CONFIG.port), Handler)
-    print(f"Delivery List Scanner running at http://{CONFIG.host}:{CONFIG.port}/")
-    print(f"Database type: {CONFIG.database_type}")
-    print(f"Database: {CONFIG.database_path}")
+    health = STORE.health()
+    print(f"Delivery List Scanner running at http://{CONFIG.host}:{CONFIG.port}/", flush=True)
+    print(f"Database type: {health.get('mode', CONFIG.database_type)}", flush=True)
+    print(f"Database: {health.get('database', CONFIG.database_path)}", flush=True)
     server.serve_forever()
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("Delivery List Scanner stopped.", flush=True)
+        raise SystemExit(0)
+    except Exception as exc:
+        log_path = write_startup_failure_log(exc)
+        print(f"Delivery List Scanner failed to start: {exc}", file=sys.stderr, flush=True)
+        print(f"Startup details were written to: {log_path}", file=sys.stderr, flush=True)
+        raise

@@ -1,0 +1,16 @@
+# Keep local databases, credentials, caches, source-control metadata, and packaged
+# releases outside the production image. The example Azure environment file remains
+# available as documentation only; App Service settings supply real secrets.
+
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.db
+*.db-shm
+*.db-wal
+*.zip
+.env
+.env.*
+!/.env.azure.example

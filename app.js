@@ -14,6 +14,8 @@
 const STORAGE_KEY = "delivery-list-scanner-demo-v1";
 const STATIONS_KEY = "delivery-list-scanner-stations-v1";
 const LANGUAGE_KEY = "delivery-list-scanner-language-v1";
+const FULLSCREEN_REFRESH_KEY = "delivery-list-scanner-resume-fullscreen-after-refresh-v1";
+const NO_RACK_SELECTION = "__NO_RACK__";
 const DEFAULT_STATIONS = ["Airport Rd", "Indian Trail", "Greenville", "Customer Pickup", "DTC"];
 const ROLE_OPTIONS = ["Operator", "Supervisor", "Indian Trail Operator", "Indian Trail Lead", "Indian Trail Manager", "Admin"];
 const CUSTOMER_ROUTE_OPTIONS = [
@@ -76,6 +78,7 @@ const state = {
   racks: [],
   rackSummary: null,
   selectedRackCode: "T",
+  selectedScanRackCode: "T",
   selectedOutboundRackCode: "",
   selectedRackOverviewCode: "",
   selectedRackSetLabel: "",
@@ -136,6 +139,8 @@ const state = {
   notificationQueue: [],
   activeNotificationId: 0,
   acknowledgedNotificationIds: new Set(),
+  activeScanOperations: new Set(),
+  rushRedirectInProgress: false,
   lastScan: null,
   homeReportSummary: null,
   homeChartMetric: "glass",
@@ -143,6 +148,7 @@ const state = {
   homeChartQuery: "",
   homeChartLimit: "all",
   homeChartSort: "value-desc",
+  homeChartSelectedLabel: "",
   language: (() => {
     try {
       return localStorage.getItem(LANGUAGE_KEY) === "es" ? "es" : "en";
@@ -182,6 +188,7 @@ const els = {
   globalPrintExportBtn: document.getElementById("globalPrintExportBtn"),
   languageToggleBtn: document.getElementById("languageToggleBtn"),
   loginLanguageToggleBtn: document.getElementById("loginLanguageToggleBtn"),
+  refreshPageBtn: document.getElementById("refreshPageBtn"),
   fullscreenToggleBtn: document.getElementById("fullscreenToggleBtn"),
   appHeader: document.querySelector(".app-header"),
   bayAutoAssignOverview: document.getElementById("bayAutoAssignOverview"),
@@ -200,12 +207,14 @@ const els = {
   statsChartModal: document.getElementById("statsChartModal"),
   statsChartBackdrop: document.getElementById("statsChartBackdrop"),
   statsChartCloseBtn: document.getElementById("statsChartCloseBtn"),
+  statsChartRangeSelect: document.getElementById("statsChartRangeSelect"),
   statsChartMetricSelect: document.getElementById("statsChartMetricSelect"),
   statsChartViewSelect: document.getElementById("statsChartViewSelect"),
   statsChartSortSelect: document.getElementById("statsChartSortSelect"),
   statsChartLimitSelect: document.getElementById("statsChartLimitSelect"),
   statsChartFilterInput: document.getElementById("statsChartFilterInput"),
   statsChartResetBtn: document.getElementById("statsChartResetBtn"),
+  statsChartKpis: document.getElementById("statsChartKpis"),
   statsChartResultCount: document.getElementById("statsChartResultCount"),
   statsChartModalTitle: document.getElementById("statsChartModalTitle"),
   statsChartModalSubtitle: document.getElementById("statsChartModalSubtitle"),
@@ -261,6 +270,7 @@ const els = {
   manualAssignStatus: document.getElementById("manualAssignStatus"),
   listRows: document.getElementById("listRows"),
   recentRows: document.getElementById("recentRows"),
+  recentScanCountLabel: document.getElementById("recentScanCountLabel"),
   viewAllRecent: document.getElementById("viewAllRecent"),
   mobileListCards: document.getElementById("mobileListCards"),
   lastCard: document.getElementById("lastCard"),
@@ -362,6 +372,7 @@ const els = {
   sdiBayInput: document.getElementById("sdiBayInput"),
   sdiTruckExemptInput: document.getElementById("sdiTruckExemptInput"),
   sdiReasonInput: document.getElementById("sdiReasonInput"),
+  sdiDeliveryDateInput: document.getElementById("sdiDeliveryDateInput"),
   sdiTypeInput: document.getElementById("sdiTypeInput"),
   sdiCurrentList: document.getElementById("sdiCurrentList"),
   manageItemsPanel: document.getElementById("manageItemsPanel"),
@@ -472,6 +483,11 @@ const els = {
   activeSessions: document.getElementById("activeSessions"),
 };
 
+/**
+ * Purpose: Run the escape HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -480,6 +496,11 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * Purpose: Run the pad workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function pad(value, length) {
   return String(value).padStart(length, "0");
 }
@@ -488,33 +509,13 @@ const SPANISH_UI_TEXT = new Map([
   ["Home", "Inicio"],
   ["Scan", "Escanear"],
   ["Racks", "Racks"],
-  ["Bay Map", "Mapa de Bahias"],
-  ["Admin", "Administracion"],
   ["Search", "Buscar"],
   ["Print/Export", "Imprimir/Exportar"],
-  ["Sign out", "Cerrar sesion"],
-  ["Sign in", "Iniciar sesion"],
-  ["Secure sign in", "Inicio de sesion seguro"],
-  ["Welcome back", "Bienvenido de nuevo"],
-  ["BFS Email or Username", "Correo BFS o nombre de usuario"],
-  ["Password", "Contrasena"],
-  ["Forgot password?", "Olvido su contrasena?"],
-  ["Password reset", "Restablecer contrasena"],
   ["Reset access", "Restablecer acceso"],
-  ["Request reset code", "Solicitar codigo"],
-  ["Reset Code", "Codigo de restablecimiento"],
-  ["New Password", "Nueva contrasena"],
-  ["Reset password", "Restablecer contrasena"],
-  ["Back to sign in", "Volver al inicio"],
   ["Delivery List Overview", "Resumen de listas de entrega"],
-  ["Today's Delivery Progress", "Progreso de entregas de hoy"],
   ["Find Delivery List", "Buscar lista de entrega"],
-  ["Statistics Dashboard", "Panel de estadisticas"],
   ["Plant performance", "Rendimiento de planta"],
   ["Range", "Rango"],
-  ["Last 30 days", "Ultimos 30 dias"],
-  ["Last week", "Ultima semana"],
-  ["Full year", "Ano completo"],
   ["All lists", "Todas las listas"],
   ["PDF", "PDF"],
   ["Remakes", "Rehechos"],
@@ -522,12 +523,10 @@ const SPANISH_UI_TEXT = new Map([
   ["Action & Scan Health", "Actividad y estado de escaneo"],
   ["Date", "Fecha"],
   ["Stage", "Etapa"],
-  ["Station", "Estacion"],
   ["Status", "Estado"],
   ["All", "Todos"],
   ["Not Scanned", "Sin escanear"],
   ["Partial", "Parcial"],
-  ["Complete", "Completo"],
   ["Rushes", "Urgentes"],
   ["New/Updated", "Nuevo/Actualizado"],
   ["Errors", "Errores"],
@@ -542,7 +541,6 @@ const SPANISH_UI_TEXT = new Map([
   ["Dimensions", "Dimensiones"],
   ["Customer", "Cliente"],
   ["Flags", "Indicadores"],
-  ["Location", "Ubicacion"],
   ["Process State", "Estado del proceso"],
   ["Transportation Method", "Metodo de transporte"],
   ["Complete Rack", "Completar rack"],
@@ -554,50 +552,36 @@ const SPANISH_UI_TEXT = new Map([
   ["Scan Barcode", "Escanear codigo de barras"],
   ["Undo", "Deshacer"],
   ["Redo", "Rehacer"],
-  ["Manual Scan", "Escaneo manual"],
   ["Submit", "Enviar"],
-  ["Scan History", "Historial de escaneos"],
   ["All scans", "Todos los escaneos"],
   ["Recent scans", "Escaneos recientes"],
   ["Remaining", "Restante"],
-  ["Needs Review", "Requiere revision"],
   ["Rack Overview", "Resumen de racks"],
   ["Edit Racks", "Editar racks"],
   ["Indian Trail Inventory", "Inventario de Indian Trail"],
-  ["Bay Map Command Center", "Centro de control de bahias"],
   ["Open list", "Abrir lista"],
   ["Open manifest", "Abrir manifiesto"],
   ["Outbound sent", "Salida enviada"],
   ["Received at Indian Trail", "Recibido en Indian Trail"],
-  ["Admin Dashboard", "Panel de administracion"],
-  ["Delivery List Management", "Administracion de listas de entrega"],
   ["Edit Delivery Lists", "Editar listas de entrega"],
-  ["Customer Route Rules", "Reglas de rutas de clientes"],
   ["Edit Customer Routes", "Editar rutas de clientes"],
   ["Customer Email Rules", "Reglas de correo de clientes"],
   ["Edit Emails", "Editar correos"],
-  ["Users", "Usuarios"],
   ["Edit Users", "Editar usuarios"],
-  ["Active Sessions", "Sesiones activas"],
   ["Open", "Abierto"],
   ["Empty", "Vacio"],
   ["On the way", "En camino"],
-  ["Truck", "Camion"],
   ["Steel", "Acero"],
   ["Wood", "Madera"],
   ["Aluminum", "Aluminio"],
   ["Other", "Otro"],
   ["No rack", "Sin rack"],
   ["Loading racks...", "Cargando racks..."],
-  ["Choose an option", "Elija una opcion"],
-  ["No matching options", "No hay opciones coincidentes"],
   ["Filter options...", "Filtrar opciones..."],
   ["Open full chart", "Abrir grafica completa"],
   ["Reset filters", "Restablecer filtros"],
   ["Save", "Guardar"],
-  ["Cancel", "Cancelar"],
   ["Delete", "Eliminar"],
-  ["Close", "Cerrar"],
   ["Add", "Agregar"],
   ["Edit", "Editar"],
 ]);
@@ -625,7 +609,6 @@ const SPANISH_UI_TEXT = new Map([
   ["Full year", "Año completo"],
   ["Station", "Estación"],
   ["Location", "Ubicación"],
-  ["Manual Scan", "Escaneo manual"],
   ["Scan History", "Historial de escaneos"],
   ["Needs Review", "Requiere revisión"],
   ["Bay Map Command Center", "Centro de control de bahías"],
@@ -646,25 +629,24 @@ const SPANISH_UI_TEXT = new Map([
   ["Bay Directory", "Directorio de bahías"],
   ["Bay Scan", "Escaneo de bahía"],
   ["Bay Scan History", "Historial de escaneos de bahía"],
+  ["Current bay location", "Ubicación actual de bahía"],
+  ["Current Bay", "Bahía actual"],
+  ["Current Location", "Ubicación actual"],
+  ["Scanned Bay", "Bahía escaneada"],
+  ["Change Location", "Cambiar ubicación"],
   ["Bay Scanner Rules", "Reglas del escáner de bahías"],
   ["Blocked Scans", "Escaneos bloqueados"],
   ["Cancel", "Cancelar"],
-  ["Chart data", "Datos de la gráfica"],
-  ["Chart style", "Estilo de gráfica"],
   ["Check", "Verificar"],
   ["Clear", "Limpiar"],
-  ["Clear filters", "Limpiar filtros"],
   ["Close", "Cerrar"],
   ["Collapse All", "Contraer todo"],
   ["Customer Emails", "Correos de clientes"],
-  ["Customer manifests", "Manifiestos de clientes"],
-  ["Data driven", "Basado en datos"],
   ["Delivery Date", "Fecha de entrega"],
   ["Delivery List", "Lista de entrega"],
   ["Delivery lists", "Listas de entrega"],
   ["Details open when a bay is selected", "Los detalles se abren al seleccionar una bahía"],
   ["Display", "Mostrar"],
-  ["Done", "Listo"],
   ["Donut chart", "Gráfica de dona"],
   ["Edit Bays", "Editar bahías"],
   ["Edit Map", "Editar mapa"],
@@ -694,6 +676,17 @@ const SPANISH_UI_TEXT = new Map([
   ["Indian Trail only", "Solo Indian Trail"],
   ["Item", "Artículo"],
   ["Latest 2", "Últimos 2"],
+  ["Latest 4", "Últimos 4"],
+  ["Selected category", "Categoría seleccionada"],
+  ["Value", "Valor"],
+  ["Displayed total", "Total mostrado"],
+  ["Chart categories", "Categorías de la gráfica"],
+  ["Drop at top", "Soltar arriba"],
+  ["Drop between groups", "Soltar entre grupos"],
+  ["Drop at bottom", "Soltar abajo"],
+  ["The displayed categories are all zero, so a donut chart cannot be drawn. Switch to the bar chart to compare them.", "Todas las categorías mostradas están en cero, por lo que no se puede dibujar una gráfica de dona. Cambie a la gráfica de barras para compararlas."],
+  ["Drag a compact group card onto any blue insertion line to place it above, between, or below other groups. Use the arrow buttons for precise one-step movement, then Save Layout.", "Arrastre una tarjeta compacta de grupo a cualquier línea azul de inserción para colocarla arriba, entre o debajo de otros grupos. Use los botones de flecha para moverla con precisión y luego guarde el diseño."],
+  ["Drop grouped bay sets here while reorganizing.", "Suelte aquí los grupos de bahías mientras reorganiza el mapa."],
   ["Lists", "Listas"],
   ["Lowest first", "Menor primero"],
   ["Manage Bay Items", "Administrar artículos de bahía"],
@@ -713,7 +706,6 @@ const SPANISH_UI_TEXT = new Map([
   ["Products, routes, and process options.", "Productos, rutas y opciones de proceso."],
   ["Progress by route/stage", "Progreso por ruta/etapa"],
   ["Rack recovery", "Recuperación de racks"],
-  ["Ready notices", "Avisos de disponibilidad"],
   ["Reason", "Motivo"],
   ["Review", "Revisar"],
   ["Run Print/Export", "Ejecutar Imprimir/Exportar"],
@@ -865,6 +857,12 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Scanner:", "Escáner:"],
   ["SDI / Rush", "SDI / urgente"],
   ["Rush / Remake", "Urgente / rehacer"],
+  ["Rush / Remake Delivery Date", "Fecha de entrega urgente / rehecha"],
+  ["Leave unchanged to keep the current date, or select the new priority delivery date.", "Déjela sin cambios para conservar la fecha actual o seleccione la nueva fecha de entrega prioritaria."],
+  ["Previous delivery date", "Fecha de entrega anterior"],
+  ["New delivery date", "Nueva fecha de entrega"],
+  ["Products / sizes", "Productos / tamaños"],
+  ["Items", "Artículos"],
   ["SDI / Rush Order", "Orden SDI / urgente"],
   ["Rush / Remake Order", "Orden urgente / rehecha"],
   ["Search bay, order, item, customer, glass type, size...", "Buscar bahía, orden, artículo, cliente, tipo de vidrio o tamaño..."],
@@ -890,17 +888,20 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Bay Map update cleared", "Actualización del mapa de bahías eliminada"],
   ["Rush marked", "Urgente marcado"],
   ["Remake marked", "Rehacer marcado"],
-  ["Rush / Remake cleared", "Marca urgente / rehacer eliminada"],
   ["Job Nr. / Order", "Núm. de trabajo / orden"],
   ["Items updated", "Artículos actualizados"],
   ["Print Rush sheet", "Imprimir hoja urgente"],
   ["Print remake sheet", "Imprimir hoja de rehacer"],
-  ["Done", "Listo"],
   ["Update complete", "Actualización completada"],
   ["Saved successfully", "Guardado correctamente"],
+  ["Save complete", "Guardado completado"],
+  ["Your changes are now active.", "Sus cambios ya están activos."],
   ["Print complete", "Impresión completada"],
   ["Return to fullscreen", "Volver a pantalla completa"],
   ["The print window closed. Your browser requires one click to enter fullscreen again.", "La ventana de impresión se cerró. Su navegador requiere un clic para volver a pantalla completa."],
+  ["Page refreshed", "Página actualizada"],
+  ["The page refreshed. Your browser requires one click to enter fullscreen again.", "La página se actualizó. Su navegador requiere un clic para volver a pantalla completa."],
+  ["Fullscreen could not be resumed. Use the fullscreen button to try again.", "No se pudo reanudar la pantalla completa. Use el botón de pantalla completa para intentarlo de nuevo."],
   ["Stay in windowed mode", "Permanecer en modo ventana"],
   ["Allow popups to open the print preview.", "Permita ventanas emergentes para abrir la vista previa de impresión."],
   ["Job Nr., SO number, order number, or barcode was not found on active delivery lists", "No se encontró el núm. de trabajo, número SO, número de orden o código de barras en las listas de entrega activas"],
@@ -1197,7 +1198,6 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Block Scans", "Bloquear escaneos"],
   ["Blocked for all scanning", "Bloqueada para todos los escaneos"],
   ["Body", "Cuerpo"],
-  ["Cancel scan", "Cancelar escaneo"],
   ["Capacity", "Capacidad"],
   ["CC on all customer emails", "CC en todos los correos de clientes"],
   ["CC optional", "CC opcional"],
@@ -1294,14 +1294,12 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Incomplete Delivery Lists", "Listas de entrega incompletas"],
   ["Indian Trail bay assignments older than 10 days will appear here.", "Las asignaciones de Indian Trail con más de 10 días aparecerán aquí."],
   ["Indian Trail bay auto-assigner", "Asignador automático de bahías de Indian Trail"],
-  ["Indian Trail Bay Scan History", "Historial de escaneos de bahía de Indian Trail"],
   ["Indian Trail Receiving", "Recepción de Indian Trail"],
   ["Individual Bays", "Bahías individuales"],
   ["Internal email drafts", "Borradores internos de correo"],
   ["items", "artículos"],
   ["job group", "grupo de trabajo"],
   ["Job Nr. groups", "Grupos por núm. de trabajo"],
-  ["Jobs in this bay", "Trabajos en esta bahía"],
   ["Known phrases and odd labels that will not ask for confirmation.", "Frases conocidas y etiquetas especiales que no pedirán confirmación."],
   ["Label", "Etiqueta"],
   ["Largest glass dimension controls Standard / Tall / Oversize.", "La dimensión mayor controla Estándar / Alto / Sobredimensionado."],
@@ -1337,7 +1335,6 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Name root", "Raíz del nombre"],
   ["Need walkthrough", "Requiere revisión física"],
   ["Needs attention", "Requiere atención"],
-  ["Needs review", "Requiere revisión"],
   ["New Bay Group", "Nuevo grupo de bahías"],
   ["New bay prefix", "Nuevo prefijo de bahía"],
   ["New custom routes become their own stage during import when a customer matches that route.", "Las rutas personalizadas se convierten en su propia etapa cuando un cliente coincide."],
@@ -1395,7 +1392,6 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Please wait while the current in-transit jobs are pulled together.", "Espere mientras se cargan los trabajos en tránsito."],
   ["Port", "Puerto"],
   ["Prevented by system", "Impedido por el sistema"],
-  ["Primary Job", "Trabajo principal"],
   ["Print / Save PDF", "Imprimir / guardar PDF"],
   ["Product", "Producto"],
   ["Progress", "Progreso"],
@@ -1410,7 +1406,6 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Rack Manager", "Administrador de racks"],
   ["Rack name", "Nombre del rack"],
   ["Rack set / type", "Conjunto / tipo de rack"],
-  ["Rack Sets", "Conjuntos de racks"],
   ["Rack type", "Tipo de rack"],
   ["Racks / truck groups", "Racks / grupos de camiones"],
   ["Received", "Recibido"],
@@ -1443,7 +1438,6 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Select destination...", "Seleccione destino..."],
   ["Select the destination before printing the packing list. Indian Trail is the default.", "Seleccione el destino antes de imprimir. Indian Trail es el predeterminado."],
   ["Selected Job Nr.", "Núm. de trabajo seleccionado"],
-  ["Selected Rack", "Rack seleccionado"],
   ["Send Test / Save Draft", "Enviar prueba / guardar borrador"],
   ["Send test email", "Enviar correo de prueba"],
   ["Send test to", "Enviar prueba a"],
@@ -1515,12 +1509,10 @@ SPANISH_UI_EXTENDED.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, s
   ["More than one item matched - use the full barcode", "Coincidió más de un artículo; use el código completo"],
   ["Scan needs review", "El escaneo requiere revisión"],
   ["Complete - awaiting outbound scan", "Completo - esperando escaneo de salida"],
-  ["Scanned outbound", "Escaneado en salida"],
   ["Outbound scan", "Escaneo de salida"],
   ["Outbound / Received", "Salida / Recibido"],
   ["Wrong destination for this rack", "Destino incorrecto para este rack"],
   ["Yes, override destination", "Sí, omitir destino"],
-  ["No, cancel scan", "No, cancelar escaneo"],
   ["Rack scan cancelled.", "Escaneo de rack cancelado."],
   ["Not complete", "Incompleto"],
   ["No active pieces are assigned", "No hay piezas activas asignadas"],
@@ -1538,6 +1530,10 @@ SPANISH_UI_EXTENDED.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, s
   ["New Rush Submitted", "Nueva orden urgente"],
   ["Acknowledge Rush", "Reconocer urgente"],
   ["Production Priority Alert", "Alerta de prioridad de producción"],
+  ["Applicable stages", "Etapas aplicables"],
+  ["Indian Trail handling", "Manejo en Indian Trail"],
+  ["Straight to installer truck / skip bay", "Directo al camión del instalador / omitir bahía"],
+  ["Expedite into priority bay", "Acelerar hacia la bahía prioritaria"],
 ].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
 
 [
@@ -1574,13 +1570,85 @@ SPANISH_UI_EXTENDED.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, s
   ["Move item", "Mover artículo"],
   ["No active assignment", "Sin asignación activa"],
   ["No active bay item", "Sin artículo activo en bahía"],
+  ["Current item is no longer assigned to a bay", "El artículo ya no está asignado a una bahía"],
+  ["Not in bay", "Fuera de bahía"],
+  ["Choose new bay...", "Elija una nueva bahía..."],
+  ["View only", "Solo lectura"],
   ["Not scanned into this bay yet", "Aún no escaneado en esta bahía"],
-  ["All Bay Scans", "Todos los escaneos de bahía"],
   ["Indian Trail Bay Scan History", "Historial de escaneos de bahía de Indian Trail"],
   ["Manual scan requires both an order number and an item number.", "El escaneo manual requiere un número de orden y un número de artículo."],
   ["Choose a target bay before adding an item.", "Elija una bahía de destino antes de agregar un artículo."],
   ["No item currently in a bay matched that scan", "Ningún artículo actualmente en una bahía coincidió con ese escaneo"],
   ["Outbound scan required", "Se requiere escaneo de salida"],
+].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
+
+const SPANISH_OPERATIONAL_TEXT = new Map([
+  ["Staging", "Preparación"],
+  ["Staged", "Preparado"],
+  ["Inbound", "Entrada"],
+  ["Delivered", "Entregado"],
+  ["Greenville", "Greenville"],
+  ["Spacer", "Separador"],
+  ["Mixed", "Mixto"],
+  ["Man", "Manual"],
+  ["Hold", "En espera"],
+  ["Scan Blocked", "Escaneo bloqueado"],
+  ["Staging - Airport Rd", "Preparación - Airport Rd"],
+  ["Outbound - Airport Rd", "Salida - Airport Rd"],
+  ["Inbound - Indian Trail", "Entrada - Indian Trail"],
+  ["BFS Greenville", "Recepción BFS Greenville"],
+  ["Delivery to Customer", "Entrega al cliente"],
+  ["Deliver to Customer", "Entregar al cliente"],
+  ["DTC - Deliver to Customer", "DTC - Entregar al cliente"],
+  ["Indian Trail Received", "Recibido en Indian Trail"],
+  ["Truck", "Camión"],
+  ["Truck / No Rack", "Camión / Sin rack"],
+  ["No Rack", "Sin rack"],
+  ["No Rack - Leave location blank", "Sin rack - Dejar ubicación en blanco"],
+  ["Steel Racks", "Racks de acero"],
+  ["Wood Racks", "Racks de madera"],
+  ["Aluminum Racks", "Racks de aluminio"],
+  ["Coral Racks", "Racks Coral"],
+  ["Rack Sets", "Conjuntos de racks"],
+  ["Selected Rack", "Rack seleccionado"],
+  ["Standard", "Estándar"],
+  ["Tall", "Alto"],
+  ["Oversize", "Sobredimensionado"],
+  ["Mirror", "Espejo"],
+  ["Mirrors", "Espejos"],
+  ["BFS Mirror", "Espejo BFS"],
+  ["BFS Mirrors", "Espejos BFS"],
+  ["Framed Mirror", "Espejo enmarcado"],
+  ["Framed Mirrors", "Espejos enmarcados"],
+  ["Showers", "Regaderas"],
+  ["Spacers", "Separadores"],
+  ["Other Bays", "Otras bahías"],
+  ["Unmapped", "Sin asignar"],
+  ["Refresh page", "Actualizar página"],
+  ["No rack selected. The scanned line will keep a blank Location value.", "No se seleccionó un rack. La línea escaneada mantendrá la ubicación en blanco."],
+]);
+SPANISH_OPERATIONAL_TEXT.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
+[
+  ["Date range", "Rango de fechas"],
+  ["Last 90 days", "Últimos 90 días"],
+  ["Delivery completion by list", "Finalización de entrega por lista"],
+  ["Open pieces by delivery list", "Piezas pendientes por lista de entrega"],
+  ["On-time completion by list", "Finalización a tiempo por lista"],
+  ["Stage workload", "Carga de trabajo por etapa"],
+  ["Delivery percentage", "Porcentaje de entrega"],
+  ["Pieces completed", "Piezas completadas"],
+  ["Open pieces", "Piezas pendientes"],
+  ["Lists complete", "Listas completadas"],
+  ["On-time completion", "Finalización a tiempo"],
+  ["Scan quality", "Calidad de escaneo"],
+  ["Completion percentage for each delivery-list stage in the selected range.", "Porcentaje de finalización de cada etapa de lista de entrega en el rango seleccionado."],
+  ["Remaining piece quantity for each delivery-list stage in the selected range.", "Cantidad de piezas pendientes de cada etapa de lista de entrega en el rango seleccionado."],
+  ["Percentage of recorded pieces completed on or before their delivery date.", "Porcentaje de piezas registradas completadas en o antes de su fecha de entrega."],
+  ["Total piece volume assigned to each workflow stage in the selected range.", "Volumen total de piezas asignado a cada etapa del flujo en el rango seleccionado."],
+  ["Chart range summary", "Resumen del rango de la gráfica"],
+  ["No timed completions in range", "No hay finalizaciones con tiempo registrado en el rango"],
+  ["No scan activity in range", "No hay actividad de escaneo en el rango"],
 ].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
 
 const SPANISH_PLACEHOLDERS = new Map([
@@ -1615,7 +1683,58 @@ const languageUi = {
   observer: null,
 };
 
+const SPANISH_BAY_CATEGORY_LABELS = {
+  standard: { singular: "Estándar", plural: "Bahías estándar" },
+  tall: { singular: "Alta", plural: "Bahías altas" },
+  oversize: { singular: "Sobredimensionada", plural: "Bahías sobredimensionadas" },
+  mirror: { singular: "Espejo", plural: "Bahías de espejos" },
+  "bfs mirror": { singular: "Espejo BFS", plural: "Bahías de espejos BFS" },
+  "framed mirror": { singular: "Espejo enmarcado", plural: "Bahías de espejos enmarcados" },
+  shower: { singular: "Regadera", plural: "Bahías de regaderas" },
+  coral: { singular: "Coral", plural: "Bahías Coral" },
+  other: { singular: "Otra bahía", plural: "Otras bahías" },
+};
+
+/**
+ * Purpose: Run the spanish bay category label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function spanishBayCategoryLabel(category, plural = false) {
+  const normalized = String(category || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^(bfs|framed) mirrors$/, "$1 mirror")
+    .replace(/^mirrors$/, "mirror")
+    .replace(/^showers$/, "shower");
+  const labels = SPANISH_BAY_CATEGORY_LABELS[normalized];
+  return labels?.[plural ? "plural" : "singular"] || category;
+}
+
 const SPANISH_DYNAMIC_PATTERNS = [
+  [/^Delivery List for\s+(.+)$/i, (_, date) => `Lista de entrega para ${date}`],
+  [/^(.+?)\s+-\s+(Staging - Airport Rd|Outbound - Airport Rd|Inbound - Indian Trail|BFS Greenville|Customer Pickup|DTC - Deliver to Customer)$/i, (_, prefix, stage) => `${prefix} - ${translatedUiValue(stage).trim()}`],
+  [/^(Staged|Outbound|Received|Delivered|Greenville|CPU):\s*(.*)$/i, (_, stage, value) => `${translatedUiValue(stage).trim()}: ${value}`],
+  [/^Rack\s+(.+?)\s+(Steel|Wood|Aluminum|Coral)$/i, (_, rack, material) => {
+    const materials = { steel: "acero", wood: "madera", aluminum: "aluminio", coral: "Coral" };
+    return `Rack ${rack} de ${materials[material.toLowerCase()] || material}`;
+  }],
+  [/^(Steel|Wood|Aluminum|Coral)\s+Rack\s+(.+)$/i, (_, material, rack) => {
+    const materials = { steel: "acero", wood: "madera", aluminum: "aluminio", coral: "Coral" };
+    return `Rack ${rack} de ${materials[material.toLowerCase()] || material}`;
+  }],
+  [/^(.+?)\s+(Steel|Wood|Aluminum|Coral)\s+Rack$/i, (_, rack, material) => {
+    const materials = { steel: "acero", wood: "madera", aluminum: "aluminio", coral: "Coral" };
+    return `${rack} Rack de ${materials[material.toLowerCase()] || material}`;
+  }],
+  [/^Truck\s+(.+)$/i, (_, truck) => `Camión ${truck}`],
+  [/^(Steel|Wood|Aluminum|Coral)\s+Racks?$/i, (_, material) => {
+    const materials = { steel: "acero", wood: "madera", aluminum: "aluminio", coral: "Coral" };
+    return `Racks de ${materials[material.toLowerCase()] || material}`;
+  }],
+  [/^Bay[\s_-]+([A-Z0-9]+(?:[-/]?[A-Z0-9]+)*)$/i, (_, code) => `Bahía ${code}`],
+  [/^(Standard|Tall|Oversize|Mirror|BFS Mirror|Framed Mirror|Shower|Coral|Other)\s+Bays?$/i, (_, category) => spanishBayCategoryLabel(category, true)],
+  [/^(Standard|Tall|Oversize|Mirrors?|BFS Mirrors?|Framed Mirrors?|Showers?|Coral|Other)[\s_-]+(?:Bay[\s_-]+)?([A-Z0-9]+(?:[-/]?[A-Z0-9]+)*)$/i, (_, category, code) => `${spanishBayCategoryLabel(category)} ${code}`],
   [/^Check delivery list date (.+)$/i, (_, date) => `Revise la fecha de la lista de entrega ${date}`],
   [/^(Rush|Remake) marked for Job Nr\. (.+)\.$/i, (_, type, job) => `${type.toLowerCase() === "rush" ? "Urgente" : "Rehacer"} marcado para el núm. de trabajo ${job}.`],
   [/^(Rush|Remake) marked for order (.+)\.$/i, (_, type, order) => `${type.toLowerCase() === "rush" ? "Urgente" : "Rehacer"} marcado para la orden ${order}.`],
@@ -1671,6 +1790,28 @@ const SPANISH_DYNAMIC_PATTERNS = [
   [/^Racks in transit$/i, () => "Racks en tránsito"],
   [/^In transit racks:\s*(.*)$/i, (_, value) => `Racks en tránsito: ${value}`],
   [/^Page\s+(\d+)\s+of\s+(\d+)$/i, (_, page, total) => `Página ${page} de ${total}`],
+  [/^Showing\s+(\d+)\s+of\s+(\d+)\s+matching categories\s+\((\d+)\s+total\)\. Select a bar, slice, or legend row to inspect it\.$/i, (_, shown, matching, total) => `Mostrando ${shown} de ${matching} categorías coincidentes (${total} en total). Seleccione una barra, una sección o una fila de la leyenda para revisarla.`],
+  [/^Showing\s+(\d+)\s+of\s+(\d+)\s+matching categories\s+\((\d+)\s+total\)\s+for\s+(.+)\. Select a chart item to inspect it\.$/i, (_, shown, matching, total, range) => `Mostrando ${shown} de ${matching} categorías coincidentes (${total} en total) para ${translatedUiValue(range).trim()}. Seleccione un elemento de la gráfica para revisarlo.`],
+  [/^(\d+)\s*\/\s*(\d+) pieces$/i, (_, complete, total) => `${complete} / ${total} piezas`],
+  [/^(\d+) pieces still open$/i, (_, count) => `${count} piezas aún pendientes`],
+  [/^(\d+) delivery lists in range$/i, (_, count) => `${count} listas de entrega en el rango`],
+  [/^(\d+) on time \/ (\d+) late$/i, (_, onTime, late) => `${onTime} a tiempo / ${late} tarde`],
+  [/^(\d+) successful \/ (\d+) exceptions$/i, (_, successful, exceptions) => `${successful} correctos / ${exceptions} excepciones`],
+  [/^(\d+) \/ (\d+) pieces · (\d+) open · (.+)$/i, (_, scanned, total, open, date) => `${scanned} / ${total} piezas · ${open} pendientes · ${date}`],
+  [/^(\d+) open · (\d+) \/ (\d+) completed · (.+)$/i, (_, open, scanned, total, date) => `${open} pendientes · ${scanned} / ${total} completadas · ${date}`],
+  [/^(\d+) on time · (\d+) late · (.+)$/i, (_, onTime, late, date) => `${onTime} a tiempo · ${late} tarde · ${date}`],
+  [/^(\d+) completed · (\d+) open$/i, (_, complete, open) => `${complete} completadas · ${open} pendientes`],
+  [/^([\d.]+%)\s+of displayed total$/i, (_, percent) => `${percent} del total mostrado`],
+  [/^Column\s+(\d+)$/i, (_, column) => `Columna ${column}`],
+  [/^(\d+)\s+grouped set$/i, (_, count) => `${count} grupo`],
+  [/^(\d+)\s+grouped sets$/i, (_, count) => `${count} grupos`],
+  [/^Insert bay group\s+(.+)$/i, (_, label) => `Insertar grupo de bahías: ${translatedUiValue(label).trim()}`],
+  [/^Move\s+(.+)\s+(up|down|left|right)$/i, (_, label, direction) => {
+    const directions = { up: "arriba", down: "abajo", left: "a la izquierda", right: "a la derecha" };
+    return `Mover ${label} ${directions[direction.toLowerCase()] || direction}`;
+  }],
+  [/^(.+)\s+bar chart$/i, (_, title) => `Gráfica de barras: ${title}`],
+  [/^(.+)\s+donut chart$/i, (_, title) => `Gráfica de dona: ${title}`],
   [/^Showing\s+(\d+)\s+of\s+(\d+)$/i, (_, shown, total) => `Mostrando ${shown} de ${total}`],
   [/^(\d+)\s+rows\s*\/\s*(\d+)\s+pieces$/i, (_, rows, pieces) => `${rows} filas / ${pieces} piezas`],
   [/^(\d+)\s+racks?\s*\/\s*(\d+)\s+pieces$/i, (_, racks, pieces) => `${racks} racks / ${pieces} piezas`],
@@ -1692,6 +1833,16 @@ const SPANISH_DYNAMIC_PATTERNS = [
   [/^Select\s+(.+)$/i, (_, value) => `Seleccione ${value}`],
   [/^No\s+(.+)\s+yet$/i, (_, value) => `Aún no hay ${value}`],
   [/^Password updated for\s+(.+)\.$/i, (_, user) => `Contraseña actualizada para ${user}.`],
+  [/^Station\s+(.+)\s+was renamed to\s+(.+)\.$/i, (_, oldName, newName) => `La estación ${oldName} cambió de nombre a ${newName}.`],
+  [/^Customer route (saved|updated) for\s+(.+)\.$/i, (_, action, customer) => `La ruta del cliente se ${action.toLowerCase() === "saved" ? "guardó" : "actualizó"} para ${customer}.`],
+  [/^User\s+(.+)\s+was created\.$/i, (_, user) => `Se creó el usuario ${user}.`],
+  [/^Created\s+(\d+)\s+rack\(s\)\.$/i, (_, count) => `Se crearon ${count} racks.`],
+  [/^Added\s+(\d+)\s+bays?\s+to\s+(.+)\.$/i, (_, count, group) => `Se agregaron ${count} bahías a ${group}.`],
+  [/^Added\s+(\d+)\s+bay\(s\)\.$/i, (_, count) => `Se agregaron ${count} bahías.`],
+  [/^A spacer was added to the Bay Map\.$/i, () => "Se agregó un separador al Mapa de Bahías."],
+  [/^(.+)\s+was saved to the Lookup Manager\.$/i, (_, value) => `${value} se guardó en el Administrador de catálogos.`],
+  [/^(.+)\s+was saved\.$/i, (_, value) => `${translatedUiValue(value).trim()} se guardó.`],
+  [/^(.+)\s+were saved\.(.*)$/i, (_, value, details) => `${translatedUiValue(value).trim()} se guardaron.${details}`],
   [/^Saved\s+(.+)\.$/i, (_, value) => `Se guardó ${value}.`],
   [/^Rack code\s+(.+)\s+already exists$/i, (_, code) => `El código de rack ${code} ya existe`],
   [/^Rack\s+(.+)\s+was not found$/i, (_, code) => `No se encontró el rack ${code}`],
@@ -1724,6 +1875,11 @@ const SPANISH_DYNAMIC_PATTERNS = [
   [/^(\d+)\s+recent events?$/i, (_, count) => `${count} eventos recientes`],
 ];
 
+/**
+ * Purpose: Run the translate dynamic UI text workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function translateDynamicUiText(cleanText) {
   const exact = SPANISH_UI_TEXT.get(cleanText);
   if (exact) return exact;
@@ -1739,6 +1895,11 @@ function translateDynamicUiText(cleanText) {
   return cleanText;
 }
 
+/**
+ * Purpose: Run the translated UI value workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function translatedUiValue(value) {
   const text = String(value ?? "");
   const leading = text.match(/^\s*/)?.[0] || "";
@@ -1748,6 +1909,11 @@ function translatedUiValue(value) {
   return `${leading}${translateDynamicUiText(clean)}${trailing}`;
 }
 
+/**
+ * Purpose: Run the translate UI text node workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function translateUiTextNode(node) {
   const current = node.nodeValue || "";
 
@@ -1765,6 +1931,11 @@ function translateUiTextNode(node) {
   }
 }
 
+/**
+ * Purpose: Run the translate UI attributes workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function translateUiAttributes(element) {
   const attributes = ["placeholder", "title", "aria-label"];
   if (element.tagName === "OPTGROUP" && element.hasAttribute("label")) attributes.push("label");
@@ -1791,10 +1962,20 @@ function translateUiAttributes(element) {
   }
 }
 
+/**
+ * Purpose: Run the should skip UI translation workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function shouldSkipUiTranslation(element) {
   return Boolean(element?.closest?.("script, style, textarea, [contenteditable='true'], [data-no-translate]"));
 }
 
+/**
+ * Purpose: Update the apply language to root workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function applyLanguageToRoot(root = document.body) {
   if (!root) return;
 
@@ -1816,9 +1997,15 @@ function applyLanguageToRoot(root = document.body) {
   }
 }
 
+/**
+ * Purpose: Run the sync language controls workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function syncLanguageControls() {
   const spanish = state.language === "es";
   document.documentElement.lang = spanish ? "es" : "en";
+  document.body.dataset.language = spanish ? "es" : "en";
   document.title = spanish ? "Escáner de Listas de Entrega" : "Delivery List Scanner";
 
   [els.languageToggleBtn, els.loginLanguageToggleBtn].forEach((button) => {
@@ -1831,6 +2018,11 @@ function syncLanguageControls() {
   });
 }
 
+/**
+ * Purpose: Update the set app language workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function setAppLanguage(language) {
   state.language = language === "es" ? "es" : "en";
   try {
@@ -1843,10 +2035,20 @@ function setAppLanguage(language) {
   syncAllCustomSelects();
 }
 
+/**
+ * Purpose: Toggle the toggle app language workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function toggleAppLanguage() {
   setAppLanguage(state.language === "es" ? "en" : "es");
 }
 
+/**
+ * Purpose: Run the init language system workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function initLanguageSystem() {
   if (languageUi.observer) return;
   applyLanguageToRoot(document.body);
@@ -1864,27 +2066,28 @@ function initLanguageSystem() {
   languageUi.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 }
 
+/**
+ * Purpose: Run the sync fullscreen sticky panel offset workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function syncFullscreenStickyPanelOffset() {
   const headerHeight = Math.ceil(els.appHeader?.getBoundingClientRect().height || 108);
-  const panelGap = 12;
-  const panelTop = headerHeight + panelGap;
-  const panelBottomGap = 8;
+  const panelTop = headerHeight + 12;
 
   document.documentElement.style.setProperty("--sticky-scanner-panel-top", `${panelTop}px`);
-  document.documentElement.style.setProperty(
-    "--sticky-scanner-panel-max-height",
-    `calc(100vh - ${panelTop + panelBottomGap}px)`,
-  );
   document.documentElement.style.setProperty("--fullscreen-sticky-panel-top", `${panelTop}px`);
-  document.documentElement.style.setProperty(
-    "--fullscreen-sticky-panel-max-height",
-    `calc(100vh - ${panelTop + panelBottomGap}px)`,
-  );
 }
 
+/**
+ * Purpose: Run the sync fullscreen control workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function syncFullscreenControl() {
   const active = Boolean(document.fullscreenElement);
   syncFullscreenStickyPanelOffset();
+  renderRecent();
   if (!els.fullscreenToggleBtn) return;
   els.fullscreenToggleBtn.classList.toggle("is-active", active);
   const label = active ? "Exit fullscreen" : "Enter fullscreen";
@@ -1894,6 +2097,11 @@ function syncFullscreenControl() {
   els.fullscreenToggleBtn.setAttribute("aria-label", els.fullscreenToggleBtn.title);
 }
 
+/**
+ * Purpose: Toggle the toggle fullscreen workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function toggleFullscreen() {
   if (!document.fullscreenEnabled) {
     showInlineError(state.language === "es" ? "La pantalla completa no está disponible en este navegador." : "Fullscreen is not available in this browser.");
@@ -1902,6 +2110,87 @@ async function toggleFullscreen() {
 
   if (document.fullscreenElement) await document.exitFullscreen();
   else await document.documentElement.requestFullscreen();
+}
+
+/**
+ * Purpose: Load the refresh page workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
+function refreshPage() {
+  try {
+    if (document.fullscreenElement) sessionStorage.setItem(FULLSCREEN_REFRESH_KEY, "1");
+    else sessionStorage.removeItem(FULLSCREEN_REFRESH_KEY);
+  } catch {
+    // Fullscreen restoration is optional when session storage is unavailable.
+  }
+  window.location.reload();
+}
+
+/**
+ * Purpose: Run the consume fullscreen refresh request workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
+function consumeFullscreenRefreshRequest() {
+  try {
+    const requested = sessionStorage.getItem(FULLSCREEN_REFRESH_KEY) === "1";
+    sessionStorage.removeItem(FULLSCREEN_REFRESH_KEY);
+    return requested;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Purpose: Open the show fullscreen recovery prompt workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function showFullscreenRecoveryPrompt({ eyebrow, message }) {
+  showActionFeedback({
+    kind: "success",
+    eyebrow,
+    title: "Return to fullscreen",
+    message,
+    primaryLabel: "Return to fullscreen",
+    secondaryLabel: "Stay in windowed mode",
+    onPrimary: async () => {
+      if (document.fullscreenElement || !document.fullscreenEnabled) return;
+      try {
+        await document.documentElement.requestFullscreen();
+      } catch {
+        showInlineError("Fullscreen could not be resumed. Use the fullscreen button to try again.");
+      }
+    },
+  });
+}
+
+/**
+ * Purpose: Run the resume fullscreen after refresh workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
+async function resumeFullscreenAfterRefresh() {
+  if (!consumeFullscreenRefreshRequest() || document.fullscreenElement) return;
+  if (!document.fullscreenEnabled) {
+    showFloatingNotice(
+      state.language === "es"
+        ? "La página se actualizó, pero este navegador no permite pantalla completa."
+        : "The page refreshed, but fullscreen is not available in this browser.",
+      "notice",
+    );
+    return;
+  }
+
+  try {
+    await document.documentElement.requestFullscreen();
+  } catch {
+    showFullscreenRecoveryPrompt({
+      eyebrow: "Page refreshed",
+      message: "The page refreshed. Your browser requires one click to enter fullscreen again.",
+    });
+  }
 }
 
 const customSelectUi = {
@@ -1913,6 +2202,11 @@ const customSelectUi = {
   syncTimer: null,
 };
 
+/**
+ * Purpose: Run the custom select is eligible workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customSelectIsEligible(select) {
   return (
     select instanceof HTMLSelectElement &&
@@ -1923,6 +2217,11 @@ function customSelectIsEligible(select) {
   );
 }
 
+/**
+ * Purpose: Run the custom select accessible label workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customSelectAccessibleLabel(select) {
   const explicit = select.getAttribute("aria-label") || select.getAttribute("title");
   if (explicit) return explicit;
@@ -1939,11 +2238,21 @@ function customSelectAccessibleLabel(select) {
     : "Choose an option";
 }
 
+/**
+ * Purpose: Run the custom select selected text workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customSelectSelectedText(select) {
   const option = select.selectedOptions?.[0] || select.options?.[select.selectedIndex];
   return option?.textContent?.trim() || select.getAttribute("placeholder") || "Choose an option";
 }
 
+/**
+ * Purpose: Run the sync custom select workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function syncCustomSelect(select) {
   const shell = select.closest(".custom-select-shell");
   const trigger = shell?.querySelector(":scope > .custom-select-trigger");
@@ -1978,11 +2287,21 @@ function syncCustomSelect(select) {
   }
 }
 
+/**
+ * Purpose: Run the sync all custom selects workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function syncAllCustomSelects() {
   if (customSelectUi.openSelect && !customSelectUi.openSelect.isConnected) closeCustomSelect(false);
   document.querySelectorAll("select[data-custom-select-enhanced='true']").forEach((select) => syncCustomSelect(select));
 }
 
+/**
+ * Purpose: Run the position custom select menu workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function positionCustomSelectMenu() {
   const select = customSelectUi.openSelect;
   const menu = customSelectUi.menu;
@@ -2015,6 +2334,11 @@ function positionCustomSelectMenu() {
     : `${Math.min(window.innerHeight - viewportPadding, rect.bottom + 7)}px`;
 }
 
+/**
+ * Purpose: Update the set custom select highlight workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function setCustomSelectHighlight(index, focus = true) {
   const buttons = [...(customSelectUi.menu?.querySelectorAll("[data-custom-option-index]:not(:disabled)") || [])];
   if (!buttons.length) {
@@ -2032,6 +2356,11 @@ function setCustomSelectHighlight(index, focus = true) {
   }
 }
 
+/**
+ * Purpose: Close the close custom select workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeCustomSelect(restoreFocus = false) {
   const select = customSelectUi.openSelect;
   const trigger = select?.closest(".custom-select-shell")?.querySelector(":scope > .custom-select-trigger");
@@ -2045,6 +2374,11 @@ function closeCustomSelect(restoreFocus = false) {
   if (restoreFocus) trigger?.focus();
 }
 
+/**
+ * Purpose: Run the custom select option rows workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customSelectOptionRows(select, query = "") {
   const cleanQuery = String(query || "").trim().toLowerCase();
   const rows = [];
@@ -2070,6 +2404,11 @@ function customSelectOptionRows(select, query = "") {
   return rows;
 }
 
+/**
+ * Purpose: Render the render custom select options workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderCustomSelectOptions(select, optionsHost, query = "") {
   optionsHost.replaceChildren();
   const rows = customSelectOptionRows(select, query);
@@ -2131,6 +2470,11 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
   setCustomSelectHighlight(selectedEnabledIndex >= 0 ? selectedEnabledIndex : 0, false);
 }
 
+/**
+ * Purpose: Open the open custom select workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openCustomSelect(select) {
   if (!customSelectIsEligible(select) || select.disabled) return;
   if (customSelectUi.openSelect === select) {
@@ -2224,6 +2568,11 @@ function openCustomSelect(select) {
   }
 }
 
+/**
+ * Purpose: Run the enhance custom select workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function enhanceCustomSelect(select) {
   if (!customSelectIsEligible(select) || select.dataset.customSelectEnhanced === "true") return;
 
@@ -2274,6 +2623,11 @@ function enhanceCustomSelect(select) {
   syncCustomSelect(select);
 }
 
+/**
+ * Purpose: Run the enhance custom selects workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function enhanceCustomSelects(root = document) {
   if (root instanceof HTMLSelectElement) {
     enhanceCustomSelect(root);
@@ -2282,6 +2636,11 @@ function enhanceCustomSelects(root = document) {
   root.querySelectorAll?.("select").forEach((select) => enhanceCustomSelect(select));
 }
 
+/**
+ * Purpose: Run the init custom select system workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function initCustomSelectSystem() {
   if (customSelectUi.initialized) return;
   customSelectUi.initialized = true;
@@ -2334,39 +2693,74 @@ function initCustomSelectSystem() {
   customSelectUi.syncTimer = window.setInterval(syncAllCustomSelects, 300);
 }
 
+/**
+ * Purpose: Run the canonical barcode workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function canonicalBarcode(order, item) {
   return `T200${pad(order, 6)}${pad(item, 3)}000`;
 }
 
+/**
+ * Purpose: Normalize the format display date workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function formatDisplayDate(value) {
   const parts = String(value || "").split("-").map(Number);
   if (parts.length !== 3 || parts.some(Number.isNaN)) return String(value || "");
   return `${parts[1]}/${parts[2]}/${parts[0]}`;
 }
 
+/**
+ * Purpose: Normalize the format date time workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function formatDateTime(value) {
   if (!value) return "";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
+/**
+ * Purpose: Run the today key workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function todayKey() {
   const now = new Date();
   return `${now.getFullYear()}-${pad(now.getMonth() + 1, 2)}-${pad(now.getDate(), 2)}`;
 }
 
+/**
+ * Purpose: Run the date input value workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function dateInputValue(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1, 2)}-${pad(date.getDate(), 2)}`;
 }
 
 const IMPORT_MAX_DATE = "";
 
+/**
+ * Purpose: Run the default import from date workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function defaultImportFromDate() {
   const from = new Date();
   from.setDate(from.getDate() - 7);
   return dateInputValue(from);
 }
 
+/**
+ * Purpose: Run the reset import date window workflow for the browser application.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function resetImportDateWindow() {
   if (els.importFromDate) els.importFromDate.value = defaultImportFromDate();
   if (els.importToDate) {
@@ -2375,6 +2769,11 @@ function resetImportDateWindow() {
   }
 }
 
+/**
+ * Purpose: Run the current import date window workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function currentImportDateWindow() {
   const dateFrom = (els.importFromDate?.value || defaultImportFromDate()).trim();
   const dateTo = (els.importToDate?.value || "").trim();
@@ -2385,12 +2784,22 @@ function currentImportDateWindow() {
   return { dateFrom, dateTo };
 }
 
+/**
+ * Purpose: Normalize the parse date key workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function parseDateKey(value) {
   const parts = String(value || "").split("-").map(Number);
   if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
   return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
+/**
+ * Purpose: Run the filter lists by overview range workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function filterListsByOverviewRange(lists = state.lists) {
   if (state.overviewRange === "all") return lists.slice();
   const days = Number(state.overviewRange || 30);
@@ -2406,24 +2815,49 @@ function filterListsByOverviewRange(lists = state.lists) {
   });
 }
 
+/**
+ * Purpose: Run the latest delivery date workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function latestDeliveryDate(lists = state.lists) {
   const dates = lists.map((list) => list.deliveryDate).filter(Boolean).sort();
   return dates[dates.length - 1] || todayKey();
 }
 
+/**
+ * Purpose: Run the dashboard date key workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function dashboardDateKey(lists = state.lists) {
   const today = todayKey();
   return lists.some((list) => list.deliveryDate === today) ? today : latestDeliveryDate(lists);
 }
 
+/**
+ * Purpose: Run the progress percent workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function progressPercent(list) {
   return Number(list?.totalQty || 0) ? (Number(list.scannedQty || 0) / Number(list.totalQty || 1)) * 100 : 0;
 }
 
+/**
+ * Purpose: Normalize the format percent workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function formatPercent(value) {
   return `${Math.round(Number(value || 0))}%`;
 }
 
+/**
+ * Purpose: Run the stage category workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function stageCategory(list) {
   const stage = `${list?.stage || ""} ${list?.scanner || ""}`.toLowerCase();
   if (stage.includes("outbound")) return "outbound";
@@ -2434,6 +2868,11 @@ function stageCategory(list) {
   return "staged";
 }
 
+/**
+ * Purpose: Run the stage label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function stageLabel(list) {
   const category = stageCategory(list);
   if (category === "outbound") return "Outbound";
@@ -2444,6 +2883,20 @@ function stageLabel(list) {
   return "Staged";
 }
 
+/**
+ * Purpose: Run the priority lists include indian trail workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function priorityListsIncludeIndianTrail(lists = []) {
+  return (Array.isArray(lists) ? lists : []).some((list) => stageCategory(list) === "received");
+}
+
+/**
+ * Purpose: Run the slugify workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function slugify(value) {
   return String(value || "")
     .toLowerCase()
@@ -2451,6 +2904,11 @@ function slugify(value) {
     .replace(/(^-|-$)/g, "");
 }
 
+/**
+ * Purpose: Run the unique text workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function uniqueText(values) {
   const seen = new Set();
   const result = [];
@@ -2463,6 +2921,11 @@ function uniqueText(values) {
   return result;
 }
 
+/**
+ * Purpose: Run the lists by delivery date workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function listsByDeliveryDate(lists = state.lists) {
   const groups = new Map();
   for (const list of lists) {
@@ -2478,23 +2941,48 @@ function listsByDeliveryDate(lists = state.lists) {
     }));
 }
 
+/**
+ * Purpose: Run the stage sort workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function stageSort(list) {
   return { staged: 1, outbound: 2, received: 3, greenville: 4, pickup: 5, dtc: 6 }[stageCategory(list)] || 9;
 }
 
+/**
+ * Purpose: Run the selected delivery date workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedDeliveryDate() {
   return state.meta?.deliveryDate || state.lists.find((list) => list.id === state.activeListId)?.deliveryDate || state.lists[0]?.deliveryDate || "";
 }
 
+/**
+ * Purpose: Run the has permission workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function hasPermission(permission) {
   if (!state.backend) return true;
   return state.permissions.includes(permission);
 }
 
+/**
+ * Purpose: Run the has any permission workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function hasAnyPermission(permissions) {
   return permissions.some((permission) => hasPermission(permission));
 }
 
+/**
+ * Purpose: Update the set control allowed workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function setControlAllowed(element, allowed, hide = false) {
   if (!element) return;
   element.disabled = !allowed;
@@ -2502,6 +2990,11 @@ function setControlAllowed(element, allowed, hide = false) {
   element.classList.toggle("is-disabled", !allowed);
 }
 
+/**
+ * Purpose: Run the user assigned stations workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function userAssignedStations(user = state.user) {
   const explicit = Array.isArray(user?.assignedStations) ? user.assignedStations : [];
   const stationText = String(user?.station || user?.assignedStation || "");
@@ -2513,20 +3006,40 @@ function userAssignedStations(user = state.user) {
   return uniqueText([...explicit, ...parsed]);
 }
 
+/**
+ * Purpose: Run the user assigned station workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function userAssignedStation(user = state.user) {
   return userAssignedStations(user)[0] || "";
 }
 
+/**
+ * Purpose: Run the user assigned station label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function userAssignedStationLabel(user = state.user, fallback = "") {
   const stations = userAssignedStations(user);
   if (stations.length) return stations.join(", ");
   return String(fallback || "No assigned station").trim();
 }
 
+/**
+ * Purpose: Run the current scan station workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function currentScanStation() {
   return userAssignedStation() || els.stationSelect?.value || state.meta?.scanner || DEFAULT_STATIONS[0] || "";
 }
 
+/**
+ * Purpose: Run the request context workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function requestContext() {
   return {
     user: state.user?.username || els.operatorInput?.value || "Scanner",
@@ -2534,6 +3047,11 @@ function requestContext() {
   };
 }
 
+/**
+ * Purpose: Open the show import status loading workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 function showImportStatusLoading(message, detail = "") {
   if (!els.importPreviewBox) return;
 
@@ -2548,6 +3066,11 @@ function showImportStatusLoading(message, detail = "") {
   `;
 }
 
+/**
+ * Purpose: Open the show import status result workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function showImportStatusResult(kind, title, detail = "", actionsHtml = "") {
   if (!els.importPreviewBox) return;
 
@@ -2564,6 +3087,11 @@ function showImportStatusResult(kind, title, detail = "", actionsHtml = "") {
   `;
 }
 
+/**
+ * Purpose: Run the wait for next paint workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function waitForNextPaint() {
   return new Promise((resolve) => {
     requestAnimationFrame(() => {
@@ -2572,6 +3100,11 @@ function waitForNextPaint() {
   });
 }
 
+/**
+ * Purpose: Update the update modal scroll lock workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function updateModalScrollLock() {
   const modalIsOpen = [
     els.adminModal,
@@ -2592,6 +3125,11 @@ function updateModalScrollLock() {
   document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
 }
 
+/**
+ * Purpose: Load the fetch JSON workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
     cache: "no-store",
@@ -2619,6 +3157,11 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+/**
+ * Purpose: Run the detect backend workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function detectBackend() {
   try {
     const health = await fetchJson("/api/health");
@@ -2628,6 +3171,11 @@ async function detectBackend() {
   }
 }
 
+/**
+ * Purpose: Open the show login workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function showLogin(message = "") {
   if (!els.loginPanel) return;
   els.loginPanel.hidden = false;
@@ -2639,6 +3187,11 @@ function showLogin(message = "") {
   window.setTimeout(() => (els.loginPassword || els.loginUsername)?.focus(), 30);
 }
 
+/**
+ * Purpose: Close the hide login workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function hideLogin() {
   if (!els.loginPanel) return;
   els.loginPanel.hidden = true;
@@ -2650,6 +3203,11 @@ function hideLogin() {
   }
 }
 
+/**
+ * Purpose: Load the load session workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function loadSession() {
   const payload = await fetchJson("/api/session");
   state.authenticated = Boolean(payload.authenticated);
@@ -2662,6 +3220,11 @@ async function loadSession() {
   return payload;
 }
 
+/**
+ * Purpose: Run the login workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function login(username, password) {
   const payload = await fetchJson("/api/login", {
     method: "POST",
@@ -2675,6 +3238,11 @@ async function login(username, password) {
   if (els.operatorInput) els.operatorInput.value = state.user.displayName || state.user.username || "Scanner";
 }
 
+/**
+ * Purpose: Open the show password reset panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function showPasswordResetPanel(show = true) {
   if (!els.passwordResetPanel) return;
   els.passwordResetPanel.hidden = !show;
@@ -2691,12 +3259,22 @@ function showPasswordResetPanel(show = true) {
   }
 }
 
+/**
+ * Purpose: Update the set password reset message workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function setPasswordResetMessage(message, success = false) {
   if (!els.passwordResetMessage) return;
   els.passwordResetMessage.textContent = message;
   els.passwordResetMessage.classList.toggle("success", success);
 }
 
+/**
+ * Purpose: Run the request password reset code workflow for the browser application.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function requestPasswordResetCode() {
   const identity = els.resetIdentityInput?.value.trim() || "";
   if (!identity) throw new Error("Enter your BFS email or username first.");
@@ -2710,6 +3288,11 @@ async function requestPasswordResetCode() {
   els.resetCodeInput?.focus();
 }
 
+/**
+ * Purpose: Run the confirm password reset workflow for the browser application.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function confirmPasswordReset() {
   const identity = els.resetIdentityInput?.value.trim() || "";
   const resetCode = els.resetCodeInput?.value.trim() || "";
@@ -2730,6 +3313,11 @@ async function confirmPasswordReset() {
   }
 }
 
+/**
+ * Purpose: Run the logout workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function logout() {
   if (state.backend) {
     await fetchJson("/api/logout", { method: "POST", body: JSON.stringify({}) });
@@ -2742,6 +3330,11 @@ async function logout() {
   showLogin("Signed out.");
 }
 
+/**
+ * Purpose: Run the clean barcode workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function cleanBarcode(value) {
   return String(value || "")
     .replace(/\*/g, "")
@@ -2753,32 +3346,95 @@ function cleanBarcode(value) {
     .toUpperCase();
 }
 
+/**
+ * Purpose: Run the digits only workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function digitsOnly(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-function inferredRoute(item) {
-  // ROUTE is authoritative. Job Nr. is only a fallback when ROUTE is blank.
-  const route = String(item.route || "").trim().toUpperCase();
-  const compactRoute = route.replace(/[^A-Z0-9]+/g, "");
-  if (route) {
-    if (["CUSTOMER PICKUP", "PICKUP"].includes(route) || /\bCPU\b/i.test(route) || compactRoute.startsWith("CPU")) return "CPU";
-    if (["GNV", "GRN", "GREENVILLE"].includes(route)) return "GNV";
-    if (["DTC", "DELIVER TO CUSTOMER"].includes(route)) return "DTC";
-    if (["INT", "IT", "INDIAN TRAIL", "INDIANTRAIL"].includes(route)) return "";
-    return route;
-  }
+const GREENVILLE_ROUTE_ALIASES = new Set(["GNV", "GRN", "GRVLLE", "GRVILLE", "GRVLE", "GVLLE", "GREENVILLE"]);
+const CPU_INDIAN_TRAIL_ROUTE_CODES = new Set(["CPUIT", "CPUINT", "ITCPU", "INTCPU"]);
+const CPU_AIR_ROUTE_CODES = new Set(["CPUAIR", "AIRCPU"]);
 
-  const job = String(item.job || "").trim().toUpperCase();
-  const compactJob = job.replace(/[^A-Z0-9]+/g, "");
-  if (/\bCPU[-\s]*(IT|INT)\b/i.test(job) || /\b(IT|INT)[-\s]*CPU\b/i.test(job)) return "";
-  if (/\bCPU[-\s]*AIR\b/i.test(job) || compactJob.includes("CPUAIR")) return "CPU";
+/**
+ * Purpose: Run the canonical route designation workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function canonicalRouteDesignation(value, { jobContext = false } = {}) {
+  const text = String(value || "").trim().toUpperCase();
+  if (!text) return { matched: false, route: "" };
+
+  const compact = text.replace(/[^A-Z0-9]+/g, "");
+  const separator = "[^A-Z0-9]*";
+  const tokenStart = "(?:^|[^A-Z0-9])";
+  const tokenEnd = "(?![A-Z0-9])";
+  const cpuIndianTrailPattern = new RegExp(
+    `(?:${tokenStart}CPU${separator}(?:IT|INT)${tokenEnd}|${tokenStart}(?:IT|INT)${separator}CPU${tokenEnd})`,
+    "i",
+  );
+  const cpuAirPattern = new RegExp(
+    `(?:${tokenStart}CPU${separator}AIR${tokenEnd}|${tokenStart}AIR${separator}CPU${tokenEnd})`,
+    "i",
+  );
+  /**
+   * Purpose: Run the has token workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
+  const hasToken = (token) => new RegExp(`${tokenStart}${token}${tokenEnd}`, "i").test(text);
+
+  if (CPU_INDIAN_TRAIL_ROUTE_CODES.has(compact) || cpuIndianTrailPattern.test(text)) {
+    return { matched: true, route: "" };
+  }
+  if (CPU_AIR_ROUTE_CODES.has(compact) || cpuAirPattern.test(text)) {
+    return { matched: true, route: "CPU" };
+  }
+  if (jobContext) return { matched: false, route: "" };
+  if (["DTC", "DELIVERTOCUSTOMER"].includes(compact) || hasToken("DTC")) {
+    return { matched: true, route: "DTC" };
+  }
+  if (GREENVILLE_ROUTE_ALIASES.has(compact) || [...GREENVILLE_ROUTE_ALIASES].some(hasToken)) {
+    return { matched: true, route: "GNV" };
+  }
+  if (["CUSTOMERPICKUP", "PICKUP"].includes(compact)) {
+    return { matched: true, route: "CPU" };
+  }
+  if (compact === "CPU" || hasToken("CPU")) return { matched: true, route: "CPU" };
+  if (["INT", "IT", "INDIANTRAIL"].includes(compact)) return { matched: true, route: "" };
+  return { matched: false, route: "" };
+}
+
+/**
+ * Purpose: Run the inferred route workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function inferredRoute(item) {
+  const rawRoute = String(item.route || "").trim();
+  const explicit = canonicalRouteDesignation(rawRoute);
+  const jobHint = canonicalRouteDesignation(item.job, { jobContext: true });
+  if (rawRoute) {
+    if (explicit.matched) {
+      return explicit.route;
+    }
+    return rawRoute.toUpperCase();
+  }
+  if (jobHint.matched) return jobHint.route;
 
   // Generic CPU text in Job Nr. remains Indian Trail unless the backend has
   // already applied a customer-route rule to the ROUTE field.
   return "";
 }
 
+/**
+ * Purpose: Run the route category workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function routeCategory(item) {
   const route = inferredRoute(item);
   if (route === "CPU") return "cpu";
@@ -2787,6 +3443,11 @@ function routeCategory(item) {
   return "indian_trail";
 }
 
+/**
+ * Purpose: Run the route label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function routeLabel(item) {
   const route = inferredRoute(item);
   if (route === "CPU") return "CPU";
@@ -2795,10 +3456,20 @@ function routeLabel(item) {
   return "";
 }
 
+/**
+ * Purpose: Run the is CPU item workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function isCpuItem(item) {
   return routeCategory(item) === "cpu";
 }
 
+/**
+ * Purpose: Run the filter items for profile workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function filterItemsForProfile(items, profile) {
   if (profile === "cpu") return items.filter(isCpuItem);
   if (profile === "indian_trail") return items.filter((item) => routeCategory(item) === "indian_trail");
@@ -2807,6 +3478,11 @@ function filterItemsForProfile(items, profile) {
   return items.slice();
 }
 
+/**
+ * Purpose: Run the clone items workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function cloneItems(items) {
   const seen = new Map();
   return (items || []).map((item, index) => {
@@ -2825,6 +3501,11 @@ function cloneItems(items) {
   });
 }
 
+/**
+ * Purpose: Create the create demo lists workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function createDemoLists(payload) {
   const baseItems = payload.items || [];
   const definitions = [
@@ -2861,6 +3542,11 @@ function createDemoLists(payload) {
     .filter(Boolean);
 }
 
+/**
+ * Purpose: Load the load local stations workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 function loadLocalStations() {
   try {
     const saved = JSON.parse(localStorage.getItem(STATIONS_KEY) || "[]");
@@ -2870,10 +3556,20 @@ function loadLocalStations() {
   }
 }
 
+/**
+ * Purpose: Run the save local stations workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function saveLocalStations() {
   localStorage.setItem(STATIONS_KEY, JSON.stringify(state.stations));
 }
 
+/**
+ * Purpose: Render the render station options workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderStationOptions(preferredStation = "") {
   if (!els.stationSelect) return;
 
@@ -2900,6 +3596,11 @@ function renderStationOptions(preferredStation = "") {
   }
 }
 
+/**
+ * Purpose: Load the load stations workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function loadStations() {
   if (state.backend) {
     const payload = await fetchJson("/api/stations");
@@ -2910,6 +3611,11 @@ async function loadStations() {
   renderStationOptions(state.meta?.scanner);
 }
 
+/**
+ * Purpose: Create the add station from input workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function addStationFromInput() {
   const name = els.newStationInput?.value.trim() || "";
   if (!name) {
@@ -2929,8 +3635,14 @@ async function addStationFromInput() {
   if (els.newStationInput) els.newStationInput.value = "";
   renderStationOptions(name);
   renderAdminStations();
+  showSaveConfirmation(`Station ${name} was saved.`);
 }
 
+/**
+ * Purpose: Remove the remove station workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function removeStation(name) {
   if (!state.backend) return;
   const payload = await fetchJson("/api/stations/remove", {
@@ -2942,6 +3654,11 @@ async function removeStation(name) {
   renderAdminStations();
 }
 
+/**
+ * Purpose: Update the apply backend payload workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 function applyBackendPayload(payload) {
   state.meta = payload.meta;
   state.activeListId = payload.meta.id;
@@ -2953,6 +3670,11 @@ function applyBackendPayload(payload) {
   renderStationOptions(payload.meta.scanner);
 }
 
+/**
+ * Purpose: Load the load delivery lists workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function loadDeliveryLists(preferredListId = "") {
   if (state.backend) {
     const payload = await fetchJson("/api/delivery-lists");
@@ -2965,6 +3687,11 @@ async function loadDeliveryLists(preferredListId = "") {
   }
 }
 
+/**
+ * Purpose: Update the set active list workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function setActiveList(listId) {
   const nextList = state.lists.find((list) => list.id === listId) || state.lists[0];
   if (!nextList) return;
@@ -2984,6 +3711,11 @@ function setActiveList(listId) {
   renderStationOptions(nextList.scanner);
 }
 
+/**
+ * Purpose: Run the activate list workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function activateList(listId, navigate = true) {
   if (!listId) return;
   const changingList = listId !== state.activeListId;
@@ -3004,15 +3736,28 @@ async function activateList(listId, navigate = true) {
     state.pageIndex = 1;
     state.glassTypeFilter = "all";
   }
-  renderScanPage();
-  if (navigate) showPage("scan");
+  if (navigate) {
+    showPage("scan");
+  } else {
+    renderScanPage();
+  }
   if (navigate || document.activeElement === els.scanInput) els.scanInput?.focus();
 }
 
+/**
+ * Purpose: Run the storage key workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function storageKey() {
   return `${STORAGE_KEY}-${state.activeListId || "default"}`;
 }
 
+/**
+ * Purpose: Run the save state workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function saveState() {
   if (state.backend) return;
   const payload = {
@@ -3025,6 +3770,11 @@ function saveState() {
   localStorage.setItem(storageKey(), JSON.stringify(payload));
 }
 
+/**
+ * Purpose: Run the restore state workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function restoreState() {
   if (state.backend) return;
   try {
@@ -3043,64 +3793,139 @@ function restoreState() {
   }
 }
 
+/**
+ * Purpose: Run the item status workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function itemStatus(item) {
   if (item.scanned >= item.qty) return "complete";
   if (item.scanned > 0) return "partial";
   return "remaining";
 }
 
+/**
+ * Purpose: Run the item text workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function itemText(item) {
   return [item.product, item.job, item.customer, item.route, item.processState, item.queueState, item.suggestedBay].join(" ");
 }
 
+/**
+ * Purpose: Run the is remake item workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function isRemakeItem(item) {
   return /\b(REMAKE|RM)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
 }
 
+/**
+ * Purpose: Run the is rush item workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function isRushItem(item) {
   return /\b(RUSH|SDI)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
 }
 
+/**
+ * Purpose: Run the is remake or rush workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function isRemakeOrRush(item) {
   return isRemakeItem(item) || isRushItem(item);
 }
 
+/**
+ * Purpose: Run the is new or updated item workflow for the browser application.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function isNewOrUpdatedItem(item) {
   return /\b(NEW LINE|NEW|UPDATED|UPDATE|CHANGED|CHANGE)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
 }
 
+/**
+ * Purpose: Run the has scan error workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function hasScanError(item) {
   return Boolean(String(item?.errorReason || item?.lastError || "").trim());
 }
 
+/**
+ * Purpose: Run the item piece qty workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function itemPieceQty(item) {
   return Math.max(Number(item?.qty || 0), 0);
 }
 
+/**
+ * Purpose: Run the item scanned piece qty workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function itemScannedPieceQty(item) {
   return Math.min(Math.max(Number(item?.scanned || 0), 0), itemPieceQty(item));
 }
 
+/**
+ * Purpose: Run the piece count workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function pieceCount(items) {
   return items.reduce((sum, item) => sum + itemPieceQty(item), 0);
 }
 
+/**
+ * Purpose: Run the unscanned piece count workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function unscannedPieceCount(items) {
   return items.reduce((sum, item) => sum + Math.max(itemPieceQty(item) - itemScannedPieceQty(item), 0), 0);
 }
 
+/**
+ * Purpose: Run the unresolved priority items workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function unresolvedPriorityItems(items = state.items) {
   return items.filter((item) => isRemakeOrRush(item) && itemStatus(item) !== "complete");
 }
 
+/**
+ * Purpose: Run the unresolved remake items workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function unresolvedRemakeItems(items = state.items) {
   return items.filter((item) => isRemakeItem(item) && itemStatus(item) !== "complete");
 }
 
+/**
+ * Purpose: Run the unresolved rush items workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function unresolvedRushItems(items = state.items) {
   return items.filter((item) => isRushItem(item) && itemStatus(item) !== "complete");
 }
 
+/**
+ * Purpose: Process the scan flash workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function scanFlash(kind = "notice") {
   const className = kind === "success" ? "scan-flash-success" : kind === "error" ? "scan-flash-error" : "scan-flash-notice";
   document.body.classList.remove("scan-flash-success", "scan-flash-error", "scan-flash-notice");
@@ -3109,6 +3934,11 @@ function scanFlash(kind = "notice") {
   window.setTimeout(() => document.body.classList.remove(className), 900);
 }
 
+/**
+ * Purpose: Resolve the get stats workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function getStats(items = state.items, errors = state.errors) {
   const totalQty = pieceCount(items);
   const scannedQty = items.reduce((sum, item) => sum + itemScannedPieceQty(item), 0);
@@ -3124,6 +3954,11 @@ function getStats(items = state.items, errors = state.errors) {
   return { totalQty, scannedQty, remainingQty, partialItems, completeItems, remainingItems, percent, errorCount };
 }
 
+/**
+ * Purpose: Run the filtered items workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function filteredItems() {
   const search = state.search.trim().toLowerCase();
 
@@ -3154,6 +3989,11 @@ function filteredItems() {
   });
 }
 
+/**
+ * Purpose: Run the group items by glass workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function groupItemsByGlass(items) {
   const groups = new Map();
   for (const item of items) {
@@ -3164,6 +4004,11 @@ function groupItemsByGlass(items) {
   return [...groups.entries()].map(([label, items]) => ({ label, items }));
 }
 
+/**
+ * Purpose: Resolve the get paged items workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function getPagedItems() {
   const rows = filteredItems();
   const groups = groupItemsByGlass(rows);
@@ -3199,6 +4044,11 @@ function getPagedItems() {
   return { rows, pageRows, pageGroups, totalPages };
 }
 
+/**
+ * Purpose: Run the stage verb workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function stageVerb() {
   const stage = String(state.meta?.stage || "").toLowerCase();
   if (stage.includes("indian trail") || stage.includes("inbound")) return "Received";
@@ -3209,10 +4059,20 @@ function stageVerb() {
   return "Staged";
 }
 
+/**
+ * Purpose: Render the render process state workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderProcessState(item) {
   return `${stageVerb()}: ${item.scanned}/${item.qty}`;
 }
 
+/**
+ * Purpose: Run the location label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function locationLabel(item) {
   if (item?.received === true || Number(item?.receivedQty || 0) > 0) return "Received";
   const stageText = `${state.meta?.stage || ""} ${state.meta?.scanner || ""}`.toLowerCase();
@@ -3225,6 +4085,11 @@ function locationLabel(item) {
   return "";
 }
 
+/**
+ * Purpose: Remove the clear selected line item workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function clearSelectedLineItem(render = true) {
   if (!state.selectedId) return;
   state.selectedId = null;
@@ -3232,6 +4097,11 @@ function clearSelectedLineItem(render = true) {
   if (render) renderScanPage();
 }
 
+/**
+ * Purpose: Run the can assign rack location workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function canAssignRackLocation() {
   const roles = state.user?.roles || [];
   return Boolean(
@@ -3241,20 +4111,40 @@ function canAssignRackLocation() {
   );
 }
 
+/**
+ * Purpose: Run the rack status value workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackStatusValue(rack) {
   return String(rack?.status || "").trim().toLowerCase();
 }
 
+/**
+ * Purpose: Run the rack is locked for line assignment workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackIsLockedForLineAssignment(rack) {
   return ["closed", "complete", "completed", "in transit", "on the way"].includes(rackStatusValue(rack));
 }
 
+/**
+ * Purpose: Run the rack for code workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackForCode(code) {
   const cleanCode = String(code || "").trim().toUpperCase();
   if (!cleanCode) return null;
   return (state.racks || []).find((rack) => String(rack.code || "").trim().toUpperCase() === cleanCode) || null;
 }
 
+/**
+ * Purpose: Run the item can show rack location dropdown workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function itemCanShowRackLocationDropdown(item) {
   if (!canAssignRackLocation() || item.id !== state.selectedId) return false;
   if (itemScannedPieceQty(item) <= 0) return false;
@@ -3266,6 +4156,11 @@ function itemCanShowRackLocationDropdown(item) {
   return !currentRack || !rackIsLockedForLineAssignment(currentRack);
 }
 
+/**
+ * Purpose: Run the location badge class workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function locationBadgeClass(location) {
   const lower = String(location || "").toLowerCase();
   return `location-badge ${
@@ -3279,12 +4174,22 @@ function locationBadgeClass(location) {
   }`;
 }
 
+/**
+ * Purpose: Run the rack location dropdown workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackLocationDropdown(item, currentLocation = "") {
   if (!itemCanShowRackLocationDropdown(item)) {
     return currentLocation ? `<span class="${escapeHtml(locationBadgeClass(currentLocation))}">${escapeHtml(currentLocation)}</span>` : "";
   }
 
   const currentRackCode = String(item.rackCode || "").trim().toUpperCase() === "T" ? "T" : String(item.rackCode || "").trim();
+  /**
+   * Purpose: Run the assignable racks workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const assignableRacks = (state.racks || []).filter((rack) => !rackIsLockedForLineAssignment(rack));
   const rackOptions = groupedRackOptionsHtml(assignableRacks, currentRackCode);
 
@@ -3299,6 +4204,11 @@ function rackLocationDropdown(item, currentLocation = "") {
   `;
 }
 
+/**
+ * Purpose: Render the render counts workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderCounts() {
   const stats = getStats();
   const totalItems = pieceCount(state.items);
@@ -3412,9 +4322,19 @@ function renderCounts() {
   if (els.completePct) els.completePct.textContent = formatPercent(stats.percent);
 }
 
+/**
+ * Purpose: Render the render pagers workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderPagers(totalRows, totalPages) {
   if (els.pageSize && Number(els.pageSize.value) !== state.pageSize) els.pageSize.value = String(state.pageSize);
   if (els.pageSizeBottom && Number(els.pageSizeBottom.value) !== state.pageSize) els.pageSizeBottom.value = String(state.pageSize);
+  /**
+   * Purpose: Render the render workflow using the existing shared UI state.
+   * Effects: Updates visible dom state, may update shared client state.
+   * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+   */
   const render = () => {
     const buttons = [];
     buttons.push(`<button type="button" data-page-action="prev" ${state.pageIndex <= 1 ? "disabled" : ""}>&lt;</button>`);
@@ -3438,10 +4358,20 @@ function renderPagers(totalRows, totalPages) {
   if (els.scanPagerBottom) els.scanPagerBottom.innerHTML = render();
 }
 
+/**
+ * Purpose: Run the glass type label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function glassTypeLabel(item) {
   return String(item.product || item.job || item.suggestedBay || "Other Glass").trim() || "Other Glass";
 }
 
+/**
+ * Purpose: Render the render item row workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderItemRow(item) {
   const status = itemStatus(item);
   const selected = item.id === state.selectedId;
@@ -3482,6 +4412,11 @@ function renderItemRow(item) {
   `;
 }
 
+/**
+ * Purpose: Render the render table workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderTable() {
   if (!els.listRows) return;
   const { rows, pageGroups, totalPages } = getPagedItems();
@@ -3512,10 +4447,20 @@ function renderTable() {
     .join("");
 }
 
+/**
+ * Purpose: Run the staging lists workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function stagingLists() {
   return state.lists.filter((list) => /staging/i.test(`${list.stage || ""} ${list.label || ""}`));
 }
 
+/**
+ * Purpose: Load the refresh racks page workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function refreshRacksPage() {
   if (!hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) return;
   if (state.backend) {
@@ -3526,6 +4471,11 @@ async function refreshRacksPage() {
   renderRacksPage();
 }
 
+/**
+ * Purpose: Render the render rack selects workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderRackSelects() {
   const stageLists = stagingLists();
   if (!state.rackScanListId || !stageLists.some((list) => list.id === state.rackScanListId)) {
@@ -3547,11 +4497,25 @@ function renderRackSelects() {
   }
 }
 
+/**
+ * Purpose: Run the rack group label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackGroupLabel(rack) {
   return rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks";
 }
 
-function groupedRackOptionsHtml(racks = [], selectedCode = "") {
+/**
+ * Purpose: Run the grouped rack options HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function groupedRackOptionsHtml(racks = [], selectedCode = "", options = {}) {
+  const includeNoRack = Boolean(options.includeNoRack);
+  const noRackOption = includeNoRack
+    ? `<option value="${NO_RACK_SELECTION}" ${selectedCode === NO_RACK_SELECTION ? "selected" : ""}>No Rack - Leave location blank</option>`
+    : "";
   const groups = new Map();
   for (const rack of racks) {
     const label = rackGroupLabel(rack);
@@ -3565,7 +4529,7 @@ function groupedRackOptionsHtml(racks = [], selectedCode = "") {
     return labelA.localeCompare(labelB, undefined, { numeric: true, sensitivity: "base" });
   });
 
-  return groupEntries
+  const groupedOptions = groupEntries
     .map(([label, groupRacks]) => `
       <optgroup label="${escapeHtml(label)}">
         ${groupRacks
@@ -3576,12 +4540,34 @@ function groupedRackOptionsHtml(racks = [], selectedCode = "") {
       </optgroup>
     `)
     .join("");
+
+  return `${noRackOption}${groupedOptions}`;
 }
 
+/**
+ * Purpose: Run the rack code for scan workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
+function rackCodeForScan(value) {
+  const selectedCode = String(value || "").trim();
+  return selectedCode === NO_RACK_SELECTION ? "" : selectedCode;
+}
+
+/**
+ * Purpose: Run the is truck rack workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function isTruckRack(rack) {
   return Boolean(rack && (rack.code === "T" || /^T\d+$/i.test(String(rack.code || "")) || /truck/i.test(rack.type || "")));
 }
 
+/**
+ * Purpose: Run the next truck rack defaults workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function nextTruckRackDefaults() {
   const truckRacks = (state.racks || []).filter(isTruckRack);
   const usedCodes = new Set(truckRacks.map((rack) => String(rack.code || "").toUpperCase()));
@@ -3594,10 +4580,20 @@ function nextTruckRackDefaults() {
   };
 }
 
+/**
+ * Purpose: Run the rack is received workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackIsReceived(rack) {
   return Boolean(rack?.received);
 }
 
+/**
+ * Purpose: Run the rack status label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackStatusLabel(rack) {
   const status = String(rack?.status || "Open").trim().toLowerCase();
   const qty = Number(rack?.qty || 0);
@@ -3608,6 +4604,11 @@ function rackStatusLabel(rack) {
   return "Empty";
 }
 
+/**
+ * Purpose: Run the rack status class name workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackStatusClassName(rack) {
   if (rackIsReceived(rack)) return "received";
   const status = String(rack?.status || "Open").trim().toLowerCase();
@@ -3618,6 +4619,11 @@ function rackStatusClassName(rack) {
   return "empty";
 }
 
+/**
+ * Purpose: Run the rack option label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackOptionLabel(rack) {
   const code = String(rack?.code || "").trim() || "Rack";
   const qty = Number(rack?.qty || 0);
@@ -3625,6 +4631,11 @@ function rackOptionLabel(rack) {
   return `${escapeHtml(code)}${escapeHtml(qtyText)} (${escapeHtml(rackStatusLabel(rack))})`;
 }
 
+/**
+ * Purpose: Run the rack destination label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackDestinationLabel(value) {
   const text = String(value || "Indian Trail").trim();
   if (/^cpu$/i.test(text)) return "CPU";
@@ -3634,6 +4645,11 @@ function rackDestinationLabel(value) {
   return text || "Indian Trail";
 }
 
+/**
+ * Purpose: Run the rack destination class workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackDestinationClass(value) {
   const text = rackDestinationLabel(value).toLowerCase();
   if (text.includes("cpu")) return "cpu";
@@ -3642,6 +4658,11 @@ function rackDestinationClass(value) {
   return "indian-trail";
 }
 
+/**
+ * Purpose: Run the rack visual class workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackVisualClass(rack) {
   if (rackIsReceived(rack)) return "is-received";
   const status = String(rack.status || "").toLowerCase();
@@ -3651,15 +4672,30 @@ function rackVisualClass(rack) {
   return "is-empty";
 }
 
+/**
+ * Purpose: Run the rack computed status workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackComputedStatus(rack) {
   return rackStatusClassName(rack);
 }
 
+/**
+ * Purpose: Run the rack sort number workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackSortNumber(value) {
   const match = String(value || "").match(/\d+/);
   return match ? Number(match[0]) : 0;
 }
 
+/**
+ * Purpose: Run the filtered sorted racks workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function filteredSortedRacks(racks = []) {
   const statusFilter = state.rackStatusFilter || "all";
   const sortMode = state.rackSort || "code-asc";
@@ -3684,6 +4720,11 @@ function filteredSortedRacks(racks = []) {
   });
 }
 
+/**
+ * Purpose: Render the render racks page workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderRacksPage() {
   renderRackSelects();
 
@@ -3719,6 +4760,11 @@ function renderRacksPage() {
     return (order[a] || 50) - (order[b] || 50) || a.localeCompare(b);
   });
 
+  /**
+   * Purpose: Render the render rack item workflow using the existing shared UI state.
+   * Effects: Updates visible dom state, may update shared client state.
+   * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+   */
   const renderRackItem = (item, currentRackCode = "") => {
     const rackItemId = String(item.rackItemId || "");
     const moveOpen = state.rackMoveItemId === rackItemId;
@@ -3786,6 +4832,11 @@ function renderRacksPage() {
     `;
   };
 
+  /**
+   * Purpose: Render the render rack items workflow using the existing shared UI state.
+   * Effects: Updates visible dom state, may update shared client state.
+   * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+   */
   const renderRackItems = (rack) => {
     const items = rack.items || [];
 
@@ -3833,12 +4884,22 @@ function renderRacksPage() {
       .join("");
   };
 
+  /**
+   * Purpose: Render the render rack workflow using the existing shared UI state.
+   * Effects: Updates visible dom state, may update shared client state.
+   * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+   */
   const renderRack = (rack) => {
     const hasItems = Number(rack.qty || 0) > 0;
     const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
     const rackState = String(rack.status || "").toLowerCase();
     const isComplete = rackState === "closed";
     const isInTransit = rackState === "in transit";
+    /**
+     * Purpose: Run the rack has move open workflow for the browser application.
+     * Effects: Updates visible dom state.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const rackHasMoveOpen = (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
     const rackOpen = state.expandedRackCodes.has(rack.code) || rackHasMoveOpen;
 
@@ -3899,6 +4960,11 @@ function renderRacksPage() {
     `;
   };
 
+  /**
+   * Purpose: Render the render rack column actions workflow using the existing shared UI state.
+   * Effects: Updates visible dom state, may update shared client state.
+   * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+   */
   const renderRackColumnActions = (label) => {
     if (!hasPermission("manage_racks")) return "";
 
@@ -3929,10 +4995,25 @@ function renderRacksPage() {
     `;
   };
 
+  /**
+   * Purpose: Run the rack status text workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const rackStatusText = (rack) => rackStatusLabel(rack);
 
+  /**
+   * Purpose: Run the rack status class workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const rackStatusClass = (rack) => rackStatusClassName(rack);
 
+  /**
+   * Purpose: Render the render rack board card workflow using the existing shared UI state.
+   * Effects: Updates visible dom state, may update shared client state.
+   * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+   */
   const renderRackBoardCard = (rack) => {
     const selected = state.selectedRackOverviewCode === rack.code;
     const statusText = rackStatusText(rack);
@@ -3975,6 +5056,11 @@ function renderRacksPage() {
     `;
   };
 
+  /**
+   * Purpose: Render the render rack board group workflow using the existing shared UI state.
+   * Effects: Updates visible dom state, may update shared client state.
+   * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+   */
   const renderRackBoardGroup = ([label, racks]) => {
     const totalQty = racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
     const activeCount = racks.filter((rack) => Number(rack.qty || 0) > 0).length;
@@ -4028,6 +5114,11 @@ function renderRacksPage() {
 
   const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackOverviewCode) || selectedGroupRacks[0] || state.racks[0] || null;
 
+  /**
+   * Purpose: Render the render rack set card workflow using the existing shared UI state.
+   * Effects: Updates visible dom state, may update shared client state.
+   * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+   */
   const renderRackSetCard = ([label, racks]) => {
     const selected = label === selectedGroupLabel;
     const totalQty = racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
@@ -4054,6 +5145,11 @@ function renderRacksPage() {
     `;
   };
 
+  /**
+   * Purpose: Render the render selected rack details workflow using the existing shared UI state.
+   * Effects: Updates visible dom state, may update shared client state.
+   * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+   */
   const renderSelectedRackDetails = (rack) => {
     if (!rack) {
       return `
@@ -4172,6 +5268,11 @@ function renderRacksPage() {
   `;
 }
 
+/**
+ * Purpose: Open the show rack destination override dialog workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function showRackDestinationOverrideDialog(payload) {
   const mismatch = payload?.destinationMismatch || {};
   const rackCode = mismatch.rackCode || "selected rack";
@@ -4196,6 +5297,11 @@ async function showRackDestinationOverrideDialog(payload) {
   });
 }
 
+/**
+ * Purpose: Process the submit rack scan workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function submitRackScan(options = {}) {
   const barcode = els.rackScanInput?.value || "";
   const rackCode = els.rackSelect?.value || state.selectedRackCode;
@@ -4230,6 +5336,11 @@ async function submitRackScan(options = {}) {
   els.rackScanInput?.focus();
 }
 
+/**
+ * Purpose: Run the choose rack destination workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function chooseRackDestination(rack) {
   const currentDestination = rackDestinationLabel(rack?.destination || "Indian Trail");
 
@@ -4259,6 +5370,11 @@ async function chooseRackDestination(rack) {
       </section>
     `;
 
+    /**
+     * Purpose: Close the close workflow using the existing shared UI state.
+     * Effects: Updates visible dom state.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const close = (value = "") => {
       shell.remove();
       document.body.classList.remove("modal-scroll-locked");
@@ -4281,6 +5397,11 @@ async function chooseRackDestination(rack) {
   });
 }
 
+/**
+ * Purpose: Run the complete rack workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function completeRack(code) {
   const payload = await fetchJson("/api/racks/complete", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
@@ -4290,6 +5411,11 @@ async function completeRack(code) {
   renderScanRackTools();
 }
 
+/**
+ * Purpose: Run the uncomplete rack workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function uncompleteRack(code) {
   const payload = await fetchJson("/api/racks/uncomplete", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
@@ -4298,6 +5424,11 @@ async function uncompleteRack(code) {
   renderScanRackTools();
 }
 
+/**
+ * Purpose: Run the return rack workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function returnRack(code) {
   const confirmed = await confirmWebAppAction({
     title: "Mark rack returned?",
@@ -4324,6 +5455,11 @@ async function returnRack(code) {
   });
 }
 
+/**
+ * Purpose: Run the mark rack not on the way workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function markRackNotOnTheWay(code) {
   const confirmed = await confirmWebAppAction({
     title: "Mark rack Not On The Way?",
@@ -4344,6 +5480,11 @@ async function markRackNotOnTheWay(code) {
   showFloatingNotice(payload.message || `Rack ${code} is open again and outbound rack scans were reversed.`, "success");
 }
 
+/**
+ * Purpose: Run the assign line item to rack workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function assignLineItemToRack(lineItemId, rackCode) {
   const payload = await fetchJson("/api/racks/assign-line-item", {
     method: "POST",
@@ -4366,6 +5507,11 @@ async function assignLineItemToRack(lineItemId, rackCode) {
   showFloatingNotice(rackCode ? `Line item assigned to rack ${rackCode}.` : "Line item rack location cleared.", "success");
 }
 
+/**
+ * Purpose: Remove the clear rack workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function clearRack(code) {
   const confirmed = await confirmWebAppAction({
     title: "Clear rack?",
@@ -4387,7 +5533,17 @@ async function clearRack(code) {
   });
 }
 
+/**
+ * Purpose: Remove the clear rack set workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function clearRackSet(label) {
+  /**
+   * Purpose: Run the racks workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const racks = (state.racks || []).filter((rack) => rackGroupLabel(rack) === label);
   if (!racks.length) return;
   const confirmed = await confirmWebAppAction({
@@ -4418,6 +5574,11 @@ async function clearRackSet(label) {
   });
 }
 
+/**
+ * Purpose: Run the move rack item workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function moveRackItem(rackItemId) {
   const select = document.querySelector(`[data-rack-target="${CSS.escape(String(rackItemId))}"]`);
   const targetRackCode = select?.value || "";
@@ -4439,6 +5600,11 @@ async function moveRackItem(rackItemId) {
   renderRacksPage();
 }
 
+/**
+ * Purpose: Remove the clear rack item workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function clearRackItem(rackItemId, label = "this piece") {
   const confirmed = await confirmWebAppAction({
     title: "Clear rack item?",
@@ -4454,23 +5620,39 @@ async function clearRackItem(rackItemId, label = "this piece") {
   renderScanRackTools();
 }
 
+/**
+ * Purpose: Run the rack packing list URL workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackPackingListUrl(rackCode, deliveryDate = "") {
   const dateParam = deliveryDate ? `&deliveryDate=${encodeURIComponent(deliveryDate)}` : "";
   return `/api/racks/packing-list?rackCode=${encodeURIComponent(rackCode)}${dateParam}`;
 }
 
-function printSelectedRackPackingSlip() {
-  if (!state.selectedRackCode) return;
-  const rack = state.racks.find((item) => item.code === state.selectedRackCode);
+/**
+ * Purpose: Run the print selected rack packing slip workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function printSelectedRackPackingSlip(rackCode = state.selectedRackCode) {
+  const selectedCode = rackCodeForScan(rackCode);
+  if (!selectedCode) return;
+  const rack = state.racks.find((item) => item.code === selectedCode);
   if (!rack || !["closed", "in transit"].includes(String(rack.status || "").toLowerCase())) {
     showFloatingNotice("Complete this rack before printing its packing list.", "notice");
     return;
   }
   const activeList = state.lists.find((list) => list.id === state.activeListId);
   const dateParam = isTruckRack(rack) && activeList?.deliveryDate ? activeList.deliveryDate : "";
-  launchManagedPrint(rackPackingListUrl(state.selectedRackCode, dateParam));
+  launchManagedPrint(rackPackingListUrl(selectedCode, dateParam));
 }
 
+/**
+ * Purpose: Run the save rack definition workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveRackDefinition() {
   const payload = await fetchJson("/api/racks", {
     method: "POST",
@@ -4485,12 +5667,23 @@ async function saveRackDefinition() {
   state.rackSummary = payload.summary || null;
   renderRacksPage();
   closeAdminModal();
+  showSaveConfirmation("The rack definition was saved.");
 }
 
+/**
+ * Purpose: Run the selected rack manager rack workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedRackManagerRack(code = state.rackManagerSelectedCode) {
   return state.racks.find((rack) => rack.code === code) || state.racks[0] || null;
 }
 
+/**
+ * Purpose: Run the populate rack manager quick edit workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function populateRackManagerQuickEdit(code = "") {
   const select = document.getElementById("rackManagerQuickRackSelect");
   const nameInput = document.getElementById("rackManagerQuickName");
@@ -4505,6 +5698,11 @@ function populateRackManagerQuickEdit(code = "") {
   if (typeInput) typeInput.value = rack.type || "Steel";
 }
 
+/**
+ * Purpose: Run the save rack quick edit workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveRackQuickEdit() {
   const code = document.getElementById("rackManagerQuickRackSelect")?.value || state.rackManagerSelectedCode || "";
   if (!code) return;
@@ -4528,9 +5726,14 @@ async function saveRackQuickEdit() {
     els.adminModalBody.innerHTML = adminModalContent("racks");
   }
 
-  showFloatingNotice(`Saved rack ${code}.`, "success");
+  showSaveConfirmation(`Rack ${code} was saved.`);
 }
 
+/**
+ * Purpose: Remove the delete rack definition workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteRackDefinition(rackCode = state.selectedRackCode) {
   if (!rackCode) return;
   const confirmed = await confirmWebAppAction({
@@ -4552,6 +5755,11 @@ async function deleteRackDefinition(rackCode = state.selectedRackCode) {
   }
 }
 
+/**
+ * Purpose: Create the create rack set workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function createRackSet() {
   const prefix = document.getElementById("rackSetModalPrefix")?.value || "";
   const nameRoot = document.getElementById("rackSetModalName")?.value || prefix || "Rack";
@@ -4570,9 +5778,14 @@ async function createRackSet() {
   renderRacksPage();
   renderScanRackTools();
   closeAdminModal();
-  showFloatingNotice(`Created ${payload.created?.length || 0} rack(s).`, "success");
+  showSaveConfirmation(`Created ${payload.created?.length || 0} rack(s).`);
 }
 
+/**
+ * Purpose: Open the open rack form workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openRackForm(rackCode = "", defaults = {}) {
   const existingRack = state.racks.find((item) => item.code === rackCode);
   const rack = existingRack ? { ...existingRack, oldCode: existingRack.code } : { ...defaults };
@@ -4580,6 +5793,11 @@ function openRackForm(rackCode = "", defaults = {}) {
   openAdminModal("rackForm");
 }
 
+/**
+ * Purpose: Open the open rack set form workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openRackSetForm(label = "") {
   const racks = state.racks.filter((rack) => (rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks") === label);
   state.rackModal = {
@@ -4593,6 +5811,11 @@ function openRackSetForm(label = "") {
   openAdminModal("rackSetForm");
 }
 
+/**
+ * Purpose: Remove the delete rack set workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteRackSet(label) {
   const racks = state.racks.filter((rack) => (rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks") === label);
   const deletable = racks.filter((rack) => rack.code !== "T");
@@ -4615,6 +5838,11 @@ async function deleteRackSet(label) {
   }
 }
 
+/**
+ * Purpose: Render the render mobile cards workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderMobileCards() {
   if (!els.mobileListCards) return;
   const { pageRows } = getPagedItems();
@@ -4654,6 +5882,11 @@ function renderMobileCards() {
   `;
 }
 
+/**
+ * Purpose: Process the scan entry event label workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function scanEntryEventLabel(entry) {
   const type = String(entry?.eventType || "").toLowerCase();
   if (type === "manual_scan") return "Manual scan";
@@ -4667,6 +5900,11 @@ function scanEntryEventLabel(entry) {
   return type === "scan" ? "Scan" : String(entry?.message || "Activity");
 }
 
+/**
+ * Purpose: Process the scan entry delivery date hint workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function scanEntryDeliveryDateHint(entry) {
   const combined = `${entry?.message || ""} ${entry?.reason || ""}`.replace(/\s+/g, " ").trim();
   const dated = combined.match(/check (?:the )?delivery list date\s+([^.;]+(?:,\s*[^.;]+)*)/i);
@@ -4681,6 +5919,11 @@ function scanEntryDeliveryDateHint(entry) {
     : legacyDate[1];
 }
 
+/**
+ * Purpose: Process the scan entry compact message workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function scanEntryCompactMessage(entry) {
   if (!entry) return "";
   const type = String(entry.eventType || "").toLowerCase();
@@ -4704,6 +5947,11 @@ function scanEntryCompactMessage(entry) {
   return [scanEntryIsManual(entry) ? "Manual Scan" : "", message].filter(Boolean).join(" - ") || reason;
 }
 
+/**
+ * Purpose: Process the scan entry full detail workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function scanEntryFullDetail(entry) {
   const message = String(entry?.message || "").trim();
   const reason = String(entry?.reason || "").trim();
@@ -4723,11 +5971,21 @@ function scanEntryFullDetail(entry) {
   return parts.join("");
 }
 
+/**
+ * Purpose: Process the scan entry row class workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function scanEntryRowClass(entry) {
   const type = String(entry?.eventType || "").toLowerCase().replace(/[^a-z0-9_-]/g, "-");
   return `${entry?.ok ? "ok" : "error"} event-${type || "activity"} ${scanEntryIsManual(entry) ? "manual" : ""}`.trim();
 }
 
+/**
+ * Purpose: Update the set last scan workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function setLastScan(entry) {
   if (!entry || !els.lastCard) return;
   state.lastScan = entry;
@@ -4746,6 +6004,11 @@ function setLastScan(entry) {
   if (els.lastCustomer) els.lastCustomer.textContent = entry.item ? entry.item.customer : "-";
 }
 
+/**
+ * Purpose: Render the render last scan workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderLastScan() {
   if (state.lastScan) {
     setLastScan(state.lastScan);
@@ -4761,6 +6024,11 @@ function renderLastScan() {
   if (els.lastCustomer) els.lastCustomer.textContent = "-";
 }
 
+/**
+ * Purpose: Run the same scan entry workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function sameScanEntry(a, b) {
   if (!a || !b) return false;
   const itemA = a.item || {};
@@ -4771,18 +6039,45 @@ function sameScanEntry(a, b) {
     String(itemA.id || `${itemA.order || ""}-${itemA.item || ""}`) === String(itemB.id || `${itemB.order || ""}-${itemB.item || ""}`);
 }
 
+/**
+ * Purpose: Process the scan entry is manual workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function scanEntryIsManual(entry) {
   return String(entry?.eventType || "").toLowerCase() === "manual_scan" || Boolean(entry?.isManual);
 }
 
-function recentRowsExcludingCurrentLastScan() {
-  const recent = state.recent || [];
-  if (!state.lastScan) return recent.slice(0, 2);
-  return recent.filter((entry) => !sameScanEntry(entry, state.lastScan)).slice(0, 2);
+/**
+ * Purpose: Run the main scan recent limit workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
+function mainScanRecentLimit() {
+  return document.fullscreenElement && state.page === "scan" ? 5 : 2;
 }
 
+/**
+ * Purpose: Run the recent rows excluding current last scan workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
+function recentRowsExcludingCurrentLastScan() {
+  const recent = state.recent || [];
+  const limit = mainScanRecentLimit();
+  if (!state.lastScan) return recent.slice(0, limit);
+  return recent.filter((entry) => !sameScanEntry(entry, state.lastScan)).slice(0, limit);
+}
+
+/**
+ * Purpose: Render the render recent workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderRecent() {
   if (!els.recentRows) return;
+  const limit = mainScanRecentLimit();
+  if (els.recentScanCountLabel) els.recentScanCountLabel.textContent = `Latest ${limit}`;
   const rows = recentRowsExcludingCurrentLastScan();
   els.recentRows.innerHTML = rows.length
     ? rows
@@ -4806,6 +6101,11 @@ function renderRecent() {
     : `<tr><td colspan="6">No scans yet</td></tr>`;
 }
 
+/**
+ * Purpose: Run the recent scans modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state, may call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function recentScansModalHtml() {
   const rows = state.recent || [];
   return `
@@ -4872,6 +6172,11 @@ function recentScansModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Render the render meta workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderMeta() {
   if (!state.meta) return;
   const dateText = formatDisplayDate(state.meta.deliveryDate);
@@ -4886,6 +6191,11 @@ function renderMeta() {
   renderDeliveryListSelect();
 }
 
+/**
+ * Purpose: Render the render delivery list select workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderDeliveryListSelect() {
   const groups = listsByDeliveryDate();
   const activeDate = selectedDeliveryDate();
@@ -4896,6 +6206,11 @@ function renderDeliveryListSelect() {
     els.deliveryDateSelect.value = activeDate;
   }
   if (els.deliveryStageSelect) {
+    /**
+     * Purpose: Run the stage lists workflow for the browser application.
+     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const stageLists = (groups.find((group) => group.date === activeDate)?.lists || state.lists).filter((list) => list.deliveryDate === activeDate);
     els.deliveryStageSelect.innerHTML = stageLists
       .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(list.stage)} - ${escapeHtml(list.scanner)}</option>`)
@@ -4910,6 +6225,11 @@ function renderDeliveryListSelect() {
   }
 }
 
+/**
+ * Purpose: Update the apply permission UI workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function applyPermissionUi() {
   const displayName = state.user ? state.user.displayName || state.user.username : "Demo";
   const roleText = state.user?.roles?.length ? state.user.roles.join(", ") : state.backend ? "Signed in" : "Local demo";
@@ -4954,6 +6274,11 @@ function applyPermissionUi() {
   setControlAllowed(els.newStationInput, hasPermission("manage_stations"));
 }
 
+/**
+ * Purpose: Render the render scan page workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderScanPage() {
   renderMeta();
   renderCounts();
@@ -4968,14 +6293,29 @@ function renderScanPage() {
   applyPermissionUi();
 }
 
+/**
+ * Purpose: Run the is staging scan context workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function isStagingScanContext() {
   return /staging/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
 }
 
+/**
+ * Purpose: Run the is outbound scan context workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function isOutboundScanContext() {
   return /outbound/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
 }
 
+/**
+ * Purpose: Run the ensure racks loaded workflow for the browser application.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function ensureRacksLoaded(force = false) {
   if (!state.backend || (!force && state.racks.length)) return;
   const payload = await fetchJson("/api/racks");
@@ -4985,6 +6325,11 @@ async function ensureRacksLoaded(force = false) {
   renderOutboundRackStatusTools();
 }
 
+/**
+ * Purpose: Render the render scan rack tools workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderScanRackTools() {
   if (!els.scanRackPanel) return;
   const visible = isStagingScanContext() && hasPermission("scan_racks");
@@ -4996,35 +6341,49 @@ function renderScanRackTools() {
     return;
   }
   els.scanRackPanel.classList.remove("is-loading");
-  if (!state.selectedRackCode || !state.racks.some((rack) => rack.code === state.selectedRackCode)) {
-    state.selectedRackCode = state.racks.find((rack) => rack.code === "T")?.code || state.racks[0]?.code || "";
+  const noRackSelected = state.selectedScanRackCode === NO_RACK_SELECTION;
+  if (!noRackSelected && (!state.selectedScanRackCode || !state.racks.some((rack) => rack.code === state.selectedScanRackCode))) {
+    state.selectedScanRackCode = state.racks.find((rack) => rack.code === "T")?.code || state.racks[0]?.code || NO_RACK_SELECTION;
   }
-  const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackCode);
+  const selectedRack = noRackSelected
+    ? null
+    : state.racks.find((rack) => rack.code === state.selectedScanRackCode);
   const selectedRackState = String(selectedRack?.status || "").toLowerCase();
   const selectedClosed = selectedRackState === "closed";
   const selectedInTransit = selectedRackState === "in transit";
+  els.scanRackPanel.classList.toggle("selected-no-rack", noRackSelected);
   els.scanRackPanel.classList.toggle("selected-rack-complete", selectedClosed);
   els.scanRackPanel.classList.toggle("selected-rack-in-transit", selectedInTransit);
   els.scanRackPanel.classList.toggle("selected-rack-loaded", Boolean(selectedRack && Number(selectedRack.qty || 0) > 0 && !selectedClosed && !selectedInTransit));
   if (els.scanRackSelect) {
-    els.scanRackSelect.innerHTML = groupedRackOptionsHtml(state.racks, state.selectedRackCode);
-    els.scanRackSelect.value = state.selectedRackCode;
+    els.scanRackSelect.innerHTML = groupedRackOptionsHtml(state.racks, state.selectedScanRackCode, { includeNoRack: true });
+    els.scanRackSelect.value = state.selectedScanRackCode;
     syncCustomSelect(els.scanRackSelect);
   }
   if (els.scanRackCompleteBtn) {
     els.scanRackCompleteBtn.textContent = selectedInTransit ? "Mark Returned" : selectedClosed ? "Uncomplete" : "Complete";
+    els.scanRackCompleteBtn.disabled = noRackSelected || !selectedRack;
   }
   if (els.scanRackPrintBtn) {
     els.scanRackPrintBtn.textContent = selectedInTransit ? "Not On The Way" : "Print Packing List";
-    els.scanRackPrintBtn.disabled = !selectedRack || (selectedInTransit ? false : !(selectedClosed || selectedInTransit) || Number(selectedRack.qty || 0) <= 0);
+    els.scanRackPrintBtn.disabled = noRackSelected || !selectedRack || (selectedInTransit ? false : !selectedClosed || Number(selectedRack.qty || 0) <= 0);
   }
   if (els.scanRackStatus) {
-    els.scanRackStatus.textContent = selectedInTransit
-      ? "This rack is marked on the way. Return it to clear it, or mark Not On The Way to reopen it and undo this rack's outbound scans."
-      : "";
+    const statusMessage = noRackSelected
+      ? "No rack selected. The scanned line will keep a blank Location value."
+      : selectedInTransit
+        ? "This rack is marked on the way. Return it to clear it, or mark Not On The Way to reopen it and undo this rack's outbound scans."
+        : "";
+    els.scanRackStatus.textContent = statusMessage;
+    els.scanRackStatus.hidden = !statusMessage;
   }
 }
 
+/**
+ * Purpose: Run the outbound rack status meta workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function outboundRackStatusMeta(rack) {
   const status = String(rack?.status || "Open").trim().toLowerCase();
   const qty = Number(rack?.qty || 0);
@@ -5063,6 +6422,11 @@ function outboundRackStatusMeta(rack) {
   };
 }
 
+/**
+ * Purpose: Run the outbound rack status options HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function outboundRackStatusOptionsHtml(racks = [], selectedCode = "") {
   const groups = new Map();
   for (const rack of racks) {
@@ -5088,6 +6452,11 @@ function outboundRackStatusOptionsHtml(racks = [], selectedCode = "") {
     .join("");
 }
 
+/**
+ * Purpose: Render the render outbound rack status tools workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderOutboundRackStatusTools() {
   if (!els.outboundRackStatusPanel) return;
   const visible = isOutboundScanContext() && hasPermission("scan");
@@ -5121,16 +6490,31 @@ function renderOutboundRackStatusTools() {
   }
 }
 
+/**
+ * Purpose: Run the is indian trail scan context workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function isIndianTrailScanContext() {
   return /indian trail|inbound/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
 }
 
+/**
+ * Purpose: Render the render manual assign tools workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderManualAssignTools() {
   if (!els.manualAssignPanel) return;
   els.manualAssignPanel.hidden = true;
 }
 
 
+/**
+ * Purpose: Run the ensure scan bay override bays workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function ensureScanBayOverrideBays() {
   if (!state.backend || state.bays.length) return;
   const payload = await fetchJson("/api/indian-trail/bays");
@@ -5138,20 +6522,40 @@ async function ensureScanBayOverrideBays() {
   renderScanBayOverrideTools();
 }
 
+/**
+ * Purpose: Process the scan bay override visible workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function scanBayOverrideVisible() {
   return state.backend && hasPermission("indian_trail_receive") && isIndianTrailScanContext();
 }
 
+/**
+ * Purpose: Run the bay override group label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayOverrideGroupLabel(bay) {
   return String(bay?.mapSection || bay?.area || bay?.bayCategory || bay?.bayType || "Other Bays").trim() || "Other Bays";
 }
 
+/**
+ * Purpose: Run the bay override sort workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayOverrideSort(a, b) {
   return Number(a.layoutRow || 9999) - Number(b.layoutRow || 9999) ||
     Number(a.layoutCol || 9999) - Number(b.layoutCol || 9999) ||
     String(a.displayName || a.bayCode || "").localeCompare(String(b.displayName || b.bayCode || ""));
 }
 
+/**
+ * Purpose: Render the render scan bay override tools workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderScanBayOverrideTools() {
   if (!els.scanBayOverridePanel) return;
   const visible = scanBayOverrideVisible();
@@ -5220,6 +6624,11 @@ function renderScanBayOverrideTools() {
   }
 }
 
+/**
+ * Purpose: Run the compatible bay candidates workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function compatibleBayCandidates(item) {
   const suggested = String(item?.suggestedBay || item?.product || "").toLowerCase();
   const targetKind =
@@ -5234,6 +6643,11 @@ function compatibleBayCandidates(item) {
     .slice(0, 16);
 }
 
+/**
+ * Purpose: Process the submit manual bay assign workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function submitManualBayAssign() {
   const order = digitsOnly(els.manualAssignOrderInput?.value || "");
   const itemNo = digitsOnly(els.manualAssignItemInput?.value || "");
@@ -5263,10 +6677,20 @@ async function submitManualBayAssign() {
   }
 }
 
+/**
+ * Purpose: Run the mini stat workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function miniStat(label, value, detail = "") {
   return `<div class="mini-stat"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong>${detail ? `<span>${escapeHtml(detail)}</span>` : ""}</div>`;
 }
 
+/**
+ * Purpose: Run the aggregate list stats workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function aggregateListStats(lists) {
   const totalLists = lists.length;
   const totalItems = lists.reduce((sum, list) => sum + Number(list.itemCount || 0), 0);
@@ -5292,6 +6716,11 @@ function aggregateListStats(lists) {
   };
 }
 
+/**
+ * Purpose: Run the home stage breakdown workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function homeStageBreakdown(lists) {
   const buckets = new Map();
   for (const list of lists) {
@@ -5314,6 +6743,11 @@ function homeStageBreakdown(lists) {
   return [...buckets.values()].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
 }
 
+/**
+ * Purpose: Run the home statistics range parts workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function homeStatisticsRangeParts() {
   const label = els.overviewRangeSelect?.selectedOptions?.[0]?.textContent || "Current dashboard range";
   const lists = filterListsByOverviewRange(state.lists).map((list) => list.deliveryDate).filter(Boolean).sort();
@@ -5321,11 +6755,21 @@ function homeStatisticsRangeParts() {
   return { label, dates: `${formatDisplayDate(lists[0])} through ${formatDisplayDate(lists[lists.length - 1])}` };
 }
 
+/**
+ * Purpose: Run the home statistics range label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function homeStatisticsRangeLabel() {
   const parts = homeStatisticsRangeParts();
   return `${parts.label} - ${parts.dates}`;
 }
 
+/**
+ * Purpose: Run the home report date params workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function homeReportDateParams() {
   if (state.overviewRange === "all") return "";
   const days = Number(state.overviewRange || 30);
@@ -5338,12 +6782,22 @@ function homeReportDateParams() {
   return `?dateFrom=${encodeURIComponent(dateInputValue(start))}&dateTo=${encodeURIComponent(dateInputValue(end))}`;
 }
 
+/**
+ * Purpose: Run the report action count workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function reportActionCount(action) {
   const report = state.homeReportSummary || {};
   const counts = report.actionCounts || {};
   return Number(counts[action] || 0);
 }
 
+/**
+ * Purpose: Run the glass quantities for statistics workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function glassQuantitiesForStatistics(overviewLists) {
   const reportRows = state.homeReportSummary?.glassQuantityByType || [];
   if (reportRows.length) {
@@ -5371,6 +6825,11 @@ function glassQuantitiesForStatistics(overviewLists) {
     .sort((a, b) => b.qty - a.qty || a.label.localeCompare(b.label));
 }
 
+/**
+ * Purpose: Render the render home stats chart workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderHomeStatsChart(overviewLists) {
   if (!els.homeStatsChart) return;
   const entries = glassQuantitiesForStatistics(overviewLists);
@@ -5443,15 +6902,138 @@ function renderHomeStatsChart(overviewLists) {
 }
 
 
+/**
+ * Purpose: Run the statistics chart kpi HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function statisticsChartKpiHtml(overviewLists = []) {
+  const overview = aggregateListStats(overviewLists);
+  const report = state.homeReportSummary || {};
+  const completedLists = overviewLists.filter((list) => Number(list.totalQty || 0) > 0 && Number(list.scannedQty || 0) >= Number(list.totalQty || 0)).length;
+  /**
+   * Purpose: Run the successful scans workflow for the browser application.
+   * Effects: May call the backend api.
+   * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+   */
+  const successfulScans = (report.scansByOperator || []).reduce((sum, row) => sum + Number(row.scans || 0), 0);
+  const scanExceptions = Number(report.badScanCount || 0) + Number(report.duplicateScanCount || 0);
+  const scanAttempts = successfulScans + scanExceptions;
+  const timedPieces = overview.onTimeQty + overview.lateQty;
+  const scanQualityPercent = scanAttempts ? (successfulScans / scanAttempts) * 100 : 0;
+
+  const cards = [
+    ["Delivery percentage", formatPercent(overview.deliveryPercent), `${overview.scannedQty} / ${overview.totalQty} pieces`],
+    ["Pieces completed", overview.scannedQty, `${overview.remainingQty} pieces still open`],
+    ["Open pieces", overview.remainingQty, `${overview.totalLists} delivery lists in range`],
+    ["Lists complete", `${completedLists}/${overview.totalLists}`, overview.totalLists ? formatPercent((completedLists / overview.totalLists) * 100) : "0%"],
+    ["On-time completion", timedPieces ? formatPercent(overview.onTimePercent) : "—", timedPieces ? `${overview.onTimeQty} on time / ${overview.lateQty} late` : "No timed completions in range"],
+    ["Scan quality", scanAttempts ? formatPercent(scanQualityPercent) : "—", scanAttempts ? `${successfulScans} successful / ${scanExceptions} exceptions` : "No scan activity in range"],
+  ];
+
+  return cards.map(([label, value, detail]) => `
+    <article class="statistics-chart-kpi">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </article>
+  `).join("");
+}
+
+/**
+ * Purpose: Run the statistics chart list label workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function statisticsChartListLabel(list) {
+  const label = String(list?.label || "Delivery list").trim();
+  return label || `${formatDisplayDate(list?.deliveryDate)} - ${stageLabel(list)}`;
+}
+
+/**
+ * Purpose: Run the statistics chart dataset workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function statisticsChartDataset(metric = state.homeChartMetric) {
   const overviewLists = filterListsByOverviewRange(state.lists);
   const report = state.homeReportSummary || {};
+
+  if (metric === "delivery") {
+    return {
+      title: "Delivery completion by list",
+      subtitle: "Completion percentage for each delivery-list stage in the selected range.",
+      suffix: "%",
+      allowDonut: false,
+      shareable: false,
+      entries: overviewLists.map((list) => {
+        const totalQty = Number(list.totalQty || 0);
+        const scannedQty = Number(list.scannedQty || 0);
+        const remainingQty = Math.max(totalQty - scannedQty, 0);
+        return {
+          label: statisticsChartListLabel(list),
+          value: totalQty ? Math.round((scannedQty / totalQty) * 100) : 0,
+          detail: `${scannedQty} / ${totalQty} pieces · ${remainingQty} open · ${formatDisplayDate(list.deliveryDate)}`,
+        };
+      }),
+    };
+  }
+
+  if (metric === "remaining") {
+    return {
+      title: "Open pieces by delivery list",
+      subtitle: "Remaining piece quantity for each delivery-list stage in the selected range.",
+      suffix: "",
+      entries: overviewLists.map((list) => {
+        const totalQty = Number(list.totalQty || 0);
+        const scannedQty = Number(list.scannedQty || 0);
+        const remainingQty = Math.max(totalQty - scannedQty, 0);
+        return {
+          label: statisticsChartListLabel(list),
+          value: remainingQty,
+          detail: `${remainingQty} open · ${scannedQty} / ${totalQty} completed · ${formatDisplayDate(list.deliveryDate)}`,
+        };
+      }).filter((entry) => entry.value > 0),
+    };
+  }
+
+  if (metric === "timeliness") {
+    return {
+      title: "On-time completion by list",
+      subtitle: "Percentage of recorded pieces completed on or before their delivery date.",
+      suffix: "%",
+      allowDonut: false,
+      shareable: false,
+      entries: overviewLists
+        .filter((list) => Number(list.onTimeQty || 0) + Number(list.lateQty || 0) > 0)
+        .map((list) => ({
+          label: statisticsChartListLabel(list),
+          value: Math.round(Number(list.onTimePercent || 0)),
+          detail: `${Number(list.onTimeQty || 0)} on time · ${Number(list.lateQty || 0)} late · ${formatDisplayDate(list.deliveryDate)}`,
+        })),
+    };
+  }
+
+  if (metric === "stage-volume") {
+    return {
+      title: "Stage workload",
+      subtitle: "Total piece volume assigned to each workflow stage in the selected range.",
+      suffix: "",
+      entries: homeStageBreakdown(overviewLists).map((stage) => ({
+        label: stage.label,
+        value: Number(stage.totalQty || 0),
+        detail: `${Number(stage.scannedQty || 0)} completed · ${Number(stage.remainingQty || 0)} open`,
+      })),
+    };
+  }
 
   if (metric === "stages") {
     return {
       title: "Stage completion",
       subtitle: "Completion percentage for every stage in the selected dashboard range.",
       suffix: "%",
+      allowDonut: false,
+      shareable: false,
       entries: homeStageBreakdown(overviewLists).map((stage) => ({
         label: stage.label,
         value: stage.totalQty ? Math.round((stage.scannedQty / stage.totalQty) * 100) : 0,
@@ -5536,11 +7118,21 @@ function statisticsChartDataset(metric = state.homeChartMetric) {
   };
 }
 
+/**
+ * Purpose: Run the filtered statistics chart entries workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function filteredStatisticsChartEntries(dataset) {
   const query = String(state.homeChartQuery || "").trim().toLowerCase();
   const limitValue = String(state.homeChartLimit || "all");
   const sortMode = String(state.homeChartSort || "value-desc");
 
+  /**
+   * Purpose: Run the entries workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   let entries = (dataset.entries || []).filter((entry) => Number(entry.value || 0) >= 0);
 
   if (query) {
@@ -5563,15 +7155,196 @@ function filteredStatisticsChartEntries(dataset) {
   return { entries, totalMatches };
 }
 
+/**
+ * Purpose: Run the chart entry color workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function chartEntryColor(index) {
+  return `var(--pie-${(index % 10) + 1})`;
+}
+
+/**
+ * Purpose: Run the truncate chart label workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function truncateChartLabel(value, maxLength = 34) {
+  const text = String(value || "");
+  return text.length > maxLength ? `${text.slice(0, Math.max(maxLength - 1, 1))}…` : text;
+}
+
+/**
+ * Purpose: Run the statistics chart selection HTML workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function statisticsChartSelectionHtml(dataset, entries, total) {
+  const selected = entries.find((entry) => entry.label === state.homeChartSelectedLabel) || entries[0];
+  if (!selected) return "";
+  state.homeChartSelectedLabel = selected.label;
+  const percent = total > 0 ? (Number(selected.value || 0) / total) * 100 : 0;
+  const shareText = dataset.shareable === false ? "" : ` · ${formatPercent(percent)} of displayed total`;
+  return `
+    <section class="statistics-chart-selection" aria-live="polite">
+      <span>Selected category</span>
+      <strong>${escapeHtml(selected.label)}</strong>
+      <b>${escapeHtml(selected.value)}${escapeHtml(dataset.suffix)}${escapeHtml(shareText)}</b>
+      <small>${escapeHtml(selected.detail || "")}</small>
+    </section>
+  `;
+}
+
+/**
+ * Purpose: Run the statistics bar chart HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function statisticsBarChartHtml(dataset, entries) {
+  const width = 1120;
+  const labelWidth = 250;
+  const valueWidth = 100;
+  const top = 54;
+  const bottom = 54;
+  const rowHeight = 54;
+  const plotWidth = width - labelWidth - valueWidth;
+  const maxValue = Math.max(...entries.map((entry) => Number(entry.value || 0)), 1);
+  const height = Math.max(430, top + entries.length * rowHeight + bottom);
+  const tickCount = 5;
+  const ticks = Array.from({ length: tickCount }, (_, index) => {
+    const ratio = index / (tickCount - 1);
+    const x = labelWidth + plotWidth * ratio;
+    const value = Math.round(maxValue * ratio);
+    return `
+      <line x1="${x}" y1="${top - 16}" x2="${x}" y2="${height - bottom + 8}" class="statistics-chart-grid-line"></line>
+      <text x="${x}" y="${height - 18}" text-anchor="middle" class="statistics-chart-axis-label">${escapeHtml(value)}${escapeHtml(dataset.suffix)}</text>
+    `;
+  }).join("");
+
+  const rows = entries.map((entry, index) => {
+    const value = Number(entry.value || 0);
+    const barWidth = value > 0 ? Math.max((value / maxValue) * plotWidth, 4) : 0;
+    const y = top + index * rowHeight;
+    const selected = entry.label === state.homeChartSelectedLabel;
+    const aria = `${entry.label}: ${value}${dataset.suffix}. ${entry.detail || ""}`.trim();
+    return `
+      <g class="statistics-chart-svg-entry ${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}">
+        <title>${escapeHtml(aria)}</title>
+        <text x="${labelWidth - 14}" y="${y + 24}" text-anchor="end" class="statistics-chart-category-label">${escapeHtml(truncateChartLabel(entry.label))}</text>
+        <rect x="${labelWidth}" y="${y + 5}" width="${plotWidth}" height="28" rx="8" class="statistics-chart-bar-rail"></rect>
+        <rect x="${labelWidth}" y="${y + 5}" width="${barWidth}" height="28" rx="8" class="statistics-chart-bar-value" style="--chart-color:${chartEntryColor(index)}"></rect>
+        <text x="${width - valueWidth + 14}" y="${y + 24}" class="statistics-chart-value-label">${escapeHtml(value)}${escapeHtml(dataset.suffix)}</text>
+      </g>
+    `;
+  }).join("");
+
+  return `
+    <div class="statistics-chart-svg-viewport statistics-chart-bar-viewport">
+      <svg class="statistics-chart-svg statistics-chart-bar-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(dataset.title)} bar chart">
+        <text x="${labelWidth}" y="24" class="statistics-chart-axis-title">Category</text>
+        <text x="${width - valueWidth + 14}" y="24" class="statistics-chart-axis-title">Value</text>
+        ${ticks}
+        ${rows}
+      </svg>
+    </div>
+  `;
+}
+
+/**
+ * Purpose: Run the statistics donut chart HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function statisticsDonutChartHtml(dataset, entries, total) {
+  if (total <= 0) {
+    return `<div class="statistics-chart-modal-empty">The displayed categories are all zero, so a donut chart cannot be drawn. Switch to the bar chart to compare them.</div>`;
+  }
+
+  const size = 480;
+  const center = size / 2;
+  const radius = 148;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const slices = entries.map((entry, index) => {
+    const value = Number(entry.value || 0);
+    const length = (value / total) * circumference;
+    const selected = entry.label === state.homeChartSelectedLabel;
+    const aria = `${entry.label}: ${value}${dataset.suffix}, ${formatPercent((value / total) * 100)}. ${entry.detail || ""}`.trim();
+    const markup = `
+      <circle
+        class="statistics-chart-donut-slice ${selected ? "is-selected" : ""}"
+        data-chart-entry-label="${escapeHtml(entry.label)}"
+        tabindex="0"
+        role="button"
+        aria-label="${escapeHtml(aria)}"
+        cx="${center}"
+        cy="${center}"
+        r="${radius}"
+        fill="none"
+        stroke-width="72"
+        style="stroke:${chartEntryColor(index)}"
+        stroke-dasharray="${length} ${Math.max(circumference - length, 0)}"
+        stroke-dashoffset="${-offset}"
+        transform="rotate(-90 ${center} ${center})"
+      ><title>${escapeHtml(aria)}</title></circle>
+    `;
+    offset += length;
+    return markup;
+  }).join("");
+
+  const legend = entries.map((entry, index) => {
+    const percent = (Number(entry.value || 0) / total) * 100;
+    const selected = entry.label === state.homeChartSelectedLabel;
+    return `
+      <button class="statistics-chart-svg-legend-row ${selected ? "is-selected" : ""}" type="button" data-chart-entry-label="${escapeHtml(entry.label)}">
+        <i style="--chart-color:${chartEntryColor(index)}"></i>
+        <span>${escapeHtml(entry.label)}</span>
+        <strong>${escapeHtml(entry.value)}${escapeHtml(dataset.suffix)} <small>${formatPercent(percent)}</small></strong>
+      </button>
+    `;
+  }).join("");
+
+  return `
+    <div class="statistics-chart-donut-layout">
+      <div class="statistics-chart-svg-viewport statistics-chart-donut-viewport">
+        <svg class="statistics-chart-svg statistics-chart-donut-svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="${escapeHtml(dataset.title)} donut chart">
+          <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="#e8eef7" stroke-width="72"></circle>
+          ${slices}
+          <circle cx="${center}" cy="${center}" r="94" class="statistics-chart-donut-center"></circle>
+          <text x="${center}" y="${center - 2}" text-anchor="middle" class="statistics-chart-donut-total">${escapeHtml(total)}</text>
+          <text x="${center}" y="${center + 28}" text-anchor="middle" class="statistics-chart-donut-caption">Displayed total</text>
+        </svg>
+      </div>
+      <div class="statistics-chart-svg-legend" aria-label="Chart categories">${legend}</div>
+    </div>
+  `;
+}
+
+/**
+ * Purpose: Render the render statistics chart modal workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderStatisticsChartModal() {
   if (!els.statsChartModalCanvas) return;
 
+  if (els.overviewRangeSelect && els.overviewRangeSelect.value !== state.overviewRange) {
+    els.overviewRangeSelect.value = state.overviewRange;
+  }
+  if (els.statsChartRangeSelect) els.statsChartRangeSelect.value = state.overviewRange;
+
+  const overviewLists = filterListsByOverviewRange(state.lists);
   const dataset = statisticsChartDataset(state.homeChartMetric);
+  const donutOption = els.statsChartViewSelect?.querySelector('option[value="donut"]');
+  if (donutOption) donutOption.disabled = dataset.allowDonut === false;
+  if (dataset.allowDonut === false && state.homeChartView === "donut") {
+    state.homeChartView = "bar";
+  }
+
   const allEntryCount = (dataset.entries || []).length;
   const filtered = filteredStatisticsChartEntries(dataset);
   const entries = filtered.entries;
   const total = entries.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
-  const maxValue = Math.max(...entries.map((entry) => Number(entry.value || 0)), 1);
 
   if (els.statsChartModalTitle) els.statsChartModalTitle.textContent = dataset.title;
   if (els.statsChartModalSubtitle) {
@@ -5584,65 +7357,49 @@ function renderStatisticsChartModal() {
   if (els.statsChartFilterInput && els.statsChartFilterInput.value !== state.homeChartQuery) {
     els.statsChartFilterInput.value = state.homeChartQuery;
   }
-  if (els.statsChartResultCount) {
-    els.statsChartResultCount.textContent = `Showing ${entries.length} of ${filtered.totalMatches} matching categories (${allEntryCount} total)`;
+  if (els.statsChartKpis) {
+    els.statsChartKpis.innerHTML = statisticsChartKpiHtml(overviewLists);
   }
-  [els.statsChartMetricSelect, els.statsChartViewSelect, els.statsChartSortSelect, els.statsChartLimitSelect].forEach((select) => {
+  if (els.statsChartResultCount) {
+    const range = homeStatisticsRangeParts();
+    els.statsChartResultCount.textContent = `Showing ${entries.length} of ${filtered.totalMatches} matching categories (${allEntryCount} total) for ${range.label}. Select a chart item to inspect it.`;
+  }
+  [
+    els.statsChartRangeSelect,
+    els.statsChartMetricSelect,
+    els.statsChartViewSelect,
+    els.statsChartSortSelect,
+    els.statsChartLimitSelect,
+    els.overviewRangeSelect,
+  ].forEach((select) => {
     if (select) syncCustomSelect(select);
   });
 
   if (!entries.length) {
+    state.homeChartSelectedLabel = "";
     els.statsChartModalCanvas.innerHTML = `<div class="statistics-chart-modal-empty">No data is available for this chart in the selected range.</div>`;
     return;
   }
 
-  if (state.homeChartView === "donut") {
-    let cursor = 0;
-    const slices = entries.map((entry, index) => {
-      const start = cursor;
-      const percent = total ? (Number(entry.value || 0) / total) * 100 : 0;
-      cursor += percent;
-      return `var(--pie-${(index % 8) + 1}) ${start.toFixed(3)}% ${cursor.toFixed(3)}%`;
-    });
-
-    els.statsChartModalCanvas.innerHTML = `
-      <div class="statistics-chart-modal-donut-layout">
-        <div class="statistics-chart-modal-donut" style="background: conic-gradient(${slices.join(", ")})">
-          <span>${escapeHtml(total)}<small>Total</small></span>
-        </div>
-        <div class="statistics-chart-modal-legend">
-          ${entries.map((entry, index) => {
-            const percent = total ? (Number(entry.value || 0) / total) * 100 : 0;
-            return `
-              <div>
-                <i style="--chart-color: var(--pie-${(index % 8) + 1})"></i>
-                <span>${escapeHtml(entry.label)}</span>
-                <strong>${escapeHtml(entry.value)}${escapeHtml(dataset.suffix)} <small>${formatPercent(percent)}</small></strong>
-              </div>
-            `;
-          }).join("")}
-        </div>
-      </div>
-    `;
-    return;
+  if (!entries.some((entry) => entry.label === state.homeChartSelectedLabel)) {
+    state.homeChartSelectedLabel = entries[0].label;
   }
 
+  const chart = state.homeChartView === "donut"
+    ? statisticsDonutChartHtml(dataset, entries, total)
+    : statisticsBarChartHtml(dataset, entries);
+
   els.statsChartModalCanvas.innerHTML = `
-    <div class="statistics-chart-modal-bars">
-      ${entries.map((entry, index) => {
-        const width = Math.max((Number(entry.value || 0) / maxValue) * 100, Number(entry.value || 0) ? 3 : 0);
-        return `
-          <article>
-            <header><strong>${escapeHtml(entry.label)}</strong><span>${escapeHtml(entry.value)}${escapeHtml(dataset.suffix)}</span></header>
-            <div class="statistics-chart-modal-bar-track"><i style="width:${width}%; --chart-color: var(--pie-${(index % 8) + 1})"></i></div>
-            <small>${escapeHtml(entry.detail || "")}</small>
-          </article>
-        `;
-      }).join("")}
-    </div>
+    ${chart}
+    ${statisticsChartSelectionHtml(dataset, entries, total)}
   `;
 }
 
+/**
+ * Purpose: Open the open statistics chart modal workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openStatisticsChartModal() {
   if (!els.statsChartModal || !els.statsChartBackdrop) return;
   els.statsChartModal.hidden = false;
@@ -5651,12 +7408,22 @@ function openStatisticsChartModal() {
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Close the close statistics chart modal workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeStatisticsChartModal() {
   if (els.statsChartModal) els.statsChartModal.hidden = true;
   if (els.statsChartBackdrop) els.statsChartBackdrop.hidden = true;
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Run the selected range remake stats workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedRangeRemakeStats(overviewLists = []) {
   const report = state.homeReportSummary || {};
   const backendQty = Number(report.rangeRemakeQty ?? report.remakeRangeQty ?? 0);
@@ -5684,6 +7451,11 @@ function selectedRangeRemakeStats(overviewLists = []) {
   return { qty, rows };
 }
 
+/**
+ * Purpose: Render the render monthly remakes workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderMonthlyRemakes(overviewLists = []) {
   if (!els.homeMonthlyRemakes) return;
   const stats = selectedRangeRemakeStats(overviewLists);
@@ -5699,6 +7471,11 @@ function renderMonthlyRemakes(overviewLists = []) {
   `;
 }
 
+/**
+ * Purpose: Render the render home statistics workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderHomeStatistics(overviewLists, overview) {
   const report = state.homeReportSummary || {};
   const stages = homeStageBreakdown(overviewLists);
@@ -5778,6 +7555,11 @@ function renderHomeStatistics(overviewLists, overview) {
   }
 }
 
+/**
+ * Purpose: Load the load home report summary workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function loadHomeReportSummary() {
   if (!state.backend || !hasPermission("view_reports")) return;
   try {
@@ -5790,6 +7572,11 @@ async function loadHomeReportSummary() {
   }
 }
 
+/**
+ * Purpose: Open the open home statistics report workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openHomeStatisticsReport() {
   const overviewLists = filterListsByOverviewRange(state.lists);
   const overview = aggregateListStats(overviewLists);
@@ -5874,6 +7661,11 @@ function openHomeStatisticsReport() {
   <table><thead><tr><th>Delivery List</th><th>Rows</th><th>Remaining Qty</th></tr></thead><tbody>${incompleteRows}</tbody></table>
   <script>
     let printCompleteSent = false;
+    /**
+     * Purpose: Run the notify print complete workflow for the browser application.
+     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const notifyPrintComplete = () => {
       if (printCompleteSent) return;
       printCompleteSent = true;
@@ -5904,6 +7696,11 @@ function openHomeStatisticsReport() {
   watchManagedPrintWindow(win);
 }
 
+/**
+ * Purpose: Run the stage progress segments workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function stageProgressSegments(lists) {
   const total = lists.reduce((sum, list) => sum + Number(list.totalQty || 0), 0);
   if (!total) return [];
@@ -5920,11 +7717,21 @@ function stageProgressSegments(lists) {
     .map((segment) => ({ ...segment, percent: Math.min((segment.qty / total) * 100, 100) }));
 }
 
+/**
+ * Purpose: Run the progress width workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function progressWidth(percent) {
   const value = Math.min(Math.max(Number(percent || 0), 0), 100);
   return value > 0 ? Math.max(value, 1.25) : 0;
 }
 
+/**
+ * Purpose: Render the render stacked progress workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderStackedProgress(lists, stats) {
   const segments = stageProgressSegments(lists);
   const segmentHtml = segments.length
@@ -5939,6 +7746,11 @@ function renderStackedProgress(lists, stats) {
   `;
 }
 
+/**
+ * Purpose: Run the filtered delivery lists workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function filteredDeliveryLists() {
   const search = state.homeSearch.trim().toLowerCase();
   return state.lists.filter((list) => {
@@ -5949,6 +7761,11 @@ function filteredDeliveryLists() {
   });
 }
 
+/**
+ * Purpose: Run the delivery list card workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function deliveryListCard(list, extraClass = "") {
   const percent = progressPercent(list);
   const category = stageCategory(list);
@@ -5978,6 +7795,11 @@ function deliveryListCard(list, extraClass = "") {
   `;
 }
 
+/**
+ * Purpose: Render the render today progress workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderTodayProgress() {
   if (!els.todayStageGrid) return;
   const key = dashboardDateKey();
@@ -6009,6 +7831,11 @@ function renderTodayProgress() {
     : `<div class="admin-empty">No delivery lists are loaded for ${formatDisplayDate(key)}.</div>`;
 }
 
+/**
+ * Purpose: Render the render home stage filter workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderHomeStageFilter() {
   if (!els.homeStageFilter) return;
   const current = state.homeStageFilter || "all";
@@ -6026,6 +7853,11 @@ function renderHomeStageFilter() {
   state.homeStageFilter = els.homeStageFilter.value;
 }
 
+/**
+ * Purpose: Render the render home workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderHome() {
   if (!els.homePage) return;
   renderHomeStageFilter();
@@ -6098,6 +7930,11 @@ function renderHome() {
   applyPermissionUi();
 }
 
+/**
+ * Purpose: Open the show page workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function showPage(page) {
   if (state.bayEditMode && state.bayHoldingSections.size && page !== "bays") {
     showFloatingNotice("Move all grouped bays out of the temporary holding area before leaving the Bay Map.", "error");
@@ -6119,19 +7956,38 @@ function showPage(page) {
   if (page === "home") renderHome();
   if (page === "scan") renderScanPage();
   if (page === "racks") refreshRacksPage().catch((error) => showInlineError(error.message, true));
-  if (page === "bays") refreshBayMapPage().catch((error) => showInlineError(error.message));
+  if (page === "bays") {
+    refreshBayMapPage().catch((error) => showInlineError(error.message));
+  }
   if (page === "admin") refreshAdminPage().catch((error) => showInlineError(error.message));
-  if (page === "scan") els.scanInput?.focus();
+  if (page === "scan") {
+    els.scanInput?.focus();
+    window.setTimeout(() => {
+      presentNextUserNotification();
+      void pollUserNotifications();
+    }, 0);
+  }
 }
 
+/**
+ * Purpose: Open the show outbound override dialog workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function showOutboundOverrideDialog(payload, scanText, options = {}) {
   await ensureRacksLoaded().catch(() => {});
+  /**
+   * Purpose: Run the racks workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const racks = (state.racks || []).filter((rack) => {
     const status = String(rack.status || "").toLowerCase();
     return rack.active !== false && !["closed", "complete", "completed", "in transit"].includes(status);
   });
-  const defaultRack = state.selectedRackCode && racks.some((rack) => rack.code === state.selectedRackCode)
-    ? state.selectedRackCode
+  const preferredRackCode = rackCodeForScan(state.selectedScanRackCode);
+  const defaultRack = preferredRackCode && racks.some((rack) => rack.code === preferredRackCode)
+    ? preferredRackCode
     : (racks.find((rack) => rack.code === "T")?.code || racks[0]?.code || "");
 
   return new Promise((resolve) => {
@@ -6168,6 +8024,11 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
       </section>
     `;
 
+    /**
+     * Purpose: Close the close workflow using the existing shared UI state.
+     * Effects: Updates visible dom state.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const close = (confirmed) => {
       dialog.remove();
       document.body.classList.remove("modal-scroll-locked");
@@ -6198,6 +8059,11 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
 }
 
 
+/**
+ * Purpose: Run the available indian trail bays workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function availableIndianTrailBays() {
   return (state.bays || [])
     .filter((bay) => bay.active !== false)
@@ -6205,6 +8071,11 @@ function availableIndianTrailBays() {
     .sort(bayOverrideSort);
 }
 
+/**
+ * Purpose: Run the indian trail bay options HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function indianTrailBayOptionsHtml(selectedCode = "") {
   const grouped = new Map();
   for (const bay of availableIndianTrailBays()) {
@@ -6219,6 +8090,11 @@ function indianTrailBayOptionsHtml(selectedCode = "") {
   `).join("");
 }
 
+/**
+ * Purpose: Open the show indian trail outbound receive override workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function showIndianTrailOutboundReceiveOverride(payload, scanText, options = {}) {
   await ensureScanBayOverrideBays().catch(() => {});
   const bays = availableIndianTrailBays();
@@ -6275,6 +8151,11 @@ async function showIndianTrailOutboundReceiveOverride(payload, scanText, options
         </div>
       </section>
     `;
+    /**
+     * Purpose: Close the close workflow using the existing shared UI state.
+     * Effects: Updates visible dom state.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const close = (decision = null) => {
       shell.remove();
       updateModalScrollLock();
@@ -6303,61 +8184,188 @@ async function showIndianTrailOutboundReceiveOverride(payload, scanText, options
   });
 }
 
-function closeIndianTrailPlacementPrompt() {
-  const shell = document.getElementById("indianTrailPlacementShell");
+/**
+ * Purpose: Close the close timed scan confirmation workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
+function closeTimedScanConfirmation(shellOrId) {
+  const shell = typeof shellOrId === "string"
+    ? document.getElementById(shellOrId)
+    : shellOrId;
   if (!shell) return;
   window.clearInterval(shell._countdownTimer);
   shell.remove();
   updateModalScrollLock();
 }
 
-async function showIndianTrailPlacementPrompt(result) {
-  if (!result?.ok || !result?.bayCode) return;
-  await ensureScanBayOverrideBays().catch(() => {});
-  closeIndianTrailPlacementPrompt();
-  const item = result.lastScan?.item || {};
-  const oversizeBay = result.oversize
-    ? availableIndianTrailBays().find((bay) => /oversize/i.test(`${bay.bayType || ""} ${bay.bayCategory || ""} ${bay.mapSection || ""} ${bay.displayName || ""}`))
-    : null;
-  const selectedCode = oversizeBay?.bayCode || result.bayCode;
+/**
+ * Purpose: Run the mount timed scan confirmation workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
+function mountTimedScanConfirmation({
+  id,
+  className = "",
+  markup,
+  durationSeconds = 12,
+}) {
+  document.querySelectorAll("[data-timed-scan-confirmation]").forEach((existingShell) => {
+    closeTimedScanConfirmation(existingShell);
+  });
+
   const shell = document.createElement("div");
-  shell.id = "indianTrailPlacementShell";
-  shell.className = "indian-trail-placement-shell";
-  shell.innerHTML = `
-    <section class="indian-trail-placement-panel" role="status" aria-live="assertive">
-      <div class="indian-trail-placement-icon" aria-hidden="true"></div>
-      <div class="indian-trail-placement-copy">
-        <small>${result.returnedToBay ? "Returned item" : "Indian Trail received"}</small>
-        <h2>Place ${escapeHtml(item.order || "item")}${item.item ? `-${escapeHtml(item.item)}` : ""} in Bay ${escapeHtml(result.bayCode)}</h2>
-        <p>${escapeHtml(item.customer || "")}${result.oversize ? " • Oversize glass detected—verify the bay below." : ""}</p>
-      </div>
-      <label class="indian-trail-placement-field">
-        <span>Override bay</span>
-        <select data-placement-bay>
-          ${indianTrailBayOptionsHtml(selectedCode)}
-        </select>
-      </label>
-      <div class="indian-trail-placement-actions">
-        <button type="button" data-placement-move ${result.assignmentId ? "" : "disabled"}>Move to selected bay</button>
-        <button type="button" data-placement-close>Done <span data-placement-countdown>12</span></button>
-      </div>
-      <i class="indian-trail-placement-timer" aria-hidden="true"></i>
-    </section>
-  `;
+  shell.id = id;
+  shell.dataset.timedScanConfirmation = "true";
+  shell.className = `indian-trail-placement-shell${className ? ` ${className}` : ""}`;
+  shell.innerHTML = markup;
   document.body.appendChild(shell);
   applyLanguageToRoot(shell);
   enhanceCustomSelects(shell);
   updateModalScrollLock();
 
-  let seconds = 12;
+  let seconds = durationSeconds;
   const countdown = shell.querySelector("[data-placement-countdown]");
+  if (countdown) countdown.textContent = String(seconds);
   shell._countdownTimer = window.setInterval(() => {
     seconds -= 1;
     if (countdown) countdown.textContent = String(Math.max(seconds, 0));
-    if (seconds <= 0) closeIndianTrailPlacementPrompt();
+    if (seconds <= 0) closeTimedScanConfirmation(shell);
   }, 1000);
 
-  shell.querySelector("[data-placement-close]")?.addEventListener("click", closeIndianTrailPlacementPrompt);
+  shell.querySelector("[data-placement-close]")?.addEventListener("click", () => {
+    closeTimedScanConfirmation(shell);
+  });
+  return shell;
+}
+
+/**
+ * Purpose: Close the close indian trail placement prompt workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function closeIndianTrailPlacementPrompt() {
+  closeTimedScanConfirmation("indianTrailPlacementShell");
+}
+
+/**
+ * Purpose: Open the show outbound rack transit prompt workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function showOutboundRackTransitPrompt(result) {
+  const rackCode = String(result?.rackCode || "").trim();
+  if (!rackCode || !result?.rackDepartureAt) return;
+
+  const spanish = state.language === "es";
+  const destination = rackDestinationLabel(result.rackDestination || "Indian Trail");
+  const pieceCount = Math.max(Number(result.rackPieceCount || result.outboundScannedQty || 0), 0);
+  const pieceLabel = spanish
+    ? `${pieceCount} pieza${pieceCount === 1 ? "" : "s"}`
+    : `${pieceCount} piece${pieceCount === 1 ? "" : "s"}`;
+  const title = spanish
+    ? `El rack ${rackCode} va en camino a ${destination}`
+    : `Rack ${rackCode} is on the way to ${destination}`;
+  const detail = spanish
+    ? `${pieceLabel} confirmadas en tránsito. El selector de estado ahora muestra este rack.`
+    : `${pieceLabel} confirmed in transit. The status selector now shows this rack.`;
+
+  mountTimedScanConfirmation({
+    id: "outboundRackTransitShell",
+    className: "is-outbound-transit",
+    markup: `
+      <section class="indian-trail-placement-panel" role="status" aria-live="assertive">
+        <div class="indian-trail-placement-icon" aria-hidden="true"></div>
+        <div class="indian-trail-placement-copy">
+          <small>${spanish ? "RACK ENVIADO DESDE SALIDA" : "OUTBOUND RACK RELEASED"}</small>
+          <h2>${escapeHtml(title)}</h2>
+          <p>${escapeHtml(detail)}</p>
+        </div>
+        <div class="outbound-rack-transit-summary">
+          <small>${spanish ? "Estado de transporte" : "Transportation status"}</small>
+          <strong>${spanish ? "En tránsito" : "In transit"}</strong>
+          <span>${escapeHtml(pieceLabel)}</span>
+        </div>
+        <div class="indian-trail-placement-actions">
+          <button type="button" data-placement-close>${spanish ? "Listo" : "Done"} <span data-placement-countdown>12</span></button>
+        </div>
+        <i class="indian-trail-placement-timer" aria-hidden="true"></i>
+      </section>
+    `,
+  });
+}
+
+/**
+ * Purpose: Open the show indian trail placement prompt workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+async function showIndianTrailPlacementPrompt(result) {
+  if (!result?.ok) return;
+  const isRush = Boolean(result.rush);
+  const directToTruck = isRush && Boolean(result.rushDirectToTruck);
+  if (!directToTruck && !result.bayCode) return;
+  await ensureScanBayOverrideBays().catch(() => {});
+  closeIndianTrailPlacementPrompt();
+  const item = result.lastScan?.item || {};
+  const spanish = state.language === "es";
+  const itemLabel = `${item.order || "item"}${item.item ? `-${item.item}` : ""}`;
+  const priorityDate = result.priorityDeliveryDate ? formatDisplayDate(result.priorityDeliveryDate) : "";
+  const oversizeBay = result.oversize && !directToTruck
+    ? availableIndianTrailBays().find((bay) => /oversize/i.test(`${bay.bayType || ""} ${bay.bayCategory || ""} ${bay.mapSection || ""} ${bay.displayName || ""}`))
+    : null;
+  const selectedCode = oversizeBay?.bayCode || result.bayCode || "";
+  const eyebrow = isRush
+    ? (spanish ? "ARTICULO URGENTE RECIBIDO" : "RUSH ITEM RECEIVED")
+    : result.returnedToBay
+      ? (spanish ? "Articulo devuelto" : "Returned item")
+      : (spanish ? "Recibido en Indian Trail" : "Indian Trail received");
+  const title = directToTruck
+    ? (spanish ? `Enviar ${itemLabel} directamente al camion del instalador` : `Send ${itemLabel} straight to the installer truck`)
+    : isRush
+      ? (spanish ? `Coloque urgente ${itemLabel} en la bahia ${result.bayCode}` : `Rush ${itemLabel} into Bay ${result.bayCode}`)
+      : (spanish ? `Coloque ${itemLabel} en la bahia ${result.bayCode}` : `Place ${itemLabel} in Bay ${result.bayCode}`);
+  const descriptionParts = [item.customer || ""];
+  if (priorityDate && isRush) descriptionParts.push(`${spanish ? "Entrega prioritaria" : "Priority delivery"}: ${priorityDate}`);
+  if (directToTruck) {
+    descriptionParts.push(spanish ? "No coloque este vidrio en una bahia." : "Do not place this glass in a bay.");
+  } else if (result.oversize) {
+    descriptionParts.push(spanish ? "Vidrio sobredimensionado detectado; verifique la bahia." : "Oversize glass detected—verify the bay below.");
+  } else if (isRush) {
+    descriptionParts.push(spanish ? "Use la bahia prioritaria indicada y mantenga este trabajo acelerado." : "Use the indicated priority bay and keep this work expedited.");
+  }
+  const shell = mountTimedScanConfirmation({
+    id: "indianTrailPlacementShell",
+    className: `${isRush ? "is-rush" : ""}${directToTruck ? `${isRush ? " " : ""}is-direct-to-truck` : ""}`,
+    markup: `
+      <section class="indian-trail-placement-panel" role="status" aria-live="assertive">
+        <div class="indian-trail-placement-icon" aria-hidden="true"></div>
+        <div class="indian-trail-placement-copy">
+          <small>${escapeHtml(eyebrow)}</small>
+          <h2>${escapeHtml(title)}</h2>
+          <p>${escapeHtml(descriptionParts.filter(Boolean).join(" • "))}</p>
+        </div>
+        ${directToTruck ? `
+          <div class="indian-trail-rush-destination">
+            <small>${spanish ? "Destino urgente" : "Rush destination"}</small>
+            <strong>${spanish ? "Camion del instalador — omitir bahia" : "Installer truck — skip bay"}</strong>
+          </div>
+        ` : `
+          <label class="indian-trail-placement-field">
+            <span>${isRush ? (spanish ? "Bahia urgente" : "Priority Rush bay") : (spanish ? "Cambiar bahia" : "Override bay")}</span>
+            <select data-placement-bay>
+              ${indianTrailBayOptionsHtml(selectedCode)}
+            </select>
+          </label>
+        `}
+        <div class="indian-trail-placement-actions">
+          ${directToTruck ? "" : `<button type="button" data-placement-move ${result.assignmentId ? "" : "disabled"}>${isRush ? (spanish ? "Mover a bahia urgente seleccionada" : "Move to selected Rush bay") : (spanish ? "Mover a la bahia seleccionada" : "Move to selected bay")}</button>`}
+          <button type="button" data-placement-close>${spanish ? "Listo" : "Done"} <span data-placement-countdown>12</span></button>
+        </div>
+        <i class="indian-trail-placement-timer" aria-hidden="true"></i>
+      </section>
+    `,
+  });
   shell.querySelector("[data-placement-move]")?.addEventListener("click", async () => {
     const newBayCode = shell.querySelector("[data-placement-bay]")?.value || "";
     if (!newBayCode || newBayCode === result.bayCode) {
@@ -6368,7 +8376,7 @@ async function showIndianTrailPlacementPrompt(result) {
       await postBayAction("/api/indian-trail/move", {
         assignmentId: result.assignmentId,
         newBayCode,
-        reason: `Placement popup override from ${result.bayCode}`,
+        reason: `${isRush ? "Rush " : ""}placement popup override from ${result.bayCode}`,
       });
       showFloatingNotice(`Moved ${item.order || "item"}-${item.item || ""} to ${newBayCode}.`, "success");
       closeIndianTrailPlacementPrompt();
@@ -6378,7 +8386,33 @@ async function showIndianTrailPlacementPrompt(result) {
   });
 }
 
-async function processScan(rawScan, options = {}) {
+/**
+ * Purpose: Run the process scan workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
+function processScan(rawScan, options = {}) {
+  const operation = Promise.resolve().then(() => processScanInternal(rawScan, options));
+  state.activeScanOperations.add(operation);
+  /**
+   * Purpose: Run the cleanup workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
+  const cleanup = () => {
+    state.activeScanOperations.delete(operation);
+    if (!state.activeScanOperations.size) window.setTimeout(() => presentNextUserNotification(), 0);
+  };
+  operation.then(cleanup, cleanup);
+  return operation;
+}
+
+/**
+ * Purpose: Run the process scan internal workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
+async function processScanInternal(rawScan, options = {}) {
   const scanText = rawScan.trim();
   if (!scanText || !state.activeListId) return;
   if (state.backend) {
@@ -6433,12 +8467,15 @@ async function processScan(rawScan, options = {}) {
       }
       return;
     }
+    const rackSelection = Object.prototype.hasOwnProperty.call(options, "rackCode")
+      ? options.rackCode
+      : (isStagingScanContext() ? state.selectedScanRackCode : "");
     const payload = await fetchJson("/api/scans", {
       method: "POST",
       body: JSON.stringify({
         listId: state.activeListId,
         barcode: scanText,
-        rackCode: options.rackCode || (isStagingScanContext() ? state.selectedRackCode : ""),
+        rackCode: rackCodeForScan(rackSelection),
         outboundOverride: Boolean(options.outboundOverride),
         destinationOverride: Boolean(options.destinationOverride),
         isManual: Boolean(options.isManual),
@@ -6446,6 +8483,14 @@ async function processScan(rawScan, options = {}) {
       }),
     });
     applyBackendPayload(payload);
+    const outboundRackDeparture = Boolean(
+      isOutboundScanContext() &&
+      payload.rackCode &&
+      payload.rackDepartureAt,
+    );
+    if (outboundRackDeparture) {
+      state.selectedOutboundRackCode = String(payload.rackCode || "").trim();
+    }
     if (payload.destinationOverrideRequired) {
       scanFlash("notice");
       renderScanPage();
@@ -6461,22 +8506,32 @@ async function processScan(rawScan, options = {}) {
       await showOutboundOverrideDialog(payload, scanText, options);
       return;
     }
-    if (payload.message) {
+    if (payload.message && !outboundRackDeparture) {
       showFloatingNotice(payload.message, payload.lastScan?.ok ? "success" : "notice");
     }
     if (payload.racks) {
       state.racks = payload.racks || state.racks;
       state.rackSummary = payload.rackSummary || state.rackSummary;
+    } else if (outboundRackDeparture) {
+      await ensureRacksLoaded(true).catch(() => {});
     } else if ((isStagingScanContext() || isOutboundScanContext()) && state.racks.length) {
       void ensureRacksLoaded(isOutboundScanContext()).catch(() => {});
     }
     scanFlash(payload.lastScan?.ok ? "success" : payload.lastScan?.eventType === "duplicate" || payload.lastScan?.eventType === "notice" ? "notice" : "error");
     renderScanPage();
+    if (outboundRackDeparture) {
+      showOutboundRackTransitPrompt(payload);
+    }
     return;
   }
   processLocalScan(scanText, options);
 }
 
+/**
+ * Purpose: Process the submit manual scan workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function submitManualScan() {
   const order = digitsOnly(els.manualOrderInput?.value || "");
   const item = digitsOnly(els.manualItemInput?.value || "");
@@ -6490,6 +8545,11 @@ async function submitManualScan() {
   els.scanInput?.focus();
 }
 
+/**
+ * Purpose: Run the process local scan workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function processLocalScan(scanText, options = {}) {
   const recovered = recoverScan(scanText);
   const timestamp = new Date().toISOString();
@@ -6534,6 +8594,11 @@ function processLocalScan(scanText, options = {}) {
   renderScanPage();
 }
 
+/**
+ * Purpose: Build the build indexes workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function buildIndexes() {
   const byOrderItem = new Map();
   const bySuffixItem = new Map();
@@ -6550,6 +8615,11 @@ function buildIndexes() {
   return { byOrderItem, bySuffixItem };
 }
 
+/**
+ * Purpose: Run the recover scan workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function recoverScan(rawScan) {
   const cleanText = cleanBarcode(rawScan);
   const { byOrderItem, bySuffixItem } = buildIndexes();
@@ -6583,6 +8653,11 @@ function recoverScan(rawScan) {
   return { ok: false, barcode: cleanText, reason: "No unique delivery-list match" };
 }
 
+/**
+ * Purpose: Run the reset state workflow for the browser application.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function resetState() {
   if (state.backend) {
     const payload = await fetchJson("/api/reset", {
@@ -6602,6 +8677,11 @@ async function resetState() {
   renderScanPage();
 }
 
+/**
+ * Purpose: Open the show inline error workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function showInlineError(message, needsReview = false) {
   const entry = { ok: false, eventType: needsReview ? "error" : "notice", barcode: "SYSTEM", message: "System notice", reason: message, time: new Date().toISOString() };
   if (needsReview) state.errors.unshift(entry);
@@ -6612,6 +8692,11 @@ function showInlineError(message, needsReview = false) {
   renderScanPage();
 }
 
+/**
+ * Purpose: Open the show floating notice workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function showFloatingNotice(message, kind = "notice") {
   let notice = document.getElementById("floatingScanNotice");
   if (!notice) {
@@ -6629,12 +8714,22 @@ function showFloatingNotice(message, kind = "notice") {
   }, 5200);
 }
 
+/**
+ * Purpose: Close the close action feedback workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeActionFeedback() {
   document.getElementById("actionFeedbackShell")?.remove();
   updateModalScrollLock();
   window.setTimeout(() => presentNextUserNotification(), 120);
 }
 
+/**
+ * Purpose: Open the show action feedback workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function showActionFeedback({
   kind = "success",
   eyebrow = "Update complete",
@@ -6682,6 +8777,11 @@ function showActionFeedback({
   applyLanguageToRoot(shell);
   updateModalScrollLock();
 
+  /**
+   * Purpose: Close the close with secondary workflow using the existing shared UI state.
+   * Effects: Updates visible dom state.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const closeWithSecondary = async () => {
     try {
       if (typeof onSecondary === "function") await onSecondary();
@@ -6702,8 +8802,35 @@ function showActionFeedback({
   shell.querySelector("[data-action-feedback-primary], [data-action-feedback-secondary]")?.focus();
 }
 
+/**
+ * Purpose: Confirm that an explicit save/create action completed successfully.
+ * Effects: Reuses the single polished action-feedback component for all settings and
+ * maintenance saves so users receive consistent confirmation without duplicate popup code.
+ * Flow: Accepts a concise message and optional detail rows, then opens the shared success
+ * dialog with one Done button. Scans and background refreshes do not call this helper.
+ */
+function showSaveConfirmation(message = "Your changes are now active.", details = []) {
+  showActionFeedback({
+    kind: "success",
+    eyebrow: "Save complete",
+    title: "Saved successfully",
+    message,
+    details,
+    secondaryLabel: "Done",
+  });
+}
+
+/**
+ * Purpose: Run the rush notification is blocked workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rushNotificationIsBlocked() {
   return Boolean(
+    state.page !== "scan" ||
+    state.rushRedirectInProgress ||
+    state.activeScanOperations.size ||
+    String(els.scanInput?.value || "").trim() ||
     document.getElementById("actionFeedbackShell") ||
     document.getElementById("rushAlertShell") ||
     (els.adminModal && !els.adminModal.hidden) ||
@@ -6712,6 +8839,11 @@ function rushNotificationIsBlocked() {
   );
 }
 
+/**
+ * Purpose: Run the acknowledge user notification workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function acknowledgeUserNotification(notificationId) {
   const cleanId = Number(notificationId || 0);
   if (!cleanId || !state.backend || !state.authenticated) return;
@@ -6721,19 +8853,117 @@ async function acknowledgeUserNotification(notificationId) {
   });
 }
 
-function closeRushAlert({ acknowledge = true } = {}) {
-  const shell = document.getElementById("rushAlertShell");
-  const notificationId = Number(shell?.dataset.notificationId || state.activeNotificationId || 0);
-  shell?.remove();
-  state.activeNotificationId = 0;
-  if (notificationId) state.acknowledgedNotificationIds.add(notificationId);
-  updateModalScrollLock();
-  if (acknowledge && notificationId) {
-    acknowledgeUserNotification(notificationId).catch(() => {});
+/**
+ * Purpose: Run the rush notification target list workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function rushNotificationTargetList(notification) {
+  const details = notification?.details || {};
+  const accessibleIds = new Set((state.lists || []).map((list) => String(list.id || "")));
+  const affectedLists = (Array.isArray(details.affectedLists) ? details.affectedLists : [])
+    .filter((list) => list && accessibleIds.has(String(list.id || "")));
+  const legacyListId = String(details.listId || "");
+  if (!affectedLists.length && legacyListId && accessibleIds.has(legacyListId)) {
+    const list = state.lists.find((entry) => String(entry.id) === legacyListId);
+    if (list) affectedLists.push(list);
   }
-  window.setTimeout(() => presentNextUserNotification(), 180);
+  if (!affectedLists.length) return null;
+
+  const currentId = String(state.activeListId || "");
+  const currentMatch = affectedLists.find((list) => String(list.id || "") === currentId);
+  if (currentMatch) return currentMatch;
+
+  const currentCategory = stageCategory(state.meta || {});
+  return affectedLists.find((list) => stageCategory(list) === currentCategory)
+    || affectedLists.find((list) => stageCategory(list) === "staged")
+    || affectedLists[0];
 }
 
+/**
+ * Purpose: Open the open rush notification list workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+async function openRushNotificationList(notification) {
+  const targetList = rushNotificationTargetList(notification);
+  state.filter = "rushes";
+  state.search = "";
+  state.pageIndex = 1;
+  if (els.searchInput) els.searchInput.value = "";
+
+  if (targetList?.id) {
+    await activateList(String(targetList.id), true);
+  } else {
+    showPage("scan");
+    renderScanPage();
+  }
+  showFloatingNotice(
+    targetList
+      ? `Opened ${stageLabel(targetList)} and filtered the delivery list to Rush items.`
+      : "Filtered the current delivery list to Rush items.",
+    "success",
+  );
+}
+
+/**
+ * Purpose: Run the wait for active scan operations workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
+async function waitForActiveScanOperations() {
+  while (state.activeScanOperations.size) {
+    await Promise.allSettled([...state.activeScanOperations]);
+  }
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
+/**
+ * Purpose: Run the acknowledge rush and open workflow for the browser application.
+ * Effects: Updates visible dom state, may call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
+async function acknowledgeRushAndOpen(notification, button) {
+  if (state.rushRedirectInProgress) return;
+  state.rushRedirectInProgress = true;
+  const notificationId = Number(notification?.id || state.activeNotificationId || 0);
+  const hadActiveScans = state.activeScanOperations.size > 0;
+  const pendingInput = String(els.scanInput?.value || "").trim();
+  if (button) {
+    button.disabled = true;
+    button.textContent = state.language === "es" ? "Finalizando escaneos..." : "Finishing current scans...";
+  }
+  document.getElementById("rushAlertShell")?.remove();
+  updateModalScrollLock();
+
+  try {
+    await waitForActiveScanOperations();
+    const remainingInput = String(els.scanInput?.value || "").trim() || (hadActiveScans ? "" : pendingInput);
+    if (remainingInput) {
+      if (els.scanInput) els.scanInput.value = "";
+      await processScan(remainingInput);
+      await waitForActiveScanOperations();
+    }
+    await acknowledgeUserNotification(notificationId);
+    if (notificationId) state.acknowledgedNotificationIds.add(notificationId);
+    state.activeNotificationId = 0;
+    await openRushNotificationList(notification);
+  } catch (error) {
+    if (pendingInput && els.scanInput && !els.scanInput.value) els.scanInput.value = pendingInput;
+    state.activeNotificationId = 0;
+    showFloatingNotice(`Rush acknowledgment was paused: ${error.message}`, "error");
+    window.setTimeout(() => showRushAlert(notification), 180);
+  } finally {
+    state.rushRedirectInProgress = false;
+    window.setTimeout(() => presentNextUserNotification(), 180);
+  }
+}
+
+/**
+ * Purpose: Open the show rush alert workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function showRushAlert(notification) {
   if (!notification || rushNotificationIsBlocked()) return false;
   const notificationId = Number(notification.id || 0);
@@ -6744,22 +8974,35 @@ function showRushAlert(notification) {
   const lookup = String(details.lookup || "").trim();
   const customer = String(details.customer || "").trim();
   const deliveryDate = String(details.deliveryDate || "").trim();
+  const previousDeliveryDate = String(details.previousDeliveryDate || "").trim();
   const deliveryDateLabel = deliveryDate ? formatDisplayDate(deliveryDate) : "";
+  const previousDeliveryDateLabel = previousDeliveryDate ? formatDisplayDate(previousDeliveryDate) : "";
   const itemCount = Math.max(Number(details.items || 0), 1);
+  const itemLabels = Array.isArray(details.itemLabels) ? details.itemLabels.filter(Boolean).join(", ") : String(details.itemLabels || "").trim();
+  const route = String(details.route || "").trim();
+  const productSummary = Array.isArray(details.products) ? details.products.filter(Boolean).join("; ") : String(details.products || "").trim();
+  const reason = String(details.reason || "").trim();
   const submittedBy = String(details.submittedBy || notification.createdBy || "").trim();
+  const affectedLists = Array.isArray(details.affectedLists) ? details.affectedLists : [];
+  const affectsIndianTrail = priorityListsIncludeIndianTrail(affectedLists);
+  const directToTruck = affectsIndianTrail && Boolean(details.directToTruck);
+  const affectedStages = [...new Set(
+    affectedLists
+      .map((list) => stageLabel(list))
+      .filter(Boolean),
+  )].join(" → ");
   const title = spanish ? "Nueva orden urgente" : "New Rush Submitted";
   const message = spanish
-    ? `${job || order || lookup || "Este trabajo"} fue marcado como urgente${customer ? ` para ${customer}` : ""}${deliveryDateLabel ? ` para la fecha de entrega ${deliveryDateLabel}` : ""}. Priorice este trabajo.`
-    : `${job || order || lookup || "This work"} was marked as Rush${customer ? ` for ${customer}` : ""}${deliveryDateLabel ? ` for delivery date ${deliveryDateLabel}` : ""}. Prioritize this work.`;
+    ? `${job || order || lookup || "Este trabajo"} fue marcado como urgente${customer ? ` para ${customer}` : ""}${deliveryDateLabel ? ` para la nueva fecha de entrega ${deliveryDateLabel}` : ""}. Priorice este trabajo.`
+    : `${job || order || lookup || "This work"} was marked as Rush${customer ? ` for ${customer}` : ""}${deliveryDateLabel ? ` for the new delivery date ${deliveryDateLabel}` : ""}. Prioritize this work.`;
 
   const shell = document.createElement("div");
   shell.id = "rushAlertShell";
   shell.className = "rush-alert-shell";
   shell.dataset.notificationId = String(notificationId);
   shell.innerHTML = `
-    <button class="rush-alert-backdrop" type="button" data-rush-alert-close aria-label="${spanish ? "Cerrar alerta urgente" : "Close Rush alert"}"></button>
+    <div class="rush-alert-backdrop" aria-hidden="true"></div>
     <section class="rush-alert-panel" role="alertdialog" aria-modal="true" aria-labelledby="rushAlertTitle">
-      <button class="rush-alert-close" type="button" data-rush-alert-close aria-label="${spanish ? "Cerrar" : "Close"}">&times;</button>
       <div class="rush-alert-icon" aria-hidden="true"><i>!</i></div>
       <div class="rush-alert-copy">
         <small>${spanish ? "ALERTA DE PRODUCCION" : "PRODUCTION PRIORITY ALERT"}</small>
@@ -6769,24 +9012,37 @@ function showRushAlert(notification) {
       <div class="rush-alert-details">
         ${job ? `<div><small>${spanish ? "Num. de trabajo" : "Job Nr."}</small><strong>${escapeHtml(job)}</strong></div>` : ""}
         ${order ? `<div><small>${spanish ? "Orden" : "Order"}</small><strong>${escapeHtml(order)}</strong></div>` : ""}
+        ${itemLabels ? `<div><small>${spanish ? "Articulos" : "Items"}</small><strong>${escapeHtml(itemLabels)}</strong></div>` : ""}
         ${customer ? `<div><small>${spanish ? "Cliente" : "Customer"}</small><strong>${escapeHtml(customer)}</strong></div>` : ""}
-        ${deliveryDateLabel ? `<div><small>${spanish ? "Fecha de entrega" : "Delivery date"}</small><strong>${escapeHtml(deliveryDateLabel)}</strong></div>` : ""}
-        <div><small>${spanish ? "Articulos prioritarios" : "Priority items"}</small><strong>${escapeHtml(itemCount)}</strong></div>
+        ${route ? `<div><small>${spanish ? "Ruta" : "Route"}</small><strong>${escapeHtml(route)}</strong></div>` : ""}
+        ${affectedStages ? `<div class="rush-alert-wide-detail"><small>${spanish ? "Etapas afectadas" : "Applicable stages"}</small><strong>${escapeHtml(affectedStages)}</strong></div>` : ""}
+        ${deliveryDateLabel ? `<div class="rush-alert-date-detail"><small>${spanish ? "Nueva fecha de entrega" : "New delivery date"}</small><strong>${escapeHtml(deliveryDateLabel)}</strong></div>` : ""}
+        ${previousDeliveryDateLabel && previousDeliveryDate !== deliveryDate ? `<div><small>${spanish ? "Fecha de entrega anterior" : "Previous delivery date"}</small><strong>${escapeHtml(previousDeliveryDateLabel)}</strong></div>` : ""}
+        ${affectsIndianTrail ? `<div class="rush-alert-wide-detail ${directToTruck ? "rush-alert-truck-detail" : ""}"><small>${spanish ? "Manejo en Indian Trail" : "Indian Trail handling"}</small><strong>${escapeHtml(directToTruck ? (spanish ? "Enviar directamente al camion del instalador; no colocar en una bahia" : "Send straight to installer truck; do not place in a bay") : (spanish ? "Acelerar hacia la bahia prioritaria indicada" : "Expedite into the assigned priority bay"))}</strong></div>` : ""}
+        ${productSummary ? `<div class="rush-alert-wide-detail"><small>${spanish ? "Productos / tamaños" : "Products / sizes"}</small><strong>${escapeHtml(productSummary)}</strong></div>` : ""}
+        ${reason ? `<div class="rush-alert-wide-detail"><small>${spanish ? "Motivo" : "Reason"}</small><strong>${escapeHtml(reason)}</strong></div>` : ""}
+        <div><small>${spanish ? "Artículos prioritarios" : "Priority items"}</small><strong>${escapeHtml(itemCount)}</strong></div>
         ${submittedBy ? `<div><small>${spanish ? "Enviado por" : "Submitted by"}</small><strong>${escapeHtml(submittedBy)}</strong></div>` : ""}
       </div>
-      <button class="rush-alert-acknowledge" type="button" data-rush-alert-close>${spanish ? "Reconocer urgente" : "Acknowledge Rush"}</button>
+      <p class="rush-alert-scan-note">${spanish ? "Puede continuar escaneando. Al reconocer, los escaneos actuales terminaran antes de abrir la lista urgente." : "You can keep scanning. Acknowledging waits for current scans to finish before opening the Rush list."}</p>
+      <button class="rush-alert-acknowledge" type="button" data-rush-alert-acknowledge>${spanish ? "Reconocer y ver urgente" : "Acknowledge Rush & View"}</button>
     </section>
   `;
   document.body.appendChild(shell);
   state.activeNotificationId = notificationId;
   updateModalScrollLock();
-  shell.querySelectorAll("[data-rush-alert-close]").forEach((button) => {
-    button.addEventListener("click", () => closeRushAlert({ acknowledge: true }));
+  shell.querySelector("[data-rush-alert-acknowledge]")?.addEventListener("click", (event) => {
+    acknowledgeRushAndOpen(notification, event.currentTarget).catch(() => {});
   });
-  shell.querySelector(".rush-alert-acknowledge")?.focus();
+  els.scanInput?.focus();
   return true;
 }
 
+/**
+ * Purpose: Run the present next user notification workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function presentNextUserNotification() {
   if (!state.authenticated || document.hidden || rushNotificationIsBlocked()) return;
   const next = state.notificationQueue.shift();
@@ -6794,6 +9050,11 @@ function presentNextUserNotification() {
   if (!showRushAlert(next)) state.notificationQueue.unshift(next);
 }
 
+/**
+ * Purpose: Run the poll user notifications workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function pollUserNotifications() {
   if (!state.backend || !state.authenticated || document.hidden) return;
   try {
@@ -6815,6 +9076,11 @@ async function pollUserNotifications() {
   }
 }
 
+/**
+ * Purpose: Run the start notification polling workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function startNotificationPolling() {
   stopNotificationPolling();
   void pollUserNotifications();
@@ -6823,6 +9089,11 @@ function startNotificationPolling() {
   }, 7000);
 }
 
+/**
+ * Purpose: Run the stop notification polling workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function stopNotificationPolling() {
   if (state.notificationPollTimer) window.clearInterval(state.notificationPollTimer);
   state.notificationPollTimer = null;
@@ -6832,6 +9103,11 @@ function stopNotificationPolling() {
   document.getElementById("rushAlertShell")?.remove();
 }
 
+/**
+ * Purpose: Run the restore fullscreen after managed print workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function restoreFullscreenAfterManagedPrint() {
   const shouldRestore = Boolean(state.restoreFullscreenAfterPrint);
   state.restoreFullscreenAfterPrint = false;
@@ -6841,22 +9117,18 @@ async function restoreFullscreenAfterManagedPrint() {
   try {
     await document.documentElement.requestFullscreen();
   } catch {
-    showActionFeedback({
-      kind: "success",
+    showFullscreenRecoveryPrompt({
       eyebrow: "Print complete",
-      title: "Return to fullscreen",
       message: "The print window closed. Your browser requires one click to enter fullscreen again.",
-      primaryLabel: "Return to fullscreen",
-      secondaryLabel: "Stay in windowed mode",
-      onPrimary: async () => {
-        if (!document.fullscreenElement && document.fullscreenEnabled) {
-          await document.documentElement.requestFullscreen();
-        }
-      },
     });
   }
 }
 
+/**
+ * Purpose: Run the stop managed print window watch workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function stopManagedPrintWindowWatch(printWindow = null) {
   if (printWindow && state.managedPrintWindow && state.managedPrintWindow !== printWindow) return;
   if (state.managedPrintWatchTimer) {
@@ -6868,12 +9140,22 @@ function stopManagedPrintWindowWatch(printWindow = null) {
   }
 }
 
+/**
+ * Purpose: Run the finish managed print session workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function finishManagedPrintSession(printWindow = null) {
   if (printWindow && state.managedPrintWindow && state.managedPrintWindow !== printWindow) return;
   stopManagedPrintWindowWatch(printWindow);
   await restoreFullscreenAfterManagedPrint();
 }
 
+/**
+ * Purpose: Run the check managed print window closed workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function checkManagedPrintWindowClosed() {
   const printWindow = state.managedPrintWindow;
   if (!printWindow) return;
@@ -6890,12 +9172,22 @@ function checkManagedPrintWindowClosed() {
   }
 }
 
+/**
+ * Purpose: Run the watch managed print window workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function watchManagedPrintWindow(printWindow) {
   stopManagedPrintWindowWatch();
   state.managedPrintWindow = printWindow;
   state.managedPrintWatchTimer = window.setInterval(checkManagedPrintWindowClosed, 250);
 }
 
+/**
+ * Purpose: Run the launch managed print workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function launchManagedPrint(url, windowName = "deliveryListPrintWindow") {
   state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
   const printWindow = window.open(url, windowName, "popup=yes,width=1180,height=860,resizable=yes,scrollbars=yes");
@@ -6909,8 +9201,18 @@ function launchManagedPrint(url, windowName = "deliveryListPrintWindow") {
   return printWindow;
 }
 
+/**
+ * Purpose: Run the print current page managed workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function printCurrentPageManaged() {
   state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
+  /**
+   * Purpose: Run the after print workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const afterPrint = () => {
     window.removeEventListener("afterprint", afterPrint);
     restoreFullscreenAfterManagedPrint();
@@ -6919,6 +9221,11 @@ function printCurrentPageManaged() {
   window.print();
 }
 
+/**
+ * Purpose: Run the run global search workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function runGlobalSearch() {
   if (!hasPermission("global_search")) return [];
   const query = els.headerGlobalSearchInput?.value.trim() || "";
@@ -6931,6 +9238,11 @@ async function runGlobalSearch() {
   return payload.results || [];
 }
 
+/**
+ * Purpose: Run the global search process class workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function globalSearchProcessClass(text, result = {}) {
   const signal = `${text || ""} ${result.stage || ""} ${result.scanner || ""} ${result.bayCode || ""} ${result.bay || ""} ${result.rackCode || ""} ${result.rackType || ""}`.toLowerCase();
   if (signal.includes("bay")) return "bay";
@@ -6947,6 +9259,11 @@ function globalSearchProcessClass(text, result = {}) {
   return "default";
 }
 
+/**
+ * Purpose: Run the global search status badges workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function globalSearchStatusBadges(result) {
   // Global Search should show one current location/process state, not every stage
   // on the delivery date. The backend resolves locationText from latest scan state.
@@ -6954,6 +9271,11 @@ function globalSearchStatusBadges(result) {
   return `<small class="global-result-status ${globalSearchProcessClass(label, result)}">${escapeHtml(label)}</small>`;
 }
 
+/**
+ * Purpose: Render the render global search results workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderGlobalSearchResults(results) {
   if (!els.headerGlobalSearchResults) return;
   if (!results.length) {
@@ -6991,6 +9313,11 @@ function renderGlobalSearchResults(results) {
     .join("");
 }
 
+/**
+ * Purpose: Load the refresh bay map page workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function refreshBayMapPage() {
   if (!hasAnyPermission(["view_bays", "view_indian_trail"])) return;
   if (state.backend) {
@@ -7018,6 +9345,11 @@ async function refreshBayMapPage() {
   maybeShowStaleBayAlert().catch(() => {});
 }
 
+/**
+ * Purpose: Render the render bay route flow workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayRouteFlow(summary) {
   if (!els.bayFlowPanel) return;
 
@@ -7125,6 +9457,11 @@ function renderBayRouteFlow(summary) {
 }
 
 
+/**
+ * Purpose: Run the transit manifest row HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function transitManifestRowHtml(item) {
   const flags = [
     isRemakeItem(item) ? "RM" : "",
@@ -7145,6 +9482,11 @@ function transitManifestRowHtml(item) {
   `;
 }
 
+/**
+ * Purpose: Run the transit rack display name workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function transitRackDisplayName(rack) {
   if (!rack) return "Needs transportation";
   if (rack.code === "T") return "Truck";
@@ -7153,6 +9495,11 @@ function transitRackDisplayName(rack) {
   return rack.code || rack.name || "Rack";
 }
 
+/**
+ * Purpose: Run the transit rack sort value workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function transitRackSortValue(rack) {
   const code = String(rack?.code || "").toUpperCase();
   if (code === "T") return "0000-TRUCK";
@@ -7161,6 +9508,11 @@ function transitRackSortValue(rack) {
   return `1000-${code}`;
 }
 
+/**
+ * Purpose: Run the transit manifest glass type class workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function transitManifestGlassTypeClass(label) {
   const text = String(label || "").toLowerCase();
 
@@ -7174,6 +9526,11 @@ function transitManifestGlassTypeClass(label) {
   return "other";
 }
 
+/**
+ * Purpose: Run the transit manifest source rows workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function transitManifestSourceRows(payload) {
   if (Array.isArray(payload.rows) && payload.rows.length) return payload.rows.slice();
 
@@ -7197,6 +9554,11 @@ function transitManifestSourceRows(payload) {
   return rows;
 }
 
+/**
+ * Purpose: Run the transit manifest rack groups workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function transitManifestRackGroups(payload) {
   const rackMap = new Map();
 
@@ -7272,6 +9634,11 @@ function transitManifestRackGroups(payload) {
 }
 
 
+/**
+ * Purpose: Run the transit rack icon class workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function transitRackIconClass(rack) {
   const text = `${rack?.type || ""} ${rack?.name || ""} ${rack?.code || ""}`;
   if (String(rack?.code || "").toUpperCase() === "T" || /truck/i.test(text)) return "truck";
@@ -7281,6 +9648,11 @@ function transitRackIconClass(rack) {
   return "steel";
 }
 
+/**
+ * Purpose: Run the transit manifest HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function transitManifestHtml(payload) {
   const rackGroups = transitManifestRackGroups(payload);
   const manifestRows = transitManifestSourceRows(payload);
@@ -7351,6 +9723,11 @@ function transitManifestHtml(payload) {
   `;
 }
 
+/**
+ * Purpose: Open the open in transit manifest workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function openInTransitManifest() {
   if (!hasPermission("view_indian_trail")) return;
   closeInTransitManifest(false);
@@ -7378,11 +9755,21 @@ async function openInTransitManifest() {
   }
 }
 
+/**
+ * Purpose: Close the close in transit manifest workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeInTransitManifest(updateLock = true) {
   document.getElementById("transitManifestShell")?.remove();
   if (updateLock) updateModalScrollLock();
 }
 
+/**
+ * Purpose: Render the render indian trail summary workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderIndianTrailSummary(summary) {
   if (!els.indianTrailSummary) return;
   const overview = bayOverview();
@@ -7408,6 +9795,11 @@ function renderIndianTrailSummary(summary) {
   `;
 }
 
+/**
+ * Purpose: Run the bay matches filter workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayMatchesFilter(bay, text) {
   const search = state.baySearch.trim().toLowerCase();
   const status = String(bay?.status || "").toLowerCase();
@@ -7434,6 +9826,11 @@ function bayMatchesFilter(bay, text) {
   return text.toLowerCase().includes(search);
 }
 
+/**
+ * Purpose: Run the bay has error state workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayHasErrorState(bay) {
   const haystack = [
     bay?.status,
@@ -7450,17 +9847,32 @@ function bayHasErrorState(bay) {
   return /error|exception|conflict|needs\s*check|bad|scanblocked|blockedall|blocked\s+for\s+all/.test(haystack);
 }
 
+/**
+ * Purpose: Run the filter option label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function filterOptionLabel(options, value, fallback = "") {
   const match = options.find(([optionValue]) => optionValue === value);
   return match ? match[1] : fallback || String(value || "");
 }
 
+/**
+ * Purpose: Run the select option label workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectOptionLabel(select, value, fallback = "") {
   if (!select) return fallback || String(value || "");
   const option = [...select.options].find((item) => item.value === value);
   return option ? option.textContent.trim() : fallback || String(value || "");
 }
 
+/**
+ * Purpose: Run the active bay filter chips workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function activeBayFilterChips() {
   const chips = [];
   const search = state.baySearch.trim();
@@ -7474,6 +9886,11 @@ function activeBayFilterChips() {
   return chips;
 }
 
+/**
+ * Purpose: Run the reset bay filters workflow for the browser application.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function resetBayFilters() {
   state.baySearch = "";
   state.bayStatusFilter = "all";
@@ -7491,11 +9908,21 @@ function resetBayFilters() {
   renderBayMapPage();
 }
 
+/**
+ * Purpose: Render the render bay filter summary workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayFilterSummary() {
   if (!els.bayActiveFilterSummary && !els.bayActiveFilterCount && !els.bayClearFiltersBtn) return;
 
   const chips = activeBayFilterChips();
   const activeCount = chips.length;
+  /**
+   * Purpose: Run the countable workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const countable = (state.bays || []).filter((bay) => bay.active !== false && bayCategoryKind(bay) !== "spacer");
   const visibleCount = countable.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))).length;
   const summaryText = activeCount
@@ -7522,19 +9949,39 @@ function renderBayFilterSummary() {
   els.bayActiveFilterBar?.classList.toggle("has-active-filters", activeCount > 0);
 }
 
+/**
+ * Purpose: Normalize the normalize filter value workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function normalizeFilterValue(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+/**
+ * Purpose: Run the bay glass label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayGlassLabel(bay) {
   const assignment = (bay?.assignments || [])[0];
   return String(assignment?.product || assignment?.job || bay?.bayCategory || bay?.bayType || "Other Glass").trim() || "Other Glass";
 }
 
+/**
+ * Purpose: Run the is workbook legend cell workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function isWorkbookLegendCell(cell) {
   return Number(cell.row || 0) >= 11 && Number(cell.row || 0) <= 18 && Number(cell.col || 0) >= 17 && Number(cell.col || 0) <= 20;
 }
 
+/**
+ * Purpose: Run the status abbreviation workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function statusAbbreviation(status, bay) {
   if (!bay) return "";
   if (bayCategoryKind(bay) === "spacer") return "";
@@ -7549,6 +9996,11 @@ function statusAbbreviation(status, bay) {
   return "";
 }
 
+/**
+ * Purpose: Run the bay category kind workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayCategoryKind(bay) {
   const text = [bay?.bayCategory, bay?.bayType, bay?.mapSection, bay?.displayName, bay?.bayCode].join(" ").toLowerCase();
   if (text.includes("spacer")) return "spacer";
@@ -7563,6 +10015,11 @@ function bayCategoryKind(bay) {
   return "standard";
 }
 
+/**
+ * Purpose: Run the bay category label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayCategoryLabel(kind) {
   const labels = {
     coral: "Coral",
@@ -7579,14 +10036,29 @@ function bayCategoryLabel(kind) {
   return labels[kind] || "Other Bays";
 }
 
+/**
+ * Purpose: Run the bay category order workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayCategoryOrder(kind) {
   return { coral: 1, lr: 2, rr: 3, showers: 4, mirror: 5, "bfs-mirror": 6, "framed-mirror": 7, crl: 8, standard: 9, spacer: 10 }[kind] || 9;
 }
 
+/**
+ * Purpose: Run the bay rack label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayRackLabel(bay) {
   return bay?.mapSection || (bay?.bayNumber ? `Bay ${bay.bayNumber}` : "Unmapped");
 }
 
+/**
+ * Purpose: Run the bay search text workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function baySearchText(bay) {
   return [
     bay?.displayName,
@@ -7599,6 +10071,11 @@ function baySearchText(bay) {
   ].join(" ");
 }
 
+/**
+ * Purpose: Run the bay policy kind workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayPolicyKind(bay) {
   const status = String(bay?.status || "").toLowerCase().replace(/[^a-z]/g, "");
   const sourceStatus = String(bay?.sourceStatus || "").toLowerCase().replace(/[^a-z]/g, "");
@@ -7610,6 +10087,11 @@ function bayPolicyKind(bay) {
   return "auto";
 }
 
+/**
+ * Purpose: Run the bay status kind workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayStatusKind(bay) {
   const status = String(bay?.status || "").toLowerCase();
   const assigned = Number(bay?.assignedQty || 0);
@@ -7623,6 +10105,11 @@ function bayStatusKind(bay) {
   return "available";
 }
 
+/**
+ * Purpose: Run the bay status label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayStatusLabel(bay) {
   const kind = bayStatusKind(bay);
   if (kind === "manual") return "Manual Assign";
@@ -7635,6 +10122,11 @@ function bayStatusLabel(bay) {
   return String(bay?.status || "Available");
 }
 
+/**
+ * Purpose: Run the bay utilization workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayUtilization(bay) {
   const capacity = Number(bay?.capacityQty || 0);
   const assigned = Number(bay?.assignedQty || 0);
@@ -7642,6 +10134,11 @@ function bayUtilization(bay) {
   return Math.min((assigned / capacity) * 100, 100);
 }
 
+/**
+ * Purpose: Run the bay category filter options workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayCategoryFilterOptions() {
   return [
     ["all", "All Bays"],
@@ -7656,6 +10153,11 @@ function bayCategoryFilterOptions() {
   ];
 }
 
+/**
+ * Purpose: Run the bay glass filter options workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayGlassFilterOptions() {
   const values = new Map();
   for (const bay of state.bays || []) {
@@ -7667,6 +10169,11 @@ function bayGlassFilterOptions() {
   return [["all", "All glass types"], ...[...values.entries()].sort((a, b) => a[1].localeCompare(b[1]))];
 }
 
+/**
+ * Purpose: Run the bay overview workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayOverview() {
   const countableBays = state.bays.filter((bay) => bay.active !== false && bayCategoryKind(bay) !== "spacer");
 
@@ -7691,7 +10198,17 @@ function bayOverview() {
 }
 
 
+/**
+ * Purpose: Run the bay group policy summary workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayGroupPolicySummary(section) {
+  /**
+   * Purpose: Run the bays workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const bays = (section?.bays || []).filter((bay) => bayCategoryKind(bay) !== "spacer");
   const counts = { auto: 0, manual: 0, blocked: 0 };
 
@@ -7722,16 +10239,31 @@ function bayGroupPolicySummary(section) {
   };
 }
 
+/**
+ * Purpose: Run the assignment job key workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function assignmentJobKey(assignment) {
   const job = String(assignment?.job || "").trim();
   if (job) return `job:${job.toLowerCase()}`;
   return `order:${assignment?.order || ""}`;
 }
 
+/**
+ * Purpose: Run the assignment job label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function assignmentJobLabel(assignment) {
   return String(assignment?.job || assignment?.order || assignment?.product || "No Job Nr.").trim() || "No Job Nr.";
 }
 
+/**
+ * Purpose: Run the group assignments by job workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function groupAssignmentsByJob(assignments = []) {
   const groups = new Map();
   for (const assignment of assignments || []) {
@@ -7764,11 +10296,21 @@ function groupAssignmentsByJob(assignments = []) {
   }));
 }
 
+/**
+ * Purpose: Run the bay job detail for group workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayJobDetailForGroup(bay, group) {
   const details = bay?.jobDetails || [];
   return details.find((detail) => String(detail.key || "") === String(group?.key || "")) || null;
 }
 
+/**
+ * Purpose: Run the selected bay job items HTML workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedBayJobItemsHtml(detail) {
   const items = detail?.items || [];
   if (!items.length) {
@@ -7794,6 +10336,11 @@ function selectedBayJobItemsHtml(detail) {
   `;
 }
 
+/**
+ * Purpose: Render the render bay slot button workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBaySlotButton(bay, mode = "physical") {
   const assignments = bay.assignments || [];
   const assignment = assignments[0];
@@ -7852,6 +10399,11 @@ function renderBaySlotButton(bay, mode = "physical") {
   `;
 }
 
+/**
+ * Purpose: Run the bay type sections workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayTypeSections() {
   const groups = new Map();
   for (const bay of state.bays || []) {
@@ -7889,6 +10441,11 @@ function bayTypeSections() {
     .sort((a, b) => bayCategoryOrder(a.kind) - bayCategoryOrder(b.kind) || a.label.localeCompare(b.label));
 }
 
+/**
+ * Purpose: Run the bay physical sections workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayPhysicalSections() {
   const sectionMap = new Map();
   for (const bay of state.bays || []) {
@@ -7908,6 +10465,11 @@ function bayPhysicalSections() {
     .sort((a, b) => a.col - b.col || a.row - b.row || a.label.localeCompare(b.label));
 }
 
+/**
+ * Purpose: Run the initialize bay layout draft workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function initializeBayLayoutDraft() {
   const sections = bayPhysicalSections();
   const used = new Set();
@@ -7930,6 +10492,11 @@ function initializeBayLayoutDraft() {
   state.bayLayoutOriginal = JSON.parse(JSON.stringify(state.bayLayoutDraft));
 }
 
+/**
+ * Purpose: Normalize the normalized bay grid positions workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function normalizedBayGridPositions(sections) {
   const positions = {};
   sections.forEach((section, index) => {
@@ -7944,6 +10511,11 @@ function normalizedBayGridPositions(sections) {
   return positions;
 }
 
+/**
+ * Purpose: Render the render bay section workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBaySection(section) {
   const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
   const displayBays = filtersActive ? section.bays.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))) : section.bays;
@@ -7980,6 +10552,168 @@ function renderBaySection(section) {
   `;
 }
 
+/**
+ * Purpose: Run the bay layout columns workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function bayLayoutColumns(physicalSections = bayPhysicalSections()) {
+  const columns = Array.from({ length: 7 }, () => []);
+  physicalSections.forEach((section, fallbackIndex) => {
+    const draft = state.bayLayoutDraft?.[section.label] || {};
+    if (draft.holding) return;
+    const col = Math.max(1, Math.min(7, Math.round(Number(draft.col || section.col || 0)) || (fallbackIndex % 7) + 1));
+    const row = Math.max(1, Math.round(Number(draft.row || section.row || 0)) || Math.floor(fallbackIndex / 7) + 1);
+    columns[col - 1].push({ section, row, col });
+  });
+  columns.forEach((column) => column.sort((a, b) => a.row - b.row || a.section.label.localeCompare(b.section.label)));
+  return columns;
+}
+
+/**
+ * Purpose: Render the render bay layout drop zone workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
+function renderBayLayoutDropZone(column, index, label) {
+  return `
+    <div
+      class="bay-layout-drop-zone"
+      data-bay-layout-drop="true"
+      data-bay-layout-column="${column}"
+      data-bay-layout-index="${index}"
+      aria-label="Insert bay group ${escapeHtml(label)}"
+    ><span>${escapeHtml(label)}</span></div>
+  `;
+}
+
+/**
+ * Purpose: Render the render bay layout group card workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
+function renderBayLayoutGroupCard(entry, index) {
+  const section = entry.section;
+  const assignedQty = section.bays.reduce((sum, bay) => sum + Number(bay.assignedQty || 0), 0);
+  const occupiedBays = section.bays.filter((bay) => Number(bay.assignedQty || 0) > 0).length;
+  return `
+    <article
+      class="bay-layout-group-card"
+      draggable="true"
+      data-bay-group-drag="${escapeHtml(section.label)}"
+      data-bay-drop-section="${escapeHtml(section.label)}"
+      data-bay-drop-category="${escapeHtml(section.kind)}"
+    >
+      <span class="bay-layout-drag-handle" aria-hidden="true"></span>
+      <div class="bay-layout-group-copy">
+        <strong>${escapeHtml(section.label)}</strong>
+        <span>${escapeHtml(bayCategoryLabel(section.kind))}</span>
+      </div>
+      <div class="bay-layout-group-stats">
+        <span><b>${escapeHtml(section.bays.length)}</b> bays</span>
+        <span><b>${escapeHtml(occupiedBays)}</b> occupied</span>
+        <span><b>${escapeHtml(assignedQty)}</b> pieces</span>
+        <span><b>${escapeHtml(index + 1)}</b> order</span>
+      </div>
+      <div class="bay-layout-group-actions" aria-label="Move ${escapeHtml(section.label)}">
+        <button type="button" data-bay-layout-shift="up" data-bay-layout-section="${escapeHtml(section.label)}" title="Move up" aria-label="Move ${escapeHtml(section.label)} up">↑</button>
+        <button type="button" data-bay-layout-shift="down" data-bay-layout-section="${escapeHtml(section.label)}" title="Move down" aria-label="Move ${escapeHtml(section.label)} down">↓</button>
+        <button type="button" data-bay-layout-shift="left" data-bay-layout-section="${escapeHtml(section.label)}" title="Move left" aria-label="Move ${escapeHtml(section.label)} left">←</button>
+        <button type="button" data-bay-layout-shift="right" data-bay-layout-section="${escapeHtml(section.label)}" title="Move right" aria-label="Move ${escapeHtml(section.label)} right">→</button>
+      </div>
+    </article>
+  `;
+}
+
+/**
+ * Purpose: Run the insert bay section draft workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function insertBaySectionDraft(sectionLabel, targetColumn, targetIndex) {
+  if (!sectionLabel || !state.bayLayoutDraft?.[sectionLabel]) return;
+  const before = JSON.parse(JSON.stringify(state.bayLayoutDraft));
+  const sections = bayPhysicalSections();
+  const columns = bayLayoutColumns(sections).map((column) => column.map((entry) => entry.section.label));
+  let sourceColumn = -1;
+  let sourceIndex = -1;
+
+  columns.some((column, columnIndex) => {
+    const index = column.indexOf(sectionLabel);
+    if (index < 0) return false;
+    sourceColumn = columnIndex;
+    sourceIndex = index;
+    column.splice(index, 1);
+    return true;
+  });
+
+  const col = Math.max(1, Math.min(7, Number(targetColumn || 1)));
+  const target = columns[col - 1];
+  let insertionIndex = Number(targetIndex || 0);
+  if (sourceColumn === col - 1 && sourceIndex >= 0 && sourceIndex < insertionIndex) insertionIndex -= 1;
+  insertionIndex = Math.max(0, Math.min(insertionIndex, target.length));
+  target.splice(insertionIndex, 0, sectionLabel);
+
+  columns.forEach((column, columnIndex) => {
+    column.forEach((label, rowIndex) => {
+      state.bayLayoutDraft[label] = { row: rowIndex + 1, col: columnIndex + 1, holding: false };
+    });
+  });
+
+  state.bayHoldingSections.delete(sectionLabel);
+  const after = JSON.parse(JSON.stringify(state.bayLayoutDraft));
+  if (JSON.stringify(before) === JSON.stringify(after)) return;
+  state.bayLayoutUndoStack.push({ label: `insert ${sectionLabel}`, beforeDraft: before, afterDraft: after });
+  state.bayLayoutRedoStack = [];
+  renderBayMapPage();
+}
+
+/**
+ * Purpose: Run the shift bay section draft workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function shiftBaySectionDraft(sectionLabel, direction) {
+  if (!sectionLabel || !state.bayLayoutDraft?.[sectionLabel]) return;
+  const columns = bayLayoutColumns();
+  let sourceColumn = -1;
+  let sourceIndex = -1;
+  columns.some((column, columnIndex) => {
+    const foundIndex = column.findIndex((entry) => entry.section.label === sectionLabel);
+    if (foundIndex < 0) return false;
+    sourceColumn = columnIndex;
+    sourceIndex = foundIndex;
+    return true;
+  });
+
+  if (sourceColumn < 0) {
+    const targetColumn = direction === "left" ? 1 : direction === "right" ? 7 : 1;
+    insertBaySectionDraft(sectionLabel, targetColumn, 0);
+    return;
+  }
+
+  if (direction === "up") {
+    if (sourceIndex === 0) return;
+    insertBaySectionDraft(sectionLabel, sourceColumn + 1, sourceIndex - 1);
+    return;
+  }
+  if (direction === "down") {
+    if (sourceIndex === columns[sourceColumn].length - 1) return;
+    insertBaySectionDraft(sectionLabel, sourceColumn + 1, sourceIndex + 2);
+    return;
+  }
+
+  if (direction === "left" && sourceColumn === 0) return;
+  if (direction === "right" && sourceColumn === 6) return;
+  const targetColumn = direction === "left" ? sourceColumn : sourceColumn + 2;
+  insertBaySectionDraft(sectionLabel, targetColumn, Math.min(sourceIndex, columns[targetColumn - 1].length));
+}
+
+/**
+ * Purpose: Render the render bay grid workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayGrid(physicalSections) {
   if (state.bayEditMode && !state.bayLayoutDraft) initializeBayLayoutDraft();
   if (!state.bayEditMode) {
@@ -8031,51 +10765,21 @@ function renderBayGrid(physicalSections) {
     `;
   }
   const sectionByLabel = new Map(physicalSections.map((section) => [section.label, section]));
-  const visibleSections = physicalSections
-    .map((section) => {
-      const draft = state.bayLayoutDraft?.[section.label] || {};
-      return {
-        section,
-        row: Math.max(1, Math.round(Number(draft.row || section.row || 1))),
-        col: Math.max(1, Math.min(7, Math.round(Number(draft.col || section.col || 1)))),
-        holding: Boolean(draft.holding),
-      };
-    })
-    .filter((entry) => !entry.holding);
-
-  const columns = Array.from({ length: 7 }, () => []);
-  const rowCounts = Array.from({ length: 7 }, () => 1);
-  visibleSections.forEach((entry) => {
-    columns[entry.col - 1].push(entry);
-    rowCounts[entry.col - 1] = Math.max(rowCounts[entry.col - 1], entry.row + 1);
-  });
-
-  const columnMarkup = columns
-    .map((column, index) => {
-      const col = index + 1;
-      const usedRows = new Set(column.map((entry) => entry.row));
-      const sorted = column.sort((a, b) => a.row - b.row || a.section.label.localeCompare(b.section.label));
-      const groupCells = sorted
-        .map((entry) => `
-          <div class="bay-edit-stack-cell has-section" data-grid-row="${entry.row}" data-grid-col="${col}" data-bay-drop-section="${escapeHtml(entry.section.label)}" data-bay-grid-cell="true">
-            ${renderBaySection(entry.section)}
-          </div>
-        `)
-        .join("");
-      const emptyRow = Math.max(rowCounts[index], ...[...usedRows, 0]) + 1;
-      return `
-        <section class="bay-edit-stack-column" data-bay-edit-column="${col}">
-          <header><strong>Column ${col}</strong><span>${escapeHtml(sorted.length)} grouped set${sorted.length === 1 ? "" : "s"}</span></header>
-          <div class="bay-edit-stack-list">
-            ${groupCells}
-            <div class="bay-edit-stack-cell empty" data-grid-row="${emptyRow}" data-grid-col="${col}" data-bay-drop-section="grid-${emptyRow}-${col}" data-bay-grid-cell="true">
-              <span class="empty-grid-slot">Drop group here</span>
-            </div>
-          </div>
-        </section>
-      `;
-    })
-    .join("");
+  const columns = bayLayoutColumns(physicalSections);
+  const columnMarkup = columns.map((column, index) => {
+    const col = index + 1;
+    const cards = [renderBayLayoutDropZone(col, 0, "Drop at top")];
+    column.forEach((entry, entryIndex) => {
+      cards.push(renderBayLayoutGroupCard(entry, entryIndex));
+      cards.push(renderBayLayoutDropZone(col, entryIndex + 1, entryIndex === column.length - 1 ? "Drop at bottom" : "Drop between groups"));
+    });
+    return `
+      <section class="bay-edit-stack-column" data-bay-edit-column="${col}">
+        <header><strong>Column ${col}</strong><span>${escapeHtml(column.length)} grouped set${column.length === 1 ? "" : "s"}</span></header>
+        <div class="bay-edit-stack-list">${cards.join("")}</div>
+      </section>
+    `;
+  }).join("");
 
   const holding = [...state.bayHoldingSections]
     .map((label) => sectionByLabel.get(label))
@@ -8085,12 +10789,14 @@ function renderBayGrid(physicalSections) {
     <section class="bay-edit-map-shell-v23">
       <div class="bay-edit-map-help-v23">
         <strong>Edit Map Layout</strong>
-        <span>This view now matches the live physical bay map. Drag grouped bay set headers between columns, then Confirm Layout to save the exact floor-map position.</span>
+        <span>Drag a compact group card onto any blue insertion line to place it above, between, or below other groups. Use the arrow buttons for precise one-step movement, then Save Layout.</span>
       </div>
       <section class="bay-holding-area bay-holding-area-v23" data-bay-holding-area="true">
         <header><strong>Temporary Holding Area</strong><span>${escapeHtml(holding.length)} group${holding.length === 1 ? "" : "s"}</span></header>
-        <div class="bay-holding-list" data-bay-drop-section="__holding" data-bay-holding-drop="true">
-          ${holding.length ? holding.map((section) => renderBaySection(section)).join("") : `<div class="empty-grid-slot">Drop grouped bay sets here while reorganizing.</div>`}
+        <div class="bay-holding-list bay-layout-holding-list" data-bay-drop-section="__holding" data-bay-holding-drop="true">
+          ${holding.length
+            ? holding.map((section, index) => renderBayLayoutGroupCard({ section, row: 0, col: 0 }, index)).join("")
+            : `<div class="empty-grid-slot">Drop grouped bay sets here while reorganizing.</div>`}
         </div>
       </section>
       <section class="bay-edit-column-grid-v23">${columnMarkup}</section>
@@ -8098,10 +10804,20 @@ function renderBayGrid(physicalSections) {
   `;
 }
 
+/**
+ * Purpose: Run the collapse all physical bay sections workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function collapseAllPhysicalBaySections() {
   (state.bays || []).forEach((bay) => state.collapsedBaySections.add(bayRackLabel(bay)));
 }
 
+/**
+ * Purpose: Run the sync bay section state workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function syncBaySectionState(details, open) {
   const label = details.dataset.bayDropSection || "";
   if (!label) return;
@@ -8109,6 +10825,11 @@ function syncBaySectionState(details, open) {
   else state.collapsedBaySections.add(label);
 }
 
+/**
+ * Purpose: Run the animate bay section toggle workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function animateBaySectionToggle(details) {
   const body = details.querySelector(".physical-slot-grid-v17");
   if (!body || details.dataset.animating === "1") return;
@@ -8148,6 +10869,11 @@ function animateBaySectionToggle(details) {
   animation.oncancel = () => delete details.dataset.animating;
 }
 
+/**
+ * Purpose: Render the render bay map page workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayMapPage() {
   if (!els.bayMapCanvas || !state.bayLayout) return;
   const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
@@ -8186,6 +10912,11 @@ function renderBayMapPage() {
   renderBayRecentActions();
 }
 
+/**
+ * Purpose: Render the render bay side panels workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBaySidePanels() {
   if (els.bayCategoryFilters) {
     els.bayCategoryFilters.innerHTML = bayCategoryFilterOptions()
@@ -8354,6 +11085,11 @@ function renderBaySidePanels() {
   }
 }
 
+/**
+ * Purpose: Load the load stale bay orders workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function loadStaleBayOrders(includeSnoozed = false) {
   if (!state.backend) {
     state.staleBayOrders = [];
@@ -8364,6 +11100,11 @@ async function loadStaleBayOrders(includeSnoozed = false) {
   return state.staleBayOrders;
 }
 
+/**
+ * Purpose: Run the maybe show stale bay alert workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function maybeShowStaleBayAlert() {
   if (state.page !== "bays" || !hasPermission("view_bays")) return;
   const today = new Date().toISOString().slice(0, 10);
@@ -8375,6 +11116,11 @@ async function maybeShowStaleBayAlert() {
   openStaleBayPanel(orders);
 }
 
+/**
+ * Purpose: Open the open stale bay panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openStaleBayPanel(orders = state.staleBayOrders) {
   if (!els.staleBayPanel || !els.staleBayBackdrop) return;
   renderStaleBayPanel(orders || []);
@@ -8383,12 +11129,22 @@ function openStaleBayPanel(orders = state.staleBayOrders) {
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Close the close stale bay panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeStaleBayPanel() {
   if (els.staleBayPanel) els.staleBayPanel.hidden = true;
   if (els.staleBayBackdrop) els.staleBayBackdrop.hidden = true;
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Render the render stale bay panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderStaleBayPanel(orders) {
   if (!els.staleBayList) return;
   const list = Array.isArray(orders) ? orders : [];
@@ -8458,6 +11214,11 @@ function renderStaleBayPanel(orders) {
   `;
 }
 
+/**
+ * Purpose: Run the snooze stale bay orders workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function snoozeStaleBayOrders(assignmentIds, days) {
   const payload = await fetchJson("/api/indian-trail/stale-bays/snooze", {
     method: "POST",
@@ -8468,6 +11229,11 @@ async function snoozeStaleBayOrders(assignmentIds, days) {
   await refreshBayMapPage();
 }
 
+/**
+ * Purpose: Render the render bay legend workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayLegend() {
   if (!els.bayLegend) return;
   const legend = [
@@ -8486,12 +11252,22 @@ function renderBayLegend() {
     .join("");
 }
 
+/**
+ * Purpose: Normalize the format event type workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function formatEventType(value) {
   return String(value || "")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/_/g, " ");
 }
 
+/**
+ * Purpose: Run the bay event tone workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayEventTone(event) {
   const text = `${event.eventType || ""} ${event.reason || ""}`.toLowerCase();
   if (text.includes("error") || text.includes("blocked") || text.includes("needs")) return "error";
@@ -8499,36 +11275,65 @@ function bayEventTone(event) {
   return "ok";
 }
 
+/**
+ * Purpose: Run the bay event move options HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayEventMoveOptionsHtml(currentBayCode = "") {
   const options = availableIndianTrailBays().map((bay) => `
     <option value="${escapeHtml(bay.bayCode)}" ${bay.bayCode === currentBayCode ? "selected" : ""}>${escapeHtml(bay.displayName || bay.bayCode)}</option>
   `).join("");
-  return `<option value="">Choose bay...</option>${options}`;
+  return `<option value="">Choose new bay...</option>${options}`;
 }
 
+/**
+ * Purpose: Run the bay event move control HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayEventMoveControlHtml(event, compact = false) {
   const assignmentId = Number(event?.assignmentId || 0);
-  if (!assignmentId) return `<span class="bay-event-move-unavailable">${compact ? "-" : "No active assignment"}</span>`;
+  const currentBayCode = event?.currentBayCode || "";
+  const currentBayDisplay = event?.currentBayDisplay || currentBayCode || "";
+  const orderLabel = event?.order ? `${event.order}-${event.item || ""}` : "item";
+  const canMove = hasPermission("move_bay") || hasPermission("indian_trail_receive");
+
+  if (!assignmentId || !currentBayCode) {
+    return `<span class="bay-event-move-unavailable" title="Current item is no longer assigned to a bay">${compact ? "Not in bay" : "Current item is no longer assigned to a bay"}</span>`;
+  }
+  if (!canMove) {
+    return `<span class="bay-event-move-unavailable" title="${escapeHtml(currentBayDisplay)}">View only</span>`;
+  }
+
   return `
-    <select
-      class="bay-event-move-select ${compact ? "is-compact" : ""}"
-      data-bay-event-move
-      data-assignment-id="${escapeHtml(assignmentId)}"
-      data-current-bay="${escapeHtml(event.currentBayCode || event.bayCode || "")}"
-      data-order-label="${escapeHtml(event.order ? `${event.order}-${event.item || ""}` : "item")}"
-      aria-label="Move ${escapeHtml(event.order ? `${event.order}-${event.item || ""}` : "item")} to another bay"
-    >
-      ${bayEventMoveOptionsHtml(event.currentBayCode || event.bayCode || "")}
-    </select>
+    <label class="bay-event-location-editor ${compact ? "is-compact" : ""}">
+      ${compact ? "" : "<span>Change Location</span>"}
+      <select
+        class="bay-event-move-select ${compact ? "is-compact" : ""}"
+        data-bay-event-move
+        data-assignment-id="${escapeHtml(assignmentId)}"
+        data-current-bay="${escapeHtml(currentBayCode)}"
+        data-order-label="${escapeHtml(orderLabel)}"
+        aria-label="Change ${escapeHtml(orderLabel)} from ${escapeHtml(currentBayDisplay)} to another bay"
+      >
+        ${bayEventMoveOptionsHtml(currentBayCode)}
+      </select>
+    </label>
   `;
 }
 
+/**
+ * Purpose: Render the render bay last scan card workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayLastScanCard(event) {
   const hasEvent = Boolean(event);
   const tone = hasEvent ? bayEventTone(event) : "notice";
   const when = new Date(event?.time || event?.createdAt || "");
   const time = hasEvent && !Number.isNaN(when.getTime()) ? when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "-";
-  const bay = event?.bayDisplay || event?.bayCode || event?.newBayDisplay || event?.newBayCode || event?.oldBayDisplay || event?.oldBayCode || "-";
+  const bay = event?.currentBayDisplay || event?.currentBayCode || event?.bayDisplay || event?.bayCode || event?.newBayDisplay || event?.newBayCode || event?.oldBayDisplay || event?.oldBayCode || "-";
   const order = event?.order ? `${event.order}-${event.item || ""}` : "-";
   const action = hasEvent ? formatEventType(event.eventType || event.reason || "Bay action") : "-";
   const title = hasEvent
@@ -8540,24 +11345,35 @@ function renderBayLastScanCard(event) {
   if (els.bayLastTitle) els.bayLastTitle.textContent = title;
   if (els.bayLastAction) els.bayLastAction.textContent = action;
   if (els.bayLastOrder) els.bayLastOrder.textContent = order;
-  if (els.bayLastBay) els.bayLastBay.textContent = bay;
+  if (els.bayLastBay) {
+    els.bayLastBay.textContent = bay;
+    els.bayLastBay.title = bay === "-" ? "" : bay;
+  }
   if (els.bayLastTime) els.bayLastTime.textContent = time;
   const moveSelect = document.getElementById("bayLastMoveSelect");
   if (moveSelect) {
     const assignmentId = Number(event?.assignmentId || 0);
-    moveSelect.disabled = !assignmentId;
-    moveSelect.dataset.assignmentId = assignmentId ? String(assignmentId) : "";
-    moveSelect.dataset.currentBay = event?.currentBayCode || event?.bayCode || "";
+    const currentBayCode = event?.currentBayCode || "";
+    const canMove = hasPermission("move_bay") || hasPermission("indian_trail_receive");
+    const moveEnabled = Boolean(assignmentId && currentBayCode && canMove);
+    moveSelect.disabled = !moveEnabled;
+    moveSelect.dataset.assignmentId = moveEnabled ? String(assignmentId) : "";
+    moveSelect.dataset.currentBay = moveEnabled ? currentBayCode : "";
     moveSelect.dataset.orderLabel = event?.order ? `${event.order}-${event.item || ""}` : "item";
-    moveSelect.innerHTML = assignmentId
-      ? bayEventMoveOptionsHtml(event?.currentBayCode || event?.bayCode || "")
-      : `<option value="">No active bay item</option>`;
+    moveSelect.innerHTML = moveEnabled
+      ? bayEventMoveOptionsHtml(currentBayCode)
+      : `<option value="">${assignmentId && currentBayCode ? "View only" : "No active bay item"}</option>`;
     syncCustomSelect(moveSelect);
   }
   if (els.bayScanOutStatus && !hasEvent) els.bayScanOutStatus.textContent = "Waiting";
   if (els.bayScanOutStatus && hasEvent) els.bayScanOutStatus.textContent = tone === "error" ? "Needs review" : tone === "notice" ? "Notice" : "Just now";
 }
 
+/**
+ * Purpose: Render the render bay recent actions workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayRecentActions() {
   const events = state.bayEvents || [];
   renderBayLastScanCard(events[0] || null);
@@ -8567,7 +11383,7 @@ function renderBayRecentActions() {
     ? recentRows.map((event) => {
         const when = new Date(event.time || event.createdAt || "");
         const time = Number.isNaN(when.getTime()) ? "" : when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-        const bay = event.bayDisplay || event.bayCode || event.newBayCode || event.oldBayCode || "Bay";
+        const bay = event.currentBayDisplay || event.currentBayCode || event.bayDisplay || event.bayCode || event.newBayDisplay || event.newBayCode || event.oldBayDisplay || event.oldBayCode || "Not in bay";
         const order = event.order ? `${event.order}-${event.item || ""}` : "Bay action";
         const tone = bayEventTone(event);
         return `
@@ -8584,6 +11400,11 @@ function renderBayRecentActions() {
     : `<tr><td colspan="6"><div class="bay-history-empty"><strong>Recent bay actions</strong><span>The next two actions will appear here.</span></div></td></tr>`;
 }
 
+/**
+ * Purpose: Run the scroll to bay search match workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function scrollToBaySearchMatch() {
   if (!els.bayMapCanvas) return;
   renderBayMapPage();
@@ -8599,10 +11420,20 @@ function scrollToBaySearchMatch() {
   window.setTimeout(() => target.classList.remove("is-found"), 1800);
 }
 
+/**
+ * Purpose: Run the selected bay workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedBay() {
   return state.bays.find((bay) => bay.bayCode === state.selectedBayCode) || null;
 }
 
+/**
+ * Purpose: Load the load bay job details workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function loadBayJobDetails(bayCode) {
   if (!state.backend || !bayCode) return;
   const bay = state.bays.find((item) => item.bayCode === bayCode);
@@ -8629,6 +11460,11 @@ async function loadBayJobDetails(bayCode) {
   if (state.selectedBayCode === bayCode) renderBaySidePanels();
 }
 
+/**
+ * Purpose: Run the select bay workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectBay(bayCode) {
   state.selectedBayCode = bayCode || "";
   renderBayMapPage();
@@ -8645,12 +11481,22 @@ function selectBay(bayCode) {
   }
 }
 
+/**
+ * Purpose: Close the close selected bay modal workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeSelectedBayModal() {
   if (els.baySelectedModal) els.baySelectedModal.hidden = true;
   if (els.baySelectedBackdrop) els.baySelectedBackdrop.hidden = true;
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Run the require selected bay workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function requireSelectedBay() {
   const bay = selectedBay();
   if (!bay) {
@@ -8660,6 +11506,11 @@ function requireSelectedBay() {
   return bay;
 }
 
+/**
+ * Purpose: Run the post bay action workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function postBayAction(path, payload) {
   const result = await fetchJson(path, {
     method: "POST",
@@ -8669,12 +11520,22 @@ async function postBayAction(path, payload) {
   return result;
 }
 
+/**
+ * Purpose: Run the push bay history workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function pushBayHistory(entry) {
   if (!entry?.undo || !entry?.redo) return;
   state.bayActionUndoStack.push(entry);
   state.bayActionRedoStack = [];
 }
 
+/**
+ * Purpose: Run the run bay history workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function runBayHistory(direction) {
   const from = direction === "undo" ? state.bayActionUndoStack : state.bayActionRedoStack;
   const to = direction === "undo" ? state.bayActionRedoStack : state.bayActionUndoStack;
@@ -8689,6 +11550,11 @@ async function runBayHistory(direction) {
   showFloatingNotice(`${direction === "undo" ? "Undid" : "Redid"} ${entry.label}.`, "success");
 }
 
+/**
+ * Purpose: Run the run bay scan workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function runBayScan(barcode, { isManual = false, outboundOverride = false, bayCodeOverride = "" } = {}) {
   const cleanBarcode = String(barcode || "").trim();
   if (!cleanBarcode) throw new Error("Enter or scan an item before submitting.");
@@ -8762,6 +11628,11 @@ async function runBayScan(barcode, { isManual = false, outboundOverride = false,
   return result;
 }
 
+/**
+ * Purpose: Process the submit bay scan out workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function submitBayScanOut() {
   const barcode = els.bayScanOutInput?.value.trim() || "";
   if (!barcode) return;
@@ -8771,6 +11642,11 @@ async function submitBayScanOut() {
   els.bayScanOutInput?.focus();
 }
 
+/**
+ * Purpose: Process the submit manual bay scan workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function submitManualBayScan() {
   const order = digitsOnly(els.bayManualOrderInput?.value || "");
   const item = digitsOnly(els.bayManualItemInput?.value || "");
@@ -8785,13 +11661,28 @@ async function submitManualBayScan() {
 }
 
 
+/**
+ * Purpose: Run the selected bay assignment workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedBayAssignment() {
   return selectedBay()?.assignments?.[0] || null;
 }
 
+/**
+ * Purpose: Run the assignment by ID workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function assignmentById(assignmentId) {
   const id = String(assignmentId || "");
   for (const bay of state.bays || []) {
+    /**
+     * Purpose: Run the match workflow for the browser application.
+     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const match = (bay.assignments || []).find((assignment) => String(assignment.id) === id);
     if (match) return { bay, assignment: match };
   }
@@ -8799,6 +11690,11 @@ function assignmentById(assignmentId) {
 }
 
 
+/**
+ * Purpose: Run the bay assignment rows workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayAssignmentRows() {
   const rows = [];
   for (const bay of state.bays || []) {
@@ -8811,12 +11707,22 @@ function bayAssignmentRows() {
   return rows.sort((a, b) => `${a.bay.displayName || a.bay.bayCode}`.localeCompare(`${b.bay.displayName || b.bay.bayCode}`) || `${a.jobLabel}`.localeCompare(`${b.jobLabel}`));
 }
 
+/**
+ * Purpose: Run the selected manage item workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedManageItem() {
   const rows = bayAssignmentRows();
   if (!state.manageItemsSelectedId && rows.length) state.manageItemsSelectedId = String(rows[0].assignment.id || "");
   return rows.find(({ assignment }) => String(assignment.id) === String(state.manageItemsSelectedId)) || rows[0] || null;
 }
 
+/**
+ * Purpose: Run the bay option groups workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayOptionGroups(selectedValue = "") {
   const sections = bayPhysicalSections();
   return sections
@@ -8830,6 +11736,11 @@ function bayOptionGroups(selectedValue = "") {
     .join("");
 }
 
+/**
+ * Purpose: Render the render manage items panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderManageItemsPanel() {
   if (!els.manageItemsPanel) return;
   const query = String(state.manageItemsQuery || "").trim().toLowerCase();
@@ -8899,6 +11810,11 @@ function renderManageItemsPanel() {
   }
 }
 
+/**
+ * Purpose: Open the open manage items panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openManageItemsPanel(assignmentId = "") {
   if (!els.manageItemsPanel || !els.manageItemsBackdrop) return;
   if (assignmentId) state.manageItemsSelectedId = String(assignmentId);
@@ -8910,12 +11826,22 @@ function openManageItemsPanel(assignmentId = "") {
   els.manageItemsSearch?.focus();
 }
 
+/**
+ * Purpose: Close the close manage items panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeManageItemsPanel() {
   if (els.manageItemsPanel) els.manageItemsPanel.hidden = true;
   if (els.manageItemsBackdrop) els.manageItemsBackdrop.hidden = true;
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Run the move managed item workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function moveManagedItem() {
   const selected = selectedManageItem();
   const targetBay = els.manageItemsTargetBay?.value || "";
@@ -8934,6 +11860,11 @@ async function moveManagedItem() {
   renderManageItemsPanel();
 }
 
+/**
+ * Purpose: Remove the clear managed item workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function clearManagedItem() {
   const selected = selectedManageItem();
   const reason = els.manageItemsReason?.value || "Cleared from Manage Items";
@@ -8958,6 +11889,11 @@ async function clearManagedItem() {
   renderManageItemsPanel();
 }
 
+/**
+ * Purpose: Run the use managed bay for scanner workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function useManagedBayForScanner() {
   const targetBay = els.manageItemsTargetBay?.value || selectedManageItem()?.bay?.bayCode || "";
   if (!targetBay) {
@@ -8974,29 +11910,59 @@ function useManagedBayForScanner() {
   showFloatingNotice(`${targetBay} is ready in the bay scanner.`, "success");
 }
 
+/**
+ * Purpose: Run the bay editor groups workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayEditorGroups() {
   return bayPhysicalSections().sort((a, b) => a.col - b.col || a.row - b.row || a.label.localeCompare(b.label));
 }
 
+/**
+ * Purpose: Run the bay editor selected group object workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayEditorSelectedGroupObject() {
   const groups = bayEditorGroups();
   if (!state.bayEditorSelectedGroup && groups.length) state.bayEditorSelectedGroup = groups[0].label;
   return groups.find((group) => group.label === state.bayEditorSelectedGroup) || groups[0] || null;
 }
 
+/**
+ * Purpose: Run the bay editor policy for group workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayEditorPolicyForGroup(group) {
+  /**
+   * Purpose: Run the policies workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const policies = (group?.bays || []).map((bay) => bayPolicyKind(bay));
   if (policies.length && policies.every((policy) => policy === "blocked")) return "blocked";
   if (policies.length && policies.every((policy) => policy === "manual")) return "manual";
   return "auto";
 }
 
+/**
+ * Purpose: Run the bay editor status from policy workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayEditorStatusFromPolicy(policy) {
   if (policy === "blocked") return "ScanBlocked";
   if (policy === "manual") return "ManualAssign";
   return "Available";
 }
 
+/**
+ * Purpose: Render the render bay editor panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayEditorPanel() {
   const groups = bayEditorGroups();
   const selectedGroup = bayEditorSelectedGroupObject();
@@ -9069,6 +12035,11 @@ function renderBayEditorPanel() {
   }
 }
 
+/**
+ * Purpose: Run the bay editor new group form markup workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayEditorNewGroupFormMarkup(standalone = true) {
   return `
     <div class="bay-editor-card bay-editor-new-card ${standalone ? "standalone" : ""}">
@@ -9092,6 +12063,11 @@ function bayEditorNewGroupFormMarkup(standalone = true) {
   `;
 }
 
+/**
+ * Purpose: Run the bay editor bay row markup workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayEditorBayRowMarkup(bay) {
   const policy = bayPolicyKind(bay);
   const assigned = (bay.assignments || []).length;
@@ -9118,6 +12094,11 @@ function bayEditorBayRowMarkup(bay) {
   `;
 }
 
+/**
+ * Purpose: Open the open bay editor panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openBayEditorPanel(groupLabel = "") {
   if (!els.bayEditorPanel || !els.bayEditorBackdrop) return;
   state.bayEditorSelectedGroup = groupLabel || state.bayEditorSelectedGroup || bayPhysicalSections()[0]?.label || "";
@@ -9127,18 +12108,33 @@ function openBayEditorPanel(groupLabel = "") {
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Close the close bay editor panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeBayEditorPanel() {
   if (els.bayEditorPanel) els.bayEditorPanel.hidden = true;
   if (els.bayEditorBackdrop) els.bayEditorBackdrop.hidden = true;
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Load the refresh bay editor after workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function refreshBayEditorAfter(payload) {
   if (payload?.bays) state.bays = payload.bays;
   await refreshBayMapPage();
   renderBayEditorPanel();
 }
 
+/**
+ * Purpose: Run the save bay editor group workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveBayEditorGroup() {
   const group = bayEditorSelectedGroupObject();
   if (!group) throw new Error("Select a bay group first.");
@@ -9171,9 +12167,14 @@ async function saveBayEditorGroup() {
   state.bayEditorSelectedGroup = groupName;
   await refreshBayMapPage();
   renderBayEditorPanel();
-  showFloatingNotice(`Saved ${groupName}.`, "success");
+  showSaveConfirmation(`Bay group ${groupName} was saved.`);
 }
 
+/**
+ * Purpose: Create the create bay editor group workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function createBayEditorGroup() {
   const name = document.getElementById("bayEditorNewGroupNameInput")?.value.trim() || "";
   const category = document.getElementById("bayEditorNewGroupCategoryInput")?.value.trim() || "Standard";
@@ -9188,9 +12189,14 @@ async function createBayEditorGroup() {
   });
   state.bayEditorSelectedGroup = name;
   await refreshBayEditorAfter(payload);
-  showFloatingNotice(`Created ${name}.`, "success");
+  showSaveConfirmation(`Bay group ${name} was created.`);
 }
 
+/**
+ * Purpose: Create the add bays to editor group workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function addBaysToEditorGroup() {
   const group = bayEditorSelectedGroupObject();
   if (!group) throw new Error("Select a bay group first.");
@@ -9204,9 +12210,14 @@ async function addBaysToEditorGroup() {
     body: JSON.stringify({ mapSection: group.label, bayCategory: category, prefix, count, layoutRow: row, layoutCol: col, ...requestContext() }),
   });
   await refreshBayEditorAfter(payload);
-  showFloatingNotice(`Added ${count} bay${count === 1 ? "" : "s"} to ${group.label}.`, "success");
+  showSaveConfirmation(`Added ${count} bay${count === 1 ? "" : "s"} to ${group.label}.`);
 }
 
+/**
+ * Purpose: Remove the delete bay editor group workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteBayEditorGroup() {
   const group = bayEditorSelectedGroupObject();
   if (!group) throw new Error("Select a bay group first.");
@@ -9226,10 +12237,20 @@ async function deleteBayEditorGroup() {
   showFloatingNotice(`Deleted ${group.label}.`, "success");
 }
 
+/**
+ * Purpose: Run the save bay editor bay workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveBayEditorBay(bayCode) {
   const row = els.bayEditorBayList?.querySelector(`[data-editor-bay-code="${CSS.escape(String(bayCode))}"]`);
   const bay = state.bays.find((item) => item.bayCode === bayCode);
   if (!row || !bay) throw new Error("Bay row not found.");
+  /**
+   * Purpose: Run the value workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const value = (field) => row.querySelector(`[data-editor-field="${field}"]`)?.value || "";
   const payload = await fetchJson("/api/indian-trail/layout", {
     method: "POST",
@@ -9250,9 +12271,14 @@ async function saveBayEditorBay(bayCode) {
     body: JSON.stringify({ bayCode, status: bayEditorStatusFromPolicy(value("policy") || "auto"), reason: "Updated from Edit Bays", ...requestContext() }),
   });
   await refreshBayEditorAfter(payload);
-  showFloatingNotice(`Saved ${bayCode}.`, "success");
+  showSaveConfirmation(`Bay ${bayCode} was saved.`);
 }
 
+/**
+ * Purpose: Remove the delete bay editor bay workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteBayEditorBay(bayCode) {
   const confirmed = await confirmWebAppAction({
     title: "Delete bay?",
@@ -9269,6 +12295,11 @@ async function deleteBayEditorBay(bayCode) {
   showFloatingNotice(`Deleted ${bayCode}.`, "success");
 }
 
+/**
+ * Purpose: Open the open bay all scans modal workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function openBayAllScansModal() {
   let events = state.bayEvents || [];
   if (state.backend) {
@@ -9284,22 +12315,28 @@ async function openBayAllScansModal() {
     ? events.map((event) => {
         const when = new Date(event.time || event.createdAt || "");
         const time = Number.isNaN(when.getTime()) ? escapeHtml(event.time || "") : escapeHtml(when.toLocaleString());
-        const bay = event.bayDisplay || event.bayCode || event.newBayDisplay || event.newBayCode || event.oldBayDisplay || event.oldBayCode || "";
+        const scannedBay = event.bayDisplay || event.bayCode || event.newBayDisplay || event.newBayCode || event.oldBayDisplay || event.oldBayCode || "";
+        const currentBay = event.currentBayDisplay || event.currentBayCode || "Not in bay";
         const order = event.order ? `${event.order}-${event.item || ""}` : "";
-        return `<tr><td>${escapeHtml(formatEventType(event.eventType))}</td><td>${escapeHtml(order)}</td><td>${escapeHtml(bay)}</td><td>${escapeHtml(event.customer || "")}</td><td>${escapeHtml(event.reason || "")}</td><td>${escapeHtml(event.user || "")}</td><td>${time}</td><td>${bayEventMoveControlHtml(event)}</td></tr>`;
+        return `<tr><td>${escapeHtml(formatEventType(event.eventType))}</td><td>${escapeHtml(order)}</td><td>${escapeHtml(scannedBay)}</td><td><strong class="bay-current-location-cell">${escapeHtml(currentBay)}</strong></td><td>${escapeHtml(event.customer || "")}</td><td>${escapeHtml(event.reason || "")}</td><td>${escapeHtml(event.user || "")}</td><td>${time}</td><td>${bayEventMoveControlHtml(event)}</td></tr>`;
       }).join("")
-    : `<tr><td colspan="8">No bay scan history is available yet.</td></tr>`;
+    : `<tr><td colspan="9">No bay scan history is available yet.</td></tr>`;
   openAdminModal("custom", {
     title: "All Bay Scans",
     body: `
       <div class="full-scans-modal bay-full-scans-modal">
-        <div class="section-heading"><h3>Indian Trail Bay Scan History</h3><span>${escapeHtml(events.length)} latest actions</span></div>
-        <div class="admin-table full-scans-table"><table><thead><tr><th>Action</th><th>Order</th><th>Bay</th><th>Customer</th><th>Reason</th><th>User</th><th>Time</th><th>Move</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="section-heading"><h3>Indian Trail Bay Scan History</h3><span>${escapeHtml(events.length)} latest actions · active items can be relocated here</span></div>
+        <div class="admin-table full-scans-table"><table><thead><tr><th>Action</th><th>Order</th><th>Scanned Bay</th><th>Current Location</th><th>Customer</th><th>Reason</th><th>User</th><th>Time</th><th>Change Location</th></tr></thead><tbody>${rows}</tbody></table></div>
       </div>
     `,
   });
 }
 
+/**
+ * Purpose: Open the open SDI panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openSdiPanel(assignmentId = "") {
   const found = assignmentById(assignmentId);
   if (found.bay?.bayCode) state.selectedBayCode = found.bay.bayCode;
@@ -9316,6 +12353,9 @@ function openSdiPanel(assignmentId = "") {
   if (els.sdiOrderInput) els.sdiOrderInput.value = assignmentLookup;
   if (els.sdiBayInput) els.sdiBayInput.value = bay?.bayCode || "";
   if (els.sdiReasonInput && !els.sdiReasonInput.value) els.sdiReasonInput.value = "Same-day install";
+  if (els.sdiDeliveryDateInput) {
+    els.sdiDeliveryDateInput.value = assignment?.deliveryDate || assignment?.originalDeliveryDate || "";
+  }
   if (els.sdiTypeInput) {
     els.sdiTypeInput.value = assignment && isRemakeItem(assignment)
       ? "Remake"
@@ -9328,6 +12368,11 @@ function openSdiPanel(assignmentId = "") {
   els.sdiOrderInput?.focus();
 }
 
+/**
+ * Purpose: Render the render SDI current list workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderSdiCurrentList() {
   if (!els.sdiCurrentList) return;
   const rows = [];
@@ -9344,7 +12389,8 @@ function renderSdiCurrentList() {
           ? rows.slice(0, 30).map(({ bay, assignment }) => {
               const typeLabel = isRemakeItem(assignment) ? "Remake" : isRushItem(assignment) ? "Rush" : "SDI";
               const lookupLabel = assignment.job || `${assignment.order}-${assignment.item}`;
-              return `<button type="button" data-assignment-action="sdi" data-assignment-id="${escapeHtml(assignment.id)}"><span>${escapeHtml(lookupLabel)} <b>${escapeHtml(typeLabel)}</b></span><small>${escapeHtml(bay.displayName || bay.bayCode)} - ${escapeHtml(assignment.customer || "")}</small></button>`;
+              const deliveryLabel = assignment.deliveryDate ? formatDisplayDate(assignment.deliveryDate) : "No delivery date";
+              return `<button type="button" data-assignment-action="sdi" data-assignment-id="${escapeHtml(assignment.id)}"><span>${escapeHtml(lookupLabel)} <b>${escapeHtml(typeLabel)}</b></span><small>${escapeHtml(bay.displayName || bay.bayCode)} - ${escapeHtml(assignment.customer || "")}</small><small>${escapeHtml(deliveryLabel)}</small></button>`;
             }).join("")
           : `<span class="admin-empty">No current Rush or Remake orders.</span>`
       }
@@ -9352,17 +12398,32 @@ function renderSdiCurrentList() {
   `;
 }
 
+/**
+ * Purpose: Close the close SDI panel workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeSdiPanel() {
   if (els.sdiPanel) els.sdiPanel.hidden = true;
   if (els.sdiBackdrop) els.sdiBackdrop.hidden = true;
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Process the submit SDI workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function submitSdi(mark = true) {
   const assignment = assignmentById(els.sdiPanel?.dataset.assignmentId || "").assignment || selectedBayAssignment();
   const orderType = els.sdiTypeInput?.value || "";
   const lookupText = els.sdiOrderInput?.value.trim() || "";
   const originalLookup = els.sdiPanel?.dataset.originalLookup || "";
+  /**
+   * Purpose: Normalize the normalize lookup workflow using the existing shared UI state.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const normalizeLookup = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
   const useSelectedAssignment = Boolean(
     assignment?.id &&
@@ -9375,6 +12436,7 @@ async function submitSdi(mark = true) {
     bayCode: els.sdiBayInput?.value || state.selectedBayCode || "",
     truckExempt: Boolean(els.sdiTruckExemptInput?.checked),
     orderType,
+    deliveryDate: els.sdiDeliveryDateInput?.value || "",
     reason: els.sdiReasonInput?.value || (mark ? "Same-day install" : "Rush / Remake cleared"),
   };
   if (mark && !orderType) {
@@ -9392,10 +12454,14 @@ async function submitSdi(mark = true) {
   const affectedItems = Number(result?.affectedItems || 0);
   const jobLabel = result?.matchedJob || lookupText;
   const customerLabel = result?.matchedCustomer || assignment?.customer || "";
-  const listId = result?.listId || assignment?.deliveryListId || state.activeListId || selectedBay()?.assignments?.[0]?.deliveryListId || "";
-  const printUrl = mark && listId
-    ? `/api/print/package?listId=${encodeURIComponent(listId)}&${result?.remake ? "remakeOnly" : "rushOnly"}=1`
-    : "";
+  const fallbackListId = result?.listId || assignment?.deliveryListId || state.activeListId || selectedBay()?.assignments?.[0]?.deliveryListId || "";
+  const affectedListIds = [...new Set((result?.affectedListIds || [fallbackListId]).filter(Boolean))];
+  const printParams = new URLSearchParams();
+  affectedListIds.forEach((listId) => printParams.append("listId", listId));
+  if (mark) printParams.set(result?.remake ? "remakeOnly" : "rushOnly", "1");
+  if (result?.affectedSourceIds?.length) printParams.set("sourceIds", result.affectedSourceIds.join(","));
+  const printUrl = mark && affectedListIds.length ? `/api/print/package?${printParams.toString()}` : "";
+  const affectsIndianTrail = priorityListsIncludeIndianTrail(result?.affectedLists || []);
 
   showActionFeedback({
     kind: "success",
@@ -9405,7 +12471,11 @@ async function submitSdi(mark = true) {
     details: [
       { label: "Job Nr. / Order", value: jobLabel },
       { label: "Customer", value: customerLabel },
+      { label: "New delivery date", value: result?.matchedDeliveryDate ? formatDisplayDate(result.matchedDeliveryDate) : "" },
+      { label: "Previous delivery date", value: result?.previousDeliveryDate && result.previousDeliveryDate !== result?.matchedDeliveryDate ? formatDisplayDate(result.previousDeliveryDate) : "" },
       { label: "Items updated", value: affectedItems ? String(affectedItems) : "1" },
+      { label: "Applicable stages", value: (result?.affectedLists || []).map((list) => stageLabel(list)).join(" → ") },
+      { label: "Indian Trail handling", value: affectsIndianTrail ? (result?.directToTruck ? "Straight to installer truck / skip bay" : result?.rush ? "Expedite into priority bay" : "") : "" },
     ],
     primaryLabel: printUrl ? (result?.remake ? "Print remake sheet" : "Print Rush sheet") : "",
     secondaryLabel: "Done",
@@ -9413,6 +12483,11 @@ async function submitSdi(mark = true) {
   });
 }
 
+/**
+ * Purpose: Run the run bay action workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function runBayAction(action) {
   if (action === "scan-here") {
     const bay = requireSelectedBay();
@@ -9486,6 +12561,11 @@ async function runBayAction(action) {
   }
 }
 
+/**
+ * Purpose: Render the render bay layout select workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayLayoutSelect() {
   if (!els.bayLayoutSelect) return;
   const current = els.bayLayoutSelect.value || state.selectedBayCode || state.bays[0]?.bayCode || "";
@@ -9495,6 +12575,11 @@ function renderBayLayoutSelect() {
   els.bayLayoutSelect.value = state.bays.some((bay) => bay.bayCode === current) ? current : state.bays[0]?.bayCode || "";
 }
 
+/**
+ * Purpose: Run the populate bay layout form workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function populateBayLayoutForm() {
   const bay = state.bays.find((item) => item.bayCode === els.bayLayoutSelect?.value) || selectedBay() || state.bays[0];
   if (!bay) return;
@@ -9508,6 +12593,11 @@ function populateBayLayoutForm() {
   if (els.bayLayoutActiveInput) els.bayLayoutActiveInput.checked = Boolean(bay.active);
 }
 
+/**
+ * Purpose: Open the open bay layout manager workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openBayLayoutManager() {
   if (!hasPermission("manage_bay_layout")) {
     showInlineError("Only admins can edit the bay map layout.", false);
@@ -9523,6 +12613,11 @@ function openBayLayoutManager() {
   renderBayMapPage();
 }
 
+/**
+ * Purpose: Close the close bay layout manager workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeBayLayoutManager() {
   if (state.bayHoldingSections.size) {
     showFloatingNotice("Move all grouped bays out of the temporary holding area before closing edit mode.", "error");
@@ -9536,28 +12631,28 @@ function closeBayLayoutManager() {
   renderBayMapPage();
 }
 
-function moveBaySectionDraft(sectionLabel, row, col, holding = false) {
+/**
+ * Purpose: Run the hold bay section draft workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
+function holdBaySectionDraft(sectionLabel) {
   if (!sectionLabel || !state.bayLayoutDraft?.[sectionLabel]) return;
   const before = JSON.parse(JSON.stringify(state.bayLayoutDraft));
-  if (holding) {
-    state.bayHoldingSections.add(sectionLabel);
-    state.collapsedBaySections.add(sectionLabel);
-    state.bayLayoutDraft[sectionLabel] = { row: 0, col: 0, holding: true };
-  } else {
-    const displaced = Object.entries(state.bayLayoutDraft).find(([, pos]) => !pos.holding && pos.row === row && pos.col === col);
-    if (displaced?.[0] && displaced[0] !== sectionLabel) {
-      state.bayHoldingSections.add(displaced[0]);
-      state.bayLayoutDraft[displaced[0]] = { row: 0, col: 0, holding: true };
-    }
-    state.bayHoldingSections.delete(sectionLabel);
-    state.bayLayoutDraft[sectionLabel] = { row, col, holding: false };
-  }
+  state.bayHoldingSections.add(sectionLabel);
+  state.collapsedBaySections.add(sectionLabel);
+  state.bayLayoutDraft[sectionLabel] = { row: 0, col: 0, holding: true };
   const after = JSON.parse(JSON.stringify(state.bayLayoutDraft));
-  state.bayLayoutUndoStack.push({ label: `move ${sectionLabel}`, beforeDraft: before, afterDraft: after });
+  state.bayLayoutUndoStack.push({ label: `hold ${sectionLabel}`, beforeDraft: before, afterDraft: after });
   state.bayLayoutRedoStack = [];
   renderBayMapPage();
 }
 
+/**
+ * Purpose: Run the hold all bay sections workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function holdAllBaySections() {
   if (!state.bayEditMode) return;
   const before = JSON.parse(JSON.stringify(state.bayLayoutDraft || {}));
@@ -9573,12 +12668,22 @@ function holdAllBaySections() {
   renderBayMapPage();
 }
 
+/**
+ * Purpose: Update the apply bay layout draft workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function applyBayLayoutDraft(draft) {
   state.bayLayoutDraft = JSON.parse(JSON.stringify(draft || {}));
   state.bayHoldingSections = new Set(Object.entries(state.bayLayoutDraft).filter(([, pos]) => pos.holding).map(([label]) => label));
   renderBayMapPage();
 }
 
+/**
+ * Purpose: Run the confirm bay layout draft workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function confirmBayLayoutDraft() {
   if (!state.bayEditMode || !state.bayLayoutDraft) return;
   if (state.bayHoldingSections.size) {
@@ -9606,9 +12711,14 @@ async function confirmBayLayoutDraft() {
   state.bayHoldingSections = new Set();
   if (els.bayLayoutManager) els.bayLayoutManager.hidden = true;
   await refreshBayMapPage();
-  showFloatingNotice("Bay map layout confirmed.", "success");
+  showSaveConfirmation("The Bay Map layout was saved.");
 }
 
+/**
+ * Purpose: Run the cancel bay layout draft workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function cancelBayLayoutDraft() {
   state.bayEditMode = false;
   state.bayLayoutDraft = null;
@@ -9621,12 +12731,18 @@ function cancelBayLayoutDraft() {
   showFloatingNotice("Bay map layout changes were cancelled.", "notice");
 }
 
+/**
+ * Purpose: Run the save bay layout form workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveBayLayoutForm() {
-  if (!els.bayLayoutSelect?.value) return;
+  const bayCode = els.bayLayoutSelect?.value || "";
+  if (!bayCode) return;
   const payload = await fetchJson("/api/indian-trail/layout", {
     method: "POST",
     body: JSON.stringify({
-      bayCode: els.bayLayoutSelect.value,
+      bayCode,
       displayName: els.bayLayoutDisplayInput?.value || "",
       mapSection: els.bayLayoutSectionInput?.value || "",
       bayCategory: els.bayLayoutCategoryInput?.value || "",
@@ -9639,8 +12755,14 @@ async function saveBayLayoutForm() {
   });
   state.bays = payload.bays || state.bays;
   renderBayMapPage();
+  showSaveConfirmation(`Bay ${bayCode} was saved.`);
 }
 
+/**
+ * Purpose: Run the bay layout snapshot workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayLayoutSnapshot(filter = () => true) {
   return (state.bays || [])
     .filter(filter)
@@ -9656,6 +12778,11 @@ function bayLayoutSnapshot(filter = () => true) {
     }));
 }
 
+/**
+ * Purpose: Update the apply bay layout snapshot workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function applyBayLayoutSnapshot(snapshot) {
   for (const bay of snapshot || []) {
     await fetchJson("/api/indian-trail/layout", {
@@ -9668,12 +12795,22 @@ async function applyBayLayoutSnapshot(snapshot) {
   populateBayLayoutForm();
 }
 
+/**
+ * Purpose: Run the push bay layout history workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function pushBayLayoutHistory(label, before, after) {
   if (!before?.length || !after?.length) return;
   state.bayLayoutUndoStack.push({ label, before, after });
   state.bayLayoutRedoStack = [];
 }
 
+/**
+ * Purpose: Run the run bay layout history workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function runBayLayoutHistory(direction) {
   const from = direction === "undo" ? state.bayLayoutUndoStack : state.bayLayoutRedoStack;
   const to = direction === "undo" ? state.bayLayoutRedoStack : state.bayLayoutUndoStack;
@@ -9693,6 +12830,11 @@ async function runBayLayoutHistory(direction) {
   showFloatingNotice(`${direction === "undo" ? "Undid" : "Redid"} ${entry.label}.`, "success");
 }
 
+/**
+ * Purpose: Run the move bay to group workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function moveBayToGroup(bayCode, mapSection, bayCategory = "", targetBayCode = "") {
   const bay = state.bays.find((item) => item.bayCode === bayCode);
   const targetBay = state.bays.find((item) => item.bayCode === targetBayCode);
@@ -9724,6 +12866,11 @@ async function moveBayToGroup(bayCode, mapSection, bayCategory = "", targetBayCo
   showFloatingNotice(`${bayCode} moved to ${mapSection}`, "success");
 }
 
+/**
+ * Purpose: Create the add bays from form workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function addBaysFromForm() {
   const result = await fetchJson("/api/indian-trail/bays/add", {
     method: "POST",
@@ -9740,9 +12887,14 @@ async function addBaysFromForm() {
   renderBayMapPage();
   renderBayLayoutSelect();
   populateBayLayoutForm();
-  showFloatingNotice(`Added ${result.created?.length || 0} bay(s)`, "success");
+  showSaveConfirmation(`Added ${result.created?.length || 0} bay(s).`);
 }
 
+/**
+ * Purpose: Create the add spacer bay workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function addSpacerBay() {
   const selected = selectedBay();
   const mapSection = await promptWebAppAction({
@@ -9773,9 +12925,14 @@ async function addSpacerBay() {
   renderBayMapPage();
   renderBayLayoutSelect();
   populateBayLayoutForm();
-  showFloatingNotice("Spacer added to the bay map.", "success");
+  showSaveConfirmation("A spacer was added to the Bay Map.");
 }
 
+/**
+ * Purpose: Remove the delete selected bay workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteSelectedBay() {
   const bayCode = els.bayLayoutSelect?.value || state.selectedBayCode;
   if (!bayCode) return;
@@ -9797,6 +12954,11 @@ async function deleteSelectedBay() {
   populateBayLayoutForm();
 }
 
+/**
+ * Purpose: Remove the delete selected bay group workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteSelectedBayGroup() {
   const mapSection = els.bayAddGroupInput?.value || els.bayLayoutSectionInput?.value || selectedBay()?.mapSection || "";
   if (!mapSection) return;
@@ -9818,40 +12980,11 @@ async function deleteSelectedBayGroup() {
   populateBayLayoutForm();
 }
 
-async function moveBayGroup(direction) {
-  const section = els.bayLayoutSectionInput?.value || selectedBay()?.mapSection || "";
-  const delta = {
-    up: { rowDelta: -1, colDelta: 0 },
-    down: { rowDelta: 1, colDelta: 0 },
-    left: { rowDelta: 0, colDelta: -1 },
-    right: { rowDelta: 0, colDelta: 1 },
-  }[direction];
-  if (!section || !delta) return;
-  const payload = await fetchJson("/api/indian-trail/layout", {
-    method: "POST",
-    body: JSON.stringify({ moveGroup: true, mapSection: section, ...delta, ...requestContext() }),
-  });
-  state.bays = payload.bays || state.bays;
-  renderBayMapPage();
-  renderBayLayoutSelect();
-  populateBayLayoutForm();
-}
-
-async function swapBayGroups(sourceSection, targetSection) {
-  if (!sourceSection || !targetSection || sourceSection === targetSection) return;
-  const before = bayLayoutSnapshot((bay) => bay.mapSection === sourceSection || bay.mapSection === targetSection);
-  const payload = await fetchJson("/api/indian-trail/layout", {
-    method: "POST",
-    body: JSON.stringify({ moveGroup: true, mapSection: sourceSection, targetMapSection: targetSection, ...requestContext() }),
-  });
-  state.bays = payload.bays || state.bays;
-  const after = bayLayoutSnapshot((bay) => bay.mapSection === sourceSection || bay.mapSection === targetSection);
-  pushBayLayoutHistory(`swap ${sourceSection}`, before, after);
-  renderBayMapPage();
-  renderBayLayoutSelect();
-  populateBayLayoutForm();
-}
-
+/**
+ * Purpose: Open the open print package workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openPrintPackage(printCandidates, filters = {}) {
   const listIds = [...new Set(printCandidates.flatMap((candidate) => candidate.listIds || []))];
   if (!listIds.length) return;
@@ -9862,6 +12995,11 @@ function openPrintPackage(printCandidates, filters = {}) {
   launchManagedPrint(`/api/print/package?${params.toString()}`);
 }
 
+/**
+ * Purpose: Run the run assignment action workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function runAssignmentAction(action, assignmentId) {
   const found = assignmentById(assignmentId);
   const assignment = found.assignment;
@@ -9884,14 +13022,29 @@ async function runAssignmentAction(action, assignmentId) {
   }
 }
 
+/**
+ * Purpose: Run the selected print stage inputs workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedPrintStageInputs() {
   return [...(els.printOptionsStages?.querySelectorAll('.print-stage-choice:not(.print-stage-all-choice) input[type="checkbox"]') || [])];
 }
 
+/**
+ * Purpose: Run the selected print list IDs workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedPrintListIds() {
   return selectedPrintStageInputs().filter((input) => input.checked).map((input) => input.value);
 }
 
+/**
+ * Purpose: Update the update print stage select state workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function updatePrintStageSelectState() {
   if (!els.printOptionsStages) return;
 
@@ -9905,6 +13058,11 @@ function updatePrintStageSelectState() {
   }
 }
 
+/**
+ * Purpose: Run the print glass category workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function printGlassCategory(label) {
   const text = String(label || "").toLowerCase();
 
@@ -9915,14 +13073,29 @@ function printGlassCategory(label) {
   return "Other";
 }
 
+/**
+ * Purpose: Run the print glass category sort workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function printGlassCategorySort(category) {
   return { Mirror: 1, Annealed: 2, Tempered: 3, Other: 4 }[category] || 9;
 }
 
+/**
+ * Purpose: Run the selected print glass inputs workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function selectedPrintGlassInputs() {
   return [...(els.printOptionsGlassType?.querySelectorAll('.print-glass-choice:not(.print-glass-all-choice) input[type="checkbox"]') || [])];
 }
 
+/**
+ * Purpose: Update the update print glass select state workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function updatePrintGlassSelectState() {
   if (!els.printOptionsGlassType) return;
 
@@ -9945,6 +13118,11 @@ function updatePrintGlassSelectState() {
   });
 }
 
+/**
+ * Purpose: Run the ensure print list details workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function ensurePrintListDetails(listIds) {
   if (!state.backend) return;
 
@@ -9973,11 +13151,21 @@ async function ensurePrintListDetails(listIds) {
   );
 }
 
+/**
+ * Purpose: Run the print list is full coverage workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function printListIsFullCoverage(list) {
   const category = stageCategory(list);
   return category === "staged" || category === "outbound";
 }
 
+/**
+ * Purpose: Run the print count source lists workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function printCountSourceLists(listIds) {
   const wanted = new Set(listIds);
   const selectedLists = state.lists.filter((list) => wanted.has(list.id));
@@ -9992,6 +13180,11 @@ function printCountSourceLists(listIds) {
   return selectedLists;
 }
 
+/**
+ * Purpose: Run the print items for count list workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function printItemsForCountList(list) {
   if (Array.isArray(list?.items) && list.items.length) {
     return list.items;
@@ -10004,10 +13197,20 @@ function printItemsForCountList(list) {
   return [];
 }
 
+/**
+ * Purpose: Run the print glass entries for lists workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function printGlassEntriesForLists(listIds) {
   const entries = new Map();
   const sourceLists = printCountSourceLists(listIds);
 
+  /**
+   * Purpose: Create the add entry workflow using the existing shared UI state.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const addEntry = (label, qty = 0) => {
     const cleanLabel = String(label || "").trim();
 
@@ -10049,10 +13252,20 @@ function printGlassEntriesForLists(listIds) {
   });
 }
 
+/**
+ * Purpose: Run the available glass types for lists workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function availableGlassTypesForLists(listIds) {
   return printGlassEntriesForLists(listIds).map((entry) => entry.label);
 }
 
+/**
+ * Purpose: Run the ensure print glass field wrapper workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function ensurePrintGlassFieldWrapper() {
   if (!els.printOptionsGlassType) return null;
 
@@ -10073,6 +13286,11 @@ function ensurePrintGlassFieldWrapper() {
   return wrapper;
 }
 
+/**
+ * Purpose: Render the render print glass types workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 async function renderPrintGlassTypes() {
   if (!els.printOptionsGlassType) return;
 
@@ -10114,6 +13332,11 @@ async function renderPrintGlassTypes() {
   const hadPrevious = currentInputs.length > 0;
   const entries = printGlassEntriesForLists(listIds);
   const groups = new Map();
+  /**
+   * Purpose: Run the checked for entry workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const checkedForEntry = (entry) => (hadPrevious ? current.has(entry.label) : !/mirror/i.test(entry.label));
 
   for (const entry of entries) {
@@ -10255,6 +13478,11 @@ async function renderPrintGlassTypes() {
   };
 }
 
+/**
+ * Purpose: Run the print stage option label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function printStageOptionLabel(list) {
   const category = stageCategory(list);
 
@@ -10267,6 +13495,11 @@ function printStageOptionLabel(list) {
   return "Staging Airport";
 }
 
+/**
+ * Purpose: Render the render print option stages workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderPrintOptionStages() {
   if (!els.printOptionsStages || !els.printOptionsDate) return;
 
@@ -10301,6 +13534,11 @@ function renderPrintOptionStages() {
   void renderPrintGlassTypes();
 }
 
+/**
+ * Purpose: Open the open print options workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openPrintOptions(context = {}) {
   state.printContext = context;
   const groups = listsByDeliveryDate();
@@ -10327,12 +13565,22 @@ function openPrintOptions(context = {}) {
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Close the close print options workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closePrintOptions() {
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = true;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = true;
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Process the submit print options workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function submitPrintOptions() {
   let listIds = state.printContext?.fixedListIds ? [...(state.printContext.listIds || [])] : selectedPrintListIds();
   if (!listIds.length) {
@@ -10369,6 +13617,11 @@ function submitPrintOptions() {
   closePrintOptions();
 }
 
+/**
+ * Purpose: Run the import temp delivery folder workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function importTempDeliveryFolder() {
   const sourceFolder = els.tempFolderInput?.value.trim() || "";
   const { dateFrom, dateTo } = currentImportDateWindow();
@@ -10422,6 +13675,11 @@ async function importTempDeliveryFolder() {
   }
 }
 
+/**
+ * Purpose: Load the refresh admin page workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function refreshAdminPage() {
   if (!state.backend) return;
   const requests = [];
@@ -10469,6 +13727,11 @@ async function refreshAdminPage() {
   renderActiveSessions();
 }
 
+/**
+ * Purpose: Run the admin delivery list cutoff date workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function adminDeliveryListCutoffDate(pastDays = state.adminDeliveryListVisiblePastDays) {
   const cutoff = new Date();
   cutoff.setHours(0, 0, 0, 0);
@@ -10476,6 +13739,11 @@ function adminDeliveryListCutoffDate(pastDays = state.adminDeliveryListVisiblePa
   return cutoff;
 }
 
+/**
+ * Purpose: Run the delivery list is in admin window workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function deliveryListIsInAdminWindow(list, pastDays = state.adminDeliveryListVisiblePastDays) {
   const deliveryDate = parseDateKey(list?.deliveryDate);
 
@@ -10484,10 +13752,20 @@ function deliveryListIsInAdminWindow(list, pastDays = state.adminDeliveryListVis
   return deliveryDate >= adminDeliveryListCutoffDate(pastDays);
 }
 
+/**
+ * Purpose: Run the admin delivery list hidden older rows workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function adminDeliveryListHiddenOlderRows(lists = state.lists, pastDays = state.adminDeliveryListVisiblePastDays) {
   return lists.filter((list) => !deliveryListIsInAdminWindow(list, pastDays));
 }
 
+/**
+ * Purpose: Run the admin delivery list window label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function adminDeliveryListWindowLabel(pastDays = state.adminDeliveryListVisiblePastDays) {
   const days = Math.max(Number(pastDays || 0), ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS);
 
@@ -10499,6 +13777,11 @@ function adminDeliveryListWindowLabel(pastDays = state.adminDeliveryListVisibleP
   return `all future dates and the last ${days} days`;
 }
 
+/**
+ * Purpose: Run the admin delivery list modal results HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function adminDeliveryListModalResultsHtml(lists = state.lists, query = "") {
   const cleanQuery = String(query || "").trim();
 
@@ -10510,6 +13793,11 @@ function adminDeliveryListModalResultsHtml(lists = state.lists, query = "") {
   });
 }
 
+/**
+ * Purpose: Render the render admin delivery list modal results workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderAdminDeliveryListModalResults(lists = state.lists, query = "") {
   const target = document.getElementById("adminDeliveryListModalResults");
 
@@ -10518,6 +13806,11 @@ function renderAdminDeliveryListModalResults(lists = state.lists, query = "") {
   target.innerHTML = adminDeliveryListModalResultsHtml(lists, query);
 }
 
+/**
+ * Purpose: Load the refresh admin delivery list modal workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function refreshAdminDeliveryListModal() {
   const searchInput = document.getElementById("adminDeliveryListModalSearch");
   const query = searchInput?.value.trim() || "";
@@ -10530,6 +13823,11 @@ async function refreshAdminDeliveryListModal() {
   renderAdminDeliveryListModalResults(await searchAdminDeliveryLists(query), query);
 }
 
+/**
+ * Purpose: Run the delivery list admin rows workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false, options = {}) {
   const cleanQuery = String(options.query || "").trim();
   const includeLoadMore = Boolean(options.includeLoadMore);
@@ -10678,6 +13976,11 @@ function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false,
   `;
 }
 
+/**
+ * Purpose: Run the search admin delivery lists workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function searchAdminDeliveryLists(query) {
   const clean = String(query || "").trim();
   const local = state.lists.filter((list) =>
@@ -10699,6 +14002,11 @@ async function searchAdminDeliveryLists(query) {
   }
 }
 
+/**
+ * Purpose: Run the active recent imports workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function activeRecentImports(imports = state.adminRecentImports || []) {
   const activeListIds = new Set(state.lists.map((list) => list.id));
   const activeByDate = listsByDeliveryDate(state.lists);
@@ -10764,11 +14072,21 @@ function activeRecentImports(imports = state.adminRecentImports || []) {
   return [...cleanedImports, ...liveDateEntries];
 }
 
+/**
+ * Purpose: Render the render admin delivery lists workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderAdminDeliveryLists() {
   if (!els.adminDeliveryLists) return;
   els.adminDeliveryLists.innerHTML = importHistoryRows(activeRecentImports());
 }
 
+/**
+ * Purpose: Open the open admin modal workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openAdminModal(kind, options = null) {
   if (kind === "roles") {
   resetRolePermissionUiSession();
@@ -10809,6 +14127,11 @@ function openAdminModal(kind, options = null) {
   }
 }
 
+/**
+ * Purpose: Close the close admin modal workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function closeAdminModal() {
   if (state.manualEditDirty) {
     const confirmed = await confirmWebAppAction({
@@ -10835,6 +14158,11 @@ async function closeAdminModal() {
   return true;
 }
 
+/**
+ * Purpose: Run the admin modal content workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function adminModalContent(kind) {
   if (kind === "deliveryLists") {
     state.adminDeliveryListVisiblePastDays = ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS;
@@ -10955,6 +14283,11 @@ function adminModalContent(kind) {
   return `<div class="admin-empty">Choose a dashboard section to view details.</div>`;
 }
 
+/**
+ * Purpose: Run the lookup type meta workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function lookupTypeMeta(title) {
   const clean = String(title || "").toLowerCase();
 
@@ -10981,6 +14314,11 @@ function lookupTypeMeta(title) {
   };
 }
 
+/**
+ * Purpose: Run the lookup list HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function lookupListHtml(title, items = []) {
   const meta = lookupTypeMeta(title);
 
@@ -11017,6 +14355,11 @@ function lookupListHtml(title, items = []) {
   `;
 }
 
+/**
+ * Purpose: Run the lookup manager modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function lookupManagerModalHtml() {
   const lookups = state.manualEditLookups || { products: [], routes: [], processes: [] };
   const productCount = (lookups.products || []).length;
@@ -11082,10 +14425,54 @@ function lookupManagerModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Save one manual-edit lookup value through the existing Lookup Manager workflow.
+ * Effects: Writes the lookup through the backend, refreshes shared lookup state and the open modal, and shows the shared save confirmation.
+ * Flow: Reads and validates the current form fields, posts the normalized value, adopts the returned lookup buckets, then re-renders the same modal.
+ */
+async function saveManualEditLookup() {
+  const type = document.getElementById("lookupTypeInput")?.value || "";
+  const value = document.getElementById("lookupValueInput")?.value.trim() || "";
+  const label = document.getElementById("lookupLabelInput")?.value.trim() || value;
+  const category = document.getElementById("lookupCategoryInput")?.value.trim() || "";
+  const matchTerms = document.getElementById("lookupMatchTermsInput")?.value.trim() || "";
+
+  if (!value) {
+    throw new Error("Lookup value is required.");
+  }
+
+  const payload = await fetchJson("/api/admin/manual-edit-lookups", {
+    method: "POST",
+    body: JSON.stringify({ type, value, label, category, matchTerms }),
+  });
+
+  state.manualEditLookups = {
+    products: payload.products || [],
+    routes: payload.routes || [],
+    processes: payload.processes || [],
+  };
+
+  if (els.adminModalBody && els.adminModal?.dataset.kind === "lookups") {
+    els.adminModalBody.innerHTML = lookupManagerModalHtml();
+  }
+
+  showSaveConfirmation(`${label || value} was saved to the Lookup Manager.`);
+}
+
+/**
+ * Purpose: Run the rack manager rack edit HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackManagerRackEditHtml() {
   const code = state.rackManagerEditingRackCode || "";
   if (!code) return "";
 
+  /**
+   * Purpose: Run the rack workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const rack = (state.racks || []).find((item) => item.code === code);
   if (!rack) return "";
 
@@ -11122,10 +14509,20 @@ function rackManagerRackEditHtml() {
   `;
 }
 
+/**
+ * Purpose: Run the rack manager set edit HTML workflow for the browser application.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackManagerSetEditHtml() {
   const label = state.rackManagerEditingSetLabel || "";
   if (!label) return "";
 
+  /**
+   * Purpose: Run the racks workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const racks = (state.racks || []).filter((rack) => rackGroupLabel(rack) === label);
   if (!racks.length) return "";
 
@@ -11163,10 +14560,20 @@ function rackManagerSetEditHtml() {
   `;
 }
 
+/**
+ * Purpose: Run the focus rack manager rack edit workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function focusRackManagerRackEdit(code) {
   openRackManagerRackInlineEdit(code);
 }
 
+/**
+ * Purpose: Open the open rack manager rack inline edit workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openRackManagerRackInlineEdit(code) {
   state.rackManagerEditingSetLabel = "";
   state.rackManagerEditingRackCode = code || "";
@@ -11182,6 +14589,11 @@ function openRackManagerRackInlineEdit(code) {
   }
 }
 
+/**
+ * Purpose: Run the save rack inline edit workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveRackInlineEdit() {
   const oldCode = state.rackManagerEditingRackCode || document.getElementById("rackManagerInlineOldCode")?.value || "";
   const code = document.getElementById("rackManagerInlineCode")?.value || oldCode;
@@ -11209,9 +14621,14 @@ async function saveRackInlineEdit() {
     els.adminModalBody.innerHTML = adminModalContent("racks");
   }
 
-  showFloatingNotice(`Saved rack ${code}.`, "success");
+  showSaveConfirmation(`Rack ${code} was saved.`);
 }
 
+/**
+ * Purpose: Open the open rack manager set edit workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openRackManagerSetEdit(label) {
   state.rackManagerEditingRackCode = "";
   state.rackManagerEditingSetLabel = label || "";
@@ -11226,10 +14643,20 @@ function openRackManagerSetEdit(label) {
   }
 }
 
+/**
+ * Purpose: Run the save rack set quick edit workflow for the browser application.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveRackSetQuickEdit() {
   const oldLabel = state.rackManagerEditingSetLabel || "";
   const newType = String(document.getElementById("rackManagerSetTypeInput")?.value || oldLabel).trim() || oldLabel;
   const nameRoot = String(document.getElementById("rackManagerSetNameRootInput")?.value || newType).trim() || newType;
+  /**
+   * Purpose: Run the racks workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const racks = (state.racks || []).filter((rack) => rackGroupLabel(rack) === oldLabel);
 
   if (!oldLabel || !racks.length) return;
@@ -11267,9 +14694,14 @@ async function saveRackSetQuickEdit() {
     els.adminModalBody.innerHTML = adminModalContent("racks");
   }
 
-  showFloatingNotice(`Saved ${oldLabel} rack set.`, "success");
+  showSaveConfirmation(`${oldLabel} rack set was saved.`);
 }
 
+/**
+ * Purpose: Run the rack manager modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackManagerModalHtml() {
   const groups = new Map();
   for (const rack of state.racks || []) {
@@ -11364,6 +14796,11 @@ function rackManagerModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Run the rack form modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackFormModalHtml() {
   const rack = state.rackModal?.rack || {};
   return `
@@ -11382,6 +14819,11 @@ function rackFormModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Run the rack set form modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rackSetFormModalHtml() {
   const set = state.rackModal?.set || {};
   return `
@@ -11395,6 +14837,11 @@ function rackSetFormModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Run the permission label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function permissionLabel(permission) {
   return String(permission || "")
     .split("_")
@@ -11460,6 +14907,11 @@ const PERMISSION_CATEGORIES = [
   },
 ];
 
+/**
+ * Purpose: Run the categorized permissions workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function categorizedPermissions(permissions = []) {
   const allPermissions = permissions || [];
   const assigned = new Set(PERMISSION_CATEGORIES.flatMap((category) => category.permissions));
@@ -11484,16 +14936,31 @@ function categorizedPermissions(permissions = []) {
   return categories;
 }
 
+/**
+ * Purpose: Run the role permission category key workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rolePermissionCategoryKey(roleName, categoryTitle) {
   return `${String(roleName || "").trim()}::${String(categoryTitle || "").trim()}`;
 }
 
+/**
+ * Purpose: Run the reset role permission UI session workflow for the browser application.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function resetRolePermissionUiSession() {
   state.rolePermissionOpenRoles = new Set();
   state.rolePermissionOpenCategories = new Set();
   state.rolePermissionScrollTop = 0;
 }
 
+/**
+ * Purpose: Run the remember role permission UI state workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rememberRolePermissionUiState() {
   const editor = document.querySelector(".role-permission-editor");
 
@@ -11522,6 +14989,11 @@ function rememberRolePermissionUiState() {
   });
 }
 
+/**
+ * Purpose: Run the restore role permission UI scroll workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function restoreRolePermissionUiScroll() {
   window.requestAnimationFrame(() => {
     if (els.adminModalBody) {
@@ -11530,6 +15002,11 @@ function restoreRolePermissionUiScroll() {
   });
 }
 
+/**
+ * Purpose: Run the role permission category HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rolePermissionCategoryHtml(roleName, category, selected) {
   const checkedCount = category.permissions.filter((permission) => selected.has(permission)).length;
   const categoryKey = rolePermissionCategoryKey(roleName, category.title);
@@ -11566,6 +15043,11 @@ function rolePermissionCategoryHtml(roleName, category, selected) {
   `;
 }
 
+/**
+ * Purpose: Run the role permission count text workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rolePermissionCountText(role, permissions) {
   const selectedCount = Array.isArray(role.permissions) ? role.permissions.length : 0;
   const totalCount = Array.isArray(permissions) ? permissions.length : 0;
@@ -11573,6 +15055,11 @@ function rolePermissionCountText(role, permissions) {
   return `${selectedCount} of ${totalCount} permissions`;
 }
 
+/**
+ * Purpose: Run the role permissions modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function rolePermissionsModalHtml() {
   const roles = state.adminRoles || [];
   const permissions = state.allPermissions || [];
@@ -11626,6 +15113,11 @@ function rolePermissionsModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Run the permission summary from permissions workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function permissionSummaryFromPermissions(permissions) {
   const list = permissions || [];
   if (list.includes("view_admin")) return "Full admin access";
@@ -11636,6 +15128,11 @@ function permissionSummaryFromPermissions(permissions) {
   return "Custom access";
 }
 
+/**
+ * Purpose: Run the permission summary for user workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function permissionSummaryForUser(user) {
   const directPermissions = Array.isArray(user?.permissions) ? user.permissions : [];
 
@@ -11655,6 +15152,11 @@ function permissionSummaryForUser(user) {
   return roleText ? `${roleText} access` : "Custom access";
 }
 
+/**
+ * Purpose: Run the save role permissions workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveRolePermissions(roleName) {
   rememberRolePermissionUiState();
 
@@ -11689,15 +15191,25 @@ async function saveRolePermissions(roleName) {
 
   await refreshAdminPage();
 
-  showFloatingNotice(`${roleName} permissions saved. Users with that role will sign in again to refresh access.`, "success");
+  showSaveConfirmation(`${roleName} permissions were saved. Users with that role will sign in again to refresh access.`);
 }
 
+/**
+ * Purpose: Run the manual edit delivery date for list workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditDeliveryDateForList(listId) {
   const selectedList = state.lists.find((item) => item.id === listId);
 
   return selectedList?.deliveryDate || state.lists[0]?.deliveryDate || "";
 }
 
+/**
+ * Purpose: Run the manual edit stage lists for current delivery workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditStageListsForCurrentDelivery(selectedListId) {
   const deliveryDate = manualEditDeliveryDateForList(selectedListId);
   const stageLists = state.lists
@@ -11707,6 +15219,11 @@ function manualEditStageListsForCurrentDelivery(selectedListId) {
   return stageLists.length ? stageLists : state.lists.slice();
 }
 
+/**
+ * Purpose: Run the manual edit stage summary workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditStageSummary(listId) {
   const list = state.lists.find((item) => item.id === listId) || state.lists[0] || {};
 
@@ -11717,6 +15234,11 @@ function manualEditStageSummary(listId) {
   return `${formatDisplayDate(list.deliveryDate)} - ${list.stage || "Stage"} - ${list.scanner || ""}`;
 }
 
+/**
+ * Purpose: Run the manual edit modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a delivery list to load editable rows.</div>`) {
   const selected = state.manualEditListId || state.activeListId || state.lists[0]?.id || "";
   const stageLists = manualEditStageListsForCurrentDelivery(selected);
@@ -11760,6 +15282,11 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
   `;
 }
 
+/**
+ * Purpose: Run the ensure manual edit lookups loaded workflow for the browser application.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function ensureManualEditLookupsLoaded() {
   if (!state.backend) return;
 
@@ -11794,6 +15321,11 @@ async function ensureManualEditLookupsLoaded() {
   }
 }
 
+/**
+ * Purpose: Open the open manual edit for list workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function openManualEditForList(listId) {
   state.manualEditDirty = false;
   state.manualEditListId = listId || state.activeListId || state.lists[0]?.id || "";
@@ -11805,6 +15337,11 @@ async function openManualEditForList(listId) {
   await runManualEditModalSearch(true);
 }
 
+/**
+ * Purpose: Load the fetch manual edit results workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function fetchManualEditResults(query, listId) {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
@@ -11813,6 +15350,11 @@ async function fetchManualEditResults(query, listId) {
   return payload.results || [];
 }
 
+/**
+ * Purpose: Run the run manual edit modal search workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function runManualEditModalSearch(loadAll = false) {
   const stage = document.getElementById("manualEditModalStage")?.value || state.manualEditListId || "";
   const query = loadAll ? "" : (document.getElementById("manualEditModalSearch")?.value.trim() || "");
@@ -11852,6 +15394,11 @@ async function runManualEditModalSearch(loadAll = false) {
   state.manualEditDirty = false;
 }
 
+/**
+ * Purpose: Render the render manual edit stage options workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderManualEditStageOptions() {
   if (!els.manualEditStageSelect) return;
   const current = els.manualEditStageSelect.value;
@@ -11865,6 +15412,11 @@ function renderManualEditStageOptions() {
   els.manualEditStageSelect.value = state.lists.some((list) => list.id === current) ? current : "";
 }
 
+/**
+ * Purpose: Render the render import history workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderImportHistory(imports) {
   state.adminRecentImports = imports || [];
 
@@ -11879,6 +15431,11 @@ function renderImportHistory(imports) {
   els.importHistory.innerHTML = importHistoryRows(activeImports);
 }
 
+/**
+ * Purpose: Run the import history rows workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function importHistoryRows(imports = []) {
   const seenImportGroups = new Set();
   const rows = imports
@@ -11899,20 +15456,45 @@ function importHistoryRows(imports = []) {
     return `<div class="admin-empty">No import history yet. Imports from the temp folder or single files will appear here.</div>`;
   }
 
+  /**
+   * Purpose: Run the stage name for row workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const stageNameForRow = (row, list) =>
     String(row.stage || row.stageProfile || row.stageSheetName || list?.stage || list?.label || row.listId || "Updated stage");
 
+  /**
+   * Purpose: Run the is staging row workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const isStagingRow = (row, list) => /staging/i.test(stageNameForRow(row, list));
 
+  /**
+   * Purpose: Run the stage category for import row workflow for the browser application.
+   * Effects: May call the backend api.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const stageCategoryForImportRow = (row, list) =>
     stageCategory({
       stage: stageNameForRow(row, list),
       scanner: row.stageProfile || row.scanner || list?.scanner || "",
     });
 
+  /**
+   * Purpose: Update the updated qty for row workflow using the existing shared UI state.
+   * Effects: May call the backend api, may update shared client state.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const updatedQtyForRow = (row, list) =>
     Number(row.totalQty ?? row.updatedQty ?? row.newQty ?? list?.totalQty ?? 0);
 
+  /**
+   * Purpose: Run the changed qty for row workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const changedQtyForRow = (row, list) => {
     const updatedQty = updatedQtyForRow(row, list);
     const explicitAddedQty = Number(row.addedPieceQty ?? row.addedQty ?? 0);
@@ -11922,6 +15504,11 @@ function importHistoryRows(imports = []) {
     return explicitAddedQty || explicitChangedQty || 0;
   };
 
+  /**
+   * Purpose: Run the original qty for row workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const originalQtyForRow = (row, list) => {
     const updatedQty = updatedQtyForRow(row, list);
     const explicitAddedQty = Number(row.addedPieceQty ?? row.addedQty ?? 0);
@@ -11950,6 +15537,11 @@ function importHistoryRows(imports = []) {
     return Math.max(updatedQty - explicitAddedQty, 0);
   };
 
+  /**
+   * Purpose: Run the is new stage row workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const isNewStageRow = (row, list) => {
     const originalQty = originalQtyForRow(row, list);
     const updatedQty = updatedQtyForRow(row, list);
@@ -11961,6 +15553,11 @@ function importHistoryRows(imports = []) {
     return Boolean(row.created) || (originalQty <= 0 && updatedQty > 0 && hasRecordedChanges);
   };
 
+  /**
+   * Purpose: Run the stage rows for entry workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const stageRowsForEntry = (entry) => {
     if (Array.isArray(entry.stageSummaries) && entry.stageSummaries.length) {
       return entry.stageSummaries;
@@ -11981,12 +15578,22 @@ function importHistoryRows(imports = []) {
     });
   };
 
+  /**
+   * Purpose: Run the has stage changes workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const hasStageChanges = (row) =>
     row.created ||
     Number(row.changedLineCount || 0) ||
     Number(row.changedPieceQty || 0) ||
     Number(row.addedPieceQty || 0);
 
+  /**
+   * Purpose: Run the stage row key workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const stageRowKey = (row) => {
     const list = state.lists.find((item) => item.id === row.listId);
 
@@ -11996,6 +15603,11 @@ function importHistoryRows(imports = []) {
       .replace(/\s+/g, " ");
   };
 
+  /**
+   * Purpose: Run the stage row priority workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const stageRowPriority = (row) => {
     const list = state.lists.find((item) => item.id === row.listId);
     const originalQty = originalQtyForRow(row, list);
@@ -12013,6 +15625,11 @@ function importHistoryRows(imports = []) {
     );
   };
 
+  /**
+   * Purpose: Run the collapse duplicate stage rows workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const collapseDuplicateStageRows = (stageRows) => {
     const byStage = new Map();
 
@@ -12031,15 +15648,30 @@ function importHistoryRows(imports = []) {
     return [...byStage.values()];
   };
 
+  /**
+   * Purpose: Run the stage sort for row workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const stageSortForRow = (row) => {
     const list = state.lists.find((item) => item.id === row.listId);
 
     return stageSort(list || { stage: stageNameForRow(row, list), scanner: row.stageProfile || "" });
   };
 
+  /**
+   * Purpose: Run the all stage rows for group workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const allStageRowsForGroup = (group, changedStageRows) => {
     const byStage = new Map();
 
+    /**
+     * Purpose: Create the add row workflow using the existing shared UI state.
+     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const addRow = (row) => {
       const key = stageRowKey(row);
 
@@ -12294,6 +15926,11 @@ function importHistoryRows(imports = []) {
   `;
 }
 
+/**
+ * Purpose: Render the render admin delete controls workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderAdminDeleteControls() {
   if (!els.deleteDateSelect || !els.deleteListSelect) return;
   const groups = listsByDeliveryDate();
@@ -12310,6 +15947,11 @@ function renderAdminDeleteControls() {
   els.deleteListSelect.value = lists.some((list) => list.id === selectedList) ? selectedList : lists[0]?.id || "";
 }
 
+/**
+ * Purpose: Render the render admin reset controls workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderAdminResetControls() {
   if (!els.resetListSelect) return;
   const selected = els.resetListSelect.value || state.activeListId || state.lists[0]?.id || "";
@@ -12319,11 +15961,21 @@ function renderAdminResetControls() {
   els.resetListSelect.value = state.lists.some((list) => list.id === selected) ? selected : state.lists[0]?.id || "";
 }
 
+/**
+ * Purpose: Run the reset selected admin scans workflow for the browser application.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function resetSelectedAdminScans() {
   const listId = els.resetListSelect?.value || "";
   await resetAdminScansForList(listId);
 }
 
+/**
+ * Purpose: Run the reset admin scans for list workflow for the browser application.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function resetAdminScansForList(listId) {
   const list = state.lists.find((item) => item.id === listId);
   if (!list) return;
@@ -12350,6 +16002,11 @@ async function resetAdminScansForList(listId) {
   renderAdminDeliveryLists();
 }
 
+/**
+ * Purpose: Run the reset admin scans for date workflow for the browser application.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function resetAdminScansForDate(deliveryDate) {
   const lists = state.lists.filter((list) => list.deliveryDate === deliveryDate);
 
@@ -12399,6 +16056,11 @@ async function resetAdminScansForDate(deliveryDate) {
   }
 }
 
+/**
+ * Purpose: Remove the delete admin delivery date by date workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteAdminDeliveryDateByDate(deliveryDate) {
   if (!deliveryDate) return;
 
@@ -12452,6 +16114,11 @@ async function deleteAdminDeliveryDateByDate(deliveryDate) {
   }
 }
 
+/**
+ * Purpose: Remove the delete selected delivery list workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteSelectedDeliveryList(deleteDate = false) {
   if (!state.backend) return;
 
@@ -12526,6 +16193,11 @@ async function deleteSelectedDeliveryList(deleteDate = false) {
   renderAdminDeliveryLists();
 }
 
+/**
+ * Purpose: Remove the delete admin delivery list by ID workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteAdminDeliveryListById(listId) {
   const list = state.lists.find((item) => item.id === listId);
   if (!list) return;
@@ -12571,6 +16243,11 @@ async function deleteAdminDeliveryListById(listId) {
   openAdminModal("deliveryLists");
 }
 
+/**
+ * Purpose: Run the user initials workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function userInitials(user) {
   const display = String(user?.displayName || user?.username || "?").trim();
 
@@ -12584,6 +16261,11 @@ function userInitials(user) {
   return display.slice(0, 2).toUpperCase() || "?";
 }
 
+/**
+ * Purpose: Run the user accent class workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function userAccentClass(user) {
   const text = String(user?.username || user?.displayName || "").toLowerCase();
 
@@ -12596,6 +16278,11 @@ function userAccentClass(user) {
   return "accent-default";
 }
 
+/**
+ * Purpose: Run the user action button HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function userActionButtonHtml({ className = "", attr = "", label = "", icon = "", disabled = false }) {
   const safeLabel = escapeHtml(label);
 
@@ -12613,6 +16300,11 @@ function userActionButtonHtml({ className = "", attr = "", label = "", icon = ""
   `;
 }
 
+/**
+ * Purpose: Run the generate temporary password workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function generateTemporaryPassword(length = 12) {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
   const values = new Uint32Array(length);
@@ -12627,6 +16319,11 @@ function generateTemporaryPassword(length = 12) {
   }).join("");
 }
 
+/**
+ * Purpose: Load the refresh admin users UI workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function refreshAdminUsersUi() {
   const usersModalOpen = Boolean(els.adminModal && !els.adminModal.hidden && els.adminModalBody?.querySelector(".users-modal-shell"));
 
@@ -12637,6 +16334,11 @@ async function refreshAdminUsersUi() {
   }
 }
 
+/**
+ * Purpose: Run the confirm web app action workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function confirmWebAppAction({
   title,
   message,
@@ -12654,6 +16356,11 @@ function confirmWebAppAction({
     const dialog = document.createElement("div");
     const requiredValue = String(requiredText || "").trim();
     const requiresTypedConfirmation = Boolean(requiredValue);
+    /**
+     * Purpose: Run the key handler workflow for the browser application.
+     * Effects: May update shared client state.
+     * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+     */
     let keyHandler = () => {};
 
     dialog.className = "action-confirm-backdrop";
@@ -12687,13 +16394,28 @@ function confirmWebAppAction({
     const input = dialog.querySelector("[data-action-confirm-input]");
     const confirmButton = dialog.querySelector("[data-action-confirm-confirm]");
 
+    /**
+     * Purpose: Run the typed confirmation matches workflow for the browser application.
+     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const typedConfirmationMatches = () => !requiresTypedConfirmation || String(input?.value || "").trim() === requiredValue;
 
+    /**
+     * Purpose: Run the sync typed confirmation workflow for the browser application.
+     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const syncTypedConfirmation = () => {
       if (!confirmButton) return;
       confirmButton.disabled = !typedConfirmationMatches();
     };
 
+    /**
+     * Purpose: Close the close workflow using the existing shared UI state.
+     * Effects: Updates visible dom state.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const close = (confirmed) => {
       document.removeEventListener("keydown", keyHandler);
       dialog.remove();
@@ -12738,6 +16460,11 @@ function confirmWebAppAction({
   });
 }
 
+/**
+ * Purpose: Run the prompt web app action workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function promptWebAppAction({
   title = "Enter information",
   message = "",
@@ -12771,11 +16498,21 @@ function promptWebAppAction({
       </section>
     `;
     const input = dialog.querySelector("[data-action-prompt-input]");
+    /**
+     * Purpose: Close the close workflow using the existing shared UI state.
+     * Effects: Updates visible dom state.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const close = (result = null) => {
       dialog.remove();
       updateModalScrollLock();
       resolve(result);
     };
+    /**
+     * Purpose: Process the submit workflow using the existing shared UI state.
+     * Effects: May call the backend api.
+     * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+     */
     const submit = () => {
       const result = String(input?.value || "").trim();
       if (required && !result) {
@@ -12804,12 +16541,22 @@ function promptWebAppAction({
   });
 }
 
+/**
+ * Purpose: Run the confirm deactivate user workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function confirmDeactivateUser(username) {
   return new Promise((resolve) => {
     const existingDialog = document.querySelector(".user-deactivate-backdrop");
     if (existingDialog) existingDialog.remove();
 
     const dialog = document.createElement("div");
+    /**
+     * Purpose: Run the key handler workflow for the browser application.
+     * Effects: May update shared client state.
+     * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+     */
     let keyHandler = () => {};
 
     dialog.className = "user-deactivate-backdrop";
@@ -12831,6 +16578,11 @@ function confirmDeactivateUser(username) {
       </section>
     `;
 
+    /**
+     * Purpose: Close the close workflow using the existing shared UI state.
+     * Effects: Updates visible dom state.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const close = (confirmed) => {
       document.removeEventListener("keydown", keyHandler);
       dialog.remove();
@@ -12861,6 +16613,11 @@ function confirmDeactivateUser(username) {
   });
 }
 
+/**
+ * Purpose: Render the render admin users workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderAdminUsers() {
   if (!els.adminUsers) return;
 
@@ -12878,6 +16635,11 @@ function renderAdminUsers() {
   `;
 }
 
+/**
+ * Purpose: Render the render admin users table workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderAdminUsersTable(editable = false, limit = 5) {
   const users = state.adminUsers.slice(0, limit);
 
@@ -13089,11 +16851,21 @@ function renderAdminUsersTable(editable = false, limit = 5) {
   `;
 }
 
+/**
+ * Purpose: Render the render admin stations workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderAdminStations() {
   if (!els.adminStations) return;
   els.adminStations.innerHTML = renderAdminStationsList(false, state.stations.length || 1);
 }
 
+/**
+ * Purpose: Render the render admin stations list workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderAdminStationsList(editable = false, limit = 6) {
   return state.stations
     .slice(0, limit)
@@ -13107,6 +16879,11 @@ function renderAdminStationsList(editable = false, limit = 6) {
     .join("") || `<div class="admin-empty">No stations loaded.</div>`;
 }
 
+/**
+ * Purpose: Run the customer route value workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteValue(route) {
   const raw = String(route || "").trim().toUpperCase();
 
@@ -13123,6 +16900,11 @@ function customerRouteValue(route) {
   return clean || "CPU";
 }
 
+/**
+ * Purpose: Run the customer route display workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteDisplay(route) {
   const clean = customerRouteValue(route);
 
@@ -13133,15 +16915,30 @@ function customerRouteDisplay(route) {
   return clean;
 }
 
+/**
+ * Purpose: Run the customer route default address workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteDefaultAddress(route) {
   return CUSTOMER_ROUTE_DEFAULT_ADDRESSES[customerRouteValue(route)] || "";
 }
 
+/**
+ * Purpose: Run the customer route address workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteAddress(rule = {}) {
   const savedAddress = String(rule.customerAddress || rule.address || "").trim();
   return savedAddress || customerRouteDefaultAddress(rule.route);
 }
 
+/**
+ * Purpose: Run the customer route address status workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteAddressStatus(rule = {}) {
   const route = customerRouteValue(rule.route);
   const address = customerRouteAddress(rule);
@@ -13151,6 +16948,11 @@ function customerRouteAddressStatus(rule = {}) {
   return address;
 }
 
+/**
+ * Purpose: Run the customer route option list workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteOptionList() {
   const customRoutes = [...new Set((state.adminCustomerRouteRules || [])
     .map((rule) => customerRouteValue(rule.route))
@@ -13160,6 +16962,11 @@ function customerRouteOptionList() {
   return [...CUSTOMER_ROUTE_OPTIONS, ...customRoutes.map((route) => ({ value: route, label: route }))];
 }
 
+/**
+ * Purpose: Run the customer route options HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteOptionsHtml(selectedRoute = "CPU") {
   const selected = customerRouteValue(selectedRoute);
 
@@ -13170,6 +16977,11 @@ function customerRouteOptionsHtml(selectedRoute = "CPU") {
     .join("");
 }
 
+/**
+ * Purpose: Run the customer route rule rows HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteRuleRowsHtml(editable = false, limit = 0) {
   const rules = limit ? state.adminCustomerRouteRules.slice(0, limit) : state.adminCustomerRouteRules;
 
@@ -13236,6 +17048,11 @@ function customerRouteRuleRowsHtml(editable = false, limit = 0) {
     .join("");
 }
 
+/**
+ * Purpose: Run the customer route rules modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteRulesModalHtml() {
   const ruleCount = state.adminCustomerRouteRules.length;
 
@@ -13286,6 +17103,11 @@ function customerRouteRulesModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Update the set customer route edit form workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function setCustomerRouteEditForm(ruleId = "") {
   const form = document.getElementById("customerRouteRuleFormModal");
   if (!form) return;
@@ -13308,6 +17130,11 @@ function setCustomerRouteEditForm(ruleId = "") {
   patternInput?.focus();
 }
 
+/**
+ * Purpose: Render the render customer route rules workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderCustomerRouteRules() {
   if (!els.customerRouteRules) return;
 
@@ -13354,6 +17181,11 @@ function renderCustomerRouteRules() {
   `;
 }
 
+/**
+ * Purpose: Load the refresh customer route modal workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 function refreshCustomerRouteModal() {
   renderCustomerRouteRules();
   if (els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "customerRoutes" && els.adminModalBody) {
@@ -13362,6 +17194,11 @@ function refreshCustomerRouteModal() {
 }
 
 
+/**
+ * Purpose: Render the render bay scanner rule overview workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may call the backend api, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayScannerRuleOverview() {
   if (!els.bayScannerRuleOverview) return;
   const settings = state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
@@ -13373,11 +17210,21 @@ function renderBayScannerRuleOverview() {
   `;
 }
 
+/**
+ * Purpose: Run the auto assign type options workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function autoAssignTypeOptions(selected = "") {
   const values = ["Standard", "Tall", "Oversize", "Mirror", "Framed Mirror", "CPU"];
   return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
 }
 
+/**
+ * Purpose: Render the render bay auto assign overview workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderBayAutoAssignOverview() {
   if (!els.bayAutoAssignOverview) return;
   const settings = state.bayAutoAssignSettings || {};
@@ -13388,6 +17235,11 @@ function renderBayAutoAssignOverview() {
   `;
 }
 
+/**
+ * Purpose: Run the bay auto assigner modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function bayAutoAssignerModalHtml() {
   const settings = state.bayAutoAssignSettings || {};
   const manual = new Set(settings.manualAssignTypes || []);
@@ -13447,6 +17299,11 @@ function bayAutoAssignerModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Load the refresh bay auto assigner workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function refreshBayAutoAssigner(openModal = false) {
   const payload = await fetchJson("/api/admin/bay-auto-assigner");
   state.bayAutoAssignSettings = payload || state.bayAutoAssignSettings;
@@ -13457,6 +17314,11 @@ async function refreshBayAutoAssigner(openModal = false) {
   return payload;
 }
 
+/**
+ * Purpose: Run the save bay auto assigner settings workflow for the browser application.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveBayAutoAssignerSettings() {
   const payload = {
     tallMinInches: Number(document.getElementById("bayAutoTallMin")?.value || 60),
@@ -13470,9 +17332,14 @@ async function saveBayAutoAssignerSettings() {
   state.bayAutoAssignSettings = saved || payload;
   renderBayAutoAssignOverview();
   if (els.adminModalBody) els.adminModalBody.innerHTML = bayAutoAssignerModalHtml();
-  showInlineError("Bay auto-assigner settings saved.", false);
+  showSaveConfirmation("Bay auto-assigner settings were saved.");
 }
 
+/**
+ * Purpose: Run the bay scanner rules modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state, may call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 function bayScannerRulesModalHtml() {
   const settings = state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
   const manualRules = settings.manualRules || [];
@@ -13519,6 +17386,11 @@ function bayScannerRulesModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Load the refresh bay scanner rules workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function refreshBayScannerRules(openModal = false) {
   const payload = await fetchJson("/api/admin/bay-scanner-rules");
   state.bayScannerSettings = payload || { manualRules: [], barcodeRules: [] };
@@ -13529,6 +17401,11 @@ async function refreshBayScannerRules(openModal = false) {
   return payload;
 }
 
+/**
+ * Purpose: Run the save bay manual rule workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveBayManualRule() {
   const matchType = document.getElementById("bayManualRuleType")?.value || "exact";
   const pattern = document.getElementById("bayManualRulePattern")?.value.trim() || "";
@@ -13537,8 +17414,14 @@ async function saveBayManualRule() {
   state.bayScannerSettings = payload || state.bayScannerSettings;
   renderBayScannerRuleOverview();
   if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  showSaveConfirmation("The manual Bay Map scanner rule was saved.");
 }
 
+/**
+ * Purpose: Run the save bay barcode rule workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveBayBarcodeRule() {
   const pattern = document.getElementById("bayBarcodeRulePattern")?.value.trim() || "";
   const label = document.getElementById("bayBarcodeRuleLabel")?.value.trim() || "";
@@ -13546,8 +17429,14 @@ async function saveBayBarcodeRule() {
   state.bayScannerSettings = payload || state.bayScannerSettings;
   renderBayScannerRuleOverview();
   if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  showSaveConfirmation("The Bay Map barcode rule was saved.");
 }
 
+/**
+ * Purpose: Remove the remove bay scanner rule workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ */
 async function removeBayScannerRule(kind, id) {
   const payload = await fetchJson(`/api/admin/bay-scanner-rules/${kind}/remove`, { method: "POST", body: JSON.stringify({ id }) });
   state.bayScannerSettings = payload || state.bayScannerSettings;
@@ -13555,6 +17444,11 @@ async function removeBayScannerRule(kind, id) {
   if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
 }
 
+/**
+ * Purpose: Render the render customer email overview workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderCustomerEmailOverview() {
   if (!els.customerEmailOverview) return;
 
@@ -13588,10 +17482,20 @@ function renderCustomerEmailOverview() {
   `;
 }
 
+/**
+ * Purpose: Run the email address list text workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function emailAddressListText(values = []) {
   return (values || []).filter(Boolean).join(", ");
 }
 
+/**
+ * Purpose: Run the email status label workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function emailStatusLabel(status) {
   const clean = String(status || "draft").toLowerCase();
   if (clean === "sent") return "Sent";
@@ -13600,6 +17504,11 @@ function emailStatusLabel(status) {
   return "Draft";
 }
 
+/**
+ * Purpose: Run the customer email rules modal HTML workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerEmailRulesModalHtml() {
   const settings = state.customerEmailSettings || { contacts: [], cc: [], outbox: [], smtpConfig: {} };
   const contacts = settings.contacts || [];
@@ -13712,6 +17621,11 @@ function customerEmailRulesModalHtml() {
   `;
 }
 
+/**
+ * Purpose: Run the email draft preview HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function emailDraftPreviewHtml(email) {
   if (!email) return "";
   return `
@@ -13743,7 +17657,17 @@ function emailDraftPreviewHtml(email) {
   `;
 }
 
+/**
+ * Purpose: Open the open email draft preview workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openEmailDraftPreview(id) {
+  /**
+   * Purpose: Run the email workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const email = (state.customerEmailSettings?.outbox || []).find((row) => String(row.id) === String(id));
   if (!email) return;
   closeEmailDraftPreview();
@@ -13755,25 +17679,55 @@ function openEmailDraftPreview(id) {
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Close the close email draft preview workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function closeEmailDraftPreview() {
   document.getElementById("emailDraftPreviewShell")?.remove();
   updateModalScrollLock();
 }
 
+/**
+ * Purpose: Run the copy email draft body workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function copyEmailDraftBody(id) {
+  /**
+   * Purpose: Run the email workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const email = (state.customerEmailSettings?.outbox || []).find((row) => String(row.id) === String(id));
   if (!email) return;
   await navigator.clipboard.writeText(email.body || "");
   showInlineError("Email body copied.", false);
 }
 
+/**
+ * Purpose: Run the mailto param workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function mailtoParam(name, value) {
   // Do not use URLSearchParams for mailto body text. Some email clients keep
   // plus signs as literal characters, so spaces must be encoded as %20.
   return `${encodeURIComponent(name)}=${encodeURIComponent(value || "")}`;
 }
 
+/**
+ * Purpose: Open the open email draft mailto workflow using the existing shared UI state.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function openEmailDraftMailto(id) {
+  /**
+   * Purpose: Run the email workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const email = (state.customerEmailSettings?.outbox || []).find((row) => String(row.id) === String(id));
   if (!email) return;
   const to = emailAddressListText(email.toEmails);
@@ -13786,6 +17740,11 @@ function openEmailDraftMailto(id) {
   window.location.href = `mailto:${encodeURIComponent(to)}?${params.join("&")}`;
 }
 
+/**
+ * Purpose: Load the refresh customer email settings workflow using the existing shared UI state.
+ * Effects: May update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function refreshCustomerEmailSettings(openModal = false) {
   const payload = await fetchJson("/api/admin/customer-emails");
   state.customerEmailSettings = payload || { contacts: [], cc: [], outbox: [] };
@@ -13795,7 +17754,17 @@ async function refreshCustomerEmailSettings(openModal = false) {
   return payload;
 }
 
+/**
+ * Purpose: Run the start customer email edit workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function startCustomerEmailEdit(id) {
+  /**
+   * Purpose: Run the contact workflow for the browser application.
+   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+   */
   const contact = (state.customerEmailSettings?.contacts || []).find((row) => String(row.id) === String(id));
   if (!contact) return;
   const idInput = document.getElementById("customerEmailEditIdInput");
@@ -13809,6 +17778,11 @@ function startCustomerEmailEdit(id) {
   patternInput?.focus();
 }
 
+/**
+ * Purpose: Run the save customer email contact workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveCustomerEmailContact() {
   const id = document.getElementById("customerEmailEditIdInput")?.value.trim() || "";
   const pattern = document.getElementById("customerEmailPatternInput")?.value.trim() || "";
@@ -13820,8 +17794,14 @@ async function saveCustomerEmailContact() {
   state.customerEmailSettings = payload || state.customerEmailSettings;
   renderCustomerEmailOverview();
   if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  showSaveConfirmation(`Customer email settings were saved for ${pattern || email}.`);
 }
 
+/**
+ * Purpose: Run the save customer email cc workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveCustomerEmailCc() {
   const email = document.getElementById("customerEmailCcInput")?.value.trim() || "";
   const payload = await fetchJson("/api/admin/customer-emails/cc", {
@@ -13831,8 +17811,14 @@ async function saveCustomerEmailCc() {
   state.customerEmailSettings = payload || state.customerEmailSettings;
   renderCustomerEmailOverview();
   if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  showSaveConfirmation(`Customer email CC address ${email} was saved.`);
 }
 
+/**
+ * Purpose: Run the send customer email test workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function sendCustomerEmailTest() {
   const toEmail = document.getElementById("customerEmailTestToInput")?.value.trim() || "";
   const ccEmails = document.getElementById("customerEmailTestCcInput")?.value.trim() || "";
@@ -13852,6 +17838,11 @@ async function sendCustomerEmailTest() {
   showFloatingNotice(message, result.status === "sent" ? "success" : "notice");
 }
 
+/**
+ * Purpose: Remove the remove customer email contact workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function removeCustomerEmailContact(id) {
   const payload = await fetchJson("/api/admin/customer-emails/remove", {
     method: "POST",
@@ -13862,6 +17853,11 @@ async function removeCustomerEmailContact(id) {
   if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
 }
 
+/**
+ * Purpose: Remove the remove customer email cc workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function removeCustomerEmailCc(id) {
   const payload = await fetchJson("/api/admin/customer-emails/cc/remove", {
     method: "POST",
@@ -13872,6 +17868,11 @@ async function removeCustomerEmailCc(id) {
   if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
 }
 
+/**
+ * Purpose: Run the customer route form values workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function customerRouteFormValues() {
   const patternInput = document.getElementById("customerRoutePatternInputModal") || els.customerRoutePatternInput;
   const routeInput = document.getElementById("customerRouteSelectModal") || els.customerRouteSelect;
@@ -13901,6 +17902,11 @@ function customerRouteFormValues() {
   return { customerPattern, route, customerAddress, patternInput, routeInput, addressInput };
 }
 
+/**
+ * Purpose: Run the save customer route rule workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveCustomerRouteRule() {
   const { customerPattern, route, customerAddress, patternInput, routeInput, addressInput } = customerRouteFormValues();
 
@@ -13926,9 +17932,14 @@ async function saveCustomerRouteRule() {
   if (routeInput) routeInput.value = "";
   if (addressInput) addressInput.value = "";
   refreshCustomerRouteModal();
-  showFloatingNotice(`Customer route saved for ${customerPattern}.`, "success");
+  showSaveConfirmation(`Customer route saved for ${customerPattern}.`);
 }
 
+/**
+ * Purpose: Run the save customer route rule row workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveCustomerRouteRuleRow(ruleId) {
   const patternInput = document.querySelector(`[data-customer-route-pattern="${CSS.escape(String(ruleId))}"]`);
   const routeInput = document.querySelector(`[data-customer-route-route="${CSS.escape(String(ruleId))}"]`);
@@ -13962,9 +17973,14 @@ async function saveCustomerRouteRuleRow(ruleId) {
   }
 
   refreshCustomerRouteModal();
-  showFloatingNotice(`Customer route updated for ${customerPattern}.`, "success");
+  showSaveConfirmation(`Customer route updated for ${customerPattern}.`);
 }
 
+/**
+ * Purpose: Remove the remove customer route rule workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function removeCustomerRouteRule(ruleId) {
   const rule = state.adminCustomerRouteRules.find((item) => String(item.id) === String(ruleId));
   const label = rule?.customerPattern || "this customer route";
@@ -13990,6 +18006,11 @@ async function removeCustomerRouteRule(ruleId) {
   showFloatingNotice(`Customer route removed for ${label}.`, "success");
 }
 
+/**
+ * Purpose: Render the render active sessions workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderActiveSessions() {
   if (!els.activeSessions) return;
   els.activeSessions.innerHTML = state.activeSessions.length
@@ -13997,6 +18018,11 @@ function renderActiveSessions() {
     : `<div><strong>No active sessions</strong><span>Users appear here after login.</span></div>`;
 }
 
+/**
+ * Purpose: Create the create user from form workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function createUserFromForm() {
   const usernameInput = document.getElementById("newUserNameModal") || els.newUserName;
   const displayInput = document.getElementById("newUserDisplayModal") || els.newUserDisplay;
@@ -14022,15 +18048,26 @@ async function createUserFromForm() {
   if (stationInput) stationInput.value = "";
   await refreshAdminPage();
   if (!els.adminModal?.hidden) openAdminModal("users");
+  showSaveConfirmation(`User ${displayName} was created.`);
 }
 
 
+/**
+ * Purpose: Run the run manual edit search workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function runManualEditSearch() {
   const query = els.manualEditSearch?.value.trim() || "";
   if (query.length < 2 && !els.manualEditStageSelect?.value) return;
   renderManualEditResults(await fetchManualEditResults(query, els.manualEditStageSelect?.value || ""));
 }
 
+/**
+ * Purpose: Render the render manual edit results workflow using the existing shared UI state.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ */
 function renderManualEditResults(results) {
   if (!els.manualEditResults) return;
   els.manualEditResults.innerHTML = manualEditResultsHtml(results);
@@ -14038,12 +18075,22 @@ function renderManualEditResults(results) {
 
 const MANUAL_EDIT_CUSTOM_VALUE = "__manual_edit_custom__";
 
+/**
+ * Purpose: Run the manual edit option has value workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditOptionHasValue(options, value) {
   const cleanValue = String(value ?? "");
 
   return options.some(([optionValue]) => String(optionValue ?? "") === cleanValue);
 }
 
+/**
+ * Purpose: Run the lookup options workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function lookupOptions(items = [], blankLabel = "Blank") {
   const seen = new Set();
   const options = [["", blankLabel]];
@@ -14056,12 +18103,22 @@ function lookupOptions(items = [], blankLabel = "Blank") {
   return options;
 }
 
+/**
+ * Purpose: Run the manual edit is custom choice workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditIsCustomChoice(options, value) {
   const cleanValue = String(value ?? "").trim();
 
   return Boolean(cleanValue) && !manualEditOptionHasValue(options, cleanValue);
 }
 
+/**
+ * Purpose: Run the manual edit select options workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditSelectOptions(options, selectedValue = "", customLabel = "Custom value...") {
   const selected = String(selectedValue ?? "");
   const selectedIsCustom = manualEditIsCustomChoice(options, selected);
@@ -14090,6 +18147,11 @@ function manualEditSelectOptions(options, selectedValue = "", customLabel = "Cus
   `;
 }
 
+/**
+ * Purpose: Run the manual edit choice field HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditChoiceFieldHtml({ field, label, value = "", options = [], customLabel = "", wide = false }) {
   const cleanField = String(field || "");
   const cleanLabel = String(label || cleanField);
@@ -14136,12 +18198,22 @@ function manualEditChoiceFieldHtml({ field, label, value = "", options = [], cus
   `;
 }
 
+/**
+ * Purpose: Run the manual edit choice hidden input workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditChoiceHiddenInput(control) {
   const field = control?.dataset?.choiceField || "";
 
   return control?.querySelector(`[data-edit-field="${CSS.escape(field)}"]`) || null;
 }
 
+/**
+ * Purpose: Run the manual edit set choice value workflow for the browser application.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditSetChoiceValue(control, value, markDirty = true) {
   const hiddenInput = manualEditChoiceHiddenInput(control);
 
@@ -14155,6 +18227,11 @@ function manualEditSetChoiceValue(control, value, markDirty = true) {
   }
 }
 
+/**
+ * Purpose: Run the manual edit show custom choice workflow for the browser application.
+ * Effects: Updates visible dom state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditShowCustomChoice(control, startingValue = "") {
   if (!control) return;
 
@@ -14178,6 +18255,11 @@ function manualEditShowCustomChoice(control, startingValue = "") {
   }
 }
 
+/**
+ * Purpose: Run the manual edit show select choice workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditShowSelectChoice(control) {
   if (!control) return;
 
@@ -14202,6 +18284,11 @@ function manualEditShowSelectChoice(control) {
   }
 }
 
+/**
+ * Purpose: Run the manual edit apply choice select workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditApplyChoiceSelect(select) {
   const control = select?.closest("[data-choice-control]");
 
@@ -14216,6 +18303,11 @@ function manualEditApplyChoiceSelect(select) {
   manualEditSetChoiceValue(control, select.value, true);
 }
 
+/**
+ * Purpose: Run the manual edit apply custom input workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditApplyCustomInput(customInput) {
   const control = customInput?.closest("[data-choice-control]");
 
@@ -14225,6 +18317,11 @@ function manualEditApplyCustomInput(customInput) {
   state.manualEditDirty = true;
 }
 
+/**
+ * Purpose: Run the manual edit clear custom choice workflow for the browser application.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditClearCustomChoice(button) {
   const control = button?.closest("[data-choice-control]");
 
@@ -14234,6 +18331,11 @@ function manualEditClearCustomChoice(button) {
   state.manualEditDirty = true;
 }
 
+/**
+ * Purpose: Run the manual edit sync choice select workflow for the browser application.
+ * Effects: Updates visible dom state, may update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditSyncChoiceSelect(input) {
   const field = input?.dataset?.editField || "";
   const row = input?.closest("[data-edit-row]");
@@ -14254,10 +18356,20 @@ function manualEditSyncChoiceSelect(input) {
   select.value = hasMatchingOption ? value : "";
 }
 
+/**
+ * Purpose: Run the manual edit current location value workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditCurrentLocationValue(item) {
   return String(item.location || item.rackCode || item.bayCode || "").trim();
 }
 
+/**
+ * Purpose: Run the manual edit location options workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditLocationOptions(item) {
   const options = [
     ["", "No location / clear"],
@@ -14307,6 +18419,11 @@ function manualEditLocationOptions(item) {
   return options;
 }
 
+/**
+ * Purpose: Run the manual edit route options workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditRouteOptions() {
   const lookupRoutes = lookupOptions(state.manualEditLookups?.routes || [], "Indian Trail / Standard")
     .map(([value, label]) => [String(value || "").trim() || "IT", label]);
@@ -14319,6 +18436,11 @@ function manualEditRouteOptions() {
   ];
 }
 
+/**
+ * Purpose: Run the manual edit process options workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditProcessOptions() {
   const lookupProcesses = lookupOptions(state.manualEditLookups?.processes || [], "Normal / blank");
   if (lookupProcesses.length > 1) return lookupProcesses;
@@ -14333,6 +18455,11 @@ function manualEditProcessOptions() {
   ];
 }
 
+/**
+ * Purpose: Run the manual edit product options workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditProductOptions(results = []) {
   const productValues = uniqueText([
     ...(state.manualEditLookups?.products || []).map((item) => item.value),
@@ -14344,12 +18471,22 @@ function manualEditProductOptions(results = []) {
   return [
     ["", "Blank product"],
     ...productValues.map((value) => {
+      /**
+       * Purpose: Run the lookup workflow for the browser application.
+       * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+       * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+       */
       const lookup = (state.manualEditLookups?.products || []).find((item) => String(item.value) === String(value));
       return [value, lookup?.label || value];
     }),
   ];
 }
 
+/**
+ * Purpose: Run the manual edit set row error workflow for the browser application.
+ * Effects: May update shared client state.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditSetRowError(row, message = "") {
   if (!row) return;
 
@@ -14367,6 +18504,11 @@ function manualEditSetRowError(row, message = "") {
   }
 }
 
+/**
+ * Purpose: Run the manual edit validate row workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditValidateRow(row) {
   if (!row) return false;
 
@@ -14406,6 +18548,11 @@ function manualEditValidateRow(row) {
   return true;
 }
 
+/**
+ * Purpose: Run the manual edit results HTML workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function manualEditResultsHtml(results) {
   const visibleRows = results.slice(0, 100);
 
@@ -14539,6 +18686,11 @@ function manualEditResultsHtml(results) {
     : `<div class="admin-empty">No editable rows found.</div>`;
 }
 
+/**
+ * Purpose: Run the save manual line item workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function saveManualLineItem(lineItemId) {
   const row = document.querySelector(`[data-edit-row="${CSS.escape(lineItemId)}"]`);
 
@@ -14570,10 +18722,15 @@ async function saveManualLineItem(lineItemId) {
   }
 
   state.manualEditDirty = false;
-  showFloatingNotice(payload.message || "Line item updated across its delivery-list stages.", "success");
+  showSaveConfirmation(payload.message || "Line item updated across its delivery-list stages.");
   renderScanPage();
 }
 
+/**
+ * Purpose: Remove the delete manual line item workflow using the existing shared UI state.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function deleteManualLineItem(lineItemId) {
   const confirmed = await confirmWebAppAction({
     title: "Delete delivery-list item?",
@@ -14594,6 +18751,11 @@ async function deleteManualLineItem(lineItemId) {
   renderScanPage();
 }
 
+/**
+ * Purpose: Run the export static CSV workflow for the browser application.
+ * Effects: May call the backend api.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function exportStaticCsv() {
   const header = ["barcode", "order", "item", "qty", "scanned", "remaining", "dimensions", "customer", "route", "job", "product", "suggestedBay"];
   const rows = state.items.map((item) => {
@@ -14609,6 +18771,11 @@ function exportStaticCsv() {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Purpose: Run the start polling workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function startPolling() {
   stopPolling();
   state.pollTimer = window.setInterval(async () => {
@@ -14624,11 +18791,21 @@ function startPolling() {
   }, 38000);
 }
 
+/**
+ * Purpose: Run the stop polling workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function stopPolling() {
   if (state.pollTimer) window.clearInterval(state.pollTimer);
   state.pollTimer = null;
 }
 
+/**
+ * Purpose: Load the load authenticated app workflow using the existing shared UI state.
+ * Effects: May call the backend api, may update shared client state.
+ * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ */
 async function loadAuthenticatedApp(params = new URLSearchParams(window.location.search)) {
   await loadStations();
   await loadDeliveryLists(params.get("list") || "");
@@ -14642,6 +18819,11 @@ async function loadAuthenticatedApp(params = new URLSearchParams(window.location
   startNotificationPolling();
 }
 
+/**
+ * Purpose: Run the init workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 async function init() {
   wireEvents();
   resetImportDateWindow();
@@ -14650,19 +18832,25 @@ async function init() {
     await loadSession();
     if (!state.authenticated) {
       showLogin();
-      return;
+    } else {
+      await loadAuthenticatedApp(new URLSearchParams(window.location.search));
     }
-    await loadAuthenticatedApp(new URLSearchParams(window.location.search));
-    return;
+  } else {
+    loadLocalStations();
+    renderStationOptions();
+    const response = await fetch("data/sample-delivery-list.json");
+    const payload = await response.json();
+    state.lists = createDemoLists(payload);
+    showPage("home");
   }
-  loadLocalStations();
-  renderStationOptions();
-  const response = await fetch("data/sample-delivery-list.json");
-  const payload = await response.json();
-  state.lists = createDemoLists(payload);
-  showPage("home");
+  await resumeFullscreenAfterRefresh();
 }
 
+/**
+ * Purpose: Run the replay expandable list animation workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function replayExpandableListAnimation(details) {
   if (!details?.open) return;
 
@@ -14679,6 +18867,11 @@ function replayExpandableListAnimation(details) {
   });
 }
 
+/**
+ * Purpose: Connect the wire events workflow using the existing shared UI state.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 function wireEvents() {
   if (state.eventsWired) return;
   state.eventsWired = true;
@@ -14708,11 +18901,16 @@ function wireEvents() {
   els.logoutBtn?.addEventListener("click", () => logout().catch((error) => showInlineError(error.message)));
   els.languageToggleBtn?.addEventListener("click", () => toggleAppLanguage());
   els.loginLanguageToggleBtn?.addEventListener("click", () => toggleAppLanguage());
+  els.refreshPageBtn?.addEventListener("click", () => refreshPage());
   els.fullscreenToggleBtn?.addEventListener("click", () => toggleFullscreen().catch((error) => showInlineError(error.message)));
   document.addEventListener("fullscreenchange", () => syncFullscreenControl());
-  window.addEventListener("resize", () => syncFullscreenStickyPanelOffset());
+  window.addEventListener("resize", () => {
+    syncFullscreenStickyPanelOffset();
+  });
   if (window.ResizeObserver && els.appHeader) {
-    state.headerResizeObserver = new ResizeObserver(() => syncFullscreenStickyPanelOffset());
+    state.headerResizeObserver = new ResizeObserver(() => {
+      syncFullscreenStickyPanelOffset();
+    });
     state.headerResizeObserver.observe(els.appHeader);
   }
   window.addEventListener("message", (event) => {
@@ -14781,7 +18979,6 @@ function wireEvents() {
     document.querySelectorAll(".user-menu[open]").forEach((menu) => menu.removeAttribute("open"));
     if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
     if (document.getElementById("actionFeedbackShell")) closeActionFeedback();
-    if (document.getElementById("rushAlertShell")) closeRushAlert({ acknowledge: true });
   });
 
   els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
@@ -14790,8 +18987,35 @@ function wireEvents() {
   });
   els.statsChartCloseBtn?.addEventListener("click", () => closeStatisticsChartModal());
   els.statsChartBackdrop?.addEventListener("click", () => closeStatisticsChartModal());
+  els.statsChartModalCanvas?.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-chart-entry-label]");
+    if (!target) return;
+    state.homeChartSelectedLabel = target.dataset.chartEntryLabel || "";
+    renderStatisticsChartModal();
+  });
+  els.statsChartModalCanvas?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const target = event.target.closest("[data-chart-entry-label]");
+    if (!target) return;
+    event.preventDefault();
+    state.homeChartSelectedLabel = target.dataset.chartEntryLabel || "";
+    renderStatisticsChartModal();
+  });
+  els.statsChartRangeSelect?.addEventListener("change", async () => {
+    state.overviewRange = els.statsChartRangeSelect.value || "30";
+    state.homeChartSelectedLabel = "";
+    if (els.overviewRangeSelect) {
+      els.overviewRangeSelect.value = state.overviewRange;
+      syncCustomSelect(els.overviewRangeSelect);
+    }
+    renderHome();
+    renderStatisticsChartModal();
+    await loadHomeReportSummary();
+    if (els.statsChartModal && !els.statsChartModal.hidden) renderStatisticsChartModal();
+  });
   els.statsChartMetricSelect?.addEventListener("change", () => {
     state.homeChartMetric = els.statsChartMetricSelect.value || "glass";
+    state.homeChartSelectedLabel = "";
     renderStatisticsChartModal();
   });
   els.statsChartViewSelect?.addEventListener("change", () => {
@@ -14808,6 +19032,7 @@ function wireEvents() {
   });
   els.statsChartFilterInput?.addEventListener("input", () => {
     state.homeChartQuery = els.statsChartFilterInput.value || "";
+    state.homeChartSelectedLabel = "";
     renderStatisticsChartModal();
   });
   els.statsChartResetBtn?.addEventListener("click", () => {
@@ -14816,6 +19041,7 @@ function wireEvents() {
     state.homeChartQuery = "";
     state.homeChartLimit = "all";
     state.homeChartSort = "value-desc";
+    state.homeChartSelectedLabel = "";
     renderStatisticsChartModal();
   });
   els.viewAllRecent?.addEventListener("click", () => openAdminModal("recentScans"));
@@ -14888,7 +19114,9 @@ function wireEvents() {
   });
   els.overviewRangeSelect?.addEventListener("change", () => {
     state.overviewRange = els.overviewRangeSelect.value || "30";
+    state.homeChartSelectedLabel = "";
     renderHome();
+    if (els.statsChartModal && !els.statsChartModal.hidden) renderStatisticsChartModal();
     void loadHomeReportSummary();
   });
   els.homePageSize?.addEventListener("change", () => {
@@ -15015,8 +19243,9 @@ function wireEvents() {
     state.selectedRackCode = els.rackSelect.value;
   });
   els.scanRackSelect?.addEventListener("change", () => {
-    state.selectedRackCode = els.scanRackSelect.value;
+    state.selectedScanRackCode = els.scanRackSelect.value || NO_RACK_SELECTION;
     renderScanRackTools();
+    els.scanInput?.focus();
   });
   els.outboundRackStatusSelect?.addEventListener("change", () => {
     state.selectedOutboundRackCode = els.outboundRackStatusSelect.value || "";
@@ -15036,16 +19265,17 @@ function wireEvents() {
     els.scanInput?.focus();
   });
   els.scanRackCompleteBtn?.addEventListener("click", async () => {
-    if (!state.selectedRackCode) return;
+    const selectedCode = rackCodeForScan(state.selectedScanRackCode);
+    if (!selectedCode) return;
     try {
-      const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackCode);
+      const selectedRack = state.racks.find((rack) => rack.code === selectedCode);
       const selectedRackStatus = String(selectedRack?.status || "").toLowerCase();
       if (selectedRackStatus === "in transit") {
-        await returnRack(state.selectedRackCode);
+        await returnRack(selectedCode);
       } else if (selectedRackStatus === "closed") {
-        await uncompleteRack(state.selectedRackCode);
+        await uncompleteRack(selectedCode);
       } else {
-        await completeRack(state.selectedRackCode);
+        await completeRack(selectedCode);
       }
       await ensureRacksLoaded();
       renderScanRackTools();
@@ -15054,12 +19284,14 @@ function wireEvents() {
     }
   });
   els.scanRackPrintBtn?.addEventListener("click", () => {
-    const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackCode);
+    const selectedCode = rackCodeForScan(state.selectedScanRackCode);
+    if (!selectedCode) return;
+    const selectedRack = state.racks.find((rack) => rack.code === selectedCode);
     if (String(selectedRack?.status || "").toLowerCase() === "in transit") {
-      markRackNotOnTheWay(state.selectedRackCode).catch((error) => showInlineError(error.message, true));
+      markRackNotOnTheWay(selectedCode).catch((error) => showInlineError(error.message, true));
       return;
     }
-    printSelectedRackPackingSlip();
+    printSelectedRackPackingSlip(selectedCode);
   });
   els.rackScanForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -15603,6 +19835,11 @@ function wireEvents() {
     submitBayScanOut().catch((error) => showInlineError(error.message, true));
   });
   els.bayManualSubmitBtn?.addEventListener("click", () => submitManualBayScan().catch((error) => showInlineError(error.message, true)));
+  /**
+   * Purpose: Update the update bay scan mode UI workflow using the existing shared UI state.
+   * Effects: May call the backend api, may update shared client state.
+   * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+   */
   const updateBayScanModeUi = () => {
     if (els.bayScanOutInput) els.bayScanOutInput.placeholder = els.bayScanModeToggle?.checked ? "Scan order to add to selected bay..." : "Scan order to remove from bay...";
   };
@@ -15620,6 +19857,16 @@ function wireEvents() {
       event.preventDefault();
       event.stopPropagation();
       openBayEditorPanel(bayEditorOpenButton.dataset.bayEditorOpen || "");
+      return;
+    }
+    const layoutShiftButton = event.target.closest("[data-bay-layout-shift]");
+    if (layoutShiftButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      shiftBaySectionDraft(
+        layoutShiftButton.dataset.bayLayoutSection || "",
+        layoutShiftButton.dataset.bayLayoutShift || "",
+      );
       return;
     }
     const columnButton = event.target.closest("[data-bay-col-action]");
@@ -15745,6 +19992,11 @@ function wireEvents() {
   els.adminModalClose?.addEventListener("click", () => closeAdminModal());
   els.adminModalBackdrop?.addEventListener("click", () => closeAdminModal());
   els.staleBaySnoozeAllBtn?.addEventListener("click", () => {
+    /**
+     * Purpose: Run the IDs workflow for the browser application.
+     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+     */
     const ids = (state.staleBayOrders || []).map((order) => order.assignmentId).filter(Boolean);
     if (!ids.length) return;
     snoozeStaleBayOrders(ids, Number(els.staleBaySnoozeAllDays?.value || 1)).catch((error) => showInlineError(error.message, true));
@@ -15792,33 +20044,50 @@ function wireEvents() {
       event.dataTransfer.effectAllowed = "move";
     });
     container?.addEventListener("dragover", (event) => {
-      const target = event.target.closest("[data-bay-holding-drop], [data-bay-grid-cell], [data-bay-drop-section]");
+      const target = event.target.closest("[data-bay-layout-drop], [data-bay-holding-drop], [data-bay-drop-section]");
       if (!target || !state.bayEditMode || !hasPermission("manage_bay_layout")) return;
       event.preventDefault();
+      container.querySelectorAll(".is-drag-over").forEach((node) => node.classList.remove("is-drag-over"));
+      target.classList.add("is-drag-over");
       if (event.clientY < 90) window.scrollBy({ top: -24, behavior: "auto" });
       if (window.innerHeight - event.clientY < 90) window.scrollBy({ top: 24, behavior: "auto" });
       event.dataTransfer.dropEffect = "move";
     });
+    container?.addEventListener("dragleave", (event) => {
+      const target = event.target.closest("[data-bay-layout-drop], [data-bay-holding-drop], [data-bay-drop-section]");
+      if (target && !target.contains(event.relatedTarget)) target.classList.remove("is-drag-over");
+    });
     container?.addEventListener("drop", (event) => {
-      const target = event.target.closest("[data-bay-holding-drop], [data-bay-grid-cell], [data-bay-drop-section]");
+      const target = event.target.closest("[data-bay-layout-drop], [data-bay-holding-drop], [data-bay-drop-section]");
       if (!target || !state.bayEditMode || !hasPermission("manage_bay_layout")) return;
       event.preventDefault();
+      container.querySelectorAll(".is-drag-over").forEach((node) => node.classList.remove("is-drag-over"));
       const sourceGroup = event.dataTransfer.getData("text/bay-group");
       if (sourceGroup) {
         if (target.dataset.bayHoldingDrop === "true") {
-          moveBaySectionDraft(sourceGroup, 0, 0, true);
+          holdBaySectionDraft(sourceGroup);
           return;
         }
-        if (target.dataset.bayGridCell === "true") {
-          moveBaySectionDraft(sourceGroup, Number(target.dataset.gridRow || 1), Number(target.dataset.gridCol || 1), false);
+        if (target.dataset.bayLayoutDrop === "true") {
+          insertBaySectionDraft(
+            sourceGroup,
+            Number(target.dataset.bayLayoutColumn || 1),
+            Number(target.dataset.bayLayoutIndex || 0),
+          );
           return;
         }
-        swapBayGroups(sourceGroup, target.dataset.bayDropSection || "").catch((error) => showInlineError(error.message, true));
+        const targetSection = target.dataset.bayDropSection || "";
+        const layoutColumns = bayLayoutColumns();
+        const targetColumn = layoutColumns.findIndex((column) => column.some((entry) => entry.section.label === targetSection));
+        const targetIndex = targetColumn >= 0
+          ? layoutColumns[targetColumn].findIndex((entry) => entry.section.label === targetSection)
+          : 0;
+        insertBaySectionDraft(sourceGroup, targetColumn + 1 || 1, Math.max(targetIndex, 0));
         return;
       }
       const bayCode = event.dataTransfer.getData("text/plain");
-      if (target.dataset.bayGridCell === "true" || target.dataset.bayHoldingDrop === "true") {
-        showFloatingNotice("Use the grouped bay header to move bay sets around the edit grid.", "notice");
+      if (target.dataset.bayLayoutDrop === "true" || target.dataset.bayHoldingDrop === "true") {
+        showFloatingNotice("Drag the compact group card to reorder the map. Use Edit Bays to move individual bays between groups.", "notice");
         return;
       }
       const targetBay = event.target.closest("[data-bay-code]");
@@ -16215,6 +20484,7 @@ function wireEvents() {
           state.stations = uniqueText([...(payload.stations || [])]);
           renderStationOptions();
           renderAdminStations();
+          showSaveConfirmation(`Station ${oldName} was renamed to ${input?.value || oldName}.`);
         })
         .catch((error) => showInlineError(error.message));
       return;
@@ -16319,7 +20589,7 @@ function wireEvents() {
       })
         .then(() => {
           if (input) input.value = "";
-          showFloatingNotice(`Password updated for ${username}.`, "success");
+          showSaveConfirmation(`Password updated for ${username}.`);
           return refreshAdminUsersUi();
         })
         .catch((error) => showInlineError(error.message));
@@ -16346,7 +20616,10 @@ function wireEvents() {
           email: emailInput?.value || "",
         }),
       })
-        .then(() => refreshAdminUsersUi())
+        .then(async () => {
+          await refreshAdminUsersUi();
+          showSaveConfirmation(`User settings were saved for ${username}.`);
+        })
         .catch((error) => showInlineError(error.message));
 
       return;
