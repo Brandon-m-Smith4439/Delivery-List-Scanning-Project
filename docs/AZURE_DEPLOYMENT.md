@@ -13,18 +13,22 @@ Use one Azure App Service custom Linux container for both the frontend and backe
 
 ## Current database mode
 
-Version 61 still defaults to local SQLite. No Azure setting is enabled automatically, and the existing SQLite database remains the active source of truth until `DLS_DATABASE_TYPE=azure-sql` is deliberately configured for the Azure deployment.
+Version 71 still defaults to local SQLite. No Azure setting is enabled automatically, and the existing SQLite database remains the active source of truth until `DLS_DATABASE_TYPE=azure-sql` is deliberately configured for the Azure deployment.
 
 The Azure SQL files are readiness tooling only while SQLite is active. Do not run the SQLite and Azure SQL environments as simultaneous writable production systems during the eventual cutover.
 
-## v063 audit and startup note
+## v071 reviewed-baseline, startup, and packaging note
 
-The v061 full sweep added source documentation, regression tests, and connection-lifecycle cleanup; v063 adds local Windows startup diagnostics without activating Azure SQL. The included Azure schema and compatibility adapter remain validated as readiness components; a live Azure SQL deployment still requires the controlled cutover steps in this guide.
+The v061 full sweep added source documentation, regression tests, and connection-lifecycle cleanup; v063 repaired production startup collisions; v070 established the Microsoft Graph transport and maintained launcher behavior; v071 documents the reviewed architecture and does not activate Azure SQL. The included Azure schema and compatibility adapter remain validated as readiness components; a live Azure SQL deployment still requires the controlled cutover steps in this guide.
 
 
-## Route data readiness in v063
+## v071 UI and shared-workflow readiness note
 
-Version 61 keeps the active Customer Route Rules as the primary routing source. The resolved route is stored in `line_items.route`, while the original imported ROUTE value is retained in `line_items.source_route`. This allows a later rule change to reroute existing items without losing the original source value.
+Version 71 adds no schema migration or runtime workflow change. The Microsoft Graph email delivery introduced in v070 reuses the existing outbox and automatic message workflow. The rebuilt header/profile layout, compact Bay scanner command surface, SDI item workspace, strict departed-rack manifest, and date-wide Outbound reconciliation use the existing shared application and store layers. The future Azure SQL backend follows the same business workflow, while SQLite remains active until the deliberate cutover.
+
+## Route data readiness in v070
+
+Version 69 retains the active Customer Route Rules as the primary routing source. The resolved route is stored in `line_items.route`, while the original imported ROUTE value is retained in `line_items.source_route`. This allows a later rule change to reroute existing items without losing the original source value.
 
 The `system_metadata` table stores a route-repair signature. SQLite and Azure SQL run the route-stage reconciliation only when the routing logic version or active customer rules change, rather than scanning all line items during every startup. This table is included in the SQLite-to-Azure migration utility.
 
@@ -62,8 +66,8 @@ From the project folder:
 ```powershell
 az login
 az acr login --name <registry-name>
-docker build -t <registry-name>.azurecr.io/delivery-list-scanner:v063 .
-docker push <registry-name>.azurecr.io/delivery-list-scanner:v063
+docker build -t <registry-name>.azurecr.io/delivery-list-scanner:v071 .
+docker push <registry-name>.azurecr.io/delivery-list-scanner:v071
 ```
 
 Configure the App Service to use that image. The included container listens on `0.0.0.0:8000`. Set `PORT=8000` inside the container and `WEBSITES_PORT=8000` in the App Service environment so App Service routes requests to the correct container port.
@@ -168,7 +172,7 @@ When the Web App is scaled to multiple instances, do not enable the built-in dai
 
 Use an App Service deployment slot:
 
-1. Deploy v063 to a staging slot.
+1. Deploy v071 to a staging slot.
 2. Point the staging slot at a separate test Azure SQL database.
 3. Run functional and scanner testing.
 4. Back up the production SQLite database.
@@ -185,3 +189,24 @@ Use an App Service deployment slot:
 - Monitor `/api/health`.
 - Configure alerts for HTTP 5xx responses, container restarts, Azure SQL connection failures, high database CPU, and storage limits.
 - Never run both SQLite and Azure SQL as active writable production databases at the same time.
+
+## Microsoft Graph email with Azure managed identity
+
+Version 71 retains the Microsoft Graph managed-identity support introduced in v070, allowing Azure App Service email without a stored client secret.
+
+Configure App Service settings:
+
+```text
+DLS_EMAIL_TRANSPORT=graph
+DLS_GRAPH_AUTH_MODE=managed-identity
+DLS_GRAPH_SENDER=BarefootNC.Glass@bldr.com
+DLS_EMAIL_FROM=BarefootNC.Glass@bldr.com
+DLS_EMAIL_TEST_RECIPIENT=brandon.m.smith@bldr.com
+DLS_GRAPH_SAVE_TO_SENT_ITEMS=1
+```
+
+Enable the App Service system-assigned managed identity. A Microsoft 365/Exchange administrator must grant that service principal `Application Mail.Send`, preferably through Exchange Online RBAC scoped to a mail-enabled security group containing only `BarefootNC.Glass@bldr.com`. Do not add a client secret to App Service for this mode.
+
+The runtime requests the Graph token from the App Service `IDENTITY_ENDPOINT` using the rotating `IDENTITY_HEADER` provided by Azure. For a user-assigned identity, also set `DLS_GRAPH_MANAGED_IDENTITY_CLIENT_ID`.
+
+See `docs/MICROSOFT_GRAPH_EMAIL.md` for the complete local test and least-privilege Exchange setup.

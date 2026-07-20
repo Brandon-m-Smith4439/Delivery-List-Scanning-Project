@@ -1,6 +1,931 @@
+# README Changelog
+
+## v095
+- Reduced only the expanded desktop sidebar logo and its outline by 10%, from 120 x 120 to 108 x 108.
+- Kept the collapsed sidebar logo and mobile logo sizes unchanged.
+- Matched the inside of every logo outline to the logo image's sampled dark-blue background color: RGB 4, 43, 84.
+- Preserved the square frame, proportional image rendering, and existing sidebar alignment.
+- Advanced browser cache keys to v095.
+
+## v094
+- Corrected the combined Barefoot and Builders FirstSource logo frames so every displayed version is a true square.
+- Set the sign-in logo frame to 188 x 188.
+- Kept the collapsed sidebar logo frame at 48 x 48.
+- Set the expanded desktop sidebar logo frame to 120 x 120.
+- Set the mobile sidebar logo frame to 158 x 158.
+- Kept `object-fit: contain` so the supplied logo remains proportional inside each square frame.
+- Advanced browser cache keys to v094.
+
+## v093
+- Removed the `object-fit: cover` logo rule that was stretching the combined logo into the outline.
+- Restored proportional `object-fit: contain` rendering for the sign-in, collapsed-sidebar, expanded-sidebar, and mobile logos.
+- Kept the existing displayed logo heights while allowing each image width to follow its natural aspect ratio.
+- Adjusted the subtle border, outline, and shadow to follow the actual rendered image rectangle rather than a wider forced frame.
+- Preserved the v092 sound volume controls and scan-sound behavior unchanged.
+- Advanced browser cache keys to v093.
+
+## v092
+- Tight-cropped the supplied combined Barefoot + Builders FirstSource logo so the rounded frame hugs the visible branding instead of surrounding large internal margins.
+- Kept the rounded corners, subtle outline, and soft shadow for collapsed, expanded, mobile, and sign-in logo presentations.
+- Added a persistent scanner-sound volume slider to the temporary Scan and Bay Map sound-test panels.
+- Added a 0-400% floor-volume range with a 200% default for louder production-floor feedback.
+- Added a shared Web Audio master-gain and compressor chain so success, notice, error, and 100% completion sounds all follow one volume setting.
+- Synchronized every visible volume slider and stored the selected setting in browser local storage.
+- Advanced browser cache keys to v092.
+
+## v091
+- Added rounded corners to the supplied Barefoot + Builders FirstSource logo in the sign-in screen and sidebar.
+- Added a subtle light outline and soft shadow so the logo stands out slightly against the dark navigation background.
+- Replaced the collapsed Barefoot-only sidebar image with the same combined Barefoot + Builders FirstSource logo used in the expanded sidebar.
+- Kept the existing collapsed/expanded dimensions and sidebar navigation alignment unchanged.
+- Advanced browser cache keys to v091.
+
+## v090
+- Replaced the existing combined Barefoot and Builders FirstSource brand image with the newly supplied logo.
+- Kept the existing webapp asset filename so the sign-in screen, expanded desktop sidebar, and mobile drawer all use the new logo without duplicating brand logic.
+- Preserved the collapsed sidebar's compact Barefoot icon so navigation remains readable at rail width.
+- Advanced browser cache keys to v090.
+
+## v089
+- Combined the existing Barefoot & Company logo with the attached Builders FirstSource logo in a new stacked brand asset.
+- Preserved the supplied Builders FirstSource red side lines, red square/white 1 mark, and dark blue text.
+- Added `barefoot-builders-firstsource-logo.png` as the maintained combined logo asset.
+- Updated the sign-in panel to use the combined Barefoot and Builders FirstSource logo.
+- Updated the expanded desktop sidebar to crossfade from the compact Barefoot-only mark to the combined logo without changing the fixed sidebar brand-row height or moving the page selectors.
+- Updated the mobile navigation drawer to use the combined logo.
+- Kept the collapsed desktop sidebar on the smaller Barefoot-only mark because the Builders FirstSource text is not readable at icon size.
+- Advanced browser cache keys to v089.
+
+## v088
+- Increased the normal Scan-page Recent Scans history from one row to two rows while retaining five rows in fullscreen.
+- Restyled the global search input as a defined rectangular box with rounded corners, a visible border, and a subtle shadow while keeping the outer search wrapper removed.
+- Added one shared Web Audio sound engine with synthesized cues so the project does not require packaged sound files.
+- Added a bright ascending success cue for accepted scans.
+- Added a distinct lower error cue for blocked or failed scans.
+- Added a separate notice cue for duplicate, override, and other non-error scan outcomes.
+- Added a fun completion arpeggio when the Scan-page stage progress transitions to 100%.
+- Added the same completion cue when the Indian Trail Bay Map / In-Transit route progress transitions to fully Outbound and fully Received.
+- Prevented initial loading of an already completed list from falsely triggering the completion sound by tracking progress per active list.
+- Added temporary shared sound-test controls to the Scan and Bay Map scanner panels, plus an In-Transit 100% test button. These controls are intentionally marked for later removal after floor approval.
+- Added static and browser-rendered tests for the two-row history, rounded search field, sound engine, completion wiring, and temporary test controls.
+- Advanced browser cache keys to v088.
+
+## v087
+- Increased the expanded desktop sidebar logo by approximately 25%, from 74 x 74 to 93 x 93.
+- Kept the collapsed sidebar logo at 48 x 48.
+- Added `--app-sidebar-logo-expanded-size` as the single documented CSS setting for future logo-size adjustments.
+- Updated both the base and final desktop ownership rules to use the shared logo-size variable, preventing later CSS overrides from using a different size.
+- Preserved the fixed 126px brand section so page selector buttons and icons remain aligned between collapsed and expanded states.
+- Advanced browser cache keys to v087.
+
+## v086
+- Reduced the expanded Barefoot sidebar logo by 65%, from 210 x 210 to 74 x 74.
+- Kept the collapsed sidebar logo at 48 x 48.
+- Reduced the fixed desktop sidebar brand section from 280px to 126px.
+- Moved Home, Scan, Racks, Bay Map, and Admin upward in both collapsed and expanded states.
+- Kept one identical fixed brand-section height in both states so every selector and icon remains vertically aligned during hover expansion.
+- Advanced browser cache keys to v086.
+
+## v085
+- Fixed the expanded Barefoot logo being reduced by a later responsive sidebar rule.
+- Added a final sidebar-specific logo ownership block so the expanded desktop logo renders up to 210 x 210.
+- Kept the collapsed sidebar logo at 48 x 48.
+- Made the top sidebar brand section a fixed 280px height in both collapsed and expanded states.
+- Removed the hover-only brand-section height change that pushed Home, Scan, Racks, Bay Map, and Admin downward during expansion.
+- Kept every page selector and icon at the same vertical position before, during, and after sidebar hover expansion.
+- Added an explicit large-logo rule for the responsive mobile drawer as well.
+- Advanced browser cache keys to v085.
+
+## v084
+- Reverted the collapsed sidebar Barefoot logo back to the smaller size so the rail stays clean when not hovered.
+- Reduced the collapsed sidebar logo from 72 x 72 back to 48 x 48.
+- Kept the large hover-only expanded brand presentation for the sidebar.
+- Tuned the expanded sidebar logo to 210 x 210 so it fills about 75% of the expanded top brand section.
+- Set the expanded sidebar top brand section height to 280px so the larger logo sits centered and proportionate.
+- Advanced browser cache keys to v084.
+
+## v083
+- Removed the outer global-search container chrome so the centered search bar and Search button sit cleanly in the header without the larger wrapper box.
+- Reduced the header global-search width from 640px to 560px for a cleaner centered layout.
+- Increased the sidebar Barefoot logo by 50% in both collapsed and expanded states.
+- Increased the collapsed sidebar logo size from 48 x 48 to 72 x 72.
+- Increased the expanded sidebar logo size from 176 x 176 to 264 x 264.
+- Added a hover-only larger sidebar logo area so the expanded logo stays centered without wasting space when collapsed.
+- Advanced browser cache keys to v083.
+
+## v082
+- Restored the operations sidebar on the Scan page.
+- Kept the sidebar collapsed by default and hover-expandable, matching Home, Racks, Bay Map, and Admin.
+- Preserved the sign-in-screen behavior that hides the entire application shell until authentication succeeds.
+- Retained the centered smaller global search bar and simplified Today’s Delivery Progress design from v081.
+- Advanced browser cache keys to v082.
+- Updated static and browser-rendered checks so the Scan page is protected as a sidebar-enabled workspace.
+
+## v081
+- Removed the operations sidebar from the Scan page so scanning uses the full available workstation width.
+- Hid the entire application shell while the sign-in screen is active, preventing the sidebar from appearing behind the login interface.
+- Centered the global search area in the utility header and reduced its desktop width to a maximum of 640 pixels.
+- Added a narrower 430-pixel search treatment for medium desktop widths while preserving the responsive compact layout.
+- Rebuilt Today's Delivery Progress with the date as the large upper-left focal point.
+- Removed the extra Daily Operations label, explanatory sentence, Completion label, remaining-piece copy, and Open List text.
+- Kept each stage card focused on the full stage name, scanned/total piece count, progress bar, and completion percentage.
+- Allowed long stage names such as Outbound and Delivery to Customer to wrap without truncation or ellipsis.
+- Advanced browser cache keys to v081.
+- Added static and browser-rendered regression checks for login-shell hiding, Scan-page sidebar removal, centered search geometry, large date treatment, and fully visible stage labels.
+
+## v080
+- Increased the sidebar Barefoot logo size by roughly 30% for improved visibility.
+- Enlarged the collapsed sidebar logo from 48 x 48 to 62 x 62.
+- Enlarged the expanded sidebar logo from 136 x 136 to 176 x 176.
+- Increased the sidebar logo area height so the larger brand mark stays centered cleanly.
+- Advanced browser cache keys to v080.
+
+## v079
+- Cropped the Barefoot sidebar logo by 1 pixel on every edge, changing it from 200 x 200 to 198 x 198.
+- Added `barefoot-logo-sidebar.png` as the new cropped sidebar logo file.
+- Updated the sidebar brand image to use the new 198 x 198 cropped logo.
+- Kept the login logo unchanged.
+- Advanced browser cache keys to v079.
+
+## v078
+- Centered the provided Barefoot logo within the expanded sidebar.
+- Kept the sidebar brand area at one fixed height in both collapsed and expanded states.
+- Removed the vertical navigation shift that occurred when hovering over a collapsed page icon.
+- Preserved identical button height, spacing, and vertical coordinates while labels reveal beside the icons.
+- Removed the small horizontal button translation on hover so the active pointer target stays stable.
+- Advanced browser cache keys to v078.
+
+## v077
+- Restored the Barefoot logo using the provided logo image and replaced the sidebar/login synthetic SVG mark.
+- Reverted the favicon reference back to the original website icon path (`assets/delivery-list-scanner-icon.ico`).
+- Forced the desktop sidebar to remain collapsed by default on every page and expand only while hovered.
+- Ensured the expanded sidebar overlays the page instead of shifting the workspace.
+- Centered collapsed navigation icons vertically within each page selector.
+- Simplified the collapsed profile area so only the avatar shows in the bottom-left; full profile content appears only while expanded.
+- Added automatic profile-menu close behavior when the pointer leaves the desktop sidebar.
+
 # Delivery List Scanner - Ongoing Changelog
 
 This is the single maintained changelog for the project. New versions are added at the top. The retained history available in the current project begins with the v037-v039 work and continues through the current release. Earlier version details were not present in the supplied project history and are not reconstructed or guessed here.
+
+---
+
+# Delivery List Scanner - v076 Sidebar Interaction Polish
+
+Date: 2026-07-16
+
+## Hover interaction refinement
+
+- Added a short delayed collapse so the sidebar does not snap closed when the pointer briefly leaves the rail.
+- Smoothed desktop expansion with a coordinated width, padding, shadow, and edge-highlight transition.
+- Kept the main header and workspace fixed while the expanded sidebar floats above them.
+- Added a restrained illuminated edge and deeper overlay shadow only while the sidebar is expanded.
+
+## Logo, labels, and profile motion
+
+- Refined the collapsed Barefoot mark to emphasize the building icon instead of shrinking the full wordmark into an unreadable thumbnail.
+- Animated the full Barefoot wordmark and company line into view after the sidebar begins expanding.
+- Replaced abrupt navigation-label display changes with opacity, width, and position transitions.
+- Applied the same progressive reveal to the bottom-left profile name, role/station copy, chevron, and backend status.
+- Kept the profile flyout usable while the sidebar or its descendants have focus.
+
+## Fullscreen and mobile safeguards
+
+- Verified the hover-preview rail expands while the application is in actual browser fullscreen mode.
+- Added explicit mobile overrides so hover rules cannot narrow the responsive drawer on pointer-capable tablets.
+- Preserved full logo, navigation labels, profile details, close control, and backdrop behavior in the mobile drawer.
+
+## Validation and packaging
+
+- Advanced browser cache keys to v076.
+- Updated static shell contracts and the maintained browser visual smoke test for hover-overlay behavior.
+- Passed 21 static-integrity checks and the browser-rendered visual smoke test.
+- Returned the complete release without an `assets` folder, active database, secrets, caches, compiled files, diffs, or backups.
+
+## Files edited
+
+- `index.html`
+- `styles.css`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `docs/CODE_REFERENCE.md`
+- `tests/test_static_integrity.py`
+- `tests/test_visual_smoke.py`
+
+---
+
+# Delivery List Scanner - v075 Hover Preview Sidebar and Transparent Branding
+
+Date: 2026-07-16
+
+## Desktop sidebar behavior
+
+- Changed the desktop navigation from a manually expanded/collapsed sidebar to a professional hover-preview rail.
+- The sidebar now stays collapsed by default on desktop workstations and expands automatically only while hovered or focused.
+- Kept the page content fixed so the expanded sidebar floats over the interface instead of pushing the header or main workspace sideways.
+- Preserved the profile section at the bottom-left of the navigation rail and kept its detail flyout available from the sidebar.
+- Simplified the desktop sidebar state so fullscreen and normal desktop mode share the same compact default behavior.
+
+## Fullscreen and mobile behavior
+
+- Reworked the shell synchronization helpers so fullscreen no longer blocks access to the sidebar; operators can hover the left rail and expand it while fullscreen is active.
+- Kept the responsive under-960px mobile drawer workflow with the existing menu button, scrim dismissal, and close control.
+- Limited the inner sidebar close button to mobile usage so desktop navigation stays clean and hover-driven.
+
+## Barefoot logo refresh
+
+- Replaced the packaged external Barefoot logo image dependency with a self-contained inline SVG brand mark.
+- Removed the white logo tile treatment so the branding now renders on a transparent background in both the login panel and the sidebar.
+- Embedded a matching SVG favicon so the release remains self-contained without an `assets` folder.
+
+## Packaging and code maintenance
+
+- Advanced browser cache keys to v075.
+- Kept the release free of an `assets` folder while preserving the existing workflows, data, and Microsoft Graph email behavior.
+- Updated the maintained README summary to document the hover-preview shell behavior and transparent branding approach.
+
+## Files edited
+
+- `index.html`
+- `app.js`
+- `styles.css`
+- `README.md`
+- `README_CHANGELOG.md`
+
+---
+
+# Delivery List Scanner - v074 Collapsible Operations Sidebar
+
+Date: 2026-07-16
+
+## Application navigation shell
+
+- Moved Home, Scan, Racks, Bay Map, and Admin out of the crowded header and into one fixed left operations sidebar.
+- Preserved the existing `data-page-target` navigation workflow and permission visibility rules instead of creating a second routing system.
+- Added a clear active-page treatment, larger page icons/text, stable vertical spacing, and browser tooltips while the sidebar is compact.
+- Reduced the utility header to the global search plus Print/Export, language, refresh, and fullscreen actions.
+- Kept the global search wide and retained the established 16-pixel input and 15-pixel Search-button text.
+
+## Collapsed, fullscreen, and responsive behavior
+
+- Added expanded and collapsed desktop states using one maintained application-shell owner.
+- Added page-aware first-run defaults: Bay Map uses the compact rail by default, while Home, Scan, Racks, and Admin remain expanded.
+- Once an operator explicitly expands or collapses the sidebar, that preference is saved in browser storage and reused across pages and restarts.
+- Fullscreen automatically uses the compact rail without overwriting the saved desktop preference.
+- Added a mobile/tablet overlay drawer below 960 pixels with a menu button, backdrop dismissal, Escape-key dismissal, and automatic closure after page navigation.
+- Preserved the prior sidebar state when leaving mobile layout or exiting fullscreen.
+
+## Profile and account controls
+
+- Moved the signed-in profile from the upper-right header to the bottom-left of the sidebar.
+- Kept display name, role, assigned station, account identity, and Sign out in the existing shared account workflow.
+- Added a compact avatar-only profile state when the desktop sidebar is collapsed.
+- Positioned the account details panel beside the desktop sidebar and above the profile control inside the mobile drawer.
+- Scoped legacy account-menu resets so older header-specific CSS cannot make the sidebar identity unreadable.
+
+## Code maintenance and validation
+
+- Removed the superseded repeated header ownership block while introducing the single v074 application-shell section.
+- Added documented sidebar state helpers for responsive detection, default resolution, persistence, desktop toggling, and mobile drawer toggling.
+- Advanced browser cache keys to v074.
+- Added static contracts and browser-rendered checks for profile placement, sidebar collapse/expand, Bay Map compact default, responsive drawer behavior, Spanish labels, and non-overlapping utility controls.
+- Kept scanning, filtering, rack, bay, SDI/Rush/Remake, printing, database, authentication, and Microsoft Graph business logic unchanged.
+
+## Files edited
+
+- `index.html`
+- `app.js`
+- `styles.css`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `docs/CODE_REFERENCE.md`
+- `tests/test_static_integrity.py`
+- `tests/test_visual_smoke.py`
+
+---
+
+# Delivery List Scanner - v073 Priority Queue and Dashboard Repair
+
+Date: 2026-07-16
+
+## Rush / Remake Current Priority Work
+
+- Traced the unreadable priority queue to a stale v072 shell/cache-key package mismatch: the release contained newer JavaScript and CSS while `index.html` still referenced v071 browser assets and omitted several v072 markup anchors.
+- Advanced both browser asset cache keys to v073 so the browser is forced to load the maintained JavaScript and CSS together.
+- Restored the missing Bay recent-scan count label, user-account identity field, and multi-filter help markup expected by the maintained v072 code.
+- Strengthened the SDI priority-card ownership selectors so older generic modal/button rules cannot collapse the job cards into separator lines.
+- Preserved real collapsed-group behavior by explicitly keeping hidden item panels hidden.
+- Verified a 30-job priority queue renders readable job, customer, Rush/Remake, date, item-count, and expand/collapse information.
+
+## Header search and scrollbar
+
+- Increased the global search surface beyond the previous 760-pixel legacy cap.
+- Increased the global search input text to 16 pixels and restored the Search button text to 15 pixels.
+- Increased the maintained vertical scrollbar from 11 pixels to 15 pixels with a larger minimum thumb.
+
+## Today's Delivery Progress
+
+- Rebuilt the Today progress panel with a clearer operations heading, date badge, stronger surface treatment, and stage-specific accent colors.
+- Reworked each stage card to show scanned/total pieces, completion percentage, progress, remaining pieces, and a persistent Open List action.
+- Added keyboard activation for the focusable Today stage cards.
+
+## Packaging and validation
+
+- Advanced the complete release to v073.
+- Kept the release free of an `assets` folder, active database, Graph secrets, caches, compiled files, diffs, and backups.
+- Updated maintained tests to protect the v073 cache keys, restored markup anchors, wider search, larger scrollbar, Today progress components, and SDI priority-card geometry.
+- Updated the maintained validation runner to exit each isolated pytest process immediately after pytest returns, preventing passing modules from lingering during interpreter shutdown.
+
+## Files edited
+
+- `index.html`
+- `app.js`
+- `styles.css`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/FOLDER_CLEANUP_GUIDE.md`
+- `docs/TEST_REPORT.md`
+- `docs/CODE_REFERENCE.md`
+- `tests/test_static_integrity.py`
+- `tests/test_visual_smoke.py`
+- `tools/run_full_validation.py`
+
+---
+
+# Delivery List Scanner - v072 Scan Workflow and Interface Polish
+
+Date: 2026-07-16
+
+## Scan-page filters
+
+- Replaced the single-active-filter behavior with one maintained multi-filter workflow.
+- Filters now use OR logic within the same category and AND logic between Status, Attention, and Route categories.
+- `All` clears every active filter, while desktop and mobile filter controls stay synchronized through shared state and `aria-pressed` values.
+- Existing text search and glass-type filtering continue to apply after the selected status/attention/route filters.
+
+## Compact scan history
+
+- Reduced the normal Scan-page Recent Scans list from two rows to one row.
+- Reduced the normal Bay Map scanner Recent Scans list from two rows to one row.
+- Preserved the denser fullscreen history: five rows on the main Scan page and two rows in the Bay Map scanner.
+- Updated the visible count labels so normal mode reports `Latest 1` and fullscreen mode reports the expanded count.
+
+## SDI Rush / Remake priority workspace
+
+- Rebuilt the Current Priority Work cards for stronger contrast, clearer job/customer/date/count hierarchy, and readable item-level actions.
+- Current groups now sort by earliest required priority date first; undated work remains visible after dated work.
+- The first group opens when fresh workspace data loads, but users can now collapse it without the interface immediately reopening it.
+- Stale expanded-group state is removed safely when the workspace changes.
+- Added behavioral coverage confirming earlier Rush/Remake dates appear ahead of later priority work.
+
+## Header and application polish
+
+- Increased the header page-selector font size and button footprint while retaining responsive reductions at narrower widths.
+- Enlarged the global search field and search button.
+- Expanded and restyled the top-right profile card with a larger avatar, assigned station, role, and account identity in the dropdown.
+- Added a maintained custom vertical scrollbar treatment for the app shell and major scrollable panels.
+- Removed the Bay scanner Add/Remove selector jump by neutralizing the inherited label transform and using a simple border/background/shadow hover.
+
+## Packaging and version maintenance
+
+- Advanced the release and browser cache keys from v071 to v072.
+- Confirmed the returned release ZIP does not require or include an `assets` folder, per the maintained deployment decision.
+- Continued excluding the active `data` folder, protected Graph secrets, caches, compiled files, diffs, and temporary test artifacts.
+
+## Validation
+
+- JavaScript syntax passed.
+- Python compilation passed.
+- CSS parsing passed with no syntax errors.
+- Targeted source/backend tests passed.
+- Browser-rendered interaction and visual smoke coverage passed, including multi-filter logic, compact histories, profile layout, SDI expansion, and stable Bay selector hover.
+- Verified **65 passed and 1 optional Azure SQL translation test skipped** across isolated maintained test-module runs.
+- Updated the validation runner to isolate test modules and retry one environment timeout without masking real assertion failures.
+
+## Files edited
+
+- `index.html`
+- `app.js`
+- `styles.css`
+- `delivery_store.py`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/PROJECT_REVIEW.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `docs/AZURE_DEPLOYMENT.md`
+- `docs/FOLDER_CLEANUP_GUIDE.md`
+- `docs/CODE_REFERENCE.md`
+- `tests/test_static_integrity.py`
+- `tests/test_extended_workflows.py`
+- `tests/test_visual_smoke.py`
+- `tools/run_full_validation.py`
+
+---
+
+# Delivery List Scanner - v071 Project Review and Maintained Baseline
+
+Date: 2026-07-16
+
+## Review scope
+
+- Reviewed the complete supplied v070 project before beginning additional feature work.
+- Confirmed the browser, HTTP, business-rule, SQLite, Azure-readiness, startup, printing, and Microsoft Graph ownership boundaries.
+- Added `docs/PROJECT_REVIEW.md` as the maintained architecture, risk, duplication, packaging, and future-editing baseline.
+- No scan, import, rack, bay, SDI, Rush/Remake, print/export, authentication, report, database, or email behavior was intentionally changed.
+
+## Code integrity and duplication review
+
+- Confirmed no duplicate Python class methods, top-level JavaScript functions, HTTP route checks, or HTML IDs.
+- Confirmed frontend API paths resolve to maintained server routes.
+- Documented the large/high-risk store and server functions that require targeted regression tests before refactoring.
+- Identified CSS override accumulation as the main current duplication concern: repeated selectors include both intentional revision layers and a small set of exact duplicate declarations.
+- Deferred broad CSS consolidation because the current interface is working and source-order changes could cause visual regressions.
+
+## Microsoft Graph review
+
+- Confirmed Graph uses the existing email outbox and automatic manifest/ready-notice workflows rather than a parallel queue.
+- Confirmed client-secret and managed-identity authentication, in-memory token caching, one 401 refresh retry, Sent Items support, SMTP fallback, and Draft mode remain intact.
+- Confirmed browser-facing settings expose readiness booleans without returning the client secret.
+- No live BLDR email was sent because tenant credentials and administrator authorization were not available in the review environment.
+
+## Version and packaging maintenance
+
+- Advanced the maintained release and browser asset cache keys from v070 to v071.
+- Updated current README, testing, test-report, Azure deployment, and cleanup documentation.
+- Preserved the supplied release structure without adding a database, protected Graph configuration, missing visual assets, caches, compiled files, diffs, or backup files.
+
+## Validation
+
+- JavaScript syntax passed.
+- Python compilation passed.
+- CSS parsing and HTML ID integrity passed.
+- Browser-rendered visual smoke coverage passed.
+- Full pytest result in this environment: **63 passed, 1 skipped**.
+- The skipped test requires the optional Azure SQL translation dependency `sqlglot`, which is listed in `requirements.txt` and is not required for local SQLite operation.
+
+## Files added or edited
+
+- `index.html`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/PROJECT_REVIEW.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `docs/AZURE_DEPLOYMENT.md`
+- `docs/FOLDER_CLEANUP_GUIDE.md`
+- `docs/CODE_REFERENCE.md`
+- `tests/test_static_integrity.py`
+
+---
+
+# Delivery List Scanner - v070 Microsoft Graph Email Integration
+
+Date: 2026-07-16
+
+## Microsoft Graph transport
+
+- Added app-only Microsoft Graph email delivery to the existing customer-email outbox and automatic manifest/ready-notice workflow.
+- Sends as `BarefootNC.Glass@bldr.com` through the Graph `/users/{sender}/sendMail` endpoint.
+- Preserves SMTP as an optional fallback and Draft mode when no transport is configured.
+- Added in-memory token caching, one authorization refresh retry, Sent Items support, and sanitized Graph error reporting.
+- Added local client-secret authentication and Azure App Service managed-identity authentication without adding a second email queue or API.
+
+## Secure local Windows setup
+
+- Added `Configure-MicrosoftGraphEmail.bat` and `Configure-MicrosoftGraphEmail.ps1`.
+- The setup utility defaults the sender to `BarefootNC.Glass@bldr.com` and the test recipient to `brandon.m.smith@bldr.com`.
+- The app-registration client secret is protected with Windows DPAPI and stored under `data\secrets`; it is never written in plain text.
+- The normal launcher decrypts the secret only in memory for the current Windows account and passes it to the Python child process.
+
+## Admin email interface
+
+- Reworked the existing SMTP-only readiness panel into one Email Delivery panel.
+- Displays Microsoft Graph/SMTP/Draft status, sender, authentication mode, client-ID readiness, and Sent Items behavior without exposing credentials.
+- Prepopulates the controlled test recipient and reports which transport sent the test.
+- Retains the existing customer rules, global CC rules, outbox, manifest drafts, and ready-notice automation.
+
+## Azure readiness
+
+- Added managed-identity Graph configuration to `.env.azure.example`.
+- Added a maintained Microsoft Graph setup and Exchange Online RBAC guide.
+- Azure App Service can use its system-assigned identity with no client secret after the future cutover.
+
+## Database and deployment status
+
+- SQLite remains the active/default backend.
+- No schema migration is required.
+- No live email was sent during packaging because the BLDR tenant ID, client ID, secret, and administrator consent were not available in the build environment.
+
+## Files added or edited
+
+- `delivery_store.py`
+- `app.js`
+- `index.html`
+- `Start-DeliveryScannerWebApp.ps1`
+- `Configure-MicrosoftGraphEmail.bat`
+- `Configure-MicrosoftGraphEmail.ps1`
+- `.env.azure.example`
+- `.dockerignore`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/MICROSOFT_GRAPH_EMAIL.md`
+- `docs/AZURE_DEPLOYMENT.md`
+- `docs/FOLDER_CLEANUP_GUIDE.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `tests/test_graph_email.py`
+- `tests/test_static_integrity.py`
+
+---
+
+# Delivery List Scanner - v069 Header, SDI, Bay Scanner, Transit, and Page Polish
+
+Date: 2026-07-16
+
+## Header and profile redesign
+
+- Removed the redundant **Glass Delivery Scanner / Plant Operations** copy from the application header; the Barefoot logo now owns the brand area.
+- Enlarged the five page-selection buttons and labels and aligned the navigation workspace farther left.
+- Expanded the profile summary into a fuller identity card with larger initials, name, role, and a clear dropdown indicator.
+- Added one explicit profile-menu toggle handler so the entire painted profile card reliably opens and closes the existing Sign out menu.
+- Preserved Print/Export directly before the language control in both English and Spanish.
+- Added Spanish translations for the rebuilt Bay scanner and Rush/Remake workspace labels.
+
+## Scan-page progress layout
+
+- Moved the quantity/percentage text beneath the progress bar.
+- Expanded the progress track across the complete scanner-header width.
+- Kept the stage title centered and preserved the existing contained shimmer and completion animation.
+- Standardized the same geometry across Staging, Outbound, Indian Trail, Greenville, CPU, and DTC.
+
+## Bay scanner command consolidation
+
+- Moved the sticky Bay scanner slightly closer to the Bay Map controls.
+- Combined Add/Remove direction and Target Bay into one compact command surface.
+- Kept the target field, Clear action, scanner input, Undo/Redo, manual scan, and history on the existing workflow.
+- Reduced unnecessary vertical spacing without hiding operational controls or adding internal scrolling.
+
+## Rush / Remake SDI workspace rebuild
+
+- Reorganized the modal into a three-step workflow: find the job/piece, choose exact glass items, then configure handling.
+- Placed exact item selection and Rush/Remake options side by side on workstation screens.
+- Added a live selected-item/missing-item summary and disabled unsafe actions until the required selections are valid.
+- Corrected inherited label/grid rules that caused oversized checkboxes, striped empty areas, overlapping controls, and misplaced action fields.
+- Preserved predictive Job Nr./SO/Order lookup, Bay Code filtering, exact-item Remake handling, individual clearing, priority dates, and direct-to-truck rules.
+
+## Pieces on the Way physical rack rules
+
+- The In-Transit Manifest and Bay Map rack list now include only racks/trucks whose barcode was actually scanned Outbound.
+- A transportation method must be active, have **In Transit** status, and have a departure timestamp before its pieces or rack appear on the way.
+- Merely assigning glass to a rack no longer makes it appear in transit.
+- Duplicate active rack assignments for the same physical item/rack use the largest assigned quantity rather than inflating totals.
+
+## Today’s Outbound quantity correction
+
+- Replaced the single-Indian-Trail-list assumption with aggregation across every active Indian Trail list for the requested delivery date.
+- Physical items are deduplicated by normalized Order Nr./Item Nr. across updated or split list copies.
+- Outbound counts now use the highest scan quantity across every active Outbound copy, departed rack quantity, and the downstream Indian Trail received quantity.
+- Received items therefore cannot disappear from Outbound totals, including the reported six-piece production case.
+- The frontend now prioritizes the date-specific backend summary instead of a potentially incomplete first list in the client list array.
+
+## Scan, Racks, and Admin page polish
+
+- Applied the same layered background, framed page headings, rounded operational cards, borders, and soft shadows used by the Home and Bay Map pages.
+- Preserved all existing table, scanner, rack, import, user, route-rule, and administration workflows.
+
+## Database and deployment status
+
+- SQLite remains the active/default backend.
+- No schema migration or new API endpoint is required.
+- Azure SQL remains opt-in and inherits the date-wide physical-item aggregation.
+
+## Validation
+
+- Full maintained validation: **58 tests passed with no skips**.
+- Browser-rendered checks verify the complete profile click target, larger navigation, full-width progress track, compact Bay target command, rebuilt SDI modal, Spanish header containment, and polished page surfaces.
+- SQLite regressions verify that a merely assigned rack is excluded from Pieces on the Way, an Outbound-scanned rack appears correctly, and six received pieces in a second active Indian Trail list increase both Received and Outbound totals.
+
+## Files edited
+
+- `app.js`
+- `styles.css`
+- `delivery_store.py`
+- `server.py`
+- `index.html`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/AZURE_DEPLOYMENT.md`
+- `docs/CODE_REFERENCE.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `tests/test_static_integrity.py`
+- `tests/test_store_workflows.py`
+- `tests/test_visual_smoke.py`
+
+---
+
+# Delivery List Scanner - v068 Header Redesign, Contained Progress Motion, and Outbound Reconciliation
+
+Date: 2026-07-16
+
+## Scan-page progress cleanup
+
+- Removed the temporary administrator progress-animation test button and its JavaScript/CSS state.
+- Recentered the stage title across the full scanner header.
+- Clipped the idle shimmer, moving gradient, and completion sparkle to the progress-track boundary.
+- Removed the header-wide completion pulse that could make the entire scanning panel appear to shimmer.
+- Preserved smooth quantity changes, idle motion, completion feedback, consistent sizing, and reduced-motion support.
+
+## Shared Bay Map route progress
+
+- Reused the existing mirrored Outbound/Received progress component inside the large In-Transit center card.
+- The compact Bay scanner and the main route card now calculate and display the same independent percentages.
+- Both meters fill toward the center and use the same one-time completion celebration.
+- The existing truck animation, pieces-in-transit quantity, rack summary, and manifest button remain intact.
+
+## Indian Trail Outbound quantity reconciliation
+
+- Replaced the single-Outbound-list assumption with aggregation across every active Outbound list for the active Indian Trail delivery date.
+- Matching continues to prefer the shared source ID and falls back to normalized Order Nr./Item Nr. for legacy rows.
+- Duplicate stage copies use the maximum scanned quantity per physical item instead of being summed.
+- A quantity already received at Indian Trail is treated as physically sent, so the Outbound side can never display behind the Received side.
+- This corrects the production case where received pieces were visible at Indian Trail but six of them were absent from the Bay Map Outbound count.
+
+## Complete application-header redesign
+
+- Rebuilt the header as three owned zones: brand, navigation/search workspace, and command center.
+- Added a polished grouped navigation rail with clearer active, hover, and keyboard-focus states.
+- Added a framed global-search workspace with a dedicated Search action.
+- Grouped Print/Export, language, refresh, fullscreen, and profile into one consistent command area.
+- Print/Export remains immediately left of the language control.
+- English and Spanish use the same geometry; translated labels no longer trigger separate ad-hoc header layouts.
+- Wide screens use one row, common workstations use a deliberate command row plus navigation/search row, and narrow screens stack predictably.
+- Preserved the full profile click target and existing Sign out dropdown behavior.
+
+## Database and deployment status
+
+- SQLite remains the active/default backend.
+- No schema migration or new API endpoint is required.
+- Azure SQL remains opt-in and inherits the shared Outbound reconciliation logic.
+
+## Validation
+
+- Full maintained validation: **55 tests passed with no skips**.
+- Browser-rendered checks verify the redesigned English/Spanish header, centered scanner title, track-confined shimmer, removal of the debug control, and both mirrored route meters.
+- SQLite regression testing verifies split active Outbound lists are aggregated and that Indian Trail Received quantities cannot exceed the displayed Outbound quantity.
+
+## Files edited
+
+- `app.js`
+- `styles.css`
+- `delivery_store.py`
+- `index.html`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/AZURE_DEPLOYMENT.md`
+- `docs/CODE_REFERENCE.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `tests/test_static_integrity.py`
+- `tests/test_store_workflows.py`
+- `tests/test_visual_smoke.py`
+
+---
+
+# Delivery List Scanner - v067 Animated Progress, Live Bay Counts, and Header Alignment
+
+Date: 2026-07-16
+
+## Scan-page progress experience
+
+- Standardized the progress summary across every stage as `Qty: scanned/total · percentage`.
+- Removed the stage-specific verb from the quantity row; the stage name remains in the larger scanner title.
+- Fixed the label area and progress track dimensions so changing between Staging, Outbound, Indian Trail, Greenville, CPU, and DTC does not resize the meter.
+- Added a smooth eased fill, continuously moving color gradient, and subtle idle light sweep so the scanning workflow feels responsive even between scans.
+- Added a short sparkle/header celebration when a stage newly reaches 100 percent.
+- Added reduced-motion support for users who disable animation at the operating-system/browser level.
+- Added a temporary administrator-only **Test** button in the scanner title that previews the complete animation without changing scan data.
+
+## Mirrored Bay Map route meter
+
+- Added one dual-sided progress meter to the existing Bay Map scanner route summary.
+- Outbound fills from the left toward the center; Received fills from the right toward the center.
+- Both sides retain their own quantities and percentages.
+- When both stages newly reach 100 percent, the fills meet in the center and trigger a brief celebration.
+- Completion animation state is tracked so the 12-second refresh does not replay the celebration repeatedly.
+- The existing pieces-in-transit pill remains clickable and continues opening the existing In-Transit Manifest.
+
+## Bay Map Outbound count correction
+
+- Replaced the fragile Order Nr./Item Nr.-only Outbound summary join with shared `source_id` matching and a legacy fallback.
+- Sent quantities are capped to the corresponding Indian Trail destination quantity, preventing duplicate rows from inflating the route count.
+- Updated the in-transit matching path to prefer the same shared source identity.
+- Extended the existing polling loop so Bay Map route counts refresh every 12 seconds while visible, allowing Outbound scans from another workstation to appear without manually reopening the page.
+
+## English and Spanish header alignment
+
+- Moved Print/Export immediately left of the language button in both languages.
+- Anchored Print/Export, language, refresh, fullscreen, and profile controls as one deliberate upper-right action cluster.
+- Wide screens match the supplied reference layout; narrower workstations use a controlled second row rather than translated labels pushing controls out of place.
+- Preserved the five-button navigation row and responsive two-column mobile navigation.
+
+## Database and deployment status
+
+- SQLite remains the active/default backend.
+- No schema migration or new API endpoint is required.
+- Azure SQL remains opt-in and inherits the shared source-identity summary behavior.
+
+## Validation
+
+- Full maintained validation: **54 tests passed with no skips**.
+- Browser-rendered checks verify consistent `Qty:` text, active/idle progress animation, temporary debug completion, mirrored Bay progress, Spanish header containment, Print/Export ordering, and right-corner alignment.
+- SQLite integration verifies a departed two-piece Indian Trail rack updates the Bay Map Outbound quantity and that receiving one piece changes only the Received side.
+
+## Files edited
+
+- `app.js`
+- `styles.css`
+- `delivery_store.py`
+- `index.html`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/AZURE_DEPLOYMENT.md`
+- `docs/CODE_REFERENCE.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `tests/test_static_integrity.py`
+- `tests/test_store_workflows.py`
+- `tests/test_visual_smoke.py`
+
+---
+
+# Delivery List Scanner - v066 Expanded Print Filters, Interactive Scan Confirmations, Permission Help, and Guided Lookups
+
+Date: 2026-07-15
+
+## Print / Export glass-type ribbons
+
+- Glass-type category ribbons now start expanded whenever the Print / Export GUI opens for the first time.
+- Users can still collapse individual categories, and their open/collapsed choices remain preserved during same-session re-renders.
+- The existing glass-type category renderer and selection logic are reused; no second print filter component was added.
+
+## Timed Outbound and Indian Trail scan confirmations
+
+- The shared timed scan-confirmation lifecycle now pauses both the numeric countdown and progress-bar animation while the mouse is over the popup.
+- The timer resumes when the pointer leaves the popup.
+- Clicking the Outbound rack confirmation opens the existing stage **All Scans** GUI.
+- Clicking the Indian Trail receiving/bay confirmation opens the existing **All Bay Scans** GUI.
+- Buttons, bay selectors, and move controls remain independently clickable and do not accidentally open history.
+- Keyboard users can focus the confirmation and press Enter or Space to open the appropriate history GUI.
+- A newly completed scan still takes priority: the shared mount function removes any older timed confirmation before showing the new result.
+- Added a short visible hint explaining that the popup can be clicked to open scan history.
+
+## Permission descriptions
+
+- Added one maintained short description for every backend permission.
+- Each permission card now shows a clear label plus a smaller explanation of exactly what the permission allows the role to access or change.
+- The descriptions remain grouped under the existing Scanning, Delivery Lists, Exceptions, Admin, Stations, Indian Trail/Bays, and Racks sections.
+- English labels and descriptions are included in the existing Spanish translation system.
+
+## Lookup Manager redesign
+
+- Replaced the three competing lookup columns with one focused workspace.
+- Added large Product, Route, and Process State type tabs with live counts.
+- Added a guided editor that explains the saved value, display label, route-only category, and route match-term fields.
+- Added a live preview showing what users will see and which value is actually stored.
+- Route-only fields remain hidden for Product and Process State entries.
+- Added one searchable active library instead of showing all lookup types at once.
+- Existing lookup rows now show their source, saved value, label, category, and match terms.
+- **Use / edit** loads an existing value back into the same editor; saving uses the existing backend upsert endpoint.
+- Added a Clear Form action and preserved the shared save-success confirmation.
+- No new database table, schema migration, or parallel lookup API was added.
+
+## Spanish and accessibility coverage
+
+- Added Spanish translations for the redesigned Lookup Manager, permission names, permission descriptions, search instructions, and popup history hint.
+- Timed confirmations now expose a keyboard-focusable action target and an All Scans accessibility label.
+- Lookup and permission layouts include narrow-screen rules so the additional explanation text remains readable.
+
+## Database and deployment status
+
+- SQLite remains the active/default backend.
+- Azure SQL remains opt-in and uses the same shared permissions and lookup workflows.
+- No database schema migration is required for v066.
+
+## Validation
+
+- Full maintained validation: **53 tests passed with no skips**.
+- Browser-rendered checks confirm Print / Export groups open expanded, permission descriptions render, the guided Lookup Manager can load and filter values, and timed confirmations pause/resume, yield immediately to newer scans, and open All Scans correctly.
+- Static checks confirm every backend permission has exactly one maintained description and the popup priority behavior continues to use one shared timed-confirmation mount path.
+
+## Files edited
+
+- `app.js`
+- `styles.css`
+- `index.html`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/AZURE_DEPLOYMENT.md`
+- `docs/CODE_REFERENCE.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `tests/test_static_integrity.py`
+- `tests/test_visual_smoke.py`
+
+---
+
+# Delivery List Scanner - v065 Bay Scanner Transit Control and Item-Aware SDI
+
+Date: 2026-07-15
+
+## Bay Map scanner header and in-transit control
+
+- Increased the Bay Map scanner title to a clearer 15-pixel compact size.
+- Fullscreen raises the same title to 21 pixels without changing the main Scan-page title.
+- Replaced the center Outbound-to-Received route content with one focused **pieces in transit** pill.
+- The pill shows only the live piece quantity and opens the existing In-Transit Manifest when clicked.
+- The existing manifest, API, modal lifecycle, permissions, and close behavior are reused; no parallel transit GUI was added.
+
+## Adaptive current-bay location
+
+- The large current-location value now supports multi-word bay names such as `Manual Overflow`.
+- The label starts at the preferred large size and automatically reduces one pixel at a time only when required to fit.
+- Multi-word names can wrap and balance across lines, remain centered, and retain a 15-pixel minimum.
+- Fitting reruns after render, resize, fullscreen changes, and language changes so translated bay labels remain readable.
+
+## Predictive SDI lookup and bay selector
+
+- The Job Nr. / SO / Order field now uses a predictive dropdown backed by live Indian Trail destination rows.
+- Suggestions include job/order, customer, missing-item count, total item count, and associated bay codes.
+- Added a real Bay Code dropdown populated from active non-spacer bays.
+- Selecting a bay narrows the workspace to that bay's job context while still including unassigned missing pieces for the selected job.
+- The existing custom-select component is reused for the Bay Code and Rush/Remake selectors.
+
+## Missing-item-aware Rush selection
+
+- The SDI workspace now calculates physical fulfillment from active Indian Trail bay assignments.
+- `PreAssigned` glass is treated as reserved but still missing; only physically assigned/received quantities count as present.
+- Job-level Rush/Remake actions automatically select only items with a missing quantity.
+- A fully occupied `1/1` item is skipped by a job-level Rush and cannot be selected while the action type is Rush.
+- The item list clearly shows quantity in bay, missing quantity, product, dimensions, and current bay.
+
+## Exact broken-piece Remakes
+
+- Users can select an exact Order Nr. and Item Nr. from the predictive workspace.
+- A completed in-bay item remains selectable when the action type is Remake.
+- Marking that exact item as a Remake clears only its active physical bay assignment, records the removal event/audit, and makes the item missing.
+- The Remake state and priority date continue to propagate through Staging, Outbound, and the applicable destination-stage copies using the existing `source_id` workflow.
+- Other items on the job remain in their bays and keep their own Rush/Remake state.
+
+## Current marks and individual clearing
+
+- Current Rush/Remake work is grouped by Job Nr. inside the SDI GUI.
+- Clicking a group expands its exact items with product, bay, and mark type.
+- Each item has its own **Clear item** action so one Rush/Remake can be cleared without clearing the rest of the job.
+- Clearing a Remake does not restore broken glass to a bay.
+- Clearing a Rush removes only a bay preassignment created by the Rush workflow itself; normal Outbound preassignments are preserved.
+
+## Spanish and documentation coverage
+
+- Added Spanish translations for the predictive lookup, exact-item instructions, bay selector, missing/fulfilled descriptions, current marks, and dynamic pieces-in-transit text.
+- New JavaScript functions and Python helpers include purpose/effects/flow notes for future maintenance.
+- `docs/CODE_REFERENCE.md` is regenerated during release validation.
+
+## Database and deployment status
+
+- SQLite remains the active/default backend.
+- No database schema migration is required for v065.
+- The future Azure SQL adapter uses the same shared store methods and remains opt-in.
+
+## Validation
+
+- Full maintained validation: **52 tests passed with no skips**.
+- Browser-rendered checks confirm the clickable transit pill, existing manifest opening, compact title size, adaptive `Manual Overflow` fitting, predictive SDI layout, safe default item selection, Rush disabling completed pieces, Remake enabling exact pieces, and individual clear controls.
+- SQLite integration checks confirm job-level Rush skips fulfilled `1/1` pieces, exact Remake removes only the broken item, stage propagation remains intact, and clearing one item preserves another item's mark.
+- The new SDI workspace endpoint is exercised through the real local HTTP server.
+
+## Files edited
+
+- `app.js`
+- `styles.css`
+- `delivery_store.py`
+- `server.py`
+- `index.html`
+- `README.md`
+- `README_CHANGELOG.md`
+- `docs/AZURE_DEPLOYMENT.md`
+- `docs/CODE_REFERENCE.md`
+- `docs/TESTING.md`
+- `docs/TEST_REPORT.md`
+- `tests/test_extended_workflows.py`
+- `tests/test_server_http.py`
+- `tests/test_static_integrity.py`
+- `tests/test_visual_smoke.py`
 
 ---
 

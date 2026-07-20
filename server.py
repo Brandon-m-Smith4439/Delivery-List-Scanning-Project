@@ -1202,13 +1202,15 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/indian-trail/summary":
             if not self.require_permission("view_indian_trail"):
                 return
-            self.send_json(STORE.indian_trail_summary())
+            delivery_date = parse_qs(parsed.query).get("deliveryDate", [""])[0]
+            self.send_json(STORE.indian_trail_summary(delivery_date))
             return
 
         if parsed.path == "/api/indian-trail/in-transit":
             if not self.require_permission("view_indian_trail"):
                 return
-            self.send_json(STORE.indian_trail_in_transit())
+            delivery_date = parse_qs(parsed.query).get("deliveryDate", [""])[0]
+            self.send_json(STORE.indian_trail_in_transit(delivery_date))
             return
 
         if parsed.path == "/api/indian-trail/bays":
@@ -1222,6 +1224,15 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             bay_code = parse_qs(parsed.query).get("bayCode", [""])[0]
             self.send_json(STORE.get_bay_job_details(bay_code))
+            return
+
+        if parsed.path == "/api/indian-trail/sdi-workspace":
+            if not self.require_permission("view_bays"):
+                return
+            params = parse_qs(parsed.query)
+            query = params.get("q", [""])[0]
+            bay_code = params.get("bayCode", [""])[0]
+            self.send_json(STORE.get_sdi_workspace(query, bay_code))
             return
 
         if parsed.path == "/api/indian-trail/layout":

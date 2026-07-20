@@ -10,7 +10,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-  <link rel="stylesheet" href="styles.css?v=20260715-v064">
+  <link rel="stylesheet" href="styles.css?v=20260717-v092">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <!-- SECTION: Authentication and password reset -->
@@ -21,7 +21,7 @@
     </button>
     <div class="login-shell">
       <aside class="login-hero-card">
-        <img src="assets/barefoot-logo.jpg" alt="Barefoot & Company" onerror="this.style.display='none'; this.nextElementSibling.hidden=false;">
+        <img class="login-hero-logo" src="barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
         <strong hidden>Barefoot &amp; Company</strong>
         <span>Glass Delivery Scanner</span>
         <h1>Production scanning, rack control, and delivery visibility in one place.</h1>
@@ -88,19 +88,60 @@
   </section>
 
   <div class="app">
-    <!-- SECTION: Global header, navigation, search, and user controls -->
-    <header class="app-header">
-      <div class="brand">
-        <img class="brand-icon" src="assets/barefoot-logo.jpg" alt="Barefoot & Company">
-        <span><strong>Glass Delivery Scanner</strong><small>Plant Operations</small></span>
+    <!-- SECTION: Collapsible desktop sidebar, mobile drawer, and global utility header -->
+    <aside class="app-sidebar" id="appSidebar" aria-label="Application navigation">
+      <div class="sidebar-brand-row">
+        <div class="brand" aria-label="Barefoot & Company Delivery List Scanner">
+          <img class="brand-icon brand-icon-collapsed" src="barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
+          <img class="brand-combined-logo" src="barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
+        </div>
+        <button class="sidebar-toggle-button" id="sidebarToggleBtn" type="button" aria-controls="appSidebar" aria-expanded="true" title="Collapse navigation">
+          <span class="sidebar-toggle-icon" aria-hidden="true"></span>
+          <span class="sr-only">Collapse navigation</span>
+        </button>
       </div>
+
       <nav class="app-nav" aria-label="Main pages">
-        <button class="is-active" data-page-target="home" type="button"><span class="top-nav-icon home"></span>Home</button>
-        <button data-page-target="scan" type="button"><span class="top-nav-icon scan"></span>Scan</button>
-        <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button"><span class="top-nav-icon racks"></span>Racks</button>
-        <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button"><span class="top-nav-icon bays"></span>Bay Map</button>
-        <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button"><span class="top-nav-icon admin"></span>Admin</button>
+        <button class="is-active" data-page-target="home" type="button" title="Home"><span class="top-nav-icon home"></span><span>Home</span></button>
+        <button data-page-target="scan" type="button" title="Scan"><span class="top-nav-icon scan"></span><span>Scan</span></button>
+        <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button" title="Racks"><span class="top-nav-icon racks"></span><span>Racks</span></button>
+        <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button" title="Bay Map"><span class="top-nav-icon bays"></span><span>Bay Map</span></button>
+        <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button" title="Admin"><span class="top-nav-icon admin"></span><span>Admin</span></button>
       </nav>
+
+      <div class="sidebar-spacer"></div>
+      <span class="backend-status sidebar-backend-status" id="backendStatus" hidden>Local demo</span>
+
+      <details class="user-menu sidebar-user-menu">
+        <summary>
+          <span class="user-avatar"></span>
+          <span class="user-menu-summary-copy">
+            <span class="signed-in-user" id="signedInUser"></span>
+            <small id="signedInRole">Signed in</small>
+          </span>
+          <span class="sidebar-profile-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="user-menu-panel">
+          <div class="user-menu-profile-card">
+            <span class="user-avatar user-menu-large-avatar" aria-hidden="true"></span>
+            <span>
+              <strong id="userMenuDisplayName">Signed in user</strong>
+              <span id="userMenuDetails">Role • Station</span>
+              <small id="userMenuIdentity">Account</small>
+            </span>
+          </div>
+          <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
+        </div>
+      </details>
+    </aside>
+
+    <button class="sidebar-scrim" id="sidebarScrim" type="button" aria-label="Close navigation"></button>
+
+    <header class="app-header">
+      <button class="mobile-sidebar-toggle" id="mobileSidebarToggleBtn" type="button" aria-controls="appSidebar" aria-expanded="false" aria-label="Open navigation" title="Open navigation">
+        <span aria-hidden="true"></span>
+      </button>
+
       <div class="header-search">
         <label class="search-box">
           <span class="search-icon"></span>
@@ -109,31 +150,21 @@
         <button class="tool-button header-action-icon-button search-action-button" id="headerGlobalSearchBtn" type="button"><span class="button-icon search-button-icon" aria-hidden="true"></span><span>Search</span></button>
         <div class="header-search-results" id="headerGlobalSearchResults" hidden></div>
       </div>
+
       <div class="header-actions">
-        <button class="tool-button header-utility-button language-toggle-button" id="languageToggleBtn" type="button" aria-label="Cambiar a Español" title="Cambiar a Español">
-          <span class="language-globe-icon" aria-hidden="true"></span>
-          <span>ES</span>
-        </button>
-        <button class="tool-button header-utility-button refresh-page-button" id="refreshPageBtn" type="button" aria-label="Refresh page" title="Refresh page">
-          <span class="refresh-page-icon" aria-hidden="true"></span>
-        </button>
-        <button class="tool-button header-utility-button fullscreen-toggle-button" id="fullscreenToggleBtn" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">
-          <span class="fullscreen-icon" aria-hidden="true"></span>
-        </button>
-        <button class="tool-button primary-tool header-action-icon-button print-export-button" id="globalPrintExportBtn" type="button"><span class="button-icon print-export-icon" aria-hidden="true"></span><span>Print/Export</span></button>
-        <span class="backend-status" id="backendStatus" hidden>Local demo</span>
-        <details class="user-menu">
-          <summary>
-            <span class="user-avatar"></span>
-            <span class="user-menu-summary-copy">
-              <span class="signed-in-user" id="signedInUser"></span>
-              <small id="signedInRole">Signed in</small>
-            </span>
-          </summary>
-          <div class="user-menu-panel">
-            <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
-          </div>
-        </details>
+        <div class="header-quick-actions" aria-label="Application actions">
+          <button class="tool-button primary-tool header-action-icon-button print-export-button" id="globalPrintExportBtn" type="button"><span class="button-icon print-export-icon" aria-hidden="true"></span><span>Print/Export</span></button>
+          <button class="tool-button header-utility-button language-toggle-button" id="languageToggleBtn" type="button" aria-label="Cambiar a Español" title="Cambiar a Español">
+            <span class="language-globe-icon" aria-hidden="true"></span>
+            <span>ES</span>
+          </button>
+          <button class="tool-button header-utility-button refresh-page-button" id="refreshPageBtn" type="button" aria-label="Refresh page" title="Refresh page">
+            <span class="refresh-page-icon" aria-hidden="true"></span>
+          </button>
+          <button class="tool-button header-utility-button fullscreen-toggle-button" id="fullscreenToggleBtn" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">
+            <span class="fullscreen-icon" aria-hidden="true"></span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -151,9 +182,11 @@
         <div class="home-grid">
           <section class="panel">
             <section class="today-progress-panel">
-              <div class="section-heading">
-                <h2>Today's Delivery Progress</h2>
-                <span id="todayDateLabel">Today</span>
+              <div class="section-heading today-progress-heading">
+                <div class="today-progress-heading-copy">
+                  <span id="todayDateLabel">Today</span>
+                  <h2>Today's Delivery Progress</h2>
+                </div>
               </div>
               <div class="today-stage-grid" id="todayStageGrid"></div>
             </section>
@@ -304,6 +337,7 @@
       <div class="glass-filter-tabs" id="glassFilterTabs"></div>
     </div>
   </div>
+  <p class="scan-filter-help">Multiple selections are allowed. Filters in the same group match any selected option; selections across groups work together.</p>
 </div>
 
 <div class="list-table-controls">
@@ -360,18 +394,23 @@
           </section>
 
           <aside class="scanner-panel" id="scanPanel">
-            <section class="progress-band scanner-summary-header">
+            <section class="progress-band scanner-summary-header" id="scanProgressBand">
               <div class="scanner-panel-title-row">
                 <h2 id="stageHeading">Select a delivery list</h2>
               </div>
               <div class="scanner-progress-row">
+                <div class="progress-track" id="scanProgressTrack" role="progressbar" aria-label="Stage completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                  <span id="progressFill"></span>
+                  <i class="progress-celebration" aria-hidden="true"></i>
+                </div>
                 <div class="progress-title">
                   <span class="cube-icon"></span>
-                  <strong id="progressText">Staged Qty: 0/0 - 0.0% Complete</strong>
+                  <strong id="progressText">Qty: 0/0 · 0.0%</strong>
                 </div>
-                <div class="progress-track"><span id="progressFill"></span></div>
               </div>
             </section>
+
+            <div class="scan-sound-test-host" data-sound-test-host="scan"></div>
 
             <section class="scan-rack-panel" id="scanRackPanel" hidden>
               <div class="scan-rack-row">
@@ -681,15 +720,24 @@
                       <small>Outbound</small>
                       <strong>0/0</strong>
                     </div>
-                    <div class="bay-panel-route-lane">
-                      <span>0 pieces on the way</span>
-                    </div>
+                    <button class="bay-panel-route-lane" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest">
+                      <span>0 pieces in transit</span>
+                    </button>
                     <div class="bay-panel-route-node inbound">
                       <small>Received</small>
                       <strong>0/0</strong>
                     </div>
+                    <div class="bay-dual-progress" data-bay-dual-progress>
+                      <div class="bay-dual-progress-half is-outbound" role="progressbar" aria-label="Outbound completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i style="width:0%"></i></div>
+                      <span class="bay-dual-progress-center" aria-hidden="true"><b>✦</b></span>
+                      <div class="bay-dual-progress-half is-received" role="progressbar" aria-label="Received completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i style="width:0%"></i></div>
+                      <div class="bay-dual-progress-label is-outbound"><span>Outbound</span><strong>0.0%</strong></div>
+                      <div class="bay-dual-progress-label is-received"><span>Received</span><strong>0.0%</strong></div>
+                    </div>
                   </div>
                 </div>
+
+                <div class="scan-sound-test-host" data-sound-test-host="bay"></div>
 
                 <form class="scan-form bay-scan-form bay-scan-form-v2 bay-scan-command-form bay-scan-command-form-v35 bay-scan-command-form-v37" id="bayScanOutForm">
                   <div class="scan-form-heading bay-scan-heading-compact">
@@ -697,24 +745,25 @@
                     <span class="bay-scan-hint">Choose add/remove, pick a target bay when needed, then scan.</span>
                   </div>
     
-                  <div class="bay-scan-mode-card bay-scan-mode-card-compact bay-scan-mode-card-v35 bay-scan-mode-card-v37">
-                    <label class="bay-mode-option is-remove">
-                      <input name="bayScanVisualMode" type="radio" value="remove" checked>
-                      <span><strong>Remove from bay</strong></span>
-                    </label>
-                    <label class="bay-mode-option is-add">
-                      <input id="bayScanModeToggle" name="bayScanVisualMode" type="radio" value="add">
-                      <span><strong>Add to bay</strong></span>
-                    </label>
-                  </div>
-    
-                  <div class="bay-add-row bay-add-row-v2 bay-target-row-v17 bay-target-row-compact bay-target-row-v35 bay-target-row-v37">
-                    <label class="bay-code-field">
-                      <span>Target Bay</span>
-                      <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Click bay or type code">
-                    </label>
-                    <button class="bay-target-clear" id="bayTargetClearBtn" type="button">Clear</button>
-                  </div>
+                  <section class="bay-scan-target-command" aria-label="Bay scan mode and target bay">
+                    <div class="bay-scan-mode-card bay-scan-mode-card-compact bay-scan-mode-card-v35 bay-scan-mode-card-v37">
+                      <label class="bay-mode-option is-remove">
+                        <input name="bayScanVisualMode" type="radio" value="remove" checked>
+                        <span><strong>Remove</strong><small>From bay</small></span>
+                      </label>
+                      <label class="bay-mode-option is-add">
+                        <input id="bayScanModeToggle" name="bayScanVisualMode" type="radio" value="add">
+                        <span><strong>Add</strong><small>To bay</small></span>
+                      </label>
+                    </div>
+                    <div class="bay-add-row bay-add-row-v2 bay-target-row-v17 bay-target-row-compact bay-target-row-v35 bay-target-row-v37">
+                      <label class="bay-code-field">
+                        <span>Target Bay</span>
+                        <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Click bay or type code">
+                      </label>
+                      <button class="bay-target-clear" id="bayTargetClearBtn" type="button">Clear</button>
+                    </div>
+                  </section>
     
                   <div class="scan-input-wrap bay-command-scan-input bay-command-scan-input-v35 bay-command-scan-input-v37">
                     <span class="barcode-icon"></span>
@@ -775,7 +824,7 @@
                   <div class="recent-inline-block bay-recent-inline-v36">
                     <div class="recent-inline-heading">
                       <h4>Recent bay scans</h4>
-                      <span>Latest 2</span>
+                      <span id="bayRecentScanCountLabel">Latest 1</span>
                     </div>
                     <div class="recent-table-wrap compact">
                       <table class="recent-table bay-recent-table-v36">
@@ -848,42 +897,76 @@
             </div>
             <button id="sdiCloseBtn" class="modal-close-x" type="button" aria-label="Close SDI window">×</button>
           </div>
-          <form id="sdiForm" class="sdi-form">
-            <label class="sdi-job-lookup">
-              <span>Job Nr. / SO / Order Nr.</span>
-              <input id="sdiOrderInput" type="text" autocomplete="off" placeholder="88418245M LOGAN FARMS 51">
-              <small>Paste the full Job Nr., customer description, SO number, order number, or barcode.</small>
-            </label>
-            <label>
-              <span>Bay Code</span>
-              <input id="sdiBayInput" type="text" autocomplete="off" placeholder="Optional bay">
-            </label>
-            <label class="checkbox-row">
-              <input id="sdiTruckExemptInput" type="checkbox">
-              <span>Send straight to installer truck / skip bay</span>
-            </label>
-            <label class="sdi-reason">
-              <span>Reason</span>
-              <input id="sdiReasonInput" type="text" autocomplete="off" value="Same-day install">
-            </label>
-            <label class="sdi-delivery-date">
-              <span>Rush / Remake Delivery Date</span>
-              <input id="sdiDeliveryDateInput" type="date">
-              <small>Leave unchanged to keep the current date, or select the new priority delivery date.</small>
-            </label>
-            <label>
-              <span>Order Type</span>
-              <select id="sdiTypeInput" required>
-                <option value="">Select Rush or Remake</option>
-                <option value="Rush">Rush</option>
-                <option value="Remake">Remake</option>
-              </select>
-            </label>
-            <div class="sdi-current-list" id="sdiCurrentList"></div>
-            <div class="sdi-actions">
-              <button type="submit" data-sdi-action="mark">Mark Rush / Remake</button>
-              <button type="button" id="sdiClearBtn">Clear Rush / Remake</button>
-            </div>
+          <form id="sdiForm" class="sdi-form sdi-form-v069">
+            <section class="sdi-search-card">
+              <div class="sdi-card-heading">
+                <div><small>Step 1</small><strong>Find the job or exact piece</strong><span>Search by Job Nr., SO, Order Nr., or barcode. Then narrow by bay when needed.</span></div>
+              </div>
+              <div class="sdi-search-grid">
+                <label class="sdi-job-lookup">
+                  <span>Job Nr. / SO / Order Nr.</span>
+                  <input id="sdiOrderInput" type="text" autocomplete="off" placeholder="Start typing a Job Nr., SO, order, or barcode">
+                  <small>Choose a predictive result to load the exact job and item list.</small>
+                  <div id="sdiLookupResults" class="sdi-lookup-results" hidden></div>
+                </label>
+                <label class="sdi-bay-select-field">
+                  <span>Bay Code</span>
+                  <select id="sdiBayInput">
+                    <option value="">All bays / no bay filter</option>
+                  </select>
+                  <small>Optional. Use this to narrow the selected job to one bay.</small>
+                </label>
+              </div>
+            </section>
+
+            <section class="sdi-workspace-grid">
+              <section class="sdi-item-selection" id="sdiItemSelection">
+                <div class="sdi-item-selection-heading">
+                  <div>
+                    <small>Step 2</small>
+                    <strong>Choose the glass items</strong>
+                    <span>Missing pieces are selected automatically. A complete in-bay piece can be selected only for a Remake.</span>
+                  </div>
+                  <button id="sdiSelectMissingBtn" type="button">Select missing</button>
+                </div>
+                <div id="sdiItemSelectionList" class="sdi-item-selection-list">
+                  <span class="admin-empty">Choose a job or order to review its items.</span>
+                </div>
+              </section>
+
+              <aside class="sdi-action-card">
+                <div class="sdi-card-heading">
+                  <div><small>Step 3</small><strong>Set the handling</strong><span id="sdiSelectionSummary">No items selected</span></div>
+                </div>
+                <label>
+                  <span>Order Type</span>
+                  <select id="sdiTypeInput" required>
+                    <option value="">Select Rush or Remake</option>
+                    <option value="Rush">Rush</option>
+                    <option value="Remake">Remake</option>
+                  </select>
+                </label>
+                <label class="sdi-delivery-date">
+                  <span>Priority Delivery Date</span>
+                  <input id="sdiDeliveryDateInput" type="date">
+                  <small>Leave unchanged to keep the existing delivery date.</small>
+                </label>
+                <label class="sdi-reason">
+                  <span>Reason</span>
+                  <input id="sdiReasonInput" type="text" autocomplete="off" value="Same-day install">
+                </label>
+                <label class="checkbox-row sdi-truck-option">
+                  <input id="sdiTruckExemptInput" type="checkbox">
+                  <span><strong>Send straight to installer truck</strong><small>Indian Trail Rush only. Skip bay placement.</small></span>
+                </label>
+                <div class="sdi-actions">
+                  <button type="submit" data-sdi-action="mark">Apply Rush / Remake</button>
+                  <button type="button" id="sdiClearBtn">Clear selected mark</button>
+                </div>
+              </aside>
+            </section>
+
+            <section class="sdi-current-list" id="sdiCurrentList"></section>
           </form>
         </section>
         <div class="modal-backdrop" id="manageItemsBackdrop" hidden></div>
@@ -1205,6 +1288,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="app.js?v=20260715-v064"></script>
+  <script src="app.js?v=20260717-v092"></script>
 </body>
 </html>

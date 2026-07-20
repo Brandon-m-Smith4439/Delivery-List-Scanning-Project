@@ -15,6 +15,7 @@ const STORAGE_KEY = "delivery-list-scanner-demo-v1";
 const STATIONS_KEY = "delivery-list-scanner-stations-v1";
 const LANGUAGE_KEY = "delivery-list-scanner-language-v1";
 const FULLSCREEN_REFRESH_KEY = "delivery-list-scanner-resume-fullscreen-after-refresh-v1";
+const SIDEBAR_MOBILE_BREAKPOINT = 960;
 const NO_RACK_SELECTION = "__NO_RACK__";
 const DEFAULT_STATIONS = ["Airport Rd", "Indian Trail", "Greenville", "Customer Pickup", "DTC"];
 const ROLE_OPTIONS = ["Operator", "Supervisor", "Indian Trail Operator", "Indian Trail Lead", "Indian Trail Manager", "Admin"];
@@ -29,9 +30,16 @@ const CUSTOMER_ROUTE_DEFAULT_ADDRESSES = {
 };
 const ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS = 21;
 const ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS = 7;
+const SCAN_FILTER_GROUPS = Object.freeze({
+  status: Object.freeze(["remaining", "partial", "complete"]),
+  attention: Object.freeze(["remakes", "rushes", "priority", "updated", "errors"]),
+  route: Object.freeze(["indian-trail-route", "cpu-route", "dtc-route", "greenville-route"]),
+});
 
 const state = {
   page: "home",
+  sidebarPreference: "collapsed",
+  sidebarMobileOpen: false,
   meta: null,
   lists: [],
   stations: DEFAULT_STATIONS.slice(),
@@ -40,7 +48,7 @@ const state = {
   recent: [],
   errors: [],
   selectedId: null,
-  filter: "all",
+  activeFilters: new Set(),
   glassTypeFilter: "all",
   search: "",
   pageIndex: 1,
@@ -124,6 +132,8 @@ const state = {
   rolePermissionOpenCategories: new Set(),
   rolePermissionScrollTop: 0,
   manualEditLookups: { products: [], routes: [], processes: [] },
+  lookupManagerActiveType: "product",
+  lookupManagerSearch: "",
   manualEditDirty: false,
   manualEditListId: "",
   manualEditQuery: "",
@@ -159,9 +169,40 @@ const state = {
   restoreFullscreenAfterPrint: false,
   managedPrintWindow: null,
   managedPrintWatchTimer: null,
+  sdiWorkspace: { suggestions: [], items: [], currentGroups: [] },
+  sdiSelectedLineItemIds: new Set(),
+  sdiExpandedCurrentGroups: new Set(),
+  sdiCurrentGroupsInitialized: false,
+  sdiLookupTimer: null,
+  lastRenderedProgressPercent: null,
+  bayRouteSummary: null,
+  bayRouteRefreshInFlight: false,
+  lastBayRouteComplete: null,
+  lastRenderedProgressListId: "",
+};
+
+const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v1";
+const appSoundRuntime = {
+  context: null,
+  masterGain: null,
+  compressor: null,
+  lastPlayedAt: new Map(),
+  volumePercent: (() => {
+    try {
+      const saved = Number(localStorage.getItem(APP_SOUND_VOLUME_KEY));
+      return Number.isFinite(saved) ? Math.max(0, Math.min(saved, 400)) : 200;
+    } catch {
+      return 200;
+    }
+  })(),
 };
 
 const els = {
+  app: document.querySelector(".app"),
+  appSidebar: document.getElementById("appSidebar"),
+  sidebarToggleBtn: document.getElementById("sidebarToggleBtn"),
+  mobileSidebarToggleBtn: document.getElementById("mobileSidebarToggleBtn"),
+  sidebarScrim: document.getElementById("sidebarScrim"),
   loginPanel: document.getElementById("loginPanel"),
   loginForm: document.getElementById("loginForm"),
   loginUsername: document.getElementById("loginUsername"),
@@ -180,6 +221,9 @@ const els = {
   signedInRole: document.getElementById("signedInRole"),
   userMenuDisplayName: document.getElementById("userMenuDisplayName"),
   userMenuDetails: document.getElementById("userMenuDetails"),
+  userMenuIdentity: document.getElementById("userMenuIdentity"),
+  userMenu: document.querySelector(".user-menu"),
+  userMenuSummary: document.querySelector(".user-menu > summary"),
   backendStatus: document.getElementById("backendStatus"),
   logoutBtn: document.getElementById("logoutBtn"),
   headerGlobalSearchInput: document.getElementById("headerGlobalSearchInput"),
@@ -242,6 +286,7 @@ const els = {
   operatorInput: document.getElementById("operatorInput"),
   progressText: document.getElementById("progressText"),
   progressFill: document.getElementById("progressFill"),
+  scanProgressTrack: document.getElementById("scanProgressTrack"),
   searchInput: document.getElementById("searchInput"),
   scanForm: document.getElementById("scanForm"),
   scanInput: document.getElementById("scanInput"),
@@ -334,6 +379,7 @@ const els = {
   bayManualSubmitBtn: document.getElementById("bayManualSubmitBtn"),
   bayScanOutStatus: document.getElementById("bayScanOutStatus"),
   bayScanOutRecent: document.getElementById("bayScanOutRecent"),
+  bayRecentScanCountLabel: document.getElementById("bayRecentScanCountLabel"),
   bayLastCard: document.getElementById("bayLastCard"),
   bayLastTitle: document.getElementById("bayLastTitle"),
   bayLastAction: document.getElementById("bayLastAction"),
@@ -369,12 +415,17 @@ const els = {
   sdiCloseBtn: document.getElementById("sdiCloseBtn"),
   sdiClearBtn: document.getElementById("sdiClearBtn"),
   sdiOrderInput: document.getElementById("sdiOrderInput"),
+  sdiLookupResults: document.getElementById("sdiLookupResults"),
   sdiBayInput: document.getElementById("sdiBayInput"),
+  sdiItemSelection: document.getElementById("sdiItemSelection"),
+  sdiItemSelectionList: document.getElementById("sdiItemSelectionList"),
+  sdiSelectMissingBtn: document.getElementById("sdiSelectMissingBtn"),
   sdiTruckExemptInput: document.getElementById("sdiTruckExemptInput"),
   sdiReasonInput: document.getElementById("sdiReasonInput"),
   sdiDeliveryDateInput: document.getElementById("sdiDeliveryDateInput"),
   sdiTypeInput: document.getElementById("sdiTypeInput"),
   sdiCurrentList: document.getElementById("sdiCurrentList"),
+  sdiSelectionSummary: document.getElementById("sdiSelectionSummary"),
   manageItemsPanel: document.getElementById("manageItemsPanel"),
   manageItemsBackdrop: document.getElementById("manageItemsBackdrop"),
   manageItemsCloseBtn: document.getElementById("manageItemsCloseBtn"),
@@ -538,6 +589,9 @@ const SPANISH_UI_TEXT = new Map([
   ["Item Nr.", "Num. de articulo"],
   ["Qty.", "Cant."],
   ["Qty", "Cant."],
+  ["Stage completion", "Finalización de etapa"],
+  ["Outbound completion", "Finalización de salida"],
+  ["Received completion", "Finalización de recepción"],
   ["Dimensions", "Dimensiones"],
   ["Customer", "Cliente"],
   ["Flags", "Indicadores"],
@@ -766,6 +820,10 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Choose where CPU, mirrors, standard, tall, and oversize glass should go.", "Elija a dónde deben ir CPU, espejos, vidrio estándar, alto y sobredimensionado."],
   ["Clear Item", "Quitar artículo"],
   ["Clear SDI", "Quitar SDI"],
+  ["Choose a job or order to review its items.", "Elija un trabajo u orden para revisar sus artículos."],
+  ["Choose a predictive job or order result to review exact items.", "Elija un resultado predictivo de trabajo u orden para revisar los artículos exactos."],
+  ["Choose a predictive result to load the exact job and item list.", "Elija un resultado predictivo para cargar la lista exacta de trabajos y artículos."],
+  ["Clear item", "Quitar artículo"],
   ["Clear Rush / Remake", "Quitar urgente / rehacer"],
   ["Click bay or type code", "Haga clic en una bahía o escriba el código"],
   ["Close admin window", "Cerrar ventana de administración"],
@@ -1046,6 +1104,21 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Sent", "Enviado"],
   ["Show password", "Mostrar contraseña"],
   ["SMTP live", "SMTP activo"],
+  ["Microsoft Graph live", "Microsoft Graph activo"],
+  ["Microsoft Graph", "Microsoft Graph"],
+  ["Email delivery", "Entrega de correo"],
+  ["Email delivery setup", "Configuración de entrega de correo"],
+  ["Ready to send", "Listo para enviar"],
+  ["Saving drafts", "Guardando borradores"],
+  ["App registration", "Registro de aplicación"],
+  ["Managed identity", "Identidad administrada"],
+  ["Client ID", "ID de cliente"],
+  ["Client secret", "Secreto de cliente"],
+  ["Configured", "Configurado"],
+  ["Not configured", "No configurado"],
+  ["Save to Sent Items", "Guardar en Elementos enviados"],
+  ["Credentials remain server-side and are never returned to the browser.", "Las credenciales permanecen en el servidor y nunca se devuelven al navegador."],
+  ["Draft mode keeps every generated email inside this webapp until Microsoft Graph or SMTP is configured. Open a draft to review, copy it, or launch it in the default email app.", "El modo borrador conserva cada correo generado dentro de esta aplicación hasta que se configure Microsoft Graph o SMTP. Abra un borrador para revisarlo, copiarlo o iniciarlo en la aplicación de correo predeterminada."],
   ["Station setup and customer route rule management.", "Configuración de estaciones y reglas de rutas de clientes."],
   ["Stations", "Estaciones"],
   ["Stations & Rules", "Estaciones y reglas"],
@@ -1286,6 +1359,7 @@ const SPANISH_UI_EXTENDED = new Map([
   ["grouped set", "conjunto agrupado"],
   ["Host", "Servidor"],
   ["If SMTP is not configured, this creates a draft you can open below.", "Si SMTP no está configurado, esto crea un borrador que puede abrir abajo."],
+  ["If email delivery is not configured, this creates a draft you can open below.", "Si la entrega de correo no está configurada, esto crea un borrador que puede abrir abajo."],
   ["Import complete.", "Importación completada."],
   ["Import completed with issues.", "La importación terminó con problemas."],
   ["Import delivery lists to populate statistics.", "Importe listas de entrega para generar estadísticas."],
@@ -1439,6 +1513,7 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Select the destination before printing the packing list. Indian Trail is the default.", "Seleccione el destino antes de imprimir. Indian Trail es el predeterminado."],
   ["Selected Job Nr.", "Núm. de trabajo seleccionado"],
   ["Send Test / Save Draft", "Enviar prueba / guardar borrador"],
+  ["Send Test Email", "Enviar correo de prueba"],
   ["Send test email", "Enviar correo de prueba"],
   ["Send test to", "Enviar prueba a"],
   ["sent", "enviado"],
@@ -1448,6 +1523,7 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Size", "Tamaño"],
   ["Size thresholds", "Límites de tamaño"],
   ["SMTP setup readiness", "Estado de configuración SMTP"],
+  ["Microsoft Graph setup readiness", "Estado de configuración de Microsoft Graph"],
   ["Starting rack number", "Número inicial del rack"],
   ["Subject", "Asunto"],
   ["Temporary Holding Area", "Área temporal de espera"],
@@ -1605,6 +1681,17 @@ const SPANISH_OPERATIONAL_TEXT = new Map([
   ["Truck / No Rack", "Camión / Sin rack"],
   ["No Rack", "Sin rack"],
   ["No Rack - Leave location blank", "Sin rack - Dejar ubicación en blanco"],
+  ["No specific bay", "Sin bahía específica"],
+  ["Items to mark", "Artículos para marcar"],
+  ["Missing items are selected automatically. Select a specific in-bay item when marking a broken piece as a Remake.", "Los artículos faltantes se seleccionan automáticamente. Seleccione un artículo específico dentro de una bahía al marcar una pieza rota como rehacer."],
+  ["Optional. Selecting a bay narrows the job and missing-item context.", "Opcional. Seleccionar una bahía limita el contexto del trabajo y de los artículos faltantes."],
+  ["Select missing", "Seleccionar faltantes"],
+  ["Start typing a Job Nr., SO, order, or barcode", "Comience a escribir un núm. de trabajo, SO, orden o código de barras"],
+  ["No current Rush or Remake items.", "No hay artículos urgentes ni de rehacer actualmente."],
+  ["Not assigned to a bay", "No asignado a una bahía"],
+  ["Already fulfilled in a bay; skipped for a job-level Rush.", "Ya completado en una bahía; se omite para una urgencia a nivel de trabajo."],
+  ["Selected by default because this item is still missing from the bay.", "Seleccionado de forma predeterminada porque este artículo aún falta en la bahía."],
+  ["Select this exact item if the glass in the bay broke; it will be removed from the bay and made missing.", "Seleccione este artículo exacto si el vidrio en la bahía se rompió; se quitará de la bahía y se marcará como faltante."],
   ["Steel Racks", "Racks de acero"],
   ["Wood Racks", "Racks de madera"],
   ["Aluminum Racks", "Racks de aluminio"],
@@ -1651,11 +1738,147 @@ SPANISH_OPERATIONAL_TEXT.forEach((spanish, english) => SPANISH_UI_TEXT.set(engli
   ["No scan activity in range", "No hay actividad de escaneo en el rango"],
 ].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
 
+const SPANISH_UI_V066 = new Map([
+  ["Maintain the choices used by manual delivery-list editing", "Mantenga las opciones utilizadas por la edición manual de listas de entrega"],
+  ["Choose one type, review what each field controls, and use the live preview before saving. Existing values can be loaded back into the editor.", "Elija un tipo, revise qué controla cada campo y use la vista previa antes de guardar. Los valores existentes se pueden volver a cargar en el editor."],
+  ["Products", "Productos"],
+  ["Routes", "Rutas"],
+  ["Process states", "Estados del proceso"],
+  ["Add or update a product name", "Agregar o actualizar un nombre de producto"],
+  ["Add or update a route code", "Agregar o actualizar un código de ruta"],
+  ["Add or update a process state", "Agregar o actualizar un estado del proceso"],
+  ["Adds a clean glass or product description that users can select while manually editing delivery-list items.", "Agrega una descripción uniforme de vidrio o producto que los usuarios pueden seleccionar al editar manualmente artículos de la lista."],
+  ["Controls route choices used by manual delivery-list editing. Customer Route Rules still remain the primary routing authority.", "Controla las opciones de ruta usadas en la edición manual. Las Reglas de Rutas de Clientes siguen siendo la autoridad principal de enrutamiento."],
+  ["Adds a consistent status choice for manual delivery-list edits, such as Rush, Remake, Updated, or Review.", "Agrega una opción de estado uniforme para ediciones manuales, como Urgente, Rehecho, Actualizado o Revisión."],
+  ["Saved product value", "Valor de producto guardado"],
+  ["Saved route code", "Código de ruta guardado"],
+  ["Saved process value", "Valor de proceso guardado"],
+  ["Display label", "Etiqueta visible"],
+  ["This is the exact value saved to the delivery-list item.", "Este es el valor exacto guardado en el artículo de la lista."],
+  ["This is the cleaner wording users see in dropdowns.", "Este es el texto más claro que los usuarios ven en los menús desplegables."],
+  ["Route category", "Categoría de ruta"],
+  ["Optional grouping note for administrators.", "Nota opcional de agrupación para administradores."],
+  ["Match terms", "Términos de coincidencia"],
+  ["Optional alternate wording, separated by commas.", "Texto alternativo opcional, separado por comas."],
+  ["Preview before saving", "Vista previa antes de guardar"],
+  ["Saved value:", "Valor guardado:"],
+  ["Clear form", "Limpiar formulario"],
+  ["Save lookup", "Guardar valor"],
+  ["Product name library", "Biblioteca de nombres de productos"],
+  ["Route code library", "Biblioteca de códigos de ruta"],
+  ["Process state library", "Biblioteca de estados del proceso"],
+  ["Search saved values, labels, categories, or match terms...", "Buscar valores, etiquetas, categorías o términos guardados..."],
+  ["Use / edit", "Usar / editar"],
+  ["No matching lookup values", "No hay valores coincidentes"],
+  ["Try a shorter search or clear the search field.", "Pruebe una búsqueda más corta o limpie el campo de búsqueda."],
+  ["Clear the search or save a new value with the editor.", "Limpie la búsqueda o guarde un valor nuevo con el editor."],
+  ["Click the notice to open All Scans", "Haga clic en el aviso para abrir Todos los escaneos"],
+  ["View Lists", "Ver listas"],
+  ["View Stations", "Ver estaciones"],
+  ["View Own Scans", "Ver escaneos propios"],
+  ["Undo Scan", "Deshacer escaneo"],
+  ["Reset Lists", "Restablecer listas"],
+  ["Resolve Exceptions", "Resolver excepciones"],
+  ["Manual Adjust", "Ajuste manual"],
+  ["View Exceptions", "Ver excepciones"],
+  ["Import Delivery Lists", "Importar listas de entrega"],
+  ["Preview Import", "Previsualizar importación"],
+  ["Manage Users", "Administrar usuarios"],
+  ["Manage Roles", "Administrar roles"],
+  ["Manage Stations", "Administrar estaciones"],
+  ["Remove Stations", "Eliminar estaciones"],
+  ["Deactivate Users", "Desactivar usuarios"],
+  ["Reactivate Users", "Reactivar usuarios"],
+  ["Update User Passwords", "Actualizar contraseñas de usuarios"],
+  ["Edit Delivery Lists", "Editar listas de entrega"],
+  ["Export Reports", "Exportar reportes"],
+  ["View Admin", "Ver administración"],
+  ["View Active Sessions", "Ver sesiones activas"],
+  ["Global Search", "Búsqueda global"],
+  ["View Reports", "Ver reportes"],
+  ["View Indian Trail", "Ver Indian Trail"],
+  ["Indian Trail Receive", "Recibir en Indian Trail"],
+  ["View Bays", "Ver bahías"],
+  ["Assign Bay", "Asignar bahía"],
+  ["Move Bay", "Mover entre bahías"],
+  ["Clear Bay", "Limpiar bahía"],
+  ["Mark Sdi", "Marcar SDI"],
+  ["Remove Sdi", "Quitar SDI"],
+  ["Bay Check", "Verificación de bahía"],
+  ["Indian Trail Reports", "Reportes de Indian Trail"],
+  ["Manage Bay Layout", "Administrar diseño de bahías"],
+  ["Manage Customer Route Rules", "Administrar reglas de rutas de clientes"],
+  ["View Racks", "Ver racks"],
+  ["Scan Racks", "Escanear racks"],
+  ["Manage Racks", "Administrar racks"],
+  ["Scan barcodes and record piece activity on delivery lists.", "Escanea códigos de barras y registra la actividad de piezas en las listas de entrega."],
+  ["Open delivery lists and view their line-item details.", "Abre listas de entrega y muestra los detalles de sus artículos."],
+  ["View and select the scanning stations available to the user.", "Permite ver y seleccionar las estaciones de escaneo disponibles para el usuario."],
+  ["View the user's own recent scan history.", "Permite ver el historial reciente de escaneos del propio usuario."],
+  ["Undo or redo recent scans when a correction is needed.", "Permite deshacer o rehacer escaneos recientes cuando se necesita una corrección."],
+  ["Reset scanned quantities for an entire delivery list.", "Restablece las cantidades escaneadas de una lista de entrega completa."],
+  ["Resolve blocked, failed, or review-required scan exceptions.", "Resuelve excepciones de escaneo bloqueadas, fallidas o que requieren revisión."],
+  ["Manually increase or decrease scanned piece quantities.", "Permite aumentar o disminuir manualmente las cantidades escaneadas."],
+  ["Open the exception queue and review scan problems.", "Abre la cola de excepciones y permite revisar problemas de escaneo."],
+  ["Import new delivery-list files and apply file updates.", "Importa archivos nuevos de listas de entrega y aplica actualizaciones."],
+  ["Preview delivery-list changes before importing them.", "Muestra una vista previa de los cambios antes de importarlos."],
+  ["Create, edit, and delete user accounts and assignments.", "Crea, edita y elimina cuentas de usuario y sus asignaciones."],
+  ["Change the permissions assigned to each role.", "Cambia los permisos asignados a cada rol."],
+  ["Add or rename scanning stations.", "Agrega o cambia el nombre de estaciones de escaneo."],
+  ["Remove scanning stations from the application.", "Elimina estaciones de escaneo de la aplicación."],
+  ["Disable a user account without deleting its history.", "Desactiva una cuenta sin eliminar su historial."],
+  ["Restore access for a deactivated user account.", "Restaura el acceso de una cuenta desactivada."],
+  ["Set or reset passwords for other users.", "Establece o restablece contraseñas de otros usuarios."],
+  ["Manually edit delivery-list rows and maintain lookup values.", "Edita manualmente filas de listas y mantiene los valores de catálogo."],
+  ["Print or export delivery lists, packing lists, and reports.", "Imprime o exporta listas de entrega, listas de empaque y reportes."],
+  ["Open the Admin dashboard and its permitted tools.", "Abre el panel de Administración y las herramientas permitidas."],
+  ["View users who are currently signed in.", "Muestra los usuarios que tienen una sesión activa."],
+  ["Search across all delivery lists and line items.", "Busca en todas las listas de entrega y artículos."],
+  ["View statistics, charts, and operational reports.", "Muestra estadísticas, gráficas y reportes operativos."],
+  ["Open Indian Trail receiving and in-transit tools.", "Abre las herramientas de recepción y tránsito de Indian Trail."],
+  ["Scan and receive glass at Indian Trail.", "Escanea y recibe vidrio en Indian Trail."],
+  ["Open the Bay Map and view bay contents and history.", "Abre el mapa de bahías y muestra contenido e historial."],
+  ["Assign missing or unassigned glass to a bay.", "Asigna vidrio faltante o sin asignar a una bahía."],
+  ["Move active glass assignments between bays.", "Mueve asignaciones activas de vidrio entre bahías."],
+  ["Remove glass from bays and control bay availability.", "Retira vidrio de bahías y controla la disponibilidad de las bahías."],
+  ["Mark specific glass as Rush or Remake in the SDI workspace.", "Marca vidrio específico como Urgente o Rehecho en el área SDI."],
+  ["Clear Rush or Remake marks from individual items.", "Quita marcas Urgente o Rehecho de artículos individuales."],
+  ["Run bay checks and verify physical bay contents.", "Ejecuta verificaciones y confirma el contenido físico de las bahías."],
+  ["View and export Indian Trail receiving and bay reports.", "Muestra y exporta reportes de recepción y bahías de Indian Trail."],
+  ["Create, edit, delete, and reorder bay groups and bays.", "Crea, edita, elimina y reordena grupos de bahías y bahías."],
+  ["Add, edit, and remove customer route rules.", "Agrega, edita y elimina reglas de rutas de clientes."],
+  ["Open the rack overview and view rack contents.", "Abre el resumen de racks y muestra su contenido."],
+  ["Scan rack barcodes for Staging and Outbound workflows.", "Escanea códigos de racks para los flujos de Preparación y Salida."],
+  ["Create, edit, delete, and recover racks and rack sets.", "Crea, edita, elimina y recupera racks y conjuntos de racks."],
+]);
+
+SPANISH_UI_V066.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
+const SPANISH_UI_V069 = new Map([
+  ["From bay", "De bahía"],
+  ["To bay", "A bahía"],
+  ["All bays / no bay filter", "Todas las bahías / sin filtro"],
+  ["Find the job or exact piece", "Busque el trabajo o la pieza exacta"],
+  ["Search by Job Nr., SO, Order Nr., or barcode. Then narrow by bay when needed.", "Busque por Núm. de trabajo, SO, Núm. de orden o código de barras. Después filtre por bahía cuando sea necesario."],
+  ["Choose the glass items", "Elija las piezas de vidrio"],
+  ["Missing pieces are selected automatically. A complete in-bay piece can be selected only for a Remake.", "Las piezas faltantes se seleccionan automáticamente. Una pieza completa en bahía solo se puede seleccionar para un Rehecho."],
+  ["Set the handling", "Configure el manejo"],
+  ["No items selected", "No hay piezas seleccionadas"],
+  ["Apply Rush / Remake", "Aplicar Urgente / Rehecho"],
+  ["Clear selected mark", "Quitar marca seleccionada"],
+  ["Current priority work", "Trabajo prioritario actual"],
+  ["Rush / Remake items", "Piezas urgentes / rehechas"],
+  ["Open a job to review exact items. Clearing one item does not affect the other Rush or Remake pieces in that job.", "Abra un trabajo para revisar las piezas exactas. Quitar una pieza no afecta las demás piezas urgentes o rehechas del trabajo."],
+]);
+
+SPANISH_UI_V069.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
 const SPANISH_PLACEHOLDERS = new Map([
   ["Global search...", "Búsqueda global..."],
   ["Search date, stage, route...", "Buscar fecha, etapa o ruta..."],
   ["Search orders, jobs, customers...", "Buscar órdenes, trabajos o clientes..."],
   ["Scan or enter barcode...", "Escanee o ingrese el código..."],
+  ["Start typing a Job Nr., SO, order, or barcode", "Comience a escribir un Núm. de trabajo, SO, orden o código"],
   ["Enter password", "Ingrese la contraseña"],
   ["6-digit code", "Código de 6 dígitos"],
   ["At least 8 characters", "Al menos 8 caracteres"],
@@ -1715,6 +1938,7 @@ const SPANISH_DYNAMIC_PATTERNS = [
   [/^Delivery List for\s+(.+)$/i, (_, date) => `Lista de entrega para ${date}`],
   [/^(.+?)\s+-\s+(Staging - Airport Rd|Outbound - Airport Rd|Inbound - Indian Trail|BFS Greenville|Customer Pickup|DTC - Deliver to Customer)$/i, (_, prefix, stage) => `${prefix} - ${translatedUiValue(stage).trim()}`],
   [/^(Staged|Outbound|Received|Delivered|Greenville|CPU):\s*(.*)$/i, (_, stage, value) => `${translatedUiValue(stage).trim()}: ${value}`],
+  [/^Qty:\s*(.*)$/i, (_, value) => `Cant.: ${value}`],
   [/^Rack\s+(.+?)\s+(Steel|Wood|Aluminum|Coral)$/i, (_, rack, material) => {
     const materials = { steel: "acero", wood: "madera", aluminum: "aluminio", coral: "Coral" };
     return `Rack ${rack} de ${materials[material.toLowerCase()] || material}`;
@@ -1787,6 +2011,10 @@ const SPANISH_DYNAMIC_PATTERNS = [
   [/^Scanner:\s*(.*)$/i, (_, value) => `Escáner: ${value}`],
   [/^Assigned station:\s*(.*)$/i, (_, value) => `Estación asignada: ${value}`],
   [/^In Transit:\s*(.*)$/i, (_, value) => `En tránsito: ${value}`],
+  [/^(\d+)\s+pieces? in transit$/i, (_, count) => `${count} ${Number(count) === 1 ? "pieza" : "piezas"} en tránsito`],
+  [/^(\d+)\s+item(?:s)?$/i, (_, count) => `${count} ${Number(count) === 1 ? "artículo" : "artículos"}`],
+  [/^In bay\s+(\d+)\/(\d+)$/i, (_, current, total) => `En bahía ${current}/${total}`],
+  [/^(\d+) missing · In bay (\d+)\/(\d+)$/i, (_, missing, current, total) => `${missing} faltantes · En bahía ${current}/${total}`],
   [/^Racks in transit$/i, () => "Racks en tránsito"],
   [/^In transit racks:\s*(.*)$/i, (_, value) => `Racks en tránsito: ${value}`],
   [/^Page\s+(\d+)\s+of\s+(\d+)$/i, (_, page, total) => `Página ${page} de ${total}`],
@@ -2033,6 +2261,7 @@ function setAppLanguage(language) {
   applyLanguageToRoot(document.body);
   syncLanguageControls();
   syncAllCustomSelects();
+  window.requestAnimationFrame(() => fitBayLastLocationText());
 }
 
 /**
@@ -2067,6 +2296,107 @@ function initLanguageSystem() {
 }
 
 /**
+ * Purpose: Determine whether the application is currently using the overlay drawer layout.
+ * Effects: None.
+ * Flow: Reads the shared responsive breakpoint so JavaScript and CSS use the same mobile boundary.
+ */
+function isMobileSidebarLayout() {
+  return window.matchMedia(`(max-width: ${SIDEBAR_MOBILE_BREAKPOINT}px)`).matches;
+}
+
+/**
+ * Purpose: Provide page-aware sidebar defaults until the operator saves a preference.
+ * Effects: None.
+ * Flow: Keeps the Bay Map compact by default while leaving the other workspaces expanded.
+ */
+function defaultSidebarCollapsedForPage(page = state.page) {
+  return true;
+}
+
+/**
+ * Purpose: Resolve the desktop sidebar state from the saved operator preference or page default.
+ * Effects: None.
+ * Flow: Honors an explicit saved choice and otherwise uses the page-aware first-run behavior.
+ */
+function resolvedSidebarCollapsed(page = state.page) {
+  return true;
+}
+
+/**
+ * Purpose: Keep sidebar classes, controls, titles, and responsive drawer state synchronized.
+ * Effects: Updates application-shell classes and accessibility attributes.
+ * Flow: Uses an overlay drawer on compact screens and the remembered collapsible rail on desktop.
+ */
+function syncSidebarState({ closeMobile = false } = {}) {
+  if (!els.app) return;
+
+  const mobile = isMobileSidebarLayout();
+  if (closeMobile) state.sidebarMobileOpen = false;
+
+  if (mobile) {
+    els.app.classList.remove("is-sidebar-collapsed");
+    els.app.classList.toggle("is-sidebar-mobile-open", state.sidebarMobileOpen);
+    els.mobileSidebarToggleBtn?.setAttribute("aria-expanded", String(state.sidebarMobileOpen));
+    els.sidebarToggleBtn?.setAttribute("aria-expanded", String(state.sidebarMobileOpen));
+
+    const mobileLabel = state.sidebarMobileOpen ? "Close navigation" : "Open navigation";
+    if (els.mobileSidebarToggleBtn) {
+      els.mobileSidebarToggleBtn.title = mobileLabel;
+      els.mobileSidebarToggleBtn.setAttribute("aria-label", mobileLabel);
+    }
+    if (els.sidebarToggleBtn) {
+      els.sidebarToggleBtn.title = "Close navigation";
+      els.sidebarToggleBtn.setAttribute("aria-label", "Close navigation");
+      const hiddenLabel = els.sidebarToggleBtn.querySelector(".sr-only");
+      if (hiddenLabel) hiddenLabel.textContent = "Close navigation";
+    }
+  } else {
+    state.sidebarMobileOpen = false;
+    els.app.classList.remove("is-sidebar-mobile-open");
+    els.app.classList.add("is-sidebar-collapsed");
+    els.sidebarToggleBtn?.setAttribute("aria-expanded", "false");
+    els.mobileSidebarToggleBtn?.setAttribute("aria-expanded", "false");
+
+    if (els.sidebarToggleBtn) {
+      els.sidebarToggleBtn.title = "Navigation opens on hover";
+      els.sidebarToggleBtn.setAttribute("aria-label", "Navigation opens on hover");
+      const hiddenLabel = els.sidebarToggleBtn.querySelector(".sr-only");
+      if (hiddenLabel) hiddenLabel.textContent = "Navigation opens on hover";
+    }
+  }
+
+  const compact = !mobile;
+  document.querySelectorAll(".app-sidebar [data-page-target]").forEach((button) => {
+    const label = button.querySelector("span:last-child")?.textContent?.trim() || "Page";
+    button.title = compact ? label : "";
+  });
+}
+
+/**
+ * Purpose: Toggle the saved desktop sidebar preference or close the mobile drawer.
+ * Effects: Persists an explicit desktop preference and updates the application shell.
+ * Flow: Mobile uses the control as a close action; desktop switches between rail and full navigation.
+ */
+function toggleSidebar() {
+  if (!isMobileSidebarLayout()) return;
+  state.sidebarMobileOpen = false;
+  els.userMenu?.removeAttribute("open");
+  syncSidebarState();
+}
+
+/**
+ * Purpose: Open or close the responsive navigation drawer without changing the desktop preference.
+ * Effects: Updates the mobile drawer and dismisses the profile flyout when closing.
+ * Flow: Keeps compact-device navigation temporary while preserving the workstation layout choice.
+ */
+function toggleMobileSidebar() {
+  if (!isMobileSidebarLayout()) return;
+  state.sidebarMobileOpen = !state.sidebarMobileOpen;
+  if (!state.sidebarMobileOpen) els.userMenu?.removeAttribute("open");
+  syncSidebarState();
+}
+
+/**
  * Purpose: Run the sync fullscreen sticky panel offset workflow for the browser application.
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
@@ -2087,6 +2417,7 @@ function syncFullscreenStickyPanelOffset() {
 function syncFullscreenControl() {
   const active = Boolean(document.fullscreenElement);
   syncFullscreenStickyPanelOffset();
+  syncSidebarState();
   renderRecent();
   if (!els.fullscreenToggleBtn) return;
   els.fullscreenToggleBtn.classList.toggle("is-active", active);
@@ -3922,11 +4253,202 @@ function unresolvedRushItems(items = state.items) {
 }
 
 /**
+ * Purpose: Create or resume the shared browser audio context used for scanner feedback.
+ * Effects: Lazily creates one Web Audio context after an operator interaction.
+ * Flow: Reuses the existing context so scan feedback never creates duplicate audio engines.
+ */
+function appAudioContext() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!appSoundRuntime.context) {
+    const context = new AudioContextClass();
+    const masterGain = context.createGain();
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -16;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 5;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.18;
+    masterGain.gain.value = appSoundRuntime.volumePercent / 100;
+    masterGain.connect(compressor);
+    compressor.connect(context.destination);
+    appSoundRuntime.context = context;
+    appSoundRuntime.masterGain = masterGain;
+    appSoundRuntime.compressor = compressor;
+  }
+  return appSoundRuntime.context;
+}
+
+/**
+ * Purpose: Persist and synchronize the operator-selected scanner sound volume.
+ * Effects: Updates the shared Web Audio master gain and every visible volume control.
+ * Flow: Clamps the floor-volume range to 0-400%, persists it locally, and refreshes labels.
+ */
+function setAppSoundVolume(value, { persist = true } = {}) {
+  const volumePercent = Math.max(0, Math.min(Number(value || 0), 400));
+  appSoundRuntime.volumePercent = volumePercent;
+  if (appSoundRuntime.masterGain && appSoundRuntime.context) {
+    appSoundRuntime.masterGain.gain.setTargetAtTime(volumePercent / 100, appSoundRuntime.context.currentTime, 0.015);
+  }
+  if (persist) {
+    try {
+      localStorage.setItem(APP_SOUND_VOLUME_KEY, String(volumePercent));
+    } catch {
+      // Volume persistence is optional in restricted browser modes.
+    }
+  }
+  document.querySelectorAll("[data-app-sound-volume]").forEach((input) => {
+    if (Number(input.value) !== volumePercent) input.value = String(volumePercent);
+  });
+  document.querySelectorAll("[data-app-sound-volume-label]").forEach((label) => {
+    label.textContent = `${Math.round(volumePercent)}%`;
+  });
+}
+
+/**
+ * Purpose: Schedule one short synthesized note inside the shared scanner audio context.
+ * Effects: Creates a temporary oscillator and gain node that disconnect automatically after playback.
+ * Flow: Applies a quick attack/release envelope so operational sounds remain clear without being harsh.
+ */
+function scheduleAppTone(context, { frequency, start, duration, type = "sine", volume = 0.12 }) {
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const safeStart = Math.max(Number(start || context.currentTime), context.currentTime);
+  const safeDuration = Math.max(Number(duration || 0.1), 0.04);
+  const safeVolume = Math.max(0.005, Math.min(Number(volume || 0.12), 0.42));
+
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(Math.max(Number(frequency || 440), 40), safeStart);
+  gain.gain.setValueAtTime(0.0001, safeStart);
+  gain.gain.exponentialRampToValueAtTime(safeVolume, safeStart + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, safeStart + safeDuration);
+  oscillator.connect(gain);
+  gain.connect(appSoundRuntime.masterGain || context.destination);
+  oscillator.start(safeStart);
+  oscillator.stop(safeStart + safeDuration + 0.025);
+}
+
+/**
+ * Purpose: Play one maintained operational sound for scan success, notice, error, or completion.
+ * Effects: Produces a short synthesized cue without requiring packaged audio files.
+ * Flow: Normalizes the requested cue, throttles accidental duplicates, resumes Web Audio, and schedules its note pattern.
+ */
+function playAppSound(kind = "notice", options = {}) {
+  const normalizedKind = ["success", "error", "notice", "complete"].includes(kind) ? kind : "notice";
+  const now = performance.now();
+  const lastPlayedAt = Number(appSoundRuntime.lastPlayedAt.get(normalizedKind) || 0);
+  const throttleMs = normalizedKind === "complete" ? 260 : 90;
+  if (!options.force && now - lastPlayedAt < throttleMs) return;
+  appSoundRuntime.lastPlayedAt.set(normalizedKind, now);
+
+  const context = appAudioContext();
+  if (!context) return;
+  const delay = Math.max(Number(options.delay || 0), 0);
+  /**
+   * Purpose: Schedule the selected sound pattern after the shared audio context is ready.
+   * Effects: Adds the maintained note sequence to the current Web Audio timeline.
+   * Flow: Selects one normalized cue pattern and delegates every note to scheduleAppTone.
+   */
+  const schedulePattern = () => {
+    const start = context.currentTime + delay;
+    const patterns = {
+      success: [
+        { frequency: 659.25, offset: 0, duration: 0.09, type: "sine", volume: 0.11 },
+        { frequency: 880, offset: 0.075, duration: 0.14, type: "sine", volume: 0.13 },
+      ],
+      notice: [
+        { frequency: 440, offset: 0, duration: 0.1, type: "triangle", volume: 0.1 },
+        { frequency: 554.37, offset: 0.11, duration: 0.11, type: "triangle", volume: 0.09 },
+      ],
+      error: [
+        { frequency: 220, offset: 0, duration: 0.16, type: "square", volume: 0.09 },
+        { frequency: 164.81, offset: 0.12, duration: 0.2, type: "sawtooth", volume: 0.075 },
+      ],
+      complete: [
+        { frequency: 523.25, offset: 0, duration: 0.14, type: "triangle", volume: 0.1 },
+        { frequency: 659.25, offset: 0.09, duration: 0.15, type: "triangle", volume: 0.105 },
+        { frequency: 783.99, offset: 0.18, duration: 0.16, type: "triangle", volume: 0.11 },
+        { frequency: 1046.5, offset: 0.29, duration: 0.26, type: "sine", volume: 0.13 },
+      ],
+    };
+    for (const note of patterns[normalizedKind]) {
+      scheduleAppTone(context, { ...note, start: start + note.offset });
+    }
+  };
+
+  if (context.state === "suspended") {
+    context.resume().then(schedulePattern).catch(() => {});
+  } else {
+    schedulePattern();
+  }
+}
+
+/**
+ * Purpose: Build the temporary sound-test controls used during floor tuning.
+ * Effects: Returns markup only; all buttons use the shared delegated test handler.
+ * Flow: Labels the progress test for the Scan or Bay context while reusing the same three outcome sounds.
+ */
+function soundTestControlsHtml(context = "scan") {
+  const progressLabel = context === "bay" ? "Bay 100%" : "Scan 100%";
+  return `
+    <section class="scan-sound-test-panel" aria-label="Temporary scanner sound tests">
+      <span class="scan-sound-test-copy"><strong>Temporary sound tests</strong><small>Remove after approval</small></span>
+      <label class="scan-sound-volume-control">
+        <span>Sound volume <strong data-app-sound-volume-label>${Math.round(appSoundRuntime.volumePercent)}%</strong></span>
+        <input type="range" min="0" max="400" step="10" value="${Math.round(appSoundRuntime.volumePercent)}" data-app-sound-volume aria-label="Scanner sound volume">
+        <small>Up to 400% floor boost</small>
+      </label>
+      <div class="scan-sound-test-actions">
+        <button type="button" data-scan-sound-test="success">Success</button>
+        <button type="button" data-scan-sound-test="notice">Notice</button>
+        <button type="button" data-scan-sound-test="error">Error</button>
+        <button type="button" data-progress-sound-test="${escapeHtml(context)}">${escapeHtml(progressLabel)}</button>
+      </div>
+    </section>
+  `;
+}
+
+/**
+ * Purpose: Fill every maintained temporary sound-test host without duplicating button behavior.
+ * Effects: Updates only the test-control placeholders on Scan and Bay Map.
+ * Flow: Reads each host context and injects one shared control template.
+ */
+function renderSoundTestControls(root = document) {
+  root.querySelectorAll?.("[data-sound-test-host]").forEach((host) => {
+    host.innerHTML = soundTestControlsHtml(host.dataset.soundTestHost || "scan");
+  });
+  setAppSoundVolume(appSoundRuntime.volumePercent, { persist: false });
+}
+
+/**
+ * Purpose: Replay the completion animation and fun sound for temporary operator testing.
+ * Effects: Toggles the existing celebration class and plays the shared completion cue.
+ * Flow: Targets the requested Scan, Bay, or In-Transit progress component and removes the class after the normal animation window.
+ */
+function replayProgressSoundTest(context = "scan") {
+  const selectors = {
+    scan: "#scanProgressTrack",
+    bay: "#bayPanelRouteMini [data-bay-dual-progress]",
+    transit: "#bayFlowPanel [data-progress-context='transit']",
+  };
+  const targets = [...document.querySelectorAll(selectors[context] || selectors.scan)];
+  for (const target of targets) {
+    target.classList.remove("is-celebrating");
+    void target.offsetWidth;
+    target.classList.add("is-celebrating");
+    window.setTimeout(() => target.classList.remove("is-celebrating"), 1900);
+  }
+  playAppSound("complete", { force: true });
+  showFloatingNotice(`${context === "bay" ? "Bay Map" : context === "transit" ? "In-Transit" : "Scan"} 100% sound test played.`, "success");
+}
+
+/**
  * Purpose: Process the scan flash workflow using the existing shared UI state.
  * Effects: May call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
 function scanFlash(kind = "notice") {
+  playAppSound(kind);
   const className = kind === "success" ? "scan-flash-success" : kind === "error" ? "scan-flash-error" : "scan-flash-notice";
   document.body.classList.remove("scan-flash-success", "scan-flash-error", "scan-flash-notice");
   void document.body.offsetWidth;
@@ -3955,29 +4477,87 @@ function getStats(items = state.items, errors = state.errors) {
 }
 
 /**
- * Purpose: Run the filtered items workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Resolve which Scan-page filter group owns a filter key.
+ * Effects: None; this is the shared ownership map used by filtering and button state.
+ * Flow: Searches the maintained filter groups and returns the matching group name or an empty string.
+ */
+function scanFilterGroup(filter) {
+  return Object.entries(SCAN_FILTER_GROUPS).find(([, filters]) => filters.includes(filter))?.[0] || "";
+}
+
+/**
+ * Purpose: Test one delivery-list item against one normalized Scan-page filter.
+ * Effects: None; all filter predicates stay centralized so desktop and mobile views cannot drift.
+ * Flow: Evaluates status, attention, or route rules and returns whether the item belongs to that filter.
+ */
+function itemMatchesScanFilter(item, filter) {
+  const status = itemStatus(item);
+  if (filter === "remaining" || filter === "partial" || filter === "complete") return status === filter;
+  if (filter === "errors") return hasScanError(item);
+  if (filter === "remakes") return isRemakeItem(item);
+  if (filter === "rushes") return isRushItem(item);
+  if (filter === "priority") return isRemakeOrRush(item);
+  if (filter === "updated") return isNewOrUpdatedItem(item);
+  if (filter === "cpu-route") return routeCategory(item) === "cpu";
+  if (filter === "dtc-route") return routeCategory(item) === "dtc";
+  if (filter === "greenville-route") return routeCategory(item) === "greenville";
+  if (filter === "indian-trail-route") return routeCategory(item) === "indian_trail";
+  return false;
+}
+
+/**
+ * Purpose: Report whether a Scan-page filter button is currently selected.
+ * Effects: None; the All button is treated as active only when no specific filters are selected.
+ * Flow: Reads the shared Set and returns one consistent active-state answer for every renderer.
+ */
+function isScanFilterActive(filter) {
+  return filter === "all" ? state.activeFilters.size === 0 : state.activeFilters.has(filter);
+}
+
+/**
+ * Purpose: Synchronize Scan-page filter button styling and accessibility state.
+ * Effects: Updates every desktop or mobile filter button currently in the DOM.
+ * Flow: Applies the shared selected Set, including the special All/clear state, without rerendering the list.
+ */
+function syncScanFilterButtons() {
+  document.querySelectorAll("[data-filter]").forEach((button) => {
+    const active = isScanFilterActive(button.dataset.filter || "all");
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+/**
+ * Purpose: Toggle one Scan-page filter while preserving other selected filter groups.
+ * Effects: Mutates the shared filter Set; selecting All clears every active filter.
+ * Flow: Adds or removes the requested key, then synchronizes all visible filter buttons.
+ */
+function toggleScanFilter(filter) {
+  if (!filter || filter === "all") {
+    state.activeFilters.clear();
+  } else if (state.activeFilters.has(filter)) {
+    state.activeFilters.delete(filter);
+  } else if (scanFilterGroup(filter)) {
+    state.activeFilters.add(filter);
+  }
+  syncScanFilterButtons();
+}
+
+/**
+ * Purpose: Filter Scan-page items using combinable status, attention, route, glass, and search criteria.
+ * Effects: None; reads shared state and returns a filtered copy.
+ * Flow: Uses OR within each selected filter group and AND between groups, then applies glass and text search.
  */
 function filteredItems() {
   const search = state.search.trim().toLowerCase();
 
   return state.items.filter((item) => {
-    const status = itemStatus(item);
-    const matchesFilter =
-      state.filter === "all" ||
-      state.filter === status ||
-      (state.filter === "errors" && hasScanError(item)) ||
-      (state.filter === "remakes" && isRemakeItem(item)) ||
-      (state.filter === "rushes" && isRushItem(item)) ||
-      (state.filter === "priority" && isRemakeOrRush(item)) ||
-      (state.filter === "updated" && isNewOrUpdatedItem(item)) ||
-      (state.filter === "cpu-route" && routeCategory(item) === "cpu") ||
-      (state.filter === "dtc-route" && routeCategory(item) === "dtc") ||
-      (state.filter === "greenville-route" && routeCategory(item) === "greenville") ||
-      (state.filter === "indian-trail-route" && routeCategory(item) === "indian_trail");
+    const matchesSelectedGroups = Object.values(SCAN_FILTER_GROUPS).every((groupFilters) => {
+      const selectedFilters = groupFilters.filter((filter) => state.activeFilters.has(filter));
+      return !selectedFilters.length || selectedFilters.some((filter) => itemMatchesScanFilter(item, filter));
+    });
 
-    if (!matchesFilter) return false;
+    if (!matchesSelectedGroups) return false;
     if (state.glassTypeFilter !== "all" && glassTypeLabel(item) !== state.glassTypeFilter) return false;
     if (!search) return true;
 
@@ -4205,6 +4785,74 @@ function rackLocationDropdown(item, currentLocation = "") {
 }
 
 /**
+ * Purpose: Update the shared Scan-page progress meter with consistent text, motion, and completion feedback.
+ * Effects: Updates the existing progress DOM and schedules a short completion-animation cleanup.
+ * Flow: Normalizes the percentage, updates accessibility values, animates changed progress, and celebrates a newly completed stage.
+ */
+function updateScanProgress(stats, options = {}) {
+  const totalQty = Math.max(Number(stats?.totalQty || 0), 0);
+  const scannedQty = Math.max(Number(stats?.scannedQty || 0), 0);
+  const percent = Math.max(0, Math.min(Number(stats?.percent || 0), 100));
+  const previousPercent = state.lastRenderedProgressPercent;
+  const sameList = state.lastRenderedProgressListId === state.activeListId;
+  const changed = sameList && previousPercent !== null && Math.abs(percent - previousPercent) > 0.01;
+  const newlyComplete = sameList && percent >= 100 && previousPercent !== null && previousPercent < 100;
+
+  if (els.progressText) els.progressText.textContent = `Qty: ${scannedQty}/${totalQty} · ${formatPercent(percent)}`;
+  if (els.progressFill) els.progressFill.style.width = `${percent}%`;
+  if (els.scanProgressTrack) {
+    els.scanProgressTrack.setAttribute("aria-valuenow", String(Math.round(percent)));
+    els.scanProgressTrack.setAttribute("aria-valuetext", `${scannedQty} of ${totalQty} pieces, ${formatPercent(percent)} complete`);
+    els.scanProgressTrack.classList.toggle("is-idle", percent < 100);
+    els.scanProgressTrack.classList.toggle("is-complete", percent >= 100);
+    if (changed || options.forceMotion) {
+      els.scanProgressTrack.classList.remove("is-updating");
+      void els.scanProgressTrack.offsetWidth;
+      els.scanProgressTrack.classList.add("is-updating");
+      window.setTimeout(() => els.scanProgressTrack?.classList.remove("is-updating"), 700);
+    }
+  }
+  if (els.scanProgressTrack && (newlyComplete || options.celebrate)) {
+    els.scanProgressTrack.classList.remove("is-celebrating");
+    void els.scanProgressTrack.offsetWidth;
+    els.scanProgressTrack.classList.add("is-celebrating");
+    window.setTimeout(() => els.scanProgressTrack?.classList.remove("is-celebrating"), 1900);
+  }
+  if (newlyComplete && !options.preview && options.sound !== false) playAppSound("complete", { delay: 0.18 });
+  if (!options.preview) {
+    state.lastRenderedProgressPercent = percent;
+    state.lastRenderedProgressListId = state.activeListId;
+  }
+}
+
+/**
+ * Purpose: Render the Bay Map scanner's mirrored Outbound and Received progress halves.
+ * Effects: Replaces only the existing dual-progress meter markup inside the Bay Map route summary.
+ * Flow: Calculates both completion percentages, fills each half toward the center, and triggers the shared completion celebration when both reach 100 percent.
+ */
+function bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTotal, options = {}) {
+  const safeOutboundTotal = Math.max(Number(outboundTotal || 0), 0);
+  const safeInboundTotal = Math.max(Number(inboundTotal || 0), 0);
+  const outboundPercent = safeOutboundTotal ? Math.min((Number(outboundQty || 0) / safeOutboundTotal) * 100, 100) : 0;
+  const inboundPercent = safeInboundTotal ? Math.min((Number(inboundQty || 0) / safeInboundTotal) * 100, 100) : 0;
+  const complete = safeOutboundTotal > 0 && safeInboundTotal > 0 && outboundPercent >= 100 && inboundPercent >= 100;
+  const contextClass = options.context === "transit" ? "is-transit-card" : "";
+  return `
+    <div class="bay-dual-progress ${contextClass} ${complete ? "is-filled" : ""} ${options.celebrate ? "is-celebrating" : ""}" data-bay-dual-progress data-progress-context="${escapeHtml(options.context || "scanner")}">
+      <div class="bay-dual-progress-half is-outbound" role="progressbar" aria-label="Outbound completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(outboundPercent)}">
+        <i style="width:${outboundPercent}%"></i>
+      </div>
+      <span class="bay-dual-progress-center" aria-hidden="true"><b>✦</b></span>
+      <div class="bay-dual-progress-half is-received" role="progressbar" aria-label="Received completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(inboundPercent)}">
+        <i style="width:${inboundPercent}%"></i>
+      </div>
+      <div class="bay-dual-progress-label is-outbound"><span>Outbound</span><strong>${escapeHtml(formatPercent(outboundPercent))}</strong></div>
+      <div class="bay-dual-progress-label is-received"><span>Received</span><strong>${escapeHtml(formatPercent(inboundPercent))}</strong></div>
+    </div>
+  `;
+}
+
+/**
  * Purpose: Render the render counts workflow using the existing shared UI state.
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
@@ -4259,14 +4907,15 @@ function renderCounts() {
   if (els.countCpuRoute) els.countCpuRoute.textContent = `(${routeCounts["cpu-route"]})`;
   if (els.countDtcRoute) els.countDtcRoute.textContent = `(${routeCounts["dtc-route"]})`;
   if (els.countGreenvilleRoute) els.countGreenvilleRoute.textContent = `(${routeCounts["greenville-route"]})`;
+  let filterSelectionChanged = false;
   document.querySelectorAll(".route-filter-tab").forEach((button) => {
-    const count = routeCounts[button.dataset.filter] || 0;
+    const filter = button.dataset.filter || "";
+    const count = routeCounts[filter] || 0;
     button.hidden = count === 0;
+    if (count === 0 && state.activeFilters.delete(filter)) filterSelectionChanged = true;
   });
-  if (state.filter.endsWith("-route") && !routeCounts[state.filter]) {
-    state.filter = "all";
-    document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.filter === state.filter));
-  }
+  if (filterSelectionChanged) state.pageIndex = 1;
+  syncScanFilterButtons();
   if (state.glassTypeFilter !== "all" && !glassCounts.has(state.glassTypeFilter)) state.glassTypeFilter = "all";
   if (els.glassFilterTabs) {
     const sortedGlassEntries = [...glassCounts.entries()].sort(
@@ -4311,8 +4960,7 @@ function renderCounts() {
     els.glassFilterTabs.innerHTML = glassButtons.join("");
   }
   if (els.totalItemsText) els.totalItemsText.textContent = `${state.items.length} rows / ${totalItems} pieces`;
-  if (els.progressText) els.progressText.textContent = `${stageVerb()} Qty: ${stats.scannedQty}/${stats.totalQty} - ${formatPercent(stats.percent)} Complete`;
-  if (els.progressFill) els.progressFill.style.width = `${Math.min(stats.percent, 100)}%`;
+  updateScanProgress(stats);
   if (els.remainingQty) els.remainingQty.textContent = String(stats.remainingQty);
   if (els.partialQty) els.partialQty.textContent = String(stats.partialItems);
   if (els.completeQty) els.completeQty.textContent = String(stats.completeItems);
@@ -5852,14 +6500,14 @@ function renderMobileCards() {
       <span>${state.items.length} items</span>
     </div>
     <div class="filter-tabs mobile-tabs">
-      <button class="tab ${state.filter === "all" ? "is-active" : ""}" data-filter="all" type="button">All (${state.items.length})</button>
-      <button class="tab ${state.filter === "remaining" ? "is-active" : ""}" data-filter="remaining" type="button">Remaining (${getStats().remainingItems})</button>
-      <button class="tab ${state.filter === "partial" ? "is-active" : ""}" data-filter="partial" type="button">Partial (${getStats().partialItems})</button>
-      <button class="tab ${state.filter === "complete" ? "is-active" : ""}" data-filter="complete" type="button">Complete (${getStats().completeItems})</button>
-      <button class="tab ${state.filter === "remakes" ? "is-active" : ""}" data-filter="remakes" type="button">Remakes (${state.items.filter(isRemakeItem).length})</button>
-      <button class="tab ${state.filter === "rushes" ? "is-active" : ""}" data-filter="rushes" type="button">Rushes (${state.items.filter(isRushItem).length})</button>
-      <button class="tab ${state.filter === "updated" ? "is-active" : ""}" data-filter="updated" type="button">Updated (${state.items.filter(isNewOrUpdatedItem).length})</button>
-      <button class="tab ${state.filter === "errors" ? "is-active" : ""}" data-filter="errors" type="button">Review (${state.errors.length})</button>
+      <button class="tab ${isScanFilterActive("all") ? "is-active" : ""}" data-filter="all" type="button">All (${state.items.length})</button>
+      <button class="tab ${isScanFilterActive("remaining") ? "is-active" : ""}" data-filter="remaining" type="button">Remaining (${getStats().remainingItems})</button>
+      <button class="tab ${isScanFilterActive("partial") ? "is-active" : ""}" data-filter="partial" type="button">Partial (${getStats().partialItems})</button>
+      <button class="tab ${isScanFilterActive("complete") ? "is-active" : ""}" data-filter="complete" type="button">Complete (${getStats().completeItems})</button>
+      <button class="tab ${isScanFilterActive("remakes") ? "is-active" : ""}" data-filter="remakes" type="button">Remakes (${state.items.filter(isRemakeItem).length})</button>
+      <button class="tab ${isScanFilterActive("rushes") ? "is-active" : ""}" data-filter="rushes" type="button">Rushes (${state.items.filter(isRushItem).length})</button>
+      <button class="tab ${isScanFilterActive("updated") ? "is-active" : ""}" data-filter="updated" type="button">Updated (${state.items.filter(isNewOrUpdatedItem).length})</button>
+      <button class="tab ${isScanFilterActive("errors") ? "is-active" : ""}" data-filter="errors" type="button">Review (${state.errors.length})</button>
     </div>
     ${pageRows
       .slice(0, 12)
@@ -5880,6 +6528,7 @@ function renderMobileCards() {
       })
       .join("")}
   `;
+  syncScanFilterButtons();
 }
 
 /**
@@ -6242,7 +6891,7 @@ function applyPermissionUi() {
   }
 
   if (els.signedInRole) {
-    els.signedInRole.textContent = roleText;
+    els.signedInRole.textContent = `${roleText} • ${stationText}`;
   }
 
   if (els.userMenuDisplayName) {
@@ -6251,6 +6900,11 @@ function applyPermissionUi() {
 
   if (els.userMenuDetails) {
     els.userMenuDetails.textContent = `${roleText} • ${stationText}`;
+  }
+
+  if (els.userMenuIdentity) {
+    const identity = state.user?.email || state.user?.username || (state.backend ? "Authenticated account" : "Local demo account");
+    els.userMenuIdentity.textContent = identity;
   }
 
   document.querySelectorAll(".user-menu .user-avatar").forEach((avatar) => {
@@ -6290,6 +6944,7 @@ function renderScanPage() {
   renderScanRackTools();
   renderOutboundRackStatusTools();
   renderScanBayOverrideTools();
+  renderSoundTestControls(els.scanPage || document);
   applyPermissionUi();
 }
 
@@ -7816,14 +8471,16 @@ function renderTodayProgress() {
     ? lists
         .map((list) => {
           const percent = progressPercent(list);
+          const scannedQty = Number(list.scannedQty || 0);
+          const totalQty = Number(list.totalQty || 0);
           return `
-            <article class="today-stage-card ${escapeHtml(stageCategory(list))}" data-open-list="${escapeHtml(list.id)}">
-              <div>
-                <span>${escapeHtml(stageLabel(list))}</span>
-                <strong>${escapeHtml(list.scannedQty || 0)} / ${escapeHtml(list.totalQty || 0)}</strong>
+            <article class="today-stage-card ${escapeHtml(stageCategory(list))}" data-open-list="${escapeHtml(list.id)}" role="button" tabindex="0">
+              <div class="today-stage-card-heading">
+                <span class="today-stage-name"><i aria-hidden="true"></i><b>${escapeHtml(stageLabel(list))}</b></span>
+                <strong><b>${escapeHtml(scannedQty)}</b><small>/ ${escapeHtml(totalQty)}</small></strong>
               </div>
-              <div class="list-card-progress"><span style="width:${Math.min(percent, 100)}%"></span></div>
-              <small>${formatPercent(percent)}</small>
+              <div class="list-card-progress" role="progressbar" aria-label="${escapeHtml(stageLabel(list))} completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(percent, 100)}"><span style="width:${Math.min(percent, 100)}%"></span></div>
+              <div class="today-stage-percent">${formatPercent(percent)}</div>
             </article>
           `;
         })
@@ -7946,6 +8603,7 @@ function showPage(page) {
   if (page === "home") state.expandedDeliveryDate = "";
   state.page = page;
   document.body.dataset.page = page;
+  syncSidebarState({ closeMobile: true });
   window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   document.querySelectorAll(".page-view").forEach((view) => {
     view.hidden = view.id !== `${page === "bays" ? "bayMap" : page}Page`;
@@ -8209,6 +8867,7 @@ function mountTimedScanConfirmation({
   className = "",
   markup,
   durationSeconds = 12,
+  openAllScans = null,
 }) {
   document.querySelectorAll("[data-timed-scan-confirmation]").forEach((existingShell) => {
     closeTimedScanConfirmation(existingShell);
@@ -8219,23 +8878,65 @@ function mountTimedScanConfirmation({
   shell.dataset.timedScanConfirmation = "true";
   shell.className = `indian-trail-placement-shell${className ? ` ${className}` : ""}`;
   shell.innerHTML = markup;
+  shell.style.setProperty("--timed-confirmation-duration", `${durationSeconds}s`);
   document.body.appendChild(shell);
   applyLanguageToRoot(shell);
   enhanceCustomSelects(shell);
   updateModalScrollLock();
 
   let seconds = durationSeconds;
+  let paused = false;
   const countdown = shell.querySelector("[data-placement-countdown]");
+  const panel = shell.querySelector(".indian-trail-placement-panel");
   if (countdown) countdown.textContent = String(seconds);
+
+  /**
+   * Purpose: Pause or resume the timed scan confirmation countdown.
+   * Effects: Updates the local timer state and the popup pause styling.
+   * Flow: Normalizes the requested pause state and applies it to both the interval and progress animation.
+   */
+  const setPaused = (nextPaused) => {
+    paused = Boolean(nextPaused);
+    shell.classList.toggle("is-timer-paused", paused);
+  };
+
+  shell.addEventListener("mouseenter", () => setPaused(true));
+  shell.addEventListener("mouseleave", () => setPaused(false));
+
   shell._countdownTimer = window.setInterval(() => {
+    if (paused) return;
     seconds -= 1;
     if (countdown) countdown.textContent = String(Math.max(seconds, 0));
     if (seconds <= 0) closeTimedScanConfirmation(shell);
   }, 1000);
 
-  shell.querySelector("[data-placement-close]")?.addEventListener("click", () => {
+  shell.querySelector("[data-placement-close]")?.addEventListener("click", (event) => {
+    event.stopPropagation();
     closeTimedScanConfirmation(shell);
   });
+
+  if (typeof openAllScans === "function" && panel) {
+    panel.classList.add("is-clickable");
+    panel.tabIndex = 0;
+    panel.setAttribute("aria-label", `${panel.getAttribute("aria-label") || "Scan confirmation"}. Click to open All Scans.`);
+
+    /**
+     * Purpose: Open the appropriate All Scans view from a timed scan confirmation.
+     * Effects: Closes the current popup and opens the supplied shared history workflow.
+     * Flow: Ignores interactive child controls, accepts click/keyboard activation, then delegates to the existing All Scans opener.
+     */
+    const openHistory = async (event) => {
+      if (event?.target?.closest?.("button, select, input, label, a, [data-placement-move], [data-placement-close]")) return;
+      if (event?.type === "keydown" && !["Enter", " "].includes(event.key)) return;
+      event?.preventDefault?.();
+      closeTimedScanConfirmation(shell);
+      await openAllScans();
+    };
+
+    panel.addEventListener("click", openHistory);
+    panel.addEventListener("keydown", openHistory);
+  }
+
   return shell;
 }
 
@@ -8273,6 +8974,7 @@ function showOutboundRackTransitPrompt(result) {
   mountTimedScanConfirmation({
     id: "outboundRackTransitShell",
     className: "is-outbound-transit",
+    openAllScans: async () => openAdminModal("recentScans"),
     markup: `
       <section class="indian-trail-placement-panel" role="status" aria-live="assertive">
         <div class="indian-trail-placement-icon" aria-hidden="true"></div>
@@ -8287,6 +8989,7 @@ function showOutboundRackTransitPrompt(result) {
           <span>${escapeHtml(pieceLabel)}</span>
         </div>
         <div class="indian-trail-placement-actions">
+          <span class="timed-scan-open-hint">${spanish ? "Haga clic en el aviso para abrir Todos los escaneos" : "Click the notice to open All Scans"}</span>
           <button type="button" data-placement-close>${spanish ? "Listo" : "Done"} <span data-placement-countdown>12</span></button>
         </div>
         <i class="indian-trail-placement-timer" aria-hidden="true"></i>
@@ -8337,6 +9040,7 @@ async function showIndianTrailPlacementPrompt(result) {
   const shell = mountTimedScanConfirmation({
     id: "indianTrailPlacementShell",
     className: `${isRush ? "is-rush" : ""}${directToTruck ? `${isRush ? " " : ""}is-direct-to-truck` : ""}`,
+    openAllScans: async () => openBayAllScansModal(),
     markup: `
       <section class="indian-trail-placement-panel" role="status" aria-live="assertive">
         <div class="indian-trail-placement-icon" aria-hidden="true"></div>
@@ -8360,6 +9064,7 @@ async function showIndianTrailPlacementPrompt(result) {
         `}
         <div class="indian-trail-placement-actions">
           ${directToTruck ? "" : `<button type="button" data-placement-move ${result.assignmentId ? "" : "disabled"}>${isRush ? (spanish ? "Mover a bahia urgente seleccionada" : "Move to selected Rush bay") : (spanish ? "Mover a la bahia seleccionada" : "Move to selected bay")}</button>`}
+          <span class="timed-scan-open-hint">${spanish ? "Haga clic en el aviso para abrir Todos los escaneos" : "Click the notice to open All Scans"}</span>
           <button type="button" data-placement-close>${spanish ? "Listo" : "Done"} <span data-placement-countdown>12</span></button>
         </div>
         <i class="indian-trail-placement-timer" aria-hidden="true"></i>
@@ -8887,7 +9592,8 @@ function rushNotificationTargetList(notification) {
  */
 async function openRushNotificationList(notification) {
   const targetList = rushNotificationTargetList(notification);
-  state.filter = "rushes";
+  state.activeFilters = new Set(["rushes"]);
+  syncScanFilterButtons();
   state.search = "";
   state.pageIndex = 1;
   if (els.searchInput) els.searchInput.value = "";
@@ -9314,6 +10020,33 @@ function renderGlobalSearchResults(results) {
 }
 
 /**
+ * Purpose: Build the date-aware Indian Trail API suffix used by every Bay Map route request.
+ * Effects: None; this is the single date-selection source for the summary and in-transit manifest.
+ * Flow: Uses today's delivery date when present, otherwise the dashboard fallback date, and returns one encoded query string.
+ */
+function indianTrailDateQuery() {
+  const deliveryDate = dashboardDateKey();
+  return deliveryDate ? `?deliveryDate=${encodeURIComponent(deliveryDate)}` : "";
+}
+
+/**
+ * Purpose: Refresh only the Bay Map Outbound, in-transit, and Received counters for live multi-user visibility.
+ * Effects: Calls the existing Indian Trail summary endpoint and reuses the existing route renderer.
+ * Flow: Prevents overlapping requests, fetches current quantities, stores the summary, and updates both Bay Map route displays.
+ */
+async function refreshBayRouteSummary() {
+  if (!state.backend || !hasPermission("view_indian_trail") || state.bayRouteRefreshInFlight) return;
+  state.bayRouteRefreshInFlight = true;
+  try {
+    const summary = await fetchJson(`/api/indian-trail/summary${indianTrailDateQuery()}`);
+    renderIndianTrailSummary(summary);
+    renderBayRouteFlow(summary);
+  } finally {
+    state.bayRouteRefreshInFlight = false;
+  }
+}
+
+/**
  * Purpose: Load the refresh bay map page workflow using the existing shared UI state.
  * Effects: Updates visible dom state.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
@@ -9324,7 +10057,7 @@ async function refreshBayMapPage() {
     const [layout, baysPayload, summary, eventsPayload] = await Promise.all([
       fetchJson("/api/indian-trail/layout"),
       fetchJson("/api/indian-trail/bays"),
-      hasPermission("view_indian_trail") ? fetchJson("/api/indian-trail/summary") : Promise.resolve(null),
+      hasPermission("view_indian_trail") ? fetchJson(`/api/indian-trail/summary${indianTrailDateQuery()}`) : Promise.resolve(null),
       fetchJson("/api/indian-trail/events"),
     ]);
     state.bayLayout = layout;
@@ -9352,14 +10085,15 @@ async function refreshBayMapPage() {
  */
 function renderBayRouteFlow(summary) {
   if (!els.bayFlowPanel) return;
+  state.bayRouteSummary = summary || null;
 
   const key = dashboardDateKey();
   const dayLists = state.lists.filter((list) => list.deliveryDate === key);
   const outbound = dayLists.find((list) => stageCategory(list) === "outbound");
   const inbound = dayLists.find((list) => stageCategory(list) === "received") || state.lists.find((list) => list.id === summary?.activeInboundListId);
 
-  const inboundQty = Number(inbound?.scannedQty ?? summary?.receivedQty ?? 0);
-  const inboundTotal = Number(inbound?.totalQty ?? summary?.indianTrailOutboundTotal ?? summary?.inboundToday ?? 0);
+  const inboundQty = Number(summary?.receivedQty ?? inbound?.scannedQty ?? 0);
+  const inboundTotal = Number(summary?.inboundToday ?? summary?.indianTrailOutboundTotal ?? inbound?.totalQty ?? 0);
 
   const outboundQty = Number(summary?.indianTrailOutboundScanned ?? outbound?.scannedQty ?? 0);
   const outboundTotal = inboundTotal || Number(summary?.indianTrailOutboundTotal ?? outbound?.totalQty ?? 0);
@@ -9371,7 +10105,10 @@ function renderBayRouteFlow(summary) {
   const inTransitJobCount = Number(summary?.inTransitJobCount || 0);
   const truckQty = Number(summary?.truckInTransitQty || 0);
   const rackQty = Number(summary?.rackInTransitQty || 0);
-  const percent = outboundTotal ? Math.min((inboundQty / outboundTotal) * 100, 100) : 0;
+  const routeComplete = outboundTotal > 0 && inboundTotal > 0 && outboundQty >= outboundTotal && inboundQty >= inboundTotal;
+  const celebrateRouteCompletion = routeComplete && state.lastBayRouteComplete === false;
+  state.lastBayRouteComplete = routeComplete;
+  if (celebrateRouteCompletion) playAppSound("complete", { delay: 0.18 });
   const rackLine = (summary?.racksInTransit || [])
     .map((rack) => `${rack.code}: ${rack.qty}`)
     .join(" | ");
@@ -9416,7 +10153,7 @@ function renderBayRouteFlow(summary) {
         </span>
         <span class="transit-route-node transit-route-node-end"></span>
       </span>
-      <span class="flow-progress-track" role="progressbar" aria-label="Indian Trail received progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(percent)}"><i style="width:${percent}%"></i></span>
+      ${bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTotal, { celebrate: celebrateRouteCompletion, context: "transit" })}
       ${rackLine ? `<span class="flow-rack-line flow-rack-line-v2"><b>Racks:</b><span>${escapeHtml(rackLine)}</span></span>` : ""}
       <span class="transit-open-action"><b>Open manifest</b><i aria-hidden="true"></i></span>
     </button>
@@ -9445,13 +10182,14 @@ function renderBayRouteFlow(summary) {
         <small>Outbound</small>
         <strong>${escapeHtml(outboundQty)}/${escapeHtml(outboundTotal)}</strong>
       </div>
-      <div class="bay-panel-route-lane">
-        <span>${escapeHtml(inTransitPieceLabel)} | Truck ${escapeHtml(truckQty)} | Racks ${escapeHtml(rackQty)}</span>
-      </div>
+      <button class="bay-panel-route-lane" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest">
+        <span>${escapeHtml(inTransitQty)} piece${inTransitQty === 1 ? "" : "s"} in transit</span>
+      </button>
       <div class="bay-panel-route-node inbound">
         <small>Received</small>
         <strong>${escapeHtml(inboundQty)}/${escapeHtml(inboundTotal)}</strong>
       </div>
+      ${bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTotal, { celebrate: celebrateRouteCompletion })}
     `;
   }
 }
@@ -9709,7 +10447,10 @@ function transitManifestHtml(payload) {
           <h2>In-Transit Manifest</h2>
           <span>${escapeHtml(dateLabel)} | grouped by rack, then glass type</span>
         </div>
-        <button class="modal-close-x transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
+        <div class="transit-manifest-header-actions">
+          <button class="scan-sound-test-progress-button" type="button" data-progress-sound-test="transit">Test 100% sound</button>
+          <button class="modal-close-x transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
+        </div>
       </header>
       <div class="transit-summary-row transit-summary-row-v31">
         <article><small>Pieces on the way</small><strong>${escapeHtml(payload.totalQty || 0)}</strong></article>
@@ -9747,7 +10488,7 @@ async function openInTransitManifest() {
   document.body.appendChild(shell);
   document.body.classList.add("modal-scroll-locked");
   try {
-    const payload = await fetchJson("/api/indian-trail/in-transit");
+    const payload = await fetchJson(`/api/indian-trail/in-transit${indianTrailDateQuery()}`);
     shell.innerHTML = transitManifestHtml(payload);
   } catch (error) {
     shell.querySelector(".transit-empty")?.remove();
@@ -10910,6 +11651,7 @@ function renderBayMapPage() {
   renderBaySidePanels();
   renderBayFilterSummary();
   renderBayRecentActions();
+  renderSoundTestControls(els.bayMapPage || document);
 }
 
 /**
@@ -11324,9 +12066,37 @@ function bayEventMoveControlHtml(event, compact = false) {
 }
 
 /**
- * Purpose: Render the render bay last scan card workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may call the backend api, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ * Purpose: Scale and wrap the Bay Map last-location label so long multi-word bay names remain large and fully readable.
+ * Effects: Updates only the current bay-location text styles after layout or fullscreen changes.
+ * Flow: Starts at the preferred large size, measures overflow, and reduces the font one pixel at a time to a safe minimum.
+ */
+function fitBayLastLocationText() {
+  const target = els.bayLastBay;
+  if (!target || !target.isConnected) return;
+  window.requestAnimationFrame(() => {
+    const box = target.parentElement;
+    if (!box) return;
+    const maxSize = document.fullscreenElement ? 38 : 32;
+    const minSize = 15;
+    target.style.fontSize = `${maxSize}px`;
+    target.style.lineHeight = "0.96";
+    target.style.whiteSpace = "normal";
+    target.style.overflowWrap = "anywhere";
+    target.style.textWrap = "balance";
+    let size = maxSize;
+    const maxHeight = Math.max(box.clientHeight - 42, 38);
+    while (size > minSize && (target.scrollWidth > target.clientWidth + 1 || target.scrollHeight > maxHeight)) {
+      size -= 1;
+      target.style.fontSize = `${size}px`;
+    }
+    target.dataset.fittedSize = String(size);
+  });
+}
+
+/**
+ * Purpose: Render the Bay Map last-scan card with a prominent auto-fitted current location and shared move control.
+ * Effects: Updates the existing last-scan fields, schedules bay-label fitting, and keeps the item relocation control synchronized.
+ * Flow: Normalizes the newest event, fills its summary fields, renders the common location editor, and fits the bay label after layout.
  */
 function renderBayLastScanCard(event) {
   const hasEvent = Boolean(event);
@@ -11348,6 +12118,7 @@ function renderBayLastScanCard(event) {
   if (els.bayLastBay) {
     els.bayLastBay.textContent = bay;
     els.bayLastBay.title = bay === "-" ? "" : bay;
+    fitBayLastLocationText();
   }
   if (els.bayLastTime) els.bayLastTime.textContent = time;
   const moveSelect = document.getElementById("bayLastMoveSelect");
@@ -11370,15 +12141,26 @@ function renderBayLastScanCard(event) {
 }
 
 /**
- * Purpose: Render the render bay recent actions workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ * Purpose: Resolve how many Bay Map recent actions fit in the current display mode.
+ * Effects: None; reads fullscreen and active-page state only.
+ * Flow: Returns one row during normal operation and preserves the existing two-row fullscreen view.
+ */
+function bayScanRecentLimit() {
+  return document.fullscreenElement && state.page === "bays" ? 2 : 1;
+}
+
+/**
+ * Purpose: Render the Bay Map scanner's last action and responsive recent-action history.
+ * Effects: Updates the Bay scanner history card, row count label, and location controls.
+ * Flow: Keeps the latest event in Last Scan, then shows one normal-screen row or the existing two fullscreen rows.
  */
 function renderBayRecentActions() {
   const events = state.bayEvents || [];
+  const limit = bayScanRecentLimit();
   renderBayLastScanCard(events[0] || null);
+  if (els.bayRecentScanCountLabel) els.bayRecentScanCountLabel.textContent = `Latest ${limit}`;
   if (!els.bayScanOutRecent) return;
-  const recentRows = events.slice(1, 3);
+  const recentRows = events.slice(1, 1 + limit);
   els.bayScanOutRecent.innerHTML = recentRows.length
     ? recentRows.map((event) => {
         const when = new Date(event.time || event.createdAt || "");
@@ -11397,7 +12179,7 @@ function renderBayRecentActions() {
           </tr>
         `;
       }).join("")
-    : `<tr><td colspan="6"><div class="bay-history-empty"><strong>Recent bay actions</strong><span>The next two actions will appear here.</span></div></td></tr>`;
+    : `<tr><td colspan="6"><div class="bay-history-empty"><strong>Recent bay actions</strong><span>The next ${limit === 1 ? "action" : `${limit} actions`} will appear here.</span></div></td></tr>`;
 }
 
 /**
@@ -12333,16 +13115,259 @@ async function openBayAllScansModal() {
 }
 
 /**
- * Purpose: Open the open SDI panel workflow using the existing shared UI state.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Populate the SDI bay selector from the live Bay Map while retaining a valid preferred bay.
+ * Effects: Rebuilds the existing bay select options and synchronizes its custom-select presentation.
+ * Flow: Filters active non-spacer bays, sorts by display name, restores a valid selection, and refreshes the shared select UI.
+ */
+function populateSdiBayOptions(preferredBayCode = "") {
+  if (!els.sdiBayInput) return;
+  const current = preferredBayCode || els.sdiBayInput.value || "";
+  const bays = (state.bays || [])
+    .filter((bay) => bay.active !== false && String(bay.bayType || "").toLowerCase() !== "spacer")
+    .sort((left, right) => String(left.displayName || left.bayCode).localeCompare(String(right.displayName || right.bayCode), undefined, { numeric: true }));
+  els.sdiBayInput.innerHTML = [
+    `<option value="">All bays / no bay filter</option>`,
+    ...bays.map((bay) => `<option value="${escapeHtml(bay.bayCode)}">${escapeHtml(bay.displayName || bay.bayCode)}</option>`),
+  ].join("");
+  els.sdiBayInput.value = bays.some((bay) => bay.bayCode === current) ? current : "";
+  if (els.sdiBayInput.dataset.customSelectEnhanced === "true") syncCustomSelect(els.sdiBayInput);
+}
+
+/**
+ * Purpose: Render predictive SDI job/order choices beneath the shared lookup field.
+ * Effects: Shows or hides the suggestion list and replaces only its owned result markup.
+ * Flow: Reads backend-ranked suggestions and presents job, customer, missing count, item count, and associated bays.
+ */
+function renderSdiLookupResults() {
+  if (!els.sdiLookupResults) return;
+  const suggestions = state.sdiWorkspace?.suggestions || [];
+  if (!suggestions.length) {
+    els.sdiLookupResults.hidden = true;
+    els.sdiLookupResults.innerHTML = "";
+    return;
+  }
+  els.sdiLookupResults.hidden = false;
+  els.sdiLookupResults.innerHTML = suggestions.map((suggestion) => `
+    <button type="button" data-sdi-lookup="${escapeHtml(suggestion.lookup)}">
+      <span><strong>${escapeHtml(suggestion.job || suggestion.order)}</strong><small>${escapeHtml(suggestion.customer || "No customer")}</small></span>
+      <span><b>${escapeHtml(suggestion.missingCount)} missing</b><small>${escapeHtml(suggestion.itemCount)} item${Number(suggestion.itemCount) === 1 ? "" : "s"}${suggestion.bayCodes?.length ? ` · ${escapeHtml(suggestion.bayCodes.join(", "))}` : ""}</small></span>
+    </button>
+  `).join("");
+}
+
+/**
+ * Purpose: Read the currently selected Rush or Remake action from the SDI form.
+ * Effects: None; this is a shared normalized accessor for selection rules and submission.
+ * Flow: Returns the existing select value or an empty string when the control is unavailable.
+ */
+function sdiSelectionType() {
+  return els.sdiTypeInput?.value || "";
+}
+
+/**
+ * Purpose: Restore the safe SDI default by selecting only items that are still missing from a physical bay.
+ * Effects: Replaces the client-side exact-item selection and rerenders the existing item list.
+ * Flow: Filters the loaded workspace by missing quantity, records destination line-item IDs, and refreshes checkboxes.
+ */
+function selectSdiMissingItems() {
+  state.sdiSelectedLineItemIds = new Set(
+    (state.sdiWorkspace?.items || [])
+      .filter((item) => Number(item.missingQty || 0) > 0)
+      .map((item) => String(item.lineItemId)),
+  );
+  renderSdiItemSelection();
+}
+
+/**
+ * Purpose: Return the loaded SDI items selected by their stable destination line-item IDs.
+ * Effects: None; reads the current modal workspace and selection set.
+ * Flow: Filters the loaded item payload so rendering, validation, and clearing use the same exact selection.
+ */
+function selectedSdiItems() {
+  return (state.sdiWorkspace?.items || []).filter((item) => state.sdiSelectedLineItemIds.has(String(item.lineItemId)));
+}
+
+/**
+ * Purpose: Keep the SDI action card synchronized with exact item selection and handling type.
+ * Effects: Updates the selection summary, mark/clear button availability, and truck option state.
+ * Flow: Counts selected and marked items, describes the current action, and permits direct-to-truck only for Rush handling.
+ */
+function updateSdiSelectionSummary() {
+  const selected = selectedSdiItems();
+  const markedSelected = selected.filter((item) => item.marked);
+  const missingSelected = selected.filter((item) => Number(item.missingQty || 0) > 0);
+  const orderType = sdiSelectionType();
+  if (els.sdiSelectionSummary) {
+    els.sdiSelectionSummary.textContent = selected.length
+      ? `${selected.length} item${selected.length === 1 ? "" : "s"} selected · ${missingSelected.length} missing${orderType ? ` · ${orderType}` : ""}`
+      : "No items selected";
+  }
+  const markButton = els.sdiForm?.querySelector('[data-sdi-action="mark"]');
+  if (markButton) markButton.disabled = !selected.length || !orderType;
+  if (els.sdiClearBtn) {
+    els.sdiClearBtn.disabled = !markedSelected.length;
+    els.sdiClearBtn.title = markedSelected.length ? "Clear Rush or Remake from the selected marked items" : "Select a currently marked item to clear it";
+  }
+  if (els.sdiTruckExemptInput) {
+    const enabled = orderType === "Rush" && selected.length > 0;
+    els.sdiTruckExemptInput.disabled = !enabled;
+    if (!enabled) els.sdiTruckExemptInput.checked = false;
+  }
+}
+
+/**
+ * Purpose: Render exact SDI item choices with physical-bay fulfillment and missing status.
+ * Effects: Replaces the item-selection region and enforces that completed pieces cannot be chosen for a job-level Rush.
+ * Flow: Maps workspace items to checkboxes, keeps missing pieces selected by default, and leaves complete pieces available only for Remake.
+ */
+function renderSdiItemSelection() {
+  if (!els.sdiItemSelectionList) return;
+  const items = state.sdiWorkspace?.items || [];
+  const orderType = sdiSelectionType();
+  if (!items.length) {
+    els.sdiItemSelectionList.innerHTML = `<span class="admin-empty">Choose a predictive job or order result to review exact items.</span>`;
+    updateSdiSelectionSummary();
+    return;
+  }
+  els.sdiItemSelectionList.innerHTML = items.map((item) => {
+    const complete = Boolean(item.complete);
+    const disabled = orderType === "Rush" && complete;
+    const checked = state.sdiSelectedLineItemIds.has(String(item.lineItemId)) && !disabled;
+    const typeLabel = item.remake ? "Remake" : item.rush ? "Rush" : "";
+    const location = item.bayDisplay || item.bayCode || "Not assigned to a bay";
+    const fulfillment = complete
+      ? `In bay ${item.inBayQty}/${item.qty}`
+      : `${item.missingQty} missing · In bay ${item.inBayQty}/${item.qty}`;
+    const note = complete
+      ? orderType === "Remake"
+        ? "Select this exact item if the glass in the bay broke; it will be removed from the bay and made missing."
+        : "Already fulfilled in a bay; skipped for a job-level Rush."
+      : "Selected by default because this item is still missing from the bay.";
+    return `
+      <label class="sdi-item-row ${complete ? "is-complete" : "is-missing"} ${disabled ? "is-disabled" : ""}">
+        <input type="checkbox" data-sdi-line-item-id="${escapeHtml(item.lineItemId)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
+        <span class="sdi-item-main">
+          <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} ${typeLabel ? `<b>${escapeHtml(typeLabel)}</b>` : ""}</strong>
+          <small>${escapeHtml(item.product || "Glass item")} ${item.dimensions ? `· ${escapeHtml(item.dimensions)}` : ""}</small>
+          <em>${escapeHtml(note)}</em>
+        </span>
+        <span class="sdi-item-status">
+          <strong>${escapeHtml(fulfillment)}</strong>
+          <small>${escapeHtml(location)}</small>
+        </span>
+      </label>
+    `;
+  }).join("");
+  updateSdiSelectionSummary();
+}
+
+/**
+ * Purpose: Render current Rush/Remake marks grouped by job with item-level clearing controls.
+ * Effects: Replaces the current-mark section while preserving which groups the user expanded.
+ * Flow: Summarizes each job, renders exact marked items, and exposes one shared clear action per destination item.
+ */
+function renderSdiCurrentList() {
+  if (!els.sdiCurrentList) return;
+  const groups = (state.sdiWorkspace?.currentGroups || []).filter((group) => Array.isArray(group.items) && group.items.length);
+  const validKeys = new Set(groups.map((group) => String(group.key || "")));
+  state.sdiExpandedCurrentGroups = new Set(
+    [...state.sdiExpandedCurrentGroups].filter((key) => validKeys.has(String(key))),
+  );
+  if (groups.length && !state.sdiCurrentGroupsInitialized) {
+    state.sdiExpandedCurrentGroups.add(String(groups[0].key || ""));
+    state.sdiCurrentGroupsInitialized = true;
+  } else if (!groups.length) {
+    state.sdiCurrentGroupsInitialized = false;
+  }
+
+  const markedCount = groups.reduce((total, group) => total + group.items.length, 0);
+  els.sdiCurrentList.innerHTML = `
+    <div class="sdi-current-heading">
+      <span><small>Current priority work</small><strong>Rush / Remake items</strong></span>
+      <b>${markedCount} marked item${markedCount === 1 ? "" : "s"}</b>
+    </div>
+    <p class="sdi-current-help">The earliest priority date appears first. Open a job to review or clear individual glass items without changing the rest of the job.</p>
+    <div class="sdi-current-groups">
+      ${groups.length ? groups.map((group, groupIndex) => {
+        const key = String(group.key || "");
+        const expanded = state.sdiExpandedCurrentGroups.has(key);
+        const rushCount = group.items.filter((item) => item.rush).length;
+        const remakeCount = group.items.filter((item) => item.remake).length;
+        const itemCount = group.items.length;
+        const groupPanelId = `sdi-current-group-${groupIndex}`;
+        const priorityDate = group.deliveryDate ? formatDisplayDate(group.deliveryDate) : "No priority date";
+        return `
+          <article class="sdi-current-group ${expanded ? "is-expanded" : ""}">
+            <button type="button" class="sdi-current-group-toggle" data-sdi-current-group="${escapeHtml(key)}" aria-expanded="${expanded}" aria-controls="${groupPanelId}">
+              <span class="sdi-current-job"><strong>${escapeHtml(group.job || "Unknown job")}</strong><small>${escapeHtml(group.customer || "No customer")}</small></span>
+              <span class="sdi-current-summary"><b>${rushCount ? `${rushCount} Rush` : ""}${rushCount && remakeCount ? " · " : ""}${remakeCount ? `${remakeCount} Remake` : ""}</b><small>${escapeHtml(priorityDate)} · ${itemCount} item${itemCount === 1 ? "" : "s"}</small></span>
+              <span class="sdi-current-chevron" aria-hidden="true">⌄</span>
+            </button>
+            <div class="sdi-current-group-items" id="${groupPanelId}" ${expanded ? "" : "hidden"}>
+              ${group.items.map((item) => {
+                const typeLabel = item.remake ? "Remake" : "Rush";
+                return `
+                  <div class="sdi-current-item">
+                    <span><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong><small>${escapeHtml(item.product || "Glass item")} ${item.bayDisplay ? `· ${escapeHtml(item.bayDisplay)}` : "· Not in bay"}</small></span>
+                    <span class="sdi-current-item-type ${item.remake ? "is-remake" : "is-rush"}">${typeLabel}</span>
+                    <button type="button" data-sdi-clear-line-item="${escapeHtml(item.lineItemId)}" data-sdi-clear-lookup="${escapeHtml(group.job || "")}">Clear item</button>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          </article>
+        `;
+      }).join("") : `<span class="admin-empty">No current Rush or Remake items.</span>`}
+    </div>
+  `;
+}
+
+
+/**
+ * Purpose: Load the predictive, item-level SDI workspace from live Indian Trail bay state.
+ * Effects: Calls the existing backend, updates shared SDI state, resets safe selections when requested, and rerenders all SDI regions.
+ * Flow: Sends the lookup and optional bay filter, stores suggestions/items/current marks, then selects only missing items by default.
+ */
+async function loadSdiWorkspace(query = "", { preserveSelection = false } = {}) {
+  if (!state.backend) return;
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (els.sdiBayInput?.value) params.set("bayCode", els.sdiBayInput.value);
+  const payload = await fetchJson(`/api/indian-trail/sdi-workspace?${params.toString()}`);
+  state.sdiWorkspace = payload || { suggestions: [], items: [], currentGroups: [] };
+  state.sdiCurrentGroupsInitialized = false;
+  if (!preserveSelection) {
+    state.sdiSelectedLineItemIds = new Set(
+      (payload.items || []).filter((item) => item.eligibleByDefault).map((item) => String(item.lineItemId)),
+    );
+  }
+  renderSdiLookupResults();
+  renderSdiItemSelection();
+  renderSdiCurrentList();
+}
+
+/**
+ * Purpose: Apply one predictive SDI lookup choice and load its exact item workspace.
+ * Effects: Updates the shared lookup input, closes suggestions, and refreshes item/current-mark data.
+ * Flow: Copies the selected job or order value into the field and delegates to the single workspace loader.
+ */
+async function chooseSdiLookup(lookup) {
+  if (els.sdiOrderInput) els.sdiOrderInput.value = lookup;
+  await loadSdiWorkspace(lookup);
+  if (els.sdiLookupResults) els.sdiLookupResults.hidden = true;
+}
+
+/**
+ * Purpose: Open the shared SDI workspace from a selected bay assignment or as a blank predictive search.
+ * Effects: Shows the modal, loads live bays and item state, restores applicable priority fields, and focuses the lookup input.
+ * Flow: Resolves the optional assignment, seeds the bay and exact order-item lookup, then delegates all workspace data to the backend loader.
  */
 function openSdiPanel(assignmentId = "") {
   const found = assignmentById(assignmentId);
   if (found.bay?.bayCode) state.selectedBayCode = found.bay.bayCode;
   const bay = selectedBay();
   const assignment = found.assignment || selectedBayAssignment();
-  const assignmentLookup = assignment?.job || assignment?.order || "";
+  const assignmentLookup = assignment ? `${assignment.order || ""}-${assignment.item || ""}`.replace(/^-|-$/g, "") : "";
   if (els.sdiPanel) {
     els.sdiPanel.dataset.assignmentId = assignment?.id || "";
     els.sdiPanel.dataset.originalLookup = assignmentLookup;
@@ -12350,112 +13375,69 @@ function openSdiPanel(assignmentId = "") {
   }
   if (els.sdiBackdrop) els.sdiBackdrop.hidden = false;
   updateModalScrollLock();
+  populateSdiBayOptions(found.bay?.bayCode || bay?.bayCode || "");
   if (els.sdiOrderInput) els.sdiOrderInput.value = assignmentLookup;
-  if (els.sdiBayInput) els.sdiBayInput.value = bay?.bayCode || "";
-  if (els.sdiReasonInput && !els.sdiReasonInput.value) els.sdiReasonInput.value = "Same-day install";
-  if (els.sdiDeliveryDateInput) {
-    els.sdiDeliveryDateInput.value = assignment?.deliveryDate || assignment?.originalDeliveryDate || "";
-  }
+  if (els.sdiReasonInput) els.sdiReasonInput.value = assignment?.reason || "Same-day install";
+  if (els.sdiDeliveryDateInput) els.sdiDeliveryDateInput.value = assignment?.deliveryDate || assignment?.originalDeliveryDate || "";
+  if (els.sdiTruckExemptInput) els.sdiTruckExemptInput.checked = Boolean(assignment?.priorityDirectToTruck);
   if (els.sdiTypeInput) {
-    els.sdiTypeInput.value = assignment && isRemakeItem(assignment)
-      ? "Remake"
-      : assignment && isRushItem(assignment)
-        ? "Rush"
-        : "";
+    els.sdiTypeInput.value = assignment && isRemakeItem(assignment) ? "Remake" : assignment && isRushItem(assignment) ? "Rush" : "";
     syncCustomSelect(els.sdiTypeInput);
   }
-  renderSdiCurrentList();
+  state.sdiSelectedLineItemIds = new Set();
+  state.sdiExpandedCurrentGroups = new Set();
+  state.sdiCurrentGroupsInitialized = false;
+  updateSdiSelectionSummary();
+  loadSdiWorkspace(assignmentLookup).catch((error) => showInlineError(error.message, true));
   els.sdiOrderInput?.focus();
 }
 
 /**
- * Purpose: Render the render SDI current list workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
- */
-function renderSdiCurrentList() {
-  if (!els.sdiCurrentList) return;
-  const rows = [];
-  for (const bay of state.bays || []) {
-    for (const assignment of bay.assignments || []) {
-      if (assignment.status === "SDIOverride") rows.push({ bay, assignment });
-    }
-  }
-  els.sdiCurrentList.innerHTML = `
-    <strong>Current Rush / Remake Orders</strong>
-    <div>
-      ${
-        rows.length
-          ? rows.slice(0, 30).map(({ bay, assignment }) => {
-              const typeLabel = isRemakeItem(assignment) ? "Remake" : isRushItem(assignment) ? "Rush" : "SDI";
-              const lookupLabel = assignment.job || `${assignment.order}-${assignment.item}`;
-              const deliveryLabel = assignment.deliveryDate ? formatDisplayDate(assignment.deliveryDate) : "No delivery date";
-              return `<button type="button" data-assignment-action="sdi" data-assignment-id="${escapeHtml(assignment.id)}"><span>${escapeHtml(lookupLabel)} <b>${escapeHtml(typeLabel)}</b></span><small>${escapeHtml(bay.displayName || bay.bayCode)} - ${escapeHtml(assignment.customer || "")}</small><small>${escapeHtml(deliveryLabel)}</small></button>`;
-            }).join("")
-          : `<span class="admin-empty">No current Rush or Remake orders.</span>`
-      }
-    </div>
-  `;
-}
-
-/**
- * Purpose: Close the close SDI panel workflow using the existing shared UI state.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Close the SDI workspace without changing any Rush, Remake, or bay data.
+ * Effects: Hides the modal, backdrop, and predictive list, then refreshes the shared modal scroll lock.
+ * Flow: Clears only transient presentation state so the next open reloads live backend data.
  */
 function closeSdiPanel() {
   if (els.sdiPanel) els.sdiPanel.hidden = true;
   if (els.sdiBackdrop) els.sdiBackdrop.hidden = true;
+  if (els.sdiLookupResults) els.sdiLookupResults.hidden = true;
+  state.sdiExpandedCurrentGroups = new Set();
+  state.sdiCurrentGroupsInitialized = false;
   updateModalScrollLock();
 }
 
 /**
- * Purpose: Process the submit SDI workflow using the existing shared UI state.
- * Effects: May call the backend api.
- * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
+ * Purpose: Submit one exact-item or safe job-level Rush/Remake mark or clear action through the existing Bay Map API.
+ * Effects: Validates current selections, posts the shared payload, refreshes open SDI state when needed, and presents print/save feedback.
+ * Flow: Builds exact destination IDs plus priority options, calls the single mark/remove endpoint, then routes the result to refresh or confirmation UI.
  */
-async function submitSdi(mark = true) {
-  const assignment = assignmentById(els.sdiPanel?.dataset.assignmentId || "").assignment || selectedBayAssignment();
+async function submitSdi(mark = true, options = {}) {
   const orderType = els.sdiTypeInput?.value || "";
-  const lookupText = els.sdiOrderInput?.value.trim() || "";
-  const originalLookup = els.sdiPanel?.dataset.originalLookup || "";
-  /**
-   * Purpose: Normalize the normalize lookup workflow using the existing shared UI state.
-   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-   */
-  const normalizeLookup = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
-  const useSelectedAssignment = Boolean(
-    assignment?.id &&
-    (!lookupText || normalizeLookup(lookupText) === normalizeLookup(originalLookup))
-  );
+  const lookupText = options.lookup || els.sdiOrderInput?.value.trim() || "";
+  const lineItemIds = options.lineItemIds || [...state.sdiSelectedLineItemIds];
   const payload = {
-    assignmentId: useSelectedAssignment ? assignment.id : "",
+    lineItemIds,
     orderNo: lookupText,
     job: lookupText,
-    bayCode: els.sdiBayInput?.value || state.selectedBayCode || "",
+    bayCode: els.sdiBayInput ? els.sdiBayInput.value : state.selectedBayCode || "",
     truckExempt: Boolean(els.sdiTruckExemptInput?.checked),
     orderType,
     deliveryDate: els.sdiDeliveryDateInput?.value || "",
-    reason: els.sdiReasonInput?.value || (mark ? "Same-day install" : "Rush / Remake cleared"),
+    reason: options.reason || els.sdiReasonInput?.value || (mark ? "Same-day install" : "Rush / Remake cleared"),
   };
   if (mark && !orderType) {
-    showInlineError("Select Rush or Remake before marking SDI.", false);
+    showInlineError("Select Rush or Remake before marking items.", false);
     return;
   }
-  if (!useSelectedAssignment && !lookupText) {
-    showInlineError("Enter a Job Nr., SO number, order number, or barcode.", false);
+  if (!lineItemIds.length) {
+    showInlineError(mark ? "Select at least one item to mark." : "Select at least one currently marked item to clear.", false);
     return;
   }
 
   const result = await postBayAction(mark ? "/api/indian-trail/mark-sdi" : "/api/indian-trail/remove-sdi", payload);
-  closeSdiPanel();
-
   const affectedItems = Number(result?.affectedItems || 0);
   const jobLabel = result?.matchedJob || lookupText;
-  const customerLabel = result?.matchedCustomer || assignment?.customer || "";
-  const fallbackListId = result?.listId || assignment?.deliveryListId || state.activeListId || selectedBay()?.assignments?.[0]?.deliveryListId || "";
-  const affectedListIds = [...new Set((result?.affectedListIds || [fallbackListId]).filter(Boolean))];
+  const affectedListIds = [...new Set((result?.affectedListIds || []).filter(Boolean))];
   const printParams = new URLSearchParams();
   affectedListIds.forEach((listId) => printParams.append("listId", listId));
   if (mark) printParams.set(result?.remake ? "remakeOnly" : "rushOnly", "1");
@@ -12463,6 +13445,13 @@ async function submitSdi(mark = true) {
   const printUrl = mark && affectedListIds.length ? `/api/print/package?${printParams.toString()}` : "";
   const affectsIndianTrail = priorityListsIncludeIndianTrail(result?.affectedLists || []);
 
+  if (options.keepOpen) {
+    await loadSdiWorkspace(els.sdiOrderInput?.value.trim() || "", { preserveSelection: false });
+    showFloatingNotice(result?.message || "Rush / Remake item cleared.", "success");
+    return result;
+  }
+
+  closeSdiPanel();
   showActionFeedback({
     kind: "success",
     eyebrow: mark ? "Bay Map update complete" : "Bay Map update cleared",
@@ -12470,17 +13459,19 @@ async function submitSdi(mark = true) {
     message: result?.message || (mark ? `${orderType} was marked successfully.` : "The Rush / Remake mark was removed."),
     details: [
       { label: "Job Nr. / Order", value: jobLabel },
-      { label: "Customer", value: customerLabel },
+      { label: "Customer", value: result?.matchedCustomer || "" },
       { label: "New delivery date", value: result?.matchedDeliveryDate ? formatDisplayDate(result.matchedDeliveryDate) : "" },
       { label: "Previous delivery date", value: result?.previousDeliveryDate && result.previousDeliveryDate !== result?.matchedDeliveryDate ? formatDisplayDate(result.previousDeliveryDate) : "" },
       { label: "Items updated", value: affectedItems ? String(affectedItems) : "1" },
+      { label: "Removed from bay", value: Number(result?.removedFromBay || 0) ? String(result.removedFromBay) : "" },
       { label: "Applicable stages", value: (result?.affectedLists || []).map((list) => stageLabel(list)).join(" → ") },
-      { label: "Indian Trail handling", value: affectsIndianTrail ? (result?.directToTruck ? "Straight to installer truck / skip bay" : result?.rush ? "Expedite into priority bay" : "") : "" },
+      { label: "Indian Trail handling", value: affectsIndianTrail ? (result?.directToTruck ? "Straight to installer truck / skip bay" : result?.rush ? "Expedite into priority bay" : result?.remake ? "Broken item removed from bay and made missing" : "") : "" },
     ],
     primaryLabel: printUrl ? (result?.remake ? "Print remake sheet" : "Print Rush sheet") : "",
     secondaryLabel: "Done",
     onPrimary: printUrl ? () => launchManagedPrint(printUrl) : null,
   });
+  return result;
 }
 
 /**
@@ -13364,7 +14355,7 @@ async function renderPrintGlassTypes() {
           .map(([category, groupEntries]) => {
             const groupQty = groupEntries.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
             const checkedGroupEntries = groupEntries.filter(checkedForEntry);
-            const groupOpen = hadPreviousGroups ? previousOpenCategories.has(category) : false;
+            const groupOpen = hadPreviousGroups ? previousOpenCategories.has(category) : true;
 
             return `
               <details
@@ -14113,6 +15104,10 @@ function openAdminModal(kind, options = null) {
   els.adminModalTitle.textContent = options?.title || titleMap[kind] || "Admin";
   els.adminModal.dataset.kind = kind;
   els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
+  if (kind === "lookups") {
+    syncLookupManagerFormGuidance();
+    filterLookupManagerLibrary(state.lookupManagerSearch || "");
+  }
   els.adminModal.hidden = false;
   if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = false;
   updateModalScrollLock();
@@ -14315,40 +15310,122 @@ function lookupTypeMeta(title) {
 }
 
 /**
- * Purpose: Run the lookup list HTML workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Return the state bucket name used by one Lookup Manager type.
+ * Effects: Performs an in-memory mapping without changing application state.
+ * Flow: Normalizes the requested type and returns the matching products, routes, or processes bucket.
  */
-function lookupListHtml(title, items = []) {
-  const meta = lookupTypeMeta(title);
+function lookupBucketForType(type) {
+  const clean = String(type || "").trim().toLowerCase();
+  if (clean === "route") return "routes";
+  if (clean === "process") return "processes";
+  return "products";
+}
+
+/**
+ * Purpose: Return all lookup rows for one type from the shared Lookup Manager state.
+ * Effects: Reads shared state without mutating it.
+ * Flow: Resolves the maintained bucket name and returns a defensive array value.
+ */
+function lookupItemsForType(type) {
+  const bucket = lookupBucketForType(type);
+  return Array.isArray(state.manualEditLookups?.[bucket]) ? state.manualEditLookups[bucket] : [];
+}
+
+/**
+ * Purpose: Return the instructional copy and examples for one Lookup Manager type.
+ * Effects: Performs an in-memory lookup without changing application state.
+ * Flow: Normalizes the type and returns field labels, examples, and behavior notes used by the editor and preview.
+ */
+function lookupEditorMeta(type) {
+  const clean = String(type || "product").trim().toLowerCase();
+  if (clean === "route") {
+    return {
+      type: "route",
+      title: "Route code",
+      explanation: "Controls route choices used by manual delivery-list editing. Customer Route Rules still remain the primary routing authority.",
+      valueLabel: "Saved route code",
+      valuePlaceholder: "CPU, DTC, GNV",
+      labelPlaceholder: "Customer Pickup",
+      example: "CPU → Customer Pickup",
+      className: "routes",
+    };
+  }
+  if (clean === "process") {
+    return {
+      type: "process",
+      title: "Process state",
+      explanation: "Adds a consistent status choice for manual delivery-list edits, such as Rush, Remake, Updated, or Review.",
+      valueLabel: "Saved process value",
+      valuePlaceholder: "Rush",
+      labelPlaceholder: "Rush",
+      example: "Rush → Rush",
+      className: "processes",
+    };
+  }
+  return {
+    type: "product",
+    title: "Product name",
+    explanation: "Adds a clean glass or product description that users can select while manually editing delivery-list items.",
+    valueLabel: "Saved product value",
+    valuePlaceholder: "1/4 Mirror",
+    labelPlaceholder: "1/4 Mirror",
+    example: "1/4 Mirror → 1/4 Mirror",
+    className: "products",
+  };
+}
+
+/**
+ * Purpose: Render one searchable Lookup Manager library for the active type.
+ * Effects: Returns HTML only; it does not mutate lookup data.
+ * Flow: Filters the active lookup rows by the maintained search term, then renders source, saved value, display label, route details, and a reusable edit action.
+ */
+function lookupListHtml(type, items = []) {
+  const meta = lookupEditorMeta(type);
+  const visibleItems = items;
 
   return `
-    <section class="lookup-manager-list ${escapeHtml(meta.className)}">
+    <section class="lookup-manager-list lookup-library ${escapeHtml(meta.className)}">
       <header>
         <span class="lookup-type-icon" aria-hidden="true"></span>
         <div>
-          <h3>${escapeHtml(meta.label)}</h3>
-          <p>${escapeHtml(meta.description)}</p>
+          <h3>${escapeHtml(meta.title)} library</h3>
+          <p>${escapeHtml(meta.explanation)}</p>
         </div>
-        <strong>${escapeHtml(items.length)}</strong>
+        <strong data-lookup-visible-count>${escapeHtml(visibleItems.length)} / ${escapeHtml(items.length)}</strong>
       </header>
 
-      <div class="lookup-row-list">
+      <div class="lookup-library-search">
+        <label class="search-box">
+          <span class="search-icon" aria-hidden="true"></span>
+          <input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="Search saved values, labels, categories, or match terms...">
+        </label>
+      </div>
+
+      <div class="lookup-row-list" data-lookup-row-list>
         ${
-          items.length
-            ? items
+          visibleItems.length
+            ? visibleItems
                 .map((item) => `
-                  <article class="lookup-row">
+                  <article class="lookup-row" data-lookup-row data-lookup-search="${escapeHtml([item.label, item.value, item.category, item.matchTerms, item.source].join(" ").toLowerCase())}">
                     <div class="lookup-row-main">
-                      <strong>${escapeHtml(item.label || item.value)}</strong>
-                      <span>${escapeHtml(item.value || "")}${item.category ? ` | ${escapeHtml(item.category)}` : ""}</span>
-                      ${item.matchTerms ? `<small>Matches: ${escapeHtml(item.matchTerms)}</small>` : ""}
+                      <span class="lookup-row-heading">
+                        <strong>${escapeHtml(item.label || item.value)}</strong>
+                        <em class="lookup-source-badge ${String(item.source || "manual").toLowerCase() === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(item.source || "manual")}</em>
+                      </span>
+                      <span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
+                      ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
+                      ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}
                     </div>
-                    <em>${escapeHtml(item.source || "manual")}</em>
+                    <button
+                      type="button"
+                      class="lookup-use-button"
+                      data-lookup-use-type="${escapeHtml(meta.type)}"
+                      data-lookup-use-value="${escapeHtml(item.value || "")}"
+                    >Use / edit</button>
                   </article>
                 `)
                 .join("")
-            : `<div class="lookup-empty-state"><strong>No ${escapeHtml(title.toLowerCase())} yet</strong><span>Add one above to make manual edits faster and cleaner.</span></div>`
+            : `<div class="lookup-empty-state" data-lookup-empty-state><strong>No matching ${escapeHtml(meta.title.toLowerCase())} values</strong><span>Clear the search or save a new value with the editor.</span></div>`
         }
       </div>
     </section>
@@ -14356,23 +15433,32 @@ function lookupListHtml(title, items = []) {
 }
 
 /**
- * Purpose: Run the lookup manager modal HTML workflow for the browser application.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Render the redesigned Lookup Manager workspace.
+ * Effects: Returns modal HTML and reads the active type/search state without writing backend data.
+ * Flow: Builds guided type tabs, a contextual editor with a live preview, and one focused searchable library instead of three competing columns.
  */
 function lookupManagerModalHtml() {
   const lookups = state.manualEditLookups || { products: [], routes: [], processes: [] };
+  const activeType = ["product", "route", "process"].includes(state.lookupManagerActiveType)
+    ? state.lookupManagerActiveType
+    : "product";
+  const meta = lookupEditorMeta(activeType);
   const productCount = (lookups.products || []).length;
   const routeCount = (lookups.routes || []).length;
   const processCount = (lookups.processes || []).length;
+  const tabs = [
+    ["product", "Products", productCount],
+    ["route", "Routes", routeCount],
+    ["process", "Process states", processCount],
+  ];
 
   return `
-    <div class="lookup-manager-shell lookup-manager-modern">
+    <div class="lookup-manager-shell lookup-manager-modern lookup-manager-v066">
       <section class="lookup-manager-hero">
         <div>
           <span class="lookup-hero-label">Lookup Manager</span>
-          <strong>Edit dropdown choices used by manual list editing</strong>
-          <span>Add clean product names, route codes, and process states so the manual editor stays consistent.</span>
+          <strong>Maintain the choices used by manual delivery-list editing</strong>
+          <span>Choose one type, review what each field controls, and use the live preview before saving. Existing values can be loaded back into the editor.</span>
         </div>
         <div class="lookup-manager-kpis">
           ${miniStat("Products", productCount)}
@@ -14381,48 +15467,183 @@ function lookupManagerModalHtml() {
         </div>
       </section>
 
-      <section class="lookup-add-card">
-        <div class="lookup-add-copy">
-          <strong>Add lookup value</strong>
-          <span>Use Value for the actual saved code. Use Display label for the cleaner name people see.</span>
-        </div>
+      <nav class="lookup-type-tabs" aria-label="Lookup type">
+        ${tabs.map(([type, label, count]) => `
+          <button type="button" data-lookup-manager-type="${escapeHtml(type)}" class="${activeType === type ? "is-active" : ""}">
+            <span>${escapeHtml(label)}</span>
+            <b>${escapeHtml(count)}</b>
+          </button>
+        `).join("")}
+      </nav>
 
-        <form id="manualLookupForm" class="lookup-manager-form">
-          <label>
-            <span>Lookup type</span>
-            <select id="lookupTypeInput">
-              <option value="product">Product</option>
-              <option value="route">Route</option>
-              <option value="process">Process</option>
-            </select>
-          </label>
-          <label>
-            <span>Value / code</span>
-            <input id="lookupValueInput" type="text" autocomplete="off" placeholder="CPU, 1/4 Mirror, Rush">
-          </label>
-          <label>
-            <span>Display label</span>
-            <input id="lookupLabelInput" type="text" autocomplete="off" placeholder="Customer Pickup">
-          </label>
-          <label>
-            <span>Category</span>
-            <input id="lookupCategoryInput" type="text" autocomplete="off" placeholder="Pickup, delivery, branch">
-          </label>
-          <label class="wide">
-            <span>Match terms</span>
-            <input id="lookupMatchTermsInput" type="text" autocomplete="off" placeholder="CPU-Air, customer pickup, will call">
-          </label>
-          <button type="submit">Add Lookup</button>
-        </form>
-      </section>
+      <div class="lookup-manager-workspace">
+        <section class="lookup-editor-card ${escapeHtml(meta.className)}">
+          <header>
+            <span class="lookup-step-number">1</span>
+            <div>
+              <strong>Add or update a ${escapeHtml(meta.title.toLowerCase())}</strong>
+              <p>${escapeHtml(meta.explanation)}</p>
+            </div>
+          </header>
 
-      <div class="lookup-manager-grid">
-        ${lookupListHtml("Products", lookups.products || [])}
-        ${lookupListHtml("Routes", lookups.routes || [])}
-        ${lookupListHtml("Processes", lookups.processes || [])}
+          <form id="manualLookupForm" class="lookup-manager-form lookup-guided-form">
+            <input id="lookupTypeInput" type="hidden" value="${escapeHtml(activeType)}">
+
+            <div class="lookup-form-grid">
+              <label>
+                <span>${escapeHtml(meta.valueLabel)}</span>
+                <input id="lookupValueInput" type="text" autocomplete="off" placeholder="${escapeHtml(meta.valuePlaceholder)}">
+                <small>This is the exact value saved to the delivery-list item.</small>
+              </label>
+              <label>
+                <span>Display label</span>
+                <input id="lookupLabelInput" type="text" autocomplete="off" placeholder="${escapeHtml(meta.labelPlaceholder)}">
+                <small>This is the cleaner wording users see in dropdowns.</small>
+              </label>
+            </div>
+
+            <div class="lookup-route-fields" data-lookup-route-fields ${activeType === "route" ? "" : "hidden"}>
+              <label>
+                <span>Route category</span>
+                <input id="lookupCategoryInput" type="text" autocomplete="off" placeholder="Pickup, delivery, branch">
+                <small>Optional grouping note for administrators.</small>
+              </label>
+              <label>
+                <span>Match terms</span>
+                <input id="lookupMatchTermsInput" type="text" autocomplete="off" placeholder="CPU-Air, customer pickup, will call">
+                <small>Optional alternate wording, separated by commas.</small>
+              </label>
+            </div>
+
+            <aside class="lookup-live-preview" aria-live="polite">
+              <span class="lookup-step-number">2</span>
+              <div>
+                <small>Preview before saving</small>
+                <strong data-lookup-preview-label>${escapeHtml(meta.example.split(" → ")[1])}</strong>
+                <span><b>Saved value:</b> <em data-lookup-preview-value>${escapeHtml(meta.example.split(" → ")[0])}</em></span>
+                <p data-lookup-preview-note>${escapeHtml(meta.explanation)}</p>
+              </div>
+            </aside>
+
+            <footer class="lookup-form-actions">
+              <button type="button" class="secondary" data-lookup-clear-form>Clear form</button>
+              <button type="submit">Save lookup</button>
+            </footer>
+          </form>
+        </section>
+
+        ${lookupListHtml(activeType, lookupItemsForType(activeType))}
       </div>
     </div>
   `;
+}
+
+/**
+ * Purpose: Synchronize the contextual Lookup Manager fields and live preview.
+ * Effects: Updates only the currently open Lookup Manager DOM.
+ * Flow: Reads the active type and form values, toggles route-only fields, and mirrors the saved/display values into the preview card.
+ */
+function syncLookupManagerFormGuidance() {
+  const type = document.getElementById("lookupTypeInput")?.value || state.lookupManagerActiveType || "product";
+  const meta = lookupEditorMeta(type);
+  const value = document.getElementById("lookupValueInput")?.value.trim() || meta.example.split(" → ")[0];
+  const label = document.getElementById("lookupLabelInput")?.value.trim() || value || meta.example.split(" → ")[1];
+  const routeFields = document.querySelector("[data-lookup-route-fields]");
+  const previewValue = document.querySelector("[data-lookup-preview-value]");
+  const previewLabel = document.querySelector("[data-lookup-preview-label]");
+  const previewNote = document.querySelector("[data-lookup-preview-note]");
+
+  if (routeFields) routeFields.hidden = type !== "route";
+  if (previewValue) previewValue.textContent = value;
+  if (previewLabel) previewLabel.textContent = label;
+  if (previewNote) previewNote.textContent = meta.explanation;
+}
+
+/**
+ * Purpose: Re-render the open Lookup Manager while preserving its single active type and search state.
+ * Effects: Replaces the Lookup Manager modal body and reapplies language/form guidance.
+ * Flow: Confirms the correct modal is open, writes the maintained HTML once, then restores translation and contextual field behavior.
+ */
+function renderLookupManagerModal() {
+  if (!els.adminModalBody || els.adminModal?.dataset.kind !== "lookups") return;
+  els.adminModalBody.innerHTML = lookupManagerModalHtml();
+  applyLanguageToRoot(els.adminModalBody);
+  syncLookupManagerFormGuidance();
+  filterLookupManagerLibrary(state.lookupManagerSearch || "");
+}
+
+/**
+ * Purpose: Load one existing lookup row into the guided editor.
+ * Effects: Updates Lookup Manager UI state and form values without writing to the backend.
+ * Flow: Finds the requested row by type/value, activates the matching tab, re-renders once, then fills and focuses the editor for an upsert save.
+ */
+function useLookupInEditor(type, value) {
+  const cleanType = ["product", "route", "process"].includes(type) ? type : "product";
+  const item = lookupItemsForType(cleanType).find((entry) => String(entry.value || "") === String(value || ""));
+  if (!item) return;
+
+  state.lookupManagerActiveType = cleanType;
+  renderLookupManagerModal();
+  const valueInput = document.getElementById("lookupValueInput");
+  const labelInput = document.getElementById("lookupLabelInput");
+  const categoryInput = document.getElementById("lookupCategoryInput");
+  const matchInput = document.getElementById("lookupMatchTermsInput");
+  if (valueInput) valueInput.value = item.value || "";
+  if (labelInput) labelInput.value = item.label || item.value || "";
+  if (categoryInput) categoryInput.value = item.category || "";
+  if (matchInput) matchInput.value = item.matchTerms || "";
+  syncLookupManagerFormGuidance();
+  valueInput?.focus();
+  valueInput?.select();
+}
+
+/**
+ * Purpose: Clear the current Lookup Manager editor without changing saved lookup data.
+ * Effects: Resets current form fields and the live preview.
+ * Flow: Clears all editable fields, restores contextual guidance, and returns focus to the saved-value field.
+ */
+function clearLookupManagerForm() {
+  ["lookupValueInput", "lookupLabelInput", "lookupCategoryInput", "lookupMatchTermsInput"].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  });
+  syncLookupManagerFormGuidance();
+  document.getElementById("lookupValueInput")?.focus();
+}
+
+/**
+ * Purpose: Filter the visible Lookup Manager library without rebuilding the editor form.
+ * Effects: Updates row visibility, result counts, and the no-results message in the open modal.
+ * Flow: Stores the normalized query, compares it to each row's maintained search text, and toggles only the active library rows.
+ */
+function filterLookupManagerLibrary(query) {
+  state.lookupManagerSearch = String(query || "");
+  const clean = state.lookupManagerSearch.trim().toLowerCase();
+  const rows = [...document.querySelectorAll("[data-lookup-row]")];
+  let visibleCount = 0;
+  rows.forEach((row) => {
+    const visible = !clean || String(row.dataset.lookupSearch || "").includes(clean);
+    row.hidden = !visible;
+    if (visible) visibleCount += 1;
+  });
+  const counter = document.querySelector("[data-lookup-visible-count]");
+  if (counter) counter.textContent = `${visibleCount} / ${rows.length}`;
+
+  let empty = document.querySelector("[data-lookup-filter-empty]");
+  const list = document.querySelector("[data-lookup-row-list]");
+  if (!visibleCount && rows.length && list) {
+    if (!empty) {
+      empty = document.createElement("div");
+      empty.dataset.lookupFilterEmpty = "true";
+      empty.className = "lookup-empty-state";
+      empty.innerHTML = "<strong>No matching lookup values</strong><span>Try a shorter search or clear the search field.</span>";
+      list.appendChild(empty);
+      applyLanguageToRoot(empty);
+    }
+    empty.hidden = false;
+  } else if (empty) {
+    empty.hidden = true;
+  }
 }
 
 /**
@@ -14452,10 +15673,8 @@ async function saveManualEditLookup() {
     processes: payload.processes || [],
   };
 
-  if (els.adminModalBody && els.adminModal?.dataset.kind === "lookups") {
-    els.adminModalBody.innerHTML = lookupManagerModalHtml();
-  }
-
+  state.lookupManagerActiveType = type || state.lookupManagerActiveType;
+  renderLookupManagerModal();
   showSaveConfirmation(`${label || value} was saved to the Lookup Manager.`);
 }
 
@@ -14849,6 +16068,57 @@ function permissionLabel(permission) {
     .join(" ");
 }
 
+const PERMISSION_DESCRIPTIONS = {
+  scan: "Scan barcodes and record piece activity on delivery lists.",
+  view_lists: "Open delivery lists and view their line-item details.",
+  view_stations: "View and select the scanning stations available to the user.",
+  view_own_scans: "View the user's own recent scan history.",
+  undo_scan: "Undo or redo recent scans when a correction is needed.",
+  reset_lists: "Reset scanned quantities for an entire delivery list.",
+  resolve_exceptions: "Resolve blocked, failed, or review-required scan exceptions.",
+  manual_adjust: "Manually increase or decrease scanned piece quantities.",
+  view_exceptions: "Open the exception queue and review scan problems.",
+  import_delivery_lists: "Import new delivery-list files and apply file updates.",
+  preview_import: "Preview delivery-list changes before importing them.",
+  manage_users: "Create, edit, and delete user accounts and assignments.",
+  manage_roles: "Change the permissions assigned to each role.",
+  manage_stations: "Add or rename scanning stations.",
+  remove_stations: "Remove scanning stations from the application.",
+  deactivate_users: "Disable a user account without deleting its history.",
+  reactivate_users: "Restore access for a deactivated user account.",
+  update_user_passwords: "Set or reset passwords for other users.",
+  edit_delivery_lists: "Manually edit delivery-list rows and maintain lookup values.",
+  export_reports: "Print or export delivery lists, packing lists, and reports.",
+  view_admin: "Open the Admin dashboard and its permitted tools.",
+  view_active_sessions: "View users who are currently signed in.",
+  global_search: "Search across all delivery lists and line items.",
+  view_reports: "View statistics, charts, and operational reports.",
+  view_indian_trail: "Open Indian Trail receiving and in-transit tools.",
+  indian_trail_receive: "Scan and receive glass at Indian Trail.",
+  view_bays: "Open the Bay Map and view bay contents and history.",
+  assign_bay: "Assign missing or unassigned glass to a bay.",
+  move_bay: "Move active glass assignments between bays.",
+  clear_bay: "Remove glass from bays and control bay availability.",
+  mark_sdi: "Mark specific glass as Rush or Remake in the SDI workspace.",
+  remove_sdi: "Clear Rush or Remake marks from individual items.",
+  bay_check: "Run bay checks and verify physical bay contents.",
+  indian_trail_reports: "View and export Indian Trail receiving and bay reports.",
+  manage_bay_layout: "Create, edit, delete, and reorder bay groups and bays.",
+  manage_customer_route_rules: "Add, edit, and remove customer route rules.",
+  view_racks: "Open the rack overview and view rack contents.",
+  scan_racks: "Scan rack barcodes for Staging and Outbound workflows.",
+  manage_racks: "Create, edit, delete, and recover racks and rack sets.",
+};
+
+/**
+ * Purpose: Return the short user-facing explanation for one permission.
+ * Effects: Performs an in-memory lookup without changing application state.
+ * Flow: Uses the maintained permission description map and falls back to a safe generic explanation for future permissions.
+ */
+function permissionDescription(permission) {
+  return PERMISSION_DESCRIPTIONS[permission] || "Allows access to this named application capability.";
+}
+
 const PERMISSION_CATEGORIES = [
   {
     title: "Scanning",
@@ -15033,7 +16303,10 @@ function rolePermissionCategoryHtml(roleName, category, selected) {
             (permission) => `
               <label class="${selected.has(permission) ? "is-checked" : ""}">
                 <input type="checkbox" value="${escapeHtml(permission)}" ${selected.has(permission) ? "checked" : ""}>
-                <span>${escapeHtml(permissionLabel(permission))}</span>
+                <span class="permission-option-copy">
+                  <strong>${escapeHtml(permissionLabel(permission))}</strong>
+                  <small>${escapeHtml(permissionDescription(permission))}</small>
+                </span>
               </label>
             `,
           )
@@ -17460,12 +18733,14 @@ function renderCustomerEmailOverview() {
   const draftCount = outbox.filter((email) => String(email.status || "").toLowerCase() === "draft").length;
   const failedCount = outbox.filter((email) => String(email.status || "").toLowerCase() === "failed").length;
   const previewContacts = contacts.slice(0, 7);
+  const emailConfigured = Boolean(settings.emailConfigured ?? settings.smtpConfigured);
+  const transportLabel = settings.emailTransportLabel || (settings.smtpConfigured ? "SMTP" : "Draft mode");
 
   els.customerEmailOverview.innerHTML = `
     <div class="customer-email-overview-card">
       <div>
         <strong>${escapeHtml(contacts.length)} email rule${contacts.length === 1 ? "" : "s"}</strong>
-        <span>${escapeHtml(cc.length)} global CC ${cc.length === 1 ? "address" : "addresses"} | ${settings.smtpConfigured ? "SMTP live" : "Draft mode"}</span>
+        <span>${escapeHtml(cc.length)} global CC ${cc.length === 1 ? "address" : "addresses"} | ${emailConfigured ? `${escapeHtml(transportLabel)} live` : "Draft mode"}</span>
       </div>
       <div class="customer-email-overview-status">
         <span class="status-sent">${escapeHtml(sentCount)} sent</span>
@@ -17510,13 +18785,21 @@ function emailStatusLabel(status) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function customerEmailRulesModalHtml() {
-  const settings = state.customerEmailSettings || { contacts: [], cc: [], outbox: [], smtpConfig: {} };
+  const settings = state.customerEmailSettings || { contacts: [], cc: [], outbox: [], smtpConfig: {}, graphConfig: {} };
   const contacts = settings.contacts || [];
   const cc = settings.cc || [];
   const outbox = settings.outbox || [];
   const drafts = outbox.filter((email) => ["draft", "queued", "failed"].includes(String(email.status || "").toLowerCase()));
   const sent = outbox.filter((email) => String(email.status || "").toLowerCase() === "sent");
   const smtp = settings.smtpConfig || {};
+  const graph = settings.graphConfig || {};
+  const emailConfigured = Boolean(settings.emailConfigured ?? settings.smtpConfigured);
+  const transport = settings.emailTransport || (settings.smtpConfigured ? "smtp" : "draft");
+  const transportLabel = settings.emailTransportLabel || (settings.smtpConfigured ? "SMTP" : "Draft mode");
+  const testRecipient = settings.emailTestRecipient || "brandon.m.smith@bldr.com";
+  const sender = settings.emailFrom || graph.sender || smtp.from || "Not set";
+  const authLabel = graph.authMode === "managed-identity" ? "Managed identity" : "App registration";
+  const graphCredentialReady = graph.authMode === "managed-identity" ? graph.managedIdentityAvailable : graph.clientSecretSet;
 
   return `
     <div class="customer-email-modal-shell customer-email-modal-shell-v34">
@@ -17525,7 +18808,7 @@ function customerEmailRulesModalHtml() {
           <strong>Customer manifest and ready-notice emails</strong>
           <p>Match customers to email addresses. Import/update creates a manifest draft, and staging completion creates a ready notice after all pieces for that customer/date are scanned.</p>
         </div>
-        <span class="email-smtp-badge ${settings.smtpConfigured ? "is-live" : "is-draft"}">${settings.smtpConfigured ? "SMTP live" : "Draft mode"}</span>
+        <span class="email-smtp-badge ${emailConfigured ? "is-live" : "is-draft"}">${emailConfigured ? `${escapeHtml(transportLabel)} live` : "Draft mode"}</span>
       </section>
 
       <section class="customer-email-draft-control">
@@ -17533,34 +18816,47 @@ function customerEmailRulesModalHtml() {
           <strong>Email Drafts</strong>
           <span>${escapeHtml(drafts.length)} open draft${drafts.length === 1 ? "" : "s"} / ${escapeHtml(sent.length)} sent recently</span>
         </div>
-        <p>Draft mode keeps every generated email inside this webapp until SMTP is configured. Open a draft to review, copy it, or launch it in the default email app.</p>
+        <p>Draft mode keeps every generated email inside this webapp until Microsoft Graph or SMTP is configured. Open a draft to review, copy it, or launch it in the default email app.</p>
       </section>
 
       <section class="customer-email-smtp-section">
         <header>
           <div>
-            <strong>SMTP setup readiness</strong>
-            <span>Server-side only. Passwords never belong in app.js or the browser.</span>
+            <strong>${transport === "graph" ? "Microsoft Graph setup readiness" : "Email delivery setup"}</strong>
+            <span>Credentials remain server-side and are never returned to the browser.</span>
           </div>
-          <em class="email-smtp-badge ${settings.smtpConfigured ? "is-live" : "is-draft"}">${settings.smtpConfigured ? "Ready to send" : "Saving drafts"}</em>
+          <em class="email-smtp-badge ${emailConfigured ? "is-live" : "is-draft"}">${emailConfigured ? "Ready to send" : "Saving drafts"}</em>
         </header>
-        <div class="smtp-config-grid">
-          <span><small>Host</small><b>${escapeHtml(smtp.host || "Not set")}</b></span>
-          <span><small>Port</small><b>${escapeHtml(smtp.port || "587")}</b></span>
-          <span><small>From</small><b>${escapeHtml(smtp.from || "Not set")}</b></span>
-          <span><small>User</small><b>${escapeHtml(smtp.user || "Not set")}</b></span>
-          <span><small>SSL</small><b>${smtp.ssl ? "Yes" : "No / TLS"}</b></span>
-        </div>
+        ${transport === "graph" ? `
+          <div class="smtp-config-grid email-graph-config-grid">
+            <span><small>Transport</small><b>Microsoft Graph</b></span>
+            <span><small>From</small><b>${escapeHtml(sender)}</b></span>
+            <span><small>Authentication</small><b>${escapeHtml(authLabel)}</b></span>
+            <span><small>Tenant ID</small><b>${graph.tenantIdSet ? "Configured" : "Not configured"}</b></span>
+            <span><small>Client ID</small><b>${escapeHtml(graph.clientId || "Not configured")}</b></span>
+            <span><small>${graph.authMode === "managed-identity" ? "Managed identity" : "Client secret"}</small><b>${graphCredentialReady ? "Configured" : "Not configured"}</b></span>
+            <span><small>Save to Sent Items</small><b>${graph.saveToSentItems === false ? "No" : "Yes"}</b></span>
+          </div>
+        ` : `
+          <div class="smtp-config-grid">
+            <span><small>Transport</small><b>${escapeHtml(transportLabel)}</b></span>
+            <span><small>Host</small><b>${escapeHtml(smtp.host || "Not set")}</b></span>
+            <span><small>Port</small><b>${escapeHtml(smtp.port || "587")}</b></span>
+            <span><small>From</small><b>${escapeHtml(smtp.from || "Not set")}</b></span>
+            <span><small>User</small><b>${escapeHtml(smtp.user || "Not set")}</b></span>
+            <span><small>SSL</small><b>${smtp.ssl ? "Yes" : "No / TLS"}</b></span>
+          </div>
+        `}
       </section>
 
       <section class="customer-email-test-section">
-        <header><strong>Send test email</strong><span>If SMTP is not configured, this creates a draft you can open below.</span></header>
+        <header><strong>Send test email</strong><span>If email delivery is not configured, this creates a draft you can open below.</span></header>
         <form id="customerEmailTestForm" class="customer-email-test-form">
-          <label><span>Send test to</span><input id="customerEmailTestToInput" type="email" autocomplete="off" placeholder="you@example.com"></label>
+          <label><span>Send test to</span><input id="customerEmailTestToInput" type="email" autocomplete="off" value="${escapeHtml(testRecipient)}" placeholder="you@example.com"></label>
           <label><span>CC optional</span><input id="customerEmailTestCcInput" type="text" autocomplete="off" placeholder="manager@example.com, lead@example.com"></label>
           <label><span>Subject</span><input id="customerEmailTestSubjectInput" type="text" autocomplete="off" value="Delivery Scanner test email"></label>
           <label class="is-wide"><span>Body</span><textarea id="customerEmailTestBodyInput" rows="4">This is a test email from the Delivery List Scanner customer email system.</textarea></label>
-          <button type="submit">Send Test / Save Draft</button>
+          <button type="submit">Send Test Email</button>
         </form>
       </section>
 
@@ -17833,7 +19129,7 @@ async function sendCustomerEmailTest() {
   if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
   const result = payload.testResult || {};
   const message = result.status === "sent"
-    ? `Test email sent to ${result.toEmail}.`
+    ? `Test email sent to ${result.toEmail} through ${result.transport === "graph" ? "Microsoft Graph" : "SMTP"}.`
     : `Test email saved as ${result.status || "draft"}. Open it in Email Drafts.`;
   showFloatingNotice(message, result.status === "sent" ? "success" : "notice");
 }
@@ -18779,16 +20075,21 @@ function exportStaticCsv() {
 function startPolling() {
   stopPolling();
   state.pollTimer = window.setInterval(async () => {
-    if (!state.backend || state.page !== "scan" || !state.activeListId || document.hidden) return;
-    const activeElement = document.activeElement;
-    if (activeElement === els.manualOrderInput || activeElement === els.manualItemInput) return;
+    if (!state.backend || document.hidden) return;
     try {
+      if (state.page === "bays") {
+        await refreshBayRouteSummary();
+        return;
+      }
+      if (state.page !== "scan" || !state.activeListId) return;
+      const activeElement = document.activeElement;
+      if (activeElement === els.manualOrderInput || activeElement === els.manualItemInput) return;
       await activateList(state.activeListId, false);
       if (activeElement === els.scanInput) els.scanInput.focus();
     } catch {
       // Keep polling quiet so scanning is not interrupted.
     }
-  }, 38000);
+  }, 12000);
 }
 
 /**
@@ -18874,9 +20175,31 @@ function replayExpandableListAnimation(details) {
  */
 function wireEvents() {
   if (state.eventsWired) return;
+
+  document.addEventListener("input", (event) => {
+    const volumeInput = event.target.closest?.("[data-app-sound-volume]");
+    if (!volumeInput) return;
+    setAppSoundVolume(volumeInput.value);
+  });
+
+  document.addEventListener("click", (event) => {
+    const soundTestButton = event.target.closest?.("[data-scan-sound-test]");
+    if (soundTestButton) {
+      const kind = soundTestButton.dataset.scanSoundTest || "notice";
+      scanFlash(kind);
+      showFloatingNotice(`${kind.charAt(0).toUpperCase()}${kind.slice(1)} scan sound test played.`, kind);
+      return;
+    }
+
+    const progressTestButton = event.target.closest?.("[data-progress-sound-test]");
+    if (progressTestButton) {
+      replayProgressSoundTest(progressTestButton.dataset.progressSoundTest || "scan");
+    }
+  });
   state.eventsWired = true;
   initLanguageSystem();
   initCustomSelectSystem();
+  syncSidebarState();
   syncFullscreenControl();
 
   document.addEventListener("toggle", (event) => {
@@ -18899,13 +20222,40 @@ function wireEvents() {
   });
 
   els.logoutBtn?.addEventListener("click", () => logout().catch((error) => showInlineError(error.message)));
+  els.sidebarToggleBtn?.addEventListener("click", () => toggleSidebar());
+  els.mobileSidebarToggleBtn?.addEventListener("click", () => toggleMobileSidebar());
+  els.sidebarScrim?.addEventListener("click", () => {
+    state.sidebarMobileOpen = false;
+    els.userMenu?.removeAttribute("open");
+    syncSidebarState();
+  });
+  // Native <details> behavior can be inconsistent when nested header controls,
+  // click-away handling, and responsive overlays share the same stacking area.
+  // Own this one toggle explicitly so every visible part of the profile card is
+  // guaranteed to open and close the existing Sign out menu.
+  els.userMenuSummary?.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (!els.userMenu) return;
+    els.userMenu.open = !els.userMenu.open;
+  });
+  els.appSidebar?.addEventListener("mouseleave", () => {
+    if (isMobileSidebarLayout()) return;
+    els.userMenu?.removeAttribute("open");
+  });
   els.languageToggleBtn?.addEventListener("click", () => toggleAppLanguage());
   els.loginLanguageToggleBtn?.addEventListener("click", () => toggleAppLanguage());
   els.refreshPageBtn?.addEventListener("click", () => refreshPage());
   els.fullscreenToggleBtn?.addEventListener("click", () => toggleFullscreen().catch((error) => showInlineError(error.message)));
-  document.addEventListener("fullscreenchange", () => syncFullscreenControl());
+  document.addEventListener("fullscreenchange", () => {
+    syncFullscreenControl();
+    renderRecent();
+    renderBayRecentActions();
+    fitBayLastLocationText();
+  });
   window.addEventListener("resize", () => {
+    syncSidebarState();
     syncFullscreenStickyPanelOffset();
+    fitBayLastLocationText();
   });
   if (window.ResizeObserver && els.appHeader) {
     state.headerResizeObserver = new ResizeObserver(() => {
@@ -18969,6 +20319,12 @@ function wireEvents() {
     });
   });
   document.addEventListener("keydown", (event) => {
+    const keyboardListCard = event.target.closest?.('[data-open-list][role="button"]');
+    if (keyboardListCard && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      keyboardListCard.click();
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
       els.headerGlobalSearchInput?.focus();
@@ -18976,6 +20332,8 @@ function wireEvents() {
       return;
     }
     if (event.key !== "Escape") return;
+    state.sidebarMobileOpen = false;
+    syncSidebarState();
     document.querySelectorAll(".user-menu[open]").forEach((menu) => menu.removeAttribute("open"));
     if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
     if (document.getElementById("actionFeedbackShell")) closeActionFeedback();
@@ -19067,6 +20425,17 @@ function wireEvents() {
     renderHome();
   });
   document.addEventListener("input", (event) => {
+    if (event.target.closest("#manualLookupForm")) {
+      syncLookupManagerFormGuidance();
+      return;
+    }
+
+    const lookupSearch = event.target.closest("#lookupManagerSearchInput");
+    if (lookupSearch) {
+      filterLookupManagerLibrary(lookupSearch.value);
+      return;
+    }
+
     const modalSearch = event.target.closest("#adminDeliveryListModalSearch");
     if (!modalSearch) return;
 
@@ -20008,7 +21377,61 @@ function wireEvents() {
     const days = Number(els.staleBayList.querySelector(`[data-stale-days="${CSS.escape(String(assignmentId))}"]`)?.value || 1);
     snoozeStaleBayOrders([assignmentId], days).catch((error) => showInlineError(error.message, true));
   });
-  els.sdiClearBtn?.addEventListener("click", () => submitSdi(false).catch((error) => showInlineError(error.message, true)));
+  els.sdiOrderInput?.addEventListener("input", () => {
+    window.clearTimeout(state.sdiLookupTimer);
+    if (els.sdiLookupResults) els.sdiLookupResults.hidden = true;
+    const query = els.sdiOrderInput.value.trim();
+    state.sdiLookupTimer = window.setTimeout(() => {
+      loadSdiWorkspace(query).catch((error) => showInlineError(error.message, true));
+    }, 180);
+  });
+  els.sdiLookupResults?.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-sdi-lookup]");
+    if (!target) return;
+    chooseSdiLookup(target.dataset.sdiLookup || "").catch((error) => showInlineError(error.message, true));
+  });
+  els.sdiBayInput?.addEventListener("change", () => {
+    loadSdiWorkspace(els.sdiOrderInput?.value.trim() || "").catch((error) => showInlineError(error.message, true));
+  });
+  els.sdiTypeInput?.addEventListener("change", () => {
+    if (sdiSelectionType() === "Rush") {
+      for (const item of state.sdiWorkspace?.items || []) {
+        if (item.complete) state.sdiSelectedLineItemIds.delete(String(item.lineItemId));
+      }
+    }
+    renderSdiItemSelection();
+  });
+  els.sdiSelectMissingBtn?.addEventListener("click", () => selectSdiMissingItems());
+  els.sdiItemSelectionList?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest("[data-sdi-line-item-id]");
+    if (!checkbox) return;
+    const id = String(checkbox.dataset.sdiLineItemId || "");
+    if (checkbox.checked) state.sdiSelectedLineItemIds.add(id);
+    else state.sdiSelectedLineItemIds.delete(id);
+    updateSdiSelectionSummary();
+  });
+  els.sdiCurrentList?.addEventListener("click", (event) => {
+    const clearButton = event.target.closest("[data-sdi-clear-line-item]");
+    if (clearButton) {
+      submitSdi(false, {
+        lineItemIds: [clearButton.dataset.sdiClearLineItem || ""],
+        lookup: clearButton.dataset.sdiClearLookup || "",
+        reason: "Cleared individual Rush / Remake item",
+        keepOpen: true,
+      }).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const groupButton = event.target.closest("[data-sdi-current-group]");
+    if (!groupButton) return;
+    const key = groupButton.dataset.sdiCurrentGroup || "";
+    if (state.sdiExpandedCurrentGroups.has(key)) state.sdiExpandedCurrentGroups.delete(key);
+    else state.sdiExpandedCurrentGroups.add(key);
+    renderSdiCurrentList();
+  });
+  els.sdiClearBtn?.addEventListener("click", () => {
+    const markedIds = selectedSdiItems().filter((item) => item.marked).map((item) => String(item.lineItemId));
+    submitSdi(false, { lineItemIds: markedIds }).catch((error) => showInlineError(error.message, true));
+  });
   els.sdiForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     submitSdi(true).catch((error) => showInlineError(error.message, true));
@@ -20145,6 +21568,25 @@ function wireEvents() {
       }
     }
   }, true);
+
+    const lookupTypeButton = event.target.closest("[data-lookup-manager-type]");
+    if (lookupTypeButton) {
+      state.lookupManagerActiveType = lookupTypeButton.dataset.lookupManagerType || "product";
+      state.lookupManagerSearch = "";
+      renderLookupManagerModal();
+      return;
+    }
+
+    const lookupUseButton = event.target.closest("[data-lookup-use-type][data-lookup-use-value]");
+    if (lookupUseButton) {
+      useLookupInEditor(lookupUseButton.dataset.lookupUseType || "product", lookupUseButton.dataset.lookupUseValue || "");
+      return;
+    }
+
+    if (event.target.closest("[data-lookup-clear-form]")) {
+      clearLookupManagerForm();
+      return;
+    }
 
     const pageButton = event.target.closest("[data-page-target]");
     if (pageButton) {
@@ -20401,9 +21843,8 @@ function wireEvents() {
     }
     const filterButton = event.target.closest("[data-filter]");
     if (filterButton) {
-      state.filter = filterButton.dataset.filter;
+      toggleScanFilter(filterButton.dataset.filter || "all");
       state.pageIndex = 1;
-      document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.filter === state.filter));
       renderScanPage();
       return;
     }

@@ -135,6 +135,55 @@ function Resolve-PythonRuntime {
     throw "Python 3.10 or newer was not found. Install current 64-bit Python and make sure the 'py' launcher is available."
 }
 
+# Purpose: Load the locally encrypted Microsoft Graph app registration settings.
+# Effects: Decrypts the client secret only in memory for the current Windows user
+# and exposes it to the child Python process through inherited environment variables.
+# Flow: Reads data\secrets\microsoft-graph-email.json when present, validates the
+# non-secret fields, decrypts the DPAPI-protected secret, and logs readiness only.
+function Import-MicrosoftGraphEmailConfiguration {
+    $configPath = Join-Path $AppRoot "data\secrets\microsoft-graph-email.json"
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        Write-LauncherLog "Microsoft Graph email is not locally configured. Email messages will remain drafts until setup is completed."
+        return
+    }
+
+    try {
+        $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $tenantId = [string]$config.tenantId
+        $clientId = [string]$config.clientId
+        $sender = [string]$config.sender
+        $testRecipient = [string]$config.testRecipient
+        $encryptedSecret = [string]$config.encryptedClientSecret
+        if (-not $tenantId -or -not $clientId -or -not $sender -or -not $encryptedSecret) {
+            throw "The Graph email configuration is incomplete. Run Configure-MicrosoftGraphEmail.bat again."
+        }
+
+        $secureSecret = ConvertTo-SecureString $encryptedSecret
+        $secretPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)
+        try {
+            $plainSecret = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretPointer)
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretPointer)
+        }
+        if (-not $plainSecret) {
+            throw "The Graph client secret could not be decrypted for this Windows account."
+        }
+
+        $env:DLS_EMAIL_TRANSPORT = "graph"
+        $env:DLS_GRAPH_AUTH_MODE = "client-secret"
+        $env:DLS_GRAPH_TENANT_ID = $tenantId
+        $env:DLS_GRAPH_CLIENT_ID = $clientId
+        $env:DLS_GRAPH_CLIENT_SECRET = $plainSecret
+        $env:DLS_GRAPH_SENDER = $sender
+        $env:DLS_EMAIL_FROM = $sender
+        $env:DLS_EMAIL_TEST_RECIPIENT = $testRecipient
+        $env:DLS_GRAPH_SAVE_TO_SENT_ITEMS = if ($config.saveToSentItems -eq $false) { "0" } else { "1" }
+        Write-LauncherLog "Microsoft Graph email configuration loaded for $sender."
+    } catch {
+        throw "Microsoft Graph email configuration could not be loaded: $($_.Exception.Message)"
+    }
+}
+
 # Purpose: Keep startup errors visible and point the operator to durable diagnostics.
 # Effects: Reads recent stderr/startup logs and writes a launcher failure milestone.
 # Flow: Displays the reason, process exit code when available, traceback tail, and log folder.
@@ -214,6 +263,7 @@ try {
     if (-not $env:DLS_TEMP_DELIVERY_LISTS_PATH) {
         $env:DLS_TEMP_DELIVERY_LISTS_PATH = "I:\BAREFOOT-INSTALL\Glass Production\Brandon\Temp Delivery Lists"
     }
+    Import-MicrosoftGraphEmailConfiguration
 
     $url = "http://127.0.0.1:$Port/"
     $databasePath = Join-Path $AppRoot "data\delivery-scanner-pilot.db"

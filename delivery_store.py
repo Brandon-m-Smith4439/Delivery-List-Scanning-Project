@@ -26,6 +26,11 @@ import json
 import re
 import secrets
 import sqlite3
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import zipfile
 from datetime import datetime, timedelta, timezone
 from io import BytesIO, StringIO
@@ -37,6 +42,17 @@ from xml.sax.saxutils import escape as xml_escape
 
 from scanner_config import AppConfig
 from azure_sql_compat import AzureSqlConnection, connect_azure_sql
+
+
+GRAPH_RESOURCE = "https://graph.microsoft.com"
+GRAPH_SCOPE = f"{GRAPH_RESOURCE}/.default"
+GRAPH_SEND_URL = f"{GRAPH_RESOURCE}/v1.0/users/{{sender}}/sendMail"
+_GRAPH_TOKEN_LOCK = threading.Lock()
+_GRAPH_TOKEN_CACHE: dict[str, Any] = {
+    "cacheKey": "",
+    "accessToken": "",
+    "expiresAt": 0.0,
+}
 
 
 class ClosingSQLiteConnection(sqlite3.Connection):
@@ -2290,6 +2306,104 @@ class BaseDeliveryStore:
         """
         raise NotImplementedError
 
+    def get_email_transport_config(self) -> dict[str, Any]:
+        """Return the active server-side email transport without exposing credentials.
+
+        Effects: Reads environment configuration only; secrets are represented as
+        booleans so the browser can show setup readiness without receiving them.
+        Flow: Resolves the requested transport, checks Graph and SMTP readiness,
+        and returns one normalized status object used by sending and Admin UI.
+        """
+        requested = str(os.environ.get("DLS_EMAIL_TRANSPORT") or "auto").strip().lower()
+        if requested not in {"auto", "graph", "smtp", "disabled"}:
+            requested = "auto"
+
+        graph_sender = str(
+            os.environ.get("DLS_GRAPH_SENDER")
+            or os.environ.get("DLS_EMAIL_FROM")
+            or os.environ.get("DLS_SMTP_FROM")
+            or ""
+        ).strip()
+        graph_tenant_id = str(os.environ.get("DLS_GRAPH_TENANT_ID") or "").strip()
+        graph_client_id = str(os.environ.get("DLS_GRAPH_CLIENT_ID") or "").strip()
+        graph_client_secret = str(os.environ.get("DLS_GRAPH_CLIENT_SECRET") or "")
+        graph_auth_mode = str(os.environ.get("DLS_GRAPH_AUTH_MODE") or "").strip().lower()
+        if not graph_auth_mode:
+            graph_auth_mode = "managed-identity" if os.environ.get("IDENTITY_ENDPOINT") else "client-secret"
+        if graph_auth_mode not in {"client-secret", "managed-identity"}:
+            graph_auth_mode = "client-secret"
+
+        managed_identity_ready = bool(
+            os.environ.get("IDENTITY_ENDPOINT") and os.environ.get("IDENTITY_HEADER")
+        )
+        graph_ready = bool(
+            graph_sender
+            and (
+                (
+                    graph_auth_mode == "client-secret"
+                    and graph_tenant_id
+                    and graph_client_id
+                    and graph_client_secret
+                )
+                or (graph_auth_mode == "managed-identity" and managed_identity_ready)
+            )
+        )
+
+        smtp_host = str(os.environ.get("DLS_SMTP_HOST") or "").strip()
+        smtp_from = str(os.environ.get("DLS_SMTP_FROM") or "").strip()
+        smtp_ready = bool(smtp_host and smtp_from)
+
+        active = "disabled"
+        if requested == "graph":
+            active = "graph"
+        elif requested == "smtp":
+            active = "smtp"
+        elif requested == "auto":
+            if graph_ready:
+                active = "graph"
+            elif smtp_ready:
+                active = "smtp"
+            else:
+                active = "draft"
+
+        configured = bool(
+            (active == "graph" and graph_ready)
+            or (active == "smtp" and smtp_ready)
+        )
+        label = {
+            "graph": "Microsoft Graph",
+            "smtp": "SMTP",
+            "draft": "Draft mode",
+            "disabled": "Disabled",
+        }.get(active, "Draft mode")
+        return {
+            "requestedTransport": requested,
+            "transport": active,
+            "transportLabel": label,
+            "configured": configured,
+            "from": graph_sender if active == "graph" else smtp_from,
+            "testRecipient": str(os.environ.get("DLS_EMAIL_TEST_RECIPIENT") or "").strip(),
+            "graphConfigured": graph_ready,
+            "graphConfig": {
+                "authMode": graph_auth_mode,
+                "sender": graph_sender,
+                "tenantIdSet": bool(graph_tenant_id),
+                "clientId": graph_client_id,
+                "clientSecretSet": bool(graph_client_secret),
+                "managedIdentityAvailable": managed_identity_ready,
+                "managedIdentityClientId": str(os.environ.get("DLS_GRAPH_MANAGED_IDENTITY_CLIENT_ID") or "").strip(),
+                "saveToSentItems": str(os.environ.get("DLS_GRAPH_SAVE_TO_SENT_ITEMS") or "1").strip().lower() not in {"0", "false", "no"},
+            },
+            "smtpConfigured": smtp_ready,
+            "smtpConfig": {
+                "host": smtp_host,
+                "port": os.environ.get("DLS_SMTP_PORT", "587"),
+                "from": smtp_from,
+                "user": os.environ.get("DLS_SMTP_USER", ""),
+                "ssl": os.environ.get("DLS_SMTP_SSL", "").strip().lower() in {"1", "true", "yes"},
+            },
+        }
+
     def get_customer_email_settings(self) -> dict[str, Any]:
         """Purpose: Read customer email settings for the delivery-list scanner workflow.
 
@@ -2318,6 +2432,7 @@ class BaseDeliveryStore:
                 LIMIT 20
                 """
             ).fetchall()
+        transport = self.get_email_transport_config()
         return {
             "contacts": [
                 {
@@ -2355,14 +2470,15 @@ class BaseDeliveryStore:
                 }
                 for row in outbox
             ],
-            "smtpConfigured": bool(os.environ.get("DLS_SMTP_HOST") and os.environ.get("DLS_SMTP_FROM")),
-            "smtpConfig": {
-                "host": os.environ.get("DLS_SMTP_HOST", ""),
-                "port": os.environ.get("DLS_SMTP_PORT", "587"),
-                "from": os.environ.get("DLS_SMTP_FROM", ""),
-                "user": os.environ.get("DLS_SMTP_USER", ""),
-                "ssl": os.environ.get("DLS_SMTP_SSL", "").strip().lower() in {"1", "true", "yes"},
-            },
+            "emailConfigured": transport["configured"],
+            "emailTransport": transport["transport"],
+            "emailTransportLabel": transport["transportLabel"],
+            "emailFrom": transport["from"],
+            "emailTestRecipient": transport["testRecipient"],
+            "graphConfigured": transport["graphConfigured"],
+            "graphConfig": transport["graphConfig"],
+            "smtpConfigured": transport["smtpConfigured"],
+            "smtpConfig": transport["smtpConfig"],
         }
 
     def upsert_customer_email_contact(self, data: dict[str, Any], user: str) -> dict[str, Any]:
@@ -2481,8 +2597,9 @@ class BaseDeliveryStore:
         status = "queued"
         sent_at = ""
         error = ""
+        transport_used = ""
         try:
-            self.try_send_email([to_email], clean_cc, subject, body)
+            transport_used = self.try_send_email([to_email], clean_cc, subject, body)
             status = "sent"
             sent_at = now_iso()
         except RuntimeError as exc:
@@ -2496,7 +2613,7 @@ class BaseDeliveryStore:
             con.execute(
                 """
                 INSERT INTO email_outbox (email_type, customer_name, customer_pattern, delivery_date, to_emails, cc_emails, subject, body, status, created_at, sent_at, error, payload_json)
-                VALUES ('test', 'SMTP Test', 'SMTP Test', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES ('test', 'Email Test', 'Email Test', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     now_iso()[:10],
@@ -2508,13 +2625,22 @@ class BaseDeliveryStore:
                     now_iso(),
                     sent_at,
                     error,
-                    json.dumps({"user": user, "smtpConfigured": bool(os.environ.get("DLS_SMTP_HOST") and os.environ.get("DLS_SMTP_FROM"))}, separators=(",", ":")),
+                    json.dumps({
+                        "user": user,
+                        "transport": transport_used or self.get_email_transport_config()["transport"],
+                        "emailConfigured": self.get_email_transport_config()["configured"],
+                    }, separators=(",", ":")),
                 ),
             )
             self.insert_audit(con, "customer_email", to_email, "send_test_email", user, "", error, {"status": status, "subject": subject})
             con.commit()
         payload = self.get_customer_email_settings()
-        payload["testResult"] = {"status": status, "error": error, "toEmail": to_email}
+        payload["testResult"] = {
+            "status": status,
+            "error": error,
+            "toEmail": to_email,
+            "transport": transport_used or payload.get("emailTransport") or "draft",
+        }
         return payload
 
     def customer_email_matches(self, con: sqlite3.Connection, customer_name: str) -> list[sqlite3.Row]:
@@ -2599,16 +2725,182 @@ class BaseDeliveryStore:
             (email_type, customer_name, customer_pattern, delivery_date, json.dumps(clean_to), json.dumps(clean_cc), subject, body, status, now_iso(), sent_at, error, json.dumps(payload, separators=(",", ":"))),
         )
 
-    def try_send_email(self, to_emails: list[str], cc_emails: list[str], subject: str, body: str) -> None:
-        """Purpose: Run the try send email workflow for the delivery-list scanner.
+    def acquire_graph_access_token(self, force_refresh: bool = False) -> str:
+        """Acquire and cache a Microsoft Graph app-only access token.
 
-        Effects: This function may send email.
-        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        Effects: Makes one HTTPS request to Microsoft Entra when the cache is empty
+        or near expiry. No token or client secret is persisted to the database.
+        Flow: Uses client credentials for the local Windows deployment or the App
+        Service managed-identity endpoint after the Azure cutover.
+        """
+        config = self.get_email_transport_config()["graphConfig"]
+        auth_mode = str(config.get("authMode") or "client-secret")
+        tenant_id = str(os.environ.get("DLS_GRAPH_TENANT_ID") or "").strip()
+        client_id = str(os.environ.get("DLS_GRAPH_CLIENT_ID") or "").strip()
+        managed_client_id = str(os.environ.get("DLS_GRAPH_MANAGED_IDENTITY_CLIENT_ID") or "").strip()
+        cache_key = f"{auth_mode}:{tenant_id}:{client_id}:{managed_client_id}"
+
+        with _GRAPH_TOKEN_LOCK:
+            now = time.time()
+            if (
+                not force_refresh
+                and _GRAPH_TOKEN_CACHE.get("cacheKey") == cache_key
+                and _GRAPH_TOKEN_CACHE.get("accessToken")
+                and float(_GRAPH_TOKEN_CACHE.get("expiresAt") or 0) > now + 90
+            ):
+                return str(_GRAPH_TOKEN_CACHE["accessToken"])
+
+            if auth_mode == "managed-identity":
+                endpoint = str(os.environ.get("IDENTITY_ENDPOINT") or "").strip()
+                identity_header = str(os.environ.get("IDENTITY_HEADER") or "").strip()
+                if not endpoint or not identity_header:
+                    raise RuntimeError("Microsoft Graph managed identity is not available on this host")
+                query = {
+                    "resource": GRAPH_RESOURCE,
+                    "api-version": "2019-08-01",
+                }
+                if managed_client_id:
+                    query["client_id"] = managed_client_id
+                separator = "&" if "?" in endpoint else "?"
+                token_url = f"{endpoint}{separator}{urllib.parse.urlencode(query)}"
+                request = urllib.request.Request(
+                    token_url,
+                    headers={"X-IDENTITY-HEADER": identity_header, "Accept": "application/json"},
+                    method="GET",
+                )
+            else:
+                client_secret = str(os.environ.get("DLS_GRAPH_CLIENT_SECRET") or "")
+                if not tenant_id or not client_id or not client_secret:
+                    raise RuntimeError("Microsoft Graph client credentials are incomplete")
+                token_url = f"https://login.microsoftonline.com/{urllib.parse.quote(tenant_id, safe='')}/oauth2/v2.0/token"
+                encoded = urllib.parse.urlencode({
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "scope": GRAPH_SCOPE,
+                    "grant_type": "client_credentials",
+                }).encode("utf-8")
+                request = urllib.request.Request(
+                    token_url,
+                    data=encoded,
+                    headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+                    method="POST",
+                )
+
+            try:
+                with urllib.request.urlopen(request, timeout=25) as response:
+                    token_payload = json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                response_body = exc.read().decode("utf-8", errors="replace")
+                try:
+                    error_payload = json.loads(response_body)
+                    nested_error = error_payload.get("error") if isinstance(error_payload, dict) else None
+                    message = str(
+                        (error_payload.get("error_description") if isinstance(error_payload, dict) else "")
+                        or (nested_error.get("message") if isinstance(nested_error, dict) else "")
+                        or nested_error
+                        or response_body
+                    )
+                except Exception:
+                    message = response_body
+                raise RuntimeError(f"Microsoft Graph authentication failed ({exc.code}): {message[:500]}") from exc
+            except OSError as exc:
+                raise RuntimeError(f"Microsoft Graph authentication could not reach Microsoft Entra: {exc}") from exc
+
+            access_token = str(token_payload.get("access_token") or "")
+            if not access_token:
+                raise RuntimeError("Microsoft Graph authentication returned no access token")
+            expires_at = now + max(int(token_payload.get("expires_in") or 3600), 300)
+            try:
+                provided_expiry = float(token_payload.get("expires_on") or 0)
+                if provided_expiry > now:
+                    expires_at = provided_expiry
+            except (TypeError, ValueError):
+                pass
+            _GRAPH_TOKEN_CACHE.update({
+                "cacheKey": cache_key,
+                "accessToken": access_token,
+                "expiresAt": expires_at,
+            })
+            return access_token
+
+    def send_graph_email(self, to_emails: list[str], cc_emails: list[str], subject: str, body: str) -> None:
+        """Send one message through Microsoft Graph as the configured mailbox.
+
+        Effects: Calls ``POST /users/{sender}/sendMail`` and saves the message in
+        the sender mailbox's Sent Items unless configuration explicitly disables it.
+        Flow: Uses the cached app-only token, retries once after an authorization
+        failure, and returns only after Graph accepts the message with HTTP 202.
+        """
+        transport = self.get_email_transport_config()
+        sender = str(transport.get("graphConfig", {}).get("sender") or "").strip()
+        if not sender:
+            raise RuntimeError("Microsoft Graph sender mailbox is not configured")
+        save_to_sent = bool(transport.get("graphConfig", {}).get("saveToSentItems", True))
+        payload = {
+            "message": {
+                "subject": subject,
+                "body": {"contentType": "Text", "content": body},
+                "toRecipients": [
+                    {"emailAddress": {"address": address}}
+                    for address in to_emails
+                ],
+                "ccRecipients": [
+                    {"emailAddress": {"address": address}}
+                    for address in cc_emails
+                ],
+            },
+            "saveToSentItems": save_to_sent,
+        }
+        endpoint = GRAPH_SEND_URL.format(sender=urllib.parse.quote(sender, safe=""))
+
+        for attempt in range(2):
+            access_token = self.acquire_graph_access_token(force_refresh=attempt > 0)
+            request = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    status = int(response.getcode() or 0)
+                    if status != 202:
+                        raise RuntimeError(f"Microsoft Graph returned unexpected HTTP {status}")
+                    return
+            except urllib.error.HTTPError as exc:
+                response_body = exc.read().decode("utf-8", errors="replace")
+                if exc.code == 401 and attempt == 0:
+                    continue
+                try:
+                    error_payload = json.loads(response_body)
+                    nested_error = error_payload.get("error") if isinstance(error_payload, dict) else None
+                    message = str(
+                        (nested_error.get("message") if isinstance(nested_error, dict) else "")
+                        or nested_error
+                        or response_body
+                    )
+                except Exception:
+                    message = response_body
+                raise RuntimeError(f"Microsoft Graph send failed ({exc.code}): {message[:500]}") from exc
+            except OSError as exc:
+                raise RuntimeError(f"Microsoft Graph could not send the email: {exc}") from exc
+        raise RuntimeError("Microsoft Graph could not authorize the email request")
+
+    def send_smtp_email(self, to_emails: list[str], cc_emails: list[str], subject: str, body: str) -> None:
+        """Send one message through the legacy SMTP transport.
+
+        Effects: Opens a TLS/SSL SMTP connection and may authenticate with the
+        configured mailbox credentials. This remains a fallback for existing sites.
+        Flow: Builds the same plain-text message used by Graph and submits it once.
         """
         smtp_host = os.environ.get("DLS_SMTP_HOST", "").strip()
         smtp_from = os.environ.get("DLS_SMTP_FROM", "").strip()
         if not smtp_host or not smtp_from:
-            raise RuntimeError("SMTP is not configured; message saved as draft")
+            raise RuntimeError("SMTP is not configured")
         msg = EmailMessage()
         msg["From"] = smtp_from
         msg["To"] = ", ".join(to_emails)
@@ -2626,6 +2918,30 @@ class BaseDeliveryStore:
             if username:
                 smtp.login(username, password)
             smtp.send_message(msg)
+
+    def try_send_email(self, to_emails: list[str], cc_emails: list[str], subject: str, body: str) -> str:
+        """Send one email through the single configured delivery transport.
+
+        Effects: May call Microsoft Graph or SMTP. If neither transport is ready,
+        raises ``RuntimeError`` so the existing outbox stores a reviewable draft.
+        Flow: Resolves transport once, delegates to the matching sender, and returns
+        the transport name for audit and test-result reporting.
+        """
+        config = self.get_email_transport_config()
+        transport = str(config.get("transport") or "draft")
+        if not config.get("configured"):
+            if transport == "graph":
+                raise RuntimeError("Microsoft Graph is not fully configured; message saved as draft")
+            if transport == "smtp":
+                raise RuntimeError("SMTP is not fully configured; message saved as draft")
+            raise RuntimeError("Email delivery is not configured; message saved as draft")
+        if transport == "graph":
+            self.send_graph_email(to_emails, cc_emails, subject, body)
+            return "graph"
+        if transport == "smtp":
+            self.send_smtp_email(to_emails, cc_emails, subject, body)
+            return "smtp"
+        raise RuntimeError("Email delivery is disabled; message saved as draft")
 
     def send_customer_manifests_for_import(self, con: sqlite3.Connection, payload: dict[str, Any], user: str) -> None:
         """Purpose: Send customer manifests for import for the delivery-list scanner workflow.
@@ -2810,6 +3126,14 @@ class BaseDeliveryStore:
         """
         raise NotImplementedError
 
+    def get_sdi_workspace(self, query: str = "", bay_code: str = "") -> dict[str, Any]:
+        """Return predictive SDI lookup options, exact item status, and current priority marks.
+
+        This read-only workspace keeps the SDI modal grounded in Indian Trail destination
+        rows so the browser can distinguish physically present items from missing items.
+        """
+        raise NotImplementedError
+
     def get_bay_layout(self) -> dict[str, Any]:
         """Purpose: Read bay layout for the delivery-list scanner workflow.
 
@@ -2826,7 +3150,7 @@ class BaseDeliveryStore:
         """
         raise NotImplementedError
 
-    def indian_trail_summary(self) -> dict[str, Any]:
+    def indian_trail_summary(self, delivery_date: str = "") -> dict[str, Any]:
         """Purpose: Run the indian trail summary workflow for the delivery-list scanner.
 
         Effects: Performs an in-memory calculation and returns data without intentional external side effects.
@@ -2834,7 +3158,7 @@ class BaseDeliveryStore:
         """
         raise NotImplementedError
 
-    def indian_trail_in_transit(self) -> dict[str, Any]:
+    def indian_trail_in_transit(self, delivery_date: str = "") -> dict[str, Any]:
         """Purpose: Run the indian trail in transit workflow for the delivery-list scanner.
 
         Effects: Performs an in-memory calculation and returns data without intentional external side effects.
@@ -5885,6 +6209,255 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (matched["list_id"], job_value),
             ).fetchall()
         return [matched]
+
+    def sdi_destination_rows(self, con: Any) -> list[Any]:
+        """Read one Indian Trail destination row per physical item with its active bay assignment.
+
+        SDI decisions must be made from the receiving-stage copy because Staging and
+        Outbound quantities do not prove that the glass is physically in a bay.
+        """
+        return con.execute(
+            """
+            SELECT li.*, dl.delivery_date AS delivery_date,
+                   dl.stage AS delivery_stage, dl.scanner AS delivery_scanner,
+                   ba.id AS assignment_id, ba.status AS assignment_status,
+                   ba.assigned_qty AS assignment_qty, ba.bay_id AS assignment_bay_id,
+                   b.bay_code AS assignment_bay_code,
+                   b.display_name AS assignment_bay_display
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            LEFT JOIN bay_assignments ba ON ba.id = (
+                SELECT ba2.id
+                FROM bay_assignments ba2
+                WHERE ba2.line_item_id = li.id
+                  AND ba2.status NOT IN ('Cleared', 'Cancelled')
+                ORDER BY ba2.id DESC
+                LIMIT 1
+            )
+            LEFT JOIN bays b ON b.id = ba.bay_id
+            WHERE dl.status = 'active'
+              AND (
+                    LOWER(COALESCE(dl.stage, '')) LIKE '%indian trail%'
+                 OR LOWER(COALESCE(dl.scanner, '')) LIKE '%indian trail%'
+                 OR LOWER(COALESCE(dl.stage, '')) LIKE '%inbound%'
+              )
+            ORDER BY dl.delivery_date DESC, li.job, li.order_no, li.item_no
+            """
+        ).fetchall()
+
+    def sdi_item_presence(self, row: Any) -> dict[str, Any]:
+        """Calculate whether an Indian Trail item is physically present or still missing.
+
+        PreAssigned rows reserve a bay but are intentionally not counted as present.
+        This is the same fulfillment rule used by the selected-bay job detail panel.
+        """
+        qty = max(int(row_value(row, "qty", 0) or 0), 0)
+        assignment_status = str(row_value(row, "assignment_status", "") or "")
+        physically_in_bay = bool(row_value(row, "assignment_id", 0)) and assignment_status not in {
+            "PreAssigned",
+            "Cleared",
+            "Cancelled",
+        }
+        in_bay_qty = (
+            min(max(int(row_value(row, "assignment_qty", 0) or 0), 0), qty)
+            if physically_in_bay
+            else 0
+        )
+        return {
+            "qty": qty,
+            "inBayQty": in_bay_qty,
+            "missingQty": max(qty - in_bay_qty, 0),
+            "physicallyInBay": physically_in_bay,
+            "complete": qty > 0 and in_bay_qty >= qty,
+        }
+
+    def resolve_sdi_destination_rows(
+        self,
+        con: Any,
+        lookup_text: str = "",
+        line_item_ids: list[str] | None = None,
+        destination_rows: list[Any] | None = None,
+    ) -> list[Any]:
+        """Resolve exact Indian Trail item rows for an SDI/Rush/Remake action.
+
+        Explicit line-item IDs are authoritative. Text lookups keep the legacy job/order
+        behavior, but are reduced back to the Indian Trail destination copies before use.
+        """
+        destination_rows = destination_rows if destination_rows is not None else self.sdi_destination_rows(con)
+        id_set = {str(value or "").strip() for value in (line_item_ids or []) if str(value or "").strip()}
+        if id_set:
+            return [row for row in destination_rows if str(row["id"]) in id_set]
+
+        text = str(lookup_text or "").strip()
+        if not text:
+            return []
+        normalized_lookup = normalized_match_text(text)
+        digits = digits_only(text)
+        item_digits = ""
+        parts = re.split(r"[-./\s]+", text)
+        if len(parts) >= 2 and parts[-2].isdigit() and parts[-1].isdigit():
+            digits = parts[-2]
+            item_digits = parts[-1]
+
+        scored: list[tuple[int, Any]] = []
+        for row in destination_rows:
+            job = str(row["job"] or "").strip()
+            order = str(row["order_no"] or "").strip()
+            item = str(row["item_no"] or "").strip()
+            barcode = str(row["barcode"] or "").strip()
+            combined = normalized_match_text(f"{job} {row['customer']} {order} {item}")
+            score = 0
+            if text and clean_barcode(text) == clean_barcode(barcode):
+                score = 100
+            elif normalized_lookup and normalized_lookup == normalized_match_text(job):
+                score = 95
+            elif digits and item_digits and digits == order and item_digits.lstrip("0") == item.lstrip("0"):
+                score = 92
+            elif digits and digits == order:
+                score = 88
+            elif normalized_lookup and normalized_lookup == normalized_match_text(order):
+                score = 86
+            elif normalized_lookup and normalized_match_text(job).startswith(normalized_lookup):
+                score = 74
+            elif normalized_lookup and normalized_lookup in combined:
+                score = 60
+            if score:
+                scored.append((score, row))
+        if not scored:
+            return []
+        scored.sort(key=lambda entry: (-entry[0], str(entry[1]["job"] or ""), str(entry[1]["order_no"] or ""), str(entry[1]["item_no"] or "")))
+        best = scored[0][1]
+        best_job = str(best["job"] or "").strip()
+        best_list = str(best["list_id"] or "")
+        if best_job and not item_digits:
+            return [row for row in destination_rows if str(row["list_id"] or "") == best_list and str(row["job"] or "").strip() == best_job]
+        if digits and not item_digits:
+            return [row for row in destination_rows if str(row["list_id"] or "") == best_list and str(row["order_no"] or "") == digits]
+        return [best]
+
+    def get_sdi_workspace(self, query: str = "", bay_code: str = "") -> dict[str, Any]:
+        """Build the predictive SDI modal workspace from live Indian Trail item state.
+
+        Missing items are flagged as the safe default selection. Current Rush/Remake
+        marks are grouped by job and include exact item IDs for individual clearing.
+        """
+        clean_query = str(query or "").strip()
+        clean_bay = str(bay_code or "").strip()
+        with self.connect() as con:
+            rows = self.sdi_destination_rows(con)
+            selected_rows = (
+                self.resolve_sdi_destination_rows(con, clean_query, destination_rows=rows)
+                if clean_query
+                else []
+            )
+
+        def item_payload(row: Any) -> dict[str, Any]:
+            """Convert one destination row into the SDI modal's item-level status payload."""
+            presence = self.sdi_item_presence(row)
+            process_state = str(row["process_state"] or "")
+            remake = is_remake_item({"processState": process_state, "queueState": row["queue_state"]})
+            rush = is_rush_item({"processState": process_state, "queueState": row["queue_state"]}) and not remake
+            return {
+                "lineItemId": str(row["id"]),
+                "sourceId": str(row["source_id"] or ""),
+                "deliveryListId": str(row["list_id"] or ""),
+                "deliveryDate": str(row["delivery_date"] or ""),
+                "job": str(row["job"] or ""),
+                "order": str(row["order_no"] or ""),
+                "item": str(row["item_no"] or ""),
+                "customer": str(row["customer"] or ""),
+                "product": str(row["product"] or ""),
+                "dimensions": str(row["dimensions"] or ""),
+                "bayCode": str(row_value(row, "assignment_bay_code", "") or ""),
+                "bayDisplay": str(row_value(row, "assignment_bay_display", "") or row_value(row, "assignment_bay_code", "") or ""),
+                "assignmentId": int(row_value(row, "assignment_id", 0) or 0),
+                "assignmentStatus": str(row_value(row, "assignment_status", "") or ""),
+                "rush": rush,
+                "remake": remake,
+                "marked": rush or remake,
+                "priorityDeliveryDate": str(row["priority_delivery_date"] or ""),
+                **presence,
+                "eligibleByDefault": presence["missingQty"] > 0,
+            }
+
+        row_payloads = [item_payload(row) for row in rows]
+        normalized_query = normalized_match_text(clean_query)
+        group_map: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for item in row_payloads:
+            group_value = item["job"] or f"ORDER:{item['order']}"
+            group_map.setdefault((item["deliveryListId"], group_value), []).append(item)
+
+        suggestions: list[dict[str, Any]] = []
+        if normalized_query:
+            for (_, group_value), items in group_map.items():
+                first = items[0]
+                haystack = normalized_match_text(
+                    f"{first['job']} {first['order']} {first['customer']} "
+                    + " ".join(f"{item['order']} {item['item']}" for item in items)
+                )
+                lookup = first["job"] or first["order"]
+                normalized_lookup = normalized_match_text(lookup)
+                if normalized_query not in haystack and normalized_query != normalized_lookup:
+                    continue
+                if clean_bay and not any(item["bayCode"] == clean_bay for item in items):
+                    continue
+                score = 100 if normalized_query == normalized_lookup else 80 if normalized_lookup.startswith(normalized_query) else 50
+                suggestions.append({
+                    "lookup": lookup,
+                    "job": first["job"],
+                    "order": first["order"],
+                    "customer": first["customer"],
+                    "deliveryDate": first["deliveryDate"],
+                    "bayCodes": sorted({item["bayCode"] for item in items if item["bayCode"]}),
+                    "itemCount": len(items),
+                    "missingCount": sum(1 for item in items if item["missingQty"] > 0),
+                    "score": score,
+                })
+            suggestions.sort(
+                key=lambda item: (
+                    -int(item["score"]),
+                    -int(re.sub(r"\D", "", str(item["deliveryDate"] or "")) or 0),
+                    str(item["lookup"]),
+                )
+            )
+
+        selected_ids = {str(row["id"]) for row in selected_rows}
+        selected_items = [item for item in row_payloads if item["lineItemId"] in selected_ids]
+        if clean_bay and selected_items:
+            bay_group_present = any(item["bayCode"] == clean_bay for item in selected_items)
+            if bay_group_present:
+                selected_items = [item for item in selected_items if not item["bayCode"] or item["bayCode"] == clean_bay]
+
+        current_groups: list[dict[str, Any]] = []
+        for (_, group_value), items in group_map.items():
+            marked_items = [item for item in items if item["marked"]]
+            if not marked_items:
+                continue
+            first = marked_items[0]
+            current_groups.append({
+                "key": f"{first['deliveryListId']}::{group_value}",
+                "job": first["job"] or first["order"],
+                "customer": first["customer"],
+                "deliveryDate": first["priorityDeliveryDate"] or first["deliveryDate"],
+                "items": marked_items,
+            })
+        # Priority work should surface the earliest required date first. Blank dates
+        # remain visible, but sort after dated Rush/Remake jobs instead of ahead of them.
+        current_groups.sort(
+            key=lambda group: (
+                not bool(group["deliveryDate"]),
+                group["deliveryDate"] or "9999-12-31",
+                group["job"],
+            )
+        )
+
+        return {
+            "query": clean_query,
+            "bayCode": clean_bay,
+            "suggestions": suggestions[:12],
+            "items": selected_items,
+            "currentGroups": current_groups[:100],
+        }
 
     def expand_priority_line_items(self, con: Any, seed_rows: list[Any]) -> list[Any]:
         """Return every active stage clone for the selected physical glass items.
@@ -10346,35 +10919,162 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return payload
 
 
-    def indian_trail_in_transit(self) -> dict[str, Any]:
-        """Purpose: Run the indian trail in transit workflow for the delivery-list scanner.
+    def active_indian_trail_list(self, con: sqlite3.Connection, delivery_date: str = "") -> sqlite3.Row | None:
+        """Resolve the active Indian Trail list for one explicit dashboard date.
 
-        Effects: This function reads or updates shared application state.
-        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        Effects: Reads delivery-list metadata only.
+        Flow: Uses the requested date when supplied; otherwise prefers today, then the nearest future list, then the latest past list.
         """
-        with self.connect() as con:
-            return self._indian_trail_in_transit_payload(con)
-
-    def _indian_trail_in_transit_payload(self, con: sqlite3.Connection) -> dict[str, Any]:
-        """Return pieces scanned outbound but not yet received at Indian Trail.
-
-        This powers the Indian Trail "In Transit" manifest. The API returns
-        flat rows plus rack/job metadata so the frontend can group the manifest
-        by rack first and then by glass type while still showing each Job Nr.
-        """
-        inbound = con.execute(
+        clean_date = str(delivery_date or "").strip()
+        if clean_date:
+            return con.execute(
+                """
+                SELECT id, delivery_date, label, stage
+                FROM delivery_lists
+                WHERE delivery_date = ?
+                  AND stage LIKE '%Indian Trail%'
+                  AND status = 'active'
+                ORDER BY id
+                LIMIT 1
+                """,
+                (clean_date,),
+            ).fetchone()
+        today = datetime.now(timezone.utc).date().isoformat()
+        return con.execute(
             """
             SELECT id, delivery_date, label, stage
             FROM delivery_lists
             WHERE stage LIKE '%Indian Trail%' AND status = 'active'
-            ORDER BY delivery_date DESC
+            ORDER BY
+                CASE
+                    WHEN delivery_date = ? THEN 0
+                    WHEN delivery_date > ? THEN 1
+                    ELSE 2
+                END,
+                CASE WHEN delivery_date >= ? THEN delivery_date END ASC,
+                delivery_date DESC,
+                id
             LIMIT 1
-            """
+            """,
+            (today, today, today),
         ).fetchone()
-        if not inbound:
-            return {"deliveryDate": "", "outboundListId": "", "inboundListId": "", "totalQty": 0, "jobs": [], "rows": []}
 
-        outbound = con.execute(
+    def active_indian_trail_lists(self, con: sqlite3.Connection, delivery_date: str = "") -> tuple[str, list[sqlite3.Row]]:
+        """Return every active Indian Trail list for one resolved delivery date.
+
+        Effects: Reads delivery-list metadata only.
+        Flow: Resolves the requested/current dashboard date through the existing primary-list
+        selector, then returns every active Indian Trail list for that same date. Keeping all
+        matching lists prevents updated or split delivery-list files from hiding physical glass
+        that belongs to the same day.
+        """
+        primary = self.active_indian_trail_list(con, delivery_date)
+        if not primary:
+            return "", []
+        resolved_date = str(primary["delivery_date"] or "")
+        rows = con.execute(
+            """
+            SELECT id, delivery_date, label, stage
+            FROM delivery_lists
+            WHERE delivery_date = ?
+              AND stage LIKE '%Indian Trail%'
+              AND status = 'active'
+            ORDER BY id
+            """,
+            (resolved_date,),
+        ).fetchall()
+        return resolved_date, list(rows)
+
+    def indian_trail_physical_inventory(self, con: sqlite3.Connection, delivery_date: str) -> dict[tuple[str, str], dict[str, Any]]:
+        """Aggregate all active Indian Trail copies into one physical item inventory.
+
+        Effects: Reads active Indian Trail line items only.
+        Flow: Uses Order Nr./Item Nr. as the stable physical identity, takes the largest expected
+        and received quantities across duplicate/update copies, and retains representative item
+        metadata for the Bay Map and in-transit manifest.
+        """
+        rows = con.execute(
+            """
+            SELECT li.*, dl.id AS delivery_list_id
+            FROM delivery_lists dl
+            JOIN line_items li ON li.list_id = dl.id
+            WHERE dl.delivery_date = ?
+              AND dl.status = 'active'
+              AND dl.stage LIKE '%Indian Trail%'
+            ORDER BY dl.id, li.order_no, li.item_no
+            """,
+            (delivery_date,),
+        ).fetchall()
+        inventory: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            key = (
+                str(row["order_no"] or "").strip(),
+                str(row["item_no"] or "").strip().zfill(3),
+            )
+            current = inventory.get(key)
+            qty = max(int(row["qty"] or 0), 0)
+            received_qty = max(int(row["scanned_qty"] or 0), 0)
+            if current is None:
+                inventory[key] = {
+                    "key": key,
+                    "source_id": str(row["source_id"] or "").strip(),
+                    "inbound_line_id": str(row["id"] or ""),
+                    "list_id": str(row["delivery_list_id"] or ""),
+                    "order_no": key[0],
+                    "item_no": key[1],
+                    "qty": qty,
+                    "received_qty": min(received_qty, qty) if qty else received_qty,
+                    "dimensions": str(row["dimensions"] or ""),
+                    "customer": str(row["customer"] or ""),
+                    "route": str(row["route"] or ""),
+                    "job": str(row["job"] or ""),
+                    "product": str(row["product"] or ""),
+                    "process_state": str(row["process_state"] or ""),
+                    "queue_state": str(row["queue_state"] or ""),
+                }
+                continue
+            current["qty"] = max(int(current["qty"] or 0), qty)
+            current["received_qty"] = max(int(current["received_qty"] or 0), min(received_qty, qty) if qty else received_qty)
+            if not current["source_id"] and row["source_id"]:
+                current["source_id"] = str(row["source_id"])
+            for field in ("dimensions", "customer", "route", "job", "product", "process_state", "queue_state"):
+                if not current[field] and row[field]:
+                    current[field] = str(row[field])
+        return inventory
+
+    def indian_trail_in_transit(self, delivery_date: str = "") -> dict[str, Any]:
+        """Return the departed-rack manifest for the requested Indian Trail delivery date.
+
+        Effects: Reads live rack, Outbound, and Indian Trail state.
+        Flow: Resolves the date-specific inbound list and returns only transportation methods that were actually scanned In Transit.
+        """
+        with self.connect() as con:
+            return self._indian_trail_in_transit_payload(con, delivery_date)
+
+    def _indian_trail_in_transit_payload(self, con: sqlite3.Connection, delivery_date: str = "") -> dict[str, Any]:
+        """Return only glass on transportation methods that actually departed for Indian Trail.
+
+        Effects: Reads active Indian Trail, Outbound, rack, and rack-item records.
+        Flow: Aggregates all Indian Trail list copies for the resolved date, finds rack assignments
+        whose rack was scanned Outbound and is still In Transit, subtracts received quantities once
+        per physical Order/Item, and groups the remaining pieces by Job Nr. and rack for the existing
+        manifest UI. Pieces merely assigned to a rack are intentionally excluded until departure.
+        """
+        resolved_date, inbound_lists = self.active_indian_trail_lists(con, delivery_date)
+        if not inbound_lists:
+            return {
+                "deliveryDate": "",
+                "outboundListId": "",
+                "inboundListId": "",
+                "inboundListIds": [],
+                "totalQty": 0,
+                "jobs": [],
+                "rows": [],
+            }
+
+        inventory = self.indian_trail_physical_inventory(con, resolved_date)
+        primary_inbound = inbound_lists[0]
+        outbound_lists = con.execute(
             """
             SELECT id, label, stage
             FROM delivery_lists
@@ -10382,26 +11082,46 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
               AND status = 'active'
               AND stage LIKE '%Outbound%'
             ORDER BY id
-            LIMIT 1
             """,
-            (inbound["delivery_date"],),
-        ).fetchone()
-        outbound_id = outbound["id"] if outbound else ""
+            (resolved_date,),
+        ).fetchall()
+        outbound_ids = [str(row["id"] or "") for row in outbound_lists]
 
-        # Prefer the live transportation manifest: active rack/truck assignments
-        # represent pieces physically on the way, even when an outbound scan was
-        # missed or the active inbound date has moved forward. If no active
-        # transportation rows are found, the older outbound-minus-received query
-        # below still catches legacy scans without a rack/truck assignment.
+        outbound_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+        if outbound_ids:
+            placeholders = ",".join("?" for _ in outbound_ids)
+            outbound_rows = con.execute(
+                f"""
+                SELECT id, source_id, order_no, item_no, scanned_qty
+                FROM line_items
+                WHERE list_id IN ({placeholders})
+                ORDER BY scanned_qty DESC, id
+                """,
+                tuple(outbound_ids),
+            ).fetchall()
+            for row in outbound_rows:
+                key = (
+                    str(row["order_no"] or "").strip(),
+                    str(row["item_no"] or "").strip().zfill(3),
+                )
+                scanned_qty = max(int(row["scanned_qty"] or 0), 0)
+                current = outbound_by_key.get(key)
+                if current is None or scanned_qty > int(current["scanned_qty"] or 0):
+                    outbound_by_key[key] = {
+                        "line_id": str(row["id"] or ""),
+                        "source_id": str(row["source_id"] or ""),
+                        "scanned_qty": scanned_qty,
+                    }
+
         rack_rows = con.execute(
             """
-            SELECT DISTINCT
-                COALESCE(in_li.id, src_li.id) AS inbound_line_id,
-                COALESCE(out_li.id, '') AS outbound_line_id,
+            SELECT
+                ri.id AS rack_item_id,
+                ri.qty AS rack_qty,
+                src_li.id AS source_line_id,
                 src_li.source_id,
                 src_li.order_no,
                 src_li.item_no,
-                src_li.qty,
                 src_li.dimensions,
                 src_li.customer,
                 src_li.route,
@@ -10409,207 +11129,143 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 src_li.product,
                 src_li.process_state,
                 src_li.queue_state,
-                COALESCE(out_li.scanned_qty, 0) AS outbound_scanned_qty,
-                COALESCE(in_li.scanned_qty, 0) AS received_qty,
-                MAX(ri.qty - COALESCE(in_li.scanned_qty, 0), 0) AS in_transit_qty,
-                r.rack_code AS rack_code,
+                r.rack_code,
                 COALESCE(NULLIF(r.display_name, ''), r.rack_code) AS rack_name,
                 COALESCE(NULLIF(r.rack_type, ''), CASE WHEN r.rack_code = 'T' THEN 'Truck' ELSE 'Rack' END) AS rack_type,
-                COALESCE(r.departed_at, '') AS rack_departed_at
+                COALESCE(r.departed_at, '') AS rack_departed_at,
+                COALESCE(r.sort_order, 9999) AS rack_sort_order
             FROM rack_items ri
             JOIN racks r ON r.id = ri.rack_id AND r.active = 1
             JOIN line_items src_li ON src_li.id = ri.line_item_id
             JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id AND src_dl.status = 'active'
-            LEFT JOIN delivery_lists recv_dl
-              ON recv_dl.delivery_date = src_dl.delivery_date
-             AND recv_dl.status = 'active'
-             AND recv_dl.stage LIKE '%Indian Trail%'
-            LEFT JOIN line_items in_li
-              ON in_li.list_id = recv_dl.id
-             AND in_li.order_no = src_li.order_no
-             AND in_li.item_no = src_li.item_no
-            LEFT JOIN delivery_lists out_dl
-              ON out_dl.delivery_date = src_dl.delivery_date
-             AND out_dl.status = 'active'
-             AND out_dl.stage LIKE '%Outbound%'
-            LEFT JOIN line_items out_li
-              ON out_li.list_id = out_dl.id
-             AND out_li.order_no = src_li.order_no
-             AND out_li.item_no = src_li.item_no
             WHERE ri.status = 'Active'
+              AND src_dl.delivery_date = ?
+              AND LOWER(REPLACE(COALESCE(r.status, ''), ' ', '')) = 'intransit'
+              AND COALESCE(r.departed_at, '') <> ''
               AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
-              AND ri.qty - COALESCE(in_li.scanned_qty, 0) > 0
-            ORDER BY src_dl.delivery_date DESC, COALESCE(NULLIF(src_li.job, ''), src_li.order_no), r.rack_code, src_li.order_no, src_li.item_no
-            """
+            ORDER BY r.sort_order, r.rack_code, src_li.order_no, src_li.item_no, ri.id
+            """,
+            (resolved_date,),
         ).fetchall()
 
-        rows = rack_rows or con.execute(
-            """
-            SELECT
-                in_li.id AS inbound_line_id,
-                out_li.id AS outbound_line_id,
-                in_li.source_id,
-                in_li.order_no,
-                in_li.item_no,
-                in_li.qty,
-                in_li.dimensions,
-                in_li.customer,
-                in_li.route,
-                in_li.job,
-                in_li.product,
-                in_li.process_state,
-                in_li.queue_state,
-                out_li.scanned_qty AS outbound_scanned_qty,
-                in_li.scanned_qty AS received_qty,
-                MAX(out_li.scanned_qty - in_li.scanned_qty, 0) AS in_transit_qty,
-                COALESCE((
-                    SELECT r.rack_code
-                    FROM rack_items ri
-                    JOIN racks r ON r.id = ri.rack_id
-                    JOIN line_items src_li ON src_li.id = ri.line_item_id
-                    JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
-                    WHERE ri.status = 'Active'
-                      AND r.active = 1
-                      AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
-                      AND src_dl.delivery_date = ?
-                      AND src_li.order_no = in_li.order_no
-                      AND src_li.item_no = in_li.item_no
-                    ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
-                    LIMIT 1
-                ), '') AS rack_code,
-                COALESCE((
-                    SELECT r.display_name
-                    FROM rack_items ri
-                    JOIN racks r ON r.id = ri.rack_id
-                    JOIN line_items src_li ON src_li.id = ri.line_item_id
-                    JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
-                    WHERE ri.status = 'Active'
-                      AND r.active = 1
-                      AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
-                      AND src_dl.delivery_date = ?
-                      AND src_li.order_no = in_li.order_no
-                      AND src_li.item_no = in_li.item_no
-                    ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
-                    LIMIT 1
-                ), '') AS rack_name,
-                COALESCE((
-                    SELECT r.rack_type
-                    FROM rack_items ri
-                    JOIN racks r ON r.id = ri.rack_id
-                    JOIN line_items src_li ON src_li.id = ri.line_item_id
-                    JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
-                    WHERE ri.status = 'Active'
-                      AND r.active = 1
-                      AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
-                      AND src_dl.delivery_date = ?
-                      AND src_li.order_no = in_li.order_no
-                      AND src_li.item_no = in_li.item_no
-                    ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
-                    LIMIT 1
-                ), '') AS rack_type,
-                COALESCE((
-                    SELECT r.departed_at
-                    FROM rack_items ri
-                    JOIN racks r ON r.id = ri.rack_id
-                    JOIN line_items src_li ON src_li.id = ri.line_item_id
-                    JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
-                    WHERE ri.status = 'Active'
-                      AND r.active = 1
-                      AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
-                      AND src_dl.delivery_date = ?
-                      AND src_li.order_no = in_li.order_no
-                      AND src_li.item_no = in_li.item_no
-                    ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
-                    LIMIT 1
-                ), '') AS rack_departed_at
-            FROM line_items in_li
-            JOIN line_items out_li
-              ON out_li.list_id = ?
-             AND out_li.order_no = in_li.order_no
-             AND out_li.item_no = in_li.item_no
-            WHERE in_li.list_id = ?
-              AND out_li.scanned_qty > in_li.scanned_qty
-            ORDER BY COALESCE(NULLIF(in_li.job, ''), in_li.order_no), rack_code, in_li.order_no, in_li.item_no
-            """,
-            (
-                inbound["delivery_date"],
-                inbound["delivery_date"],
-                inbound["delivery_date"],
-                inbound["delivery_date"],
-                outbound_id,
-                inbound["id"],
-            ),
-        ).fetchall()
+        rack_map_by_item: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+        for row in rack_rows:
+            key = (
+                str(row["order_no"] or "").strip(),
+                str(row["item_no"] or "").strip().zfill(3),
+            )
+            if key not in inventory:
+                continue
+            rack_code = str(row["rack_code"] or "").strip()
+            if not rack_code:
+                continue
+            item_racks = rack_map_by_item.setdefault(key, {})
+            current = item_racks.get(rack_code)
+            rack_qty = max(int(row["rack_qty"] or 0), 0)
+            # Reimports can leave equivalent active assignment records pointing at different
+            # stage copies. Use the largest quantity for the same physical item/rack rather
+            # than summing those duplicates, while still allowing one item to span two racks.
+            if current is None or rack_qty > int(current["rack_qty"] or 0):
+                item_racks[rack_code] = {
+                    "rack_qty": rack_qty,
+                    "rack_code": rack_code,
+                    "rack_name": str(row["rack_name"] or rack_code),
+                    "rack_type": str(row["rack_type"] or "Rack"),
+                    "rack_departed_at": str(row["rack_departed_at"] or ""),
+                    "rack_sort_order": int(row["rack_sort_order"] or 9999),
+                    "source_line_id": str(row["source_line_id"] or ""),
+                    "source_id": str(row["source_id"] or ""),
+                    "dimensions": str(row["dimensions"] or ""),
+                    "customer": str(row["customer"] or ""),
+                    "route": str(row["route"] or ""),
+                    "job": str(row["job"] or ""),
+                    "product": str(row["product"] or ""),
+                    "process_state": str(row["process_state"] or ""),
+                    "queue_state": str(row["queue_state"] or ""),
+                }
+
+        flat_rows: list[dict[str, Any]] = []
+        for key, item in inventory.items():
+            racks = sorted(
+                rack_map_by_item.get(key, {}).values(),
+                key=lambda row: (int(row["rack_sort_order"]), str(row["rack_code"])),
+            )
+            if not racks:
+                continue
+            item_qty = max(int(item["qty"] or 0), 0)
+            received_qty = min(max(int(item["received_qty"] or 0), 0), item_qty)
+            departed_qty = min(sum(max(int(row["rack_qty"] or 0), 0) for row in racks), item_qty)
+            remaining_qty = max(departed_qty - received_qty, 0)
+            if remaining_qty <= 0:
+                continue
+            outbound = outbound_by_key.get(key, {})
+            outbound_scanned_qty = min(
+                max(int(outbound.get("scanned_qty") or 0), received_qty + remaining_qty),
+                item_qty,
+            )
+            qty_to_allocate = remaining_qty
+            for rack in racks:
+                if qty_to_allocate <= 0:
+                    break
+                rack_qty = min(max(int(rack["rack_qty"] or 0), 0), qty_to_allocate)
+                if rack_qty <= 0:
+                    continue
+                qty_to_allocate -= rack_qty
+                rack_code = str(rack["rack_code"] or "").strip()
+                rack_type = str(rack["rack_type"] or "").strip() or "Rack"
+                rack_name = str(rack["rack_name"] or rack_code).strip() or rack_code
+                if rack_code == "T" or re.fullmatch(r"T\d+", rack_code) or "TRUCK" in rack_type.upper():
+                    rack_name = rack_name or ("Truck" if rack_code == "T" else f"Truck {rack_code[1:]}")
+                    rack_type = rack_type or "Truck"
+                flat_rows.append(
+                    {
+                        "inboundLineId": item["inbound_line_id"],
+                        "outboundLineId": str(outbound.get("line_id") or ""),
+                        "order": item["order_no"],
+                        "item": item["item_no"],
+                        "qty": rack_qty,
+                        "outboundScannedQty": outbound_scanned_qty,
+                        "receivedQty": received_qty,
+                        "dimensions": item["dimensions"] or rack["dimensions"],
+                        "customer": item["customer"] or rack["customer"],
+                        "route": item["route"] or rack["route"],
+                        "job": item["job"] or rack["job"],
+                        "product": item["product"] or rack["product"],
+                        "processState": item["process_state"] or rack["process_state"],
+                        "queueState": item["queue_state"] or rack["queue_state"],
+                        "rackCode": rack_code,
+                        "rackName": rack_name,
+                        "rackType": rack_type,
+                        "rackDepartedAt": rack["rack_departed_at"],
+                    }
+                )
 
         job_map: dict[str, dict[str, Any]] = {}
-        flat_rows: list[dict[str, Any]] = []
         total_qty = 0
-        for row in rows:
-            qty = max(int(row["in_transit_qty"] or 0), 0)
-            if qty <= 0:
-                continue
+        for item in flat_rows:
+            qty = max(int(item["qty"] or 0), 0)
             total_qty += qty
-            job_label = str(row["job"] or row["product"] or row["order_no"] or "No Job Nr.")
-            job_key = normalized_match_text(job_label) or f"ORDER{row['order_no']}"
-            rack_code = str(row["rack_code"] or "").strip()
-            rack_name = str(row["rack_name"] or "").strip()
-            rack_type = str(row["rack_type"] or "").strip()
-            if not rack_code:
-                rack_code = "UNASSIGNED"
-                rack_name = "Needs transportation method"
-                rack_type = "Unassigned"
-            elif rack_code == "T" or re.fullmatch(r"T\d+", rack_code) or "TRUCK" in rack_type.upper():
-                rack_name = rack_name or ("Truck" if rack_code == "T" else f"Truck {rack_code[1:]}")
-                rack_type = rack_type or "Truck"
-            else:
-                rack_name = rack_name or rack_code
-                rack_type = rack_type or "Rack"
-
-            item = {
-                "inboundLineId": row["inbound_line_id"],
-                "outboundLineId": row["outbound_line_id"],
-                "order": row["order_no"],
-                "item": row["item_no"],
-                "qty": qty,
-                "outboundScannedQty": row["outbound_scanned_qty"],
-                "receivedQty": row["received_qty"],
-                "dimensions": row["dimensions"],
-                "customer": row["customer"],
-                "route": row["route"],
-                "job": row["job"],
-                "product": row["product"],
-                "processState": row["process_state"],
-                "queueState": row["queue_state"],
-                "rackCode": rack_code,
-                "rackName": rack_name,
-                "rackType": rack_type,
-                "rackDepartedAt": str(row["rack_departed_at"] or ""),
-            }
-            flat_rows.append(item)
-
+            job_label = str(item["job"] or item["product"] or item["order"] or "No Job Nr.")
+            job_key = normalized_match_text(job_label) or f"ORDER{item['order']}"
             job = job_map.setdefault(
                 job_key,
                 {
                     "key": job_key,
                     "job": job_label,
-                    "customer": row["customer"] or "",
-                    "product": row["product"] or "",
+                    "customer": item["customer"] or "",
+                    "product": item["product"] or "",
                     "totalQty": 0,
                     "rackMap": {},
                 },
             )
-            if not job["customer"] and row["customer"]:
-                job["customer"] = row["customer"]
-            if not job["product"] and row["product"]:
-                job["product"] = row["product"]
             job["totalQty"] += qty
-            rack_key = rack_code or "UNASSIGNED"
+            rack_key = str(item["rackCode"] or "")
             rack = job["rackMap"].setdefault(
                 rack_key,
                 {
-                    "code": rack_code,
-                    "name": rack_name,
-                    "type": rack_type,
+                    "code": rack_key,
+                    "name": item["rackName"],
+                    "type": item["rackType"],
                     "totalQty": 0,
                     "items": [],
                 },
@@ -10621,19 +11277,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         for job in job_map.values():
             racks = sorted(
                 job["rackMap"].values(),
-                key=lambda rack: (rack["code"] == "UNASSIGNED", rack["code"] == "T", rack["code"]),
+                key=lambda rack: (str(rack["code"]) == "T", str(rack["code"])),
             )
             for rack in racks:
                 rack["items"].sort(key=lambda item: (str(item["order"]), str(item["item"])))
             jobs.append({key: value for key, value in job.items() if key != "rackMap"} | {"racks": racks})
-
         jobs.sort(key=lambda job: (str(job.get("job") or ""), str(job.get("customer") or "")))
+
+        primary_outbound = outbound_lists[0] if outbound_lists else None
         return {
-            "deliveryDate": inbound["delivery_date"],
-            "outboundListId": outbound_id,
-            "outboundLabel": outbound["label"] if outbound else "",
-            "inboundListId": inbound["id"],
-            "inboundLabel": inbound["label"],
+            "deliveryDate": resolved_date,
+            "outboundListId": str(primary_outbound["id"] or "") if primary_outbound else "",
+            "outboundListIds": outbound_ids,
+            "outboundLabel": str(primary_outbound["label"] or "") if primary_outbound else "",
+            "inboundListId": str(primary_inbound["id"] or ""),
+            "inboundListIds": [str(row["id"] or "") for row in inbound_lists],
+            "inboundLabel": str(primary_inbound["label"] or ""),
             "totalQty": total_qty,
             "jobCount": len(jobs),
             "rowCount": len(flat_rows),
@@ -10641,64 +11300,144 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "rows": flat_rows,
         }
 
-    def indian_trail_summary(self) -> dict[str, Any]:
-        """Purpose: Run the indian trail summary workflow for the delivery-list scanner.
+    def indian_trail_outbound_totals(
+        self,
+        con: sqlite3.Connection,
+        inbound_list_id: str,
+        delivery_date: str,
+    ) -> dict[str, int]:
+        """Return date-wide physical Indian Trail quantities that reached Outbound.
+
+        Effects: Reads all active Indian Trail and Outbound copies plus departed rack assignments.
+        Flow: Aggregates each Order Nr./Item Nr. once across updated/split lists, takes the highest
+        stored Outbound scan quantity, adds a floor for actually departed rack quantities, and
+        finally applies the downstream Received floor. The result cannot under-report a piece that
+        is already physically at Indian Trail and cannot double-count duplicate list copies.
+        """
+        inventory = self.indian_trail_physical_inventory(con, delivery_date)
+        if not inventory:
+            return {"totalQty": 0, "scannedQty": 0}
+
+        outbound_rows = con.execute(
+            """
+            SELECT li.order_no, li.item_no, li.scanned_qty
+            FROM delivery_lists dl
+            JOIN line_items li ON li.list_id = dl.id
+            WHERE dl.delivery_date = ?
+              AND dl.status = 'active'
+              AND dl.stage LIKE '%Outbound%'
+            """,
+            (delivery_date,),
+        ).fetchall()
+        outbound_by_key: dict[tuple[str, str], int] = {}
+        for row in outbound_rows:
+            key = (
+                str(row["order_no"] or "").strip(),
+                str(row["item_no"] or "").strip().zfill(3),
+            )
+            outbound_by_key[key] = max(
+                outbound_by_key.get(key, 0),
+                max(int(row["scanned_qty"] or 0), 0),
+            )
+
+        departed_rows = con.execute(
+            """
+            SELECT src.order_no, src.item_no, r.rack_code, ri.qty
+            FROM rack_items ri
+            JOIN racks r ON r.id = ri.rack_id AND r.active = 1
+            JOIN line_items src ON src.id = ri.line_item_id
+            JOIN delivery_lists src_dl ON src_dl.id = src.list_id AND src_dl.status = 'active'
+            WHERE ri.status = 'Active'
+              AND src_dl.delivery_date = ?
+              AND LOWER(REPLACE(COALESCE(r.status, ''), ' ', '')) = 'intransit'
+              AND COALESCE(r.departed_at, '') <> ''
+              AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
+            """,
+            (delivery_date,),
+        ).fetchall()
+        departed_by_key_and_rack: dict[tuple[tuple[str, str], str], int] = {}
+        for row in departed_rows:
+            key = (
+                str(row["order_no"] or "").strip(),
+                str(row["item_no"] or "").strip().zfill(3),
+            )
+            rack_key = (key, str(row["rack_code"] or "").strip())
+            departed_by_key_and_rack[rack_key] = max(
+                departed_by_key_and_rack.get(rack_key, 0),
+                max(int(row["qty"] or 0), 0),
+            )
+        departed_by_key: dict[tuple[str, str], int] = {}
+        for (key, _rack_code), qty in departed_by_key_and_rack.items():
+            departed_by_key[key] = departed_by_key.get(key, 0) + qty
+
+        total_qty = 0
+        sent_qty = 0
+        for key, item in inventory.items():
+            item_qty = max(int(item["qty"] or 0), 0)
+            received_qty = min(max(int(item["received_qty"] or 0), 0), item_qty)
+            total_qty += item_qty
+            sent_qty += min(
+                max(
+                    outbound_by_key.get(key, 0),
+                    departed_by_key.get(key, 0),
+                    received_qty,
+                ),
+                item_qty,
+            )
+        return {"totalQty": total_qty, "scannedQty": sent_qty}
+
+    def indian_trail_summary(self, delivery_date: str = "") -> dict[str, Any]:
+        """Purpose: Return date-specific Indian Trail route totals for the Bay Map.
 
         Effects: This function reads or changes database records.
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
         with self.connect() as con:
-            inbound = con.execute(
-                "SELECT id, delivery_date FROM delivery_lists WHERE stage LIKE '%Indian Trail%' AND status = 'active' ORDER BY delivery_date DESC LIMIT 1"
-            ).fetchone()
-            list_id = inbound["id"] if inbound else ""
+            resolved_date, inbound_lists = self.active_indian_trail_lists(con, delivery_date)
+            inbound = inbound_lists[0] if inbound_lists else None
+            list_id = str(inbound["id"] or "") if inbound else ""
             totals = {"totalQty": 0, "receivedQty": 0, "unassignedQty": 0}
             outbound_totals = {"totalQty": 0, "scannedQty": 0}
-            if list_id:
-                row = con.execute(
-                    "SELECT COALESCE(SUM(qty),0) AS total_qty, COALESCE(SUM(scanned_qty),0) AS received_qty FROM line_items WHERE list_id = ?",
-                    (list_id,),
-                ).fetchone()
-                unassigned = con.execute(
+            if inbound_lists:
+                inventory = self.indian_trail_physical_inventory(con, resolved_date)
+                assigned_rows = con.execute(
                     """
-                    SELECT COALESCE(SUM(li.qty), 0)
-                    FROM line_items li
-                    LEFT JOIN bay_assignments ba ON ba.line_item_id = li.id AND ba.status NOT IN ('Cleared', 'Cancelled')
-                    WHERE li.list_id = ? AND ba.id IS NULL
-                    """,
-                    (list_id,),
-                ).fetchone()[0]
-                totals = {"totalQty": row["total_qty"], "receivedQty": row["received_qty"], "unassignedQty": unassigned}
-                outbound = con.execute(
-                    """
-                    SELECT dl.id
+                    SELECT DISTINCT li.order_no, li.item_no
                     FROM delivery_lists dl
+                    JOIN line_items li ON li.list_id = dl.id
+                    JOIN bay_assignments ba
+                      ON ba.line_item_id = li.id
+                     AND ba.status NOT IN ('Cleared', 'Cancelled')
                     WHERE dl.delivery_date = ?
                       AND dl.status = 'active'
-                      AND dl.stage LIKE '%Outbound%'
-                    ORDER BY dl.id
-                    LIMIT 1
+                      AND dl.stage LIKE '%Indian Trail%'
                     """,
-                    (inbound["delivery_date"],),
-                ).fetchone()
-                if outbound:
-                    outbound_row = con.execute(
-                        """
-                        SELECT COALESCE(SUM(out_li.scanned_qty),0) AS scanned_qty
-                        FROM line_items in_li
-                        LEFT JOIN line_items out_li
-                          ON out_li.list_id = ?
-                         AND out_li.order_no = in_li.order_no
-                         AND out_li.item_no = in_li.item_no
-                        WHERE in_li.list_id = ?
-                        """,
-                    (outbound["id"], list_id),
-                ).fetchone()
-
-                outbound_totals = {
-                    "totalQty": totals["totalQty"],
-                    "scannedQty": outbound_row["scanned_qty"],
+                    (resolved_date,),
+                ).fetchall()
+                assigned_keys = {
+                    (
+                        str(row["order_no"] or "").strip(),
+                        str(row["item_no"] or "").strip().zfill(3),
+                    )
+                    for row in assigned_rows
                 }
+                totals = {
+                    "totalQty": sum(max(int(item["qty"] or 0), 0) for item in inventory.values()),
+                    "receivedQty": sum(
+                        min(max(int(item["received_qty"] or 0), 0), max(int(item["qty"] or 0), 0))
+                        for item in inventory.values()
+                    ),
+                    "unassignedQty": sum(
+                        max(int(item["qty"] or 0), 0)
+                        for key, item in inventory.items()
+                        if key not in assigned_keys
+                    ),
+                }
+                outbound_totals = self.indian_trail_outbound_totals(
+                    con,
+                    list_id,
+                    resolved_date,
+                )
             assigned = con.execute("SELECT COALESCE(SUM(assigned_qty),0) FROM bay_assignments WHERE status NOT IN ('Cleared', 'Cancelled')").fetchone()[0]
             sdi = con.execute("SELECT COUNT(*) FROM bay_assignments WHERE status = 'SDIOverride'").fetchone()[0]
             conflicts = con.execute("SELECT COUNT(*) FROM exceptions WHERE exception_type LIKE '%bay%' AND status = 'Open'").fetchone()[0]
@@ -10712,7 +11451,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (today_start,),
             ).fetchone()[0]
             rack_summary = self.rack_summary(con)
-            in_transit_payload = self._indian_trail_in_transit_payload(con)
+            in_transit_payload = self._indian_trail_in_transit_payload(con, resolved_date or delivery_date)
             transit_rows = in_transit_payload.get("rows", []) if isinstance(in_transit_payload, dict) else []
 
             def transit_row_is_truck(row: dict[str, Any]) -> bool:
@@ -10764,6 +11503,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
         return {
             "activeInboundListId": list_id,
+            "activeInboundListIds": [str(row["id"] or "") for row in inbound_lists],
+            "deliveryDate": resolved_date,
             "indianTrailOutboundTotal": outbound_totals["totalQty"],
             "indianTrailOutboundScanned": outbound_totals["scannedQty"],
             "inboundToday": totals["totalQty"],
@@ -11962,10 +12703,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "mapSection": map_section, "moved": len(rows), "bays": self.get_bays()}
 
     def mark_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
-        """Purpose: Run the mark SDI workflow for the delivery-list scanner.
+        """Mark exact missing items, or an explicitly selected broken item, as Rush/Remake.
 
-        Effects: This function reads or changes database records.
-        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        Job-level actions intentionally skip pieces already physically fulfilled in a bay.
+        Explicit item selections remain available for a broken in-bay piece; a Remake clears
+        that exact physical assignment so the Bay Map immediately reports the piece missing.
         """
         assignment_id = int(data.get("assignmentId") or 0)
         lookup_text = str(data.get("orderNo") or data.get("order") or data.get("job") or "").strip()
@@ -11974,6 +12716,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         raw_type = str(data.get("orderType") or data.get("type") or "").strip()
         raw_reason = str(data.get("reason") or "Same-day install").strip()
         requested_delivery_date = str(data.get("deliveryDate") or "").strip()
+        raw_ids = data.get("lineItemIds") or data.get("lineItemId") or []
+        if isinstance(raw_ids, (str, int)):
+            raw_ids = [raw_ids]
+        line_item_ids = [str(value or "").strip() for value in raw_ids if str(value or "").strip()]
         if requested_delivery_date:
             try:
                 datetime.strptime(requested_delivery_date, "%Y-%m-%d")
@@ -11997,25 +12743,32 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 raise ValueError("Select Rush or Remake before marking the item")
 
         reason = f"{order_type} - {raw_reason or ('Same-day install' if order_type == 'Rush' else 'Remake')}"
-        if not assignment_id and not lookup_text:
-            raise ValueError("Select a bay assignment or enter a Job Nr., SO number, or order number")
+        if not assignment_id and not lookup_text and not line_item_ids:
+            raise ValueError("Select one or more items, or enter a Job Nr., SO number, or order number")
 
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            explicit_selection = bool(line_item_ids or assignment_id)
             seed_rows: list[Any] = []
-            assignment = None
-
             if assignment_id:
                 assignment = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
                 if not assignment:
                     raise ValueError("Assignment not found")
                 row = con.execute("SELECT * FROM line_items WHERE id = ?", (assignment["line_item_id"],)).fetchone()
                 if row:
-                    seed_rows.append(row)
+                    seed_rows = self.resolve_sdi_destination_rows(con, line_item_ids=[str(row["id"])])
+            elif line_item_ids:
+                seed_rows = self.resolve_sdi_destination_rows(con, line_item_ids=line_item_ids)
             else:
-                seed_rows = self.find_sdi_line_items(con, lookup_text)
+                seed_rows = self.resolve_sdi_destination_rows(con, lookup_text=lookup_text)
+
+            if not seed_rows:
+                raise ValueError("No matching Indian Trail item was found on active delivery lists")
+
+            if not explicit_selection:
+                seed_rows = [row for row in seed_rows if self.sdi_item_presence(row)["missingQty"] > 0]
                 if not seed_rows:
-                    raise ValueError("Job Nr., SO number, order number, or barcode was not found on active delivery lists")
+                    raise ValueError("Every matching item is already fulfilled in a bay. Select the exact broken item to mark a Remake.")
 
             affected_rows = self.expand_priority_line_items(con, seed_rows) or seed_rows
             affected_lists = self.priority_list_context(con, affected_rows)
@@ -12025,75 +12778,86 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 str(row["source_id"] or "") or f"{row['order_no']}::{row['item_no']}"
                 for row in affected_rows
             }
+            has_indian_trail_destination = bool(seed_rows)
+            direct_to_truck_value = 1 if order_type == "Rush" and truck_exempt and has_indian_trail_destination else 0
+            target_bay = self.get_bay_by_code(con, bay_code) if bay_code and not direct_to_truck_value else None
+            removed_from_bay = 0
+            created_preassignments = 0
+            primary_assignment_id = assignment_id
 
-            bay_rows = [
-                row
-                for row in affected_rows
-                if "indian trail" in f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
-                or "inbound" in f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
-            ]
+            for row in seed_rows:
+                active_assignments = con.execute(
+                    """
+                    SELECT * FROM bay_assignments
+                    WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled')
+                    ORDER BY id
+                    """,
+                    (row["id"],),
+                ).fetchall()
 
-            if assignment_id and assignment:
-                con.execute("UPDATE bay_assignments SET status = 'SDIOverride', reason = ? WHERE id = ?", (reason, assignment_id))
-                self.insert_bay_event(
-                    con,
-                    assignment["bay_id"],
-                    assignment["line_item_id"],
-                    "MarkRush" if order_type == "Rush" else "MarkRemake",
-                    user,
-                    reason,
-                )
-                self.insert_audit(
-                    con,
-                    "bay_assignment",
-                    str(assignment_id),
-                    "mark_sdi",
-                    user,
-                    "",
-                    reason,
-                    {"orderType": order_type, "lookup": lookup_text, "directToTruck": truck_exempt},
-                )
-            elif bay_rows:
-                target_bay = self.get_bay_by_code(con, bay_code) if bay_code and not truck_exempt else None
-                for row in bay_rows:
-                    existing_assignments = con.execute(
-                        "SELECT * FROM bay_assignments WHERE line_item_id = ? ORDER BY id",
-                        (row["id"],),
-                    ).fetchall()
-                    if existing_assignments:
-                        for existing in existing_assignments:
-                            con.execute(
-                                "UPDATE bay_assignments SET status = 'SDIOverride', reason = ? WHERE id = ?",
-                                (reason, existing["id"]),
-                            )
+                if order_type == "Remake":
+                    for current in active_assignments:
+                        current_status = str(current["status"] or "")
+                        if current_status == "PreAssigned":
                             self.insert_bay_event(
                                 con,
-                                existing["bay_id"],
+                                current["bay_id"],
                                 row["id"],
-                                "MarkRush" if order_type == "Rush" else "MarkRemake",
+                                "MarkRemakePreAssigned",
                                 user,
                                 reason,
                             )
-                            self.insert_audit(
+                            primary_assignment_id = primary_assignment_id or int(current["id"])
+                            continue
+                        con.execute(
+                            """
+                            UPDATE bay_assignments
+                            SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = ?
+                            WHERE id = ?
+                            """,
+                            (user, now_iso(), reason, current["id"]),
+                        )
+                        removed_from_bay += 1
+                        self.insert_bay_event(
+                            con,
+                            current["bay_id"],
+                            row["id"],
+                            "MarkRemakeMissing",
+                            user,
+                            reason,
+                            old_bay_id=current["bay_id"],
+                        )
+                        self.insert_audit(
+                            con,
+                            "bay_assignment",
+                            str(current["id"]),
+                            "mark_remake_remove_from_bay",
+                            user,
+                            "",
+                            reason,
+                            {"lineItemId": row["id"], "lookup": lookup_text},
+                        )
+                        primary_assignment_id = primary_assignment_id or int(current["id"])
+                else:
+                    if active_assignments:
+                        for current in active_assignments:
+                            self.insert_bay_event(
                                 con,
-                                "bay_assignment",
-                                str(existing["id"]),
-                                "mark_sdi",
+                                current["bay_id"],
+                                row["id"],
+                                "MarkRush",
                                 user,
-                                "",
                                 reason,
-                                {
-                                    "orderType": order_type,
-                                    "lookup": lookup_text,
-                                    "directToTruck": truck_exempt,
-                                },
                             )
-                        assignment_id = assignment_id or int(existing_assignments[0]["id"])
+                            primary_assignment_id = primary_assignment_id or int(current["id"])
                     elif target_bay:
                         cur = con.execute(
                             """
-                            INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
-                            VALUES (?, ?, ?, ?, 'SDIOverride', ?, ?, ?)
+                            INSERT INTO bay_assignments (
+                                delivery_list_id, line_item_id, bay_id, assigned_qty,
+                                status, assigned_by, assigned_at, reason
+                            )
+                            VALUES (?, ?, ?, ?, 'PreAssigned', ?, ?, ?)
                             """,
                             (
                                 row["list_id"],
@@ -12106,38 +12870,29 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                             ),
                         )
                         new_assignment_id = int(cur.lastrowid)
-                        assignment_id = assignment_id or new_assignment_id
-                        self.insert_bay_event(
-                            con,
-                            target_bay["id"],
-                            row["id"],
-                            "MarkRush" if order_type == "Rush" else "MarkRemake",
-                            user,
-                            reason,
-                            new_bay_id=target_bay["id"],
-                        )
+                        primary_assignment_id = primary_assignment_id or new_assignment_id
+                        created_preassignments += 1
                         self.insert_audit(
                             con,
                             "bay_assignment",
                             str(new_assignment_id),
-                            "mark_sdi",
+                            "mark_rush_preassign",
                             user,
                             "",
                             reason,
-                            {"orderType": order_type, "lookup": lookup_text, "bayCode": bay_code},
+                            {"lineItemId": row["id"], "bayCode": bay_code, "lookup": lookup_text},
+                        )
+                        self.insert_bay_event(
+                            con,
+                            target_bay["id"],
+                            row["id"],
+                            "MarkRushPreAssign",
+                            user,
+                            reason,
+                            new_bay_id=target_bay["id"],
                         )
 
             special_pattern = r"\b(?:Rush|SDI|Remake|RM)\b"
-            has_indian_trail_destination = any(
-                "indian trail" in f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
-                or "inbound" in f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
-                for row in affected_rows
-            )
-            direct_to_truck_value = (
-                1
-                if order_type == "Rush" and truck_exempt and has_indian_trail_destination
-                else 0
-            )
             for row in affected_rows:
                 process_state = re.sub(special_pattern, "", str(row["process_state"] or ""), flags=re.IGNORECASE)
                 process_state = re.sub(r"\s{2,}", " ", process_state).strip(" -|,")
@@ -12171,8 +12926,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "orderType": order_type,
                         "truckExempt": bool(direct_to_truck_value),
                         "bayCode": bay_code,
-                        "assignmentId": assignment_id,
+                        "assignmentId": primary_assignment_id,
                         "lookup": lookup_text,
+                        "explicitItemSelection": explicit_selection,
                         "affectedListIds": affected_list_ids,
                     },
                 )
@@ -12198,10 +12954,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     row_previous_date = str(row_value(row, "priority_delivery_date") or row_original_date)
                     if row_previous_date == requested_delivery_date:
                         continue
-                    con.execute(
-                        "UPDATE line_items SET priority_delivery_date = ? WHERE id = ?",
-                        (requested_delivery_date, row["id"]),
-                    )
+                    con.execute("UPDATE line_items SET priority_delivery_date = ? WHERE id = ?", (requested_delivery_date, row["id"]))
                     self.insert_audit(
                         con,
                         "line_item",
@@ -12210,11 +12963,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         user,
                         "",
                         reason,
-                        {
-                            "previousDeliveryDate": row_previous_date,
-                            "deliveryDate": requested_delivery_date,
-                            "orderType": order_type,
-                        },
+                        {"previousDeliveryDate": row_previous_date, "deliveryDate": requested_delivery_date, "orderType": order_type},
                     )
 
             notification_id = 0
@@ -12224,18 +12973,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 notice_customer = str(first_notice_row["customer"] or "").strip()
                 notice_order = str(first_notice_row["order_no"] or "").strip()
                 notice_route = str(first_notice_row["route"] or "").strip()
-                item_pairs = sorted(
-                    {
-                        (str(row["order_no"] or "").strip(), str(row["item_no"] or "").strip())
-                        for row in affected_rows
-                    }
-                )
+                item_pairs = sorted({(str(row["order_no"] or "").strip(), str(row["item_no"] or "").strip()) for row in affected_rows})
                 item_labels = [f"{order}-{item}" if order else item for order, item in item_pairs]
                 products: list[str] = []
                 for row in affected_rows:
-                    product_label = " - ".join(
-                        value for value in [str(row["product"] or "").strip(), str(row["dimensions"] or "").strip()] if value
-                    )
+                    product_label = " - ".join(value for value in [str(row["product"] or "").strip(), str(row["dimensions"] or "").strip()] if value)
                     if product_label and product_label not in products:
                         products.append(product_label)
                 notice_target = notice_job or notice_order or lookup_text
@@ -12284,18 +13026,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         is_rush = order_type == "Rush"
         return {
             "ok": True,
-            "assignmentId": assignment_id,
+            "assignmentId": primary_assignment_id,
             "listId": affected_list_ids[0] if affected_list_ids else "",
             "affectedListIds": affected_list_ids,
             "affectedLists": affected_lists,
             "affectedSourceIds": source_ids,
-            "status": "SDIOverride",
+            "status": "PriorityMarked",
             "orderType": order_type,
             "rush": is_rush,
             "remake": not is_rush,
             "directToTruck": bool(direct_to_truck_value),
             "affectedItems": len(logical_item_keys),
             "affectedStageRows": len(affected_rows),
+            "removedFromBay": removed_from_bay,
+            "createdPreassignments": created_preassignments,
             "matchedJob": matched_job,
             "matchedCustomer": matched_customer,
             "matchedOrder": matched_order,
@@ -12307,16 +13051,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
 
     def remove_sdi(self, data: dict[str, Any], user: str) -> dict[str, Any]:
-        """Purpose: Remove SDI for the delivery-list scanner workflow.
-
-        Effects: This function reads or changes database records.
-        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
-        """
+        """Clear Rush/Remake from an exact item selection or a resolved job/order group."""
         assignment_id = int(data.get("assignmentId") or 0)
         lookup_text = str(data.get("orderNo") or data.get("order") or data.get("job") or "").strip()
-        reason = str(data.get("reason") or "SDI cleared").strip()
-        if not assignment_id and not lookup_text:
-            raise ValueError("Select a bay assignment or enter a Job Nr., SO number, or order number")
+        raw_ids = data.get("lineItemIds") or data.get("lineItemId") or []
+        if isinstance(raw_ids, (str, int)):
+            raw_ids = [raw_ids]
+        line_item_ids = [str(value or "").strip() for value in raw_ids if str(value or "").strip()]
+        reason = str(data.get("reason") or "Rush / Remake cleared").strip()
+        if not assignment_id and not lookup_text and not line_item_ids:
+            raise ValueError("Select one or more marked items, or enter a Job Nr., SO number, or order number")
 
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -12325,47 +13069,77 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 assignment = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
                 if not assignment:
                     raise ValueError("Assignment not found")
-                row = con.execute("SELECT * FROM line_items WHERE id = ?", (assignment["line_item_id"],)).fetchone()
-                if row:
-                    seed_rows.append(row)
+                seed_rows = self.resolve_sdi_destination_rows(con, line_item_ids=[str(assignment["line_item_id"])])
+            elif line_item_ids:
+                seed_rows = self.resolve_sdi_destination_rows(con, line_item_ids=line_item_ids)
             else:
-                seed_rows = self.find_sdi_line_items(con, lookup_text)
-                if not seed_rows:
-                    raise ValueError("Job Nr., SO number, order number, or barcode was not found on active delivery lists")
+                seed_rows = self.resolve_sdi_destination_rows(con, lookup_text=lookup_text)
+            if not seed_rows:
+                raise ValueError("No matching marked Indian Trail items were found")
 
             rows = self.expand_priority_line_items(con, seed_rows) or seed_rows
             affected_lists = self.priority_list_context(con, rows)
-            logical_item_keys = {
-                str(row["source_id"] or "") or f"{row['order_no']}::{row['item_no']}"
-                for row in rows
-            }
+            logical_item_keys = {str(row["source_id"] or "") or f"{row['order_no']}::{row['item_no']}" for row in rows}
 
             for row in rows:
+                preassignments = con.execute(
+                    "SELECT * FROM bay_assignments WHERE line_item_id = ? AND status = 'PreAssigned' ORDER BY id",
+                    (row["id"],),
+                ).fetchall()
+                for assignment in preassignments:
+                    created_by_priority = con.execute(
+                        """
+                        SELECT 1 FROM audit_events
+                        WHERE entity_type = 'bay_assignment'
+                          AND entity_id = ?
+                          AND action = 'mark_rush_preassign'
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (str(assignment["id"]),),
+                    ).fetchone()
+                    if not created_by_priority:
+                        continue
+                    con.execute(
+                        """
+                        UPDATE bay_assignments
+                        SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = ?
+                        WHERE id = ?
+                        """,
+                        (user, now_iso(), reason, assignment["id"]),
+                    )
+                    self.insert_bay_event(
+                        con,
+                        assignment["bay_id"],
+                        row["id"],
+                        "RemoveRushPreAssign",
+                        user,
+                        reason,
+                        old_bay_id=assignment["bay_id"],
+                    )
+                    self.insert_audit(
+                        con,
+                        "bay_assignment",
+                        str(assignment["id"]),
+                        "remove_rush_preassign",
+                        user,
+                        "",
+                        reason,
+                    )
+
                 assignments = con.execute(
                     "SELECT * FROM bay_assignments WHERE line_item_id = ? AND status = 'SDIOverride' ORDER BY id",
                     (row["id"],),
                 ).fetchall()
                 for assignment in assignments:
-                    con.execute(
-                        "UPDATE bay_assignments SET status = 'Assigned', reason = ? WHERE id = ?",
-                        (reason, assignment["id"]),
-                    )
+                    con.execute("UPDATE bay_assignments SET status = 'Assigned', reason = ? WHERE id = ?", (reason, assignment["id"]))
                     self.insert_bay_event(con, assignment["bay_id"], row["id"], "RemoveSDI", user, reason)
                     self.insert_audit(con, "bay_assignment", str(assignment["id"]), "remove_sdi", user, "", reason)
 
-                next_state = re.sub(
-                    r"\b(?:Rush|SDI|Remake|RM)\b",
-                    "",
-                    str(row["process_state"] or ""),
-                    flags=re.IGNORECASE,
-                ).strip(" -|,")
+                next_state = re.sub(r"\b(?:Rush|SDI|Remake|RM)\b", "", str(row["process_state"] or ""), flags=re.IGNORECASE).strip(" -|,")
                 next_state = re.sub(r"\s{2,}", " ", next_state)
                 con.execute(
-                    """
-                    UPDATE line_items
-                    SET process_state = ?, priority_delivery_date = '', priority_direct_to_truck = 0
-                    WHERE id = ?
-                    """,
+                    "UPDATE line_items SET process_state = ?, priority_delivery_date = '', priority_direct_to_truck = 0 WHERE id = ?",
                     (next_state, row["id"]),
                 )
                 self.insert_audit(
@@ -12376,7 +13150,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     user,
                     "",
                     reason,
-                    {"lookup": lookup_text, "affectedListIds": [item["id"] for item in affected_lists]},
+                    {"lookup": lookup_text, "lineItemIds": line_item_ids, "affectedListIds": [item["id"] for item in affected_lists]},
                 )
             con.commit()
 
@@ -12387,7 +13161,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {
             "ok": True,
             "assignmentId": assignment_id,
-            "status": "Assigned",
+            "status": "Cleared",
             "affectedItems": len(logical_item_keys),
             "affectedStageRows": len(rows),
             "affectedListIds": [item["id"] for item in affected_lists],
@@ -12396,7 +13170,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "matchedCustomer": matched_customer,
             "matchedOrder": matched_order,
             "lookup": lookup_text,
-            "message": "Rush / Remake mark cleared from every applicable stage.",
+            "message": "Rush / Remake mark cleared from the selected item(s) across every applicable stage.",
         }
 
     def bay_check(self, data: dict[str, Any], user: str) -> dict[str, Any]:
