@@ -80,6 +80,10 @@ const state = {
   baySpecialFilter: "all",
   staleBayOrders: [],
   staleBayAlertDate: "",
+  staleBayQuery: "",
+  staleBayAgeFilter: "all",
+  staleBaySort: "age-desc",
+  staleBaySelectedIds: new Set(),
   selectedBayCode: "",
   bayEditMode: false,
   pendingBayMove: null,
@@ -203,7 +207,7 @@ const state = {
 };
 
 const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v3";
-const APP_SOUND_CACHE_VERSION = "20260722-v104";
+const APP_SOUND_CACHE_VERSION = "20260722-v105";
 const APP_SOUND_FILES = Object.freeze({
   // Normal accepted item scans use the restrained confirmation cue. Keep
   // sounds/scan_success.wav packaged but intentionally unused for future work.
@@ -499,6 +503,8 @@ const els = {
   bayScanOutInput: document.getElementById("bayScanOutInput"),
   bayScanBayInput: document.getElementById("bayScanBayInput"),
   bayScanModeToggle: document.getElementById("bayScanModeToggle"),
+  bayScannerModeSummary: document.getElementById("bayScannerModeSummary"),
+  bayScannerTargetState: document.getElementById("bayScannerTargetState"),
   bayManualOrderInput: document.getElementById("bayManualOrderInput"),
   bayManualItemInput: document.getElementById("bayManualItemInput"),
   bayManualQtyInput: document.getElementById("bayManualQtyInput"),
@@ -580,6 +586,11 @@ const els = {
   staleBayPrintBtn: document.getElementById("staleBayPrintBtn"),
   staleBaySnoozeAllBtn: document.getElementById("staleBaySnoozeAllBtn"),
   staleBaySnoozeAllDays: document.getElementById("staleBaySnoozeAllDays"),
+  staleBaySearchInput: document.getElementById("staleBaySearchInput"),
+  staleBayAgeFilter: document.getElementById("staleBayAgeFilter"),
+  staleBaySortSelect: document.getElementById("staleBaySortSelect"),
+  staleBaySelectionCount: document.getElementById("staleBaySelectionCount"),
+  staleBaySelectVisibleBtn: document.getElementById("staleBaySelectVisibleBtn"),
   bayLayoutManager: document.getElementById("bayLayoutManager"),
   bayLayoutCloseBtn: document.getElementById("bayLayoutCloseBtn"),
   bayLayoutSelect: document.getElementById("bayLayoutSelect"),
@@ -1999,10 +2010,59 @@ const SPANISH_UI_V069 = new Map([
 
 SPANISH_UI_V069.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
+const SPANISH_UI_V105 = new Map([
+  ["Indian Trail operations", "Operaciones de Indian Trail"],
+  ["Bay Scanner", "Escáner de bahías"],
+  ["Add glass to a selected bay or remove it from its current bay.", "Agregue vidrio a una bahía seleccionada o retírelo de su bahía actual."],
+  ["Remove from bay", "Retirar de bahía"],
+  ["Add to bay", "Agregar a bahía"],
+  ["Live route progress", "Progreso de ruta en vivo"],
+  ["Choose action", "Elija la acción"],
+  ["What should happen to the scanned piece?", "¿Qué debe ocurrir con la pieza escaneada?"],
+  ["Find current bay", "Buscar bahía actual"],
+  ["Place into bay", "Colocar en bahía"],
+  ["Target bay", "Bahía de destino"],
+  ["Bay code", "Código de bahía"],
+  ["Current bay is found automatically in Remove mode.", "La bahía actual se encuentra automáticamente en modo Retirar."],
+  ["Choose a target bay before scanning in Add mode.", "Elija una bahía de destino antes de escanear en modo Agregar."],
+  ["Scan piece", "Escanear pieza"],
+  ["Scan the barcode or enter it manually, then press Enter.", "Escanee el código o ingréselo manualmente y presione Enter."],
+  ["Submit Scan", "Enviar escaneo"],
+  ["Correction tools", "Herramientas de corrección"],
+  ["Manual entry", "Entrada manual"],
+  ["Use order and item when a barcode is unavailable.", "Use la orden y el artículo cuando no haya un código disponible."],
+  ["Submit Manual Scan", "Enviar escaneo manual"],
+  ["Latest activity", "Actividad más reciente"],
+  ["Quick confirmation of the latest actions", "Confirmación rápida de las acciones recientes"],
+  ["Indian Trail inventory control", "Control de inventario de Indian Trail"],
+  ["Old Bay Control Center", "Centro de control de bahías antiguas"],
+  ["Review assignments older than 10 days, verify their physical location, and snooze only the rows that have been checked.", "Revise asignaciones de más de 10 días, confirme su ubicación física y posponga solo las filas verificadas."],
+  ["Age", "Antigüedad"],
+  ["All ages", "Todas las antigüedades"],
+  ["14+ days", "14+ días"],
+  ["30+ days", "30+ días"],
+  ["Oldest first", "Más antiguas primero"],
+  ["Newest first", "Más recientes primero"],
+  ["Bay A-Z", "Bahía A-Z"],
+  ["Select visible", "Seleccionar visibles"],
+  ["Clear visible", "Quitar visibles"],
+  ["Snooze days", "Días de pausa"],
+  ["Snooze selected", "Posponer seleccionadas"],
+  ["Select verified rows before using the bulk snooze action.", "Seleccione las filas verificadas antes de usar la pausa masiva."],
+  ["Visible rows", "Filas visibles"],
+  ["Needs physical review", "Requiere revisión física"],
+  ["Select row", "Seleccionar fila"],
+  ["No old bay rows match these filters.", "Ninguna fila antigua coincide con estos filtros."],
+  ["Try a different search, age range, or sort order.", "Pruebe otra búsqueda, rango de antigüedad u orden."],
+]);
+
+SPANISH_UI_V105.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
 const SPANISH_PLACEHOLDERS = new Map([
   ["Global search...", "Búsqueda global..."],
   ["Search date, stage, route...", "Buscar fecha, etapa o ruta..."],
   ["Search orders, jobs, customers...", "Buscar órdenes, trabajos o clientes..."],
+  ["Search order, customer, bay, glass, or size...", "Buscar orden, cliente, bahía, vidrio o tamaño..."],
   ["Scan or enter barcode...", "Escanee o ingrese el código..."],
   ["Start typing a Job Nr., SO, order, or barcode", "Comience a escribir un Núm. de trabajo, SO, orden o código"],
   ["Enter password", "Ingrese la contraseña"],
@@ -12502,10 +12562,19 @@ async function maybeShowStaleBayAlert() {
  */
 function openStaleBayPanel(orders = state.staleBayOrders) {
   if (!els.staleBayPanel || !els.staleBayBackdrop) return;
-  renderStaleBayPanel(orders || []);
+  state.staleBayOrders = Array.isArray(orders) ? orders : [];
+  state.staleBayQuery = "";
+  state.staleBayAgeFilter = "all";
+  state.staleBaySort = "age-desc";
+  state.staleBaySelectedIds = new Set();
+  if (els.staleBaySearchInput) els.staleBaySearchInput.value = "";
+  if (els.staleBayAgeFilter) els.staleBayAgeFilter.value = "all";
+  if (els.staleBaySortSelect) els.staleBaySortSelect.value = "age-desc";
+  renderStaleBayPanel(state.staleBayOrders);
   els.staleBayPanel.hidden = false;
   els.staleBayBackdrop.hidden = false;
   updateModalScrollLock();
+  window.setTimeout(() => els.staleBaySearchInput?.focus(), 0);
 }
 
 /**
@@ -12520,6 +12589,65 @@ function closeStaleBayPanel() {
 }
 
 /**
+ * Purpose: Return the old-bay rows that match the active local controls.
+ * Effects: Performs an in-memory calculation without changing backend data.
+ * Flow: Applies search and age filters, then sorts the visible rows for review.
+ */
+function filteredStaleBayOrders(orders = state.staleBayOrders) {
+  const query = String(state.staleBayQuery || "").trim().toLowerCase();
+  const minimumAge = state.staleBayAgeFilter === "all" ? 0 : Number(state.staleBayAgeFilter || 0);
+  const rows = (Array.isArray(orders) ? orders : []).filter((order) => {
+    if (minimumAge && Number(order.daysOld || 0) < minimumAge) return false;
+    if (!query) return true;
+    const haystack = [
+      order.order,
+      order.item,
+      order.customer,
+      order.bayCode,
+      order.bayDisplay,
+      order.job,
+      order.product,
+      order.dimensions,
+      order.deliveryDate,
+    ].join(" ").toLowerCase();
+    return haystack.includes(query);
+  });
+
+  rows.sort((left, right) => {
+    if (state.staleBaySort === "age-asc") return Number(left.daysOld || 0) - Number(right.daysOld || 0);
+    if (state.staleBaySort === "bay") {
+      return String(left.bayDisplay || left.bayCode || "").localeCompare(String(right.bayDisplay || right.bayCode || ""), undefined, { numeric: true });
+    }
+    return Number(right.daysOld || 0) - Number(left.daysOld || 0);
+  });
+  return rows;
+}
+
+/**
+ * Purpose: Keep old-bay bulk controls synchronized with visible and selected rows.
+ * Effects: Updates only the Old Bay modal controls.
+ * Flow: Prunes unavailable selections, updates counts, and enables safe bulk actions.
+ */
+function updateStaleBaySelectionControls(visibleOrders = filteredStaleBayOrders()) {
+  const validIds = new Set((state.staleBayOrders || []).map((order) => String(order.assignmentId || "")).filter(Boolean));
+  state.staleBaySelectedIds = new Set([...state.staleBaySelectedIds].filter((id) => validIds.has(String(id))));
+  const selectedCount = state.staleBaySelectedIds.size;
+  const visibleIds = visibleOrders.map((order) => String(order.assignmentId || "")).filter(Boolean);
+  const allVisibleSelected = Boolean(visibleIds.length) && visibleIds.every((id) => state.staleBaySelectedIds.has(id));
+
+  if (els.staleBaySelectionCount) els.staleBaySelectionCount.textContent = `${selectedCount} selected`;
+  if (els.staleBaySelectVisibleBtn) {
+    els.staleBaySelectVisibleBtn.disabled = !visibleIds.length;
+    els.staleBaySelectVisibleBtn.textContent = allVisibleSelected ? "Clear visible" : "Select visible";
+    els.staleBaySelectVisibleBtn.dataset.selectionState = allVisibleSelected ? "clear" : "select";
+  }
+  if (els.staleBaySnoozeAllBtn) {
+    els.staleBaySnoozeAllBtn.disabled = selectedCount === 0;
+    els.staleBaySnoozeAllBtn.textContent = selectedCount ? `Snooze ${selectedCount} selected` : "Snooze selected";
+  }
+}
+
+/**
  * Purpose: Render the render stale bay panel workflow using the existing shared UI state.
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
@@ -12527,70 +12655,90 @@ function closeStaleBayPanel() {
 function renderStaleBayPanel(orders) {
   if (!els.staleBayList) return;
   const list = Array.isArray(orders) ? orders : [];
+  const visible = filteredStaleBayOrders(list);
   const oldestDays = list.reduce((max, order) => Math.max(max, Number(order.daysOld || 0)), 0);
   const bayCount = new Set(list.map((order) => order.bayCode || order.bayDisplay).filter(Boolean)).size;
 
+  if (els.staleBaySearchInput && els.staleBaySearchInput.value !== state.staleBayQuery) els.staleBaySearchInput.value = state.staleBayQuery;
+  if (els.staleBayAgeFilter) els.staleBayAgeFilter.value = state.staleBayAgeFilter;
+  if (els.staleBaySortSelect) els.staleBaySortSelect.value = state.staleBaySort;
+
   if (!list.length) {
     els.staleBayList.innerHTML = `
-      <section class="stale-bay-summary-cards">
+      <section class="stale-bay-summary-cards stale-bay-summary-cards-v105">
         <article><small>Old bay rows</small><strong>0</strong><span>Nothing needs review</span></article>
         <article><small>Bays affected</small><strong>0</strong><span>Clear right now</span></article>
         <article><small>Oldest row</small><strong>0 days</strong><span>No aged rows</span></article>
       </section>
-      <div class="stale-bay-empty">
+      <div class="stale-bay-empty stale-bay-empty-v105">
+        <span class="stale-bay-empty-icon-v105" aria-hidden="true"></span>
         <strong>No old bay orders right now.</strong>
         <span>Indian Trail bay assignments older than 10 days will appear here.</span>
       </div>
     `;
+    updateStaleBaySelectionControls([]);
     return;
   }
 
+  const cards = visible.map((order) => {
+    const assignmentId = String(order.assignmentId || "");
+    const daysOld = Number(order.daysOld || 0);
+    const urgency = daysOld >= 30 ? "is-critical" : daysOld >= 14 ? "is-warning" : "is-attention";
+    const checked = state.staleBaySelectedIds.has(assignmentId) ? "checked" : "";
+    return `
+      <article class="stale-bay-order stale-bay-order-v105 ${urgency}" data-stale-assignment-row="${escapeHtml(assignmentId)}">
+        <label class="stale-bay-select-control-v105" title="Select row">
+          <input type="checkbox" data-stale-select="${escapeHtml(assignmentId)}" ${checked}>
+          <span aria-hidden="true"></span>
+          <small>Select</small>
+        </label>
+        <div class="stale-bay-main stale-bay-main-v105">
+          <div class="stale-bay-title-row stale-bay-title-row-v105">
+            <div class="stale-bay-identity">
+              <span class="stale-bay-id-line">
+                <strong>Order ${escapeHtml(order.order)} · Item ${escapeHtml(order.item)}</strong>
+                <span class="stale-age-pill">${escapeHtml(daysOld)} days old</span>
+              </span>
+              <span class="stale-bay-customer">${escapeHtml(order.customer || "No customer listed")}</span>
+            </div>
+            <span class="stale-bay-bay-pill">Bay ${escapeHtml(order.bayDisplay || order.bayCode)}</span>
+          </div>
+          <div class="stale-bay-meta-grid stale-bay-meta-grid-v105">
+            <small><b>Glass / Job</b>${escapeHtml(order.job || order.product || "-")}</small>
+            <small><b>Size</b>${escapeHtml(order.dimensions || "-")}</small>
+            <small><b>Delivery</b>${escapeHtml(formatDisplayDate(order.deliveryDate || ""))}</small>
+            <small><b>Last scanned</b>${escapeHtml(formatDateTime(order.lastScannedAt) || "Not scanned")}</small>
+          </div>
+        </div>
+        <div class="stale-snooze-row stale-snooze-row-v105">
+          <label>
+            <span>Snooze this row</span>
+            <select data-stale-days="${escapeHtml(assignmentId)}" aria-label="Snooze days">
+              <option value="1">1 day</option>
+              <option value="3">3 days</option>
+              <option value="7">1 week</option>
+              <option value="14">2 weeks</option>
+              <option value="30">30 days</option>
+            </select>
+          </label>
+          <button type="button" data-stale-snooze="${escapeHtml(assignmentId)}">Snooze</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+
   els.staleBayList.innerHTML = `
-    <section class="stale-bay-summary-cards">
-      <article><small>Old bay rows</small><strong>${escapeHtml(list.length)}</strong><span>Need walkthrough</span></article>
+    <section class="stale-bay-summary-cards stale-bay-summary-cards-v105">
+      <article><small>Old bay rows</small><strong>${escapeHtml(list.length)}</strong><span>Needs physical review</span></article>
       <article><small>Bays affected</small><strong>${escapeHtml(bayCount)}</strong><span>Physical locations</span></article>
       <article><small>Oldest row</small><strong>${escapeHtml(oldestDays)} days</strong><span>Assigned age</span></article>
+      <article><small>Visible rows</small><strong>${escapeHtml(visible.length)}</strong><span>Current filters</span></article>
     </section>
-    <div class="stale-bay-card-list">
-      ${list
-        .map((order) => `
-          <article class="stale-bay-order">
-            <div class="stale-bay-main">
-              <div class="stale-bay-title-row">
-                <div class="stale-bay-identity">
-                  <span class="stale-bay-id-line">
-                    <strong>${escapeHtml(order.order)}-${escapeHtml(order.item)}</strong>
-                    <span class="stale-age-pill">${escapeHtml(order.daysOld)} days</span>
-                  </span>
-                  <span class="stale-bay-customer">${escapeHtml(order.customer || "No customer listed")}</span>
-                </div>
-                <span class="stale-bay-bay-pill">Bay ${escapeHtml(order.bayDisplay || order.bayCode)}</span>
-              </div>
-              <div class="stale-bay-meta-grid">
-                <small><b>Glass</b>${escapeHtml(order.job || order.product || "-")}</small>
-                <small><b>Size</b>${escapeHtml(order.dimensions || "-")}</small>
-                <small><b>Delivery</b>${escapeHtml(formatDisplayDate(order.deliveryDate || ""))}</small>
-                <small><b>Last scanned</b>${escapeHtml(formatDateTime(order.lastScannedAt) || "Not scanned")}</small>
-              </div>
-            </div>
-            <div class="stale-snooze-row">
-              <label>
-                <span>Snooze</span>
-                <select data-stale-days="${escapeHtml(order.assignmentId)}" aria-label="Snooze days">
-                  <option value="1">1 day</option>
-                  <option value="3">3 days</option>
-                  <option value="7">1 week</option>
-                  <option value="14">2 weeks</option>
-                  <option value="30">30 days</option>
-                </select>
-              </label>
-              <button type="button" data-stale-snooze="${escapeHtml(order.assignmentId)}">Snooze</button>
-            </div>
-          </article>
-        `)
-        .join("")}
-    </div>
+    ${visible.length
+      ? `<div class="stale-bay-card-list stale-bay-card-list-v105">${cards}</div>`
+      : `<div class="stale-bay-empty stale-bay-empty-v105"><span class="stale-bay-empty-icon-v105" aria-hidden="true"></span><strong>No old bay rows match these filters.</strong><span>Try a different search, age range, or sort order.</span></div>`}
   `;
+  updateStaleBaySelectionControls(visible);
 }
 
 /**
@@ -12603,6 +12751,7 @@ async function snoozeStaleBayOrders(assignmentIds, days) {
     method: "POST",
     body: JSON.stringify({ assignmentIds, days }),
   });
+  for (const assignmentId of assignmentIds || []) state.staleBaySelectedIds.delete(String(assignmentId));
   state.staleBayOrders = payload.orders || [];
   renderStaleBayPanel(state.staleBayOrders);
   await refreshBayMapPage();
@@ -12970,6 +13119,26 @@ async function runBayHistory(direction) {
 }
 
 /**
+ * Purpose: Keep the redesigned Bay Scanner mode, target guidance, and styling synchronized.
+ * Effects: Updates only scanner-facing labels and state classes.
+ * Flow: Reads the current Add/Remove selection and target bay value, then presents the next required step.
+ */
+function updateBayScannerCommandState() {
+  const adding = Boolean(els.bayScanModeToggle?.checked);
+  const targetBay = String(els.bayScanBayInput?.value || "").trim();
+  els.bayScanOutForm?.classList.toggle("is-add-mode", adding);
+  if (els.bayScannerModeSummary) els.bayScannerModeSummary.textContent = adding ? "Add to bay" : "Remove from bay";
+  if (els.bayScannerTargetState) {
+    els.bayScannerTargetState.textContent = adding
+      ? (targetBay ? `Target selected: ${targetBay}` : "Choose a target bay before scanning in Add mode.")
+      : "Current bay is found automatically in Remove mode.";
+  }
+  if (els.bayScanOutInput) {
+    els.bayScanOutInput.placeholder = adding ? "Scan order to add to selected bay..." : "Scan order to remove from bay...";
+  }
+}
+
+/**
  * Purpose: Run the run bay scan workflow for the browser application.
  * Effects: May call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
@@ -13322,6 +13491,7 @@ function useManagedBayForScanner() {
   }
   if (els.bayScanBayInput) els.bayScanBayInput.value = targetBay;
   if (els.bayScanModeToggle) els.bayScanModeToggle.checked = true;
+  updateBayScannerCommandState();
   if (els.bayScanOutInput) {
     els.bayScanOutInput.placeholder = `Scan order to add to ${targetBay}...`;
     els.bayScanOutInput.focus();
@@ -14126,6 +14296,7 @@ async function runBayAction(action) {
     if (!bay) return;
     if (els.bayScanBayInput) els.bayScanBayInput.value = bay.bayCode;
     if (els.bayScanModeToggle) els.bayScanModeToggle.checked = true;
+    updateBayScannerCommandState();
     if (els.bayScanOutInput) {
       els.bayScanOutInput.placeholder = `Scan order to add to ${bay.displayName || bay.bayCode}...`;
       els.bayScanOutInput.focus();
@@ -22062,20 +22233,17 @@ function wireEvents() {
     submitBayScanOut().catch((error) => showInlineError(error.message, true));
   });
   els.bayManualSubmitBtn?.addEventListener("click", () => submitManualBayScan().catch((error) => showInlineError(error.message, true)));
-  /**
-   * Purpose: Update the update bay scan mode UI workflow using the existing shared UI state.
-   * Effects: May call the backend api, may update shared client state.
-   * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
-   */
-  const updateBayScanModeUi = () => {
-    if (els.bayScanOutInput) els.bayScanOutInput.placeholder = els.bayScanModeToggle?.checked ? "Scan order to add to selected bay..." : "Scan order to remove from bay...";
-  };
-  document.querySelectorAll('input[name="bayScanVisualMode"]').forEach((input) => input.addEventListener("change", updateBayScanModeUi));
+  document.querySelectorAll('input[name="bayScanVisualMode"]').forEach((input) => input.addEventListener("change", updateBayScannerCommandState));
+  els.bayScanBayInput?.addEventListener("input", updateBayScannerCommandState);
   document.getElementById("bayTargetClearBtn")?.addEventListener("click", () => {
     if (els.bayScanBayInput) els.bayScanBayInput.value = "";
+    const removeMode = document.getElementById("bayScanRemoveMode");
+    if (removeMode) removeMode.checked = true;
     if (els.bayScanModeToggle) els.bayScanModeToggle.checked = false;
-    if (els.bayScanOutInput) els.bayScanOutInput.placeholder = "Scan order to remove from bay...";
+    updateBayScannerCommandState();
+    els.bayScanOutInput?.focus();
   });
+  updateBayScannerCommandState();
   els.bayUndoBtn?.addEventListener("click", () => runBayHistory("undo").catch((error) => showInlineError(error.message, true)));
   els.bayRedoBtn?.addEventListener("click", () => runBayHistory("redo").catch((error) => showInlineError(error.message, true)));
   els.bayMapCanvas?.addEventListener("click", async (event) => {
@@ -22218,15 +22386,43 @@ function wireEvents() {
   els.staleBayPrintBtn?.addEventListener("click", () => launchManagedPrint("/api/indian-trail/stale-bays/print"));
   els.adminModalClose?.addEventListener("click", () => closeAdminModal());
   els.adminModalBackdrop?.addEventListener("click", () => closeAdminModal());
+  els.staleBaySearchInput?.addEventListener("input", () => {
+    state.staleBayQuery = els.staleBaySearchInput.value;
+    renderStaleBayPanel(state.staleBayOrders);
+  });
+  els.staleBayAgeFilter?.addEventListener("change", () => {
+    state.staleBayAgeFilter = els.staleBayAgeFilter.value || "all";
+    renderStaleBayPanel(state.staleBayOrders);
+  });
+  els.staleBaySortSelect?.addEventListener("change", () => {
+    state.staleBaySort = els.staleBaySortSelect.value || "age-desc";
+    renderStaleBayPanel(state.staleBayOrders);
+  });
+  els.staleBaySelectVisibleBtn?.addEventListener("click", () => {
+    const visible = filteredStaleBayOrders();
+    const visibleIds = visible.map((order) => String(order.assignmentId || "")).filter(Boolean);
+    const shouldClear = Boolean(visibleIds.length) && visibleIds.every((id) => state.staleBaySelectedIds.has(id));
+    for (const id of visibleIds) {
+      if (shouldClear) state.staleBaySelectedIds.delete(id);
+      else state.staleBaySelectedIds.add(id);
+    }
+    renderStaleBayPanel(state.staleBayOrders);
+  });
   els.staleBaySnoozeAllBtn?.addEventListener("click", () => {
-    /**
-     * Purpose: Run the IDs workflow for the browser application.
-     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-     */
-    const ids = (state.staleBayOrders || []).map((order) => order.assignmentId).filter(Boolean);
-    if (!ids.length) return;
+    const ids = [...state.staleBaySelectedIds];
+    if (!ids.length) {
+      showInlineError("Select at least one verified old-bay row first.", false);
+      return;
+    }
     snoozeStaleBayOrders(ids, Number(els.staleBaySnoozeAllDays?.value || 1)).catch((error) => showInlineError(error.message, true));
+  });
+  els.staleBayList?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest("[data-stale-select]");
+    if (!checkbox) return;
+    const assignmentId = String(checkbox.dataset.staleSelect || "");
+    if (checkbox.checked) state.staleBaySelectedIds.add(assignmentId);
+    else state.staleBaySelectedIds.delete(assignmentId);
+    updateStaleBaySelectionControls(filteredStaleBayOrders());
   });
   els.staleBayList?.addEventListener("click", (event) => {
     const target = event.target.closest("[data-stale-snooze]");

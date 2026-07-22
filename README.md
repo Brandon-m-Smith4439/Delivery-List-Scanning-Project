@@ -1,10 +1,10 @@
 # Delivery List Scanner
 
-Current maintained release: **v104**. SQLite remains the active/default backend.
+Current maintained release: **v105**. SQLite remains the active/default backend.
 
-v104 tightens the Scan-page result popup into a smaller, concise card while preserving the key order, item, customer, quantity, dimensions, route, location, and rack-correction details. Popup dropdown menus now render above the card, and the countdown remains paused while a rack/bay selector is open or while a rack correction is being saved.
+v105 completely rebuilds the **Old Bay Control Center** and the Indian Trail **Bay Scanner** without removing any existing bay-map capabilities. Old Bay review now includes local search, age filtering, sorting, clear age/urgency treatments, row selection, safe bulk snoozing, individual snoozing, summary counts, and the existing printable investigation list.
 
-Page navigation is now silent. Rack barcodes use a dedicated rack cue, Outbound rack release uses a new airy on-the-way success cue, and the print confirmation cue plays only after the browser reports that printing completed. Successful clear, reset, Rush/Remake removal, and delete actions now use one restrained destructive-action confirmation throughout the maintained web app. Rush/Remake filter buttons no longer resize when their indicator changes, and active filter pills now use polished category-specific styling.
+The Bay Scanner now presents Add/Remove as a clear three-step workflow, makes target-bay requirements obvious, provides a larger primary scan command, keeps Undo/Redo close to the scan action, moves manual entry into an accessible disclosure, and reorganizes current/recent history into a cleaner operational card. Route progress, barcode scanning, manual scans, location correction, and All Scans remain available.
 
 The v097 numbered/checksummed SQLite migrations, verified backups, constraints, append-only event history, integrity tooling, and Azure SQL migration preparation remain unchanged.
 
