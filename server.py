@@ -20,7 +20,7 @@ import time
 import traceback
 import sys
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -1166,9 +1166,12 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/admin/line-items/search":
             if not self.require_permission("edit_delivery_lists"):
                 return
-            query = parse_qs(parsed.query).get("q", [""])[0]
-            list_id = parse_qs(parsed.query).get("listId", [""])[0]
-            self.send_json({"results": STORE.admin_search_line_items(query, list_id)})
+            query_values = parse_qs(parsed.query)
+            query = query_values.get("q", [""])[0]
+            list_id = query_values.get("listId", [""])[0]
+            limit = int(query_values.get("limit", ["20"])[0] or 20)
+            offset = int(query_values.get("offset", ["0"])[0] or 0)
+            self.send_json(STORE.admin_search_line_items(query, list_id, limit, offset))
             return
 
         if parsed.path == "/api/admin/sessions":
@@ -1952,15 +1955,23 @@ def daily_import_loop() -> None:
     """
     if os.environ.get("DLS_DAILY_IMPORT_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
         return
-    tz = ZoneInfo("America/New_York")
+    try:
+        eastern_tz = ZoneInfo("America/New_York")
+    except ZoneInfoNotFoundError:
+        eastern_tz = None
+        print("Timezone database unavailable; daily import will use the Windows local timezone.")
+
+    def scheduled_now() -> datetime:
+        return datetime.now(eastern_tz) if eastern_tz is not None else datetime.now().astimezone()
+
     while True:
-        now = datetime.now(tz)
+        now = scheduled_now()
         next_run = now.replace(hour=17, minute=0, second=0, microsecond=0)
         if next_run <= now:
             next_run += timedelta(days=1)
         time.sleep(max((next_run - now).total_seconds(), 1))
         try:
-            date_from = (datetime.now(tz).date() - timedelta(days=7)).isoformat()
+            date_from = (scheduled_now().date() - timedelta(days=7)).isoformat()
             result = STORE.import_delivery_folder({"user": "daily-auto-import", "dateFrom": date_from, "dateTo": ""})
             print(f"Daily 5 PM ET delivery-list import complete: {result.get('scannedFiles', 0)} files checked")
         except Exception as exc:

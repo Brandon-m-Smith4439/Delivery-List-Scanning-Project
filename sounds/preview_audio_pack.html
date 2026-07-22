@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Barefoot Scanner Audio Language Preview</title>
+<style>
+body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:#071b34;color:#eef6ff}main{max-width:1100px;margin:auto;padding:28px}h1{margin:0 0 8px}p{color:#bdd0e7}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}button{text-align:left;border:1px solid #355377;background:#102c4d;color:#fff;border-radius:14px;padding:15px;cursor:pointer;box-shadow:0 8px 24px #0004}button:hover{border-color:#7eb6ee;transform:translateY(-1px)}strong,small,span{display:block}small{color:#80b7ea;margin:4px 0 8px}span{color:#c4d5e7;font-size:12px;line-height:1.35}
+</style>
+</head><body><main><h1>Barefoot Delivery Scanner Audio Language</h1><p>Click any cue to preview it. Only one cue plays at a time.</p><div class="grid"><button data-file="scan_success.wav"><strong>Successful item scan</strong><small>scan_success</small><span>Tactile digital tick followed by a bright two-stage confirmation.</span></button>
+<button data-file="scan_duplicate.wav"><strong>Duplicate/already scanned</strong><small>scan_duplicate</small><span>A gentle repeated confirmation that says the scan was heard but no state changed.</span></button>
+<button data-file="scan_warning.wav"><strong>Warning or override required</strong><small>scan_warning</small><span>A controlled descending caution phrase that is distinct without sounding like failure.</span></button>
+<button data-file="scan_error.wav"><strong>Rejected or invalid scan</strong><small>scan_error</small><span>A low two-part industrial rejection cue that remains clear without becoming a buzzer.</span></button>
+<button data-file="scan_rush.wav"><strong>Successful Rush scan</strong><small>scan_rush</small><span>The signature success sound with a high-priority sparkle that can be recognized instantly.</span></button>
+<button data-file="scan_remake.wav"><strong>Successful remake scan</strong><small>scan_remake</small><span>A bright success cue with a restrained glass-like shimmer for remake identification.</span></button>
+<button data-file="task_complete.wav"><strong>100% progress or major task completion</strong><small>task_complete</small><span>A confident four-note ascending completion phrase with a polished final resonance.</span></button>
+<button data-file="rack_item_added.wav"><strong>Item added or assigned to rack</strong><small>rack_item_added</small><span>A short mechanical latch followed by a clean confirmation.</span></button>
+<button data-file="rack_complete.wav"><strong>Rack completed</strong><small>rack_complete</small><span>A satisfying three-stage industrial lock-in sound.</span></button>
+<button data-file="rack_reopened.wav"><strong>Rack reopened / Not On The Way</strong><small>rack_reopened</small><span>A reverse-release sweep followed by an open-state confirmation.</span></button>
+<button data-file="rack_returned.wav"><strong>Rack returned and cleared</strong><small>rack_returned</small><span>A contained release-and-settle cue for rack reuse.</span></button>
+<button data-file="bay_assigned.wav"><strong>Item assigned or scanned into a bay</strong><small>bay_assigned</small><span>A precise placement click with a clean glass-like confirmation.</span></button>
+<button data-file="bay_removed.wav"><strong>Item scanned out or released from a bay</strong><small>bay_removed</small><span>A short release cue that moves downward and away.</span></button>
+<button data-file="bay_moved.wav"><strong>Item moved between bays</strong><small>bay_moved</small><span>A directional slide followed by a placement confirmation.</span></button>
+<button data-file="undo.wav"><strong>Undo completed</strong><small>undo</small><span>A reverse sweep with a soft descending endpoint.</span></button>
+<button data-file="redo.wav"><strong>Redo completed</strong><small>redo</small><span>A forward sweep with a clear ascending endpoint.</span></button>
+<button data-file="import_start.wav"><strong>Delivery-list import started</strong><small>import_start</small><span>A compact rising pulse that signals work is underway.</span></button>
+<button data-file="import_complete.wav"><strong>Import completed successfully</strong><small>import_complete</small><span>A three-note completion phrase that is shorter than a full-truck celebration.</span></button>
+<button data-file="save.wav"><strong>Settings or record saved</strong><small>save</small><span>A compact, confident save confirmation.</span></button>
+<button data-file="print_ready.wav"><strong>Print job opened or prepared</strong><small>print_ready</small><span>A subtle feed/click sequence with a ready confirmation.</span></button>
+<button data-file="email_sent.wav"><strong>Email sent</strong><small>email_sent</small><span>An outgoing sweep followed by a concise delivered confirmation.</span></button>
+<button data-file="login.wav"><strong>Successful sign-in</strong><small>login</small><span>A warm, restrained welcome phrase.</span></button>
+<button data-file="logout.wav"><strong>Sign-out</strong><small>logout</small><span>A quiet descending close that does not resemble an error.</span></button>
+<button data-file="notification.wav"><strong>New application notification</strong><small>notification</small><span>A light two-part ping designed to be informative rather than urgent.</span></button>
+<button data-file="permission_denied.wav"><strong>Permission denied</strong><small>permission_denied</small><span>A firm low refusal cue reserved for access-control failures.</span></button>
+<button data-file="machine_scan.wav"><strong>Future machine-generated scan accepted</strong><small>machine_scan</small><span>A compact electromechanical pulse distinct from handheld scanning.</span></button>
+<button data-file="machine_fault.wav"><strong>Future machine fault</strong><small>machine_fault</small><span>A controlled industrial fault signal that is forceful without becoming a piercing alarm.</span></button></div></main>
+<script>let active=null;document.addEventListener('click',e=>{const b=e.target.closest('button[data-file]');if(!b)return;if(active){active.pause();active.currentTime=0}active=new Audio(b.dataset.file);active.play();});</script>
+</body></html>

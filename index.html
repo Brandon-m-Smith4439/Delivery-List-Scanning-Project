@@ -10,7 +10,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-  <link rel="stylesheet" href="styles.css?v=20260717-v092">
+    <link rel="stylesheet" href="styles.css?v=20260721-v102">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <!-- SECTION: Authentication and password reset -->
@@ -21,7 +21,7 @@
     </button>
     <div class="login-shell">
       <aside class="login-hero-card">
-        <img class="login-hero-logo" src="barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
+        <img class="login-hero-logo brand-framed-logo" src="barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
         <strong hidden>Barefoot &amp; Company</strong>
         <span>Glass Delivery Scanner</span>
         <h1>Production scanning, rack control, and delivery visibility in one place.</h1>
@@ -93,7 +93,7 @@
       <div class="sidebar-brand-row">
         <div class="brand" aria-label="Barefoot & Company Delivery List Scanner">
           <img class="brand-icon brand-icon-collapsed" src="barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
-          <img class="brand-combined-logo" src="barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
+          <img class="brand-combined-logo brand-framed-logo" src="barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
         </div>
         <button class="sidebar-toggle-button" id="sidebarToggleBtn" type="button" aria-controls="appSidebar" aria-expanded="true" title="Collapse navigation">
           <span class="sidebar-toggle-icon" aria-hidden="true"></span>
@@ -130,6 +130,18 @@
               <small id="userMenuIdentity">Account</small>
             </span>
           </div>
+          <section class="user-menu-sound-controls" aria-label="Application sound controls">
+            <div class="user-menu-sound-heading">
+              <strong>Application sound</strong>
+              <span data-app-sound-volume-label>100%</span>
+            </div>
+            <input type="range" min="0" max="200" step="10" value="100" data-app-sound-volume aria-label="Application sound volume">
+            <button class="tool-button user-menu-sound-test" type="button" data-scan-sound-test="scan_success">
+              <span class="user-menu-speaker-icon" aria-hidden="true"></span>
+              <span>Test sound</span>
+            </button>
+            <small data-app-sound-status data-sound-state="ready" aria-live="polite">Sound is on at 100%.</small>
+          </section>
           <button class="tool-button" id="logoutBtn" type="button">Sign out</button>
         </div>
       </details>
@@ -306,39 +318,57 @@
 
         <main class="workspace">
           <section class="list-panel" id="listPanel">
-            <div class="list-toolbar">
-  <div class="filter-tabs filter-groups" role="tablist" aria-label="Delivery list filters">
-    <div class="filter-group status-filter-group" aria-label="Status filters">
-      <span class="filter-group-label">Status</span>
-      <button class="tab is-active" data-filter="all" type="button">All <span id="countAll">(0)</span></button>
-      <button class="tab" data-filter="remaining" type="button">Not Scanned <span id="countRemaining">(0)</span></button>
-      <button class="tab" data-filter="partial" type="button">Partial <span id="countPartial">(0)</span></button>
-      <button class="tab" data-filter="complete" type="button">Complete <span id="countComplete">(0)</span></button>
-    </div>
-
-    <div class="filter-group attention-filter-group" aria-label="Attention filters">
-      <span class="filter-group-label">Attention</span>
-      <button class="tab priority-tab" data-filter="remakes" type="button">Remakes <span id="countRemakes">(0)</span></button>
-      <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">(0)</span></button>
-      <button class="tab" data-filter="updated" type="button">New/Updated <span id="countUpdated">(0)</span></button>
-      <button class="tab" data-filter="errors" type="button">Errors <span id="countErrors">(0)</span></button>
-    </div>
-
-    <div class="filter-group route-filter-group" aria-label="Route filters">
-      <span class="filter-group-label">Route</span>
-      <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button">Indian Trail <span id="countIndianTrailRoute">(0)</span></button>
-      <button class="tab route-filter-tab" data-filter="cpu-route" type="button">CPU <span id="countCpuRoute">(0)</span></button>
-      <button class="tab route-filter-tab" data-filter="dtc-route" type="button">DTC <span id="countDtcRoute">(0)</span></button>
-      <button class="tab route-filter-tab" data-filter="greenville-route" type="button">Greenville <span id="countGreenvilleRoute">(0)</span></button>
-    </div>
-
-    <div class="filter-group glass-filter-group" aria-label="Glass type filters">
-      <span class="filter-group-label">Glass Type</span>
-      <div class="glass-filter-tabs" id="glassFilterTabs"></div>
-    </div>
-  </div>
-  <p class="scan-filter-help">Multiple selections are allowed. Filters in the same group match any selected option; selections across groups work together.</p>
-</div>
+            <div class="list-toolbar scan-filter-toolbar">
+              <details class="scan-filter-drawer" id="scanFilterDrawer">
+                <summary aria-label="Open delivery-list filters">
+                  <span class="filter-icon" aria-hidden="true"></span>
+                  <span>Filters</span>
+                  <strong class="scan-filter-priority-state is-clear" id="scanFilterPriorityState" aria-label="No open remakes or rushes">&#10003;</strong>
+                  <b id="scanActiveFilterCount">0</b>
+                </summary>
+                <div class="scan-filter-drawer-panel">
+                  <header>
+                    <div><strong>Filter delivery list</strong><span>Select more than one option when needed.</span></div>
+                    <button type="button" data-clear-scan-filters>Clear all</button>
+                  </header>
+                  <section class="scan-filter-section" aria-label="Status filters">
+                    <h3>Status</h3>
+                    <div class="scan-filter-options">
+                      <button class="tab" data-filter="remaining" type="button">Not Scanned <span id="countRemaining">(0)</span></button>
+                      <button class="tab" data-filter="partial" type="button">Partial <span id="countPartial">(0)</span></button>
+                      <button class="tab" data-filter="complete" type="button">Complete <span id="countComplete">(0)</span></button>
+                    </div>
+                  </section>
+                  <section class="scan-filter-section" aria-label="Attention filters">
+                    <h3>Attention</h3>
+                    <div class="scan-filter-options">
+                      <button class="tab priority-tab" data-filter="remakes" type="button">Remakes <span id="countRemakes">(0)</span></button>
+                      <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">(0)</span></button>
+                      <button class="tab" data-filter="updated" type="button">New/Updated <span id="countUpdated">(0)</span></button>
+                      <button class="tab" data-filter="errors" type="button">Errors <span id="countErrors">(0)</span></button>
+                    </div>
+                  </section>
+                  <section class="scan-filter-section" aria-label="Route filters">
+                    <h3>Route</h3>
+                    <div class="scan-filter-options">
+                      <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button">Indian Trail <span id="countIndianTrailRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="cpu-route" type="button">CPU <span id="countCpuRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="dtc-route" type="button">DTC <span id="countDtcRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="greenville-route" type="button">Greenville <span id="countGreenvilleRoute">(0)</span></button>
+                    </div>
+                  </section>
+                  <section class="scan-filter-section scan-filter-glass-section" aria-label="Glass type filters">
+                    <h3>Glass Type</h3>
+                    <div class="scan-filter-options glass-filter-tabs" id="glassFilterTabs"></div>
+                  </section>
+                  <span id="countAll" hidden>(0)</span>
+                </div>
+              </details>
+              <div class="scan-active-filter-bar" id="scanActiveFilterBar" aria-live="polite">
+                <span class="scan-active-filter-empty">No filters applied</span>
+                <div class="scan-active-filter-chips" id="scanActiveFilterChips"></div>
+              </div>
+            </div>
 
 <div class="list-table-controls">
   <label class="search-box list-search-box">
@@ -409,8 +439,6 @@
                 </div>
               </div>
             </section>
-
-            <div class="scan-sound-test-host" data-sound-test-host="scan"></div>
 
             <section class="scan-rack-panel" id="scanRackPanel" hidden>
               <div class="scan-rack-row">
@@ -736,8 +764,6 @@
                     </div>
                   </div>
                 </div>
-
-                <div class="scan-sound-test-host" data-sound-test-host="bay"></div>
 
                 <form class="scan-form bay-scan-form bay-scan-form-v2 bay-scan-command-form bay-scan-command-form-v35 bay-scan-command-form-v37" id="bayScanOutForm">
                   <div class="scan-form-heading bay-scan-heading-compact">
@@ -1288,6 +1314,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="app.js?v=20260717-v092"></script>
+    <script src="app.js?v=20260721-v102"></script>
 </body>
 </html>

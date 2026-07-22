@@ -42,6 +42,13 @@ from xml.sax.saxutils import escape as xml_escape
 
 from scanner_config import AppConfig
 from azure_sql_compat import AzureSqlConnection, connect_azure_sql
+from database_migrations import (
+    MIGRATIONS,
+    MigrationError,
+    create_verified_backup,
+    database_needs_upgrade,
+    run_sqlite_migrations,
+)
 
 
 GRAPH_RESOURCE = "https://graph.microsoft.com"
@@ -247,22 +254,35 @@ XLSX_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationsh
 XLSX_PACKAGE_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 
 
+def utc_now_iso() -> str:
+    """Return the canonical UTC timestamp representation used by the database."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 def now_iso() -> str:
-    """Purpose: Run the now iso workflow for the delivery-list scanner.
+    """Backward-compatible alias for the canonical UTC timestamp helper.
 
     Effects: Performs an in-memory calculation and returns data without intentional external side effects.
     Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
     """
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return utc_now_iso()
+
+
+def parse_utc_timestamp(value: str) -> datetime:
+    """Parse an ISO timestamp and normalize it to an aware UTC datetime."""
+    parsed = datetime.fromisoformat(str(value or "").strip().replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def parse_iso(value: str) -> datetime:
-    """Purpose: Parse iso for the delivery-list scanner workflow.
+    """Backward-compatible timestamp parser returning an aware UTC value.
 
     Effects: Performs an in-memory calculation and returns data without intentional external side effects.
     Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
     """
-    return datetime.fromisoformat(value)
+    return parse_utc_timestamp(value)
 
 
 def hash_password(password: str) -> str:
@@ -1288,6 +1308,11 @@ def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
             "job": row["job"],
             "product": row["product"],
             "suggestedBay": row["suggested_bay"],
+            "rackCode": row_value(row, "rack_code", ""),
+            "rackName": row_value(row, "rack_name", ""),
+            "rackStatus": row_value(row, "rack_status", ""),
+            "outboundScanned": bool(row_value(row, "outbound_scanned", 0)),
+            "listStage": row_value(row, "list_stage", ""),
         }
     return {
         "ok": row["event_type"] in {"scan", "manual_scan", "undo", "redo", "import", "update"},
@@ -3293,6 +3318,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         con.execute("PRAGMA foreign_keys = ON")
         con.execute(f"PRAGMA busy_timeout = {timeout_seconds * 1000}")
         con.execute("PRAGMA journal_mode = WAL")
+        con.execute("PRAGMA synchronous = NORMAL")
+        con.execute("PRAGMA temp_store = MEMORY")
         return con
 
     def health(self) -> dict[str, Any]:
@@ -3315,16 +3342,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Effects: This function reads or updates shared application state.
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
-        with self.connect() as con:
-            self.create_schema(con)
-            self.seed_customer_route_rules(con)
-            self.seed_demo_data(con)
-            self.seed_security_data(con)
-            self.seed_bays(con)
-            self.repair_manual_assign_bay_visibility(con)
-            self.seed_bay_auto_assign_settings(con)
-            self.seed_racks(con)
-            self.repair_route_stage_memberships_if_needed(con)
+        backup_path: Path | None = None
+        if database_needs_upgrade(self.database_path):
+            backup_path = create_verified_backup(self.database_path)
+        try:
+            with self.connect() as con:
+                self.create_schema(con)
+                self.seed_customer_route_rules(con)
+                if not self.config.production:
+                    self.seed_demo_data(con)
+                else:
+                    self.seed_stations(con)
+                self.seed_security_data(con)
+                self.seed_bays(con)
+                self.repair_manual_assign_bay_visibility(con)
+                self.seed_bay_auto_assign_settings(con)
+                self.seed_racks(con)
+                self.repair_route_stage_memberships_if_needed(con)
+        except Exception as exc:
+            suffix = f" Verified backup preserved at {backup_path}." if backup_path else ""
+            raise MigrationError(f"Database initialization failed.{suffix}") from exc
 
     def customer_route_rules_from_connection(self, con: Any) -> list[dict[str, Any]]:
         """Purpose: Run the customer route rules from connection workflow for the delivery-list scanner.
@@ -3499,7 +3536,37 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return repaired
 
     def create_schema(self, con: sqlite3.Connection) -> None:
-        """Purpose: Create schema for the delivery-list scanner workflow.
+        """Apply the canonical numbered SQLite migrations."""
+        run_sqlite_migrations(con, self)
+
+    def _verify_v096_baseline(self, con: sqlite3.Connection) -> None:
+        """Refuse to baseline a legacy database that is missing v096 essentials."""
+        required = {
+            "delivery_lists": {"id", "delivery_date", "stage", "status"},
+            "line_items": {"id", "list_id", "order_no", "item_no", "qty", "scanned_qty"},
+            "scan_events": {"id", "list_id", "event_type", "created_at"},
+            "audit_events": {"id", "entity_type", "action", "created_at"},
+            "users": {"id", "username", "active"},
+            "racks": {"id", "rack_code", "status"},
+            "bays": {"id", "bay_code", "active"},
+        }
+        missing: list[str] = []
+        for table, expected_columns in required.items():
+            exists = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+            ).fetchone()
+            if not exists:
+                missing.append(table)
+                continue
+            actual = {str(row["name"]) for row in con.execute(f"PRAGMA table_info([{table}])").fetchall()}
+            absent = sorted(expected_columns - actual)
+            if absent:
+                missing.append(f"{table}({', '.join(absent)})")
+        if missing:
+            raise MigrationError("Cannot baseline an incomplete legacy database: " + "; ".join(missing))
+
+    def _migration_001_v096_baseline(self, con: sqlite3.Connection) -> None:
+        """Create the complete v096 schema for a new empty database.
 
         Effects: This function reads or changes database records.
         Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
@@ -3843,10 +3910,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ON app_notifications(active, created_at DESC, id DESC);
             """
         )
-        self.apply_schema_migrations(con)
+        self._upgrade_v096_columns(con)
 
-    def apply_schema_migrations(self, con: Any) -> None:
-        """Purpose: Run the apply schema migrations workflow for the delivery-list scanner.
+    def _upgrade_v096_columns(self, con: Any) -> None:
+        """Apply the historical pre-v097 compatibility columns to a new baseline.
 
         Effects: This function reads or changes database records.
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
@@ -3898,6 +3965,336 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         columns = {row["name"] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
         if column not in columns:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _add_v097_audit_columns(self, con: sqlite3.Connection, table: str) -> None:
+        """Add non-breaking UTC audit and soft-delete fields to a mutable table."""
+        self.ensure_column(con, table, "created_at_utc", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, table, "created_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
+        self.ensure_column(con, table, "updated_at_utc", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, table, "updated_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
+        self.ensure_column(con, table, "is_deleted", "INTEGER NOT NULL DEFAULT 0")
+        self.ensure_column(con, table, "deleted_at_utc", "TEXT NOT NULL DEFAULT ''")
+        self.ensure_column(con, table, "deleted_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
+
+    def _migration_002_v097_production_database(self, con: sqlite3.Connection) -> None:
+        """Harden v096 in place while preserving every existing business row."""
+        migrated_at = now_iso()
+        for table in (
+            "delivery_lists",
+            "line_items",
+            "users",
+            "bays",
+            "bay_assignments",
+            "racks",
+            "rack_items",
+            "customer_route_rules",
+            "admin_lookup_values",
+        ):
+            self._add_v097_audit_columns(con, table)
+
+        con.execute(
+            "UPDATE delivery_lists SET created_at_utc = CASE WHEN created_at_utc = '' THEN created_at ELSE created_at_utc END, "
+            "updated_at_utc = CASE WHEN updated_at_utc = '' THEN created_at ELSE updated_at_utc END"
+        )
+        con.execute(
+            "UPDATE users SET created_at_utc = CASE WHEN created_at_utc = '' THEN created_at ELSE created_at_utc END, "
+            "updated_at_utc = CASE WHEN updated_at_utc = '' THEN created_at ELSE updated_at_utc END"
+        )
+        con.execute(
+            "UPDATE racks SET created_at_utc = CASE WHEN created_at_utc = '' THEN created_at ELSE created_at_utc END, "
+            "updated_at_utc = CASE WHEN updated_at_utc = '' THEN COALESCE(NULLIF(updated_at, ''), created_at) ELSE updated_at_utc END"
+        )
+        con.execute(
+            "UPDATE customer_route_rules SET created_at_utc = CASE WHEN created_at_utc = '' THEN created_at ELSE created_at_utc END, "
+            "updated_at_utc = CASE WHEN updated_at_utc = '' THEN COALESCE(NULLIF(updated_at, ''), created_at) ELSE updated_at_utc END"
+        )
+        con.execute(
+            "UPDATE admin_lookup_values SET created_at_utc = CASE WHEN created_at_utc = '' THEN created_at ELSE created_at_utc END, "
+            "updated_at_utc = CASE WHEN updated_at_utc = '' THEN COALESCE(NULLIF(updated_at, ''), created_at) ELSE updated_at_utc END"
+        )
+        for table in ("line_items", "bays", "bay_assignments", "rack_items"):
+            con.execute(
+                f"UPDATE [{table}] SET created_at_utc = CASE WHEN created_at_utc = '' THEN ? ELSE created_at_utc END, "
+                "updated_at_utc = CASE WHEN updated_at_utc = '' THEN ? ELSE updated_at_utc END",
+                (migrated_at, migrated_at),
+            )
+
+        # Rebuild the quantity-bearing tables so SQLite has real CHECK
+        # constraints. Foreign keys are disabled by the runner only for this
+        # transaction and verified immediately after commit.
+        con.execute(
+            """
+            CREATE TABLE line_items_v097 (
+                id TEXT PRIMARY KEY,
+                list_id TEXT NOT NULL REFERENCES delivery_lists(id) ON DELETE CASCADE,
+                source_id TEXT NOT NULL,
+                barcode TEXT NOT NULL,
+                order_no TEXT NOT NULL,
+                item_no TEXT NOT NULL,
+                qty INTEGER NOT NULL CHECK (qty >= 0),
+                scanned_qty INTEGER NOT NULL DEFAULT 0 CHECK (scanned_qty >= 0 AND scanned_qty <= qty),
+                dimensions TEXT NOT NULL DEFAULT '',
+                customer TEXT NOT NULL DEFAULT '',
+                route TEXT NOT NULL DEFAULT '',
+                job TEXT NOT NULL DEFAULT '',
+                product TEXT NOT NULL DEFAULT '',
+                process_state TEXT NOT NULL DEFAULT '',
+                queue_state TEXT NOT NULL DEFAULT '',
+                suggested_bay TEXT NOT NULL DEFAULT '',
+                priority_delivery_date TEXT NOT NULL DEFAULT '',
+                priority_direct_to_truck INTEGER NOT NULL DEFAULT 0 CHECK (priority_direct_to_truck IN (0, 1)),
+                source_route TEXT NOT NULL DEFAULT '',
+                created_at_utc TEXT NOT NULL DEFAULT '',
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                updated_at_utc TEXT NOT NULL DEFAULT '',
+                updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+                deleted_at_utc TEXT NOT NULL DEFAULT '',
+                deleted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        line_columns = (
+            "id, list_id, source_id, barcode, order_no, item_no, qty, scanned_qty, dimensions, customer, route, job, "
+            "product, process_state, queue_state, suggested_bay, priority_delivery_date, priority_direct_to_truck, "
+            "source_route, created_at_utc, created_by_user_id, updated_at_utc, updated_by_user_id, is_deleted, "
+            "deleted_at_utc, deleted_by_user_id"
+        )
+        con.execute(f"INSERT INTO line_items_v097 ({line_columns}) SELECT {line_columns} FROM line_items")
+        con.execute("DROP TABLE line_items")
+        con.execute("ALTER TABLE line_items_v097 RENAME TO line_items")
+
+        con.execute(
+            """
+            CREATE TABLE rack_items_v097 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rack_id INTEGER NOT NULL REFERENCES racks(id) ON DELETE CASCADE,
+                line_item_id TEXT NOT NULL REFERENCES line_items(id) ON DELETE CASCADE,
+                qty INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+                status TEXT NOT NULL DEFAULT 'Active',
+                added_by TEXT NOT NULL DEFAULT '',
+                added_at TEXT NOT NULL,
+                removed_by TEXT NOT NULL DEFAULT '',
+                removed_at TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                destination_override TEXT NOT NULL DEFAULT '',
+                created_at_utc TEXT NOT NULL DEFAULT '',
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                updated_at_utc TEXT NOT NULL DEFAULT '',
+                updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+                deleted_at_utc TEXT NOT NULL DEFAULT '',
+                deleted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                UNIQUE(rack_id, line_item_id)
+            )
+            """
+        )
+        rack_item_columns = (
+            "id, rack_id, line_item_id, qty, status, added_by, added_at, removed_by, removed_at, reason, "
+            "destination_override, created_at_utc, created_by_user_id, updated_at_utc, updated_by_user_id, "
+            "is_deleted, deleted_at_utc, deleted_by_user_id"
+        )
+        con.execute(f"INSERT INTO rack_items_v097 ({rack_item_columns}) SELECT {rack_item_columns} FROM rack_items")
+        con.execute("DROP TABLE rack_items")
+        con.execute("ALTER TABLE rack_items_v097 RENAME TO rack_items")
+
+        con.execute(
+            """
+            CREATE TABLE exceptions_v097 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                list_id TEXT NOT NULL REFERENCES delivery_lists(id) ON DELETE CASCADE,
+                scan_event_id INTEGER REFERENCES scan_events(id) ON DELETE SET NULL,
+                exception_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'Open',
+                reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                resolved_by TEXT NOT NULL DEFAULT '',
+                resolved_at TEXT NOT NULL DEFAULT '',
+                resolution_comment TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        exception_columns = (
+            "id, list_id, scan_event_id, exception_type, status, reason, created_at, resolved_by, resolved_at, resolution_comment"
+        )
+        con.execute(f"INSERT INTO exceptions_v097 ({exception_columns}) SELECT {exception_columns} FROM exceptions")
+        con.execute("DROP TABLE exceptions")
+        con.execute("ALTER TABLE exceptions_v097 RENAME TO exceptions")
+
+        # line_item_id remains a durable textual historical reference here.
+        # v096 legitimately contains cleared/replaced line IDs that no longer
+        # exist, so forcing a line-item FK would destroy valid bay history.
+        con.execute(
+            """
+            CREATE TABLE bay_assignments_v097 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                delivery_list_id TEXT NOT NULL REFERENCES delivery_lists(id) ON DELETE CASCADE,
+                line_item_id TEXT NOT NULL,
+                bay_id INTEGER REFERENCES bays(id) ON DELETE SET NULL,
+                assigned_qty INTEGER NOT NULL DEFAULT 0 CHECK (assigned_qty >= 0),
+                status TEXT NOT NULL DEFAULT 'Assigned',
+                assigned_by TEXT NOT NULL DEFAULT '',
+                assigned_at TEXT NOT NULL,
+                cleared_by TEXT NOT NULL DEFAULT '',
+                cleared_at TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                created_at_utc TEXT NOT NULL DEFAULT '',
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                updated_at_utc TEXT NOT NULL DEFAULT '',
+                updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+                deleted_at_utc TEXT NOT NULL DEFAULT '',
+                deleted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        assignment_columns = (
+            "id, delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, cleared_by, "
+            "cleared_at, reason, created_at_utc, created_by_user_id, updated_at_utc, updated_by_user_id, is_deleted, "
+            "deleted_at_utc, deleted_by_user_id"
+        )
+        con.execute(
+            f"INSERT INTO bay_assignments_v097 ({assignment_columns}) SELECT {assignment_columns} FROM bay_assignments"
+        )
+        con.execute("DROP TABLE bay_assignments")
+        con.execute("ALTER TABLE bay_assignments_v097 RENAME TO bay_assignments")
+
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS machines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                machine_code TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL DEFAULT '',
+                machine_type TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+                created_at_utc TEXT NOT NULL,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                updated_at_utc TEXT NOT NULL DEFAULT '',
+                updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+                deleted_at_utc TEXT NOT NULL DEFAULT '',
+                deleted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scanners (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scanner_code TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL DEFAULT '',
+                station_name TEXT NOT NULL DEFAULT '',
+                machine_id INTEGER REFERENCES machines(id) ON DELETE SET NULL,
+                device_identifier TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                last_seen_at_utc TEXT NOT NULL DEFAULT '',
+                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+                created_at_utc TEXT NOT NULL,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                updated_at_utc TEXT NOT NULL DEFAULT '',
+                updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+                deleted_at_utc TEXT NOT NULL DEFAULT '',
+                deleted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS machine_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                machine_id INTEGER REFERENCES machines(id) ON DELETE SET NULL,
+                scanner_id INTEGER REFERENCES scanners(id) ON DELETE SET NULL,
+                line_item_id TEXT REFERENCES line_items(id) ON DELETE SET NULL,
+                event_type TEXT NOT NULL,
+                event_status TEXT NOT NULL DEFAULT '',
+                qty INTEGER NOT NULL DEFAULT 0 CHECK (qty >= 0),
+                barcode TEXT NOT NULL DEFAULT '',
+                order_no TEXT NOT NULL DEFAULT '',
+                item_no TEXT NOT NULL DEFAULT '',
+                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+                created_at_utc TEXT NOT NULL,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+
+        index_sql = (
+            "CREATE INDEX IF NOT EXISTS idx_delivery_lists_date_status_stage ON delivery_lists(delivery_date, status, stage)",
+            "CREATE INDEX IF NOT EXISTS idx_line_items_list_order_item ON line_items(list_id, order_no, item_no)",
+            "CREATE INDEX IF NOT EXISTS idx_line_items_source ON line_items(source_id, list_id)",
+            "CREATE INDEX IF NOT EXISTS idx_line_items_barcode ON line_items(barcode, list_id)",
+            "CREATE INDEX IF NOT EXISTS idx_scan_events_line_time ON scan_events(line_item_id, created_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_imports_date_time ON imports(delivery_date, imported_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_exceptions_list_status ON exceptions(list_id, status, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_audit_events_entity_time ON audit_events(entity_type, entity_id, created_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_user_expiry ON sessions(user_id, expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_bay_assignments_line_status ON bay_assignments(line_item_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_bay_assignments_bay_status ON bay_assignments(bay_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_bay_events_bay_time ON bay_events(bay_id, created_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_rack_items_rack_status ON rack_items(rack_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_rack_items_line_status ON rack_items(line_item_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_machine_events_machine_time ON machine_events(machine_id, created_at_utc DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_machine_events_scanner_time ON machine_events(scanner_id, created_at_utc DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_machine_events_order_item ON machine_events(order_no, item_no, created_at_utc DESC)",
+        )
+        for statement in index_sql:
+            con.execute(statement)
+
+        # Existing boolean columns cannot receive a table-level CHECK without
+        # rebuilding every dependent table. Equivalent constraint triggers keep
+        # the upgrade low risk while enforcing all future writes.
+        boolean_constraints = {
+            "bays": ("active",),
+            "racks": ("active",),
+            "users": ("active",),
+            "customer_route_rules": ("active",),
+            "admin_lookup_values": ("is_active",),
+            "app_notifications": ("active",),
+        }
+        for table, columns in boolean_constraints.items():
+            for column in columns:
+                for operation, reference in (("INSERT", "NEW"), ("UPDATE", "NEW")):
+                    trigger = f"trg_{table}_{column}_{operation.lower()}_boolean"
+                    con.execute(
+                        f"CREATE TRIGGER IF NOT EXISTS [{trigger}] BEFORE {operation} ON [{table}] "
+                        f"WHEN {reference}.[{column}] NOT IN (0, 1) BEGIN SELECT RAISE(ABORT, '{table}.{column} must be 0 or 1'); END"
+                    )
+
+        for table in ("scan_events", "audit_events", "machine_events"):
+            con.execute(
+                f"CREATE TRIGGER IF NOT EXISTS trg_{table}_immutable_update BEFORE UPDATE ON {table} "
+                f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END"
+            )
+            con.execute(
+                f"CREATE TRIGGER IF NOT EXISTS trg_{table}_immutable_delete BEFORE DELETE ON {table} "
+                f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END"
+            )
+
+        for table in (
+            "delivery_lists",
+            "line_items",
+            "users",
+            "bays",
+            "bay_assignments",
+            "racks",
+            "rack_items",
+            "customer_route_rules",
+            "admin_lookup_values",
+        ):
+            con.execute(
+                f"CREATE TRIGGER IF NOT EXISTS trg_{table}_utc_insert AFTER INSERT ON [{table}] "
+                f"WHEN NEW.created_at_utc = '' BEGIN UPDATE [{table}] SET "
+                "created_at_utc = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), "
+                "updated_at_utc = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE rowid = NEW.rowid; END"
+            )
+            con.execute(
+                f"CREATE TRIGGER IF NOT EXISTS trg_{table}_utc_update AFTER UPDATE ON [{table}] "
+                f"WHEN NEW.updated_at_utc = OLD.updated_at_utc BEGIN UPDATE [{table}] SET "
+                "updated_at_utc = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE rowid = NEW.rowid; END"
+            )
 
     def clone_item_for_list(self, item: dict[str, Any], list_id: str, index: int, auto_assign_settings: dict[str, Any] | None = None) -> dict[str, Any]:
         """Purpose: Run the clone item for list workflow for the delivery-list scanner.
@@ -4071,16 +4468,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         revision = int(existing["revision"]) + 1 if existing and replace_items else int(existing["revision"]) if existing else 1
         con.execute(
             """
-            INSERT INTO delivery_lists (id, label, delivery_date, stage, scanner, status, revision, created_at)
-            VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
+            INSERT INTO delivery_lists (
+                id, label, delivery_date, stage, scanner, status, revision, created_at,
+                created_at_utc, updated_at_utc, is_deleted, deleted_at_utc, deleted_by_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, 0, '', NULL)
             ON CONFLICT(id) DO UPDATE SET
                 label = excluded.label,
                 delivery_date = excluded.delivery_date,
                 stage = excluded.stage,
                 scanner = excluded.scanner,
-                revision = excluded.revision
+                status = 'active',
+                revision = excluded.revision,
+                updated_at_utc = excluded.updated_at_utc,
+                is_deleted = 0,
+                deleted_at_utc = '',
+                deleted_by_user_id = NULL
             """,
-            (list_id, label, delivery_date, stage, scanner, revision, created),
+            (list_id, label, delivery_date, stage, scanner, revision, created, created, now_iso()),
         )
         summary = {
             "listId": list_id,
@@ -4958,9 +5363,47 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         rows = con.execute(
             f"""
             SELECT se.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.dimensions,
-                   li.customer, li.route, li.job, li.product, li.suggested_bay
+                   li.customer, li.route, li.job, li.product, li.suggested_bay,
+                   dl.stage AS list_stage,
+                   (
+                       SELECT r.rack_code
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND ri.status = 'Active' AND r.active = 1
+                       ORDER BY ri.added_at DESC, ri.id DESC
+                       LIMIT 1
+                   ) AS rack_code,
+                   (
+                       SELECT r.display_name
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND ri.status = 'Active' AND r.active = 1
+                       ORDER BY ri.added_at DESC, ri.id DESC
+                       LIMIT 1
+                   ) AS rack_name,
+                   (
+                       SELECT r.status
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND ri.status = 'Active' AND r.active = 1
+                       ORDER BY ri.added_at DESC, ri.id DESC
+                       LIMIT 1
+                   ) AS rack_status,
+                   EXISTS(
+                       SELECT 1
+                       FROM delivery_lists outbound_list
+                       JOIN line_items outbound_item ON outbound_item.list_id = outbound_list.id
+                       WHERE outbound_list.delivery_date = dl.delivery_date
+                         AND LOWER(outbound_list.stage) LIKE '%outbound%'
+                         AND outbound_item.scanned_qty > 0
+                         AND (
+                           (li.source_id <> '' AND outbound_item.source_id = li.source_id)
+                           OR (outbound_item.order_no = li.order_no AND outbound_item.item_no = li.item_no)
+                         )
+                   ) AS outbound_scanned
             FROM scan_events se
             LEFT JOIN line_items li ON li.id = se.line_item_id
+            LEFT JOIN delivery_lists dl ON dl.id = li.list_id
             WHERE se.list_id = ? {condition}
             ORDER BY se.id DESC
             LIMIT 30
@@ -5051,8 +5494,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not existing:
                 raise ValueError("Station not found")
             con.execute("UPDATE stations SET name = ? WHERE name = ?", (clean_new, clean_old))
-            con.execute("UPDATE scan_events SET station = ? WHERE station = ?", (clean_new, clean_old))
-            con.execute("UPDATE audit_events SET station = ? WHERE station = ?", (clean_new, clean_old))
             self.insert_audit(con, "station", clean_new, "rename_station", "admin", clean_new, clean_old, {"oldName": clean_old})
             con.commit()
         return {"stations": self.get_stations(), "station": clean_new, "oldStation": clean_old}
@@ -8137,21 +8578,137 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         """
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            row = con.execute(
+            rows = con.execute(
                 """
-                SELECT * FROM scan_events
-                WHERE list_id = ? AND event_type IN ('scan', 'redo') AND line_item_id IS NOT NULL
-                ORDER BY id DESC
-                LIMIT 1
+                SELECT *
+                FROM scan_events
+                WHERE list_id = ?
+                  AND event_type IN ('scan', 'manual_scan', 'undo', 'redo')
+                  AND line_item_id IS NOT NULL
+                  AND qty_delta <> 0
+                ORDER BY id
                 """,
                 (list_id,),
-            ).fetchone()
-            if not row:
+            ).fetchall()
+
+            # Replay the append-only event stream so an older positive event
+            # cannot be undone repeatedly. Legacy quantity-one undo events can
+            # also partially consume newer multi-piece scan events safely.
+            active_events: list[dict[str, Any]] = []
+            for event_row in rows:
+                event_type = str(event_row["event_type"] or "").lower()
+                delta = int(event_row["qty_delta"] or 0)
+                if event_type in {"scan", "manual_scan", "redo"} and delta > 0:
+                    active_events.append({"row": event_row, "remaining": delta})
+                    continue
+                if event_type != "undo" or delta >= 0:
+                    continue
+                quantity_to_reverse = abs(delta)
+                for active in reversed(active_events):
+                    if quantity_to_reverse <= 0:
+                        break
+                    available = int(active["remaining"] or 0)
+                    if available <= 0:
+                        continue
+                    consumed = min(available, quantity_to_reverse)
+                    active["remaining"] = available - consumed
+                    quantity_to_reverse -= consumed
+
+            candidate = next((active for active in reversed(active_events) if int(active["remaining"] or 0) > 0), None)
+            if not candidate:
                 last = self.insert_event(con, list_id, None, "UNDO", "", user, station, "error", "Nothing to undo")
                 con.commit()
                 return self._get_payload(con, list_id, last)
 
-            con.execute("UPDATE line_items SET scanned_qty = MAX(scanned_qty - 1, 0) WHERE id = ?", (row["line_item_id"],))
+            row = candidate["row"]
+            item_row = con.execute(
+                """
+                SELECT li.*, dl.stage
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE li.id = ?
+                """,
+                (row["line_item_id"],),
+            ).fetchone()
+            current_scanned = int(item_row["scanned_qty"] or 0) if item_row else 0
+            decrement = min(int(candidate["remaining"] or 0), current_scanned)
+            if decrement <= 0:
+                last = self.insert_event(con, list_id, None, "UNDO", "", user, station, "error", "Nothing to undo")
+                con.commit()
+                return self._get_payload(con, list_id, last)
+
+            rack_allocations: list[dict[str, Any]] = []
+            if item_row and "staging" in str(item_row["stage"] or "").lower():
+                rack_rows = con.execute(
+                    """
+                    SELECT ri.*, r.rack_code, r.status AS rack_status
+                    FROM rack_items ri
+                    JOIN racks r ON r.id = ri.rack_id
+                    WHERE ri.line_item_id = ? AND ri.status = 'Active' AND ri.qty > 0
+                    ORDER BY ri.added_at DESC, ri.id DESC
+                    """,
+                    (row["line_item_id"],),
+                ).fetchall()
+                locked = next(
+                    (
+                        rack_row for rack_row in rack_rows
+                        if str(rack_row["rack_status"] or "").lower()
+                        in {"closed", "complete", "completed", "in transit", "on the way"}
+                    ),
+                    None,
+                )
+                if locked:
+                    last = self.insert_event(
+                        con,
+                        list_id,
+                        row["line_item_id"],
+                        row["barcode"],
+                        row["canonical_barcode"],
+                        user,
+                        station,
+                        "error",
+                        "Undo blocked",
+                        f"Rack {locked['rack_code']} must be reopened before undoing this staging scan.",
+                    )
+                    con.commit()
+                    return self._get_payload(con, list_id, last)
+
+                remaining_rack_qty = decrement
+                for rack_row in rack_rows:
+                    if remaining_rack_qty <= 0:
+                        break
+                    rack_qty = int(rack_row["qty"] or 0)
+                    removed_qty = min(rack_qty, remaining_rack_qty)
+                    if removed_qty <= 0:
+                        continue
+                    new_qty = rack_qty - removed_qty
+                    con.execute(
+                        """
+                        UPDATE rack_items
+                        SET qty = ?, status = ?, removed_by = ?, removed_at = ?, reason = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            new_qty if new_qty > 0 else rack_qty,
+                            "Active" if new_qty > 0 else "Removed",
+                            "" if new_qty > 0 else user,
+                            "" if new_qty > 0 else now_iso(),
+                            "Quantity reduced by scan undo",
+                            rack_row["id"],
+                        ),
+                    )
+                    self.refresh_rack_destination(con, int(rack_row["rack_id"]))
+                    rack_allocations.append({"rackCode": str(rack_row["rack_code"]), "qty": removed_qty})
+                    remaining_rack_qty -= removed_qty
+
+            con.execute(
+                "UPDATE line_items SET scanned_qty = MAX(scanned_qty - ?, 0) WHERE id = ?",
+                (decrement, row["line_item_id"]),
+            )
+            undo_metadata = json.dumps(
+                {"sourceEventId": int(row["id"]), "rackAllocations": rack_allocations},
+                separators=(",", ":"),
+            )
             last = self.insert_event(
                 con,
                 list_id,
@@ -8161,11 +8718,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 user,
                 station,
                 "undo",
-                "Last scan undone",
-                "",
-                -1,
+                f"Last scan undone ({decrement} piece{'s' if decrement != 1 else ''})",
+                f"UNDO_META:{undo_metadata}",
+                -decrement,
             )
-            self.insert_audit(con, "line_item", row["line_item_id"], "undo_scan", user, station, "Last scan undone")
+            self.insert_audit(
+                con,
+                "line_item",
+                row["line_item_id"],
+                "undo_scan",
+                user,
+                station,
+                "Last scan undone",
+                {"sourceEventId": int(row["id"]), "qty": decrement, "rackAllocations": rack_allocations},
+            )
             con.commit()
             return self._get_payload(con, list_id, last)
 
@@ -8182,7 +8748,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 SELECT se.*, li.qty, li.scanned_qty
                 FROM scan_events se
                 JOIN line_items li ON li.id = se.line_item_id
-                WHERE se.list_id = ? AND se.event_type IN ('undo', 'scan', 'redo') AND se.line_item_id IS NOT NULL
+                WHERE se.list_id = ?
+                  AND se.event_type IN ('undo', 'scan', 'manual_scan', 'redo')
+                  AND se.line_item_id IS NOT NULL
                 ORDER BY se.id DESC
                 LIMIT 1
                 """,
@@ -8192,11 +8760,65 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 last = self.insert_event(con, list_id, None, "REDO", "", user, station, "error", "Nothing to redo")
                 con.commit()
                 return self._get_payload(con, list_id, last)
-            if int(row["scanned_qty"] or 0) >= int(row["qty"] or 0):
+            remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
+            increment = min(abs(int(row["qty_delta"] or -1)), remaining_qty)
+            if increment <= 0:
                 last = self.insert_event(con, list_id, row["line_item_id"], row["barcode"], row["canonical_barcode"], user, station, "duplicate", "Redo blocked", "Quantity already scanned")
                 con.commit()
                 return self._get_payload(con, list_id, last)
-            con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["line_item_id"],))
+
+            rack_allocations: list[dict[str, Any]] = []
+            reason = str(row["reason"] or "")
+            if reason.startswith("UNDO_META:"):
+                try:
+                    rack_allocations = list(json.loads(reason[len("UNDO_META:"):]).get("rackAllocations") or [])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    rack_allocations = []
+            restored_qty = 0
+            for allocation in rack_allocations:
+                if restored_qty >= increment:
+                    break
+                rack_code = normalize_rack_code(str(allocation.get("rackCode") or ""))
+                allocation_qty = min(max(int(allocation.get("qty") or 0), 0), increment - restored_qty)
+                if not rack_code or allocation_qty <= 0:
+                    continue
+                rack = self.get_rack_by_code(con, rack_code)
+                rack_status = str(rack["status"] or "").lower()
+                if rack_status in {"closed", "complete", "completed", "in transit", "on the way"}:
+                    last = self.insert_event(
+                        con,
+                        list_id,
+                        row["line_item_id"],
+                        row["barcode"],
+                        row["canonical_barcode"],
+                        user,
+                        station,
+                        "error",
+                        "Redo blocked",
+                        f"Rack {rack_code} must be reopened before redoing this staging scan.",
+                    )
+                    con.commit()
+                    return self._get_payload(con, list_id, last)
+                con.execute(
+                    """
+                    INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
+                    VALUES (?, ?, ?, 'Active', ?, ?, 'Restored by scan redo')
+                    ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
+                        qty = CASE
+                            WHEN rack_items.status = 'Active' THEN rack_items.qty + excluded.qty
+                            ELSE excluded.qty
+                        END,
+                        status = 'Active',
+                        removed_by = '',
+                        removed_at = '',
+                        reason = 'Restored by scan redo'
+                    """,
+                    (rack["id"], row["line_item_id"], allocation_qty, user, now_iso()),
+                )
+                self.refresh_rack_destination(con, int(rack["id"]))
+                restored_qty += allocation_qty
+
+            con.execute("UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?", (increment, row["line_item_id"]))
             last = self.insert_event(
                 con,
                 list_id,
@@ -8206,11 +8828,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 user,
                 station,
                 "redo",
-                "Undo redone",
+                f"Undo redone ({increment} piece{'s' if increment != 1 else ''})",
                 "Last undo was re-applied",
-                1,
+                increment,
             )
-            self.insert_audit(con, "line_item", row["line_item_id"], "redo_scan", user, station, "Last undo was re-applied")
+            self.insert_audit(
+                con,
+                "line_item",
+                row["line_item_id"],
+                "redo_scan",
+                user,
+                station,
+                "Last undo was re-applied",
+                {"qty": increment, "rackAllocations": rack_allocations},
+            )
             con.commit()
             return self._get_payload(con, list_id, last)
 
@@ -8786,11 +9417,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "UPDATE line_items SET scanned_qty = MAX(scanned_qty, ?), qty = MAX(qty, ?) WHERE id = ?",
             (int(source["scanned_qty"] or 0), int(source["qty"] or 0), target_id),
         )
-        con.execute(
-            "UPDATE scan_events SET line_item_id = ?, list_id = ? WHERE line_item_id = ?",
-            (target_id, target_list_id, source_id),
+        self.insert_audit(
+            con,
+            "line_item",
+            target_id,
+            "merge_line_item_reference",
+            "system",
+            "",
+            "Historical scan and bay events remain linked to their original immutable identifiers",
+            {"sourceLineItemId": source_id, "targetListId": target_list_id},
         )
-        con.execute("UPDATE bay_events SET line_item_id = ? WHERE line_item_id = ?", (target_id, source_id))
         con.execute(
             "UPDATE bay_assignments SET line_item_id = ?, delivery_list_id = ? WHERE line_item_id = ?",
             (target_id, target_list_id, source_id),
@@ -8835,7 +9471,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if receiving_rows:
                 target_row = receiving_rows[0]
                 con.execute("UPDATE line_items SET list_id = ? WHERE id = ?", (target_list_id, target_row["id"]))
-                con.execute("UPDATE scan_events SET list_id = ? WHERE line_item_id = ?", (target_list_id, target_row["id"]))
                 con.execute("UPDATE bay_assignments SET delivery_list_id = ? WHERE line_item_id = ?", (target_list_id, target_row["id"]))
             else:
                 source = next(
@@ -9120,8 +9755,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (clean_id,)).fetchone()
             if not row:
                 raise ValueError("Delivery list not found")
+            user_row = con.execute("SELECT id FROM users WHERE username = ?", (user,)).fetchone()
+            user_id = int(user_row["id"]) if user_row else None
+            deleted_at = now_iso()
             con.execute("UPDATE bay_assignments SET status = 'Cancelled', reason = 'Delivery list deleted' WHERE delivery_list_id = ?", (clean_id,))
-            con.execute("DELETE FROM delivery_lists WHERE id = ?", (clean_id,))
+            con.execute(
+                "UPDATE delivery_lists SET status = 'deleted', is_deleted = 1, deleted_at_utc = ?, "
+                "deleted_by_user_id = ?, updated_at_utc = ?, updated_by_user_id = ? WHERE id = ?",
+                (deleted_at, user_id, deleted_at, user_id, clean_id),
+            )
+            con.execute(
+                "UPDATE line_items SET is_deleted = 1, deleted_at_utc = ?, deleted_by_user_id = ?, "
+                "updated_at_utc = ?, updated_by_user_id = ? WHERE list_id = ?",
+                (deleted_at, user_id, deleted_at, user_id, clean_id),
+            )
             self.insert_audit(con, "delivery_list", clean_id, "delete_delivery_list", user, row["scanner"], "Deleted from admin page")
             con.commit()
         return {"ok": True, "deletedListId": clean_id, "lists": self.get_delivery_lists()}
@@ -9137,13 +9784,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             raise ValueError("deliveryDate is required")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            rows = con.execute("SELECT id FROM delivery_lists WHERE delivery_date = ?", (clean_date,)).fetchall()
+            rows = con.execute("SELECT id FROM delivery_lists WHERE delivery_date = ? AND status = 'active'", (clean_date,)).fetchall()
             list_ids = [row["id"] for row in rows]
             if not list_ids:
                 raise ValueError("No delivery lists found for that date")
             placeholders = ",".join("?" for _ in list_ids)
+            user_row = con.execute("SELECT id FROM users WHERE username = ?", (user,)).fetchone()
+            user_id = int(user_row["id"]) if user_row else None
+            deleted_at = now_iso()
             con.execute(f"UPDATE bay_assignments SET status = 'Cancelled', reason = 'Delivery date deleted' WHERE delivery_list_id IN ({placeholders})", list_ids)
-            con.execute(f"DELETE FROM delivery_lists WHERE id IN ({placeholders})", list_ids)
+            con.execute(
+                f"UPDATE delivery_lists SET status = 'deleted', is_deleted = 1, deleted_at_utc = ?, "
+                f"deleted_by_user_id = ?, updated_at_utc = ?, updated_by_user_id = ? WHERE id IN ({placeholders})",
+                [deleted_at, user_id, deleted_at, user_id, *list_ids],
+            )
+            con.execute(
+                f"UPDATE line_items SET is_deleted = 1, deleted_at_utc = ?, deleted_by_user_id = ?, "
+                f"updated_at_utc = ?, updated_by_user_id = ? WHERE list_id IN ({placeholders})",
+                [deleted_at, user_id, deleted_at, user_id, *list_ids],
+            )
             self.insert_audit(con, "delivery_date", clean_date, "delete_delivery_date", user, "", "Deleted from admin page", {"listIds": list_ids})
             con.commit()
         return {"ok": True, "deliveryDate": clean_date, "deletedCount": len(list_ids), "lists": self.get_delivery_lists()}
@@ -10565,6 +11224,31 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if int(target_row["scanned_qty"] or 0) <= 0:
                 raise ValueError("Only line items already scanned at Staging can be assigned to a rack")
 
+            outbound_scan = con.execute(
+                """
+                SELECT outbound_item.id
+                FROM delivery_lists outbound_list
+                JOIN line_items outbound_item ON outbound_item.list_id = outbound_list.id
+                WHERE outbound_list.delivery_date = ?
+                  AND LOWER(outbound_list.stage) LIKE '%outbound%'
+                  AND outbound_item.scanned_qty > 0
+                  AND (
+                    (? <> '' AND outbound_item.source_id = ?)
+                    OR (outbound_item.order_no = ? AND outbound_item.item_no = ?)
+                  )
+                LIMIT 1
+                """,
+                (
+                    target_row["delivery_date"],
+                    target_row["source_id"],
+                    target_row["source_id"],
+                    target_row["order_no"],
+                    target_row["item_no"],
+                ),
+            ).fetchone()
+            if outbound_scan:
+                raise ValueError("Rack location cannot be changed after this item has been scanned Outbound")
+
             current_rack = con.execute(
                 """
                 SELECT r.*
@@ -11525,7 +12209,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ],
         }
 
-    def admin_search_line_items(self, query: str, stage_filter: str = "") -> list[dict[str, Any]]:
+    def admin_search_line_items(
+        self,
+        query: str,
+        stage_filter: str = "",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
         """Purpose: Run the admin search line items workflow for the delivery-list scanner.
 
         Effects: This function reads or changes database records.
@@ -11533,8 +12223,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         """
         clean = str(query or "").strip()
         stage_filter = str(stage_filter or "").strip()
+        limit = max(1, min(int(limit or 20), 100))
+        offset = max(int(offset or 0), 0)
         if len(clean) < 2 and not stage_filter:
-            return []
+            return {"results": [], "total": 0, "limit": limit, "offset": offset}
         like = f"%{clean}%"
         stage_clause = ""
         search_clause = ""
@@ -11552,6 +12244,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             stage_clause = " AND dl.id = ?"
             params.append(stage_filter)
         with self.connect() as con:
+            total = int(
+                con.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT li.id)
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    LEFT JOIN rack_items ri ON ri.line_item_id = li.id AND ri.status = 'Active'
+                    LEFT JOIN racks r ON r.id = ri.rack_id AND r.active = 1
+                    LEFT JOIN bay_assignments ba ON ba.line_item_id = li.id AND ba.status NOT IN ('Cleared', 'Cancelled')
+                    LEFT JOIN bays b ON b.id = ba.bay_id
+                    WHERE 1 = 1
+                    {search_clause}
+                    {stage_clause}
+                    """,
+                    params,
+                ).fetchone()[0]
+                or 0
+            )
             rows = con.execute(
                 f"""
                 SELECT li.*, dl.label, dl.delivery_date, dl.stage, dl.scanner,
@@ -11567,9 +12277,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 {search_clause}
                 {stage_clause}
                 ORDER BY dl.delivery_date DESC, dl.stage, CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER)
-                LIMIT 80
+                LIMIT ? OFFSET ?
                 """,
-                params,
+                [*params, limit, offset],
             ).fetchall()
         results = []
         for row in rows:
@@ -11587,7 +12297,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 }
             )
             results.append(item)
-        return results
+        return {
+            "results": results,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
 
     def find_bay_for_assignment(self, con: sqlite3.Connection, bay_type: str) -> sqlite3.Row | None:
         """Purpose: Resolve bay for assignment for the delivery-list scanner workflow.
@@ -13550,7 +14265,24 @@ class AzureSqlDeliveryStore(SQLiteDeliveryStore):
         for batch in batches:
             if batch.strip():
                 con.execute_tsql(batch)
-        self.apply_schema_migrations(con)
+        self._upgrade_v096_columns(con)
+        for migration in MIGRATIONS:
+            con.execute_tsql(
+                """
+                MERGE dbo.schema_migrations AS target
+                USING (SELECT ? AS version, ? AS name, ? AS checksum, ? AS app_version) AS source
+                ON target.version = source.version
+                WHEN NOT MATCHED THEN
+                    INSERT (version, name, checksum, applied_at_utc, execution_ms, app_version)
+                    VALUES (source.version, source.name, source.checksum, SYSUTCDATETIME(), 0, source.app_version);
+                """,
+                (migration.version, migration.name, migration.checksum, "097"),
+            )
+            installed = con.execute_tsql(
+                "SELECT checksum FROM dbo.schema_migrations WHERE version = ?", (migration.version,)
+            ).fetchone()
+            if not installed or str(installed["checksum"]) != migration.checksum:
+                raise MigrationError(f"Azure SQL migration {migration.version:03d} checksum mismatch")
 
     def ensure_column(self, con: AzureSqlConnection, table: str, column: str, definition: str) -> None:
         """Purpose: Validate column for the delivery-list scanner workflow.

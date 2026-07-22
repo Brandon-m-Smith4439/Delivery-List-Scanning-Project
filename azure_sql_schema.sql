@@ -510,3 +510,219 @@ BEGIN
     );
 END;
 GO
+
+-- v097 canonical migration history. Checksums are written by the application
+-- migration runner after this idempotent schema script completes.
+IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.schema_migrations (
+        version int NOT NULL PRIMARY KEY,
+        name nvarchar(255) NOT NULL,
+        checksum char(64) NOT NULL,
+        applied_at_utc datetime2(0) NOT NULL DEFAULT (SYSUTCDATETIME()),
+        execution_ms int NOT NULL DEFAULT (0),
+        app_version nvarchar(32) NOT NULL DEFAULT (N''),
+        CONSTRAINT ck_schema_migrations_execution_ms CHECK (execution_ms >= 0)
+    );
+END;
+GO
+
+-- v097 UTC audit and soft-delete fields. These are additive so an existing
+-- Azure readiness database can be upgraded without replacing any table.
+DECLARE @audit_tables TABLE (table_name sysname NOT NULL PRIMARY KEY);
+INSERT INTO @audit_tables (table_name) VALUES
+    (N'delivery_lists'), (N'line_items'), (N'users'), (N'bays'),
+    (N'bay_assignments'), (N'racks'), (N'rack_items'),
+    (N'customer_route_rules'), (N'admin_lookup_values');
+
+DECLARE @table_name sysname;
+DECLARE audit_cursor CURSOR LOCAL FAST_FORWARD FOR SELECT table_name FROM @audit_tables;
+OPEN audit_cursor;
+FETCH NEXT FROM audit_cursor INTO @table_name;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF COL_LENGTH(N'dbo.' + @table_name, N'created_at_utc') IS NULL
+        EXEC(N'ALTER TABLE dbo.' + QUOTENAME(@table_name) + N' ADD created_at_utc datetime2(0) NOT NULL CONSTRAINT ' + QUOTENAME(N'df_' + @table_name + N'_created_at_utc') + N' DEFAULT (SYSUTCDATETIME()) WITH VALUES');
+    IF COL_LENGTH(N'dbo.' + @table_name, N'created_by_user_id') IS NULL
+        EXEC(N'ALTER TABLE dbo.' + QUOTENAME(@table_name) + N' ADD created_by_user_id bigint NULL');
+    IF COL_LENGTH(N'dbo.' + @table_name, N'updated_at_utc') IS NULL
+        EXEC(N'ALTER TABLE dbo.' + QUOTENAME(@table_name) + N' ADD updated_at_utc datetime2(0) NOT NULL CONSTRAINT ' + QUOTENAME(N'df_' + @table_name + N'_updated_at_utc') + N' DEFAULT (SYSUTCDATETIME()) WITH VALUES');
+    IF COL_LENGTH(N'dbo.' + @table_name, N'updated_by_user_id') IS NULL
+        EXEC(N'ALTER TABLE dbo.' + QUOTENAME(@table_name) + N' ADD updated_by_user_id bigint NULL');
+    IF COL_LENGTH(N'dbo.' + @table_name, N'is_deleted') IS NULL
+        EXEC(N'ALTER TABLE dbo.' + QUOTENAME(@table_name) + N' ADD is_deleted bit NOT NULL CONSTRAINT ' + QUOTENAME(N'df_' + @table_name + N'_is_deleted') + N' DEFAULT (0) WITH VALUES');
+    IF COL_LENGTH(N'dbo.' + @table_name, N'deleted_at_utc') IS NULL
+        EXEC(N'ALTER TABLE dbo.' + QUOTENAME(@table_name) + N' ADD deleted_at_utc datetime2(0) NULL');
+    IF COL_LENGTH(N'dbo.' + @table_name, N'deleted_by_user_id') IS NULL
+        EXEC(N'ALTER TABLE dbo.' + QUOTENAME(@table_name) + N' ADD deleted_by_user_id bigint NULL');
+    FETCH NEXT FROM audit_cursor INTO @table_name;
+END;
+CLOSE audit_cursor;
+DEALLOCATE audit_cursor;
+GO
+
+-- Future production-machine integration. Business identifiers intentionally
+-- remain text even when their current values happen to be numeric.
+IF OBJECT_ID(N'dbo.machines', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.machines (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        machine_code nvarchar(255) NOT NULL UNIQUE,
+        display_name nvarchar(500) NOT NULL DEFAULT (N''),
+        machine_type nvarchar(255) NOT NULL DEFAULT (N''),
+        location nvarchar(500) NOT NULL DEFAULT (N''),
+        active bit NOT NULL DEFAULT (1),
+        metadata_json nvarchar(max) NOT NULL DEFAULT (N'{}'),
+        created_at_utc datetime2(0) NOT NULL DEFAULT (SYSUTCDATETIME()),
+        created_by_user_id bigint NULL,
+        updated_at_utc datetime2(0) NOT NULL DEFAULT (SYSUTCDATETIME()),
+        updated_by_user_id bigint NULL,
+        is_deleted bit NOT NULL DEFAULT (0),
+        deleted_at_utc datetime2(0) NULL,
+        deleted_by_user_id bigint NULL,
+        CONSTRAINT ck_machines_metadata_json CHECK (ISJSON(metadata_json) = 1)
+    );
+END;
+GO
+
+IF OBJECT_ID(N'dbo.scanners', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.scanners (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        scanner_code nvarchar(255) NOT NULL UNIQUE,
+        display_name nvarchar(500) NOT NULL DEFAULT (N''),
+        station_name nvarchar(255) NOT NULL DEFAULT (N''),
+        machine_id bigint NULL,
+        device_identifier nvarchar(500) NOT NULL DEFAULT (N''),
+        active bit NOT NULL DEFAULT (1),
+        last_seen_at_utc datetime2(0) NULL,
+        metadata_json nvarchar(max) NOT NULL DEFAULT (N'{}'),
+        created_at_utc datetime2(0) NOT NULL DEFAULT (SYSUTCDATETIME()),
+        created_by_user_id bigint NULL,
+        updated_at_utc datetime2(0) NOT NULL DEFAULT (SYSUTCDATETIME()),
+        updated_by_user_id bigint NULL,
+        is_deleted bit NOT NULL DEFAULT (0),
+        deleted_at_utc datetime2(0) NULL,
+        deleted_by_user_id bigint NULL,
+        CONSTRAINT fk_scanners_machine FOREIGN KEY (machine_id) REFERENCES dbo.machines(id) ON DELETE SET NULL,
+        CONSTRAINT ck_scanners_metadata_json CHECK (ISJSON(metadata_json) = 1)
+    );
+END;
+GO
+
+IF OBJECT_ID(N'dbo.machine_events', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.machine_events (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        machine_id bigint NULL,
+        scanner_id bigint NULL,
+        line_item_id nvarchar(255) NULL,
+        event_type nvarchar(255) NOT NULL,
+        event_status nvarchar(255) NOT NULL DEFAULT (N''),
+        qty int NOT NULL DEFAULT (0),
+        barcode nvarchar(255) NOT NULL DEFAULT (N''),
+        order_no nvarchar(255) NOT NULL DEFAULT (N''),
+        item_no nvarchar(255) NOT NULL DEFAULT (N''),
+        metadata_json nvarchar(max) NOT NULL DEFAULT (N'{}'),
+        created_at_utc datetime2(0) NOT NULL DEFAULT (SYSUTCDATETIME()),
+        created_by_user_id bigint NULL,
+        CONSTRAINT fk_machine_events_machine FOREIGN KEY (machine_id) REFERENCES dbo.machines(id) ON DELETE SET NULL,
+        CONSTRAINT fk_machine_events_scanner FOREIGN KEY (scanner_id) REFERENCES dbo.scanners(id) ON DELETE SET NULL,
+        CONSTRAINT fk_machine_events_line_item FOREIGN KEY (line_item_id) REFERENCES dbo.line_items(id) ON DELETE SET NULL,
+        CONSTRAINT ck_machine_events_qty CHECK (qty >= 0),
+        CONSTRAINT ck_machine_events_metadata_json CHECK (ISJSON(metadata_json) = 1)
+    );
+END;
+GO
+
+-- Core constraints are added only when absent and WITH CHECK validates all
+-- existing rows before SQL Server begins enforcing future writes.
+IF OBJECT_ID(N'dbo.ck_line_items_qty', N'C') IS NULL
+    ALTER TABLE dbo.line_items WITH CHECK ADD CONSTRAINT ck_line_items_qty CHECK (qty >= 0 AND scanned_qty >= 0 AND scanned_qty <= qty);
+IF OBJECT_ID(N'dbo.ck_line_items_priority_direct', N'C') IS NULL
+    ALTER TABLE dbo.line_items WITH CHECK ADD CONSTRAINT ck_line_items_priority_direct CHECK (priority_direct_to_truck IN (0, 1));
+IF OBJECT_ID(N'dbo.ck_rack_items_qty', N'C') IS NULL
+    ALTER TABLE dbo.rack_items WITH CHECK ADD CONSTRAINT ck_rack_items_qty CHECK (qty > 0);
+IF OBJECT_ID(N'dbo.ck_bay_assignments_qty', N'C') IS NULL
+    ALTER TABLE dbo.bay_assignments WITH CHECK ADD CONSTRAINT ck_bay_assignments_qty CHECK (assigned_qty >= 0);
+GO
+
+-- Missing safe relationships from the v096 readiness schema.
+IF OBJECT_ID(N'dbo.fk_exceptions_delivery_list', N'F') IS NULL
+    ALTER TABLE dbo.exceptions WITH CHECK ADD CONSTRAINT fk_exceptions_delivery_list FOREIGN KEY (list_id) REFERENCES dbo.delivery_lists(id) ON DELETE CASCADE;
+IF OBJECT_ID(N'dbo.fk_bay_assignments_delivery_list', N'F') IS NULL
+    ALTER TABLE dbo.bay_assignments WITH CHECK ADD CONSTRAINT fk_bay_assignments_delivery_list FOREIGN KEY (delivery_list_id) REFERENCES dbo.delivery_lists(id) ON DELETE CASCADE;
+IF OBJECT_ID(N'dbo.fk_notification_receipts_notification', N'F') IS NULL
+    ALTER TABLE dbo.app_notification_receipts WITH CHECK ADD CONSTRAINT fk_notification_receipts_notification FOREIGN KEY (notification_id) REFERENCES dbo.app_notifications(id) ON DELETE CASCADE;
+IF OBJECT_ID(N'dbo.fk_notification_receipts_user', N'F') IS NULL
+    ALTER TABLE dbo.app_notification_receipts WITH CHECK ADD CONSTRAINT fk_notification_receipts_user FOREIGN KEY (user_id) REFERENCES dbo.users(id) ON DELETE CASCADE;
+GO
+
+-- Query-driven indexes shared logically with SQLite v097.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.delivery_lists') AND name = N'idx_delivery_lists_date_status_stage')
+    CREATE INDEX idx_delivery_lists_date_status_stage ON dbo.delivery_lists(delivery_date, status, stage);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.line_items') AND name = N'idx_line_items_list_order_item')
+    CREATE INDEX idx_line_items_list_order_item ON dbo.line_items(list_id, order_no, item_no);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.line_items') AND name = N'idx_line_items_source')
+    CREATE INDEX idx_line_items_source ON dbo.line_items(source_id, list_id);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.line_items') AND name = N'idx_line_items_barcode')
+    CREATE INDEX idx_line_items_barcode ON dbo.line_items(barcode, list_id);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.scan_events') AND name = N'idx_scan_events_line_time')
+    CREATE INDEX idx_scan_events_line_time ON dbo.scan_events(line_item_id, created_at DESC, id DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.imports') AND name = N'idx_imports_date_time')
+    CREATE INDEX idx_imports_date_time ON dbo.imports(delivery_date, imported_at DESC, id DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.exceptions') AND name = N'idx_exceptions_list_status')
+    CREATE INDEX idx_exceptions_list_status ON dbo.exceptions(list_id, status, created_at DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.audit_events') AND name = N'idx_audit_events_entity_time')
+    CREATE INDEX idx_audit_events_entity_time ON dbo.audit_events(entity_type, entity_id, created_at DESC, id DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.sessions') AND name = N'idx_sessions_user_expiry')
+    CREATE INDEX idx_sessions_user_expiry ON dbo.sessions(user_id, expires_at);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.bay_assignments') AND name = N'idx_bay_assignments_line_status')
+    CREATE INDEX idx_bay_assignments_line_status ON dbo.bay_assignments(line_item_id, status);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.bay_assignments') AND name = N'idx_bay_assignments_bay_status')
+    CREATE INDEX idx_bay_assignments_bay_status ON dbo.bay_assignments(bay_id, status);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.bay_events') AND name = N'idx_bay_events_bay_time')
+    CREATE INDEX idx_bay_events_bay_time ON dbo.bay_events(bay_id, created_at DESC, id DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.rack_items') AND name = N'idx_rack_items_rack_status')
+    CREATE INDEX idx_rack_items_rack_status ON dbo.rack_items(rack_id, status);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.rack_items') AND name = N'idx_rack_items_line_status')
+    CREATE INDEX idx_rack_items_line_status ON dbo.rack_items(line_item_id, status);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.machine_events') AND name = N'idx_machine_events_machine_time')
+    CREATE INDEX idx_machine_events_machine_time ON dbo.machine_events(machine_id, created_at_utc DESC, id DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.machine_events') AND name = N'idx_machine_events_scanner_time')
+    CREATE INDEX idx_machine_events_scanner_time ON dbo.machine_events(scanner_id, created_at_utc DESC, id DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.machine_events') AND name = N'idx_machine_events_order_item')
+    CREATE INDEX idx_machine_events_order_item ON dbo.machine_events(order_no, item_no, created_at_utc DESC);
+GO
+
+-- Immutable event histories. Corrections are represented by new reversal or
+-- superseding events instead of changing the original record.
+CREATE OR ALTER TRIGGER dbo.trg_scan_events_append_only
+ON dbo.scan_events
+INSTEAD OF UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50001, 'scan_events is append-only; write a reversal event instead.', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER dbo.trg_audit_events_append_only
+ON dbo.audit_events
+INSTEAD OF UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50002, 'audit_events is append-only; write a superseding audit event instead.', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER dbo.trg_machine_events_append_only
+ON dbo.machine_events
+INSTEAD OF UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50003, 'machine_events is append-only; write a reversal event instead.', 1;
+END;
+GO

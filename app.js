@@ -35,6 +35,19 @@ const SCAN_FILTER_GROUPS = Object.freeze({
   attention: Object.freeze(["remakes", "rushes", "priority", "updated", "errors"]),
   route: Object.freeze(["indian-trail-route", "cpu-route", "dtc-route", "greenville-route"]),
 });
+const SCAN_FILTER_LABELS = Object.freeze({
+  remaining: "Not Scanned",
+  partial: "Partial",
+  complete: "Complete",
+  remakes: "Remakes",
+  rushes: "Rushes",
+  updated: "New/Updated",
+  errors: "Errors",
+  "indian-trail-route": "Indian Trail",
+  "cpu-route": "CPU",
+  "dtc-route": "DTC",
+  "greenville-route": "Greenville",
+});
 
 const state = {
   page: "home",
@@ -137,6 +150,11 @@ const state = {
   manualEditDirty: false,
   manualEditListId: "",
   manualEditQuery: "",
+  manualEditResultRows: [],
+  manualEditTotalRows: 0,
+  manualEditVisibleCount: 20,
+  manualEditSearchTimer: null,
+  manualEditSearchRequestId: 0,
   expandedRackGroups: new Set(),
   expandedRackCodes: new Set(),
   backend: false,
@@ -179,20 +197,111 @@ const state = {
   bayRouteRefreshInFlight: false,
   lastBayRouteComplete: null,
   lastRenderedProgressListId: "",
+  scanRenderFrame: 0,
+  scanViewportMobile: null,
+  lastGlassFilterSignature: "",
 };
 
-const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v1";
+const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v3";
+const APP_SOUND_CACHE_VERSION = "20260721-v102";
+const APP_SOUND_FILES = Object.freeze({
+  scan_success: "sounds/scan_success.wav",
+  scan_duplicate: "sounds/scan_duplicate.wav",
+  scan_warning: "sounds/scan_warning.wav",
+  scan_error: "sounds/scan_error.wav",
+  scan_rush: "sounds/scan_rush.wav",
+  scan_remake: "sounds/scan_remake.wav",
+  task_complete: "sounds/task_complete.wav",
+  rack_item_added: "sounds/rack_item_added.wav",
+  rack_complete: "sounds/rack_complete.wav",
+  rack_reopened: "sounds/rack_reopened.wav",
+  rack_returned: "sounds/rack_returned.wav",
+  bay_assigned: "sounds/bay_assigned.wav",
+  bay_removed: "sounds/bay_removed.wav",
+  bay_moved: "sounds/bay_moved.wav",
+  undo: "sounds/undo.wav",
+  redo: "sounds/redo.wav",
+  import_start: "sounds/import_start.wav",
+  import_complete: "sounds/import_complete.wav",
+  save: "sounds/save.wav",
+  print_ready: "sounds/print_ready.wav",
+  email_sent: "sounds/email_sent.wav",
+  login: "sounds/login.wav",
+  logout: "sounds/logout.wav",
+  notification: "sounds/notification.wav",
+  permission_denied: "sounds/permission_denied.wav",
+  machine_scan: "sounds/machine_scan.wav",
+  machine_fault: "sounds/machine_fault.wav",
+  collapse_open: "sounds/collapse_open.wav",
+  collapse_close: "sounds/collapse_close.wav",
+});
+const APP_SOUND_ALIASES = Object.freeze({
+  success: "scan_success",
+  notice: "scan_warning",
+  warning: "scan_warning",
+  error: "scan_error",
+  complete: "task_complete",
+});
+const APP_SOUND_ENABLED_KINDS = new Set([
+  "scan_success",
+  "scan_duplicate",
+  "scan_warning",
+  "scan_error",
+  "scan_rush",
+  "scan_remake",
+  "task_complete",
+  "rack_item_added",
+  "rack_complete",
+  "rack_reopened",
+  "rack_returned",
+  "bay_assigned",
+  "bay_removed",
+  "bay_moved",
+  "undo",
+  "redo",
+  "import_start",
+  "import_complete",
+  "save",
+  "email_sent",
+  "login",
+  "logout",
+  "notification",
+  "permission_denied",
+  "machine_scan",
+  "machine_fault",
+  "collapse_open",
+  "collapse_close",
+]);
+const APP_SOUND_PRELOAD_KINDS = Object.freeze([
+  "scan_success",
+  "scan_duplicate",
+  "scan_warning",
+  "scan_error",
+  "rack_item_added",
+  "bay_assigned",
+  "save",
+  "notification",
+  "collapse_open",
+  "collapse_close",
+]);
 const appSoundRuntime = {
   context: null,
   masterGain: null,
   compressor: null,
+  unlocked: false,
   lastPlayedAt: new Map(),
+  buffers: new Map(),
+  bufferPromises: new Map(),
+  htmlPlayers: new Set(),
+  lastError: "",
   volumePercent: (() => {
     try {
-      const saved = Number(localStorage.getItem(APP_SOUND_VOLUME_KEY));
-      return Number.isFinite(saved) ? Math.max(0, Math.min(saved, 400)) : 200;
+      const savedValue = localStorage.getItem(APP_SOUND_VOLUME_KEY);
+      if (savedValue === null || String(savedValue).trim() === "") return 100;
+      const saved = Number(savedValue);
+      return Number.isFinite(saved) ? Math.max(0, Math.min(saved, 200)) : 100;
     } catch {
-      return 200;
+      return 100;
     }
   })(),
 };
@@ -327,6 +436,11 @@ const els = {
   lastDims: document.getElementById("lastDims"),
   lastCustomer: document.getElementById("lastCustomer"),
   totalItemsText: document.getElementById("totalItemsText"),
+  scanFilterDrawer: document.getElementById("scanFilterDrawer"),
+  scanFilterPriorityState: document.getElementById("scanFilterPriorityState"),
+  scanActiveFilterCount: document.getElementById("scanActiveFilterCount"),
+  scanActiveFilterBar: document.getElementById("scanActiveFilterBar"),
+  scanActiveFilterChips: document.getElementById("scanActiveFilterChips"),
   countAll: document.getElementById("countAll"),
   countRemaining: document.getElementById("countRemaining"),
   countPartial: document.getElementById("countPartial"),
@@ -3014,14 +3128,15 @@ function initCustomSelectSystem() {
     if (event.key === "Escape" && customSelectUi.openSelect) closeCustomSelect(true);
   });
 
-  document.addEventListener("change", () => queueMicrotask(syncAllCustomSelects), true);
+  document.addEventListener("change", (event) => {
+    if (event.target instanceof HTMLSelectElement) queueMicrotask(() => syncCustomSelect(event.target));
+  }, true);
   window.addEventListener("resize", () => customSelectUi.openSelect && positionCustomSelectMenu());
   document.addEventListener("scroll", (event) => {
     if (!customSelectUi.openSelect || customSelectUi.menu?.contains(event.target)) return;
     closeCustomSelect(false);
   }, true);
 
-  customSelectUi.syncTimer = window.setInterval(syncAllCustomSelects, 300);
 }
 
 /**
@@ -3437,6 +3552,11 @@ function waitForNextPaint() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function updateModalScrollLock() {
+  const panelIsActuallyVisible = (panel) => {
+    if (!panel || !panel.isConnected || panel.hidden) return false;
+    const style = window.getComputedStyle(panel);
+    return style.display !== "none" && style.visibility !== "hidden" && panel.getClientRects().length > 0;
+  };
   const modalIsOpen = [
     els.adminModal,
     els.printOptionsPanel,
@@ -3451,7 +3571,7 @@ function updateModalScrollLock() {
     document.getElementById("indianTrailOutboundOverrideShell"),
     document.querySelector(".action-confirm-backdrop"),
     els.statsChartModal,
-  ].some((panel) => panel && !panel.hidden);
+  ].some(panelIsActuallyVisible);
 
   document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
 }
@@ -3476,6 +3596,7 @@ async function fetchJson(url, options = {}) {
     } catch {
       // Keep raw text when the server does not return JSON.
     }
+    if (response.status === 403) playAppSound("permission_denied", { force: true });
     if (response.status === 401 && state.backend && url !== "/api/login") {
       state.authenticated = false;
       state.user = null;
@@ -3567,6 +3688,7 @@ async function login(username, password) {
   hideLogin();
   if (els.loginPassword) els.loginPassword.value = "";
   if (els.operatorInput) els.operatorInput.value = state.user.displayName || state.user.username || "Scanner";
+  playAppSound("login", { force: true });
 }
 
 /**
@@ -3658,6 +3780,7 @@ async function logout() {
   state.permissions = [];
   stopPolling();
   stopNotificationPolling();
+  playAppSound("logout", { force: true });
   showLogin("Signed out.");
 }
 
@@ -4261,31 +4384,59 @@ function appAudioContext() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextClass) return null;
   if (!appSoundRuntime.context) {
-    const context = new AudioContextClass();
-    const masterGain = context.createGain();
-    const compressor = context.createDynamicsCompressor();
-    compressor.threshold.value = -16;
-    compressor.knee.value = 18;
-    compressor.ratio.value = 5;
-    compressor.attack.value = 0.003;
-    compressor.release.value = 0.18;
-    masterGain.gain.value = appSoundRuntime.volumePercent / 100;
-    masterGain.connect(compressor);
-    compressor.connect(context.destination);
-    appSoundRuntime.context = context;
-    appSoundRuntime.masterGain = masterGain;
-    appSoundRuntime.compressor = compressor;
+    try {
+      const context = new AudioContextClass();
+      const masterGain = context.createGain();
+      const compressor = context.createDynamicsCompressor();
+      compressor.threshold.value = -16;
+      compressor.knee.value = 18;
+      compressor.ratio.value = 5;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.18;
+      masterGain.gain.value = appSoundRuntime.volumePercent / 100;
+      masterGain.connect(compressor);
+      compressor.connect(context.destination);
+      appSoundRuntime.context = context;
+      appSoundRuntime.masterGain = masterGain;
+      appSoundRuntime.compressor = compressor;
+    } catch (error) {
+      appSoundRuntime.lastError = error?.message || "The browser could not create an audio output.";
+      return null;
+    }
   }
   return appSoundRuntime.context;
+}
+
+/** Unlock Web Audio during the operator's first real browser gesture. */
+async function unlockAppSounds() {
+  const context = appAudioContext();
+  if (!context) return false;
+  appSoundRuntime.unlocked = true;
+  try {
+    if (context.state === "suspended") await context.resume();
+    if (context.state !== "running") throw new Error(`Browser audio is ${context.state}.`);
+
+    // A one-frame silent buffer completes browser audio activation inside the real user gesture.
+    const source = context.createBufferSource();
+    source.buffer = context.createBuffer(1, 1, context.sampleRate);
+    source.connect(context.destination);
+    source.start(0);
+    appSoundRuntime.lastError = "";
+    for (const kind of APP_SOUND_PRELOAD_KINDS) void loadAppSoundBuffer(kind);
+    return true;
+  } catch (error) {
+    appSoundRuntime.lastError = error?.message || "The browser blocked audio playback.";
+    return false;
+  }
 }
 
 /**
  * Purpose: Persist and synchronize the operator-selected scanner sound volume.
  * Effects: Updates the shared Web Audio master gain and every visible volume control.
- * Flow: Clamps the floor-volume range to 0-400%, persists it locally, and refreshes labels.
+ * Flow: Clamps the floor-volume range to 0-200%, persists it locally, and refreshes labels.
  */
 function setAppSoundVolume(value, { persist = true } = {}) {
-  const volumePercent = Math.max(0, Math.min(Number(value || 0), 400));
+  const volumePercent = Math.max(0, Math.min(Number(value || 0), 200));
   appSoundRuntime.volumePercent = volumePercent;
   if (appSoundRuntime.masterGain && appSoundRuntime.context) {
     appSoundRuntime.masterGain.gain.setTargetAtTime(volumePercent / 100, appSoundRuntime.context.currentTime, 0.015);
@@ -4302,6 +4453,18 @@ function setAppSoundVolume(value, { persist = true } = {}) {
   });
   document.querySelectorAll("[data-app-sound-volume-label]").forEach((label) => {
     label.textContent = `${Math.round(volumePercent)}%`;
+  });
+  updateAppSoundStatus(
+    volumePercent > 0 ? `Sound is on at ${Math.round(volumePercent)}%.` : "Sound is muted. Move the slider to hear cues.",
+    volumePercent > 0 ? "ready" : "error",
+  );
+}
+
+/** Show browser-audio readiness in every visible account sound control. */
+function updateAppSoundStatus(message, stateName = "ready") {
+  document.querySelectorAll("[data-app-sound-status]").forEach((status) => {
+    status.textContent = message;
+    status.dataset.soundState = stateName;
   });
 }
 
@@ -4329,58 +4492,224 @@ function scheduleAppTone(context, { frequency, start, duration, type = "sine", v
 }
 
 /**
- * Purpose: Play one maintained operational sound for scan success, notice, error, or completion.
- * Effects: Produces a short synthesized cue without requiring packaged audio files.
- * Flow: Normalizes the requested cue, throttles accidental duplicates, resumes Web Audio, and schedules its note pattern.
+ * Purpose: Load one editable WAV file for an operational scanner sound.
+ * Effects: Caches decoded audio so later scans play without another network request.
+ * Flow: Fetches the maintained file, decodes it through Web Audio, and returns null on failure.
+ */
+async function loadAppSoundBuffer(kind) {
+  if (appSoundRuntime.buffers.has(kind)) return appSoundRuntime.buffers.get(kind);
+  if (appSoundRuntime.bufferPromises.has(kind)) return appSoundRuntime.bufferPromises.get(kind);
+  const context = appAudioContext();
+  const file = APP_SOUND_FILES[kind];
+  if (!context || !file) return null;
+  const promise = fetch(`${file}?v=${APP_SOUND_CACHE_VERSION}`, { cache: "force-cache" })
+    .then((response) => {
+      if (!response.ok) throw new Error(`Unable to load ${file}`);
+      return response.arrayBuffer();
+    })
+    .then((bytes) => context.decodeAudioData(bytes))
+    .then((buffer) => {
+      appSoundRuntime.buffers.set(kind, buffer);
+      return buffer;
+    })
+    .catch((error) => {
+      appSoundRuntime.lastError = error?.message || `Unable to load ${file}.`;
+      return null;
+    })
+    .finally(() => appSoundRuntime.bufferPromises.delete(kind));
+  appSoundRuntime.bufferPromises.set(kind, promise);
+  return promise;
+}
+
+/**
+ * Purpose: Play a decoded editable sound file through the shared floor-volume chain.
+ * Effects: Routes the WAV through the same master gain and compressor used by synthesized fallback sounds.
+ */
+function playAppSoundBuffer(context, buffer, delay = 0) {
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(appSoundRuntime.masterGain || context.destination);
+  source.start(context.currentTime + Math.max(Number(delay || 0), 0));
+}
+
+/** Use the browser's media element path when Web Audio is unavailable or blocked. */
+async function playHtmlAppSound(kind, delay = 0) {
+  const file = APP_SOUND_FILES[kind];
+  if (!file || typeof Audio !== "function") return false;
+  if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay * 1000));
+  const player = new Audio(`${file}?v=${APP_SOUND_CACHE_VERSION}`);
+  player.preload = "auto";
+  player.volume = Math.max(0, Math.min(appSoundRuntime.volumePercent / 100, 1));
+  appSoundRuntime.htmlPlayers.add(player);
+  const release = () => appSoundRuntime.htmlPlayers.delete(player);
+  player.addEventListener("ended", release, { once: true });
+  player.addEventListener("error", release, { once: true });
+  try {
+    await player.play();
+    appSoundRuntime.lastError = "";
+    return true;
+  } catch (error) {
+    release();
+    appSoundRuntime.lastError = error?.message || "The browser blocked audio playback.";
+    return false;
+  }
+}
+
+/**
+ * Purpose: Normalize legacy and semantic audio names into one maintained cue key.
+ * Effects: Performs an in-memory lookup only.
+ * Flow: Resolves the compatibility aliases first, then falls back to the neutral notification cue.
+ */
+function resolveAppSoundKind(kind = "notification") {
+  const requested = String(kind || "notification").trim();
+  const resolved = APP_SOUND_ALIASES[requested] || requested;
+  return APP_SOUND_FILES[resolved] ? resolved : "notification";
+}
+
+/**
+ * Purpose: Select the most informative scan cue from the latest scan result.
+ * Effects: Reads only the supplied scan result and current item classification helpers.
+ * Flow: Prioritizes rejected/duplicate states, then successful Rush and remake identification.
+ */
+function scanSoundKind(entry, fallback = "scan_success") {
+  if (!entry) return resolveAppSoundKind(fallback);
+  const eventType = String(entry.eventType || entry.type || "").toLowerCase();
+  if (!entry.ok) {
+    if (eventType.includes("duplicate") || eventType.includes("already")) return "scan_duplicate";
+    if (eventType.includes("notice") || eventType.includes("warning") || entry.overrideRequired) return "scan_warning";
+    return "scan_error";
+  }
+
+  const item = entry.item || entry.lineItem || entry;
+  if (isRushItem(item) || Boolean(entry.rush || item.rush)) return "scan_rush";
+  if (isRemakeItem(item) || Boolean(entry.remake || item.remake)) return "scan_remake";
+  return resolveAppSoundKind(fallback);
+}
+
+/**
+ * Purpose: Play one semantic cue from the Delivery List Scanner audio language.
+ * Effects: Plays immediate operational feedback through the shared compressor and volume control.
+ * Flow: Uses a cached packaged WAV when available and otherwise loads that exact cue before playback.
+ * This prevents a generic fallback tone from sounding before the intended button or scan cue.
  */
 function playAppSound(kind = "notice", options = {}) {
-  const normalizedKind = ["success", "error", "notice", "complete"].includes(kind) ? kind : "notice";
+  const normalizedKind = resolveAppSoundKind(kind);
+  if (!APP_SOUND_ENABLED_KINDS.has(normalizedKind) || appSoundRuntime.volumePercent <= 0) return Promise.resolve(false);
   const now = performance.now();
   const lastPlayedAt = Number(appSoundRuntime.lastPlayedAt.get(normalizedKind) || 0);
-  const throttleMs = normalizedKind === "complete" ? 260 : 90;
-  if (!options.force && now - lastPlayedAt < throttleMs) return;
+  const throttleMs = ["task_complete", "rack_complete", "machine_fault"].includes(normalizedKind) ? 260 : 75;
+  if (!options.force && now - lastPlayedAt < throttleMs) return Promise.resolve(false);
   appSoundRuntime.lastPlayedAt.set(normalizedKind, now);
 
   const context = appAudioContext();
-  if (!context) return;
+  if (!context) return playHtmlAppSound(normalizedKind, Number(options.delay || 0));
   const delay = Math.max(Number(options.delay || 0), 0);
-  /**
-   * Purpose: Schedule the selected sound pattern after the shared audio context is ready.
-   * Effects: Adds the maintained note sequence to the current Web Audio timeline.
-   * Flow: Selects one normalized cue pattern and delegates every note to scheduleAppTone.
-   */
+
+  const soundCategory = (() => {
+    if (["scan_error", "machine_fault"].includes(normalizedKind)) return "error";
+    if (normalizedKind === "scan_duplicate") return "duplicate";
+    if (normalizedKind === "scan_warning") return "warning";
+    if (["task_complete", "rack_complete"].includes(normalizedKind)) return "complete";
+    if (["scan_rush", "scan_remake"].includes(normalizedKind)) return "priority";
+    if (["save", "email_sent", "import_complete"].includes(normalizedKind)) return "confirmed";
+    if (["undo", "logout", "rack_reopened", "rack_returned"].includes(normalizedKind)) return "down";
+    if (["redo", "login", "import_start", "notification", "machine_scan"].includes(normalizedKind)) return "up";
+    return "success";
+  })();
+
   const schedulePattern = () => {
     const start = context.currentTime + delay;
     const patterns = {
       success: [
-        { frequency: 659.25, offset: 0, duration: 0.09, type: "sine", volume: 0.11 },
-        { frequency: 880, offset: 0.075, duration: 0.14, type: "sine", volume: 0.13 },
+        { frequency: 261.63, offset: 0, duration: 0.16, type: "triangle", volume: 0.055 },
+        { frequency: 523.25, offset: 0.025, duration: 0.13, type: "sine", volume: 0.075 },
+        { frequency: 659.25, offset: 0.095, duration: 0.15, type: "sine", volume: 0.085 },
+        { frequency: 783.99, offset: 0.17, duration: 0.2, type: "sine", volume: 0.095 },
+        { frequency: 1046.5, offset: 0.235, duration: 0.16, type: "triangle", volume: 0.055 },
       ],
-      notice: [
-        { frequency: 440, offset: 0, duration: 0.1, type: "triangle", volume: 0.1 },
-        { frequency: 554.37, offset: 0.11, duration: 0.11, type: "triangle", volume: 0.09 },
+      duplicate: [
+        { frequency: 440, offset: 0, duration: 0.09, type: "triangle", volume: 0.075 },
+        { frequency: 440, offset: 0.11, duration: 0.09, type: "triangle", volume: 0.065 },
+      ],
+      warning: [
+        { frequency: 554.37, offset: 0, duration: 0.1, type: "triangle", volume: 0.075 },
+        { frequency: 493.88, offset: 0.11, duration: 0.12, type: "triangle", volume: 0.07 },
       ],
       error: [
-        { frequency: 220, offset: 0, duration: 0.16, type: "square", volume: 0.09 },
-        { frequency: 164.81, offset: 0.12, duration: 0.2, type: "sawtooth", volume: 0.075 },
+        { frequency: 196, offset: 0, duration: 0.13, type: "square", volume: 0.06 },
+        { frequency: 164.81, offset: 0.14, duration: 0.16, type: "square", volume: 0.055 },
+      ],
+      priority: [
+        { frequency: 659.25, offset: 0, duration: 0.08, type: "triangle", volume: 0.075 },
+        { frequency: 880, offset: 0.09, duration: 0.12, type: "sine", volume: 0.09 },
       ],
       complete: [
-        { frequency: 523.25, offset: 0, duration: 0.14, type: "triangle", volume: 0.1 },
-        { frequency: 659.25, offset: 0.09, duration: 0.15, type: "triangle", volume: 0.105 },
-        { frequency: 783.99, offset: 0.18, duration: 0.16, type: "triangle", volume: 0.11 },
-        { frequency: 1046.5, offset: 0.29, duration: 0.26, type: "sine", volume: 0.13 },
+        { frequency: 523.25, offset: 0, duration: 0.1, type: "triangle", volume: 0.07 },
+        { frequency: 659.25, offset: 0.1, duration: 0.11, type: "triangle", volume: 0.075 },
+        { frequency: 783.99, offset: 0.21, duration: 0.17, type: "sine", volume: 0.085 },
+      ],
+      confirmed: [
+        { frequency: 659.25, offset: 0, duration: 0.09, type: "triangle", volume: 0.065 },
+        { frequency: 880, offset: 0.08, duration: 0.14, type: "sine", volume: 0.075 },
+      ],
+      down: [
+        { frequency: 587.33, offset: 0, duration: 0.08, type: "triangle", volume: 0.055 },
+        { frequency: 440, offset: 0.075, duration: 0.11, type: "triangle", volume: 0.05 },
+      ],
+      up: [
+        { frequency: 440, offset: 0, duration: 0.07, type: "triangle", volume: 0.05 },
+        { frequency: 587.33, offset: 0.065, duration: 0.1, type: "sine", volume: 0.06 },
       ],
     };
-    for (const note of patterns[normalizedKind]) {
+    for (const note of patterns[soundCategory]) {
       scheduleAppTone(context, { ...note, start: start + note.offset });
     }
   };
 
+  const playReadyCue = async () => {
+    const buffer = appSoundRuntime.buffers.get(normalizedKind) || await loadAppSoundBuffer(normalizedKind);
+    if (buffer) {
+      playAppSoundBuffer(context, buffer, delay);
+      return true;
+    }
+    return playHtmlAppSound(normalizedKind, delay);
+  };
+
   if (context.state === "suspended") {
-    context.resume().then(schedulePattern).catch(() => {});
-  } else {
-    schedulePattern();
+    return context.resume()
+      .then(() => (context.state === "running" ? playReadyCue() : playHtmlAppSound(normalizedKind, delay)))
+      .catch(() => playHtmlAppSound(normalizedKind, delay));
   }
+  return Promise.resolve(playReadyCue());
+}
+
+/** Play one packaged WAV from an explicit operator click and report real browser startup. */
+async function testAppSoundCue(kind = "scan_success") {
+  const normalizedKind = resolveAppSoundKind(kind);
+  if (appSoundRuntime.volumePercent <= 0) {
+    updateAppSoundStatus("Sound is muted. Move the volume slider above 0%.", "error");
+    return false;
+  }
+  updateAppSoundStatus("Testing browser audio...", "testing");
+  const unlocked = await unlockAppSounds();
+  const context = appAudioContext();
+  const buffer = context ? await loadAppSoundBuffer(normalizedKind) : null;
+  let played = false;
+  try {
+    if (unlocked && context?.state === "running" && buffer) {
+      playAppSoundBuffer(context, buffer);
+      played = true;
+    } else {
+      played = await playHtmlAppSound(normalizedKind);
+    }
+  } catch (error) {
+    appSoundRuntime.lastError = error?.message || "Audio playback failed.";
+  }
+  updateAppSoundStatus(
+    played ? `Sound played at ${Math.round(appSoundRuntime.volumePercent)}%.` : `Sound blocked: ${appSoundRuntime.lastError || "check this site's sound and Windows volume."}`,
+    played ? "success" : "error",
+  );
+  return played;
 }
 
 /**
@@ -4395,13 +4724,16 @@ function soundTestControlsHtml(context = "scan") {
       <span class="scan-sound-test-copy"><strong>Temporary sound tests</strong><small>Remove after approval</small></span>
       <label class="scan-sound-volume-control">
         <span>Sound volume <strong data-app-sound-volume-label>${Math.round(appSoundRuntime.volumePercent)}%</strong></span>
-        <input type="range" min="0" max="400" step="10" value="${Math.round(appSoundRuntime.volumePercent)}" data-app-sound-volume aria-label="Scanner sound volume">
-        <small>Up to 400% floor boost</small>
+        <input type="range" min="0" max="200" step="10" value="${Math.round(appSoundRuntime.volumePercent)}" data-app-sound-volume aria-label="Scanner sound volume">
+        <small>Up to 200% floor boost</small>
       </label>
       <div class="scan-sound-test-actions">
-        <button type="button" data-scan-sound-test="success">Success</button>
-        <button type="button" data-scan-sound-test="notice">Notice</button>
-        <button type="button" data-scan-sound-test="error">Error</button>
+        <button type="button" data-scan-sound-test="scan_success">Scan</button>
+        <button type="button" data-scan-sound-test="scan_duplicate">Duplicate</button>
+        <button type="button" data-scan-sound-test="scan_warning">Warning</button>
+        <button type="button" data-scan-sound-test="scan_error">Error</button>
+        <button type="button" data-scan-sound-test="scan_rush">Rush</button>
+        <button type="button" data-scan-sound-test="scan_remake">Remake</button>
         <button type="button" data-progress-sound-test="${escapeHtml(context)}">${escapeHtml(progressLabel)}</button>
       </div>
     </section>
@@ -4438,7 +4770,7 @@ function replayProgressSoundTest(context = "scan") {
     target.classList.add("is-celebrating");
     window.setTimeout(() => target.classList.remove("is-celebrating"), 1900);
   }
-  playAppSound("complete", { force: true });
+  playAppSound("task_complete", { force: true });
   showFloatingNotice(`${context === "bay" ? "Bay Map" : context === "transit" ? "In-Transit" : "Scan"} 100% sound test played.`, "success");
 }
 
@@ -4447,8 +4779,8 @@ function replayProgressSoundTest(context = "scan") {
  * Effects: May call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
-function scanFlash(kind = "notice") {
-  playAppSound(kind);
+function scanFlash(kind = "notice", soundKind = "") {
+  playAppSound(soundKind || kind);
   const className = kind === "success" ? "scan-flash-success" : kind === "error" ? "scan-flash-error" : "scan-flash-notice";
   document.body.classList.remove("scan-flash-success", "scan-flash-error", "scan-flash-notice");
   void document.body.offsetWidth;
@@ -4525,6 +4857,38 @@ function syncScanFilterButtons() {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", active ? "true" : "false");
   });
+  renderActiveScanFilters();
+}
+
+/** Render the compact active-filter chips and the remake/rush health marker. */
+function renderActiveScanFilters() {
+  const selected = Object.values(SCAN_FILTER_GROUPS)
+    .flat()
+    .filter((filter) => state.activeFilters.has(filter) && filter !== "priority");
+  const glassSelected = state.glassTypeFilter && state.glassTypeFilter !== "all";
+  const selectionCount = selected.length + (glassSelected ? 1 : 0);
+  const priorityOpen = unscannedPieceCount(state.items.filter((item) => isRemakeItem(item) || isRushItem(item)));
+
+  if (els.scanActiveFilterCount) els.scanActiveFilterCount.textContent = String(selectionCount);
+  if (els.scanFilterPriorityState) {
+    els.scanFilterPriorityState.textContent = priorityOpen ? "!" : "\u2713";
+    els.scanFilterPriorityState.classList.toggle("has-alert", Boolean(priorityOpen));
+    els.scanFilterPriorityState.classList.toggle("is-clear", !priorityOpen);
+    els.scanFilterPriorityState.setAttribute(
+      "aria-label",
+      priorityOpen ? `${priorityOpen} remake or Rush pieces still need scanning` : "No open remakes or rushes",
+    );
+  }
+  if (!els.scanActiveFilterBar || !els.scanActiveFilterChips) return;
+  els.scanActiveFilterBar.classList.toggle("has-active-filters", Boolean(selectionCount));
+  els.scanActiveFilterChips.innerHTML = [
+    ...selected.map(
+      (filter) => `<button type="button" data-remove-scan-filter="${escapeHtml(filter)}"><span>${escapeHtml(SCAN_FILTER_LABELS[filter] || filter)}</span><b aria-hidden="true">&times;</b></button>`,
+    ),
+    ...(glassSelected
+      ? [`<button type="button" data-remove-glass-filter><span>Glass: ${escapeHtml(state.glassTypeFilter)}</span><b aria-hidden="true">&times;</b></button>`]
+      : []),
+  ].join("");
 }
 
 /**
@@ -4818,7 +5182,7 @@ function updateScanProgress(stats, options = {}) {
     els.scanProgressTrack.classList.add("is-celebrating");
     window.setTimeout(() => els.scanProgressTrack?.classList.remove("is-celebrating"), 1900);
   }
-  if (newlyComplete && !options.preview && options.sound !== false) playAppSound("complete", { delay: 0.18 });
+  if (newlyComplete && !options.preview && options.sound !== false) playAppSound("task_complete", { delay: 0.18 });
   if (!options.preview) {
     state.lastRenderedProgressPercent = percent;
     state.lastRenderedProgressListId = state.activeListId;
@@ -4921,44 +5285,19 @@ function renderCounts() {
     const sortedGlassEntries = [...glassCounts.entries()].sort(
       (a, b) => Number(b[1] || 0) - Number(a[1] || 0) || a[0].localeCompare(b[0]),
     );
-
-    const visibleGlassEntries = sortedGlassEntries.slice(0, 3);
-    const hiddenGlassEntries = sortedGlassEntries.slice(3);
-    const selectedHiddenGlass = hiddenGlassEntries.find(([label]) => label === state.glassTypeFilter);
-    const selectedHiddenCount = selectedHiddenGlass ? selectedHiddenGlass[1] : 0;
-
-    const visibleGlassButtons = visibleGlassEntries.map(
-      ([label, count]) =>
-        `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
-    );
-
-    const moreGlassButton = hiddenGlassEntries.length
-      ? `
-        <details class="glass-filter-more">
-          <summary class="tab glass-filter-tab glass-filter-more-summary ${selectedHiddenGlass ? "is-active" : ""}">
-            ${selectedHiddenGlass ? escapeHtml(state.glassTypeFilter) : "More Glass Types"}
-            <span>${selectedHiddenGlass ? `(${escapeHtml(selectedHiddenCount)})` : `+${hiddenGlassEntries.length}`}</span>
-          </summary>
-          <div class="glass-filter-menu">
-            ${hiddenGlassEntries
-              .map(
-                ([label, count]) =>
-                  `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
-              )
-              .join("")}
-          </div>
-        </details>
-      `
-      : "";
-
-    const glassButtons = [
-      `<button class="tab glass-filter-tab ${state.glassTypeFilter === "all" ? "is-active" : ""}" data-glass-filter="all" type="button">All Glass <span>(${totalItems})</span></button>`,
-      ...visibleGlassButtons,
-      moreGlassButton,
-    ];
-
-    els.glassFilterTabs.innerHTML = glassButtons.join("");
+    const signature = JSON.stringify([state.glassTypeFilter, sortedGlassEntries]);
+    if (signature !== state.lastGlassFilterSignature) {
+      els.glassFilterTabs.innerHTML = [
+        `<button class="tab glass-filter-tab ${state.glassTypeFilter === "all" ? "is-active" : ""}" data-glass-filter="all" type="button">All Glass <span>(${totalItems})</span></button>`,
+        ...sortedGlassEntries.map(
+          ([label, count]) =>
+            `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
+        ),
+      ].join("");
+      state.lastGlassFilterSignature = signature;
+    }
   }
+  renderActiveScanFilters();
   if (els.totalItemsText) els.totalItemsText.textContent = `${state.items.length} rows / ${totalItems} pieces`;
   updateScanProgress(stats);
   if (els.remainingQty) els.remainingQty.textContent = String(stats.remainingQty);
@@ -6054,6 +6393,7 @@ async function completeRack(code) {
   const payload = await fetchJson("/api/racks/complete", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
+  playAppSound("rack_complete", { force: true });
   showFloatingNotice(payload.message || `Rack ${code} completed with automatic destination.`, "success");
   renderRacksPage();
   renderScanRackTools();
@@ -6068,6 +6408,7 @@ async function uncompleteRack(code) {
   const payload = await fetchJson("/api/racks/uncomplete", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
+  playAppSound("rack_reopened");
   renderRacksPage();
   renderScanRackTools();
 }
@@ -6089,6 +6430,7 @@ async function returnRack(code) {
   const payload = await fetchJson("/api/racks/return", { method: "POST", body: JSON.stringify({ rackCode: code }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
+  playAppSound("rack_returned", { force: true });
   renderRacksPage();
   renderScanRackTools();
   showActionFeedback({
@@ -6125,6 +6467,7 @@ async function markRackNotOnTheWay(code) {
   state.rackSummary = payload.summary || null;
   renderRacksPage();
   renderScanRackTools();
+  playAppSound("rack_reopened", { force: true });
   showFloatingNotice(payload.message || `Rack ${code} is open again and outbound rack scans were reversed.`, "success");
 }
 
@@ -6133,7 +6476,7 @@ async function markRackNotOnTheWay(code) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-async function assignLineItemToRack(lineItemId, rackCode) {
+async function assignLineItemToRack(lineItemId, rackCode, options = {}) {
   const payload = await fetchJson("/api/racks/assign-line-item", {
     method: "POST",
     body: JSON.stringify({ lineItemId, rackCode }),
@@ -6151,8 +6494,11 @@ async function assignLineItemToRack(lineItemId, rackCode) {
   }
 
   renderScanPage();
-  renderRacksPage();
-  showFloatingNotice(rackCode ? `Line item assigned to rack ${rackCode}.` : "Line item rack location cleared.", "success");
+  if (state.page === "racks") renderRacksPage();
+  if (!options.quiet) {
+    playAppSound(rackCode ? "rack_item_added" : "rack_reopened");
+    showFloatingNotice(rackCode ? `Line item assigned to rack ${rackCode}.` : "Line item rack location cleared.", "success");
+  }
 }
 
 /**
@@ -6499,16 +6845,6 @@ function renderMobileCards() {
       <h3>Delivery List</h3>
       <span>${state.items.length} items</span>
     </div>
-    <div class="filter-tabs mobile-tabs">
-      <button class="tab ${isScanFilterActive("all") ? "is-active" : ""}" data-filter="all" type="button">All (${state.items.length})</button>
-      <button class="tab ${isScanFilterActive("remaining") ? "is-active" : ""}" data-filter="remaining" type="button">Remaining (${getStats().remainingItems})</button>
-      <button class="tab ${isScanFilterActive("partial") ? "is-active" : ""}" data-filter="partial" type="button">Partial (${getStats().partialItems})</button>
-      <button class="tab ${isScanFilterActive("complete") ? "is-active" : ""}" data-filter="complete" type="button">Complete (${getStats().completeItems})</button>
-      <button class="tab ${isScanFilterActive("remakes") ? "is-active" : ""}" data-filter="remakes" type="button">Remakes (${state.items.filter(isRemakeItem).length})</button>
-      <button class="tab ${isScanFilterActive("rushes") ? "is-active" : ""}" data-filter="rushes" type="button">Rushes (${state.items.filter(isRushItem).length})</button>
-      <button class="tab ${isScanFilterActive("updated") ? "is-active" : ""}" data-filter="updated" type="button">Updated (${state.items.filter(isNewOrUpdatedItem).length})</button>
-      <button class="tab ${isScanFilterActive("errors") ? "is-active" : ""}" data-filter="errors" type="button">Review (${state.errors.length})</button>
-    </div>
     ${pageRows
       .slice(0, 12)
       .map((item) => {
@@ -6755,8 +7091,49 @@ function renderRecent() {
  * Effects: Updates visible dom state, may call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
+function allScansRackControl(item) {
+  if (!item) return `<span class="all-scans-rack-note">-</span>`;
+  const currentCode = String(item.rackCode || "").trim().toUpperCase();
+  const currentRack = rackForCode(currentCode);
+  const currentLocked = rackIsLockedForLineAssignment(currentRack) || item.outboundScanned;
+  const canEdit = canAssignRackLocation() && !currentLocked;
+  if (!canEdit) {
+    const label = currentCode || "No rack";
+    const reason = item.outboundScanned
+      ? "Locked after Outbound scan"
+      : rackIsLockedForLineAssignment(currentRack)
+        ? `Rack is ${currentRack?.status || "closed"}`
+        : "View only";
+    return `<span class="all-scans-rack-note ${currentCode ? "has-rack" : ""}"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(reason)}</small></span>`;
+  }
+
+  const options = (state.racks || [])
+    .filter((rack) => rack.active !== false)
+    .map((rack) => {
+      const code = String(rack.code || "").trim().toUpperCase();
+      const locked = rackIsLockedForLineAssignment(rack) && code !== currentCode;
+      return `<option value="${escapeHtml(code)}" ${code === currentCode ? "selected" : ""} ${locked ? "disabled" : ""}>${escapeHtml(rackOptionLabel(rack))}${locked ? " (closed)" : ""}</option>`;
+    })
+    .join("");
+  return `
+    <label class="all-scans-rack-editor">
+      <span class="sr-only">Rack for Order ${escapeHtml(item.order)} Item ${escapeHtml(item.item)}</span>
+      <select data-scan-event-rack="${escapeHtml(item.id)}" data-current-rack="${escapeHtml(currentCode)}">
+        <option value="" ${currentCode ? "" : "selected"}>No rack</option>
+        ${options}
+      </select>
+    </label>
+  `;
+}
+
+async function openRecentScansModal() {
+  if (isStagingScanContext() && canAssignRackLocation()) await ensureRacksLoaded().catch(() => {});
+  openAdminModal("recentScans");
+}
+
 function recentScansModalHtml() {
   const rows = state.recent || [];
+  const stagingView = isStagingScanContext();
   return `
     <div class="recent-scans-modal full-scans-modal">
       <div class="modal-list-heading">
@@ -6767,13 +7144,14 @@ function recentScansModalHtml() {
         <span>${escapeHtml(rows.length)} recent event${rows.length === 1 ? "" : "s"}</span>
       </div>
       <div class="recent-table-wrap expanded">
-        <table class="recent-table all-scans-table">
+        <table class="recent-table all-scans-table ${stagingView ? "has-rack-column" : ""}">
           <thead>
             <tr>
               <th>Event</th>
               <th>Barcode / Source</th>
-              <th>Job / Order / Item</th>
+              <th>Order / Item / Job Nr.</th>
               <th>Qty</th>
+              ${stagingView ? "<th>Rack</th>" : ""}
               <th>Customer</th>
               <th>Full details</th>
               <th>User / Station</th>
@@ -6795,7 +7173,7 @@ function recentScansModalHtml() {
                         : entry.barcode || entry.raw || "SYSTEM";
                       const quantity = item ? `${escapeHtml(item.scanned)}/${escapeHtml(item.qty || item.scanned || "-")}` : Math.abs(Number(entry.qtyDelta || 0)) || "-";
                       const jobOrderItem = item
-                        ? `<strong>${escapeHtml(item.job || item.product || "No Job Nr.")}</strong><span>Order ${escapeHtml(item.order)} / Item ${escapeHtml(item.item)}</span>`
+                        ? `<strong>Order ${escapeHtml(item.order)} / Item ${escapeHtml(item.item)}</strong><span>Job Nr. ${escapeHtml(item.job || "Not provided")}</span>`
                         : `<strong>${escapeHtml(eventLabel)}</strong><span>No line item attached</span>`;
                       return `
                         <tr class="${scanEntryRowClass(entry)}">
@@ -6803,6 +7181,7 @@ function recentScansModalHtml() {
                           <td><strong>${escapeHtml(sourceLabel)}</strong>${!["import", "update"].includes(eventType) && entry.raw && entry.raw !== entry.barcode ? `<small>Raw: ${escapeHtml(entry.raw)}</small>` : ""}</td>
                           <td><div class="all-scans-item-cell">${jobOrderItem}</div></td>
                           <td>${quantity}</td>
+                          ${stagingView ? `<td>${allScansRackControl(item)}</td>` : ""}
                           <td>${item ? escapeHtml(item.customer || "-") : "-"}</td>
                           <td><div class="all-scans-detail-cell">${scanEntryFullDetail(entry) || `<span>${escapeHtml(scanEntryCompactMessage(entry) || "No additional details")}</span>`}</div></td>
                           <td><strong>${escapeHtml(entry.user || "System")}</strong><span>${escapeHtml(entry.station || "No station")}</span></td>
@@ -6812,7 +7191,7 @@ function recentScansModalHtml() {
                       `;
                     })
                     .join("")
-                : `<tr><td colspan="9">No scans yet</td></tr>`
+                : `<tr><td colspan="${stagingView ? 10 : 9}">No scans yet</td></tr>`
             }
           </tbody>
         </table>
@@ -6936,16 +7315,26 @@ function applyPermissionUi() {
 function renderScanPage() {
   renderMeta();
   renderCounts();
-  renderTable();
-  renderMobileCards();
+  const mobileViewport = window.matchMedia("(max-width: 760px)").matches;
+  state.scanViewportMobile = mobileViewport;
+  if (mobileViewport) renderMobileCards();
+  else renderTable();
   renderRecent();
   renderLastScan();
   renderManualAssignTools();
   renderScanRackTools();
   renderOutboundRackStatusTools();
   renderScanBayOverrideTools();
-  renderSoundTestControls(els.scanPage || document);
   applyPermissionUi();
+}
+
+/** Coalesce rapid search and filter input into one Scan-page paint per frame. */
+function scheduleScanRender() {
+  if (state.scanRenderFrame) return;
+  state.scanRenderFrame = window.requestAnimationFrame(() => {
+    state.scanRenderFrame = 0;
+    renderScanPage();
+  });
 }
 
 /**
@@ -8600,6 +8989,7 @@ function showPage(page) {
   if (page === "admin" && !hasAnyPermission(["view_admin", "manage_users", "manage_stations", "edit_delivery_lists"])) page = "home";
   if (page === "bays" && !hasAnyPermission(["view_bays", "view_indian_trail"])) page = "home";
   if (page === "racks" && !hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) page = "home";
+  const pageChanged = state.page !== page;
   if (page === "home") state.expandedDeliveryDate = "";
   state.page = page;
   document.body.dataset.page = page;
@@ -8611,11 +9001,19 @@ function showPage(page) {
   document.querySelectorAll("[data-page-target]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.pageTarget === page);
   });
+  updateModalScrollLock();
+  requestAnimationFrame(() => updateModalScrollLock());
   if (page === "home") renderHome();
   if (page === "scan") renderScanPage();
   if (page === "racks") refreshRacksPage().catch((error) => showInlineError(error.message, true));
   if (page === "bays") {
-    refreshBayMapPage().catch((error) => showInlineError(error.message));
+    if (pageChanged) els.bayFlowPanel?.classList.add("is-entering");
+    refreshBayMapPage()
+      .then(() => {
+        if (pageChanged) restartBayTruckAnimation();
+      })
+      .catch((error) => showInlineError(error.message))
+      .finally(() => els.bayFlowPanel?.classList.remove("is-entering"));
   }
   if (page === "admin") refreshAdminPage().catch((error) => showInlineError(error.message));
   if (page === "scan") {
@@ -8625,6 +9023,7 @@ function showPage(page) {
       void pollUserNotifications();
     }, 0);
   }
+  if (pageChanged && state.authenticated) playAppSound("notification");
 }
 
 /**
@@ -8974,7 +9373,7 @@ function showOutboundRackTransitPrompt(result) {
   mountTimedScanConfirmation({
     id: "outboundRackTransitShell",
     className: "is-outbound-transit",
-    openAllScans: async () => openAdminModal("recentScans"),
+    openAllScans: async () => openRecentScansModal(),
     markup: `
       <section class="indian-trail-placement-panel" role="status" aria-live="assertive">
         <div class="indian-trail-placement-icon" aria-hidden="true"></div>
@@ -8996,6 +9395,105 @@ function showOutboundRackTransitPrompt(result) {
       </section>
     `,
   });
+}
+
+/**
+ * Show one compact, timed outcome card for every normal delivery-list scan.
+ * The Indian Trail receiving workflow keeps its more specific bay-placement card.
+ */
+function showStageScanConfirmation(result, options = {}) {
+  const entry = result?.lastScan || result || {};
+  const item = entry.item || result?.item || {};
+  const eventType = String(entry.eventType || entry.type || "").toLowerCase();
+  const isNotice = !entry.ok && (
+    eventType.includes("duplicate") ||
+    eventType.includes("notice") ||
+    eventType.includes("warning") ||
+    Boolean(entry.overrideRequired)
+  );
+  const outcome = entry.ok ? "success" : isNotice ? "notice" : "error";
+  const title = entry.ok
+    ? `${item.order || "Scan"}${item.item ? `-${item.item}` : ""} accepted`
+    : isNotice
+      ? (entry.message || result?.message || "Scan notice")
+      : (entry.message || result?.message || "Scan not accepted");
+  const message = [result?.message, entry.message, entry.reason]
+    .map((value) => String(value || "").trim())
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .join(" - ");
+  const stage = stageLabel(state.meta || {}) || state.meta?.stage || state.meta?.scanner || "Current stage";
+  const quantity = item.qty == null
+    ? "-"
+    : `${Math.max(Number(item.scanned || 0), 0)} / ${Math.max(Number(item.qty || 0), 0)}`;
+  const currentRackCode = String(result?.rackCode || item.rackCode || "").trim();
+  const canCorrectRack = Boolean(entry.ok && item.id && canAssignRackLocation());
+  const rackOptions = canCorrectRack
+    ? groupedRackOptionsHtml((state.racks || []).filter((rack) => !rackIsLockedForLineAssignment(rack)), currentRackCode, { includeNoRack: true })
+    : "";
+  const eyebrow = outcome === "success" ? "SCAN ACCEPTED" : outcome === "notice" ? "SCAN NOTICE" : "SCAN ERROR";
+
+  const shell = mountTimedScanConfirmation({
+    id: "stageScanConfirmationShell",
+    className: `scan-result-confirmation is-${outcome}`,
+    durationSeconds: outcome === "error" ? 10 : 8,
+    openAllScans: async () => openRecentScansModal(),
+    markup: `
+      <section class="indian-trail-placement-panel" role="${outcome === "error" ? "alert" : "status"}" aria-live="${outcome === "error" ? "assertive" : "polite"}">
+        <div class="indian-trail-placement-icon" aria-hidden="true"></div>
+        <div class="indian-trail-placement-copy">
+          <small>${escapeHtml(eyebrow)}</small>
+          <h2>${escapeHtml(title)}</h2>
+          <p>${escapeHtml(message || (entry.ok ? `${stage} quantity was updated.` : "Review the scan and try again."))}</p>
+        </div>
+        <div class="scan-result-facts" aria-label="Scan details">
+          <span><small>Order</small><strong>${escapeHtml(item.order || "-")}</strong></span>
+          <span><small>Item</small><strong>${escapeHtml(item.item || "-")}</strong></span>
+          <span><small>Quantity</small><strong>${escapeHtml(quantity)}</strong></span>
+          <span><small>Dimensions</small><strong>${escapeHtml(item.dimensions || "-")}</strong></span>
+          <span><small>Customer</small><strong>${escapeHtml(item.customer || "-")}</strong></span>
+          <span><small>Stage</small><strong>${escapeHtml(stage)}</strong></span>
+          <span><small>Job / Glass</small><strong>${escapeHtml(item.job || item.product || "-")}</strong></span>
+          <span><small>Route</small><strong>${escapeHtml(routeLabel(item) || "-")}</strong></span>
+          <span><small>Location</small><strong>${escapeHtml(currentRackCode || locationLabel(item) || "-")}</strong></span>
+        </div>
+        ${canCorrectRack ? `
+          <label class="scan-result-rack-field">
+            <span>Rack / Truck</span>
+            <select data-scan-result-rack>${rackOptions}</select>
+            <small data-scan-result-rack-status>${currentRackCode ? `Currently ${escapeHtml(currentRackCode)}` : "No rack assigned"}</small>
+          </label>
+        ` : ""}
+        <div class="indian-trail-placement-actions">
+          <span class="timed-scan-open-hint">Click the notice to open All Scans</span>
+          <button type="button" data-placement-close>Done <span data-placement-countdown>${outcome === "error" ? "10" : "8"}</span></button>
+        </div>
+        <i class="indian-trail-placement-timer" aria-hidden="true"></i>
+      </section>
+    `,
+  });
+
+  const rackSelect = shell.querySelector("[data-scan-result-rack]");
+  rackSelect?.addEventListener("change", async () => {
+    const status = shell.querySelector("[data-scan-result-rack-status]");
+    rackSelect.disabled = true;
+    if (status) status.textContent = "Updating location...";
+    try {
+      await assignLineItemToRack(item.id, rackCodeForScan(rackSelect.value), { quiet: true });
+      if (status) status.textContent = rackSelect.value === NO_RACK_SELECTION
+        ? "Rack location cleared"
+        : `Moved to ${rackSelect.value}`;
+      shell.classList.add("rack-change-saved");
+    } catch (error) {
+      rackSelect.value = currentRackCode || NO_RACK_SELECTION;
+      if (status) status.textContent = error.message;
+      shell.classList.add("rack-change-error");
+    } finally {
+      rackSelect.disabled = false;
+      syncCustomSelect(rackSelect);
+    }
+  });
+
+  return shell;
 }
 
 /**
@@ -9145,7 +9643,7 @@ async function processScanInternal(rawScan, options = {}) {
       state.lastScan = result.lastScan || state.lastScan;
 
       if (result.outboundOverrideRequired) {
-        scanFlash("notice");
+        scanFlash("notice", "scan_warning");
         const decision = await showIndianTrailOutboundReceiveOverride(result, scanText, options);
         if (decision) {
           await processScan(scanText, {
@@ -9161,14 +9659,13 @@ async function processScanInternal(rawScan, options = {}) {
       }
 
       await activateList(state.activeListId, false);
-      scanFlash(result.ok ? "success" : "error");
-      if (!result.ok && result?.message) {
-        showFloatingNotice(result.message, "error");
-      }
+      scanFlash(result.ok ? "success" : "error", result.ok ? "bay_assigned" : scanSoundKind(result.lastScan || result, "scan_error"));
       renderScanPage();
       await refreshBayMapPage().catch(() => {});
       if (result.ok) {
         await showIndianTrailPlacementPrompt(result);
+      } else {
+        showStageScanConfirmation(result);
       }
       return;
     }
@@ -9197,7 +9694,7 @@ async function processScanInternal(rawScan, options = {}) {
       state.selectedOutboundRackCode = String(payload.rackCode || "").trim();
     }
     if (payload.destinationOverrideRequired) {
-      scanFlash("notice");
+      scanFlash("notice", "scan_warning");
       renderScanPage();
       const approved = await showRackDestinationOverrideDialog(payload);
       if (approved) {
@@ -9206,13 +9703,10 @@ async function processScanInternal(rawScan, options = {}) {
       return;
     }
     if (payload.outboundOverrideRequired) {
-      scanFlash("error");
+      scanFlash("error", "scan_warning");
       renderScanPage();
       await showOutboundOverrideDialog(payload, scanText, options);
       return;
-    }
-    if (payload.message && !outboundRackDeparture) {
-      showFloatingNotice(payload.message, payload.lastScan?.ok ? "success" : "notice");
     }
     if (payload.racks) {
       state.racks = payload.racks || state.racks;
@@ -9222,10 +9716,15 @@ async function processScanInternal(rawScan, options = {}) {
     } else if ((isStagingScanContext() || isOutboundScanContext()) && state.racks.length) {
       void ensureRacksLoaded(isOutboundScanContext()).catch(() => {});
     }
-    scanFlash(payload.lastScan?.ok ? "success" : payload.lastScan?.eventType === "duplicate" || payload.lastScan?.eventType === "notice" ? "notice" : "error");
+    scanFlash(
+      payload.lastScan?.ok ? "success" : payload.lastScan?.eventType === "duplicate" || payload.lastScan?.eventType === "notice" ? "notice" : "error",
+      scanSoundKind(payload.lastScan, payload.lastScan?.ok ? (payload.rackCode ? "rack_item_added" : "scan_success") : "scan_error"),
+    );
     renderScanPage();
     if (outboundRackDeparture) {
       showOutboundRackTransitPrompt(payload);
+    } else {
+      showStageScanConfirmation(payload);
     }
     return;
   }
@@ -9273,10 +9772,10 @@ function processLocalScan(scanText, options = {}) {
     state.errors.unshift(entry);
     state.recent.unshift(entry);
     state.lastScan = entry;
-    scanFlash("error");
-    showFloatingNotice(`${entry.message}: ${entry.reason}`, "error");
+    scanFlash("error", "scan_error");
     saveState();
     renderScanPage();
+    showStageScanConfirmation(entry, { local: true });
     return;
   }
   const item = recovered.item;
@@ -9284,19 +9783,20 @@ function processLocalScan(scanText, options = {}) {
     const entry = { ok: false, eventType: "duplicate", barcode: recovered.barcode, item, message: "Item already complete", reason: "Quantity already scanned", time: timestamp };
     state.recent.unshift(entry);
     state.lastScan = entry;
-    scanFlash("notice");
-    showFloatingNotice(entry.reason, "notice");
+    scanFlash("notice", "scan_duplicate");
     saveState();
     renderScanPage();
+    showStageScanConfirmation(entry, { local: true });
     return;
   }
   item.scanned += 1;
   state.selectedId = item.id;
   const entry = { ok: true, eventType: options.isManual ? "manual_scan" : "scan", isManual: Boolean(options.isManual), barcode: recovered.barcode, raw: scanText, item, message: recovered.reason, time: timestamp };  state.recent.unshift(entry);
   state.lastScan = entry;
-  scanFlash("success");
+  scanFlash("success", scanSoundKind(entry));
   saveState();
   renderScanPage();
+  showStageScanConfirmation(entry, { local: true });
 }
 
 /**
@@ -9515,6 +10015,7 @@ function showActionFeedback({
  * dialog with one Done button. Scans and background refreshes do not call this helper.
  */
 function showSaveConfirmation(message = "Your changes are now active.", details = []) {
+  playAppSound("save");
   showActionFeedback({
     kind: "success",
     eyebrow: "Save complete",
@@ -9753,7 +10254,11 @@ function presentNextUserNotification() {
   if (!state.authenticated || document.hidden || rushNotificationIsBlocked()) return;
   const next = state.notificationQueue.shift();
   if (!next) return;
-  if (!showRushAlert(next)) state.notificationQueue.unshift(next);
+  if (!showRushAlert(next)) {
+    state.notificationQueue.unshift(next);
+    return;
+  }
+  playAppSound("notification");
 }
 
 /**
@@ -9904,6 +10409,7 @@ function launchManagedPrint(url, windowName = "deliveryListPrintWindow") {
   }
   watchManagedPrintWindow(printWindow);
   printWindow.focus();
+  playAppSound("print_ready");
   return printWindow;
 }
 
@@ -9924,6 +10430,7 @@ function printCurrentPageManaged() {
     restoreFullscreenAfterManagedPrint();
   };
   window.addEventListener("afterprint", afterPrint);
+  playAppSound("print_ready");
   window.print();
 }
 
@@ -10078,6 +10585,21 @@ async function refreshBayMapPage() {
   maybeShowStaleBayAlert().catch(() => {});
 }
 
+/** Start the Bay Map truck from its route origin after the page is fully painted. */
+function restartBayTruckAnimation() {
+  const truck = els.bayFlowPanel?.querySelector(".transit-moving-truck");
+  if (!truck || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+  truck.style.animation = "none";
+  truck.style.opacity = "0";
+  void truck.offsetWidth;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      truck.style.removeProperty("animation");
+      truck.style.removeProperty("opacity");
+    });
+  });
+}
+
 /**
  * Purpose: Render the render bay route flow workflow using the existing shared UI state.
  * Effects: Updates visible dom state, may update shared client state.
@@ -10108,10 +10630,27 @@ function renderBayRouteFlow(summary) {
   const routeComplete = outboundTotal > 0 && inboundTotal > 0 && outboundQty >= outboundTotal && inboundQty >= inboundTotal;
   const celebrateRouteCompletion = routeComplete && state.lastBayRouteComplete === false;
   state.lastBayRouteComplete = routeComplete;
-  if (celebrateRouteCompletion) playAppSound("complete", { delay: 0.18 });
+  if (celebrateRouteCompletion) playAppSound("task_complete", { delay: 0.18 });
   const rackLine = (summary?.racksInTransit || [])
     .map((rack) => `${rack.code}: ${rack.qty}`)
     .join(" | ");
+
+  const flowSignature = JSON.stringify({
+    key,
+    outboundId: outbound?.id || "",
+    inboundId: inbound?.id || "",
+    outboundQty,
+    outboundTotal,
+    inboundQty,
+    inboundTotal,
+    inTransitQty,
+    inTransitJobCount,
+    truckQty,
+    rackQty,
+    rackLine,
+  });
+  if (state.bayRouteFlowSignature === flowSignature && els.bayFlowPanel.querySelector(".transit-moving-truck")) return;
+  state.bayRouteFlowSignature = flowSignature;
 
   const inTransitPieceLabel = `${inTransitQty} piece${inTransitQty === 1 ? "" : "s"} on the way`;
   const outboundStageLabel = outbound ? outbound.stage : "No outbound list";
@@ -11576,6 +12115,7 @@ function animateBaySectionToggle(details) {
   if (!body || details.dataset.animating === "1") return;
 
   const isOpen = details.open;
+  void playAppSound(isOpen ? "collapse_close" : "collapse_open");
   details.dataset.animating = "1";
 
   if (isOpen) {
@@ -11651,7 +12191,6 @@ function renderBayMapPage() {
   renderBaySidePanels();
   renderBayFilterSummary();
   renderBayRecentActions();
-  renderSoundTestControls(els.bayMapPage || document);
 }
 
 /**
@@ -12400,7 +12939,7 @@ async function runBayScan(barcode, { isManual = false, outboundOverride = false,
     ? result.message
     : `${isManual ? "Manual scan: " : ""}Removed ${result.order}-${result.item} from ${result.bayDisplay || result.bayCode}`;
   if (els.bayScanOutStatus) els.bayScanOutStatus.textContent = message;
-  scanFlash("success");
+  scanFlash("success", adding ? "bay_assigned" : "bay_removed");
 
   if (adding) {
     await showIndianTrailPlacementPrompt(result);
@@ -14618,6 +15157,7 @@ async function importTempDeliveryFolder() {
   const { dateFrom, dateTo } = currentImportDateWindow();
 
   showImportStatusLoading("Importing Temp folder...", `Checking delivery dates from ${formatDisplayDate(dateFrom)} through the newest future list.`);
+  playAppSound("import_start", { force: true });
   await waitForNextPaint();
 
   const result = await fetchJson("/api/import/folder", {
@@ -14664,6 +15204,7 @@ async function importTempDeliveryFolder() {
           <small>${escapeHtml(windowText)}</small>
         `;
   }
+  playAppSound(failed ? "scan_warning" : "import_complete", { force: true });
 }
 
 /**
@@ -16541,7 +17082,7 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
 
         <label class="manual-edit-control search-control">
           <span>Search within stage</span>
-          <input id="manualEditModalSearch" type="search" autocomplete="off" value="${escapeHtml(state.manualEditQuery || "")}" placeholder="Order, customer, job, route...">
+          <input id="manualEditModalSearch" type="search" autocomplete="off" value="${escapeHtml(state.manualEditQuery || "")}" placeholder="Order number, Job Nr., customer, route...">
         </label>
 
         <div class="manual-edit-tool-actions">
@@ -16603,6 +17144,9 @@ async function openManualEditForList(listId) {
   state.manualEditDirty = false;
   state.manualEditListId = listId || state.activeListId || state.lists[0]?.id || "";
   state.manualEditQuery = "";
+  state.manualEditResultRows = [];
+  state.manualEditTotalRows = 0;
+  state.manualEditVisibleCount = 20;
 
   openAdminModal("manualEdit");
 
@@ -16615,12 +17159,22 @@ async function openManualEditForList(listId) {
  * Effects: May call the backend api.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
-async function fetchManualEditResults(query, listId) {
+async function fetchManualEditBatch(query, listId, limit = 20, offset = 0) {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   if (listId) params.set("listId", listId);
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
   const payload = await fetchJson(`/api/admin/line-items/search?${params.toString()}`);
-  return payload.results || [];
+  return {
+    results: payload.results || [],
+    total: Math.max(Number(payload.total || 0), (payload.results || []).length),
+  };
+}
+
+/** Retain the older array-returning helper for the compact Admin-page editor. */
+async function fetchManualEditResults(query, listId) {
+  return (await fetchManualEditBatch(query, listId, 100, 0)).results;
 }
 
 /**
@@ -16629,8 +17183,14 @@ async function fetchManualEditResults(query, listId) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function runManualEditModalSearch(loadAll = false) {
+  const requestId = ++state.manualEditSearchRequestId;
   const stage = document.getElementById("manualEditModalStage")?.value || state.manualEditListId || "";
   const query = loadAll ? "" : (document.getElementById("manualEditModalSearch")?.value.trim() || "");
+
+  if (loadAll) {
+    const searchInput = document.getElementById("manualEditModalSearch");
+    if (searchInput) searchInput.value = "";
+  }
 
   state.manualEditListId = stage;
   state.manualEditQuery = query;
@@ -16653,8 +17213,12 @@ async function runManualEditModalSearch(loadAll = false) {
     `;
   }
 
-  const results = await fetchManualEditResults(query, stage);
-  const html = manualEditResultsHtml(results);
+  const resultPage = await fetchManualEditBatch(query, stage, 20, 0);
+  if (requestId !== state.manualEditSearchRequestId) return;
+  state.manualEditResultRows = resultPage.results;
+  state.manualEditTotalRows = resultPage.total;
+  state.manualEditVisibleCount = 20;
+  const html = manualEditResultsHtml(state.manualEditResultRows, state.manualEditVisibleCount, state.manualEditTotalRows);
 
   if (target) {
     target.innerHTML = html;
@@ -16665,6 +17229,30 @@ async function runManualEditModalSearch(loadAll = false) {
   }
 
   state.manualEditDirty = false;
+}
+
+/** Reveal the next batch of editable rows without another server request. */
+async function loadMoreManualEditRows() {
+  const button = document.querySelector("[data-manual-edit-load-more]");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Loading...";
+  }
+  const resultPage = await fetchManualEditBatch(
+    state.manualEditQuery,
+    state.manualEditListId,
+    20,
+    state.manualEditResultRows.length,
+  );
+  const knownIds = new Set(state.manualEditResultRows.map((item) => String(item.lineItemId || "")));
+  state.manualEditResultRows.push(
+    ...resultPage.results.filter((item) => !knownIds.has(String(item.lineItemId || ""))),
+  );
+  state.manualEditTotalRows = resultPage.total;
+  state.manualEditVisibleCount = state.manualEditResultRows.length;
+  const html = manualEditResultsHtml(state.manualEditResultRows, state.manualEditVisibleCount, state.manualEditTotalRows);
+  const target = document.getElementById("manualEditModalResults");
+  if (target) target.innerHTML = html;
 }
 
 /**
@@ -19131,6 +19719,7 @@ async function sendCustomerEmailTest() {
   const message = result.status === "sent"
     ? `Test email sent to ${result.toEmail} through ${result.transport === "graph" ? "Microsoft Graph" : "SMTP"}.`
     : `Test email saved as ${result.status || "draft"}. Open it in Email Drafts.`;
+  playAppSound(result.status === "sent" ? "email_sent" : "notification");
   showFloatingNotice(message, result.status === "sent" ? "success" : "notice");
 }
 
@@ -19849,14 +20438,16 @@ function manualEditValidateRow(row) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function manualEditResultsHtml(results) {
-  const visibleRows = results.slice(0, 100);
+function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.length) {
+  const visibleRows = results.slice(0, Math.max(Number(visibleCount || 20), 20));
+  const totalRows = Math.max(Number(totalCount || 0), results.length);
+  const remainingRows = Math.max(totalRows - visibleRows.length, 0);
 
   return results.length
     ? `
       <div class="manual-edit-result-summary">
-        <span>Showing ${escapeHtml(visibleRows.length)} of ${escapeHtml(results.length)} row${results.length === 1 ? "" : "s"}</span>
-        <small>Choose from dropdowns or type a custom value.</small>
+        <span>Showing ${escapeHtml(visibleRows.length)} of ${escapeHtml(totalRows)} row${totalRows === 1 ? "" : "s"}</span>
+        <small>Rows start collapsed. Expand one to edit it.</small>
       </div>
 
       <div class="manual-edit-card-list">
@@ -19869,16 +20460,21 @@ function manualEditResultsHtml(results) {
             const locationValue = manualEditCurrentLocationValue(item);
 
             return `
-              <article class="manual-edit-card" data-edit-row="${escapeHtml(item.lineItemId)}">
-                <header class="manual-edit-card-header">
+              <details class="manual-edit-card" data-edit-row="${escapeHtml(item.lineItemId)}">
+                <summary class="manual-edit-card-header">
                   <div class="manual-edit-card-title">
                     <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
-                    <span>${escapeHtml(item.customer || "")}</span>
+                    <span>${escapeHtml(item.job || "No Job Nr.")} &bull; ${escapeHtml(item.customer || "No customer")}</span>
                   </div>
 
                   <div class="manual-edit-card-stage" title="${escapeHtml(stageText)}">
                     <span>Stage</span>
                     <strong>${escapeHtml(stageText || "No stage")}</strong>
+                  </div>
+
+                  <div class="manual-edit-card-quantity">
+                    <span>Quantity</span>
+                    <strong>${escapeHtml(scannedValue)} / ${escapeHtml(qtyValue)}</strong>
                   </div>
 
                   <div class="manual-edit-row-actions">
@@ -19897,9 +20493,11 @@ function manualEditResultsHtml(results) {
                       aria-label="Delete ${escapeHtml(rowLabel)}"
                     ></button>
                   </div>
-                </header>
+                  <span class="manual-edit-card-chevron" aria-hidden="true"></span>
+                </summary>
 
-                <div class="manual-edit-card-grid">
+                <div class="manual-edit-card-body">
+                  <div class="manual-edit-card-grid">
 
                   <label class="manual-field">
                     <span>Order</span>
@@ -19970,14 +20568,21 @@ function manualEditResultsHtml(results) {
                   </label>
 
                   <input data-edit-field="queueState" type="hidden" value="${escapeHtml(item.queueState || "")}">
-                </div>
+                  </div>
 
-                <div class="manual-edit-row-error" hidden aria-live="polite"></div>
-              </article>
+                  <div class="manual-edit-row-error" hidden aria-live="polite"></div>
+                </div>
+              </details>
             `;
           })
           .join("")}
       </div>
+      ${remainingRows ? `
+        <div class="manual-edit-load-more">
+          <button type="button" data-manual-edit-load-more>Load 20 more</button>
+          <span>${escapeHtml(remainingRows)} row${remainingRows === 1 ? "" : "s"} remaining</span>
+        </div>
+      ` : ""}
     `
     : `<div class="admin-empty">No editable rows found.</div>`;
 }
@@ -19998,28 +20603,60 @@ async function saveManualLineItem(lineItemId) {
   }
 
   const data = { lineItemId };
+  const saveButton = row.querySelector("[data-save-line-item]");
 
   row.querySelectorAll("[data-edit-field]").forEach((input) => {
     data[input.dataset.editField] = input.value;
   });
 
-  const payload = await fetchJson("/api/admin/line-item", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+  row.classList.add("is-saving");
+  if (saveButton) saveButton.disabled = true;
+  try {
+    const payload = await fetchJson("/api/admin/line-item", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
 
-  const preferredListId = state.activeListId || payload.meta?.id || "";
-  await loadDeliveryLists(preferredListId);
+    const payloadListId = String(payload.meta?.id || "");
+    const catalogList = state.lists.find((list) => String(list.id || "") === payloadListId);
+    if (catalogList && Array.isArray(payload.items)) {
+      catalogList.items = cloneItems(payload.items);
+      catalogList.totalQty = pieceCount(catalogList.items);
+      catalogList.scannedQty = catalogList.items.reduce((sum, item) => sum + itemScannedPieceQty(item), 0);
+    }
+    if (payloadListId && payloadListId === state.activeListId) {
+      applyBackendPayload(payload);
+      if (state.page === "scan") scheduleScanRender();
+    }
 
-  if (!els.adminModal?.hidden && state.manualEditListId) {
-    await runManualEditModalSearch(!state.manualEditQuery);
-  } else {
-    await runManualEditSearch();
+    const resultItem = state.manualEditResultRows.find((item) => String(item.lineItemId || "") === String(lineItemId));
+    if (resultItem) {
+      Object.assign(resultItem, {
+        order: data.order,
+        item: data.item,
+        customer: data.customer,
+        qty: Number(data.qty || 0),
+        scanned: Number(data.scanned || 0),
+        route: data.route,
+        processState: data.processState,
+        product: data.product,
+        dimensions: data.dimensions,
+        job: data.job,
+        queueState: data.queueState,
+        location: data.location,
+        locationDisplay: data.location,
+      });
+    }
+
+    state.manualEditDirty = false;
+    row.classList.remove("is-saving");
+    row.classList.add("is-saved");
+    window.setTimeout(() => row.classList.remove("is-saved"), 1200);
+    showSaveConfirmation(payload.message || "Line item updated across its delivery-list stages.");
+  } finally {
+    row.classList.remove("is-saving");
+    if (saveButton) saveButton.disabled = false;
   }
-
-  state.manualEditDirty = false;
-  showSaveConfirmation(payload.message || "Line item updated across its delivery-list stages.");
-  renderScanPage();
 }
 
 /**
@@ -20176,18 +20813,32 @@ function replayExpandableListAnimation(details) {
 function wireEvents() {
   if (state.eventsWired) return;
 
+  document.addEventListener("pointerdown", () => void unlockAppSounds(), { capture: true, once: true });
+  document.addEventListener("keydown", () => void unlockAppSounds(), { capture: true, once: true });
+  setAppSoundVolume(appSoundRuntime.volumePercent, { persist: false });
+
   document.addEventListener("input", (event) => {
     const volumeInput = event.target.closest?.("[data-app-sound-volume]");
     if (!volumeInput) return;
     setAppSoundVolume(volumeInput.value);
   });
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     const soundTestButton = event.target.closest?.("[data-scan-sound-test]");
     if (soundTestButton) {
-      const kind = soundTestButton.dataset.scanSoundTest || "notice";
-      scanFlash(kind);
-      showFloatingNotice(`${kind.charAt(0).toUpperCase()}${kind.slice(1)} scan sound test played.`, kind);
+      event.preventDefault();
+      const kind = soundTestButton.dataset.scanSoundTest || "notification";
+      const visualKind = kind.includes("error") ? "error" : kind.includes("warning") || kind.includes("duplicate") ? "notice" : "success";
+      const played = await testAppSoundCue(kind);
+      if (played) {
+        document.body.classList.remove("scan-flash-success", "scan-flash-error", "scan-flash-notice");
+        void document.body.offsetWidth;
+        document.body.classList.add(visualKind === "error" ? "scan-flash-error" : visualKind === "notice" ? "scan-flash-notice" : "scan-flash-success");
+        window.setTimeout(() => document.body.classList.remove("scan-flash-success", "scan-flash-error", "scan-flash-notice"), 900);
+        showFloatingNotice(`${kind.replaceAll("_", " ")} sound played.`, visualKind);
+      } else {
+        showFloatingNotice("Sound could not play. Open the account menu for the browser audio status.", "error");
+      }
       return;
     }
 
@@ -20201,6 +20852,15 @@ function wireEvents() {
   initCustomSelectSystem();
   syncSidebarState();
   syncFullscreenControl();
+  let scanResizeTimer = 0;
+  window.addEventListener("resize", () => {
+    window.clearTimeout(scanResizeTimer);
+    scanResizeTimer = window.setTimeout(() => {
+      if (state.page !== "scan") return;
+      const mobileViewport = window.matchMedia("(max-width: 760px)").matches;
+      if (mobileViewport !== state.scanViewportMobile) scheduleScanRender();
+    }, 120);
+  });
 
   document.addEventListener("toggle", (event) => {
     const details = event.target.closest?.(".delivery-date-group, .admin-import-date-group");
@@ -20214,6 +20874,7 @@ function wireEvents() {
       await login(els.loginUsername?.value || "", els.loginPassword?.value || "");
       await loadAuthenticatedApp();
     } catch (error) {
+      playAppSound("permission_denied", { force: true });
       if (els.loginError) {
         els.loginError.textContent = error.message;
         els.loginError.classList.remove("success");
@@ -20275,7 +20936,49 @@ function wireEvents() {
     if (!document.hidden) void pollUserNotifications();
   });
 
+  document.addEventListener("toggle", (event) => {
+    const roleCard = event.target.closest?.(".role-permission-card[data-role-card]");
+    if (roleCard && els.adminModalBody?.contains(roleCard)) {
+      const roleName = roleCard.dataset.roleCard || "";
+      if (roleCard.open) state.rolePermissionOpenRoles.add(roleName);
+      else state.rolePermissionOpenRoles.delete(roleName);
+      return;
+    }
+
+    const category = event.target.closest?.(".permission-category[data-role-name][data-category-title]");
+    if (category && els.adminModalBody?.contains(category)) {
+      const key = rolePermissionCategoryKey(category.dataset.roleName, category.dataset.categoryTitle);
+      if (category.open) state.rolePermissionOpenCategories.add(key);
+      else state.rolePermissionOpenCategories.delete(key);
+      return;
+    }
+
+    if (event.target.matches?.("#scanFilterDrawer, #bayFilterDrawer")) {
+      void playAppSound(event.target.open ? "collapse_open" : "collapse_close");
+    }
+  }, true);
+
   document.addEventListener("change", async (event) => {
+    const scanRackSelect = event.target.closest?.("[data-scan-event-rack]");
+    if (scanRackSelect) {
+      const lineItemId = scanRackSelect.dataset.scanEventRack || "";
+      const previousRack = scanRackSelect.dataset.currentRack || "";
+      const rackCode = scanRackSelect.value || "";
+      scanRackSelect.disabled = true;
+      try {
+        await assignLineItemToRack(lineItemId, rackCode, { quiet: true });
+        playAppSound(rackCode ? "rack_item_added" : "rack_reopened");
+        showFloatingNotice(rackCode ? `Rack changed to ${rackCode}.` : "Rack location cleared.", "success");
+        await openRecentScansModal();
+      } catch (error) {
+        scanRackSelect.value = previousRack;
+        syncCustomSelect(scanRackSelect);
+        scanRackSelect.disabled = false;
+        showFloatingNotice(error.message, "error");
+      }
+      return;
+    }
+
     const moveSelect = event.target.closest?.("[data-bay-event-move]");
     if (!moveSelect) return;
     const assignmentId = Number(moveSelect.dataset.assignmentId || 0);
@@ -20303,6 +21006,7 @@ function wireEvents() {
         newBayCode,
         reason: `Moved from scan history selector (${currentBay || "unknown bay"})`,
       });
+      playAppSound("bay_moved");
       showFloatingNotice(`Moved ${label} to ${newBayCode}.`, "success");
       renderBayRecentActions();
       if (!els.adminModal?.hidden && els.adminModal?.dataset.kind === "custom") await openBayAllScansModal();
@@ -20402,7 +21106,9 @@ function wireEvents() {
     state.homeChartSelectedLabel = "";
     renderStatisticsChartModal();
   });
-  els.viewAllRecent?.addEventListener("click", () => openAdminModal("recentScans"));
+  els.viewAllRecent?.addEventListener("click", () => {
+    openRecentScansModal().catch((error) => showFloatingNotice(error.message, "error"));
+  });
   els.globalPrintExportBtn?.addEventListener("click", () => {
     const date = state.page === "scan" ? state.meta?.deliveryDate : dashboardDateKey();
     const listIds = state.lists.filter((list) => !date || list.deliveryDate === date).map((list) => list.id);
@@ -20496,7 +21202,7 @@ function wireEvents() {
   els.searchInput?.addEventListener("input", () => {
     state.search = els.searchInput.value;
     state.pageIndex = 1;
-    renderScanPage();
+    scheduleScanRender();
   });
   els.scanInput?.addEventListener("focus", () => clearSelectedLineItem());
   document.addEventListener("click", (event) => {
@@ -20547,7 +21253,8 @@ function wireEvents() {
     try {
       await processScan(els.scanInput.value);
     } catch (error) {
-      showInlineError(error.message, false);
+      scanFlash("error", "scan_error");
+      showStageScanConfirmation({ ok: false, eventType: "error", message: error.message, barcode: els.scanInput.value });
     }
     els.scanInput.value = "";
     els.scanInput.focus();
@@ -20557,7 +21264,8 @@ function wireEvents() {
     try {
       await submitManualScan();
     } catch (error) {
-      showInlineError(error.message, false);
+      scanFlash("error", "scan_error");
+      showStageScanConfirmation({ ok: false, eventType: "error", message: error.message });
     }
   });
   els.manualAssignForm?.addEventListener("submit", async (event) => {
@@ -20588,22 +21296,36 @@ function wireEvents() {
   els.printOptionsBackdrop?.addEventListener("click", () => closePrintOptions());
   els.printOptionsSubmit?.addEventListener("click", () => submitPrintOptions());
   els.undoBtn?.addEventListener("click", async () => {
-    const payload = await fetchJson("/api/undo", {
-      method: "POST",
-      body: JSON.stringify({ listId: state.activeListId, ...requestContext() }),
-    });
-    applyBackendPayload(payload);
-    scanFlash(payload.lastScan?.ok ? "success" : "notice");
-    renderScanPage();
+    try {
+      const payload = await fetchJson("/api/undo", {
+        method: "POST",
+        body: JSON.stringify({ listId: state.activeListId, ...requestContext() }),
+      });
+      applyBackendPayload(payload);
+      const succeeded = payload.lastScan?.eventType === "undo";
+      scanFlash(succeeded ? "success" : "notice", succeeded ? "undo" : "scan_warning");
+      showFloatingNotice(payload.lastScan?.reason?.startsWith("UNDO_META:") ? payload.lastScan.message : (payload.lastScan?.reason || payload.lastScan?.message || "Undo complete."), succeeded ? "success" : "notice");
+      renderScanPage();
+    } catch (error) {
+      scanFlash("error", "scan_error");
+      showFloatingNotice(error.message, "error");
+    }
   });
   els.redoBtn?.addEventListener("click", async () => {
-    const payload = await fetchJson("/api/redo", {
-      method: "POST",
-      body: JSON.stringify({ listId: state.activeListId, ...requestContext() }),
-    });
-    applyBackendPayload(payload);
-    scanFlash(payload.lastScan?.ok ? "success" : "notice");
-    renderScanPage();
+    try {
+      const payload = await fetchJson("/api/redo", {
+        method: "POST",
+        body: JSON.stringify({ listId: state.activeListId, ...requestContext() }),
+      });
+      applyBackendPayload(payload);
+      const succeeded = payload.lastScan?.eventType === "redo";
+      scanFlash(succeeded ? "success" : "notice", succeeded ? "redo" : "scan_warning");
+      showFloatingNotice(payload.lastScan?.reason || payload.lastScan?.message || "Redo complete.", succeeded ? "success" : "notice");
+      renderScanPage();
+    } catch (error) {
+      scanFlash("error", "scan_error");
+      showFloatingNotice(error.message, "error");
+    }
   });
   els.rackListSelect?.addEventListener("change", () => {
     state.rackScanListId = els.rackListSelect.value;
@@ -21045,6 +21767,26 @@ function wireEvents() {
     }
   });
   document.addEventListener("input", (event) => {
+    const modalSearchInput = event.target.closest("#manualEditModalSearch");
+    if (modalSearchInput) {
+      window.clearTimeout(state.manualEditSearchTimer);
+      state.manualEditSearchTimer = window.setTimeout(async () => {
+        if (state.manualEditDirty) {
+          const confirmed = await confirmWebAppAction({
+            title: "Search without saving?",
+            message: "Searching will replace the currently displayed rows and discard unsaved delivery-list edits.",
+            confirmLabel: "Discard and search",
+            cancelLabel: "Keep editing",
+            danger: false,
+          });
+          if (!confirmed) return;
+          state.manualEditDirty = false;
+        }
+        runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
+      }, 180);
+      return;
+    }
+
     const customField = event.target.closest("#manualEditModalResults [data-custom-field]");
 
     if (customField) {
@@ -21159,6 +21901,7 @@ function wireEvents() {
   document.addEventListener("keydown", (event) => {
     if (event.target.closest("#manualEditModalSearch") && event.key === "Enter") {
       event.preventDefault();
+      window.clearTimeout(state.manualEditSearchTimer);
       runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
     }
   });
@@ -21280,7 +22023,7 @@ function wireEvents() {
             }
 
             showFloatingNotice(`Moved ${label} to ${newBayCode}.`, "success");
-            scanFlash("success");
+            scanFlash("success", "bay_moved");
           } catch (error) {
             showInlineError(error.message, true);
           }
@@ -21541,34 +22284,6 @@ function wireEvents() {
       }
     });
 
-    document.addEventListener("toggle", (event) => {
-    const roleCard = event.target.closest?.(".role-permission-card[data-role-card]");
-
-    if (roleCard && els.adminModalBody?.contains(roleCard)) {
-      const roleName = roleCard.dataset.roleCard || "";
-
-      if (roleCard.open) {
-        state.rolePermissionOpenRoles.add(roleName);
-      } else {
-        state.rolePermissionOpenRoles.delete(roleName);
-      }
-
-      return;
-    }
-
-    const category = event.target.closest?.(".permission-category[data-role-name][data-category-title]");
-
-    if (category && els.adminModalBody?.contains(category)) {
-      const key = rolePermissionCategoryKey(category.dataset.roleName, category.dataset.categoryTitle);
-
-      if (category.open) {
-        state.rolePermissionOpenCategories.add(key);
-      } else {
-        state.rolePermissionOpenCategories.delete(key);
-      }
-    }
-  }, true);
-
     const lookupTypeButton = event.target.closest("[data-lookup-manager-type]");
     if (lookupTypeButton) {
       state.lookupManagerActiveType = lookupTypeButton.dataset.lookupManagerType || "product";
@@ -21747,12 +22462,19 @@ function wireEvents() {
     }
     const manualModalSearchButton = event.target.closest("#manualEditModalSearchBtn");
     if (manualModalSearchButton) {
+      window.clearTimeout(state.manualEditSearchTimer);
       runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
       return;
     }
     const manualModalReloadButton = event.target.closest("#manualEditModalReloadBtn");
     if (manualModalReloadButton) {
+      window.clearTimeout(state.manualEditSearchTimer);
       runManualEditModalSearch(true).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("[data-manual-edit-load-more]")) {
+      event.preventDefault();
+      loadMoreManualEditRows().catch((error) => showInlineError(error.message, true));
       return;
     }
     const adminReportButton = event.target.closest("[data-admin-report]");
@@ -21845,14 +22567,39 @@ function wireEvents() {
     if (filterButton) {
       toggleScanFilter(filterButton.dataset.filter || "all");
       state.pageIndex = 1;
-      renderScanPage();
+      scheduleScanRender();
+      return;
+    }
+    const removeScanFilterButton = event.target.closest("[data-remove-scan-filter]");
+    if (removeScanFilterButton) {
+      state.activeFilters.delete(removeScanFilterButton.dataset.removeScanFilter || "");
+      state.pageIndex = 1;
+      syncScanFilterButtons();
+      scheduleScanRender();
+      return;
+    }
+    if (event.target.closest("[data-remove-glass-filter]")) {
+      state.glassTypeFilter = "all";
+      state.pageIndex = 1;
+      state.lastGlassFilterSignature = "";
+      scheduleScanRender();
+      return;
+    }
+    if (event.target.closest("[data-clear-scan-filters]")) {
+      state.activeFilters.clear();
+      state.glassTypeFilter = "all";
+      state.pageIndex = 1;
+      state.lastGlassFilterSignature = "";
+      syncScanFilterButtons();
+      scheduleScanRender();
       return;
     }
     const glassFilterButton = event.target.closest("[data-glass-filter]");
     if (glassFilterButton) {
       state.glassTypeFilter = glassFilterButton.dataset.glassFilter || "all";
       state.pageIndex = 1;
-      renderScanPage();
+      state.lastGlassFilterSignature = "";
+      scheduleScanRender();
       return;
     }
     const pageNumber = event.target.closest("[data-page-number]");
@@ -21876,7 +22623,9 @@ function wireEvents() {
     const glassToggle = event.target.closest("[data-toggle-glass-group]");
     if (glassToggle) {
       const label = glassToggle.dataset.toggleGlassGroup || "";
-      if (state.collapsedGlassTypes.has(label)) state.collapsedGlassTypes.delete(label);
+      const isCollapsed = state.collapsedGlassTypes.has(label);
+      void playAppSound(isCollapsed ? "collapse_open" : "collapse_close");
+      if (isCollapsed) state.collapsedGlassTypes.delete(label);
       else state.collapsedGlassTypes.add(label);
       renderScanPage();
       return;
@@ -22077,11 +22826,15 @@ function wireEvents() {
     }
     const saveLineItemButton = event.target.closest("[data-save-line-item]");
     if (saveLineItemButton) {
+      event.preventDefault();
+      event.stopPropagation();
       saveManualLineItem(saveLineItemButton.dataset.saveLineItem).catch((error) => showInlineError(error.message));
       return;
     }
     const deleteLineItemButton = event.target.closest("[data-delete-line-item]");
     if (deleteLineItemButton) {
+      event.preventDefault();
+      event.stopPropagation();
       deleteManualLineItem(deleteLineItemButton.dataset.deleteLineItem).catch((error) => showInlineError(error.message, true));
       return;
     }

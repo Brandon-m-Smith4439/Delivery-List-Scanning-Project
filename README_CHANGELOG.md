@@ -1,5 +1,64 @@
 # README Changelog
 
+## v100
+- Restored the v098 operational and interface sound set for login/logout, saves, email, navigation, undo/redo, imports, racks, bays, permissions, notifications, and machine events; printing remains intentionally silent.
+- Unlocks Web Audio during the first pointer or keyboard gesture so asynchronous actions no longer lose browser audio permission.
+- Plays an immediate synthesized cue on first use while each distinct packaged WAV loads in the background for later actions, preventing delayed sounds from arriving after the related operation.
+- Rebuilt Scan Success as a bright five-note rising major chord with a stable low confirmation tone and high finishing sparkle.
+- Reset the sound-volume storage key to restore a 100% default for operators whose earlier test setting may have remained muted.
+- Added server-backed Manual Delivery List Edit pagination with 20 rows per request, accurate total counts, and offset-based Load More behavior.
+- Made manual-edit rows collapsed by default while keeping Order, Item, Job Nr., customer, stage, and quantity visible in each summary ribbon.
+- Added predictive 180 ms search for every typed Order or Job Nr. character and retained unsaved-edit confirmation before replacing displayed rows.
+- Lowered the Scan filter drawer below the expanded sidebar stacking layer.
+- Advanced browser cache keys to v100.
+
+## v099
+- Restored Scan-page responsiveness by removing the 300 ms whole-document custom-select polling loop and relying on the existing mutation/change synchronization.
+- Stopped rendering both desktop rows and mobile cards during every Scan-page refresh; only the active viewport layout is now built.
+- Coalesced search and filter paints with `requestAnimationFrame` and avoided rebuilding unchanged glass-type controls.
+- Changed Manual Delivery List Edit saves to update the affected in-memory list and row in place instead of reloading the complete delivery-list catalog and modal.
+- Replaced delayed WAV fetch/decode playback with short immediate synthesized operational cues.
+- Limited sounds to scans, important completion events, bay assignment/removal, and machine faults; navigation, login/logout, save, print, email, undo/redo, and routine button actions are silent.
+- Added one timed, nonblocking scan-result card for normal stages with success, notice, and error treatments plus the same item details shown by Last Scan.
+- Added Admin/Supervisor rack or truck correction to successful staging scan cards while retaining existing backend permissions.
+- Replaced the wide Scan-page filter rows with one organized multi-filter drawer, removable active-filter chips, and a combined remake/Rush attention marker.
+- Added a Windows local-time fallback for the daily importer when the optional IANA timezone package is unavailable.
+- Advanced browser cache keys to v099.
+
+## v098
+- Added the complete Barefoot Delivery Scanner Audio Language with 27 distinct mastered mono WAV cues.
+- Replaced the four generic operational files with semantic cues for success, duplicate, warning, error, Rush, remake, completion, racks, bays, undo/redo, import, save, print, email, authentication, notifications, permissions, and future machine events.
+- Updated the shared Web Audio loader to resolve semantic cue names, cache decoded buffers, retain the shared compressor/volume chain, and fall back safely when a WAV cannot load.
+- Added context-aware scan selection so Rush and remake pieces have recognizable success sounds, duplicate scans differ from warnings, and rack/bay workflows use their own audio identities.
+- Added audio feedback for rack completion/reopen/return, bay assign/remove/move, undo/redo, import start/complete, settings saves, print preview, sent email, sign-in/sign-out, notifications, and permission denial.
+- Added `sounds/audio_manifest.json`, `sounds/README_AUDIO_PACK.md`, and `sounds/preview_audio_pack.html` for maintenance and browser-based auditioning.
+- Preserved the v097 numbered SQLite migrations, database safeguards, and Azure SQL preparation without changing migration 001 or 002.
+- Advanced browser and sound cache keys to v098.
+- Packaged the release as `Delivery_List_Scanner_v098.zip` without live databases, WAL/SHM files, logs, caches, or verification artifacts.
+
+## v097
+- Added numbered, checksummed SQLite migrations with automatic legacy v096 baselining.
+- Added verified pre-upgrade backups using SQLite's online backup API; failed upgrades preserve the backup and never recreate production data.
+- Centralized the canonical logical database contract and documented SQLite-to-SQL Server type mappings.
+- Added quantity, boolean, relationship, JSON, timestamp, and migration-history integrity validation.
+- Added UTC audit and soft-delete fields to core mutable entities.
+- Made scan, audit, and machine event histories append-only in SQLite and Azure SQL.
+- Added production-ready machines, scanners, and machine-events tables without changing the UI.
+- Added query-driven parity indexes and documented their purpose.
+- Added explicit SQLite optimize, WAL checkpoint, and backup-before-VACUUM maintenance commands.
+- Rebuilt the SQLite-to-Azure utility with preflight checks, dry-run-by-default behavior, transactional copy, reports, row-count checks, and deterministic checksums.
+- Prevented production demo delivery-list seeding while preserving idempotent configuration seeds.
+- Added database migration, preservation, integrity, and Azure contract tests.
+- Matched the sign-in logo frame to the expanded desktop sidebar logo and removed the oversized login-only glow.
+- Added the first editable four-cue WAV implementation used as the foundation for v098.
+
+## v096
+- Matched the sign-in page logo to the expanded desktop sidebar logo.
+- Reduced the sign-in logo frame from 188 x 188 to 108 x 108.
+- Kept the sign-in logo square, proportional, and filled with the same sampled dark-blue background color used by the expanded sidebar logo.
+- Kept collapsed-sidebar and mobile-logo sizes unchanged.
+- Advanced browser cache keys to v096.
+
 ## v095
 - Reduced only the expanded desktop sidebar logo and its outline by 10%, from 120 x 120 to 108 x 108.
 - Kept the collapsed sidebar logo and mobile logo sizes unchanged.

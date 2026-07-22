@@ -1,0 +1,183 @@
+{
+  "pack": "Barefoot Delivery Scanner Audio Language",
+  "version": "1.1",
+  "sample_rate_hz": 44100,
+  "encoding": "16-bit PCM mono WAV",
+  "mastering": "High-pass filtered, soft-compressed, limited, normalized to -1 dBFS peak",
+  "cues": {
+    "scan_success": {
+      "file": "scan_success.wav",
+      "label": "Successful item scan",
+      "description": "A crisp scanner response followed by a confident rising three-note success phrase.",
+      "duration_seconds": 0.58
+    },
+    "collapse_open": {
+      "file": "collapse_open.wav",
+      "label": "Section expanded",
+      "description": "A short upward whoosh for expanding scan and Bay Map sections.",
+      "duration_seconds": 0.25
+    },
+    "collapse_close": {
+      "file": "collapse_close.wav",
+      "label": "Section collapsed",
+      "description": "A short downward whoosh for collapsing scan and Bay Map sections.",
+      "duration_seconds": 0.22
+    },
+    "scan_duplicate": {
+      "file": "scan_duplicate.wav",
+      "label": "Duplicate/already scanned",
+      "description": "A gentle repeated confirmation that says the scan was heard but no state changed.",
+      "duration_seconds": 0.38
+    },
+    "scan_warning": {
+      "file": "scan_warning.wav",
+      "label": "Warning or override required",
+      "description": "A controlled descending caution phrase that is distinct without sounding like failure.",
+      "duration_seconds": 0.48
+    },
+    "scan_error": {
+      "file": "scan_error.wav",
+      "label": "Rejected or invalid scan",
+      "description": "A low two-part industrial rejection cue that remains clear without becoming a buzzer.",
+      "duration_seconds": 0.58
+    },
+    "scan_rush": {
+      "file": "scan_rush.wav",
+      "label": "Successful Rush scan",
+      "description": "The signature success sound with a high-priority sparkle that can be recognized instantly.",
+      "duration_seconds": 0.49
+    },
+    "scan_remake": {
+      "file": "scan_remake.wav",
+      "label": "Successful remake scan",
+      "description": "A bright success cue with a restrained glass-like shimmer for remake identification.",
+      "duration_seconds": 0.5
+    },
+    "task_complete": {
+      "file": "task_complete.wav",
+      "label": "100% progress or major task completion",
+      "description": "A confident four-note ascending completion phrase with a polished final resonance.",
+      "duration_seconds": 0.92
+    },
+    "rack_item_added": {
+      "file": "rack_item_added.wav",
+      "label": "Item added or assigned to rack",
+      "description": "A short mechanical latch followed by a clean confirmation.",
+      "duration_seconds": 0.31
+    },
+    "rack_complete": {
+      "file": "rack_complete.wav",
+      "label": "Rack completed",
+      "description": "A satisfying three-stage industrial lock-in sound.",
+      "duration_seconds": 0.72
+    },
+    "rack_reopened": {
+      "file": "rack_reopened.wav",
+      "label": "Rack reopened / Not On The Way",
+      "description": "A reverse-release sweep followed by an open-state confirmation.",
+      "duration_seconds": 0.48
+    },
+    "rack_returned": {
+      "file": "rack_returned.wav",
+      "label": "Rack returned and cleared",
+      "description": "A contained release-and-settle cue for rack reuse.",
+      "duration_seconds": 0.49
+    },
+    "bay_assigned": {
+      "file": "bay_assigned.wav",
+      "label": "Item assigned or scanned into a bay",
+      "description": "A precise placement click with a clean glass-like confirmation.",
+      "duration_seconds": 0.34
+    },
+    "bay_removed": {
+      "file": "bay_removed.wav",
+      "label": "Item scanned out or released from a bay",
+      "description": "A short release cue that moves downward and away.",
+      "duration_seconds": 0.39
+    },
+    "bay_moved": {
+      "file": "bay_moved.wav",
+      "label": "Item moved between bays",
+      "description": "A directional slide followed by a placement confirmation.",
+      "duration_seconds": 0.44
+    },
+    "undo": {
+      "file": "undo.wav",
+      "label": "Undo completed",
+      "description": "A reverse sweep with a soft descending endpoint.",
+      "duration_seconds": 0.36
+    },
+    "redo": {
+      "file": "redo.wav",
+      "label": "Redo completed",
+      "description": "A forward sweep with a clear ascending endpoint.",
+      "duration_seconds": 0.36
+    },
+    "import_start": {
+      "file": "import_start.wav",
+      "label": "Delivery-list import started",
+      "description": "A compact rising pulse that signals work is underway.",
+      "duration_seconds": 0.36
+    },
+    "import_complete": {
+      "file": "import_complete.wav",
+      "label": "Import completed successfully",
+      "description": "A three-note completion phrase that is shorter than a full-truck celebration.",
+      "duration_seconds": 0.62
+    },
+    "save": {
+      "file": "save.wav",
+      "label": "Settings or record saved",
+      "description": "A compact, confident save confirmation.",
+      "duration_seconds": 0.28
+    },
+    "print_ready": {
+      "file": "print_ready.wav",
+      "label": "Print job opened or prepared",
+      "description": "A subtle feed/click sequence with a ready confirmation.",
+      "duration_seconds": 0.47
+    },
+    "email_sent": {
+      "file": "email_sent.wav",
+      "label": "Email sent",
+      "description": "An outgoing sweep followed by a concise delivered confirmation.",
+      "duration_seconds": 0.48
+    },
+    "login": {
+      "file": "login.wav",
+      "label": "Successful sign-in",
+      "description": "A warm, restrained welcome phrase.",
+      "duration_seconds": 0.52
+    },
+    "logout": {
+      "file": "logout.wav",
+      "label": "Sign-out",
+      "description": "A quiet descending close that does not resemble an error.",
+      "duration_seconds": 0.45
+    },
+    "notification": {
+      "file": "notification.wav",
+      "label": "New application notification",
+      "description": "A light two-part ping designed to be informative rather than urgent.",
+      "duration_seconds": 0.33
+    },
+    "permission_denied": {
+      "file": "permission_denied.wav",
+      "label": "Permission denied",
+      "description": "A firm low refusal cue reserved for access-control failures.",
+      "duration_seconds": 0.55
+    },
+    "machine_scan": {
+      "file": "machine_scan.wav",
+      "label": "Future machine-generated scan accepted",
+      "description": "A compact electromechanical pulse distinct from handheld scanning.",
+      "duration_seconds": 0.3
+    },
+    "machine_fault": {
+      "file": "machine_fault.wav",
+      "label": "Future machine fault",
+      "description": "A controlled industrial fault signal that is forceful without becoming a piercing alarm.",
+      "duration_seconds": 0.68
+    }
+  }
+}

@@ -1,4 +1,0 @@
-# Optional Azure SQL runtime dependencies. The local SQLite deployment uses only the
-# Python standard library; these packages support ODBC connectivity and SQL translation.
-pyodbc==5.2.0
-sqlglot==27.20.0
