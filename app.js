@@ -62,7 +62,7 @@ const state = {
   errors: [],
   selectedId: null,
   activeFilters: new Set(),
-  glassTypeFilter: "all",
+  glassTypeFilters: new Set(),
   search: "",
   pageIndex: 1,
   pageSize: 25,
@@ -203,9 +203,14 @@ const state = {
 };
 
 const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v3";
-const APP_SOUND_CACHE_VERSION = "20260721-v102";
+const APP_SOUND_CACHE_VERSION = "20260722-v104";
 const APP_SOUND_FILES = Object.freeze({
-  scan_success: "sounds/scan_success.wav",
+  // Normal accepted item scans use the restrained confirmation cue. Keep
+  // sounds/scan_success.wav packaged but intentionally unused for future work.
+  scan_success: "sounds/notification.wav",
+  rack_barcode: "sounds/rack_barcode.wav",
+  rack_outbound: "sounds/rack_outbound.wav",
+  destructive_action: "sounds/destructive_action.wav",
   scan_duplicate: "sounds/scan_duplicate.wav",
   scan_warning: "sounds/scan_warning.wav",
   scan_error: "sounds/scan_error.wav",
@@ -244,6 +249,9 @@ const APP_SOUND_ALIASES = Object.freeze({
 });
 const APP_SOUND_ENABLED_KINDS = new Set([
   "scan_success",
+  "rack_barcode",
+  "rack_outbound",
+  "destructive_action",
   "scan_duplicate",
   "scan_warning",
   "scan_error",
@@ -262,6 +270,7 @@ const APP_SOUND_ENABLED_KINDS = new Set([
   "import_start",
   "import_complete",
   "save",
+  "print_ready",
   "email_sent",
   "login",
   "logout",
@@ -274,13 +283,16 @@ const APP_SOUND_ENABLED_KINDS = new Set([
 ]);
 const APP_SOUND_PRELOAD_KINDS = Object.freeze([
   "scan_success",
+  "rack_barcode",
+  "rack_outbound",
+  "destructive_action",
+  "print_ready",
   "scan_duplicate",
   "scan_warning",
   "scan_error",
   "rack_item_added",
   "bay_assigned",
   "save",
-  "notification",
   "collapse_open",
   "collapse_close",
 ]);
@@ -2809,11 +2821,15 @@ function setCustomSelectHighlight(index, focus = true) {
 function closeCustomSelect(restoreFocus = false) {
   const select = customSelectUi.openSelect;
   const trigger = select?.closest(".custom-select-shell")?.querySelector(":scope > .custom-select-trigger");
+  const timedConfirmationShell = customSelectUi.menu?._timedConfirmationShell
+    || select?.closest?.("[data-timed-scan-confirmation]")
+    || null;
 
   customSelectUi.menu?.remove();
   customSelectUi.menu = null;
   customSelectUi.openSelect = null;
   customSelectUi.highlightedIndex = -1;
+  timedConfirmationShell?._setCustomSelectOpen?.(false);
 
   if (select) syncCustomSelect(select);
   if (restoreFocus) trigger?.focus();
@@ -2935,7 +2951,10 @@ function openCustomSelect(select) {
   if (!shell || !trigger) return;
 
   const menu = document.createElement("div");
-  menu.className = "custom-select-menu";
+  const timedConfirmationShell = select.closest("[data-timed-scan-confirmation]");
+  menu.className = `custom-select-menu${timedConfirmationShell ? " is-timed-confirmation-menu" : ""}`;
+  menu._timedConfirmationShell = timedConfirmationShell || null;
+  timedConfirmationShell?._setCustomSelectOpen?.(true);
   menu.id = `${select.id || `customSelect${Date.now()}`}Menu`;
   menu.setAttribute("role", "listbox");
   menu.setAttribute("aria-label", customSelectAccessibleLabel(select));
@@ -4106,6 +4125,7 @@ async function removeStation(name) {
   state.stations = uniqueText([...DEFAULT_STATIONS, ...(payload.stations || [])]);
   renderStationOptions();
   renderAdminStations();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -4172,6 +4192,8 @@ function setActiveList(listId) {
  */
 async function activateList(listId, navigate = true) {
   if (!listId) return;
+  const previousDeliveryDate = String(state.meta?.deliveryDate || "").trim();
+  const previousSearch = state.search;
   const changingList = listId !== state.activeListId;
   if (state.backend) {
     const payload = await fetchJson(`/api/delivery-lists/${encodeURIComponent(listId)}`);
@@ -4179,16 +4201,22 @@ async function activateList(listId, navigate = true) {
   } else {
     setActiveList(listId);
   }
-  if (changingList) {
-    // v39: Global search can seed the Scan page search after navigation.
-    // For normal list switching, clear the previous list search so a stale order
-    // number does not hide rows on the next delivery list.
+  const nextDeliveryDate = String(state.meta?.deliveryDate || "").trim();
+  const changingDate = Boolean(changingList && previousDeliveryDate !== nextDeliveryDate);
+  if (changingDate) {
+    // A date change starts a new work context and clears the item search.
     state.search = "";
     if (els.searchInput) els.searchInput.value = "";
+  } else if (changingList) {
+    // Preserve the exact search while operators move between stages on the
+    // same delivery date, even if list-specific local state was restored.
+    state.search = previousSearch;
+    if (els.searchInput) els.searchInput.value = previousSearch;
   }
   if (changingList || navigate) {
     state.pageIndex = 1;
-    state.glassTypeFilter = "all";
+    state.glassTypeFilters.clear();
+    state.lastGlassFilterSignature = "";
   }
   if (navigate) {
     showPage("scan");
@@ -4566,6 +4594,11 @@ function resolveAppSoundKind(kind = "notification") {
   return APP_SOUND_FILES[resolved] ? resolved : "notification";
 }
 
+/** Return true when a scanner submission is a transportation rack barcode. */
+function isRackBarcodeScan(value) {
+  return /^RACK/.test(cleanBarcode(value));
+}
+
 /**
  * Purpose: Select the most informative scan cue from the latest scan result.
  * Effects: Reads only the supplied scan result and current item classification helpers.
@@ -4579,6 +4612,8 @@ function scanSoundKind(entry, fallback = "scan_success") {
     if (eventType.includes("notice") || eventType.includes("warning") || entry.overrideRequired) return "scan_warning";
     return "scan_error";
   }
+
+  if (isRackBarcodeScan(entry.raw || entry.barcode || entry.rackBarcode || "")) return "rack_barcode";
 
   const item = entry.item || entry.lineItem || entry;
   if (isRushItem(item) || Boolean(entry.rush || item.rush)) return "scan_rush";
@@ -4611,9 +4646,9 @@ function playAppSound(kind = "notice", options = {}) {
     if (normalizedKind === "scan_warning") return "warning";
     if (["task_complete", "rack_complete"].includes(normalizedKind)) return "complete";
     if (["scan_rush", "scan_remake"].includes(normalizedKind)) return "priority";
-    if (["save", "email_sent", "import_complete"].includes(normalizedKind)) return "confirmed";
-    if (["undo", "logout", "rack_reopened", "rack_returned"].includes(normalizedKind)) return "down";
-    if (["redo", "login", "import_start", "notification", "machine_scan"].includes(normalizedKind)) return "up";
+    if (["save", "print_ready", "email_sent", "import_complete", "rack_barcode"].includes(normalizedKind)) return "confirmed";
+    if (["undo", "logout", "rack_reopened", "rack_returned", "destructive_action"].includes(normalizedKind)) return "down";
+    if (["redo", "login", "import_start", "notification", "machine_scan", "rack_outbound"].includes(normalizedKind)) return "up";
     return "success";
   })();
 
@@ -4860,13 +4895,13 @@ function syncScanFilterButtons() {
   renderActiveScanFilters();
 }
 
-/** Render the compact active-filter chips and the remake/rush health marker. */
+/** Render active filter chips, including every selected glass type. */
 function renderActiveScanFilters() {
   const selected = Object.values(SCAN_FILTER_GROUPS)
     .flat()
     .filter((filter) => state.activeFilters.has(filter) && filter !== "priority");
-  const glassSelected = state.glassTypeFilter && state.glassTypeFilter !== "all";
-  const selectionCount = selected.length + (glassSelected ? 1 : 0);
+  const selectedGlassTypes = [...state.glassTypeFilters].sort((a, b) => a.localeCompare(b));
+  const selectionCount = selected.length + selectedGlassTypes.length;
   const priorityOpen = unscannedPieceCount(state.items.filter((item) => isRemakeItem(item) || isRushItem(item)));
 
   if (els.scanActiveFilterCount) els.scanActiveFilterCount.textContent = String(selectionCount);
@@ -4882,12 +4917,13 @@ function renderActiveScanFilters() {
   if (!els.scanActiveFilterBar || !els.scanActiveFilterChips) return;
   els.scanActiveFilterBar.classList.toggle("has-active-filters", Boolean(selectionCount));
   els.scanActiveFilterChips.innerHTML = [
-    ...selected.map(
-      (filter) => `<button type="button" data-remove-scan-filter="${escapeHtml(filter)}"><span>${escapeHtml(SCAN_FILTER_LABELS[filter] || filter)}</span><b aria-hidden="true">&times;</b></button>`,
+    ...selected.map((filter) => {
+      const group = scanFilterGroup(filter) || "status";
+      return `<button class="scan-filter-chip is-${escapeHtml(group)}" type="button" data-remove-scan-filter="${escapeHtml(filter)}"><i aria-hidden="true"></i><span>${escapeHtml(SCAN_FILTER_LABELS[filter] || filter)}</span><b aria-hidden="true">&times;</b></button>`;
+    }),
+    ...selectedGlassTypes.map(
+      (label) => `<button class="scan-filter-chip is-glass" type="button" data-remove-glass-filter="${escapeHtml(label)}"><i aria-hidden="true"></i><span>${escapeHtml(label)}</span><b aria-hidden="true">&times;</b></button>`,
     ),
-    ...(glassSelected
-      ? [`<button type="button" data-remove-glass-filter><span>Glass: ${escapeHtml(state.glassTypeFilter)}</span><b aria-hidden="true">&times;</b></button>`]
-      : []),
   ].join("");
 }
 
@@ -4922,7 +4958,7 @@ function filteredItems() {
     });
 
     if (!matchesSelectedGroups) return false;
-    if (state.glassTypeFilter !== "all" && glassTypeLabel(item) !== state.glassTypeFilter) return false;
+    if (state.glassTypeFilters.size && !state.glassTypeFilters.has(glassTypeLabel(item))) return false;
     if (!search) return true;
 
     const haystack = [item.order, item.item, item.job, item.customer, item.dimensions, item.product, item.route, item.barcode]
@@ -5280,19 +5316,22 @@ function renderCounts() {
   });
   if (filterSelectionChanged) state.pageIndex = 1;
   syncScanFilterButtons();
-  if (state.glassTypeFilter !== "all" && !glassCounts.has(state.glassTypeFilter)) state.glassTypeFilter = "all";
+  for (const selectedGlassType of [...state.glassTypeFilters]) {
+    if (!glassCounts.has(selectedGlassType)) state.glassTypeFilters.delete(selectedGlassType);
+  }
   if (els.glassFilterTabs) {
     const sortedGlassEntries = [...glassCounts.entries()].sort(
       (a, b) => Number(b[1] || 0) - Number(a[1] || 0) || a[0].localeCompare(b[0]),
     );
-    const signature = JSON.stringify([state.glassTypeFilter, sortedGlassEntries]);
+    const selectedGlassTypes = [...state.glassTypeFilters].sort((a, b) => a.localeCompare(b));
+    const signature = JSON.stringify([selectedGlassTypes, sortedGlassEntries]);
     if (signature !== state.lastGlassFilterSignature) {
       els.glassFilterTabs.innerHTML = [
-        `<button class="tab glass-filter-tab ${state.glassTypeFilter === "all" ? "is-active" : ""}" data-glass-filter="all" type="button">All Glass <span>(${totalItems})</span></button>`,
-        ...sortedGlassEntries.map(
-          ([label, count]) =>
-            `<button class="tab glass-filter-tab ${state.glassTypeFilter === label ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`,
-        ),
+        `<button class="tab glass-filter-tab ${state.glassTypeFilters.size ? "" : "is-active"}" data-glass-filter="all" type="button" aria-pressed="${state.glassTypeFilters.size ? "false" : "true"}">All Glass <span>(${totalItems})</span></button>`,
+        ...sortedGlassEntries.map(([label, count]) => {
+          const active = state.glassTypeFilters.has(label);
+          return `<button class="tab glass-filter-tab ${active ? "is-active" : ""}" data-glass-filter="${escapeHtml(label)}" type="button" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`;
+        }),
       ].join("");
       state.lastGlassFilterSignature = signature;
     }
@@ -6496,7 +6535,7 @@ async function assignLineItemToRack(lineItemId, rackCode, options = {}) {
   renderScanPage();
   if (state.page === "racks") renderRacksPage();
   if (!options.quiet) {
-    playAppSound(rackCode ? "rack_item_added" : "rack_reopened");
+    playAppSound(rackCode ? "rack_item_added" : "destructive_action", { force: !rackCode });
     showFloatingNotice(rackCode ? `Line item assigned to rack ${rackCode}.` : "Line item rack location cleared.", "success");
   }
 }
@@ -6518,6 +6557,7 @@ async function clearRack(code) {
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
+  playAppSound("destructive_action", { force: true });
   showActionFeedback({
     eyebrow: "Rack reset",
     title: `${code} was cleared`,
@@ -6556,6 +6596,7 @@ async function clearRackSet(label) {
     state.rackSummary = latestPayload.summary || null;
   }
   renderRacksPage();
+  playAppSound("destructive_action", { force: true });
   showActionFeedback({
     eyebrow: "Rack set reset",
     title: `${label} was cleared`,
@@ -6612,6 +6653,7 @@ async function clearRackItem(rackItemId, label = "this piece") {
   state.rackSummary = payload.summary || null;
   renderRacksPage();
   renderScanRackTools();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -6747,6 +6789,7 @@ async function deleteRackDefinition(rackCode = state.selectedRackCode) {
   if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
     els.adminModalBody.innerHTML = adminModalContent("racks");
   }
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -6830,6 +6873,7 @@ async function deleteRackSet(label) {
   if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
     els.adminModalBody.innerHTML = adminModalContent("racks");
   }
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -9023,7 +9067,6 @@ function showPage(page) {
       void pollUserNotifications();
     }, 0);
   }
-  if (pageChanged && state.authenticated) playAppSound("notification");
 }
 
 /**
@@ -9252,6 +9295,7 @@ function closeTimedScanConfirmation(shellOrId) {
     : shellOrId;
   if (!shell) return;
   window.clearInterval(shell._countdownTimer);
+  if (customSelectUi.openSelect && shell.contains(customSelectUi.openSelect)) closeCustomSelect(false);
   shell.remove();
   updateModalScrollLock();
 }
@@ -9285,6 +9329,9 @@ function mountTimedScanConfirmation({
 
   let seconds = durationSeconds;
   let paused = false;
+  let pointerInside = false;
+  let customSelectOpen = false;
+  let editInProgress = false;
   const countdown = shell.querySelector("[data-placement-countdown]");
   const panel = shell.querySelector(".indian-trail-placement-panel");
   if (countdown) countdown.textContent = String(seconds);
@@ -9292,15 +9339,41 @@ function mountTimedScanConfirmation({
   /**
    * Purpose: Pause or resume the timed scan confirmation countdown.
    * Effects: Updates the local timer state and the popup pause styling.
-   * Flow: Normalizes the requested pause state and applies it to both the interval and progress animation.
+   * Flow: Keeps the timer paused while the popup is hovered or any popup control retains focus.
    */
   const setPaused = (nextPaused) => {
     paused = Boolean(nextPaused);
     shell.classList.toggle("is-timer-paused", paused);
   };
+  const syncPausedState = () => {
+    setPaused(pointerInside || customSelectOpen || editInProgress || shell.contains(document.activeElement));
+  };
+  shell._setCustomSelectOpen = (open) => {
+    customSelectOpen = Boolean(open);
+    syncPausedState();
+  };
+  shell._setTimedEditInProgress = (editing) => {
+    editInProgress = Boolean(editing);
+    syncPausedState();
+  };
 
-  shell.addEventListener("mouseenter", () => setPaused(true));
-  shell.addEventListener("mouseleave", () => setPaused(false));
+  shell.addEventListener("pointerenter", () => {
+    pointerInside = true;
+    syncPausedState();
+  });
+  shell.addEventListener("pointerleave", () => {
+    pointerInside = false;
+    syncPausedState();
+  });
+  shell.addEventListener("focusin", syncPausedState);
+  shell.addEventListener("focusout", () => window.setTimeout(syncPausedState, 0));
+  shell.querySelectorAll("select").forEach((select) => {
+    // Native option menus can render outside the popup and fire pointerleave.
+    // The focused select keeps the countdown paused until the menu closes.
+    select.addEventListener("pointerdown", () => setPaused(true));
+    select.addEventListener("change", () => window.setTimeout(syncPausedState, 0));
+    select.addEventListener("blur", () => window.setTimeout(syncPausedState, 0));
+  });
 
   shell._countdownTimer = window.setInterval(() => {
     if (paused) return;
@@ -9426,47 +9499,59 @@ function showStageScanConfirmation(result, options = {}) {
     ? "-"
     : `${Math.max(Number(item.scanned || 0), 0)} / ${Math.max(Number(item.qty || 0), 0)}`;
   const currentRackCode = String(result?.rackCode || item.rackCode || "").trim();
+  const location = currentRackCode || locationLabel(item) || "-";
   const canCorrectRack = Boolean(entry.ok && item.id && canAssignRackLocation());
   const rackOptions = canCorrectRack
     ? groupedRackOptionsHtml((state.racks || []).filter((rack) => !rackIsLockedForLineAssignment(rack)), currentRackCode, { includeNoRack: true })
     : "";
   const eyebrow = outcome === "success" ? "SCAN ACCEPTED" : outcome === "notice" ? "SCAN NOTICE" : "SCAN ERROR";
+  const statusLabel = outcome === "success" ? "Accepted" : outcome === "notice" ? "Review" : "Not accepted";
+  const durationSeconds = outcome === "error" ? 10 : 8;
+  const jobText = item.job || item.product || "-";
 
   const shell = mountTimedScanConfirmation({
     id: "stageScanConfirmationShell",
     className: `scan-result-confirmation is-${outcome}`,
-    durationSeconds: outcome === "error" ? 10 : 8,
+    durationSeconds,
     openAllScans: async () => openRecentScansModal(),
     markup: `
-      <section class="indian-trail-placement-panel" role="${outcome === "error" ? "alert" : "status"}" aria-live="${outcome === "error" ? "assertive" : "polite"}">
-        <div class="indian-trail-placement-icon" aria-hidden="true"></div>
-        <div class="indian-trail-placement-copy">
-          <small>${escapeHtml(eyebrow)}</small>
-          <h2>${escapeHtml(title)}</h2>
-          <p>${escapeHtml(message || (entry.ok ? `${stage} quantity was updated.` : "Review the scan and try again."))}</p>
+      <section class="indian-trail-placement-panel scan-result-panel" role="${outcome === "error" ? "alert" : "status"}" aria-live="${outcome === "error" ? "assertive" : "polite"}">
+        <header class="scan-result-header">
+          <div class="indian-trail-placement-icon" aria-hidden="true"></div>
+          <div class="indian-trail-placement-copy">
+            <small>${escapeHtml(eyebrow)}</small>
+            <h2>${escapeHtml(title)}</h2>
+            <p>${escapeHtml(message || (entry.ok ? `${stage} quantity was updated.` : "Review the scan and try again."))}</p>
+          </div>
+          <div class="scan-result-status-stack">
+            <span class="scan-result-status-badge">${escapeHtml(statusLabel)}</span>
+            <span class="scan-result-stage-badge">${escapeHtml(stage)}</span>
+          </div>
+        </header>
+
+        <div class="scan-result-compact-body">
+          <div class="scan-result-compact-grid" aria-label="Scanned item details">
+            <span class="is-primary"><small>Order / Item</small><strong>${escapeHtml(item.order || "-")}<i>/</i>${escapeHtml(item.item || "-")}</strong></span>
+            <span class="is-customer"><small>Customer</small><strong title="${escapeHtml(item.customer || "-")}">${escapeHtml(item.customer || "-")}</strong></span>
+            <span><small>Qty</small><strong>${escapeHtml(quantity)}</strong></span>
+            <span><small>Dimensions</small><strong title="${escapeHtml(item.dimensions || "-")}">${escapeHtml(item.dimensions || "-")}</strong></span>
+            <span class="is-job"><small>Glass / Job</small><strong title="${escapeHtml(jobText)}">${escapeHtml(jobText)}</strong></span>
+            <span><small>Route</small><strong>${escapeHtml(routeLabel(item) || "-")}</strong></span>
+            <span><small>Location</small><strong title="${escapeHtml(location)}">${escapeHtml(location)}</strong></span>
+          </div>
+          ${canCorrectRack ? `
+            <label class="scan-result-rack-field scan-result-rack-field-compact">
+              <span>Correct rack / truck</span>
+              <select data-scan-result-rack>${rackOptions}</select>
+              <small data-scan-result-rack-status>${currentRackCode ? `Currently ${escapeHtml(currentRackCode)}` : "No rack assigned"}</small>
+            </label>
+          ` : ""}
         </div>
-        <div class="scan-result-facts" aria-label="Scan details">
-          <span><small>Order</small><strong>${escapeHtml(item.order || "-")}</strong></span>
-          <span><small>Item</small><strong>${escapeHtml(item.item || "-")}</strong></span>
-          <span><small>Quantity</small><strong>${escapeHtml(quantity)}</strong></span>
-          <span><small>Dimensions</small><strong>${escapeHtml(item.dimensions || "-")}</strong></span>
-          <span><small>Customer</small><strong>${escapeHtml(item.customer || "-")}</strong></span>
-          <span><small>Stage</small><strong>${escapeHtml(stage)}</strong></span>
-          <span><small>Job / Glass</small><strong>${escapeHtml(item.job || item.product || "-")}</strong></span>
-          <span><small>Route</small><strong>${escapeHtml(routeLabel(item) || "-")}</strong></span>
-          <span><small>Location</small><strong>${escapeHtml(currentRackCode || locationLabel(item) || "-")}</strong></span>
-        </div>
-        ${canCorrectRack ? `
-          <label class="scan-result-rack-field">
-            <span>Rack / Truck</span>
-            <select data-scan-result-rack>${rackOptions}</select>
-            <small data-scan-result-rack-status>${currentRackCode ? `Currently ${escapeHtml(currentRackCode)}` : "No rack assigned"}</small>
-          </label>
-        ` : ""}
-        <div class="indian-trail-placement-actions">
-          <span class="timed-scan-open-hint">Click the notice to open All Scans</span>
-          <button type="button" data-placement-close>Done <span data-placement-countdown>${outcome === "error" ? "10" : "8"}</span></button>
-        </div>
+
+        <footer class="indian-trail-placement-actions scan-result-actions">
+          <span class="timed-scan-open-hint">Select the card for All Scans</span>
+          <button type="button" data-placement-close>Done <span data-placement-countdown>${durationSeconds}</span></button>
+        </footer>
         <i class="indian-trail-placement-timer" aria-hidden="true"></i>
       </section>
     `,
@@ -9475,6 +9560,7 @@ function showStageScanConfirmation(result, options = {}) {
   const rackSelect = shell.querySelector("[data-scan-result-rack]");
   rackSelect?.addEventListener("change", async () => {
     const status = shell.querySelector("[data-scan-result-rack-status]");
+    shell._setTimedEditInProgress?.(true);
     rackSelect.disabled = true;
     if (status) status.textContent = "Updating location...";
     try {
@@ -9483,13 +9569,16 @@ function showStageScanConfirmation(result, options = {}) {
         ? "Rack location cleared"
         : `Moved to ${rackSelect.value}`;
       shell.classList.add("rack-change-saved");
+      shell.classList.remove("rack-change-error");
     } catch (error) {
       rackSelect.value = currentRackCode || NO_RACK_SELECTION;
       if (status) status.textContent = error.message;
       shell.classList.add("rack-change-error");
+      shell.classList.remove("rack-change-saved");
     } finally {
       rackSelect.disabled = false;
       syncCustomSelect(rackSelect);
+      shell._setTimedEditInProgress?.(false);
     }
   });
 
@@ -9716,9 +9805,15 @@ async function processScanInternal(rawScan, options = {}) {
     } else if ((isStagingScanContext() || isOutboundScanContext()) && state.racks.length) {
       void ensureRacksLoaded(isOutboundScanContext()).catch(() => {});
     }
+    const acceptedRackBarcode = Boolean(
+      isRackBarcodeScan(scanText) &&
+      (payload.lastScan ? payload.lastScan.ok : (payload.ok || outboundRackDeparture)),
+    );
     scanFlash(
       payload.lastScan?.ok ? "success" : payload.lastScan?.eventType === "duplicate" || payload.lastScan?.eventType === "notice" ? "notice" : "error",
-      scanSoundKind(payload.lastScan, payload.lastScan?.ok ? (payload.rackCode ? "rack_item_added" : "scan_success") : "scan_error"),
+      acceptedRackBarcode
+        ? (outboundRackDeparture ? "rack_outbound" : "rack_barcode")
+        : scanSoundKind(payload.lastScan, payload.lastScan?.ok ? (payload.rackCode ? "rack_item_added" : "scan_success") : "scan_error"),
     );
     renderScanPage();
     if (outboundRackDeparture) {
@@ -9871,6 +9966,7 @@ async function resetState() {
     });
     applyBackendPayload(payload);
     renderScanPage();
+    playAppSound("destructive_action", { force: true });
     return;
   }
   for (const item of state.items) item.scanned = 0;
@@ -9880,6 +9976,7 @@ async function resetState() {
   state.lastScan = null;
   saveState();
   renderScanPage();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -10356,9 +10453,10 @@ function stopManagedPrintWindowWatch(printWindow = null) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-async function finishManagedPrintSession(printWindow = null) {
+async function finishManagedPrintSession(printWindow = null, options = {}) {
   if (printWindow && state.managedPrintWindow && state.managedPrintWindow !== printWindow) return;
   stopManagedPrintWindowWatch(printWindow);
+  if (options.printed) playAppSound("print_ready", { force: true });
   await restoreFullscreenAfterManagedPrint();
 }
 
@@ -10409,7 +10507,6 @@ function launchManagedPrint(url, windowName = "deliveryListPrintWindow") {
   }
   watchManagedPrintWindow(printWindow);
   printWindow.focus();
-  playAppSound("print_ready");
   return printWindow;
 }
 
@@ -10427,10 +10524,10 @@ function printCurrentPageManaged() {
    */
   const afterPrint = () => {
     window.removeEventListener("afterprint", afterPrint);
+    playAppSound("print_ready", { force: true });
     restoreFullscreenAfterManagedPrint();
   };
   window.addEventListener("afterprint", afterPrint);
-  playAppSound("print_ready");
   window.print();
 }
 
@@ -10501,9 +10598,10 @@ function renderGlobalSearchResults(results) {
     .slice(0, 8)
     .map(
       (result) => {
-        const openAttrs = result.bayCode
-          ? `data-open-bay="${escapeHtml(result.bayCode)}"`
-          : `data-open-list="${escapeHtml(result.deliveryListId)}" data-open-search="${escapeHtml([result.order, result.item].filter(Boolean).join(" "))}"`;
+        const navigationListId = result.navigationDeliveryListId || result.deliveryListId || "";
+        const openAttrs = navigationListId
+          ? `data-open-list="${escapeHtml(navigationListId)}" data-open-search="${escapeHtml([result.order, result.item].filter(Boolean).join(" "))}"`
+          : `data-open-bay="${escapeHtml(result.bayCode || "")}"`;
         const destinationLabel = result.bay
           ? `Bay ${result.bay}`
           : result.rackCode
@@ -13208,6 +13306,7 @@ async function clearManagedItem() {
   await refreshBayMapPage();
   if (els.manageItemsStatus) els.manageItemsStatus.textContent = `Cleared ${label}.`;
   renderManageItemsPanel();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -13555,6 +13654,7 @@ async function deleteBayEditorGroup() {
   });
   state.bayEditorSelectedGroup = "";
   await refreshBayEditorAfter(payload);
+  playAppSound("destructive_action", { force: true });
   showFloatingNotice(`Deleted ${group.label}.`, "success");
 }
 
@@ -13613,6 +13713,7 @@ async function deleteBayEditorBay(bayCode) {
     body: JSON.stringify({ bayCode, ...requestContext() }),
   });
   await refreshBayEditorAfter(payload);
+  playAppSound("destructive_action", { force: true });
   showFloatingNotice(`Deleted ${bayCode}.`, "success");
 }
 
@@ -13974,6 +14075,7 @@ async function submitSdi(mark = true, options = {}) {
   }
 
   const result = await postBayAction(mark ? "/api/indian-trail/mark-sdi" : "/api/indian-trail/remove-sdi", payload);
+  if (!mark) playAppSound("destructive_action", { force: true });
   const affectedItems = Number(result?.affectedItems || 0);
   const jobLabel = result?.matchedJob || lookupText;
   const affectedListIds = [...new Set((result?.affectedListIds || []).filter(Boolean))];
@@ -14065,6 +14167,7 @@ async function runBayAction(action) {
     });
     if (!confirmed) return;
     await postBayAction("/api/indian-trail/clear", { bayCode: bay.bayCode, reason: "Cleared from bay map" });
+    playAppSound("destructive_action", { force: true });
     return;
   }
   if (action === "move") {
@@ -14482,6 +14585,7 @@ async function deleteSelectedBay() {
   renderBayMapPage();
   renderBayLayoutSelect();
   populateBayLayoutForm();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -14508,6 +14612,7 @@ async function deleteSelectedBayGroup() {
   renderBayMapPage();
   renderBayLayoutSelect();
   populateBayLayoutForm();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -17861,6 +17966,7 @@ async function resetAdminScansForList(listId) {
   await loadDeliveryLists(state.activeListId);
   if (els.resetScansStatus) els.resetScansStatus.innerHTML = `<strong>Scans reset</strong><span>${escapeHtml(list.label)} is back to zero scanned quantity.</span>`;
   renderAdminDeliveryLists();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -17915,6 +18021,7 @@ async function resetAdminScansForDate(deliveryDate) {
   if (els.resetScansStatus) {
     els.resetScansStatus.innerHTML = `<strong>Scans reset</strong><span>Every stage for ${escapeHtml(formatDisplayDate(deliveryDate))} is back to zero scanned quantity.</span>`;
   }
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -17973,6 +18080,7 @@ async function deleteAdminDeliveryDateByDate(deliveryDate) {
   if (els.deleteListStatus) {
     els.deleteListStatus.innerHTML = `<strong>Deleted date</strong><span>${escapeHtml(result.deletedCount || 0)} stages removed.</span>`;
   }
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -18052,6 +18160,7 @@ async function deleteSelectedDeliveryList(deleteDate = false) {
   renderDeliveryListSelect();
   renderAdminDeleteControls();
   renderAdminDeliveryLists();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -18101,6 +18210,7 @@ async function deleteAdminDeliveryListById(listId) {
   renderDeliveryListSelect();
   renderAdminDeleteControls();
   renderAdminDeliveryLists();
+  playAppSound("destructive_action", { force: true });
   openAdminModal("deliveryLists");
 }
 
@@ -19303,6 +19413,7 @@ async function removeBayScannerRule(kind, id) {
   state.bayScannerSettings = payload || state.bayScannerSettings;
   renderBayScannerRuleOverview();
   if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -19736,6 +19847,7 @@ async function removeCustomerEmailContact(id) {
   state.customerEmailSettings = payload || state.customerEmailSettings;
   renderCustomerEmailOverview();
   if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -19751,6 +19863,7 @@ async function removeCustomerEmailCc(id) {
   state.customerEmailSettings = payload || state.customerEmailSettings;
   renderCustomerEmailOverview();
   if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -19888,6 +20001,7 @@ async function removeCustomerRouteRule(ruleId) {
   }
 
   refreshCustomerRouteModal();
+  playAppSound("destructive_action", { force: true });
   showFloatingNotice(`Customer route removed for ${label}.`, "success");
 }
 
@@ -20682,6 +20796,7 @@ async function deleteManualLineItem(lineItemId) {
   else await runManualEditSearch();
   state.manualEditDirty = false;
   renderScanPage();
+  playAppSound("destructive_action", { force: true });
 }
 
 /**
@@ -20926,7 +21041,7 @@ function wireEvents() {
   }
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin || event.data?.type !== "delivery-print-complete") return;
-    finishManagedPrintSession().catch(() => {});
+    finishManagedPrintSession(null, { printed: true }).catch(() => {});
   });
   window.addEventListener("focus", () => {
     checkManagedPrintWindowClosed();
@@ -20967,7 +21082,7 @@ function wireEvents() {
       scanRackSelect.disabled = true;
       try {
         await assignLineItemToRack(lineItemId, rackCode, { quiet: true });
-        playAppSound(rackCode ? "rack_item_added" : "rack_reopened");
+        playAppSound(rackCode ? "rack_item_added" : "destructive_action", { force: !rackCode });
         showFloatingNotice(rackCode ? `Rack changed to ${rackCode}.` : "Rack location cleared.", "success");
         await openRecentScansModal();
       } catch (error) {
@@ -22262,6 +22377,10 @@ function wireEvents() {
   }
 
   document.addEventListener("click", async (event) => {
+    document.querySelectorAll("#scanFilterDrawer[open], #bayFilterDrawer[open]").forEach((drawer) => {
+      if (!drawer.contains(event.target)) drawer.open = false;
+    });
+
     if (
       els.headerGlobalSearchResults &&
       !event.target.closest(".global-search") &&
@@ -22578,8 +22697,9 @@ function wireEvents() {
       scheduleScanRender();
       return;
     }
-    if (event.target.closest("[data-remove-glass-filter]")) {
-      state.glassTypeFilter = "all";
+    const removeGlassFilterButton = event.target.closest("[data-remove-glass-filter]");
+    if (removeGlassFilterButton) {
+      state.glassTypeFilters.delete(removeGlassFilterButton.dataset.removeGlassFilter || "");
       state.pageIndex = 1;
       state.lastGlassFilterSignature = "";
       scheduleScanRender();
@@ -22587,7 +22707,7 @@ function wireEvents() {
     }
     if (event.target.closest("[data-clear-scan-filters]")) {
       state.activeFilters.clear();
-      state.glassTypeFilter = "all";
+      state.glassTypeFilters.clear();
       state.pageIndex = 1;
       state.lastGlassFilterSignature = "";
       syncScanFilterButtons();
@@ -22596,7 +22716,14 @@ function wireEvents() {
     }
     const glassFilterButton = event.target.closest("[data-glass-filter]");
     if (glassFilterButton) {
-      state.glassTypeFilter = glassFilterButton.dataset.glassFilter || "all";
+      const glassType = glassFilterButton.dataset.glassFilter || "all";
+      if (glassType === "all") {
+        state.glassTypeFilters.clear();
+      } else if (state.glassTypeFilters.has(glassType)) {
+        state.glassTypeFilters.delete(glassType);
+      } else {
+        state.glassTypeFilters.add(glassType);
+      }
       state.pageIndex = 1;
       state.lastGlassFilterSignature = "";
       scheduleScanRender();
@@ -22728,6 +22855,7 @@ function wireEvents() {
           body: JSON.stringify({ username }),
         })
           .then(() => refreshAdminUsersUi())
+          .then(() => playAppSound("destructive_action", { force: true }))
           .catch((error) => showInlineError(error.message));
       });
 

@@ -2,40 +2,44 @@
 
 Custom, consistent industrial UI sounds for the Delivery List Scanner.
 
-Technical format: 44.1 kHz, 16-bit PCM, mono WAV. Every cue is mastered to a -1 dBFS peak with restrained compression and limiting.
+Technical format: 44.1 kHz, 16-bit PCM, mono WAV. Primary operational cues are mastered for production-floor use. The expand/collapse and destructive-action cues are intentionally quieter than scan, outbound, and fault cues so routine operation stays clear without becoming noisy.
 
 ## Cue map
 
-| Cue | Use | Design |
-|---|---|---|
-| `scan_success` | Successful item scan | A crisp scanner response followed by a confident rising three-note success phrase. |
-| `collapse_open` | Section expanded | A short upward whoosh for Scan and Bay Map sections. |
-| `collapse_close` | Section collapsed | A short downward whoosh for Scan and Bay Map sections. |
-| `scan_duplicate` | Duplicate/already scanned | A gentle repeated confirmation that says the scan was heard but no state changed. |
-| `scan_warning` | Warning or override required | A controlled descending caution phrase that is distinct without sounding like failure. |
-| `scan_error` | Rejected or invalid scan | A low two-part industrial rejection cue that remains clear without becoming a buzzer. |
-| `scan_rush` | Successful Rush scan | The signature success sound with a high-priority sparkle that can be recognized instantly. |
-| `scan_remake` | Successful remake scan | A bright success cue with a restrained glass-like shimmer for remake identification. |
-| `task_complete` | 100% progress or major task completion | A confident four-note ascending completion phrase with a polished final resonance. |
-| `rack_item_added` | Item added or assigned to rack | A short mechanical latch followed by a clean confirmation. |
-| `rack_complete` | Rack completed | A satisfying three-stage industrial lock-in sound. |
-| `rack_reopened` | Rack reopened / Not On The Way | A reverse-release sweep followed by an open-state confirmation. |
-| `rack_returned` | Rack returned and cleared | A contained release-and-settle cue for rack reuse. |
-| `bay_assigned` | Item assigned or scanned into a bay | A precise placement click with a clean glass-like confirmation. |
-| `bay_removed` | Item scanned out or released from a bay | A short release cue that moves downward and away. |
-| `bay_moved` | Item moved between bays | A directional slide followed by a placement confirmation. |
-| `undo` | Undo completed | A reverse sweep with a soft descending endpoint. |
-| `redo` | Redo completed | A forward sweep with a clear ascending endpoint. |
-| `import_start` | Delivery-list import started | A compact rising pulse that signals work is underway. |
-| `import_complete` | Import completed successfully | A three-note completion phrase that is shorter than a full-truck celebration. |
-| `save` | Settings or record saved | A compact, confident save confirmation. |
-| `print_ready` | Print job opened or prepared | A subtle feed/click sequence with a ready confirmation. |
-| `email_sent` | Email sent | An outgoing sweep followed by a concise delivered confirmation. |
-| `login` | Successful sign-in | A warm, restrained welcome phrase. |
-| `logout` | Sign-out | A quiet descending close that does not resemble an error. |
-| `notification` | New application notification | A light two-part ping designed to be informative rather than urgent. |
-| `permission_denied` | Permission denied | A firm low refusal cue reserved for access-control failures. |
-| `machine_scan` | Future machine-generated scan accepted | A compact electromechanical pulse distinct from handheld scanning. |
-| `machine_fault` | Future machine fault | A controlled industrial fault signal that is forceful without becoming a piercing alarm. |
+| Cue | File | Use | Design |
+|---|---|---|---|
+| `scan_success` | `notification.wav` | Normal accepted item scan | A light two-part confirmation. Page navigation is intentionally silent. |
+| Reserved | `scan_success.wav` | Future use | The previous success composition remains packaged but is intentionally not mapped in v104. |
+| `rack_barcode` | `rack_barcode.wav` | Accepted `RACK...` barcode | A compact mechanical barcode snap and rack-specific confirmation. |
+| `rack_outbound` | `rack_outbound.wav` | Rack released from Outbound | A rising airy departure swoosh followed by a success chime. |
+| `destructive_action` | `destructive_action.wav` | Clear, reset, remove, or delete completed | A restrained downward wipe and settle cue that plays only after the action succeeds. |
+| `collapse_open` | `collapse_open.wav` | Section expanded | A short, quiet upward windy swoosh for Scan and Bay Map sections. |
+| `collapse_close` | `collapse_close.wav` | Section collapsed | A short, quiet downward windy swoosh for Scan and Bay Map sections. |
+| `scan_duplicate` | `scan_duplicate.wav` | Duplicate/already scanned | A gentle repeated confirmation that says the scan was heard but no state changed. |
+| `scan_warning` | `scan_warning.wav` | Warning or override required | A controlled descending caution phrase that is distinct without sounding like failure. |
+| `scan_error` | `scan_error.wav` | Rejected or invalid scan | A low two-part industrial rejection cue that remains clear without becoming a buzzer. |
+| `scan_rush` | `scan_rush.wav` | Successful Rush scan | A priority success sound that can be recognized instantly. |
+| `scan_remake` | `scan_remake.wav` | Successful remake scan | A bright success cue with a restrained glass-like shimmer. |
+| `task_complete` | `task_complete.wav` | 100% progress or major completion | A confident ascending completion phrase. |
+| `rack_item_added` | `rack_item_added.wav` | Item added or assigned to rack | A short mechanical latch followed by a clean confirmation. |
+| `rack_complete` | `rack_complete.wav` | Rack completed | A satisfying industrial lock-in sound. |
+| `rack_reopened` | `rack_reopened.wav` | Rack reopened / Not On The Way | A reverse-release sweep followed by an open-state confirmation. |
+| `rack_returned` | `rack_returned.wav` | Rack returned and cleared | A contained release-and-settle cue for rack reuse. |
+| `bay_assigned` | `bay_assigned.wav` | Item assigned or scanned into a bay | A precise placement click with a glass-like confirmation. |
+| `bay_removed` | `bay_removed.wav` | Item scanned out or released from a bay | A short release cue that moves downward and away. |
+| `bay_moved` | `bay_moved.wav` | Item moved between bays | A directional slide followed by placement confirmation. |
+| `undo` | `undo.wav` | Undo completed | A reverse sweep with a soft descending endpoint. |
+| `redo` | `redo.wav` | Redo completed | A forward sweep with a clear ascending endpoint. |
+| `import_start` | `import_start.wav` | Delivery-list import started | A compact rising pulse that signals work is underway. |
+| `import_complete` | `import_complete.wav` | Import completed successfully | A short completion phrase. |
+| `save` | `save.wav` | Settings or record saved | A compact save confirmation. |
+| `print_ready` | `print_ready.wav` | Print completed | Plays after the browser reports that the print workflow completed, not when the preview opens. |
+| `email_sent` | `email_sent.wav` | Email sent | An outgoing sweep followed by a delivered confirmation. |
+| `login` | `login.wav` | Successful sign-in | A warm, restrained welcome phrase. |
+| `logout` | `logout.wav` | Sign-out | A quiet descending close. |
+| `notification` | `notification.wav` | Informational notification and normal accepted scan | A light two-part ping. Page navigation does not play a sound. |
+| `permission_denied` | `permission_denied.wav` | Permission denied | A firm low refusal cue. |
+| `machine_scan` | `machine_scan.wav` | Future machine-generated scan accepted | A compact electromechanical pulse. |
+| `machine_fault` | `machine_fault.wav` | Future machine fault | A controlled industrial fault signal. |
 
-The app should use semantic cue names rather than referring directly to filenames. This keeps business events and audio assets easy to change independently.
+The app uses semantic cue names rather than filenames. This keeps business events and audio assets easy to change independently.

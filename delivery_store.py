@@ -2056,6 +2056,8 @@ class BaseDeliveryStore:
                            SELECT se.created_at
                            FROM scan_events se
                            WHERE se.line_item_id = li.id
+                             AND se.event_type IN ('scan', 'manual_scan', 'redo')
+                             AND se.qty_delta > 0
                            ORDER BY se.id DESC
                            LIMIT 1
                        ) AS last_scan_time,
@@ -2063,6 +2065,8 @@ class BaseDeliveryStore:
                            SELECT se.user_name
                            FROM scan_events se
                            WHERE se.line_item_id = li.id
+                             AND se.event_type IN ('scan', 'manual_scan', 'redo')
+                             AND se.qty_delta > 0
                            ORDER BY se.id DESC
                            LIMIT 1
                        ) AS last_scan_user
@@ -2103,33 +2107,36 @@ class BaseDeliveryStore:
                 return "staging"
             return "other"
 
-        def representative_rank(row: sqlite3.Row) -> int:
-            """Purpose: Run the representative rank workflow for the delivery-list scanner.
+        def representative_rank(row: sqlite3.Row) -> tuple[int, str, int]:
+            """Rank the navigation row by the actual latest scan event.
 
-            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            A timestamped scan always wins, regardless of process order. Legacy
+            scanned rows without event timestamps fall back to process progress.
+            Completely unscanned items deliberately choose Staging.
             """
             scanned = int(row["scanned_qty"] or 0)
             kind = stage_kind(row)
-            if scanned and kind == "indian_trail":
-                return 100
-            if scanned and kind == "outbound":
-                return 90
-            if scanned and kind == "cpu":
-                return 86
-            if scanned and kind == "dtc":
-                return 84
-            if scanned and kind == "greenville":
-                return 82
-            if scanned and kind == "staging":
-                return 70
-            if row["bay_code"]:
-                return 60
-            if row["rack_code"]:
-                return 55
+            last_scan_time = str(row["last_scan_time"] or "")
+            progress_rank = {
+                "indian_trail": 100,
+                "outbound": 90,
+                "cpu": 86,
+                "dtc": 84,
+                "greenville": 82,
+                "staging": 70,
+                "other": 40,
+            }.get(kind, 0)
+            if last_scan_time:
+                return (3, last_scan_time, progress_rank)
             if scanned:
-                return 50
-            return 0
+                return (2, "", progress_rank)
+            if kind == "staging":
+                return (1, "", 100)
+            if row["bay_code"]:
+                return (1, "", 40)
+            if row["rack_code"]:
+                return (1, "", 30)
+            return (0, "", progress_rank)
 
         def rack_location_label(code: Any) -> str:
             """Purpose: Run the rack location label workflow for the delivery-list scanner.
@@ -2191,7 +2198,9 @@ class BaseDeliveryStore:
                 "lastScanUser": row["last_scan_user"],
                 "stageLocations": [],
                 "locationText": "Process Not Started",
-                "_rank": -1,
+                "_rank": (0, "", -1),
+                "_representativeKind": "",
+                "_representativeHasScan": False,
                 "_staged": False,
                 "_outbound": False,
                 "_received": False,
@@ -2229,7 +2238,7 @@ class BaseDeliveryStore:
                 else:
                     result["_staged"] = True
 
-            if rank >= int(result.get("_rank", -1)):
+            if rank >= tuple(result.get("_rank", (0, "", -1))):
                 result["deliveryListId"] = row["list_id"]
                 result["deliveryList"] = row["label"]
                 result["lineItemId"] = row["id"]
@@ -2245,28 +2254,44 @@ class BaseDeliveryStore:
                 result["rackName"] = row["rack_display_name"]
                 result["rackType"] = row["rack_type"]
                 result["rackStatus"] = row["rack_status"]
+                result["lastScanTime"] = row["last_scan_time"]
+                result["lastScanUser"] = row["last_scan_user"]
                 result["_scanner"] = row["scanner"]
+                result["_representativeKind"] = kind
+                result["_representativeHasScan"] = bool(row["last_scan_time"] or scanned)
                 result["_rank"] = rank
 
         cleaned_results: list[dict[str, Any]] = []
         for result in grouped.values():
             transport_label = rack_location_label(result.get("_transportCode") or result.get("rackCode"))
             bay_label = result.get("_bayLabel") or result.get("bay") or result.get("_preassignedBay")
-            if result.get("_received") or result.get("_cpu") or result.get("_dtc") or result.get("_greenville"):
-                location = "Received"
-            elif result.get("_outbound"):
+            representative_kind = str(result.get("_representativeKind") or "")
+            representative_has_scan = bool(result.get("_representativeHasScan"))
+            if not representative_has_scan:
+                location = "Not Scanned Yet"
+            elif representative_kind == "indian_trail":
+                location = "Indian Trail Received"
+                if bay_label:
+                    location = f"{location} - Bay {bay_label}"
+            elif representative_kind == "outbound":
                 location = f"Outbound on {transport_label}" if transport_label else f"Outbound {airport_label(result.get('_scanner'))}"
-            elif result.get("_staged"):
-                location = f"Staged {airport_label(result.get('_scanner'))}"
+            elif representative_kind == "staging":
+                location = f"Staging {airport_label(result.get('_scanner'))}"
                 if transport_label:
                     location = f"{location} on {transport_label}"
-            elif result.get("_preassignedBay"):
-                location = f"Preassigned Indian Trail Bay {result.get('_preassignedBay')}"
+            elif representative_kind == "cpu":
+                location = "Customer Pickup"
+            elif representative_kind == "dtc":
+                location = "Delivery to Customer"
+            elif representative_kind == "greenville":
+                location = "BFS Greenville"
             else:
-                location = "Process Not Started"
+                location = str(result.get("stage") or result.get("scanner") or "Last scanned stage")
 
             result["locationText"] = location
             result["stageLocations"] = [location]
+            result["navigationDeliveryListId"] = result.get("deliveryListId")
+            result["navigationStage"] = result.get("stage")
             if result.get("_transportCode") and not result.get("rackCode"):
                 result["rackCode"] = result.get("_transportCode")
             for key in list(result.keys()):
@@ -9101,6 +9126,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                            SELECT se.created_at
                            FROM scan_events se
                            WHERE se.line_item_id = li.id
+                             AND se.event_type IN ('scan', 'manual_scan', 'redo')
+                             AND se.qty_delta > 0
                            ORDER BY se.id DESC
                            LIMIT 1
                        ) AS last_scan_time,
@@ -9108,6 +9135,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                            SELECT se.user_name
                            FROM scan_events se
                            WHERE se.line_item_id = li.id
+                             AND se.event_type IN ('scan', 'manual_scan', 'redo')
+                             AND se.qty_delta > 0
                            ORDER BY se.id DESC
                            LIMIT 1
                        ) AS last_scan_user
@@ -9148,33 +9177,36 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return "staging"
             return "other"
 
-        def representative_rank(row: sqlite3.Row) -> int:
-            """Purpose: Run the representative rank workflow for the delivery-list scanner.
+        def representative_rank(row: sqlite3.Row) -> tuple[int, str, int]:
+            """Rank the navigation row by the actual latest scan event.
 
-            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            A timestamped scan always wins, regardless of process order. Legacy
+            scanned rows without event timestamps fall back to process progress.
+            Completely unscanned items deliberately choose Staging.
             """
             scanned = int(row["scanned_qty"] or 0)
             kind = stage_kind(row)
-            if scanned and kind == "indian_trail":
-                return 100
-            if scanned and kind == "outbound":
-                return 90
-            if scanned and kind == "cpu":
-                return 86
-            if scanned and kind == "dtc":
-                return 84
-            if scanned and kind == "greenville":
-                return 82
-            if scanned and kind == "staging":
-                return 70
-            if row["bay_code"]:
-                return 60
-            if row["rack_code"]:
-                return 55
+            last_scan_time = str(row["last_scan_time"] or "")
+            progress_rank = {
+                "indian_trail": 100,
+                "outbound": 90,
+                "cpu": 86,
+                "dtc": 84,
+                "greenville": 82,
+                "staging": 70,
+                "other": 40,
+            }.get(kind, 0)
+            if last_scan_time:
+                return (3, last_scan_time, progress_rank)
             if scanned:
-                return 50
-            return 0
+                return (2, "", progress_rank)
+            if kind == "staging":
+                return (1, "", 100)
+            if row["bay_code"]:
+                return (1, "", 40)
+            if row["rack_code"]:
+                return (1, "", 30)
+            return (0, "", progress_rank)
 
         def rack_location_label(code: Any) -> str:
             """Purpose: Run the rack location label workflow for the delivery-list scanner.
@@ -9236,7 +9268,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "lastScanUser": row["last_scan_user"],
                 "stageLocations": [],
                 "locationText": "Not Scanned Yet",
-                "_rank": -1,
+                "_rank": (0, "", -1),
+                "_representativeKind": "",
+                "_representativeHasScan": False,
                 "_staged": False,
                 "_outbound": False,
                 "_received": False,
@@ -9274,7 +9308,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 else:
                     result["_staged"] = True
 
-            if rank >= int(result.get("_rank", -1)):
+            if rank >= tuple(result.get("_rank", (0, "", -1))):
                 result["deliveryListId"] = row["list_id"]
                 result["deliveryList"] = row["label"]
                 result["lineItemId"] = row["id"]
@@ -9290,28 +9324,44 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 result["rackName"] = row["rack_display_name"]
                 result["rackType"] = row["rack_type"]
                 result["rackStatus"] = row["rack_status"]
+                result["lastScanTime"] = row["last_scan_time"]
+                result["lastScanUser"] = row["last_scan_user"]
                 result["_scanner"] = row["scanner"]
+                result["_representativeKind"] = kind
+                result["_representativeHasScan"] = bool(row["last_scan_time"] or scanned)
                 result["_rank"] = rank
 
         cleaned_results: list[dict[str, Any]] = []
         for result in grouped.values():
             transport_label = rack_location_label(result.get("_transportCode") or result.get("rackCode"))
             bay_label = result.get("_bayLabel") or result.get("bay") or result.get("_preassignedBay")
-            if result.get("_received") or result.get("_cpu") or result.get("_dtc") or result.get("_greenville"):
-                location = "Received"
-            elif result.get("_outbound"):
+            representative_kind = str(result.get("_representativeKind") or "")
+            representative_has_scan = bool(result.get("_representativeHasScan"))
+            if not representative_has_scan:
+                location = "Not Scanned Yet"
+            elif representative_kind == "indian_trail":
+                location = "Indian Trail Received"
+                if bay_label:
+                    location = f"{location} - Bay {bay_label}"
+            elif representative_kind == "outbound":
                 location = f"Outbound on {transport_label}" if transport_label else f"Outbound {airport_label(result.get('_scanner'))}"
-            elif result.get("_staged"):
-                location = f"Staged {airport_label(result.get('_scanner'))}"
+            elif representative_kind == "staging":
+                location = f"Staging {airport_label(result.get('_scanner'))}"
                 if transport_label:
                     location = f"{location} on {transport_label}"
-            elif result.get("_preassignedBay"):
-                location = f"Preassigned Indian Trail Bay {result.get('_preassignedBay')}"
+            elif representative_kind == "cpu":
+                location = "Customer Pickup"
+            elif representative_kind == "dtc":
+                location = "Delivery to Customer"
+            elif representative_kind == "greenville":
+                location = "BFS Greenville"
             else:
-                location = "Not Scanned Yet"
+                location = str(result.get("stage") or result.get("scanner") or "Last scanned stage")
 
             result["locationText"] = location
             result["stageLocations"] = [location]
+            result["navigationDeliveryListId"] = result.get("deliveryListId")
+            result["navigationStage"] = result.get("stage")
             if result.get("_transportCode") and not result.get("rackCode"):
                 result["rackCode"] = result.get("_transportCode")
             for key in list(result.keys()):

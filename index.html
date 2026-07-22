@@ -10,7 +10,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="styles.css?v=20260721-v102">
+    <link rel="stylesheet" href="styles.css?v=20260722-v104">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <!-- SECTION: Authentication and password reset -->
@@ -327,12 +327,27 @@
                   <b id="scanActiveFilterCount">0</b>
                 </summary>
                 <div class="scan-filter-drawer-panel">
-                  <header>
-                    <div><strong>Filter delivery list</strong><span>Select more than one option when needed.</span></div>
+                  <header class="scan-filter-panel-header">
+                    <div class="scan-filter-panel-title">
+                      <span class="scan-filter-panel-icon" aria-hidden="true"></span>
+                      <div>
+                        <strong>Filter delivery list</strong>
+                        <span>Combine filters to narrow the list without losing your place.</span>
+                      </div>
+                    </div>
                     <button type="button" data-clear-scan-filters>Clear all</button>
                   </header>
+
+                  <div class="scan-filter-guidance">
+                    <strong>How filters work</strong>
+                    <span>Choices within one group are combined. Different groups narrow the results together.</span>
+                  </div>
+
                   <section class="scan-filter-section" aria-label="Status filters">
-                    <h3>Status</h3>
+                    <div class="scan-filter-section-heading">
+                      <h3>Status</h3>
+                      <span>Select one or more scan states</span>
+                    </div>
                     <div class="scan-filter-options">
                       <button class="tab" data-filter="remaining" type="button">Not Scanned <span id="countRemaining">(0)</span></button>
                       <button class="tab" data-filter="partial" type="button">Partial <span id="countPartial">(0)</span></button>
@@ -340,7 +355,10 @@
                     </div>
                   </section>
                   <section class="scan-filter-section" aria-label="Attention filters">
-                    <h3>Attention</h3>
+                    <div class="scan-filter-section-heading">
+                      <h3>Attention</h3>
+                      <span>Find priority or changed pieces</span>
+                    </div>
                     <div class="scan-filter-options">
                       <button class="tab priority-tab" data-filter="remakes" type="button">Remakes <span id="countRemakes">(0)</span></button>
                       <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">(0)</span></button>
@@ -349,7 +367,10 @@
                     </div>
                   </section>
                   <section class="scan-filter-section" aria-label="Route filters">
-                    <h3>Route</h3>
+                    <div class="scan-filter-section-heading">
+                      <h3>Route</h3>
+                      <span>Show one or several destinations</span>
+                    </div>
                     <div class="scan-filter-options">
                       <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button">Indian Trail <span id="countIndianTrailRoute">(0)</span></button>
                       <button class="tab route-filter-tab" data-filter="cpu-route" type="button">CPU <span id="countCpuRoute">(0)</span></button>
@@ -358,9 +379,16 @@
                     </div>
                   </section>
                   <section class="scan-filter-section scan-filter-glass-section" aria-label="Glass type filters">
-                    <h3>Glass Type</h3>
+                    <div class="scan-filter-section-heading">
+                      <h3>Glass Type</h3>
+                      <span>Select multiple glass types when needed</span>
+                    </div>
                     <div class="scan-filter-options glass-filter-tabs" id="glassFilterTabs"></div>
                   </section>
+                  <footer class="scan-filter-panel-footer">
+                    <span>Results update immediately.</span>
+                    <span>Click anywhere outside this panel to close it.</span>
+                  </footer>
                   <span id="countAll" hidden>(0)</span>
                 </div>
               </details>
@@ -1314,6 +1342,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-    <script src="app.js?v=20260721-v102"></script>
+    <script src="app.js?v=20260722-v104"></script>
 </body>
 </html>

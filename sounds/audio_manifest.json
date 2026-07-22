@@ -1,27 +1,51 @@
 {
   "pack": "Barefoot Delivery Scanner Audio Language",
-  "version": "1.1",
+  "version": "1.3",
   "sample_rate_hz": 44100,
   "encoding": "16-bit PCM mono WAV",
-  "mastering": "High-pass filtered, soft-compressed, limited, normalized to -1 dBFS peak",
+  "mastering": "Floor-ready mastered cues; routine interface and destructive-action cues are intentionally restrained below scan, outbound, and fault cues.",
   "cues": {
     "scan_success": {
-      "file": "scan_success.wav",
+      "file": "notification.wav",
       "label": "Successful item scan",
-      "description": "A crisp scanner response followed by a confident rising three-note success phrase.",
+      "description": "A light two-part confirmation for normal accepted item scans. Page navigation is intentionally silent.",
+      "duration_seconds": 0.33
+    },
+    "reserved_scan_success": {
+      "file": "scan_success.wav",
+      "label": "Reserved success cue",
+      "description": "The former scan-success composition is intentionally retained in the sound pack but is not currently mapped in the web app.",
       "duration_seconds": 0.58
+    },
+    "rack_barcode": {
+      "file": "rack_barcode.wav",
+      "label": "Rack barcode accepted",
+      "description": "A compact mechanical barcode snap and rack-specific confirmation, distinct from normal item scans.",
+      "duration_seconds": 0.38
+    },
+    "rack_outbound": {
+      "file": "rack_outbound.wav",
+      "label": "Outbound rack released",
+      "description": "A rising airy departure swoosh followed by a success chime when a rack is sent on the way.",
+      "duration_seconds": 0.78
+    },
+    "destructive_action": {
+      "file": "destructive_action.wav",
+      "label": "Clear, reset, remove, or delete completed",
+      "description": "A restrained downward wipe and settle cue used only after destructive actions finish successfully.",
+      "duration_seconds": 0.46
     },
     "collapse_open": {
       "file": "collapse_open.wav",
       "label": "Section expanded",
-      "description": "A short upward whoosh for expanding scan and Bay Map sections.",
-      "duration_seconds": 0.25
+      "description": "A small, subtle upward windy swoosh for expanding Scan and Bay Map sections.",
+      "duration_seconds": 0.22
     },
     "collapse_close": {
       "file": "collapse_close.wav",
       "label": "Section collapsed",
-      "description": "A short downward whoosh for collapsing scan and Bay Map sections.",
-      "duration_seconds": 0.22
+      "description": "A small, subtle downward windy swoosh for collapsing Scan and Bay Map sections.",
+      "duration_seconds": 0.19
     },
     "scan_duplicate": {
       "file": "scan_duplicate.wav",
@@ -133,8 +157,8 @@
     },
     "print_ready": {
       "file": "print_ready.wav",
-      "label": "Print job opened or prepared",
-      "description": "A subtle feed/click sequence with a ready confirmation.",
+      "label": "Print completed",
+      "description": "A subtle feed-and-click confirmation played after the browser reports that printing has completed.",
       "duration_seconds": 0.47
     },
     "email_sent": {
@@ -157,8 +181,8 @@
     },
     "notification": {
       "file": "notification.wav",
-      "label": "New application notification",
-      "description": "A light two-part ping designed to be informative rather than urgent.",
+      "label": "Navigation and application notification",
+      "description": "A light two-part ping used for page changes, normal accepted scans, and informative notifications.",
       "duration_seconds": 0.33
     },
     "permission_denied": {

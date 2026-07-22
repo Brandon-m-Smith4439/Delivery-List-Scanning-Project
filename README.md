@@ -1,10 +1,12 @@
 # Delivery List Scanner
 
-Current maintained release: **v098**. SQLite remains the active/default backend.
+Current maintained release: **v104**. SQLite remains the active/default backend.
 
-v098 adds the complete **Barefoot Delivery Scanner Audio Language** while preserving the v097 production database upgrade. The web app now uses 27 distinct mastered WAV cues for scans, duplicates, warnings, errors, Rush and remake pieces, rack and bay actions, undo/redo, imports, saves, printing, email, authentication, notifications, completion events, and future machine integration.
+v104 tightens the Scan-page result popup into a smaller, concise card while preserving the key order, item, customer, quantity, dimensions, route, location, and rack-correction details. Popup dropdown menus now render above the card, and the countdown remains paused while a rack/bay selector is open or while a rack correction is being saved.
 
-The sign-in logo continues to use the exact same framed presentation as the expanded desktop sidebar logo. The v097 numbered/checksummed SQLite migrations, verified backups, constraints, append-only event history, integrity tooling, and Azure SQL migration preparation remain unchanged.
+Page navigation is now silent. Rack barcodes use a dedicated rack cue, Outbound rack release uses a new airy on-the-way success cue, and the print confirmation cue plays only after the browser reports that printing completed. Successful clear, reset, Rush/Remake removal, and delete actions now use one restrained destructive-action confirmation throughout the maintained web app. Rush/Remake filter buttons no longer resize when their indicator changes, and active filter pills now use polished category-specific styling.
+
+The v097 numbered/checksummed SQLite migrations, verified backups, constraints, append-only event history, integrity tooling, and Azure SQL migration preparation remain unchanged.
 
 ## Start the local web app
 
@@ -29,14 +31,13 @@ See `docs\DATABASE_MIGRATIONS.md` before restoring or troubleshooting an upgrade
 
 ## Audio language
 
-The maintained sound pack is stored under `sounds\` as 44.1 kHz, 16-bit PCM mono WAV files. Open `sounds\preview_audio_pack.html` in a browser to audition every cue without installing audio software. The web app loads semantic cue names from `app.js`, uses the existing shared volume/compressor chain, and falls back to synthesized tones only if a WAV file cannot be loaded.
+The maintained sound pack is stored under `sounds\` as 44.1 kHz, 16-bit PCM mono WAV files. Open `sounds\preview_audio_pack.html` in a browser to audition the packaged cues without installing audio software. The web app loads semantic cue names from `app.js`, uses the existing shared volume/compressor chain, and falls back to synthesized tones only if a WAV file cannot be loaded.
 
-The existing sound-volume slider remains available for floor testing. At 100%, the new files are already mastered near full scale; use the higher range only when the device speaker and production-floor noise require it.
-
+The existing sound-volume slider remains available for floor testing. At 100%, the main operational files are mastered for production-floor use; the subtle expand/collapse and destructive-action cues are intentionally quieter and shorter so routine interface actions are less distracting.
 
 ## Microsoft Graph email
 
-Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v098 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
+Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v104 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
 
 After BLDR IT provides the Entra tenant ID, application/client ID, and a client-secret value, run `Configure-MicrosoftGraphEmail.bat` once. The secret is encrypted for the current Windows account and loaded only in memory by the normal scanner launcher. See `docs/MICROSOFT_GRAPH_EMAIL.md` for the IT and testing steps.
 
