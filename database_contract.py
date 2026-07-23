@@ -8,8 +8,8 @@ and documented indexes so validation tools do not need a second schema parser.
 from __future__ import annotations
 
 
-APPLICATION_VERSION = "097"
-CURRENT_SCHEMA_VERSION = 2
+APPLICATION_VERSION = "121"
+CURRENT_SCHEMA_VERSION = 3
 
 
 TABLE_DESCRIPTIONS = {
@@ -45,6 +45,8 @@ TABLE_DESCRIPTIONS = {
     "email_outbox": "Queued and delivered customer notifications.",
     "app_notifications": "Multi-user in-app notices.",
     "app_notification_receipts": "Per-user notification acknowledgements.",
+    "line_update_notices": "Per-user-visible new and updated delivery-list line events.",
+    "line_update_receipts": "Per-user review acknowledgements for line update events.",
     "machines": "Production machines available for future scanner integration.",
     "scanners": "Physical scanner devices and optional machine association.",
     "machine_events": "Append-only machine/scanner production events.",
@@ -66,6 +68,8 @@ REQUIRED_COLUMNS = {
     "bay_assignments": {"id", "delivery_list_id", "line_item_id", "bay_id", "assigned_qty", "status", "is_deleted"},
     "machines": {"id", "machine_code", "display_name", "machine_type", "active", "metadata_json"},
     "scanners": {"id", "scanner_code", "display_name", "machine_id", "active", "metadata_json"},
+    "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "created_at"},
+    "line_update_receipts": {"notice_id", "user_id", "seen_at"},
     "machine_events": {
         "id", "machine_id", "scanner_id", "line_item_id", "event_type", "event_status", "qty",
         "barcode", "order_no", "item_no", "metadata_json", "created_at_utc",
@@ -79,6 +83,8 @@ TEXT_BUSINESS_IDENTIFIERS = {
     "bays": {"bay_code"},
     "machines": {"machine_code"},
     "scanners": {"scanner_code"},
+    "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "created_at"},
+    "line_update_receipts": {"notice_id", "user_id", "seen_at"},
     "machine_events": {"barcode", "order_no", "item_no"},
 }
 
@@ -112,6 +118,8 @@ INDEX_DESCRIPTIONS = {
     "idx_bay_events_bay_time": "Recent actions for a selected bay.",
     "idx_rack_items_rack_status": "Current contents of a rack.",
     "idx_rack_items_line_status": "Current rack location for a line item.",
+    "idx_line_update_notices_list_date": "Pending update lines by delivery list and current/future date.",
+    "idx_line_update_receipts_user": "Per-user review state for update lines.",
     "idx_machine_events_machine_time": "Machine event timeline.",
     "idx_machine_events_scanner_time": "Scanner event timeline.",
     "idx_machine_events_order_item": "Production lookup by order and item.",
@@ -124,6 +132,8 @@ JSON_COLUMNS = {
     "email_outbox": {"to_emails", "cc_emails", "payload_json"},
     "machines": {"metadata_json"},
     "scanners": {"metadata_json"},
+    "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "created_at"},
+    "line_update_receipts": {"notice_id", "user_id", "seen_at"},
     "machine_events": {"metadata_json"},
 }
 
@@ -138,6 +148,10 @@ TIMESTAMP_COLUMNS = {
     "racks": {"created_at", "updated_at", "completed_at", "departed_at", "returned_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
     "rack_items": {"added_at", "removed_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
     "bay_assignments": {"assigned_at", "cleared_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
+    "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "created_at"},
+    "line_update_receipts": {"notice_id", "user_id", "seen_at"},
+    "line_update_notices": {"created_at"},
+    "line_update_receipts": {"seen_at"},
     "machine_events": {"created_at_utc"},
 }
 

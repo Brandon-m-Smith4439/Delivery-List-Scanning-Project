@@ -39,6 +39,12 @@ MIGRATIONS = (
         "UTC audit fields, relational constraints, immutable history, machine scanning tables, query indexes, and atomic FK validation; final-v097-r1",
         "_migration_002_v097_production_database",
     ),
+    Migration(
+        3,
+        "v120_user_line_updates",
+        "Per-user current-and-future delivery-list line update notices and explicit review acknowledgements; v120-r1",
+        "_migration_003_v120_user_line_updates",
+    ),
 )
 
 

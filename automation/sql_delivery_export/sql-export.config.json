@@ -1,0 +1,93 @@
+{
+  "Version": "v121",
+  "ProjectRoot": "",
+  "WorkingRoot": "C:\\DeliveryListAutomation",
+  "Database": {
+    "Provider": "SqlServer",
+    "Server": "SQLAWGLASS",
+    "Database": "BFSMAIN",
+    "AuthenticationMode": "Windows",
+    "ConnectionStringEnvironmentVariable": "DLS_SOURCE_SQL_CONNECTION_STRING",
+    "ConnectTimeoutSeconds": 15,
+    "QueryTimeoutSeconds": 120,
+    "Encrypt": false,
+    "TrustServerCertificate": true
+  },
+  "SourceMapping": {
+    "Schema": "SYSADM",
+    "HeaderTable": "BW_AUFTR_KOPF",
+    "ItemTable": "BW_AUFTR_POS",
+    "HeaderJoinColumn": "ID",
+    "ItemJoinColumn": "ID",
+    "HeaderColumns": {
+      "DeliveryDate": "DATUM_LIEFER_PLAN",
+      "JobNumber": "BEST_TEXT1",
+      "OrderNumber": "ID",
+      "Customer": "AH_NAME1",
+      "RemakeFlags": "BIT",
+      "Route": "OR_TOUR"
+    },
+    "ItemColumns": {
+      "ItemNumber": "POS_NR",
+      "Quantity": "PP_MENGE",
+      "WidthUnits": "PP_BREITE",
+      "HeightUnits": "PP_HOEHE",
+      "ProductHeading": "PROD_BEZ1"
+    },
+    "DimensionUnitsPerInch": 32,
+    "RemakeBitMask": 128,
+    "BlankRouteValues": [
+      "",
+      "<n.e.>"
+    ],
+    "RouteMappings": {
+      "Deliver to Customer": "DTC",
+      "Customer Pick Up": "CPU"
+    }
+  },
+  "Report": {
+    "OutputNameFormat": "Delivery List {0:MM-dd-yyyy}.xlsx"
+  },
+  "DestinationFolder": "\\\\bfs.buildersfirstsource.com\\Departments\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Temp Delivery Lists",
+  "Runtime": {
+    "PowerShellPath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "PythonPath": "",
+    "PythonArguments": []
+  },
+  "Schedule": {
+    "IncrementalIntervalMinutes": 60,
+    "IncrementalPastDays": 2,
+    "IncrementalFutureDays": 14,
+    "FullPastDays": 7,
+    "FullFutureDays": 90,
+    "FullRefreshTime": "17:00"
+  },
+  "Import": {
+    "Mode": "direct-store",
+    "User": "sql-auto-import",
+    "InitializeStore": true,
+    "DisableBuiltInDailyImporter": true
+  },
+  "Validation": {
+    "KnownDeliveryDate": "2026-07-15",
+    "ExpectedOrders": 33,
+    "ExpectedLineItems": 61,
+    "ExpectedPieces": 65,
+    "ExpectedRemakeLines": 5
+  },
+  "MinimumWorkbookBytes": 1500,
+  "LogRetentionDays": 30,
+  "Notifications": {
+    "Enabled": true,
+    "CreatedBy": "sql-delivery-automation",
+    "NotifyOnNoChanges": true,
+    "NoChangeExpiresInHours": 2,
+    "SuccessExpiresInHours": 12,
+    "ErrorExpiresInHours": 24
+  },
+  "Automation": {
+    "Mode": "sql-export-and-import",
+    "ScheduleEnabled": false,
+    "AllowWebGuiControl": true
+  }
+}

@@ -1514,6 +1514,68 @@ class BaseDeliveryStore:
             )
         return notifications
 
+    def get_notification_history(self, username: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent non-scan application notifications for the bell inbox.
+
+        Scan events live in scan_events and are deliberately excluded. Notification
+        receipts affect popup delivery only; acknowledged items remain visible here
+        until their normal expiration so scanning cannot erase update history.
+        """
+        clean_username = str(username or "").strip()
+        clean_limit = max(1, min(int(limit or 50), 200))
+        if not clean_username:
+            return []
+        with self.connect() as con:
+            user = con.execute(
+                "SELECT id FROM users WHERE lower(username) = lower(?) AND active = 1",
+                (clean_username,),
+            ).fetchone()
+            if not user:
+                return []
+            rows = con.execute(
+                """
+                SELECT n.*,
+                       CASE WHEN r.notification_id IS NULL THEN 0 ELSE 1 END AS is_read
+                FROM app_notifications n
+                LEFT JOIN app_notification_receipts r
+                  ON r.notification_id = n.id AND r.user_id = ?
+                WHERE n.active = 1
+                  AND (COALESCE(n.expires_at, '') = '' OR n.expires_at > ?)
+                ORDER BY n.id DESC
+                """,
+                (user["id"], now_iso()),
+            ).fetchall()
+        notifications = []
+        for row in list(rows)[:clean_limit]:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except json.JSONDecodeError:
+                payload = {}
+            notifications.append(
+                {
+                    "id": row["id"],
+                    "type": row["notification_type"],
+                    "title": row["title"],
+                    "message": row["message"],
+                    "details": payload,
+                    "createdBy": row["created_by"],
+                    "createdAt": row["created_at"],
+                    "expiresAt": row["expires_at"],
+                    "isRead": bool(row["is_read"]),
+                }
+            )
+        return notifications
+
+    def mark_all_notifications_read(self, username: str) -> dict[str, Any]:
+        """Acknowledge all currently visible bell notifications for one user."""
+        notifications = self.get_notification_history(username, 200)
+        marked = 0
+        for notification in notifications:
+            if notification.get("isRead"):
+                continue
+            self.acknowledge_notification(int(notification.get("id") or 0), username)
+            marked += 1
+        return {"ok": True, "markedRead": marked}
     def acknowledge_notification(self, notification_id: int, username: str) -> dict[str, Any]:
         """Purpose: Run the acknowledge notification workflow for the delivery-list scanner.
 
@@ -1771,6 +1833,7 @@ class BaseDeliveryStore:
                     "rowCount": preview["rowCount"],
                     "totalQty": preview["totalQty"],
                     "createdCount": result["createdCount"],
+                    "reactivatedCount": result.get("reactivatedCount", 0),
                     "updatedCount": result["updatedCount"],
                     "listIds": result["changedListIds"],
                     "stageSummaries": result.get("stageSummaries") or [],
@@ -4321,6 +4384,35 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "updated_at_utc = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE rowid = NEW.rowid; END"
             )
 
+    def _migration_003_v120_user_line_updates(self, con: sqlite3.Connection) -> None:
+        """Add persistent per-user review state for current/future import changes."""
+        con.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS line_update_notices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                line_item_id TEXT NOT NULL,
+                list_id TEXT NOT NULL,
+                delivery_date TEXT NOT NULL,
+                change_type TEXT NOT NULL CHECK (change_type IN ('new', 'updated')),
+                change_token TEXT NOT NULL,
+                source_hash TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(line_item_id, change_type, change_token)
+            );
+
+            CREATE TABLE IF NOT EXISTS line_update_receipts (
+                notice_id INTEGER NOT NULL REFERENCES line_update_notices(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                seen_at TEXT NOT NULL,
+                PRIMARY KEY (notice_id, user_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_line_update_notices_list_date
+                ON line_update_notices(list_id, delivery_date, created_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_line_update_receipts_user
+                ON line_update_receipts(user_id, notice_id);
+            """
+        )
     def clone_item_for_list(self, item: dict[str, Any], list_id: str, index: int, auto_assign_settings: dict[str, Any] | None = None) -> dict[str, Any]:
         """Purpose: Run the clone item for list workflow for the delivery-list scanner.
 
@@ -7270,12 +7362,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         stale_profile_ids = [list_id for list_id in all_profile_list_ids(delivery_date) if list_id not in definition_ids]
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            existing_list_ids = {
+            existing_list_rows = con.execute(
+                "SELECT id, status FROM delivery_lists WHERE id IN ({})".format(",".join("?" for _ in definitions)),
+                definition_ids,
+            ).fetchall()
+            active_existing_list_ids = {
                 row["id"]
-                for row in con.execute(
-                    "SELECT id FROM delivery_lists WHERE id IN ({})".format(",".join("?" for _ in definitions)),
-                    definition_ids,
-                ).fetchall()
+                for row in existing_list_rows
+                if str(row["status"] or "").strip().lower() == "active"
+            }
+            reactivated_list_ids = {
+                row["id"]
+                for row in existing_list_rows
+                if str(row["status"] or "").strip().lower() != "active"
             }
             if stale_profile_ids:
                 con.execute(
@@ -7309,10 +7408,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             stage_summaries: list[dict[str, Any]] = []
             for list_id, label, stage, scanner, items in definitions:
                 summary = self.upsert_delivery_list(con, list_id, label, str(payload["deliveryDate"]), stage, scanner, items, replace_items=True)
+                stage_reactivated = list_id in reactivated_list_ids
+                summary["reactivated"] = stage_reactivated
                 stage_summaries.append(summary)
-                if summary["created"] or summary["changedLineCount"] or summary["changedPieceQty"]:
+                if summary["created"] or stage_reactivated or summary["changedLineCount"] or summary["changedPieceQty"]:
                     changed_list_ids.append(list_id)
-                    event_type = "import" if summary["created"] else "update"
+                    event_type = "import" if summary["created"] or stage_reactivated else "update"
                     event_message = "Delivery list imported" if summary["created"] else "Delivery list updated"
                     event_reason = (
                         f"{source_name or 'Delivery-list source'} | "
@@ -7325,10 +7426,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             change_summary = {
                 "sourceName": source_name,
                 "deliveryDate": delivery_date,
-                "createdCount": sum(1 for summary in stage_summaries if summary["created"]),
-                "updatedCount": sum(1 for summary in stage_summaries if not summary["created"] and (summary["changedLineCount"] or summary["changedPieceQty"])),
+                "createdCount": sum(1 for summary in stage_summaries if summary["created"] or summary.get("reactivated")),
+                "reactivatedCount": sum(1 for summary in stage_summaries if summary.get("reactivated")),
+                "reactivatedListIds": [summary["listId"] for summary in stage_summaries if summary.get("reactivated")],
+                "updatedCount": sum(1 for summary in stage_summaries if not summary["created"] and not summary.get("reactivated") and (summary["changedLineCount"] or summary["changedPieceQty"])),
                 "addedPieceQty": sum(int(summary["addedPieceQty"] or 0) for summary in stage_summaries),
                 "changedPieceQty": sum(int(summary["changedPieceQty"] or 0) for summary in stage_summaries),
+                "removedLineCount": sum(int(summary.get("removedLineCount") or 0) for summary in stage_summaries),
+                "removedPieceQty": sum(int(summary.get("removedPieceQty") or 0) for summary in stage_summaries),
                 "stages": stage_summaries,
                 "changedListIds": changed_list_ids,
             }
@@ -7337,18 +7442,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             # This lets newly-added customer email rules catch the next import even when the list file is unchanged.
             self.send_customer_manifests_for_import(con, payload, user)
             con.commit()
-        created_count = sum(1 for definition in definitions if definition[0] not in existing_list_ids)
-        updated_count = sum(1 for summary in stage_summaries if not summary["created"] and (summary["changedLineCount"] or summary["changedPieceQty"]))
+        created_count = sum(1 for definition in definitions if definition[0] not in active_existing_list_ids)
+        reactivated_count = sum(1 for definition in definitions if definition[0] in reactivated_list_ids)
+        updated_count = sum(1 for summary in stage_summaries if not summary["created"] and not summary.get("reactivated") and (summary["changedLineCount"] or summary["changedPieceQty"]))
         return {
             "lists": self.get_delivery_lists(),
             "activeListId": definitions[0][0],
             "importedCount": len(definitions),
             "createdCount": created_count,
+            "reactivatedCount": reactivated_count,
+            "reactivatedListIds": sorted(reactivated_list_ids),
             "updatedCount": updated_count,
             "changedListIds": changed_list_ids,
             "stageSummaries": stage_summaries,
             "addedPieceQty": sum(int(summary["addedPieceQty"] or 0) for summary in stage_summaries),
             "changedPieceQty": sum(int(summary["changedPieceQty"] or 0) for summary in stage_summaries),
+            "removedLineCount": sum(int(summary.get("removedLineCount") or 0) for summary in stage_summaries),
+            "removedPieceQty": sum(int(summary.get("removedPieceQty") or 0) for summary in stage_summaries),
             "printCandidates": self.print_candidates_from_payload(payload, changed_list_ids, source_name, stage_summaries),
         }
 
@@ -7519,6 +7629,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "rowCount": preview["rowCount"],
                     "totalQty": preview["totalQty"],
                     "createdCount": result["createdCount"],
+                    "reactivatedCount": result.get("reactivatedCount", 0),
                     "updatedCount": result["updatedCount"],
                     "listIds": result["changedListIds"],
                     "stageSummaries": result.get("stageSummaries") or [],

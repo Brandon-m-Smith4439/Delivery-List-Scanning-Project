@@ -1,0 +1,373 @@
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = "Stop"
+
+$server = "SQLAWGLASS"
+$database = "BFSMAIN"
+
+$dateText = Read-Host "Enter a delivery date that has a known manual Crystal export (MM/DD/YYYY)"
+
+$formats = @(
+    "MM/dd/yyyy",
+    "M/d/yyyy",
+    "yyyy-MM-dd"
+)
+
+$deliveryDate = [datetime]::MinValue
+
+$dateIsValid = [datetime]::TryParseExact(
+    $dateText,
+    $formats,
+    [Globalization.CultureInfo]::InvariantCulture,
+    [Globalization.DateTimeStyles]::None,
+    [ref]$deliveryDate
+)
+
+if (-not $dateIsValid) {
+    throw "The date must be entered as MM/DD/YYYY or YYYY-MM-DD."
+}
+
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$desktop = [Environment]::GetFolderPath("Desktop")
+
+$outputFolder = Join-Path `
+    $desktop `
+    "AW-DeliveryList-Probe-$timestamp"
+
+New-Item `
+    -ItemType Directory `
+    -Path $outputFolder `
+    -Force |
+    Out-Null
+
+$connectionString = @"
+Server=$server;
+Database=$database;
+Integrated Security=True;
+Application Name=DeliveryListFocusedProbe;
+Connect Timeout=15;
+Encrypt=False;
+TrustServerCertificate=True;
+"@
+
+$connection = New-Object `
+    System.Data.SqlClient.SqlConnection(
+        $connectionString
+    )
+
+function Export-Query {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Query,
+
+        [switch]$UseDeliveryDate
+    )
+
+    $outputPath = Join-Path $outputFolder $FileName
+    $errorPath = "$outputPath.error.txt"
+
+    $command = $connection.CreateCommand()
+    $command.CommandText = $Query
+    $command.CommandTimeout = 120
+
+    if ($UseDeliveryDate) {
+        $parameter = $command.Parameters.Add(
+            "@DeliveryDate",
+            [System.Data.SqlDbType]::Date
+        )
+
+        $parameter.Value = $deliveryDate.Date
+    }
+
+    $adapter = New-Object `
+        System.Data.SqlClient.SqlDataAdapter(
+            $command
+        )
+
+    $table = New-Object System.Data.DataTable
+
+    try {
+        [void]$adapter.Fill($table)
+
+        if ($table.Rows.Count -gt 0) {
+            $table |
+                Export-Csv `
+                    -LiteralPath $outputPath `
+                    -NoTypeInformation `
+                    -Encoding UTF8
+        }
+        else {
+            "No rows returned." |
+                Set-Content `
+                    -LiteralPath $outputPath `
+                    -Encoding UTF8
+        }
+
+        Write-Host (
+            "Created {0} — {1} rows" -f
+            $FileName,
+            $table.Rows.Count
+        ) -ForegroundColor Green
+    }
+    catch {
+        $_.Exception.ToString() |
+            Set-Content `
+                -LiteralPath $errorPath `
+                -Encoding UTF8
+
+        Write-Host (
+            "Query failed for {0}. See {1}" -f
+            $FileName,
+            $errorPath
+        ) -ForegroundColor Yellow
+    }
+    finally {
+        $table.Dispose()
+        $adapter.Dispose()
+        $command.Dispose()
+    }
+}
+
+try {
+    Write-Host ""
+    Write-Host "Opening read-only A+W SQL connection..." -ForegroundColor Cyan
+
+    $connection.Open()
+
+    Write-Host "Connected successfully." -ForegroundColor Green
+    Write-Host "Delivery date: $($deliveryDate.ToString('yyyy-MM-dd'))"
+    Write-Host ""
+
+    Export-Query `
+        -FileName "01-target-object-columns.csv" `
+        -Query @"
+SELECT
+    s.name AS SchemaName,
+    o.name AS ObjectName,
+    o.type_desc AS ObjectType,
+    c.column_id AS ColumnOrder,
+    c.name AS ColumnName,
+    t.name AS DataType,
+    c.max_length AS MaxLength,
+    c.is_nullable AS IsNullable
+FROM sys.objects o
+INNER JOIN sys.schemas s
+    ON s.schema_id = o.schema_id
+INNER JOIN sys.columns c
+    ON c.object_id = o.object_id
+INNER JOIN sys.types t
+    ON t.user_type_id = c.user_type_id
+WHERE s.name = 'SYSADM'
+  AND o.name IN (
+        'TEMP_DELIV',
+        'BW_LADELISTE',
+        'DR_REPORTE',
+        'KA_CRYSTAL',
+        'KA_CRYSTAL_GRP',
+        'KA_CRYSTAL_MIT',
+        'BW_AUFTR_KOPF',
+        'BW_AUFTR_POS'
+  )
+ORDER BY
+    o.name,
+    c.column_id;
+"@
+
+    Export-Query `
+        -FileName "02-candidate-delivery-view.csv" `
+        -UseDeliveryDate `
+        -Query @"
+SELECT TOP (1000)
+    h.ID AS OrderNumber,
+    i.ITEM_NO AS ItemNumber,
+
+    h.DATE_SCHEDDEL AS ScheduledDeliveryDate,
+    h.DATE_DEL AS DeliveryDate,
+    h.DATE_ACTUALDEL AS ActualDeliveryDate,
+    h.DATE_REQDEL AS RequestedDeliveryDate,
+
+    h.CUST_ID AS CustomerNumber,
+    h.CUST_MATCHCODE AS CustomerMatchCode,
+    h.CUST_NAME1 AS CustomerName1,
+    h.CUST_NAME2 AS CustomerName2,
+
+    h.DELADDR_CUSTNAME1 AS DeliveryName1,
+    h.DELADDR_CUSTNAME2 AS DeliveryName2,
+    h.DELADDR_CUSTCITY AS DeliveryCity,
+    h.DELADDR_CUSTSTATE AS DeliveryState,
+
+    h.OR_DELROUTE AS DeliveryRoute,
+    h.OR_ALTDELROUTE AS AlternateDeliveryRoute,
+    h.OR_CUSTOMSROUTE AS CustomsRoute,
+
+    h.STATUS AS OrderStatus,
+    i.ITEM_STATUS AS ItemStatus,
+
+    h.CLAIM_NO AS ClaimNumber,
+    h.CLAIM_DOCNO AS ClaimDocumentNumber,
+
+    h.BATCH_PRODNOIG AS HeaderBatchIG,
+    h.BATCH_PRODNOLSG AS HeaderBatchLSG,
+    h.BATCH_PRODNOTSG AS HeaderBatchTSG,
+    i.PROD_PRODBATCHNO AS ItemProductionBatch,
+    i.PROD_KOMONO AS ItemProductionReference,
+
+    i.ITEM_CUSTREF AS ItemCustomerReference,
+    i.ITEM_CUSTITEMNO AS CustomerItemNumber,
+    i.ITEM_TEXT AS ItemText,
+    i.ITEM_TEXT1 AS ItemText1,
+    i.ITEM_TEXT2 AS ItemText2,
+    i.ITEM_TEXT3 AS ItemText3,
+
+    i.PROD_ID AS ProductId,
+    i.PROD_SHORTDESC AS ProductShortDescription,
+    i.PROD_DESC1 AS ProductDescription1,
+    i.PROD_DESC2 AS ProductDescription2,
+    i.PROD_DESC3 AS ProductDescription3,
+
+    i.PI_ITEMQTY AS ItemQuantity,
+    i.PI_ORIGQTYFORPARTDEL AS OriginalQuantity,
+    i.PI_PARTDELIVEREDQTY AS PartDeliveredQuantity,
+
+    i.PI_WIDTH AS Width,
+    i.PI_HEIGHT AS Height,
+    i.PI_THICKNESS AS Thickness,
+    i.PI_WEIGHTPERPIECE AS WeightPerPiece,
+
+    i.PROD_RACKNO AS AWrackNumber,
+    i.PROD_RACKNOSHIPCTRL AS RackNoShippingControl,
+
+    i.REF_PONO AS CustomerPONumber,
+    i.REF_DELORDERNO AS ReferencedDeliveryOrder,
+    i.REF_DELITEMNO AS ReferencedDeliveryItem,
+
+    i.COMP_REASON AS ComplaintReason,
+    i.COMP_CAUSE AS ComplaintCause,
+    i.DATELASTMOD AS ItemLastModifiedDate
+FROM SYSADM.AWV_TD_ORDER_HEADER h
+INNER JOIN SYSADM.AWV_TD_ORDER_ITEM i
+    ON i.ORDER_REF = h.ID
+WHERE
+       h.DATE_SCHEDDEL = @DeliveryDate
+    OR h.DATE_DEL = @DeliveryDate
+    OR TRY_CONVERT(date, h.DATE_REQDEL) = @DeliveryDate
+ORDER BY
+    h.ID,
+    i.ITEM_NO;
+"@
+
+    Export-Query `
+        -FileName "03-temp-deliv.csv" `
+        -Query @"
+SELECT TOP (500)
+    *
+FROM SYSADM.TEMP_DELIV;
+"@
+
+    Export-Query `
+        -FileName "04-bw-ladeliste.csv" `
+        -Query @"
+SELECT TOP (100)
+    *
+FROM SYSADM.BW_LADELISTE;
+"@
+
+    Export-Query `
+        -FileName "05-base-order-headers.csv" `
+        -UseDeliveryDate `
+        -Query @"
+SELECT TOP (500)
+    ID AS OrderNumber,
+    STATUS AS OrderStatus,
+    DATUM_LIEFER_PLAN AS PlannedDeliveryDate,
+    DATUM_LIEFER_TAT AS ActualDeliveryDate,
+    DATUM_LIEFERWUNSCH AS RequestedDeliveryDate,
+    AH_HAUPT_AUFTR AS MainOrderNumber,
+    OR_TOUR AS Route,
+    OR_AWTOUR AS AWRoute,
+    OR_LIEFERBED AS DeliveryCondition,
+    KO_OBJEKT_KUNDE AS CustomerObject,
+    LAUF_PROD1 AS ProductionBatch1,
+    LAUF_PROD2 AS ProductionBatch2,
+    LAUF_PROD3 AS ProductionBatch3
+FROM SYSADM.BW_AUFTR_KOPF
+WHERE DATUM_LIEFER_PLAN = @DeliveryDate
+ORDER BY ID;
+"@
+
+    Export-Query `
+        -FileName "06-base-order-items.csv" `
+        -UseDeliveryDate `
+        -Query @"
+SELECT TOP (1000)
+    h.ID AS OrderNumber,
+    p.POS_NR AS ItemNumber,
+    h.DATUM_LIEFER_PLAN AS PlannedDeliveryDate,
+    h.OR_TOUR AS Route,
+    h.OR_AWTOUR AS AWRoute,
+
+    p.POS_STATUS AS ItemStatus,
+    p.POS_KOMMISSION AS JobOrCommission,
+    p.POS_KUNDENPOS AS CustomerItemNumber,
+    p.POS_TEXT AS ItemText,
+    p.POS_TEXT1 AS ItemText1,
+    p.POS_TEXT2 AS ItemText2,
+    p.POS_TEXT3 AS ItemText3,
+
+    p.PP_MENGE AS Quantity,
+    p.PP_ORIG_MENGE AS OriginalQuantity,
+    p.PP_TEILGEL_MENGE AS PartDeliveredQuantity,
+    p.PP_BREITE AS Width,
+    p.PP_HOEHE AS Height,
+
+    p.FER_LAUF1 AS ProductionBatch
+FROM SYSADM.BW_AUFTR_KOPF h
+INNER JOIN SYSADM.BW_AUFTR_POS p
+    ON p.ID = h.ID
+WHERE h.DATUM_LIEFER_PLAN = @DeliveryDate
+ORDER BY
+    h.ID,
+    p.POS_NR;
+"@
+
+    $summary = @"
+A+W focused delivery-list probe
+Generated: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+Delivery date: $($deliveryDate.ToString("yyyy-MM-dd"))
+SQL login: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)
+
+All queries were SELECT-only.
+No A+W data or database objects were modified.
+"@
+
+    $summary |
+        Set-Content `
+            -LiteralPath (Join-Path $outputFolder "README.txt") `
+            -Encoding UTF8
+
+    Write-Host ""
+    Write-Host "Probe completed." -ForegroundColor Green
+    Write-Host "Results folder:"
+    Write-Host $outputFolder -ForegroundColor Cyan
+}
+catch {
+    Write-Host ""
+    Write-Host "PROBE FAILED" -ForegroundColor Red
+    Write-Host $_.Exception.Message
+}
+finally {
+    if ($null -ne $connection) {
+        if ($connection.State -ne [System.Data.ConnectionState]::Closed) {
+            $connection.Close()
+        }
+
+        $connection.Dispose()
+    }
+}
+
+Write-Host ""
+Read-Host "Press Enter to close"

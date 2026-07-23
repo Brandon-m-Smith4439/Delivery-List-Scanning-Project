@@ -206,6 +206,167 @@ const state = {
   lastGlassFilterSignature: "",
 };
 
+// DLS_AUTOMATION_LIST_REFRESH_BRIDGE_V121
+// Delivery List Management has two independent live inputs: the current list
+// catalog and the complete newest import result. Keep both in the app's normal
+// state, then call the original Admin renderer so the existing layout remains
+// authoritative instead of drawing a second replacement UI.
+let dlsAutomationLatestImportCheckedAt = "";
+
+function dlsAutomationDateLabel(value) {
+  const parsed = new Date(`${value}T12:00:00`);
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+
+function dlsAutomationStageLabel(item) {
+  const base = String(item.label || item.stage || item.scanner || item.id || "Delivery-list stage");
+  const unseen = Number(item.unseenUpdateCount || 0);
+  return unseen > 0 ? `${base} - ${unseen} update${unseen === 1 ? "" : "s"}` : base;
+}
+
+function dlsAutomationTryRenderer(renderer, name) {
+  if (typeof renderer !== "function") return false;
+  try {
+    renderer();
+    return true;
+  } catch (error) {
+    console.warn(`Delivery-list catalog renderer ${name} could not run.`, error);
+    return false;
+  }
+}
+
+function dlsAutomationApplyLastUpdatedTimestamp(value) {
+  const text = String(value || dlsAutomationLatestImportCheckedAt || "").trim();
+  if (!text) return;
+  dlsAutomationLatestImportCheckedAt = text;
+  const parsed = new Date(text);
+  const label = Number.isNaN(parsed.getTime())
+    ? text
+    : parsed.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const target = document.getElementById("adminLastUpdated");
+  if (target) target.textContent = `Last updated: ${label}`;
+}
+
+function dlsAutomationRefreshVisibleListViews(lastCheckedAt = "") {
+  const adminPage = document.getElementById("adminPage");
+  if (adminPage && !adminPage.hidden) {
+    // renderAdmin is the maintained page renderer and preserves the exact
+    // Delivery List Management layout. Older add-ons guessed at narrower
+    // renderer names and could update the wrong part of the Admin page.
+    let rendered = false;
+    if (typeof renderAdmin === "function") {
+      rendered = dlsAutomationTryRenderer(renderAdmin, "renderAdmin");
+    }
+    if (!rendered && typeof renderAdminDeliveryLists === "function") {
+      rendered = dlsAutomationTryRenderer(renderAdminDeliveryLists, "renderAdminDeliveryLists");
+    }
+    if (!rendered && typeof renderAdminDeliveryListManagement === "function") {
+      rendered = dlsAutomationTryRenderer(renderAdminDeliveryListManagement, "renderAdminDeliveryListManagement");
+    }
+    if (!rendered && typeof renderAdminDashboard === "function") {
+      dlsAutomationTryRenderer(renderAdminDashboard, "renderAdminDashboard");
+    }
+    window.requestAnimationFrame(() => dlsAutomationApplyLastUpdatedTimestamp(lastCheckedAt));
+    return;
+  }
+
+  const homePage = document.getElementById("homePage");
+  if (homePage && !homePage.hidden) {
+    if (typeof renderHome === "function" && dlsAutomationTryRenderer(renderHome, "renderHome")) return;
+    if (typeof renderHomeDeliveryLists === "function") {
+      dlsAutomationTryRenderer(renderHomeDeliveryLists, "renderHomeDeliveryLists");
+    }
+  }
+}
+
+function dlsAutomationApplyDeliveryCatalog(refreshedLists) {
+  if (!Array.isArray(refreshedLists)) return false;
+
+  const dateSelect = document.getElementById("deliveryDateSelect");
+  const stageSelect = document.getElementById("deliveryStageSelect");
+  const previousDate = String(dateSelect?.value || "");
+  const previousStage = String(stageSelect?.value || state.activeListId || "");
+  state.lists = refreshedLists.slice();
+
+  const deliveryDates = [...new Set(
+    state.lists.map((item) => String(item.deliveryDate || "").trim()).filter(Boolean)
+  )].sort();
+
+  if (dateSelect && stageSelect && deliveryDates.length) {
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const selectedDate = deliveryDates.includes(previousDate)
+      ? previousDate
+      : deliveryDates.find((value) => value >= todayKey) || deliveryDates[deliveryDates.length - 1];
+
+    dateSelect.innerHTML = deliveryDates.map(
+      (value) => `<option value="${value}">${dlsAutomationDateLabel(value)}</option>`
+    ).join("");
+    dateSelect.value = selectedDate;
+
+    const selectedDateLists = state.lists.filter(
+      (item) => String(item.deliveryDate || "") === selectedDate
+    );
+    stageSelect.innerHTML = selectedDateLists.map((item) => {
+      const listId = String(item.id || "");
+      return `<option value="${listId}">${dlsAutomationStageLabel(item)}</option>`;
+    }).join("");
+
+    const desiredListId = selectedDateLists.some((item) => String(item.id || "") === previousStage)
+      ? previousStage
+      : String(selectedDateLists[0]?.id || "");
+    if (desiredListId) stageSelect.value = desiredListId;
+
+    const activeStillExists = state.lists.some(
+      (item) => String(item.id || "") === String(state.activeListId || "")
+    );
+    if (!activeStillExists && desiredListId) state.activeListId = desiredListId;
+  }
+  return true;
+}
+
+function dlsAutomationApplyImportSnapshot(detail = {}) {
+  const latestResults = Array.isArray(detail.latestImportResults)
+    ? detail.latestImportResults
+    : (Array.isArray(detail.recentImports) ? detail.recentImports : null);
+  let changed = false;
+
+  if (latestResults) {
+    state.adminRecentImports = latestResults.slice();
+    changed = true;
+  }
+  if (Array.isArray(detail.lists)) {
+    changed = dlsAutomationApplyDeliveryCatalog(detail.lists) || changed;
+  }
+  if (detail.lastCheckedAt) {
+    dlsAutomationLatestImportCheckedAt = String(detail.lastCheckedAt);
+    changed = true;
+  }
+
+  if (!changed) return;
+  dlsAutomationRefreshVisibleListViews(detail.lastCheckedAt || dlsAutomationLatestImportCheckedAt);
+  document.dispatchEvent(new CustomEvent("dls:delivery-list-catalog-synced", {
+    detail: {
+      listCount: state.lists.length,
+      importResultCount: state.adminRecentImports.length,
+      lastCheckedAt: dlsAutomationLatestImportCheckedAt,
+      selectedDate: String(document.getElementById("deliveryDateSelect")?.value || ""),
+      selectedListId: String(document.getElementById("deliveryStageSelect")?.value || state.activeListId || ""),
+    },
+  }));
+}
+
+document.addEventListener("dls:delivery-list-data-refreshed", (event) => {
+  const detail = event.detail && typeof event.detail === "object" ? event.detail : {};
+  dlsAutomationApplyImportSnapshot(detail);
+});
+
+
+
+
+
 const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v3";
 const APP_SOUND_CACHE_VERSION = "20260722-v105";
 const APP_SOUND_FILES = Object.freeze({

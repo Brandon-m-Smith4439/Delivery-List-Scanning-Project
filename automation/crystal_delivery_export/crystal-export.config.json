@@ -1,0 +1,39 @@
+{
+  "ProjectRoot": "",
+  "WorkingRoot": "C:\\DeliveryListAutomation",
+  "Report": {
+    "SourcePath": "\\\\bfs-awbppw01\\Trans\\Reports\\BFS\\CR\\DeliveryList.rpt",
+    "LocalPath": "C:\\DeliveryListAutomation\\Reports\\DeliveryList.rpt",
+    "ParameterName": "DeliveryDate",
+    "StringDateFormat": "MM/dd/yyyy",
+    "ExportFormat": "ExcelWorkbook",
+    "OutputNameFormat": "Delivery List {0:yyyy-MM-dd}.xlsx"
+  },
+  "Database": {
+    "Provider": "SQLServer OLEDB",
+    "Server": "SQLAWGLASS",
+    "Database": "BFSMAIN",
+    "User": "bsmith",
+    "CredentialFile": "C:\\DeliveryListAutomation\\Secrets\\aw-sql-password.txt"
+  },
+  "DestinationFolder": "\\\\bfs.buildersfirstsource.com\\Departments\\BAREFOOT-INSTALL\\Glass Production\\Brandon\\Temp Delivery Lists",
+  "Runtime": {
+    "PowerShellPath": "",
+    "AssemblyPaths": []
+  },
+  "Schedule": {
+    "IncrementalIntervalMinutes": 60,
+    "IncrementalPastDays": 2,
+    "IncrementalFutureDays": 14,
+    "FullPastDays": 7,
+    "FullFutureDays": 90,
+    "FullRefreshTime": "17:15"
+  },
+  "Import": {
+    "Enabled": true,
+    "PythonLauncher": "py",
+    "PythonLauncherArguments": ["-3"]
+  },
+  "MinimumWorkbookBytes": 2048,
+  "LogRetentionDays": 30
+}

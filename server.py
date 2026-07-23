@@ -29,11 +29,15 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from delivery_store import SESSION_COOKIE_NAME, create_store, public_route_label, request_station, request_user_name
 from scanner_config import load_config
+from delivery_automation_control import DeliveryAutomationController
+from delivery_import_safety import install_safe_delivery_import
 
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = load_config(ROOT)
 STORE = create_store(CONFIG)
+install_safe_delivery_import(STORE)
+DELIVERY_AUTOMATION = DeliveryAutomationController(ROOT, CONFIG, STORE)
 
 
 def esc(value: object) -> str:
@@ -1077,6 +1081,56 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             self.send_json({"notifications": STORE.get_pending_notifications(user["username"])})
             return
+        if parsed.path == "/api/notifications/history":
+            user = self.current_user()
+            if not user:
+                self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+                return
+            limit = parse_qs(parsed.query).get("limit", ["50"])[0]
+            self.send_json({"notifications": STORE.get_notification_history(user["username"], int(limit or 50))})
+            return
+        if parsed.path == "/api/delivery-list-updates":
+            user = self.require_permission("view_lists")
+            if not user:
+                return
+            list_id = str(parse_qs(parsed.query).get("listId", [""])[0] or "").strip()
+            if not list_id:
+                self.send_json({"error": "listId is required"}, HTTPStatus.BAD_REQUEST)
+                return
+            if not STORE.user_can_access_list(user, list_id):
+                self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
+                return
+            self.send_json(STORE.get_user_line_update_summary(user["username"], list_id))
+            return
+        if parsed.path == "/api/admin/delivery-automation":
+            user = self.require_permission("import_delivery_lists")
+            if not user:
+                return
+            self.send_json(DELIVERY_AUTOMATION.get_dashboard())
+            return
+
+        if parsed.path == "/api/admin/delivery-automation/recent-imports":
+            user = self.require_permission("import_delivery_lists")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            self.send_json(
+                DELIVERY_AUTOMATION.get_import_history(
+                    page=int(params.get("page", ["1"])[0] or 1),
+                    page_size=int(params.get("pageSize", params.get("limit", ["20"]))[0] or 20),
+                    query=params.get("q", [""])[0],
+                    classification=params.get("classification", [""])[0],
+                    date_from=params.get("dateFrom", [""])[0],
+                    date_to=params.get("dateTo", [""])[0],
+                )
+            )
+            return
+        if parsed.path == "/api/admin/delivery-automation/latest-import":
+            user = self.require_permission("import_delivery_lists")
+            if not user:
+                return
+            self.send_json(DELIVERY_AUTOMATION.get_latest_import_result())
+            return
 
         if parsed.path == "/api/delivery-lists":
             user = self.require_permission("view_lists")
@@ -1101,7 +1155,15 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/admin/summary":
             if not self.require_permission("view_admin"):
                 return
-            self.send_json(STORE.admin_summary())
+            summary = dict(STORE.admin_summary() or {})
+            latest_import = DELIVERY_AUTOMATION.get_latest_import_result()
+            latest_results = list(latest_import.get("latestImportResults") or [])
+            summary["recentImports"] = latest_results
+            summary["latestImportResults"] = latest_results
+            summary["lastCheckedAt"] = str(latest_import.get("lastCheckedAt") or "")
+            summary["lastImportCheckedAt"] = str(latest_import.get("lastCheckedAt") or "")
+            summary["latestImportRun"] = dict(latest_import.get("latestRun") or {})
+            self.send_json(summary)
             return
 
         if parsed.path == "/api/admin/users":
@@ -1434,6 +1496,27 @@ class Handler(SimpleHTTPRequestHandler):
                     )
                 )
                 return
+            if parsed.path == "/api/notifications/read-all":
+                user = self.current_user()
+                if not user:
+                    self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+                    return
+                self.send_json(STORE.mark_all_notifications_read(user["username"]))
+                return
+            if parsed.path == "/api/delivery-list-updates/acknowledge":
+                user = self.require_permission("view_lists")
+                if not user:
+                    return
+                list_id = str(data.get("listId") or "").strip()
+                if not list_id:
+                    self.send_json({"error": "listId is required"}, HTTPStatus.BAD_REQUEST)
+                    return
+                if not STORE.user_can_access_list(user, list_id):
+                    self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
+                    return
+                notice_ids = data.get("noticeIds") if isinstance(data.get("noticeIds"), list) else None
+                self.send_json(STORE.acknowledge_user_line_updates(user["username"], list_id, notice_ids))
+                return
 
             if parsed.path == "/api/scans":
                 user = self.require_permission("scan")
@@ -1528,6 +1611,34 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 data["user"] = user["username"]
                 self.send_json(STORE.import_delivery_folder(data))
+                return
+            if parsed.path == "/api/admin/delivery-automation/run":
+                user = self.require_permission("import_delivery_lists")
+                if not user:
+                    return
+                self.send_json(
+                    DELIVERY_AUTOMATION.start_run(data, user["username"]),
+                    HTTPStatus.ACCEPTED,
+                )
+                return
+
+            if parsed.path == "/api/admin/delivery-automation/config":
+                user = self.require_permission("import_delivery_lists")
+                if not user:
+                    return
+                self.send_json(DELIVERY_AUTOMATION.save_settings(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/delivery-automation/schedule/install":
+                if not self.require_permission("import_delivery_lists"):
+                    return
+                self.send_json(DELIVERY_AUTOMATION.install_schedule())
+                return
+
+            if parsed.path == "/api/admin/delivery-automation/schedule/remove":
+                if not self.require_permission("import_delivery_lists"):
+                    return
+                self.send_json(DELIVERY_AUTOMATION.remove_schedule())
                 return
 
             if parsed.path == "/api/import/preview":
