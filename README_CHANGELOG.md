@@ -1,3 +1,50 @@
+## v125 - Safe Task Scheduler Native Command Handling
+
+- Fixed schedule installation failing when `schtasks.exe /Delete` reported that an obsolete legacy task did not exist.
+- Added one maintained Task Scheduler command wrapper that captures native stdout/stderr without allowing Windows PowerShell's `ErrorActionPreference = Stop` to convert expected `schtasks.exe` messages into terminating `NativeCommandError` records.
+- Queries each obsolete task before attempting deletion, so a missing legacy task is treated as normal and schedule installation continues.
+- Routes task deletion, creation, post-create verification, and the final launch test through the same exit-code-based command wrapper.
+- Preserves detailed native command output when an actual task creation, verification, deletion, or launch error occurs.
+- Added `Apply-v125-AutomationPatch.bat`, which backs up and replaces only the installed SQL task installer without touching configuration, scanner data, existing tasks, or generated workbooks.
+- Kept the v123-v124 SQL/export/import verification, parser checks, timestamp fixes, and legacy-script compatibility repairs intact.
+- Advanced browser asset cache keys to v125.
+
+## v124 - Legacy Scheduler Parser Hotfix
+
+- Fixed the remaining schedule-installation failure coming from the older `Install-DeliveryListAutomationTasks.ps1` file left in the shared installed automation Scripts folder.
+- Delimited `${incrementalTask}:` and `${fullTask}:` in the legacy Crystal task installer so the file is valid Windows PowerShell.
+- Narrowed the maintained SQL scheduler preflight from every `.ps1` file in the shared folder to the six current SQL automation entry points actually used for initialization, runs, installation, removal, status, and verification.
+- Prevented retired or unrelated upgrade scripts from blocking installation of the current SQL scheduled tasks.
+- Added `Apply-v124-AutomationPatch.bat`, which backs up and replaces both affected installed scheduler scripts without changing configuration, tasks, scanner data, or generated workbooks.
+- Kept the v123 end-to-end SQL/export/import verifier and unchanged-list timestamp fixes intact.
+- Advanced browser asset cache keys to v124.
+
+## v123 - Schedule Installer Fix, Timestamp Persistence, and End-to-End Verification
+
+- Fixed the PowerShell parser failure in `Install-DeliveryListSqlAutomationTasks.ps1` by delimiting task-name variables before literal colons.
+- Added a complete PowerShell syntax scan across the installed automation scripts before Windows scheduled tasks are created.
+- Runs the existing SQL connectivity, workbook builder, destination-write, and scanner compatibility preflight before schedule installation.
+- Verifies that both scheduled tasks remain queryable after creation before reporting installation success.
+- Added `Apply-v123-AutomationPatch.bat`, which backs up and replaces only the affected installed runtime scripts without touching the automation configuration, scanner database, or delivery-list data.
+- Added `Verify-SQL-And-Import.cmd` and maintained PowerShell/Python helpers for a real one-date end-to-end test on the authorized workstation.
+- The verification forces the maintained folder importer for the selected date after a fresh read-only SQL query and validated workbook export, then requires a successful normalized result and every expected stage list in the configured scanner store.
+- Preserved newest-run No Changes timestamps when the Admin summary refreshes by merging database-backed history into the current automation snapshot instead of replacing it.
+- Fixed unchanged delivery dates reverting to `Updated at: --` after the latest-run event had already supplied a valid completion timestamp.
+- Added explicit CSS maintenance rules requiring existing selectors, shared components, and design tokens to be reused before new declarations or override layers are introduced.
+- Advanced browser asset cache keys to v123.
+
+## v122 - CSS Ownership Map and No-Change Import Timestamps
+
+- Reorganized `styles.css` with a maintained table of contents and clearly labeled sections for global tokens, authentication, shell/header/sidebar, Home, Admin, Scan, shared components, Racks, Bay Map, compatibility layers, and current-release ownership.
+- Preserved CSS source order so historical compatibility layers keep the same cascade and visual behavior.
+- Removed eight verified exact duplicate qualified rules while leaving similar selectors with different values untouched.
+- Fixed Delivery List Management result hydration so date-level **No Changes** results inherit every active stage for that delivery date instead of being filtered out for having no changed-stage rows.
+- Carries the completed manual or automatic import timestamp into every hydrated stage row, keeping each Delivery List Management date group current even when the maintained importer performs no database rewrite.
+- Reviewed the v106-v121 automation architecture, append-only import reconciliation, notification/review flow, and mirrored runtime/package assets.
+- Corrected stale README references from the superseded Crystal export folder to the maintained `automation/sql_delivery_export` control center and setup entry point.
+- Advanced browser asset cache keys to v122.
+- Confirmed the root and `automation/sql_delivery_export` automation assets are intentional deployment mirrors rather than competing runtime implementations.
+
 ## v121 - Notification Timing and Review Reliability
 
 - Moved the delivery-list import toast to the bottom center of the page and extended it to 20 seconds.
@@ -371,3 +418,4 @@
 - Preserved the sign-in-screen behavior that hides the entire application shell until authentication succeeds.
 - Retained the centered smaller global search bar and simplified Today’s Delivery Progress design from v081.
 - Advanced browser cache keys to v082.
+- Updated static and browser-rendered checks so the Scan page is protected as a sidebar-enabled workspace.

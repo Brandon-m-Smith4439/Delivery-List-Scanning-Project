@@ -1,6 +1,14 @@
 # Delivery List Scanner
 
-Current maintained release: **v121**. SQLite remains the active/default backend.
+Current maintained release: **v125**. SQLite remains the active/default backend.
+
+v125 fixes Windows PowerShell treating harmless `schtasks.exe` error output as a terminating `NativeCommandError` when an obsolete scheduled task is not installed. The scheduler now queries before deleting legacy tasks, captures native command output under a non-terminating preference, and evaluates the real exit code for delete, create, query, and launch operations.
+
+v124 fixes the remaining schedule-installation parser failure caused by an older Crystal automation script that was still present in the shared installed Scripts folder. The maintained SQL scheduler now syntax-checks only the current SQL automation entry points it actually uses, while the legacy Crystal task installer is also repaired so its task-name labels are valid PowerShell.
+
+v123 fixes the Windows Task Scheduler installer parser error, validates every installed PowerShell automation script before tasks are created, and runs the existing SQL/workbook/scanner runtime preflight before schedule installation. It also adds a one-click end-to-end verification command that queries A+W SQL for a known date, rebuilds and validates the workbook, explicitly invokes the maintained scanner importer for that date, checks the known-date expected counts, and confirms every expected stage list exists in the scanner store. Delivery List Management now preserves newest-run No Changes timestamps when the normal Admin summary refreshes, preventing unchanged dates from falling back to `Updated at: --`. The CSS maintenance header explicitly requires reusing maintained selectors, components, and tokens before adding new rules.
+
+v122 organizes the main stylesheet into a documented page-and-component ownership map without changing the intentional source order of compatibility rules. It also removes a small set of verified exact CSS duplicates and fixes Delivery List Management so every stage for a manually or automatically checked delivery date receives the completed-run timestamp even when the result is **No Changes**.
 
 v121 centers delivery-list update toasts at the bottom of the page for 20 seconds, marks bell notifications read when the notification menu opens, removes the manual read control, stamps every latest-run result including No Changes with the actual check completion time, and makes per-user Mark reviewed clear the visible New/Updated rows immediately while verifying the exact notice receipts on the server.
 v120 separates delivery-list automation notices from Rush alerts, adds a small nonblocking update toast, opens Delivery List Management from bell notifications, and adds persistent per-user current/future line-update review state. New and updated lines remain highlighted for each user until that user explicitly marks the selected list reviewed; repeated no-change imports do not erase unseen updates.
@@ -34,16 +42,16 @@ SQLite remains the active/default database. The production database is:
 
 Keep this file and its `-wal`/`-shm` companions together whenever the app is running. Before the first v097 schema upgrade, startup creates and verifies a backup under `data\backups`. Production databases are never deleted or recreated automatically.
 
-## Automated A+W delivery-list exports
+## Automated A+W delivery-list imports
 
-The maintained automation package is under `automation\crystal_delivery_export`.
+The maintained v121+ automation package is under `automation\sql_delivery_export`.
 
-1. Run `automation\crystal_delivery_export\Setup-DeliveryListAutomation.bat` from the active scanner project folder.
-2. Enter the A+W SQL password only in the local secure prompt. Do not add it to the repository.
-3. Run `C:\DeliveryListAutomation\Run-Test.cmd` with a known delivery date.
-4. After confirming the XLSX export and scanner import, run `automation\crystal_delivery_export\Install-DeliveryListAutomationTasks.bat`.
+1. For an existing v121-v124 installation, extract the newest changed-files package into the project folder and run `Apply-v125-AutomationPatch.bat` once. This safely backs up and replaces only the installed SQL schedule installer; it does not change configuration, scanner data, existing tasks, or workbooks.
+2. Open **Admin > Import / Update Delivery List**, save the settings, and choose **Save & Install Schedule** again. The installer now checks PowerShell syntax and runs the SQL/workbook/scanner preflight before creating tasks.
+3. Run `C:\DeliveryListAutomation\Verify-SQL-And-Import.cmd` and enter a known delivery date. This performs a real read-only A+W SQL query, enforces the configured known-date count comparison, rebuilds and validates the workbook, imports it through the maintained scanner workflow, and confirms every expected stage list exists.
+4. Continue using the control center for Folder Import Only, SQL Export Only, SQL Export and Import, schedule settings, logs, and notifications.
 
-See `automation\crystal_delivery_export\README.md` for paths, schedule settings, runtime requirements, logs, and troubleshooting.
+See `automation\sql_delivery_export\README.md` for the installed runtime, repair steps, and verification details.
 
 ## Database operations
 
@@ -61,14 +69,14 @@ The existing sound-volume slider remains available for floor testing. At 100%, t
 
 ## Microsoft Graph email
 
-Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v106 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
+Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v125 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
 
 After BLDR IT provides the Entra tenant ID, application/client ID, and a client-secret value, run `Configure-MicrosoftGraphEmail.bat` once. The secret is encrypted for the current Windows account and loaded only in memory by the normal scanner launcher. See `docs/MICROSOFT_GRAPH_EMAIL.md` for the IT and testing steps.
 
 ## Project documentation
 
 - Ongoing version history: `README_CHANGELOG.md`
-- Automated A+W Crystal export: `automation/crystal_delivery_export/README.md`
+- Automated A+W SQL export/import: `automation/sql_delivery_export/README.md`
 - Folder cleanup and required-file guide: `docs/FOLDER_CLEANUP_GUIDE.md`
 - Function and ownership map: `docs/CODE_REFERENCE.md`
 - Maintained test instructions: `docs/TESTING.md`
@@ -86,7 +94,7 @@ After BLDR IT provides the Entra tenant ID, application/client ID, and a client-
 
 - `data` — required SQLite database and local scanner data. Keep it and back it up.
 - `logs` — generated diagnostics. Safe to clear while the app is stopped.
-- `C:\DeliveryListAutomation` — local Crystal-export scripts, encrypted credential, staging, logs, and status files created by v106 setup.
+- `C:\DeliveryListAutomation` — local SQL automation runtime, staging, logs, state, and scheduled-task files created by the maintained setup.
 
 A terminal whose prompt points to another project folder, such as `Showers Programmer`, is being opened by that project or its updater; the scanner launcher fixes its Python working directory to this project folder.
 

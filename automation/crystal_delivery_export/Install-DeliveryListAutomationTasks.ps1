@@ -35,8 +35,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Created scheduled tasks:" -ForegroundColor Green
-Write-Host "- $incrementalTask: every $interval minutes while $taskUser is logged on"
-Write-Host "- $fullTask: daily at $fullTime while $taskUser is logged on"
+Write-Host "- ${incrementalTask}: every $interval minutes while $taskUser is logged on"
+Write-Host "- ${fullTask}: daily at $fullTime while $taskUser is logged on"
 Write-Host ""
 Write-Host "Running the incremental task now for a final check..."
 & schtasks.exe /Run /TN $incrementalTask

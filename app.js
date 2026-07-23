@@ -213,6 +213,52 @@ const state = {
 // authoritative instead of drawing a second replacement UI.
 let dlsAutomationLatestImportCheckedAt = "";
 
+function dlsAutomationImportResultTime(entry = {}) {
+  const text = String(
+    entry.checkedAt
+    || entry.importedAt
+    || entry.updatedAt
+    || entry.createdAt
+    || "",
+  ).trim();
+  const parsed = Date.parse(text);
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function dlsAutomationImportResultKey(entry = {}, index = 0) {
+  const deliveryDate = String(entry.deliveryDate || "").trim();
+  const sourceName = String(entry.sourceName || entry.fileName || "").trim().toLowerCase();
+  const id = String(entry.id || entry.batchId || "").trim();
+
+  if (deliveryDate || sourceName) return `${deliveryDate}|${sourceName}`;
+  if (id) return `id:${id}`;
+
+  return `unkeyed:${index}`;
+}
+
+function dlsAutomationMergeRecentImports(currentImports = [], incomingImports = []) {
+  const merged = new Map();
+
+  [...incomingImports, ...currentImports].forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+
+    const key = dlsAutomationImportResultKey(entry, index);
+    const existing = merged.get(key);
+
+    if (!existing || dlsAutomationImportResultTime(entry) >= dlsAutomationImportResultTime(existing)) {
+      merged.set(key, entry);
+    }
+  });
+
+  return [...merged.values()]
+    .sort((a, b) =>
+      String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || ""))
+      || dlsAutomationImportResultTime(b) - dlsAutomationImportResultTime(a),
+    )
+    .slice(0, 100);
+}
+
 function dlsAutomationDateLabel(value) {
   const parsed = new Date(`${value}T12:00:00`);
   return Number.isNaN(parsed.getTime())
@@ -362,10 +408,6 @@ document.addEventListener("dls:delivery-list-data-refreshed", (event) => {
   const detail = event.detail && typeof event.detail === "object" ? event.detail : {};
   dlsAutomationApplyImportSnapshot(detail);
 });
-
-
-
-
 
 const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v3";
 const APP_SOUND_CACHE_VERSION = "20260722-v105";
@@ -15672,8 +15714,14 @@ async function refreshAdminPage() {
   }
   if (els.adminLastUpdated) els.adminLastUpdated.textContent = `Last updated: ${new Date().toLocaleString()}`;
   if (summary) {
-    state.adminRecentImports = summary.recentImports || [];
-    renderImportHistory(summary.recentImports || []);
+    // The Admin summary contains database-backed import history, but unchanged
+    // automation checks may exist only in the newest run snapshot. Merge instead
+    // of replacing so No Changes timestamps survive an Admin-page refresh.
+    state.adminRecentImports = dlsAutomationMergeRecentImports(
+      state.adminRecentImports,
+      summary.recentImports || [],
+    );
+    renderImportHistory(state.adminRecentImports);
     renderAdminDeleteControls();
     renderAdminResetControls();
     if (els.tempFolderInput && !els.tempFolderInput.value && summary.tempDeliveryListsDir) els.tempFolderInput.value = summary.tempDeliveryListsDir;
@@ -15985,13 +16033,45 @@ function activeRecentImports(imports = state.adminRecentImports || []) {
 
   const cleanedImports = imports
     .map((entry) => {
-      const listIds = Array.isArray(entry.listIds)
-        ? entry.listIds.filter((listId) => activeListIds.has(listId))
+      const deliveryDate = String(entry.deliveryDate || "").trim();
+      const deliveryDateLists = deliveryDate
+        ? state.lists.filter((list) => String(list.deliveryDate || "") === deliveryDate)
         : [];
+      const suppliedListIds = [
+        ...(Array.isArray(entry.listIds) ? entry.listIds : []),
+        ...(Array.isArray(entry.changedListIds) ? entry.changedListIds : []),
+        ...(Array.isArray(entry.reactivatedListIds) ? entry.reactivatedListIds : []),
+      ];
 
-      const stageSummaries = Array.isArray(entry.stageSummaries)
+      let stageSummaries = Array.isArray(entry.stageSummaries)
         ? entry.stageSummaries.filter((row) => row.listId && activeListIds.has(row.listId))
         : [];
+
+      // A successful No Changes run intentionally does not rewrite the scanner
+      // database, so the importer can return a date-level result without changed
+      // stage rows. Hydrate those rows from the live catalog so Delivery List
+      // Management still shows every stage and the run-completion timestamp.
+      if (!stageSummaries.length && deliveryDateLists.length) {
+        stageSummaries = deliveryDateLists.map((list) => ({
+          listId: list.id,
+          stage: list.stage,
+          stageProfile: list.scanner,
+          label: list.label,
+          totalQty: Number(list.totalQty || 0),
+          changedLineCount: 0,
+          changedPieceQty: 0,
+          addedPieceQty: 0,
+          created: false,
+          importedAt: entry.importedAt || entry.checkedAt || entry.updatedAt || "",
+          checkedAt: entry.checkedAt || entry.importedAt || entry.updatedAt || "",
+          updatedAt: entry.updatedAt || entry.importedAt || entry.checkedAt || "",
+        }));
+      }
+
+      const listIds = [...new Set([
+        ...suppliedListIds,
+        ...stageSummaries.map((row) => row.listId),
+      ])].filter((listId) => activeListIds.has(listId));
 
       return {
         ...entry,

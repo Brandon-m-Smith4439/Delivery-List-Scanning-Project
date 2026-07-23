@@ -1,16 +1,40 @@
 /*
   Delivery List Scanner Styles
-  ----------------------------
-  Code map for future edits:
-  - Base tokens/layout are near the top (:root, app header, panels, tables).
-  - Feature sections follow the page flow: Home, Scan, Bay Map, Racks, Admin, Print.
-  - Later dated blocks are compatibility overrides from iterative UI work. Before adding
-    a new override at the bottom, search for the selector above and update the existing
-    rule when possible.
-  - Keep shared button/input/pill styles reusable so the CSS file does not keep growing
-    with one-off copies.
+  ============================
+
+  MAINTENANCE MAP
+  ---------------
+  01. Global tokens and element defaults
+  02. Authentication and password reset
+  03. Application shell, header, sidebar, navigation, and account menu
+  04. Home dashboard, statistics, and delivery-list finder
+  05. Administration, imports, users, roles, routes, and lookup tools
+  06. Main Scan page, filters, scanner feedback, history, and tables
+  07. Shared responsive, print/export, modal, dropdown, and utility components
+  08. Rack overview, rack scanner, rack manager, and transportation status
+  09. Early cross-page compatibility ownership layers
+  10. Indian Trail Bay Map, Bay Scanner, SDI, transit, and Old Bay review
+  11. Later cross-page compatibility ownership layers
+  12. Final current-release ownership rules
+
+  CSS OWNERSHIP RULES
+  -------------------
+  - Source order is intentional. Do not move a compatibility rule merely to make the
+    file look shorter; a later rule may be the maintained owner of that selector.
+  - Search for an existing selector, shared component, and design token before writing
+    new CSS. Reuse or extend the newest owning rule instead of copying declarations.
+  - Do not add a release-specific override at the bottom merely to avoid editing the
+    maintained owner. Add a new override only when cascade order is genuinely required.
+  - Page-specific selectors stay with their page section. Shared controls belong in the
+    shared components section only when more than one page truly uses them.
+  - Before each release, check for exact duplicate rules and repeated declarations in the
+    same selector/media context. Remove only duplicates proven not to change the cascade.
+  - Exact duplicate declarations are removed when they have the same selector, body,
+    and media context. Similar-looking rules with different values remain intentional.
 */
-/* SECTION: Global design tokens and base element rules */
+/* ==========================================================================
+   01. GLOBAL TOKENS AND ELEMENT DEFAULTS
+   ========================================================================== */
 :root {
   --navy: #072a63;
   --navy-dark: #041a3d;
@@ -89,7 +113,9 @@ select:disabled,
   border: 0;
 }
 
-/* SECTION: Authentication and password-reset presentation */
+/* ==========================================================================
+   02. AUTHENTICATION AND PASSWORD RESET
+   ========================================================================== */
 .login-screen {
   position: fixed;
   inset: 0;
@@ -348,7 +374,9 @@ select:disabled,
   color: #176b2d;
 }
 
-/* SECTION: Responsive rules; preserve desktop ownership selectors above */
+/* --------------------------------------------------------------------------
+   02A. Authentication responsive behavior
+   -------------------------------------------------------------------------- */
 @media (max-width: 820px) {
   .login-shell {
     grid-template-columns: 1fr;
@@ -377,7 +405,9 @@ select:disabled,
   min-height: 0;
 }
 
-/* SECTION: Global application header, navigation, search, and profile menu */
+/* ==========================================================================
+   03. APPLICATION SHELL, HEADER, NAVIGATION, AND ACCOUNT MENU
+   ========================================================================== */
 .app-header {
   min-height: 108px;
   display: grid;
@@ -737,7 +767,9 @@ select:disabled,
   min-width: min(540px, 100%);
 }
 
-/* SECTION: Home dashboard, statistics, and delivery-list finder */
+/* ==========================================================================
+   04. HOME DASHBOARD, STATISTICS, AND DELIVERY-LIST FINDER
+   ========================================================================== */
 .home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
@@ -2316,7 +2348,9 @@ select:disabled,
   margin-bottom: 10px;
 }
 
-/* SECTION: Administration panels, users, roles, imports, and route rules */
+/* ==========================================================================
+   05. ADMINISTRATION, IMPORTS, USERS, ROLES, ROUTES, AND LOOKUPS
+   ========================================================================== */
 .admin-page .panel {
   min-width: 0;
   grid-column: span 4;
@@ -2801,7 +2835,9 @@ select:disabled,
   min-height: 0;
 }
 
-/* SECTION: Main Scan page panel, barcode workflow, history, and tables */
+/* ==========================================================================
+   06. MAIN SCAN PAGE, FILTERS, BARCODE WORKFLOW, HISTORY, AND TABLES
+   ========================================================================== */
 .scan-page .workspace {
   gap: 8px;
 }
@@ -3831,7 +3867,13 @@ select:disabled,
   min-width: 64px;
 }
 
-/* SECTION: Mobile navigation and compact delivery-list presentation */
+/* ==========================================================================
+   07. SHARED RESPONSIVE, PRINT, MODAL, DROPDOWN, AND UTILITY COMPONENTS
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   07A. Mobile navigation and compact delivery-list presentation
+   -------------------------------------------------------------------------- */
 .mobile-nav {
   display: none;
 }
@@ -3847,7 +3889,9 @@ select:disabled,
   margin-top: 0;
 }
 
-/* Print / Export Delivery Lists */
+/* --------------------------------------------------------------------------
+   07B. Print / Export delivery lists
+   -------------------------------------------------------------------------- */
 .print-options-backdrop {
   position: fixed;
   inset: 0;
@@ -4986,7 +5030,9 @@ select:disabled,
   align-items: start;
 }
 
-/* SECTION: Shared modal/backdrop foundations used by feature dialogs */
+/* --------------------------------------------------------------------------
+   07C. Shared modal and backdrop foundations
+   -------------------------------------------------------------------------- */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -7190,13 +7236,6 @@ body.bay-move-mode .excel-bay-map {
   box-shadow: 0 0 0 2px rgba(209, 42, 58, 0.22);
 }
 
-.undo-icon::before {
-  content: "\21b6" !important;
-}
-
-.redo-icon::before {
-  content: "\21b7" !important;
-}
 
 .bay-layout-editor {
   display: grid;
@@ -7464,7 +7503,9 @@ body.bay-move-mode .excel-bay-map {
   justify-content: flex-end;
 }
 
-/* SECTION: Rack overview, rack scanner, status, and packing-list controls */
+/* ==========================================================================
+   08. RACK OVERVIEW, SCANNER, MANAGER, AND TRANSPORTATION STATUS
+   ========================================================================== */
 .racks-page {
   padding-bottom: 20px;
 }
@@ -12002,7 +12043,13 @@ body.bay-move-mode .excel-bay-map {
 }
 
 
-/* 2026-07-07 professional admin/rack/scan refinements */
+/* ==========================================================================
+   09. EARLY COMPATIBILITY OWNERSHIP LAYERS - SOURCE ORDER MUST BE PRESERVED
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   09A. Admin, rack, and Scan refinements (v3-v14 lineage)
+   -------------------------------------------------------------------------- */
 .app-nav button {
   position: relative;
   overflow: hidden;
@@ -12513,10 +12560,6 @@ body.bay-move-mode .excel-bay-map {
   gap: 8px;
 }
 
-.lookup-manager-shell {
-  display: grid;
-  gap: 14px;
-}
 
 .lookup-manager-hero {
   display: grid;
@@ -12684,9 +12727,6 @@ body.bay-move-mode .excel-bay-map {
 }
 
 @media (max-width: 1280px) {
-  .rack-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 
   .rack-sets-sidebar,
   .rack-center-panel,
@@ -15279,9 +15319,6 @@ body.bay-move-mode .excel-bay-map {
 /* v50 polish: make the signed-in account control feel like a compact app menu,
    keep the dropdown focused on the one action users need, and give the Sign out
    dropdown a larger reliable hover/click area. */
-.user-menu {
-  position: relative;
-}
 
 .user-menu[open]::after {
   content: "";
@@ -15500,6 +15537,10 @@ body.bay-move-mode .excel-bay-map {
   background: var(--navy);
   color: #fff;
 }
+
+/* ==========================================================================
+   10. INDIAN TRAIL BAY MAP, BAY SCANNER, SDI, TRANSIT, AND OLD BAYS
+   ========================================================================== */
 
 /* v105 Old Bay Control Center: one maintained modal ownership block. */
 .stale-bay-panel-v105 {
@@ -16168,7 +16209,9 @@ body.bay-move-mode .excel-bay-map {
 }
 
 /* Bay Map v16 redesign: command-center workflow with a cleaner map, stronger filters, and a right-side scanner. */
-/* SECTION: Indian Trail Bay Map, receiving scanner, and bay-management UI */
+/* --------------------------------------------------------------------------
+   10A. Bay Map core, receiving scanner, and bay-management UI
+   -------------------------------------------------------------------------- */
 .bay-map-page-v2 {
   --bay-card-radius: 14px;
   --bay-card-shadow: 0 16px 36px rgba(8, 38, 90, 0.08);
@@ -23709,6 +23752,10 @@ body.modal-scroll-locked .app-header {
   }
 }
 
+/* --------------------------------------------------------------------------
+   11. LATER CROSS-PAGE COMPATIBILITY OWNERSHIP LAYERS
+   -------------------------------------------------------------------------- */
+
 /* v013: make admin delivery-list groups visibly expandable with a small animated chevron. */
 .admin-import-date-summary {
   grid-template-columns: 24px minmax(320px, 1.18fr) auto minmax(88px, 0.82fr);
@@ -25751,10 +25798,6 @@ body.modal-scroll-locked .app-header {
   background: #edf3fb;
 }
 
-.delivery-date-group[open] .delivery-stage-list,
-.admin-import-date-group[open] .admin-import-stage-wrap {
-  animation: none !important;
-}
 
 .delivery-date-group[open].is-expanding .delivery-stage-list,
 .admin-import-date-group[open].is-expanding .admin-import-stage-wrap {
@@ -26385,6 +26428,10 @@ body.modal-scroll-locked .app-header {
     padding: 12px;
   }
 }
+
+/* --------------------------------------------------------------------------
+   11A. Shared custom dropdown system and cross-page controls
+   -------------------------------------------------------------------------- */
 
 /* v025: shared custom dropdown system.
    Native selects remain in the DOM for existing form and change-event logic, while
@@ -27563,13 +27610,6 @@ button.custom-select-trigger.is-invalid {
   width: min(430px, 92%) !important;
 }
 
-.bay-workflow-row-full .transit-lane-polished .transit-animation.transit-animation-v59::before {
-  top: 13px;
-}
-
-.bay-workflow-row-full .transit-lane-polished .transit-flow-line {
-  top: 12px !important;
-}
 
 .bay-workflow-row-full .transit-lane-polished .flow-progress-track {
   width: min(360px, 86%) !important;
@@ -28054,6 +28094,10 @@ html[lang="es"] .delivery-stage-list .delivery-list-card::after,
 html[lang="es"] .delivery-list-card.date-grouped::after {
   content: "Abrir";
 }
+
+/* --------------------------------------------------------------------------
+   11B. Operational Scan, rack, SDI, Rush, progress, and scanner workflows
+   -------------------------------------------------------------------------- */
 
 /* v037: Job Nr. SDI lookup, polished success feedback, and print/fullscreen return. */
 .sdi-form .sdi-job-lookup {
@@ -31322,6 +31366,10 @@ html:-webkit-full-screen .bay-scanner-panel-compact-v57 > .bay-panel-route-band-
   }
 }
 
+/* --------------------------------------------------------------------------
+   11C. Final page-level ownership before the current shell
+   -------------------------------------------------------------------------- */
+
 /* v069: unified header, polished operational pages, compact Bay scanner command,
    stable SDI workspace, and full-width Scan progress. This final ownership block
    intentionally supersedes older incremental layout rules without duplicating UI. */
@@ -32856,6 +32904,10 @@ html:-webkit-full-screen .bay-scanner-sticky-slot {
   }
 }
 
+/* --------------------------------------------------------------------------
+   11D. Application shell, sidebar, branding, and global-search ownership
+   -------------------------------------------------------------------------- */
+
 /* v081: page-aware sidebar visibility, centered global search, and simplified dashboard header.
    This block owns the application shell so sidebar hover behavior, bottom profile placement,
    responsive drawer handling, and fullscreen geometry remain coordinated without shifting page content. */
@@ -34213,6 +34265,10 @@ body.modal-scroll-locked .app-header {
   justify-self: start;
 }
 
+
+/* ==========================================================================
+   12. FINAL CURRENT-RELEASE OWNERSHIP RULES
+   ========================================================================== */
 
 /* v099: compact Scan filters, immediate save feedback, and shared timed scan outcomes. */
 .scan-filter-toolbar {
