@@ -1,6 +1,8 @@
 # Delivery List Scanner
 
-Current maintained release: **v125**. SQLite remains the active/default backend.
+Current maintained release: **v126**. SQLite remains the active/default backend.
+
+v126 adds a guarded floor-database transfer utility for moving an existing SQLite scanner database into the newest project copy without losing operational data. The BAT creates verified source and target backups, uses SQLite online backup so WAL data is included, runs the current maintained migrations, validates integrity and foreign keys, compares every pre-existing table count, writes a JSON report, and automatically restores the prior target database if the upgrade fails.
 
 v125 fixes Windows PowerShell treating harmless `schtasks.exe` error output as a terminating `NativeCommandError` when an obsolete scheduled task is not installed. The scheduler now queries before deleting legacy tasks, captures native command output under a non-terminating preference, and evaluates the real exit code for delete, create, query, and launch operations.
 
@@ -42,6 +44,22 @@ SQLite remains the active/default database. The production database is:
 
 Keep this file and its `-wal`/`-shm` companions together whenever the app is running. Before the first v097 schema upgrade, startup creates and verifies a backup under `data\backups`. Production databases are never deleted or recreated automatically.
 
+## Floor database transfer and upgrade
+
+Use `Transfer-Floor-Database-To-Current-Version.bat` when updating a floor computer to a newer scanner build while keeping its existing SQLite data.
+
+1. Close the old and new Delivery List Scanner server windows.
+2. Keep the old project folder unchanged.
+3. Extract the v126 changed-files package into the newest/current project folder.
+4. Double-click `Transfer-Floor-Database-To-Current-Version.bat`.
+5. Paste the old project folder, old `data` folder, or old `delivery-scanner-pilot.db` path.
+6. Confirm the displayed source and target paths by typing `TRANSFER`.
+7. Start the newest web app and verify users, delivery lists, scans, racks, and bays.
+
+The utility does not modify the old database. It backs up both the old source and the current target under `data\backups\floor-database-transfer-<timestamp>`, upgrades the copied database with the current app's numbered migrations, validates SQLite integrity/foreign keys, and confirms that record counts from every old table did not decrease. On failure, it preserves diagnostics and restores the database that was in the current project before the transfer.
+
+This is a replacement-and-upgrade operation, not a merge of two separately active databases. It supports the maintained v096-compatible SQLite schema and later. See `docs/FLOOR_DATABASE_TRANSFER.md`.
+
 ## Automated A+W delivery-list imports
 
 The maintained v121+ automation package is under `automation\sql_delivery_export`.
@@ -77,6 +95,7 @@ After BLDR IT provides the Entra tenant ID, application/client ID, and a client-
 
 - Ongoing version history: `README_CHANGELOG.md`
 - Automated A+W SQL export/import: `automation/sql_delivery_export/README.md`
+- Floor database transfer and recovery: `docs/FLOOR_DATABASE_TRANSFER.md`
 - Folder cleanup and required-file guide: `docs/FOLDER_CLEANUP_GUIDE.md`
 - Function and ownership map: `docs/CODE_REFERENCE.md`
 - Maintained test instructions: `docs/TESTING.md`

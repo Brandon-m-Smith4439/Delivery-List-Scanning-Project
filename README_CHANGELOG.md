@@ -1,3 +1,17 @@
+## v126 - Floor Database Transfer and Upgrade
+
+- Added `Transfer-Floor-Database-To-Current-Version.bat` for moving an existing floor SQLite database into the newest scanner project while preserving operational data.
+- Accepts the old project folder, old data folder, or direct `delivery-scanner-pilot.db` path, including drag-and-drop onto the BAT file.
+- Uses SQLite's online backup API instead of raw file copying so committed WAL data is included safely.
+- Creates verified backups of both the selected old floor database and the database already present in the current project.
+- Replaces the current project's database with a verified snapshot of the old floor data, then invokes the current `delivery_store.py` initialization and numbered migrations.
+- Validates SQLite integrity, foreign keys, expected schema version, required scanner tables, and before/after row counts for every pre-existing application table.
+- Writes a detailed JSON transfer report under `data\backups\floor-database-transfer-<timestamp>`.
+- Preserves a failed upgraded copy when possible and automatically restores the prior current-project database if migration or validation fails.
+- Refuses unsupported Azure SQL targets, same-file source/target selections, incomplete pre-v096 schemas, damaged databases, and open target files rather than risking silent data loss.
+- Added `docs/FLOOR_DATABASE_TRANSFER.md` and targeted success, rollback, and invalid-source tests.
+- Advanced browser asset cache keys to v126.
+
 ## v125 - Safe Task Scheduler Native Command Handling
 
 - Fixed schedule installation failing when `schtasks.exe /Delete` reported that an obsolete legacy task did not exist.

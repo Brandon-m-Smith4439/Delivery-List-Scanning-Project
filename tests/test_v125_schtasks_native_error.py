@@ -39,12 +39,14 @@ class V125ScheduledTasksNativeCommandTests(unittest.TestCase):
         self.assertNotIn("delivery-scanner-pilot.db", script)
         self.assertNotIn("sql-export.config.json\" -Destination", script)
 
-    def test_release_and_cache_keys_are_v125(self) -> None:
-        self.assertIn("Current maintained release: **v125**", (ROOT / "README.md").read_text(encoding="utf-8"))
-        self.assertTrue((ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8").startswith("## v125"))
+    def test_v125_fix_remains_documented_in_newer_releases(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("v125 fixes Windows PowerShell", readme)
+        self.assertIn("## v125", changelog)
         index = (ROOT / "index.html").read_text(encoding="utf-8")
-        self.assertIn("styles.css?v=20260723-v125", index)
-        self.assertIn("app.js?v=20260723-v125", index)
+        self.assertRegex(index, r"styles\.css\?v=20260723-v(?:125|12[6-9]|1[3-9]\d)")
+        self.assertRegex(index, r"app\.js\?v=20260723-v(?:125|12[6-9]|1[3-9]\d)")
 
 
 if __name__ == "__main__":
