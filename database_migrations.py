@@ -134,24 +134,31 @@ def baseline_legacy_v096(connection: Any, owner: Any) -> bool:
     return True
 
 
-def prepare_v096_compatibility_columns(connection: Any, owner: Any, installed: dict[int, dict[str, Any]]) -> None:
-    """Add historical v096 compatibility columns before the v097 table rebuild.
+def prepare_v096_compatibility_schema(connection: Any, owner: Any, installed: dict[int, dict[str, Any]]) -> None:
+    """Complete the canonical v096 schema before the v097 table rebuild.
 
-    Some floor databases predate late-v096 additive fields such as
-    ``priority_delivery_date`` and ``priority_direct_to_truck`` but otherwise
-    contain the complete operational schema. The v097 migration rebuilds
-    ``line_items`` and therefore must normalize those additive columns first.
-    This step is idempotent and also repairs databases that already carry the
-    v096 baseline record but were created before those fields were introduced.
+    Some floor databases were created during development before every v096
+    support table and additive column existed. Merely recording the v096
+    baseline is not enough for those databases: later startup work expects
+    auxiliary tables such as ``system_metadata``, and the v097 rebuild expects
+    fields such as ``priority_delivery_date``.
+
+    Re-run the canonical v096 schema method here because it is deliberately
+    idempotent: ``CREATE TABLE IF NOT EXISTS`` adds missing support tables, and
+    the maintained compatibility helper adds only absent columns. Existing
+    rows are not recreated or replaced. This also repairs a database that
+    already carries the v096 baseline record but was created before the schema
+    was complete.
     """
     if 2 in installed:
         return
-    upgrader = getattr(owner, "_upgrade_v096_columns", None)
-    if not callable(upgrader):
+    baseline = migration_by_version(1)
+    initializer = getattr(owner, baseline.method_name, None)
+    if not callable(initializer):
         raise MigrationError(
-            "The database requires pre-v097 compatibility repair, but the current store does not provide it."
+            "The database requires v096 schema completion, but the current store does not provide it."
         )
-    upgrader(connection)
+    initializer(connection)
     connection.commit()
 
 
@@ -161,7 +168,7 @@ def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:
     baseline_legacy_v096(connection, owner)
     validate_installed_checksums(connection)
     installed = installed_migrations(connection)
-    prepare_v096_compatibility_columns(connection, owner, installed)
+    prepare_v096_compatibility_schema(connection, owner, installed)
     installed = installed_migrations(connection)
     applied: list[int] = []
     for migration in MIGRATIONS:

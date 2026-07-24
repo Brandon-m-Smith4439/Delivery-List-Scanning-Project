@@ -72,7 +72,7 @@ goto finished
 echo ERROR: The database transfer tool is missing:
 echo   %SCRIPT%
 echo.
-echo Extract the complete v128 changed-files package into the current project
+echo Extract the complete current changed-files package into the current project
 echo before running this BAT again.
 >>"%LAUNCH_LOG%" echo ERROR: Missing transfer tool: %SCRIPT%
 set "EXIT_CODE=1"

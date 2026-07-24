@@ -42,7 +42,7 @@ A database file can also be dragged directly onto the BAT file. The BAT passes a
 
 ## Launcher troubleshooting
 
-The v129 package retains the v128 launcher, which normalizes its own project folder before passing it to Python and always pauses before closing. It also writes `logs\floor-database-transfer-launch.log` with the project folder, chosen Python runtime, and exit code.
+The v128 launcher normalizes its own project folder before passing it to Python and always pauses before closing. It also writes `logs\floor-database-transfer-launch.log` with the project folder, chosen Python runtime, and exit code.
 
 When the transfer prompt does not appear:
 
@@ -51,18 +51,6 @@ When the transfer prompt does not appear:
 3. Open `logs\floor-database-transfer-launch.log` to see which Python runtime was selected or why startup failed.
 4. Run the BAT again and paste the old path only when the Python prompt appears.
 5. A message containing `project-main" --interactive` means the older v127 BAT was still being run; replace the BAT with the v128 copy.
-
-## Legacy v096 column compatibility
-
-V129 supports floor databases that contain the maintained core v096 tables but were created before the final late-v096 additive columns were introduced. Before the v097 constrained-table rebuild, the migration runner now adds any missing maintained compatibility fields, including `source_route`, `priority_delivery_date`, and `priority_direct_to_truck`.
-
-This specifically fixes the transfer error:
-
-```text
-sqlite3.OperationalError: no such column: priority_delivery_date
-```
-
-The repair runs only on the verified target copy. The selected old floor database remains untouched. A failed v128 attempt already restored the database that was present in the current project, so after installing v129, run the same transfer BAT again and select the same old floor project/database.
 
 ## Verify after transfer
 
@@ -92,3 +80,9 @@ Do not delete the timestamped backup folder until floor testing has been complet
 ## Compatibility boundary
 
 The current migration system can baseline and upgrade the maintained v096-compatible schema and later databases. The transfer stops before changing the target when the selected database is missing required core tables. That is safer than guessing how to translate a much older or incomplete schema. Provide that database for a dedicated converter if this validation occurs.
+
+## Legacy schema completion in v130
+
+Some early floor databases contain the main scanner tables but predate later v096 support tables and fields. Before the v097 production migration rebuilds constrained tables, the transfer now reruns the maintained v096 schema method in an idempotent mode. It creates only missing support tables such as `system_metadata`, adds only missing compatibility columns, and leaves every existing row in place.
+
+This specifically fixes the observed sequence where migration 002 and migration 003 completed, but normal startup then failed while reading `system_metadata`. The original floor database remains untouched, and the guarded target replacement is still rolled back automatically if any later validation fails.

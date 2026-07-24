@@ -1,11 +1,20 @@
-## v129 - Legacy Floor Column Repair Before v097 Migration
+## v130 - Complete Legacy v096 Schema Before Migration
 
-- Fixed floor database transfer failing during the v097 `line_items` rebuild with `sqlite3.OperationalError: no such column: priority_delivery_date`.
-- Runs the maintained `_upgrade_v096_columns` compatibility repair before migration 002 whenever the database has not yet reached the v097 production schema.
-- Repairs both unversioned legacy floor databases and databases that already contain the v096 baseline record but predate late-v096 additive fields.
-- Reuses the existing idempotent column definitions for source route, priority delivery, direct-to-truck, rack lifecycle, import metadata, bay layout, user station/email, and related compatibility fields instead of duplicating schema logic in the transfer tool.
-- Preserves migration checksums and the existing verified-backup, integrity-check, foreign-key-check, row-count comparison, failed-copy retention, and automatic target rollback protections.
-- Added regression tests for both affected legacy migration paths and advanced browser asset cache keys to v129.
+- Fixed floor database upgrades reaching the current schema version and then failing during startup with `no such table: system_metadata`.
+- Replays the canonical v096 schema creation method before migration 002 whenever the database has not yet reached v097.
+- Uses the existing idempotent `CREATE TABLE IF NOT EXISTS` and missing-column helpers, so support tables and fields are added without recreating or replacing existing operational rows.
+- Covers both unversioned legacy databases and databases that already contain a v096 baseline record but were created before all v096 support tables existed.
+- Does not change any historical migration checksum or schema version.
+- Preserves verified source/target backups, integrity checks, foreign-key validation, row-count checks, failed-copy preservation, and automatic target rollback.
+- Corrected maintained release documentation that had remained labeled v128 after the v129 migration patch.
+- Advanced browser asset cache keys to v130.
+
+## v129 - Late-v096 Column Compatibility Repair
+
+- Fixed the v097 migration failing with `no such column: priority_delivery_date` on older floor databases.
+- Runs the maintained v096 compatibility preparation before migration 002 so `source_route`, `priority_delivery_date`, and `priority_direct_to_truck` exist before `line_items` is rebuilt.
+- Supports both unversioned legacy databases and databases already marked with the v096 baseline.
+- Preserved migration checksums, existing operational data, verified backups, validation, and rollback behavior.
 
 ## v128 - Windows Project-Root Quoting Fix
 

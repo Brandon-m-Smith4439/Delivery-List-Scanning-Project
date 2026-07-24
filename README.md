@@ -1,8 +1,10 @@
 # Delivery List Scanner
 
-Current maintained release: **v129**. SQLite remains the active/default backend.
+Current maintained release: **v130**. SQLite remains the active/default backend.
 
-v129 fixes floor-database upgrades for operational databases created before the late-v096 `priority_delivery_date`, `priority_direct_to_truck`, and related additive compatibility columns were introduced. The migration runner now applies the maintained v096 compatibility-column repair before the v097 constrained-table rebuild, including databases that already contain a v096 baseline record. Existing rows, scan quantities, history, racks, bays, users, and imports remain in place, and the transfer tool keeps its verified backups and automatic rollback protections.
+v130 completes the canonical v096 schema before running the v097 production migration on older floor databases. This safely creates missing support tables such as `system_metadata` and adds any missing late-v096 columns without replacing existing rows, fixing the transfer failure that occurred after the main migrations when startup tried to read a table absent from early development databases.
+
+v129 added pre-v097 compatibility-column repair so older floor databases receive `source_route`, `priority_delivery_date`, and `priority_direct_to_truck` before the v097 `line_items` rebuild.
 
 v128 fixes the Windows project-root quoting failure in the floor database transfer launcher. The BAT now removes its trailing directory separator before passing the current project path to Python, and the Python tool defensively repairs the malformed `project-main" --interactive` argument produced by already-extracted v127 launchers.
 
