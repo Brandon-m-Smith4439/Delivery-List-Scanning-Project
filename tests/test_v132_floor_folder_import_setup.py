@@ -61,7 +61,7 @@ class FloorFolderImportSetupTests(unittest.TestCase):
 
     def test_batch_launcher_keeps_errors_visible(self) -> None:
         text = SETUP_BAT.read_text(encoding="utf-8")
-        self.assertIn('powershell.exe -NoProfile -ExecutionPolicy Bypass', text)
+        self.assertIn('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass', text)
         self.assertIn('pause', text.lower())
         self.assertIn('exit /b %EXIT_CODE%', text)
         self.assertNotIn('set /p', text.lower())
@@ -69,15 +69,14 @@ class FloorFolderImportSetupTests(unittest.TestCase):
     def test_backups_and_database_preservation_are_documented(self) -> None:
         setup = SETUP_PS1.read_text(encoding="utf-8")
         doc = DOC.read_text(encoding="utf-8")
-        self.assertIn('Backups\\v132-floor-folder-import-', setup)
+        self.assertRegex(setup, r'Backups\\v\d+-floor-folder-import-')
         self.assertIn('The scanner database is not copied, replaced, or reset', doc)
 
-    def test_release_markers_are_consistent(self) -> None:
-        self.assertIn('Current maintained release: **v132**', README.read_text(encoding="utf-8"))
-        self.assertTrue(CHANGELOG.read_text(encoding="utf-8").startswith('## v132'))
-        index = INDEX.read_text(encoding="utf-8")
-        self.assertEqual(index.count('20260724-v132'), 6)
-        self.assertNotIn('20260724-v131', index)
+    def test_v132_release_history_remains_documented(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        changelog = CHANGELOG.read_text(encoding="utf-8")
+        self.assertIn('v132 adds a dedicated one-click floor-computer setup', readme)
+        self.assertIn('## v132 - Floor Computer Hourly Folder-Import Setup', changelog)
 
     def test_setup_has_balanced_basic_delimiters(self) -> None:
         text = SETUP_PS1.read_text(encoding="utf-8")

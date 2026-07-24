@@ -1,6 +1,8 @@
 # Delivery List Scanner
 
-Current maintained release: **v132**. SQLite remains the active/default backend.
+Current maintained release: **v133**. SQLite remains the active/default backend.
+
+v133 fixes Windows batch launchers closing immediately when the scanner project path contains parentheses or other CMD-sensitive characters, such as `Delivery-List-Scanning-Project-main (5)`. The floor folder-import setup and desktop-shortcut launchers now use label-based control flow instead of parenthesized command blocks, quote every project-derived path, always pause at a visible result screen, and write launcher/error logs under the project `logs` folder.
 
 v132 adds a dedicated one-click floor-computer setup for hourly imports from the shared Temp Delivery Lists folder. It installs the missing runtime scripts under `C:\DeliveryListAutomation\Scripts`, preserves existing automation configuration with timestamped backups, forces folder-import-only mode, sets the interval to 60 minutes, creates and verifies the scheduled tasks, and skips A+W SQL and workbook-write preflight checks on floor computers while keeping the central SQL workflow unchanged.
 

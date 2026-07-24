@@ -1,3 +1,15 @@
+## v133 - Safe Windows Batch Launchers for Parenthesized Project Paths
+
+- Fixed `Setup-Floor-Folder-Import-Automation.bat` opening briefly and closing before the PowerShell installer started when the project folder contained parentheses, such as `Delivery-List-Scanning-Project-main (5)`.
+- Fixed the same CMD parser failure in `Create Desktop Shortcut.bat`.
+- Rebuilt both launchers with label-based control flow instead of parenthesized command blocks that expanded project paths during CMD parsing.
+- Quotes every project-derived path and keeps delayed expansion disabled so spaces, parentheses, ampersands, and common OneDrive folder names do not alter the command structure.
+- Both launchers now always reach a visible success/failure screen and wait for a keypress before closing.
+- Added `logs\floor-folder-import-setup-launch.log` and `logs\desktop-shortcut-launch.log` with the selected project/script paths and PowerShell exit code.
+- Added `logs\floor-folder-import-setup-error.log` for unhandled PowerShell setup failures.
+- Preserved the v132 folder-import-only runtime installation, hourly schedule, SQL isolation, scanner database, existing import configuration backups, and desktop-shortcut behavior.
+- Advanced browser asset cache keys to v133.
+
 ## v132 - Floor Computer Hourly Folder-Import Setup
 
 - Added `Setup-Floor-Folder-Import-Automation.bat` as a dedicated one-click installer for floor computers that only consume workbooks from the shared Temp Delivery Lists folder.
