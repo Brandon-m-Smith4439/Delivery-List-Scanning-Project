@@ -1,3 +1,12 @@
+## v127 - Reliable Floor Database Transfer Launcher
+
+- Moved the old-project/database path prompt from the BAT command parser into the Python transfer tool so pasted paths containing spaces, ampersands, parentheses, quotes, and other CMD-sensitive characters cannot terminate the launcher.
+- Rebuilt the BAT as explicit non-nested execution labels for the project virtual environment, bundled Python, Windows Python launcher, and PATH Python fallback.
+- Kept the transfer window open after success and every handled failure with a final keypress prompt.
+- Added `logs\floor-database-transfer-launch.log` with the project root, selected Python runtime, and transfer-process exit code.
+- Preserved drag-and-drop support through an environment handoff without embedding the pasted path in the Python command line.
+- Added an interactive-path regression test using a folder name containing an ampersand while preserving the v126 backup, migration, validation, and rollback protections.
+
 ## v126 - Floor Database Transfer and Upgrade
 
 - Added `Transfer-Floor-Database-To-Current-Version.bat` for moving an existing floor SQLite database into the newest scanner project while preserving operational data.

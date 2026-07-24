@@ -45,8 +45,8 @@ class V125ScheduledTasksNativeCommandTests(unittest.TestCase):
         self.assertIn("v125 fixes Windows PowerShell", readme)
         self.assertIn("## v125", changelog)
         index = (ROOT / "index.html").read_text(encoding="utf-8")
-        self.assertRegex(index, r"styles\.css\?v=20260723-v(?:125|12[6-9]|1[3-9]\d)")
-        self.assertRegex(index, r"app\.js\?v=20260723-v(?:125|12[6-9]|1[3-9]\d)")
+        self.assertRegex(index, r"styles\.css\?v=\d{8}-v(?:125|12[6-9]|1[3-9]\d)")
+        self.assertRegex(index, r"app\.js\?v=\d{8}-v(?:125|12[6-9]|1[3-9]\d)")
 
 
 if __name__ == "__main__":

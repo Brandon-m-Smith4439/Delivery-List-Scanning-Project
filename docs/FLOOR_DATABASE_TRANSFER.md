@@ -29,7 +29,7 @@ The transfer preserves the complete floor database, including delivery lists, li
 
 1. Extract the newest changed-files package into the current scanner project.
 2. Double-click `Transfer-Floor-Database-To-Current-Version.bat`.
-3. Paste either:
+3. Wait for the Python prompt in the same window, then paste either:
    - the old scanner project folder,
    - the old project's `data` folder, or
    - the full path to `delivery-scanner-pilot.db`.
@@ -38,7 +38,18 @@ The transfer preserves the complete floor database, including delivery lists, li
 6. Wait for the final success message.
 7. Start the current scanner normally.
 
-A database file can also be dragged directly onto the BAT file.
+A database file can also be dragged directly onto the BAT file. The BAT passes a dragged path through an environment variable so CMD does not reinterpret special characters in the path.
+
+## Launcher troubleshooting
+
+The v127 launcher always pauses before closing. It also writes `logs\floor-database-transfer-launch.log` with the project folder, chosen Python runtime, and exit code.
+
+When the transfer prompt does not appear:
+
+1. Confirm the ZIP was extracted into the current project; do not launch the BAT from inside the ZIP preview.
+2. Confirm `tools\upgrade_floor_database.py` exists below the BAT.
+3. Open `logs\floor-database-transfer-launch.log` to see which Python runtime was selected or why startup failed.
+4. Run the BAT again and paste the old path only when the Python prompt appears.
 
 ## Verify after transfer
 

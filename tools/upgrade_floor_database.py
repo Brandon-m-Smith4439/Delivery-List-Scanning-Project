@@ -92,11 +92,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        required=True,
+        default=os.environ.get("DLS_FLOOR_TRANSFER_SOURCE", ""),
         help=(
             "Old floor database file, old project folder, or old project data folder. "
             f"Folders are searched for data/{DEFAULT_DATABASE_NAME} and {DEFAULT_DATABASE_NAME}."
         ),
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Prompt for the old project/database path when --source was not supplied.",
     )
     parser.add_argument(
         "--target",
@@ -114,6 +119,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Keep the failed upgraded target in place instead of restoring the prior target.",
     )
     return parser.parse_args(argv)
+
+
+def prompt_source_path() -> str:
+    """Read the source path inside Python so CMD metacharacters cannot close the BAT."""
+    print("Paste the OLD project folder, its data folder, or the old database file.")
+    print("Example: C:\\Delivery List Scanner OLD")
+    try:
+        return input("Old floor project/database path: ").strip()
+    except (EOFError, KeyboardInterrupt) as exc:
+        raise TransferError("No source path was entered. Nothing was changed.") from exc
+
+
+def resolve_source_argument(args: argparse.Namespace) -> str:
+    """Return a supplied, drag-dropped, environment, or interactively entered path."""
+    value = str(args.source or "").strip()
+    if not value and args.interactive:
+        value = prompt_source_path()
+    if not value:
+        raise TransferError(
+            "No source database path was supplied. Run the BAT and paste the old project "
+            "folder or database path when prompted."
+        )
+    return value
 
 
 def normalize_user_path(value: str) -> Path:
@@ -440,7 +468,8 @@ def run_transfer(args: argparse.Namespace) -> Path:
     if not project_root.is_dir():
         raise TransferError(f"Current project folder was not found: {project_root}")
 
-    source = resolve_source_database(args.source)
+    source_text = resolve_source_argument(args)
+    source = resolve_source_database(source_text)
     target, database_type = resolve_target_database(project_root, args.target)
     if database_type != "sqlite":
         raise TransferError(
