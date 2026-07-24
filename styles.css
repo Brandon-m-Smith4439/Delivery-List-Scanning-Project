@@ -35343,3 +35343,1520 @@ body.modal-scroll-locked .app-header {
 .user-menu-sound-controls [data-app-sound-status][data-sound-state="error"] {
   color: #b42335;
 }
+
+/* ========================================================================== */
+/* 13. v136 maintained component system and operational workflows             */
+/* ========================================================================== */
+/*
+  v136 CSS ownership rules:
+  - Reuse the button, panel, form, badge, and modal primitives in this section.
+  - Change an owning rule here or in its numbered feature section instead of
+    appending another release-specific override at the end of the stylesheet.
+  - Search for the selector before adding a new rule and remove superseded
+    declarations when a component is formally migrated to this system.
+*/
+
+
+:root {
+  --control-radius: 9px;
+  --control-height: 38px;
+  --control-border: #b9c7d8;
+  --control-border-hover: #7693ba;
+  --control-text: #183457;
+  --control-surface: #f8fafc;
+  --control-surface-hover: #ffffff;
+  --control-shadow: 0 1px 2px rgba(19, 44, 78, 0.10);
+  --control-shadow-hover: 0 5px 12px rgba(19, 44, 78, 0.14);
+  --control-primary: #1d4f91;
+  --control-primary-hover: #173f75;
+  --control-primary-border: #163d72;
+  --control-danger: #a92e3a;
+  --control-danger-hover: #8e2430;
+  --control-success: #247556;
+  --control-success-hover: #1c6046;
+}
+
+/* Apply the shared control treatment to action buttons, not navigation cards,
+   tabs, filter chips, or selectable workflow surfaces that own their layout. */
+.app :where(
+  button.tool-button,
+  button.primary-tool,
+  button.primary,
+  button.secondary,
+  button.danger,
+  button.success,
+  button.link-button,
+  button.icon-only,
+  button.icon-button,
+  button[type="submit"],
+  .page-heading-actions > button,
+  .rack-create-actions > button,
+  .bay-action-buttons > button,
+  .reject-history-toolbar > button,
+  .rack-details-modal-actions > button,
+  .packing-history-row > button,
+  .rack-modal-move-actions > button,
+  .reject-log-actions > button,
+  .manual-order-create-actions > button,
+  .admin-modal-panel button:not(.modal-close-x):not(.tab):not(.route-filter-tab):not(.priority-tab),
+  .operations-modal-panel button:not(.modal-close-x):not(.admin-import-run-tab)
+),
+.login-screen :where(button:not(.login-link-button):not(.login-language-toggle)) {
+  min-height: var(--control-height);
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-surface);
+  color: var(--control-text);
+  font: inherit;
+  font-weight: 750;
+  letter-spacing: 0.005em;
+  box-shadow: var(--control-shadow);
+  transition: transform 130ms ease, box-shadow 130ms ease, border-color 130ms ease, background-color 130ms ease, color 130ms ease;
+}
+
+.app :where(
+  button.tool-button,
+  button.primary-tool,
+  button.primary,
+  button.secondary,
+  button.danger,
+  button.success,
+  button.link-button,
+  button.icon-only,
+  button.icon-button,
+  button[type="submit"],
+  .page-heading-actions > button,
+  .rack-create-actions > button,
+  .bay-action-buttons > button,
+  .reject-history-toolbar > button,
+  .rack-details-modal-actions > button,
+  .packing-history-row > button,
+  .rack-modal-move-actions > button,
+  .reject-log-actions > button,
+  .manual-order-create-actions > button,
+  .admin-modal-panel button:not(.modal-close-x):not(.tab):not(.route-filter-tab):not(.priority-tab),
+  .operations-modal-panel button:not(.modal-close-x):not(.admin-import-run-tab)
+):hover:not(:disabled),
+.login-screen :where(button:not(.login-link-button):not(.login-language-toggle)):hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--control-border-hover);
+  background: var(--control-surface-hover);
+  box-shadow: var(--control-shadow-hover);
+}
+
+.app :where(
+  button.tool-button,
+  button.primary-tool,
+  button.primary,
+  button.secondary,
+  button.danger,
+  button.success,
+  button.link-button,
+  button.icon-only,
+  button.icon-button,
+  button[type="submit"],
+  .page-heading-actions > button,
+  .rack-create-actions > button,
+  .bay-action-buttons > button,
+  .reject-history-toolbar > button,
+  .rack-details-modal-actions > button,
+  .packing-history-row > button,
+  .rack-modal-move-actions > button,
+  .reject-log-actions > button,
+  .manual-order-create-actions > button,
+  .admin-modal-panel button:not(.modal-close-x):not(.tab):not(.route-filter-tab):not(.priority-tab),
+  .operations-modal-panel button:not(.modal-close-x):not(.admin-import-run-tab)
+):active:not(:disabled),
+.login-screen :where(button:not(.login-link-button):not(.login-language-toggle)):active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 1px 1px rgba(19, 44, 78, 0.12);
+}
+
+.app :where(button:focus-visible),
+.login-screen :where(button:focus-visible) {
+  outline: 3px solid rgba(47, 108, 190, 0.26);
+  outline-offset: 2px;
+}
+
+.app :where(button:disabled),
+.login-screen :where(button:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+}
+
+.app :where(
+  button.primary,
+  button.primary-tool,
+  button[type="submit"],
+  .action-feedback-primary,
+  .rack-move-confirm,
+  .users-add-button,
+  #headerGlobalSearchBtn,
+  #globalPrintExportBtn,
+  #rejectLogOpenBtn,
+  .bay-scan-submit-v105,
+  .rack-details-modal-actions > button:not(.secondary)
+) {
+  border-color: var(--control-primary-border);
+  background: var(--control-primary);
+  color: #fff;
+}
+
+.app :where(
+  button.primary,
+  button.primary-tool,
+  button[type="submit"],
+  .action-feedback-primary,
+  .rack-move-confirm,
+  .users-add-button,
+  #headerGlobalSearchBtn,
+  #globalPrintExportBtn,
+  #rejectLogOpenBtn,
+  .bay-scan-submit-v105,
+  .rack-details-modal-actions > button:not(.secondary)
+):hover:not(:disabled) {
+  border-color: #12345f;
+  background: var(--control-primary-hover);
+  color: #fff;
+}
+
+.app :where(button.secondary, .action-feedback-secondary, .rack-move-cancel) {
+  border-color: #b9c8da;
+  background: #f5f7fa;
+  color: #294b73;
+}
+
+#adminPage .link-button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-color: #9fb6d3;
+  background: #eef4fb;
+  color: #1f4f87;
+  padding: 0 11px;
+  text-decoration: none;
+}
+
+#adminPage .link-button::before {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  background: currentColor;
+  content: "";
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m16.9 3.1 4 4-11.8 11.8-5 1 1-5L16.9 3.1Zm0 2.8L7 15.8l-.4 1.6 1.6-.4 9.9-9.9-1.2-1.2Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m16.9 3.1 4 4-11.8 11.8-5 1 1-5L16.9 3.1Zm0 2.8L7 15.8l-.4 1.6 1.6-.4 9.9-9.9-1.2-1.2Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+#adminPage .link-button:hover:not(:disabled) {
+  border-color: #6f94c3;
+  background: #e3eefb;
+  color: #173f70;
+}
+
+.app :where(button.danger, button.icon-trash, button[data-rack-clear], button[data-rack-set-clear]) {
+  border-color: #84232d;
+  background: var(--control-danger);
+  color: #fff;
+}
+
+.app :where(button.danger, button.icon-trash, button[data-rack-clear], button[data-rack-set-clear]):hover:not(:disabled) {
+  background: var(--control-danger-hover);
+  color: #fff;
+}
+
+.app :where(button.success) {
+  border-color: #18513b;
+  background: var(--control-success);
+  color: #fff;
+}
+
+.app :where(button.success):hover:not(:disabled) {
+  background: var(--control-success-hover);
+  color: #fff;
+}
+
+.app :where(button.icon-only, button.modal-close-x, button.notification-center-close) {
+  min-width: 38px;
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
+#headerGlobalSearchBtn,
+#globalPrintExportBtn {
+  box-shadow: 0 2px 5px rgba(13, 44, 84, 0.18);
+}
+
+#headerGlobalSearchBtn:hover:not(:disabled),
+#globalPrintExportBtn:hover:not(:disabled) {
+  box-shadow: 0 6px 14px rgba(13, 44, 84, 0.22);
+}
+
+/* Scan table operational markers */
+.internal-reject-ribbon {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  padding: 5px 8px;
+  border: 1px solid #b62535;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #9d1f2e, #ce3e4d);
+  color: #fff;
+  box-shadow: 0 3px 9px rgba(127, 20, 34, 0.2);
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.internal-reject-ribbon b {
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.internal-reject-ribbon span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.internal-reject-ribbon small {
+  color: #ffe8eb;
+  white-space: nowrap;
+}
+
+tr.has-internal-reject > td:first-child {
+  position: relative;
+  min-width: 250px;
+}
+
+.row-marker.manual-only-marker {
+  border-color: #8a5a10;
+  background: #fff0bd;
+  color: #6e4300;
+}
+
+/* Personal new/updated review workflow */
+.line-update-review-prompt-shell {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2400;
+  width: min(430px, calc(100vw - 32px));
+}
+
+.line-update-review-prompt {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid #7698c8;
+  border-radius: 15px;
+  background: rgba(250, 253, 255, 0.98);
+  color: #112a50;
+  box-shadow: 0 18px 50px rgba(24, 49, 88, 0.28);
+  backdrop-filter: blur(12px);
+}
+
+.line-update-review-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #3975d2, #184786);
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.line-update-review-prompt small,
+.operations-modal-heading small {
+  color: #5d7495;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.line-update-review-prompt h2 {
+  margin: 2px 0 4px;
+  font-size: 1.05rem;
+}
+
+.line-update-review-prompt p {
+  margin: 0;
+  color: #58708f;
+  font-size: 0.82rem;
+}
+
+.line-update-review-primary {
+  white-space: nowrap;
+}
+
+.line-update-review-close {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #5e7290 !important;
+}
+
+.user-line-update-banner.v135 {
+  border-radius: 13px;
+  border: 1px solid #77a0d7;
+  background: linear-gradient(105deg, #edf5ff, #f9fcff);
+  box-shadow: 0 6px 18px rgba(35, 76, 130, 0.13);
+}
+
+/* Shared operations modal */
+.operations-modal-panel {
+  width: min(1120px, calc(100vw - 40px));
+  max-height: calc(100vh - 50px);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-radius: 18px;
+}
+
+.operations-modal-heading {
+  padding: 17px 20px;
+  border-bottom: 1px solid #d5dfed;
+  background: linear-gradient(180deg, #fff, #f4f8fd);
+}
+
+.operations-modal-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.operations-modal-heading h2 {
+  margin: 0;
+}
+
+#operationsModalBody {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+  background: #f4f7fb;
+}
+
+/* Racks page and compact rack modal */
+.rack-grid {
+  grid-template-columns: minmax(215px, 275px) minmax(0, 1fr) !important;
+}
+
+.rack-detail-panel {
+  display: none !important;
+}
+
+.rack-center-panel,
+.rack-overview-card-grid,
+.rack-board-card,
+.rack-board-card * {
+  min-width: 0;
+}
+
+.rack-board-card .rack-scan-time,
+.rack-card .rack-scan-time,
+.rack-item .rack-scan-time {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.rack-board-card-footer,
+.rack-board-card .rack-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rack-details-modal-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.rack-details-modal-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 18px;
+  border: 1px solid #c3d2e5;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(30, 56, 93, 0.1);
+}
+
+.rack-details-modal-hero h3 {
+  margin: 3px 0;
+  font-size: clamp(1.45rem, 3vw, 2.2rem);
+  color: #102951;
+}
+
+.rack-details-modal-hero p,
+.rack-details-modal-hero > div > span {
+  margin: 0;
+  color: #637894;
+}
+
+.rack-details-modal-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rack-details-modal-kpis > span {
+  min-width: 110px;
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid #d1dceb;
+  border-radius: 11px;
+  background: #f5f8fc;
+}
+
+.rack-details-modal-kpis small,
+.rack-modal-line-details,
+.rack-modal-line-time {
+  color: #687d99;
+}
+
+.rack-details-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rack-details-modal-list-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.rack-details-modal-list {
+  display: grid;
+  gap: 7px;
+}
+
+.rack-modal-line {
+  display: grid;
+  grid-template-columns: minmax(135px, 0.65fr) minmax(0, 2fr) minmax(170px, 0.8fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 11px;
+  border: 1px solid #d0dae8;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.rack-modal-line-primary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rack-modal-line-primary strong {
+  font-size: 1rem;
+  color: #102951;
+}
+
+.rack-modal-line-primary span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #e7eef9;
+  color: #284d7d;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.rack-modal-line-details {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(80px, 1fr));
+  gap: 7px;
+  font-size: 0.79rem;
+}
+
+.rack-modal-line-details span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rack-modal-line-time {
+  min-width: 0;
+  max-width: 190px;
+  justify-self: end;
+  overflow-wrap: anywhere;
+  text-align: right;
+  line-height: 1.25;
+}
+
+.rack-modal-line-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.rack-modal-date-group {
+  border: 1px solid #c8d6e8;
+  border-radius: 12px;
+  background: #eef4fb;
+  overflow: hidden;
+}
+
+.rack-modal-date-group > summary {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 13px;
+  cursor: pointer;
+}
+
+.rack-modal-date-group > div {
+  display: grid;
+  gap: 6px;
+  padding: 0 8px 8px;
+}
+
+/* Packing-list history */
+.packing-history-shell,
+.packing-history-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.packing-history-intro {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  padding: 15px;
+  border: 1px solid #cbd7e7;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.packing-history-intro > div {
+  display: grid;
+  gap: 3px;
+}
+
+.packing-history-intro span {
+  color: #617691;
+}
+
+.packing-history-day {
+  border: 1px solid #c9d5e5;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.packing-history-day > summary {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+  cursor: pointer;
+  background: #edf3fa;
+}
+
+.packing-history-day > div {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+
+.packing-history-row {
+  display: grid;
+  grid-template-columns: 1.1fr repeat(4, minmax(120px, 0.75fr)) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #dde5ef;
+  border-radius: 9px;
+}
+
+.packing-history-row > div {
+  display: grid;
+  gap: 2px;
+}
+
+.packing-history-row small {
+  color: #71839b;
+}
+
+/* Reject Tracking */
+.rejects-page {
+  display: grid;
+  gap: 18px;
+}
+
+.rejects-page[hidden] {
+  display: none;
+}
+
+.top-nav-icon.rejects {
+  border: 0;
+  border-radius: 0;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 21 5.5v6.3c0 5.1-3.5 8.8-9 10.2-5.5-1.4-9-5.1-9-10.2V5.5L12 2Zm0 2.2L5 6.9v4.9c0 3.9 2.5 6.8 7 8 4.5-1.2 7-4.1 7-8V6.9l-7-2.7Zm-1 3.3h2v6h-2v-6Zm0 7.8h2v2h-2v-2Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 21 5.5v6.3c0 5.1-3.5 8.8-9 10.2-5.5-1.4-9-5.1-9-10.2V5.5L12 2Zm0 2.2L5 6.9v4.9c0 3.9 2.5 6.8 7 8 4.5-1.2 7-4.1 7-8V6.9l-7-2.7Zm-1 3.3h2v6h-2v-6Zm0 7.8h2v2h-2v-2Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.reject-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.reject-summary-grid .mini-stat {
+  border-left: 4px solid #bd2f40;
+}
+
+.reject-history-panel {
+  min-width: 0;
+}
+
+.reject-history-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.reject-history-toolbar > label:not(.search-box) {
+  display: grid;
+  gap: 4px;
+  color: #5f7390;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.reject-history-list,
+.reject-event-list {
+  display: grid;
+  gap: 9px;
+}
+
+.reject-date-group {
+  border: 1px solid #cbd6e5;
+  border-radius: 13px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.reject-date-group > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 13px 15px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #fff, #f1f5fa);
+}
+
+.reject-date-group > summary > div {
+  display: grid;
+  gap: 2px;
+}
+
+.reject-date-group > summary span {
+  color: #657b97;
+  font-size: 0.78rem;
+}
+
+.reject-date-group > summary b {
+  color: #9f2433;
+}
+
+.reject-event-list {
+  padding: 9px;
+}
+
+.reject-event-card {
+  display: grid;
+  grid-template-columns: 1.15fr 0.45fr 1fr 1fr 1fr 0.8fr;
+  gap: 9px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #e0d3d7;
+  border-radius: 9px;
+  background: #fffafb;
+}
+
+.reject-event-card > span {
+  display: grid;
+  gap: 2px;
+}
+
+.reject-event-card small {
+  color: #8b6970;
+}
+
+.reject-event-order strong {
+  color: #9f2433;
+  font-size: 1.03rem;
+}
+
+.reject-event-card p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #6d6064;
+  font-size: 0.8rem;
+}
+
+.reject-log-form {
+  display: grid;
+  gap: 15px;
+}
+
+.reject-log-form-intro {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-left: 4px solid #bc2d3e;
+  border-radius: 10px;
+  background: #fff3f5;
+}
+
+.reject-log-form-intro span {
+  color: #765b62;
+}
+
+.reject-log-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(170px, 1fr));
+  gap: 11px;
+}
+
+.reject-log-grid label,
+.manual-order-form-grid label {
+  display: grid;
+  gap: 5px;
+  color: #526984;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.reject-notes {
+  grid-column: 1 / -1;
+}
+
+.reject-match-preview {
+  display: grid;
+  gap: 3px;
+  padding: 11px 13px;
+  border: 1px dashed #aabbd1;
+  border-radius: 10px;
+  background: #f4f7fb;
+  color: #607590;
+}
+
+.reject-match-preview.is-valid {
+  border-color: #4f9a78;
+  background: #eef9f4;
+  color: #275f49;
+}
+
+.reject-match-preview.is-error {
+  border-color: #c15a66;
+  background: #fff0f2;
+  color: #8c2632;
+}
+
+.reject-log-actions,
+.manual-order-create-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reject-log-actions span,
+.manual-order-create-actions span {
+  color: #6b7e98;
+  font-size: 0.82rem;
+}
+
+.reject-settings-shell {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.reject-settings-column {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #ccd8e7;
+  border-radius: 13px;
+  background: #f7f9fc;
+}
+
+.reject-settings-column > header,
+.reject-catalog-add,
+.reject-catalog-list article {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reject-catalog-add input {
+  flex: 1;
+}
+
+.reject-catalog-list {
+  display: grid;
+  gap: 6px;
+}
+
+.reject-catalog-list article {
+  padding: 7px 9px;
+  border: 1px solid #dae2ed;
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* Manual order creation */
+.manual-order-create-panel {
+  margin-bottom: 14px;
+  border: 1px solid #9fb6d6;
+  border-radius: 12px;
+  background: #f3f7fc;
+  overflow: hidden;
+}
+
+.manual-order-create-panel > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.manual-order-create-panel > summary small {
+  color: #617691;
+}
+
+.manual-order-create-form {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.manual-order-form-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(145px, 1fr));
+  gap: 10px;
+}
+
+.manual-order-only-toggle {
+  grid-column: span 2;
+  display: flex !important;
+  align-items: center;
+  gap: 9px !important;
+  padding: 9px;
+  border: 1px solid #c9d5e5;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.manual-order-only-toggle > span {
+  display: grid;
+  gap: 2px;
+}
+
+.manual-order-only-toggle small {
+  color: #667c97;
+}
+
+/* Import run tabs: selection remains stable while live history refreshes. */
+.admin-import-run-browser {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-import-run-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 3px 2px 8px;
+  scrollbar-width: thin;
+}
+
+.admin-import-run-tab {
+  flex: 0 0 auto;
+  min-width: 165px;
+  display: grid !important;
+  justify-items: start;
+  gap: 2px;
+  padding: 9px 11px !important;
+  text-align: left;
+  border-left-width: 4px !important;
+}
+
+.admin-import-run-tab strong {
+  font-size: 0.78rem;
+}
+
+.admin-import-run-tab small,
+.admin-import-run-tab span {
+  color: inherit;
+  opacity: 0.78;
+  font-size: 0.7rem;
+}
+
+.admin-import-run-tab.updated,
+.admin-import-run-tab.new-updated {
+  border-left-color: #2d71c4 !important;
+}
+
+.admin-import-run-tab.unchanged {
+  border-left-color: #8797ab !important;
+}
+
+.admin-import-run-tab.failed {
+  border-left-color: #bd3342 !important;
+}
+
+.admin-import-run-tab.running {
+  border-left-color: #c88816 !important;
+}
+
+.admin-import-run-tab,
+.admin-import-run-tab:hover,
+.admin-import-run-tab:active {
+  min-height: 68px;
+  border-top: 1px solid #c4d0df;
+  border-right: 1px solid #c4d0df;
+  border-bottom: 1px solid #c4d0df;
+  background: #f7f9fc !important;
+  color: #243f62 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.admin-import-run-tab:hover:not(.is-active) {
+  border-color: #91a8c5;
+  background: #eef3f9 !important;
+  color: #173b67 !important;
+}
+
+.admin-import-run-tab.is-active,
+.admin-import-run-tab[aria-selected="true"] {
+  border-color: #285ca7;
+  background: #dfeafb !important;
+  color: #123d76 !important;
+  box-shadow: inset 0 0 0 1px rgba(40, 92, 167, 0.08) !important;
+}
+
+.admin-import-run-tab.is-active strong,
+.admin-import-run-tab.is-active span,
+.admin-import-run-tab.is-active small,
+.admin-import-run-tab[aria-selected="true"] strong,
+.admin-import-run-tab[aria-selected="true"] span,
+.admin-import-run-tab[aria-selected="true"] small {
+  color: inherit;
+  opacity: 1;
+}
+
+.admin-import-run-selected-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid #c9d6e7;
+  border-radius: 10px;
+  background: #f5f8fc;
+}
+
+.admin-import-run-selected-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-import-run-selected-header > span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #e4ebf5;
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.admin-import-run-selected-header.failed > span {
+  background: #ffe5e8;
+  color: #9c2735;
+}
+
+.admin-import-run-selected-header.running > span {
+  background: #fff1cc;
+  color: #825a08;
+}
+
+.admin-import-run-selected-header.updated > span,
+.admin-import-run-selected-header.new-updated > span {
+  background: #e1edff;
+  color: #24579a;
+}
+
+/* Bay scanner polish: one compact, deliberate workflow card. */
+.bay-scanner-panel-v105 {
+  border: 1px solid #b7c9df !important;
+  border-radius: 16px !important;
+  background: linear-gradient(180deg, #fff, #f4f8fc) !important;
+  box-shadow: 0 12px 30px rgba(25, 54, 94, 0.16) !important;
+  overflow: hidden;
+}
+
+.bay-scanner-header-v105 {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 15px 16px !important;
+  border-bottom: 1px solid #d4dfec;
+  background: linear-gradient(135deg, #f9fcff, #eaf2fb);
+}
+
+.bay-scanner-title-v105 h2 {
+  margin: 2px 0 3px !important;
+  color: #102b53;
+}
+
+.bay-scanner-title-v105 p {
+  margin: 0 !important;
+  color: #607792;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.bay-scanner-mode-summary-v105 {
+  min-width: 120px;
+  padding: 8px 10px;
+  border: 1px solid #9db4d2;
+  border-radius: 10px;
+  background: #fff;
+  color: #244d7f;
+  text-align: center;
+}
+
+.bay-scanner-panel-v105 .progress-band,
+.bay-scanner-panel-v105 .bay-scan-step-card-v105,
+.bay-scanner-panel-v105 .bay-scanner-history-v105 {
+  margin: 10px 12px !important;
+  border: 1px solid #d3deeb !important;
+  border-radius: 12px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+.bay-scanner-panel-v105 .bay-scan-step-card-v105 {
+  padding: 12px !important;
+}
+
+.bay-scanner-panel-v105 input,
+.bay-scanner-panel-v105 select {
+  min-height: 42px;
+  border-radius: 9px;
+  border: 1px solid #aebfd5;
+  background: #fff;
+}
+
+@media (max-width: 1050px) {
+  .rack-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .rack-sets-sidebar {
+    order: 0;
+  }
+
+  .rack-modal-line,
+  .packing-history-row,
+  .reject-event-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rack-modal-line-actions,
+  .rack-modal-line-time,
+  .packing-history-row button,
+  .reject-event-card p {
+    grid-column: 1 / -1;
+  }
+
+  .manual-order-form-grid,
+  .reject-log-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .operations-modal-panel {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+  }
+
+  #operationsModalBody {
+    padding: 12px;
+  }
+
+  .line-update-review-prompt-shell {
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .line-update-review-prompt {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .line-update-review-primary {
+    grid-column: 1 / -1;
+  }
+
+  .rack-details-modal-hero,
+  .packing-history-intro {
+    display: grid;
+  }
+
+  .rack-details-modal-kpis {
+    justify-content: stretch;
+  }
+
+  .rack-details-modal-kpis > span {
+    flex: 1 1 120px;
+  }
+
+  .rack-modal-line,
+  .packing-history-row,
+  .reject-event-card,
+  .reject-history-toolbar,
+  .reject-settings-shell,
+  .manual-order-form-grid,
+  .reject-log-grid,
+  .reject-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rack-modal-line-details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .manual-order-only-toggle,
+  .reject-notes {
+    grid-column: auto;
+  }
+}
+
+/* Rack modal move editor is owned by the v135 rack detail workflow. */
+.rack-modal-line.is-moving {
+  grid-template-columns: minmax(135px, 0.65fr) minmax(0, 2fr) minmax(170px, 0.8fr) auto;
+  border-color: #7297c8;
+  box-shadow: 0 5px 14px rgba(37, 76, 128, 0.14);
+}
+
+.rack-modal-move-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid #bfd0e5;
+  border-radius: 9px;
+  background: #f2f7fd;
+}
+
+.rack-modal-move-editor label {
+  display: grid;
+  gap: 5px;
+  color: #536d8e;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.rack-modal-move-editor select {
+  min-height: 40px;
+}
+
+.rack-modal-move-actions {
+  display: flex;
+  gap: 7px;
+}
+
+@media (max-width: 720px) {
+  .rack-modal-move-editor {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ========================================================================== */
+/* 14. v136 stabilized controls, admin dialogs, racks, rejects, and Bay Scan  */
+/* ========================================================================== */
+
+.reject-page-status {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  margin: -2px 0 10px;
+  color: #63768e;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.reject-page-status.is-loading { color: #315f99; }
+.reject-page-status.is-warning { color: #8a6215; }
+.reject-page-status.is-error { color: #a12a37; }
+.reject-match-preview.is-loading { border-color: #7d9fc8; background: #eef4fb; color: #315f99; }
+
+/* Shared Admin dialogs keep their own content layouts, but use one deliberate
+   frame, header, spacing system, and form surface. */
+.admin-modal-panel:not([hidden]) {
+  width: min(1180px, calc(100vw - 28px));
+  max-height: min(900px, calc(100vh - 28px));
+  overflow: hidden;
+  border: 1px solid #aebfd4;
+  border-radius: 16px;
+  background: #f4f7fb;
+  box-shadow: 0 22px 60px rgba(11, 35, 69, 0.24);
+}
+
+.admin-modal-panel > .section-heading {
+  min-height: 66px;
+  margin: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid #cbd7e5;
+  background: #173f73;
+  color: #fff;
+}
+
+.admin-modal-panel > .section-heading h2 {
+  color: #fff;
+  font-size: 1.2rem;
+  letter-spacing: 0.01em;
+}
+
+.admin-modal-panel > .section-heading .modal-close-x {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.10);
+  color: #fff;
+  box-shadow: none;
+}
+
+.admin-modal-panel > .section-heading .modal-close-x:hover {
+  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+#adminModalBody {
+  max-height: calc(100vh - 110px);
+  overflow: auto;
+  padding: 18px;
+  background: #f4f7fb;
+}
+
+#adminModalBody :where(.admin-card, .panel, .admin-table, form, details) {
+  border-color: #ccd7e4;
+}
+
+#adminModalBody :where(input, select, textarea) {
+  border: 1px solid #aebfd3;
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* Rack Overview cards remain selectable surfaces rather than generic buttons. */
+.rack-board-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.rack-board-card-meta,
+.rack-board-card-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.rack-board-card-meta :where(span, small, time) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rack-details-modal-actions > button {
+  flex: 0 1 auto;
+}
+
+/* Bay Scanner owns the width of the right rail and never expands the page. */
+.bay-right-rail,
+.bay-scanner-sticky-slot,
+.bay-scanner-panel-v105,
+.bay-scanner-panel-v105 > *,
+.bay-scan-command-form-v105,
+.bay-scan-workflow-v105,
+.bay-scanner-history-v105 {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.bay-scanner-panel-v105 {
+  overflow: hidden !important;
+  border-color: #b8c7d9 !important;
+  background: #f5f7fa !important;
+  box-shadow: 0 8px 22px rgba(20, 48, 84, 0.13) !important;
+}
+
+.bay-scanner-header-v105 {
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 8px !important;
+  padding: 13px 14px !important;
+  background: #173f73 !important;
+}
+
+.bay-scanner-mode-summary-v105 {
+  justify-self: start;
+  min-width: 0;
+  max-width: 100%;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.bay-scanner-title-v105 h2 { color: #fff !important; }
+.bay-scanner-title-v105 p { color: rgba(255, 255, 255, 0.76) !important; white-space: normal; }
+.bay-scanner-eyebrow-v105 { color: #b9d6ff !important; }
+
+.bay-route-status-v105 {
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 7px !important;
+  margin: 0 !important;
+  padding: 9px 12px !important;
+}
+
+.bay-route-status-v105 .bay-panel-route-mini {
+  width: 100%;
+  min-width: 0;
+}
+
+.bay-workflow-step-v105 {
+  grid-template-columns: 30px minmax(0, 1fr) !important;
+  align-items: start;
+  gap: 7px 9px;
+  padding: 10px !important;
+}
+
+.bay-workflow-number-v105 {
+  grid-row: 1 / span 2;
+  width: 30px;
+  height: 30px;
+}
+
+.bay-workflow-copy-v105 small {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.bay-workflow-step-v105 > :last-child,
+.bay-barcode-step-v105 .bay-scan-utility-row-v105 {
+  grid-column: 2 !important;
+  width: 100%;
+  min-width: 0;
+}
+
+.bay-scan-mode-card-v105,
+.bay-target-row-v105,
+.bay-scan-input-row-v105,
+.bay-scan-utility-row-v105,
+.bay-manual-row-v105,
+.bay-last-card-v105,
+.bay-last-meta-v105 {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bay-target-row-v105,
+.bay-scan-input-row-v105 {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+}
+
+.bay-target-row-v105 .bay-code-field {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.bay-target-row-v105 .bay-code-field > span {
+  white-space: normal;
+}
+
+.bay-scan-utility-row-v105 {
+  margin-top: 0;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.bay-scan-utility-row-v105 > span {
+  flex: 1 0 100%;
+  margin-right: 0;
+}
+
+.bay-scanner-panel-v105 :where(input, select, button) {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.bay-scanner-panel-v105 .recent-table-wrap,
+.bay-recent-table-wrap-v105 {
+  max-width: 100%;
+  overflow-x: auto !important;
+}
+
+.bay-scanner-panel-v105 .recent-table {
+  min-width: 620px;
+}
+
+.bay-scan-submit-v105 {
+  background: var(--control-primary) !important;
+  box-shadow: var(--control-shadow) !important;
+}
+
+.bay-scan-submit-v105:hover:not(:disabled) {
+  background: var(--control-primary-hover) !important;
+  box-shadow: var(--control-shadow-hover) !important;
+}
+
+@media (max-width: 520px) {
+  .bay-target-row-v105,
+  .bay-scan-input-row-v105,
+  .bay-manual-row-v105 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .bay-target-row-v105 .bay-target-clear,
+  .bay-scan-submit-v105,
+  .bay-manual-row-v105 button {
+    width: 100%;
+  }
+}
+

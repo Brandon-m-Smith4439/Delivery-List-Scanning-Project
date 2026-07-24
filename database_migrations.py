@@ -45,6 +45,12 @@ MIGRATIONS = (
         "Per-user current-and-future delivery-list line update notices and explicit review acknowledgements; v120-r1",
         "_migration_003_v120_user_line_updates",
     ),
+    Migration(
+        4,
+        "v135_operations_workflows",
+        "Internal reject tracking, manual delivery entries, per-line operational flags, and immutable packing-list print snapshots; v135-r1",
+        "_migration_004_v135_operations_workflows",
+    ),
 )
 
 
@@ -162,6 +168,112 @@ def prepare_v096_compatibility_schema(connection: Any, owner: Any, installed: di
     connection.commit()
 
 
+def _ensure_column(connection: Any, table: str, column: str, definition: str) -> None:
+    """Add one compatibility column only when it is absent."""
+    columns = {str(row["name"]) for row in connection.execute(f"PRAGMA table_info([{table}])").fetchall()}
+    if column not in columns:
+        connection.execute(f"ALTER TABLE [{table}] ADD COLUMN [{column}] {definition}")
+
+
+def _migration_004_v135_operations_workflows(connection: Any) -> None:
+    """Add internal rejects, manual orders, packing history, and per-line flags."""
+    _ensure_column(connection, "line_items", "manual_only", "INTEGER NOT NULL DEFAULT 0 CHECK (manual_only IN (0, 1))")
+    _ensure_column(connection, "line_items", "manual_source", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "line_items", "internal_reject_count", "INTEGER NOT NULL DEFAULT 0 CHECK (internal_reject_count >= 0)")
+    _ensure_column(connection, "line_items", "last_reject_reason", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "line_items", "last_reject_location", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "line_items", "last_rejected_at", "TEXT NOT NULL DEFAULT ''")
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS reject_reasons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL UNIQUE,
+            active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS reject_locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL UNIQUE,
+            active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS reject_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            delivery_date TEXT NOT NULL,
+            order_no TEXT NOT NULL,
+            item_no TEXT NOT NULL,
+            qty INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+            customer TEXT NOT NULL DEFAULT '',
+            job TEXT NOT NULL DEFAULT '',
+            product TEXT NOT NULL DEFAULT '',
+            reason_label TEXT NOT NULL,
+            location_label TEXT NOT NULL,
+            notes TEXT NOT NULL DEFAULT '',
+            rejected_at TEXT NOT NULL,
+            rejected_by TEXT NOT NULL DEFAULT '',
+            source_list_id TEXT NOT NULL DEFAULT '',
+            source_line_item_id TEXT NOT NULL DEFAULT '',
+            affected_list_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(affected_list_ids_json)),
+            scan_qty_reduced INTEGER NOT NULL DEFAULT 0 CHECK (scan_qty_reduced >= 0)
+        );
+        CREATE TABLE IF NOT EXISTS packing_list_prints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rack_code TEXT NOT NULL,
+            rack_name TEXT NOT NULL DEFAULT '',
+            delivery_date TEXT NOT NULL DEFAULT '',
+            printed_at TEXT NOT NULL,
+            printed_by TEXT NOT NULL DEFAULT '',
+            piece_qty INTEGER NOT NULL DEFAULT 0 CHECK (piece_qty >= 0),
+            line_count INTEGER NOT NULL DEFAULT 0 CHECK (line_count >= 0),
+            snapshot_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(snapshot_json))
+        );
+        CREATE TABLE IF NOT EXISTS manual_delivery_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            delivery_date TEXT NOT NULL,
+            order_no TEXT NOT NULL,
+            item_no TEXT NOT NULL,
+            qty INTEGER NOT NULL CHECK (qty > 0),
+            route TEXT NOT NULL,
+            customer TEXT NOT NULL DEFAULT '',
+            job TEXT NOT NULL DEFAULT '',
+            product TEXT NOT NULL DEFAULT '',
+            dimensions TEXT NOT NULL DEFAULT '',
+            manual_only INTEGER NOT NULL DEFAULT 0 CHECK (manual_only IN (0, 1)),
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            target_list_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(target_list_ids_json))
+        );
+        CREATE INDEX IF NOT EXISTS idx_reject_events_date_time
+            ON reject_events(delivery_date, rejected_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_reject_events_order_item
+            ON reject_events(order_no, item_no, rejected_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_packing_list_prints_time
+            ON packing_list_prints(printed_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_manual_delivery_entries_date
+            ON manual_delivery_entries(delivery_date, created_at DESC, id DESC);
+        """
+    )
+    created = utc_now()
+    reason_defaults = ("Damaged / broken", "Edge chip", "Scratch / surface defect", "Incorrect size", "Other")
+    location_defaults = ("Cutting", "Polisher", "Washer", "Tempering", "Wrapper", "Staging", "Rack / transport", "Other")
+    for sort_order, label in enumerate(reason_defaults, start=1):
+        connection.execute(
+            "INSERT OR IGNORE INTO reject_reasons (label, active, sort_order, created_by, created_at, updated_at) VALUES (?, 1, ?, 'system', ?, ?)",
+            (label, sort_order, created, created),
+        )
+    for sort_order, label in enumerate(location_defaults, start=1):
+        connection.execute(
+            "INSERT OR IGNORE INTO reject_locations (label, active, sort_order, created_by, created_at, updated_at) VALUES (?, 1, ?, 'system', ?, ?)",
+            (label, sort_order, created, created),
+        )
+
+
 def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:
     """Handle run sqlite migrations for the maintained Delivery List Scanner workflow."""
     ensure_migration_table(connection)
@@ -172,10 +284,12 @@ def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:
     installed = installed_migrations(connection)
     applied: list[int] = []
     for migration in MIGRATIONS:
-        if migration.version in installed:
+        if migration.version > CURRENT_SCHEMA_VERSION or migration.version in installed:
             continue
         started = time.monotonic()
-        method: Callable[[Any], None] = getattr(owner, migration.method_name)
+        method: Callable[[Any], None] | None = globals().get(migration.method_name)
+        if not callable(method):
+            method = getattr(owner, migration.method_name)
         foreign_keys_disabled = migration.version >= 2
         try:
             if foreign_keys_disabled:
@@ -237,7 +351,7 @@ def create_verified_backup(database_path: Path, backup_dir: Path | None = None) 
     target_dir = (backup_dir or database_path.parent / "backups").resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    target = target_dir / f"{database_path.stem}-before-v097-{stamp}.db"
+    target = target_dir / f"{database_path.stem}-before-v{APPLICATION_VERSION}-{stamp}.db"
     source = sqlite3.connect(database_path, timeout=60)
     destination = sqlite3.connect(target)
     try:

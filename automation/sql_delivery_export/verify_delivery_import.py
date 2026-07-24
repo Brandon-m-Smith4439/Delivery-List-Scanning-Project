@@ -46,14 +46,15 @@ def main() -> int:
     from delivery_store import build_delivery_lists, create_store, load_delivery_source_payload
 
     payload = load_delivery_source_payload(workbook)
-    definitions = build_delivery_lists(payload)
+    config = load_config(project_root)
+    store = create_store(config)
+    store.initialize()
+    routed_payload = store.apply_customer_route_rules_to_payload(payload)
+    definitions = build_delivery_lists(routed_payload)
     expected_ids = sorted({str(row[0]).strip() for row in definitions if row and str(row[0]).strip()})
     if not expected_ids:
         raise RuntimeError("The workbook produced no expected scanner stage lists.")
 
-    config = load_config(project_root)
-    store = create_store(config)
-    store.initialize()
     current_rows = store.get_delivery_lists() or []
     current_ids = {
         str(row_value(row, "id") or "").strip()

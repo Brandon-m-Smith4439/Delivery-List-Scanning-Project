@@ -367,6 +367,23 @@ def current_list_ids(store: Any) -> set[str]:
     return result
 
 
+def routed_payload_for_stage_expectations(store: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply the scanner's customer-route rules before calculating stage IDs.
+
+    The maintained importer performs this transformation inside
+    ``import_delivery_list``. Selective SQL verification must use the same
+    routed payload or an all-CPU/DTC/Greenville date can incorrectly appear to
+    be missing the default Indian Trail stage after a successful import.
+    """
+    resolver = getattr(store, "apply_customer_route_rules_to_payload", None)
+    if not callable(resolver):
+        return payload
+    routed = resolver(payload)
+    if not isinstance(routed, dict):
+        raise TypeError("Scanner customer-route resolution returned an invalid payload.")
+    return routed
+
+
 def delivery_workbooks_by_date(
     folder: Path,
     target_dates: set[str],
@@ -445,7 +462,8 @@ def selective_sql_sync(
 
         try:
             payload = payload_loader(path)
-            expected_definitions = list_builder(payload)
+            routed_payload = routed_payload_for_stage_expectations(store, payload)
+            expected_definitions = list_builder(routed_payload)
             expected_ids = {
                 str(row[0]).strip()
                 for row in expected_definitions

@@ -32,7 +32,7 @@ class V124ScheduleHotfixTests(unittest.TestCase):
         ):
             self.assertIn(f'"{name}"', script)
         self.assertNotIn('Get-ChildItem -LiteralPath $scriptRoot -Filter "*.ps1"', script)
-        self.assertIn("maintained SQL automation scripts", script)
+        self.assertRegex(script, r"maintained(?: SQL)? automation scripts")
 
     def test_patch_replaces_both_installed_scheduler_scripts(self) -> None:
         script = (ROOT / "Apply-v124-AutomationPatch.ps1").read_text(encoding="utf-8")

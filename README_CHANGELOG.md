@@ -1,3 +1,100 @@
+## v136 - Interface Stability and Professional Control Polish
+
+### Rack Overview and Reject Tracking
+
+- Fixed rack cards failing to open the rack-details GUI because the modal called helper functions that existed only inside the rack-page renderer.
+- Removed the duplicate local rack status wrappers and reused the maintained global rack status helpers.
+- Added visible Reject Tracking loading, success, warning, empty, retry, and server-error states.
+- Reject history and reject reason/location catalogs now load independently, so a catalog failure no longer blanks otherwise valid history.
+- Reject logging verifies an active order/item match, prevents duplicate submissions while saving, and explains when Admin catalog setup is incomplete.
+- Replaced the blank reject navigation square with a masked shield/reject icon that works with the current sidebar icon system.
+
+### Bay Scanner and shared controls
+
+- Rebuilt the final Bay Scanner ownership rules so the right rail, sticky slot, panel, workflow steps, inputs, utilities, and history stay within the available width.
+- Wide recent-scan tables now scroll inside the scanner card rather than forcing the page wider.
+- Changed workflow cards to a stable step-number/content layout that remains readable in the normal right rail and on smaller screens.
+- Replaced the broad glossy every-button override with a scoped action-control system.
+- Navigation cards, filter tabs, import tabs, route lanes, and other selectable surfaces retain their component-specific appearance.
+- Global Search, Print / Export, Admin edit commands, rack actions, reject actions, and Bay Scanner submit controls use the same flatter professional hover/press/focus language.
+
+### Admin GUI and import-run history
+
+- Added a shared polished frame, header, scrolling body, form surface, and close-button treatment for Admin editor GUIs without replacing each editor's internal layout.
+- Made import-run tabs proper accessible tabs with persistent selected state, readable active colors, and stable horizontal scroll position.
+- Removed the duplicate render path used when selecting an import run, preventing selected tabs from disappearing or being immediately replaced.
+- Advanced browser asset cache keys to v136.
+- Added focused v136 release tests for rack modal helper ownership, reject resilience, tab accessibility, button scope, sidebar icon rendering, and Bay Scanner width containment.
+
+## v135 - Personalized Update Review and Operations Workflows
+
+### Personalized New/Updated review
+
+- Replaced browser-only New/Updated clearing with persistent per-user line flags and exact notice receipts.
+- Loads the selected delivery list and its personalized update flags in parallel so the review prompt no longer delays normal list selection.
+- Shows a compact prompt when the selected list contains unseen New or Updated lines for the signed-in user.
+- **Review updates** activates the Updated filter first; **Mark reviewed** is enabled only after the same notice set has been displayed.
+- Sends the exact notice IDs to the server and clears only that user's receipts for that list. Other users retain their own unseen state.
+- Invalid or stale notice sets are rejected instead of accidentally clearing newer changes.
+- Clears the client flag cache when a new automation notification/catalog update arrives so unchanged cached results cannot hide a newly imported change.
+- Keeps legacy `New Line` / `Updated Line` process text from acting as the authoritative per-user state.
+
+### Import-run navigation and automation history
+
+- Bell notifications now open and pin the exact saved import result that produced the notification.
+- Stops the older automation listener from replacing that pinned result with the newest run on the next 10-second heartbeat.
+- Added time-based import-run tabs to Delivery List Management with New / Updated, No Changes, Failed, and Running states.
+- Keeps a user-selected run active while normal catalog refreshes continue in the background.
+- Groups automation audit history by date and time, keeps result details collapsed initially, and preserves searchable/paginated history controls.
+- Renamed the Admin command to **Delivery Automation Control Center** to match its actual scheduling, manual-run, status, and history responsibilities.
+
+### Scan page and Bay Map usability
+
+- Preselects today's Staging delivery list during authenticated startup when one exists, so the first visit to Scan begins on today's Staging stage.
+- Displays the line's plain quantity in the Scan-page QTY column; scanned progress remains available through row status and hover details.
+- Refined the Bay Map scanning panel into a clearer workflow with stronger spacing, hierarchy, status feedback, and responsive behavior.
+- Added a shared professional button system with consistent radius, typography, depth, focus, hover, active, disabled, primary, secondary, success, and danger treatments. Existing button sizes and semantic colors remain available.
+- Added a v135 CSS ownership note requiring existing selectors and primitives to be reused before new override blocks are introduced.
+- Verified the stylesheet has balanced braces and no exact duplicate qualified rules after the release changes.
+
+### Rack workflow and packing-list history
+
+- Removed the permanent selected-rack details column from Rack Overview.
+- Clicking a rack now opens a responsive rack-details modal with compact order/item-first rows, quantity, customer, job/glass, dimensions, delivery date, scan time, and existing management actions.
+- Corrected long rack scan timestamps so they wrap inside the rack card instead of pushing Reset Rack out of the card.
+- Added **Packing List History** to Rack Overview.
+- Records an immutable snapshot immediately before a rack packing list is printed, including rack identity, user, print time, delivery date, quantities, and the exact item rows.
+- Historical snapshots remain viewable and printable even after the active rack contents later change.
+
+### Manual delivery-list entries
+
+- Added a manual-order form to the Edit Delivery Lists window.
+- Requires order, item, quantity, customer, glass/product, dimensions, and an explicit route before insertion.
+- Checks the order/item against every active delivery list inside the configured full automation window and blocks duplicates.
+- Inserts the line into Staging, Outbound, and the matching destination stage for the selected delivery date.
+- Supports a **manual scanning only** declaration with a visible marker and non-scannable `MANUAL-...` identity.
+- Adds per-user New notices for every inserted stage copy.
+- Patches the maintained delivery-list refresh so manual entries survive automatic imports until the source workbook supplies the same order/item, at which point the source data takes ownership.
+
+### Internal Reject Tracking
+
+- Added a Rejects page to the left navigation with searchable, date-grouped internal reject history.
+- Added a guided reject-entry modal for order, item, quantity, reason, break location, delivery date, and notes.
+- Added Admin-managed Reject Reasons and Break Locations with safe deactivate/reactivate behavior.
+- Logging a reject records an immutable reject event and audit entry, reduces scanned quantity for the rejected piece across active stage copies, adds `reject_reset` scan events, and reduces/removes matching active rack and bay quantities.
+- Tracks cumulative reject count and latest reason/location/time on each affected line.
+- Shows a red **INTERNAL REJECT** ribbon on Scan-page rows without conflating internal rejects with imported external RM/remake lines.
+
+### Database, safety, and release packaging
+
+- Added numbered/checksummed SQLite migration 004 for reject catalogs/events, packing-list snapshots, manual-entry audit rows, and per-line manual/reject fields.
+- Preserved migration 001-003 checksums and the existing verified pre-upgrade backup path.
+- Added `operations_features.py` to keep new operational business rules isolated from the large legacy store while reusing its maintained connections, line insertion, access, audit, rack, bay, and import behavior.
+- Added `Apply-v135-OperationsPatch.bat` / `.py` to patch the current full `server.py` and `delivery_store.py` safely from a changed-files-only release. Both generated files are compiled before replacement, timestamped backups are retained, and a failed replacement restores both originals.
+- Added focused backend, migration, frontend wiring, HTML-ID, CSS-duplicate, patch-idempotence, and checksum regression tests.
+- Added `docs/V135_OPERATIONS_WORKFLOWS.md` with installation, permission, review, reject, manual-order, rack-history, testing, and rollback guidance.
+- Advanced browser asset cache keys to v135.
+
 ## v134 - Floor Scheduler PowerShell Interpolation Fix
 
 - Fixed `Install-DeliveryListSqlAutomationTasks.ps1` failing syntax validation at line 227 before Task Scheduler installation began.

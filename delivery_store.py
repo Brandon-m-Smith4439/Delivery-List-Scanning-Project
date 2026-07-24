@@ -4625,6 +4625,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "business": {},
             }
             preserved_rack_items: list[dict[str, Any]] = []
+            # DLS_V135_PRESERVE_MANUAL_LINES: keep manually added orders through
+            # every automatic folder/SQL refresh until the source file contains
+            # the same order/item and takes ownership of it.
+            preserved_manual_items: list[dict[str, Any]] = []
             original_total_qty = 0
 
             def add_previous_to_pool(pool_name: str, key: str, record: dict[str, Any]) -> None:
@@ -4665,6 +4669,41 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "payload": previous_payload,
                     "scanned_qty": scanned_qty,
                 }
+                manual_source = str(row_value(row, "manual_source", "") or "")
+                manual_only = int(row_value(row, "manual_only", 0) or 0)
+                if manual_source or manual_only:
+                    preserved_manual_items.append(
+                        {
+                            "source_id": source_key,
+                            "order_item_key": order_item_key,
+                            "manual_only": manual_only,
+                            "manual_source": manual_source,
+                            "clone": {
+                                "id": line_key,
+                                "source_id": source_key,
+                                "barcode": str(row["barcode"] or ""),
+                                "order_no": str(row["order_no"] or ""),
+                                "item_no": str(row["item_no"] or "").zfill(3),
+                                "qty": int(row["qty"] or 0),
+                                "scanned_qty": scanned_qty,
+                                "dimensions": str(row["dimensions"] or ""),
+                                "customer": str(row["customer"] or ""),
+                                "route": str(row["route"] or ""),
+                                "source_route": str(row_value(row, "source_route", "manual") or "manual"),
+                                "job": str(row["job"] or ""),
+                                "product": str(row["product"] or ""),
+                                "process_state": str(row["process_state"] or ""),
+                                "queue_state": str(row["queue_state"] or ""),
+                                "suggested_bay": str(row["suggested_bay"] or ""),
+                                "priority_delivery_date": str(row_value(row, "priority_delivery_date", "") or ""),
+                                "priority_direct_to_truck": int(row_value(row, "priority_direct_to_truck", 0) or 0),
+                                "internal_reject_count": int(row_value(row, "internal_reject_count", 0) or 0),
+                                "last_reject_reason": str(row_value(row, "last_reject_reason", "") or ""),
+                                "last_reject_location": str(row_value(row, "last_reject_location", "") or ""),
+                                "last_rejected_at": str(row_value(row, "last_rejected_at", "") or ""),
+                            },
+                        }
+                    )
                 original_total_qty += int(row["qty"] or 0)
                 previous_by_id[line_key] = record
                 add_previous_to_pool("source", source_match_key, record)
@@ -4690,8 +4729,43 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     (list_id,),
                 ).fetchall()
             ]
+            incoming_order_keys = {
+                f"{str(item.get('order') or '').strip()}-{str(item.get('item') or '').strip().zfill(3)}"
+                for item in items
+            }
+            preserved_manual_total = sum(
+                int(record["clone"]["qty"] or 0)
+                for record in preserved_manual_items
+                if record["order_item_key"] not in incoming_order_keys
+            )
+            summary["totalQty"] = sum(int(item.get("qty") or 0) for item in items) + preserved_manual_total
+
             con.execute("DELETE FROM line_items WHERE list_id = ?", (list_id,))
             cloned_items = self.insert_line_items(con, list_id, items)
+            for manual_record in preserved_manual_items:
+                if manual_record["order_item_key"] in incoming_order_keys:
+                    continue
+                cloned = manual_record["clone"]
+                con.execute(
+                    "INSERT INTO line_items ("
+                    "id, list_id, source_id, barcode, order_no, item_no, qty, scanned_qty, "
+                    "dimensions, customer, route, source_route, job, product, process_state, "
+                    "queue_state, suggested_bay, priority_delivery_date, priority_direct_to_truck, "
+                    "manual_only, manual_source, internal_reject_count, last_reject_reason, "
+                    "last_reject_location, last_rejected_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        cloned["id"], list_id, cloned["source_id"], cloned["barcode"],
+                        cloned["order_no"], cloned["item_no"], cloned["qty"], cloned["scanned_qty"],
+                        cloned["dimensions"], cloned["customer"], cloned["route"], cloned["source_route"],
+                        cloned["job"], cloned["product"], cloned["process_state"], cloned["queue_state"],
+                        cloned["suggested_bay"], cloned["priority_delivery_date"],
+                        cloned["priority_direct_to_truck"], manual_record["manual_only"],
+                        manual_record["manual_source"], cloned["internal_reject_count"],
+                        cloned["last_reject_reason"], cloned["last_reject_location"], cloned["last_rejected_at"],
+                    ),
+                )
+                cloned_items.append(cloned)
             summary["originalQty"] = original_total_qty
             if not existing:
                 summary["newPieceQty"] = summary["totalQty"]

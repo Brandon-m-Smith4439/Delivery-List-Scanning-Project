@@ -1,8 +1,24 @@
 # Delivery List Scanner
 
-Current maintained release: **v134**. SQLite remains the active/default backend.
+Current maintained release: **v136**. SQLite remains the active/default backend.
 
-v134 fixes the floor folder-import scheduler installer failing PowerShell syntax validation at `Install-DeliveryListSqlAutomationTasks.ps1:227`. The task mode variable is now explicitly delimited before the literal colon, so the hourly folder-import tasks can be created normally. The floor setup continues to validate the installed PowerShell files before touching Task Scheduler.
+v136 is a focused interface-stability release over v135. Rack cards now open the maintained rack-details GUI correctly, Reject Tracking reports loading and server failures directly instead of silently leaving the page blank, and Delivery List Management import-run tabs remain visible, readable, selected, and horizontally positioned while live import data refreshes.
+
+The button system is now flatter and more professional. It is scoped to actual action controls rather than navigation cards, filters, and tabs. Colored action buttons—including Global Search, Print / Export, Admin editor commands, rack actions, reject actions, and Bay Scanner submit controls—share consistent hover, press, focus, primary, secondary, success, and destructive behavior without the previous glossy treatment.
+
+The Bay Scanner right rail now owns its width, keeps each workflow step inside the panel, and scrolls wide scan history inside the card instead of pushing half the scanner off the page. Admin editor GUIs share a polished modal frame and form surface, and Reject Tracking now has a proper shield icon in the side navigation.
+
+## Install v136 over v135
+
+1. Close the scanner web app/server window.
+2. Extract `Delivery_List_Scanner_v136_Changed_Files.zip` into the current v135 project folder and replace the included files.
+3. Start the web app normally.
+4. Hard-refresh the browser once with `Ctrl+F5` so the `20260724-v136` asset cache keys take effect.
+5. Verify Rack Overview, Reject Tracking, Bay Map scanning, Admin editor GUIs, and Delivery List Management import-run tabs.
+
+No database migration or patch BAT is required for v136. Keep the v135 database migration and operations patch already installed.
+
+v134 fixes the floor folder-import scheduler installer failing PowerShell syntax validation at `Install-DeliveryListSqlAutomationTasks.ps1:227`. The task mode variable is explicitly delimited before the literal colon, so the hourly folder-import tasks can be created normally. The floor setup continues to validate the installed PowerShell files before touching Task Scheduler.
 
 v133 fixes Windows batch launchers closing immediately when the scanner project path contains parentheses or other CMD-sensitive characters, such as `Delivery-List-Scanning-Project-main (5)`. The floor folder-import setup and desktop-shortcut launchers now use label-based control flow instead of parenthesized command blocks, quote every project-derived path, always pause at a visible result screen, and write launcher/error logs under the project `logs` folder.
 
@@ -58,7 +74,7 @@ SQLite remains the active/default database. The production database is:
 
 `data\delivery-scanner-pilot.db`
 
-Keep this file and its `-wal`/`-shm` companions together whenever the app is running. Before the first v097 schema upgrade, startup creates and verifies a backup under `data\backups`. Production databases are never deleted or recreated automatically.
+Keep this file and its `-wal`/`-shm` companions together whenever the app is running. Before any numbered schema upgrade, startup creates and verifies a version-labeled backup under `data\backups`. Production databases are never deleted or recreated automatically.
 
 ## Floor database transfer and upgrade
 
@@ -85,7 +101,7 @@ The maintained automation package is under `automation\sql_delivery_export`.
 1. Extract the newest changed-files package into the current scanner project folder.
 2. Close the scanner web app/server window.
 3. Run `Setup-Floor-Folder-Import-Automation.bat` once.
-4. Restart the scanner web app and confirm **Admin > Import / Update Delivery List** shows **Import Temp Folder Only** with the schedule installed.
+4. Restart the scanner web app and confirm **Admin > Delivery Automation Control Center** shows **Import Temp Folder Only** with the schedule installed.
 5. Run `C:\DeliveryListAutomation\Run-Now.cmd` for a visible manual verification.
 
 The floor setup copies the maintained runtime to `C:\DeliveryListAutomation\Scripts`, uses the existing shared Temp Delivery Lists folder, creates a 60-minute incremental task plus the normal daily full-window safety task, and disables the older built-in 5 PM importer for that Windows user. It does not query A+W SQL or replace the scanner database.
@@ -119,6 +135,8 @@ After BLDR IT provides the Entra tenant ID, application/client ID, and a client-
 ## Project documentation
 
 - Ongoing version history: `README_CHANGELOG.md`
+- v136 interface stability checks: `docs/V136_INTERFACE_STABILITY.md`
+- v135 operations workflows: `docs/V135_OPERATIONS_WORKFLOWS.md`
 - Automated SQL export/import runtime: `automation/sql_delivery_export/README.md`
 - Floor hourly folder-import setup: `docs/FLOOR_FOLDER_IMPORT_AUTOMATION.md`
 - Floor database transfer and recovery: `docs/FLOOR_DATABASE_TRANSFER.md`

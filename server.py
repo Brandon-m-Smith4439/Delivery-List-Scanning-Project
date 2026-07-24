@@ -30,6 +30,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from delivery_store import SESSION_COOKIE_NAME, create_store, public_route_label, request_station, request_user_name
 from scanner_config import load_config
 from delivery_automation_control import DeliveryAutomationController
+from operations_features import OperationsFeatureService
 from delivery_import_safety import install_safe_delivery_import
 
 
@@ -37,6 +38,7 @@ ROOT = Path(__file__).resolve().parent
 CONFIG = load_config(ROOT)
 STORE = create_store(CONFIG)
 install_safe_delivery_import(STORE)
+OPERATIONS = OperationsFeatureService(STORE, CONFIG, ROOT)
 DELIVERY_AUTOMATION = DeliveryAutomationController(ROOT, CONFIG, STORE)
 
 
@@ -1102,6 +1104,67 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             self.send_json(STORE.get_user_line_update_summary(user["username"], list_id))
             return
+        # DLS_V135_OPERATIONS_ROUTES: per-user line flags, rejects, and packing history.
+        if parsed.path == "/api/operations/line-flags":
+            user = self.require_permission("view_lists")
+            if not user:
+                return
+            list_id = str(parse_qs(parsed.query).get("listId", [""])[0] or "").strip()
+            if not list_id:
+                self.send_json({"error": "listId is required"}, HTTPStatus.BAD_REQUEST)
+                return
+            if not STORE.user_can_access_list(user, list_id):
+                self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
+                return
+            self.send_json(OPERATIONS.line_flags(list_id, user["username"]))
+            return
+
+        if parsed.path == "/api/rejects":
+            if not self.require_permission("view_lists"):
+                return
+            params = parse_qs(parsed.query)
+            self.send_json(
+                OPERATIONS.list_rejects(
+                    date_from=params.get("dateFrom", [""])[0],
+                    date_to=params.get("dateTo", [""])[0],
+                    query=params.get("q", [""])[0],
+                    limit=int(params.get("limit", ["500"])[0] or 500),
+                )
+            )
+            return
+
+        if parsed.path == "/api/rejects/catalog":
+            if not self.require_permission("view_lists"):
+                return
+            self.send_json(OPERATIONS.reject_catalog())
+            return
+
+        if parsed.path == "/api/rejects/matches":
+            if not self.require_permission("view_lists"):
+                return
+            params = parse_qs(parsed.query)
+            self.send_json(
+                OPERATIONS.reject_matches(
+                    params.get("order", [""])[0],
+                    params.get("item", [""])[0],
+                )
+            )
+            return
+
+        packing_history_print_match = re.match(r"^/api/racks/packing-history/(\d+)/print$", parsed.path)
+        if packing_history_print_match:
+            if not self.require_any_permission("view_racks", "export_reports"):
+                return
+            self.send_html(OPERATIONS.packing_history_print_html(int(packing_history_print_match.group(1))))
+            return
+
+        if parsed.path == "/api/racks/packing-history":
+            if not self.require_any_permission("view_racks", "export_reports"):
+                return
+            limit = int(parse_qs(parsed.query).get("limit", ["250"])[0] or 250)
+            self.send_json(OPERATIONS.packing_history(limit))
+            return
+
         if parsed.path == "/api/admin/delivery-automation":
             user = self.require_permission("import_delivery_lists")
             if not user:
@@ -1516,6 +1579,69 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 notice_ids = data.get("noticeIds") if isinstance(data.get("noticeIds"), list) else None
                 self.send_json(STORE.acknowledge_user_line_updates(user["username"], list_id, notice_ids))
+                return
+
+            # DLS_V135_OPERATIONS_POST_ROUTES
+            if parsed.path == "/api/operations/line-flags/acknowledge":
+                user = self.require_permission("view_lists")
+                if not user:
+                    return
+                list_id = str(data.get("listId") or "").strip()
+                if not list_id:
+                    self.send_json({"error": "listId is required"}, HTTPStatus.BAD_REQUEST)
+                    return
+                if not STORE.user_can_access_list(user, list_id):
+                    self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
+                    return
+                notice_ids = data.get("noticeIds") if isinstance(data.get("noticeIds"), list) else []
+                self.send_json(OPERATIONS.acknowledge_line_updates(list_id, notice_ids, user["username"]))
+                return
+
+            if parsed.path == "/api/rejects":
+                user = self.require_any_permission("scan", "manual_adjust", "resolve_exceptions")
+                if not user:
+                    return
+                self.send_json(OPERATIONS.create_reject(data, user["username"]))
+                return
+
+            if parsed.path == "/api/rejects/catalog":
+                user = self.require_permission("view_admin")
+                if not user:
+                    return
+                self.send_json(
+                    OPERATIONS.upsert_reject_catalog(
+                        str(data.get("kind") or ""),
+                        str(data.get("label") or ""),
+                        user["username"],
+                    )
+                )
+                return
+
+            if parsed.path == "/api/rejects/catalog/remove":
+                user = self.require_permission("view_admin")
+                if not user:
+                    return
+                self.send_json(
+                    OPERATIONS.remove_reject_catalog(
+                        str(data.get("kind") or ""),
+                        int(data.get("id") or 0),
+                        user["username"],
+                    )
+                )
+                return
+
+            if parsed.path == "/api/admin/manual-order":
+                user = self.require_permission("edit_delivery_lists")
+                if not user:
+                    return
+                self.send_json(OPERATIONS.create_manual_order(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/packing-history":
+                user = self.require_any_permission("view_racks", "export_reports")
+                if not user:
+                    return
+                self.send_json(OPERATIONS.record_packing_print(data, user["username"]))
                 return
 
             if parsed.path == "/api/scans":

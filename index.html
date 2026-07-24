@@ -10,9 +10,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="styles.css?v=20260724-v134">
-    <link rel="stylesheet" href="delivery-automation-ui.css?v=20260724-v134">
-    <link rel="stylesheet" href="notification-center-ui.css?v=20260724-v134">
+    <link rel="stylesheet" href="styles.css?v=20260724-v136">
+    <link rel="stylesheet" href="delivery-automation-ui.css?v=20260724-v136">
+    <link rel="stylesheet" href="notification-center-ui.css?v=20260724-v136">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <!-- SECTION: Authentication and password reset -->
@@ -108,6 +108,7 @@
         <button data-page-target="scan" type="button" title="Scan"><span class="top-nav-icon scan"></span><span>Scan</span></button>
         <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button" title="Racks"><span class="top-nav-icon racks"></span><span>Racks</span></button>
         <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button" title="Bay Map"><span class="top-nav-icon bays"></span><span>Bay Map</span></button>
+        <button data-page-target="rejects" data-permission-any="view_lists" type="button" title="Reject Tracking"><span class="top-nav-icon rejects"></span><span>Rejects</span></button>
         <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button" title="Admin"><span class="top-nav-icon admin"></span><span>Admin</span></button>
       </nav>
 
@@ -648,12 +649,42 @@
           <div class="page-heading-actions rack-heading-actions">
             <div class="rack-summary" id="rackSummary"></div>
             <div class="rack-create-actions" data-permission-any="manage_racks">
+              <button id="rackPackingHistoryBtn" type="button">Packing List History</button>
               <button id="rackEditOpenBtn" type="button">Edit Racks</button>
             </div>
           </div>
         </div>
 
         <section class="rack-grid" id="rackGrid"></section>
+      </section>
+
+
+      <!-- SECTION: Internal reject tracking and process restart history -->
+      <section class="page-view rejects-page" id="rejectsPage" hidden>
+        <div class="page-heading rejects-heading">
+          <div>
+            <span class="page-eyebrow">Quality and process recovery</span>
+            <h1>Internal Reject Tracking</h1>
+            <p>Log broken glass, restart the affected piece through production, and keep a searchable reject history.</p>
+          </div>
+          <button id="rejectLogOpenBtn" type="button" data-permission-any="scan,manual_adjust,resolve_exceptions">Log Internal Reject</button>
+        </div>
+
+        <section class="reject-summary-grid" id="rejectSummary"></section>
+
+        <section class="panel reject-history-panel">
+          <div class="reject-history-toolbar">
+            <label class="search-box">
+              <span class="search-icon"></span>
+              <input id="rejectSearchInput" type="search" autocomplete="off" placeholder="Search order, item, customer, reason, or location...">
+            </label>
+            <label><span>From</span><input id="rejectDateFrom" type="date"></label>
+            <label><span>Through</span><input id="rejectDateTo" type="date"></label>
+            <button id="rejectRefreshBtn" type="button">Refresh</button>
+          </div>
+          <div id="rejectPageStatus" class="reject-page-status" role="status" aria-live="polite">Reject history has not been loaded yet.</div>
+          <div id="rejectHistory" class="reject-history-list"></div>
+        </section>
       </section>
 
       <!-- SECTION: Indian Trail bay map, receiving scanner, and bay modals -->
@@ -1182,7 +1213,7 @@
               <button class="link-button" type="button" data-admin-modal="deliveryLists">Edit delivery lists</button>
             </div>
             <div class="admin-button-row admin-primary-actions">
-              <button id="folderImportBtn" type="button">Import / Update Delivery List</button>
+              <button id="folderImportBtn" type="button">Delivery Automation Control Center</button>
             </div>
             <div id="importPreviewBox" class="admin-empty import-status-compact" hidden></div>
             <div id="adminDeliveryLists" class="admin-table admin-preview-table"></div>
@@ -1227,6 +1258,18 @@
             <div class="compact-list lookup-summary-list">
               <div><strong>Manual Edit dropdowns</strong><span>Products, routes, and process options.</span></div>
               <div><strong>Data driven</strong><span>Imports plus admin-added values.</span></div>
+            </div>
+          </section>
+
+
+          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="view_admin">
+            <div class="section-heading">
+              <h2>Reject Tracking Setup</h2>
+              <button class="link-button" type="button" data-admin-modal="rejectSettings">Edit reasons & locations</button>
+            </div>
+            <div class="compact-list">
+              <div><strong>Reject reasons</strong><span>Maintain the choices used when internal rejects are logged.</span></div>
+              <div><strong>Break locations</strong><span>Maintain the process locations where glass can be rejected.</span></div>
             </div>
           </section>
 
@@ -1395,6 +1438,20 @@
       <div id="statsChartModalCanvas" class="statistics-chart-modal-canvas"></div>
     </section>
 
+
+    <!-- SECTION: Shared operational workflow modal (racks, rejects, and history) -->
+    <div class="modal-backdrop operations-modal-backdrop" id="operationsModalBackdrop" hidden></div>
+    <section class="modal-panel operations-modal-panel" id="operationsModal" hidden>
+      <div class="section-heading operations-modal-heading">
+        <div>
+          <small id="operationsModalEyebrow">Operations</small>
+          <h2 id="operationsModalTitle">Operations</h2>
+        </div>
+        <button id="operationsModalClose" class="modal-close-x" type="button" aria-label="Close operations window">×</button>
+      </div>
+      <div id="operationsModalBody"></div>
+    </section>
+
     <!-- SECTION: Shared administration editor modal -->
     <div class="modal-backdrop" id="adminModalBackdrop" hidden></div>
     <section class="modal-panel admin-modal-panel" id="adminModal" hidden>
@@ -1407,8 +1464,8 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-    <script src="app.js?v=20260724-v134"></script>
-  <script src="delivery-automation-ui.js?v=20260724-v134"></script>
-  <script src="notification-center-ui.js?v=20260724-v134"></script>
+    <script src="app.js?v=20260724-v136"></script>
+  <script src="delivery-automation-ui.js?v=20260724-v136"></script>
+  <script src="notification-center-v135.js?v=20260724-v136"></script>
 </body>
 </html>

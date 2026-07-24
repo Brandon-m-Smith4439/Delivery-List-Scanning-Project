@@ -57,3 +57,17 @@ Enter a delivery date known to contain A+W orders. The verification performs all
 A passing result proves the selected date moved through SQL query, workbook generation, workbook validation, the maintained scanner importer, and final stage-list presence. A failed result keeps the detailed automation log under `C:\DeliveryListAutomation\Logs`.
 
 The runtime continues to query A+W read-only and uses the scanner's maintained import workflow.
+
+## Route-aware stage verification fix
+
+The importer and the end-to-end verifier now apply the scanner's active
+Customer Route Rules before calculating which receiving-stage lists should
+exist. This prevents a successful all-CPU, all-DTC, or all-Greenville delivery
+date from being reported as failed merely because no Indian Trail list is
+appropriate for that date.
+
+For an existing central SQL automation installation, run
+`Apply-ImportRouteVerificationFix.bat` from the scanner project folder. The
+patch creates a timestamped backup and replaces only
+`import_delivery_folder.py` and `verify_delivery_import.py` under
+`C:\DeliveryListAutomation\Scripts`.

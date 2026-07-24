@@ -80,8 +80,8 @@ class V123AutomationPatchTests(unittest.TestCase):
         self.assertIsNotNone(release_match)
         self.assertGreaterEqual(int(release_match.group(1)), 123)
         self.assertIn("## v123 - Schedule Installer Fix", changelog)
-        self.assertRegex(index, r"styles\.css\?v=20260723-v\d+")
-        self.assertRegex(index, r"app\.js\?v=20260723-v\d+")
+        self.assertRegex(index, r"styles\.css\?v=\d{8}-v\d+")
+        self.assertRegex(index, r"app\.js\?v=\d{8}-v\d+")
 
 
 if __name__ == "__main__":

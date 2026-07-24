@@ -77,12 +77,18 @@ class SafeBatchLauncherTests(unittest.TestCase):
         self.assertIn("v134-floor-folder-import-", text)
 
     def test_release_markers_are_consistent(self) -> None:
-        self.assertIn("Current maintained release: **v134**", README.read_text(encoding="utf-8"))
-        self.assertTrue(CHANGELOG.read_text(encoding="utf-8").startswith("## v134"))
+        readme = README.read_text(encoding="utf-8")
+        changelog = CHANGELOG.read_text(encoding="utf-8")
+        release_match = re.search(r"Current maintained release: \*\*v(\d+)\*\*", readme)
+        self.assertIsNotNone(release_match)
+        release = int(release_match.group(1))
+        self.assertGreaterEqual(release, 134)
+        self.assertTrue(changelog.startswith(f"## v{release}"))
         self.assertIn("Extract the v134 changed-files package", DOC.read_text(encoding="utf-8"))
         index = INDEX.read_text(encoding="utf-8")
-        self.assertEqual(index.count("20260724-v134"), 6)
-        self.assertNotIn("20260724-v133", index)
+        markers = re.findall(r"20260724-v(\d+)", index)
+        self.assertEqual(len(markers), 6)
+        self.assertEqual(set(markers), {str(release)})
 
     def test_batch_files_use_windows_line_endings(self) -> None:
         for path in (FLOOR_BAT, SHORTCUT_BAT):

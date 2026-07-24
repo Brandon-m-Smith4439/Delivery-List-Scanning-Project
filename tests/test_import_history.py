@@ -135,6 +135,87 @@ class ImportHistoryTests(unittest.TestCase):
             self.assertEqual(result["importedDates"], ["2026-07-28"])
             self.assertIn("all expected scanner stage lists are present", result["files"][0]["reason"])
 
+    def test_selective_sync_applies_customer_routes_before_stage_verification(self) -> None:
+        """An all-Greenville date must not falsely require Indian Trail."""
+
+        class FakeStore:
+            def __init__(self) -> None:
+                self.ids = {
+                    "2026-07-31-staging-airport",
+                    "2026-07-31-outbound-airport",
+                    "2026-07-31-bfs-greenville",
+                }
+                self.folder_import_calls = []
+                self.route_resolution_calls = 0
+
+            def get_delivery_lists(self):
+                return [{"id": value} for value in sorted(self.ids)]
+
+            def apply_customer_route_rules_to_payload(self, payload):
+                self.route_resolution_calls += 1
+                routed = dict(payload)
+                routed["items"] = [
+                    {**item, "route": "GNV"}
+                    for item in payload.get("items") or []
+                ]
+                return routed
+
+            def import_delivery_folder(self, payload):
+                self.folder_import_calls.append(payload)
+                raise AssertionError("Correctly routed complete dates must not be reimported")
+
+        def list_builder(payload):
+            delivery_date = payload["deliveryDate"]
+            definitions = [
+                (f"{delivery_date}-staging-airport", "Staging", "Staging", "Airport", []),
+                (f"{delivery_date}-outbound-airport", "Outbound", "Outbound", "Airport", []),
+            ]
+            routes = {str(item.get("route") or "") for item in payload.get("items") or []}
+            if "GNV" in routes:
+                definitions.append(
+                    (f"{delivery_date}-bfs-greenville", "Greenville", "Greenville", "Greenville", [])
+                )
+            else:
+                definitions.append(
+                    (f"{delivery_date}-inbound-indian-trail", "Inbound", "Inbound", "Indian Trail", [])
+                )
+            return definitions
+
+        folder = ROOT / "_verification"
+        workbook = folder / "Delivery List 07-31-2026.xlsx"
+        with mock.patch.object(
+            module,
+            "delivery_workbooks_by_date",
+            return_value={"2026-07-31": workbook},
+        ):
+            store = FakeStore()
+            result = module.selective_sql_sync(
+                store=store,
+                folder=folder,
+                target_dates=["2026-07-31"],
+                force_import_dates=set(),
+                user="sql-auto-import",
+                date_reader=lambda path: "2026-07-31",
+                payload_loader=lambda path: {
+                    "deliveryDate": "2026-07-31",
+                    "sourceName": path.name,
+                    "items": [
+                        {
+                            "qty": 1,
+                            "customer": "BFS East Greenville SC MW",
+                            "route": "",
+                        }
+                    ],
+                },
+                list_builder=list_builder,
+            )
+
+            self.assertEqual(store.route_resolution_calls, 1)
+            self.assertEqual(store.folder_import_calls, [])
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["noChangeFileCount"], 1)
+            self.assertEqual(result["failedFileCount"], 0)
+
     def test_selective_sync_recovers_deleted_stage_via_maintained_folder_import(self) -> None:
         class FakeStore:
             def __init__(self) -> None:

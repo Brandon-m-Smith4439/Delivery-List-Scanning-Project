@@ -1,16 +1,9 @@
-"""Canonical database contract shared by SQLite and Azure SQL tooling.
-
-Migration DDL remains in the database-specific migration implementations.  This
-module owns the logical table inventory, required v097 columns, type mapping,
-and documented indexes so validation tools do not need a second schema parser.
-"""
+"""Canonical database contract shared by SQLite and Azure SQL tooling."""
 
 from __future__ import annotations
 
-
-APPLICATION_VERSION = "121"
-CURRENT_SCHEMA_VERSION = 3
-
+APPLICATION_VERSION = "135"
+CURRENT_SCHEMA_VERSION = 4
 
 TABLE_DESCRIPTIONS = {
     "schema_migrations": "Installed numbered database migrations and checksums.",
@@ -50,15 +43,20 @@ TABLE_DESCRIPTIONS = {
     "machines": "Production machines available for future scanner integration.",
     "scanners": "Physical scanner devices and optional machine association.",
     "machine_events": "Append-only machine/scanner production events.",
+    "reject_reasons": "Admin-managed internal reject reason choices.",
+    "reject_locations": "Admin-managed internal reject break-location choices.",
+    "reject_events": "Append-only internal reject history and process resets.",
+    "packing_list_prints": "Immutable snapshots of rack packing lists when printed.",
+    "manual_delivery_entries": "Audit inventory of orders manually added to delivery lists.",
 }
-
 
 REQUIRED_COLUMNS = {
     "schema_migrations": {"version", "name", "checksum", "applied_at_utc", "execution_ms", "app_version"},
     "delivery_lists": {"id", "delivery_date", "stage", "status", "is_deleted", "created_at_utc", "updated_at_utc"},
     "line_items": {
         "id", "list_id", "source_id", "barcode", "order_no", "item_no", "qty", "scanned_qty",
-        "is_deleted", "created_at_utc", "updated_at_utc",
+        "manual_only", "manual_source", "internal_reject_count", "last_reject_reason",
+        "last_reject_location", "last_rejected_at", "is_deleted", "created_at_utc", "updated_at_utc",
     },
     "scan_events": {"id", "list_id", "line_item_id", "barcode", "event_type", "qty_delta", "created_at"},
     "audit_events": {"id", "entity_type", "entity_id", "action", "payload_json", "created_at"},
@@ -70,12 +68,11 @@ REQUIRED_COLUMNS = {
     "scanners": {"id", "scanner_code", "display_name", "machine_id", "active", "metadata_json"},
     "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "created_at"},
     "line_update_receipts": {"notice_id", "user_id", "seen_at"},
-    "machine_events": {
-        "id", "machine_id", "scanner_id", "line_item_id", "event_type", "event_status", "qty",
-        "barcode", "order_no", "item_no", "metadata_json", "created_at_utc",
-    },
+    "machine_events": {"id", "machine_id", "scanner_id", "line_item_id", "event_type", "event_status", "qty", "barcode", "order_no", "item_no", "metadata_json", "created_at_utc"},
+    "reject_events": {"id", "delivery_date", "order_no", "item_no", "qty", "reason_label", "location_label", "rejected_at", "rejected_by"},
+    "packing_list_prints": {"id", "rack_code", "delivery_date", "printed_at", "printed_by", "snapshot_json"},
+    "manual_delivery_entries": {"id", "delivery_date", "order_no", "item_no", "route", "manual_only", "created_at"},
 }
-
 
 TEXT_BUSINESS_IDENTIFIERS = {
     "line_items": {"id", "source_id", "barcode", "order_no", "item_no"},
@@ -83,11 +80,12 @@ TEXT_BUSINESS_IDENTIFIERS = {
     "bays": {"bay_code"},
     "machines": {"machine_code"},
     "scanners": {"scanner_code"},
-    "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "created_at"},
-    "line_update_receipts": {"notice_id", "user_id", "seen_at"},
+    "line_update_notices": {"line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash"},
+    "reject_events": {"order_no", "item_no", "delivery_date"},
+    "packing_list_prints": {"rack_code", "delivery_date"},
+    "manual_delivery_entries": {"order_no", "item_no", "delivery_date", "route"},
     "machine_events": {"barcode", "order_no", "item_no"},
 }
-
 
 SQLITE_TO_SQLSERVER_TYPES = {
     "TEXT_IDENTIFIER": "nvarchar(255)",
@@ -100,7 +98,6 @@ SQLITE_TO_SQLSERVER_TYPES = {
     "UTC_TIMESTAMP": "datetime2(0)",
     "JSON": "nvarchar(max) with ISJSON CHECK",
 }
-
 
 INDEX_DESCRIPTIONS = {
     "idx_delivery_lists_date_status_stage": "Home/list selection by delivery date, active status, and stage.",
@@ -120,11 +117,14 @@ INDEX_DESCRIPTIONS = {
     "idx_rack_items_line_status": "Current rack location for a line item.",
     "idx_line_update_notices_list_date": "Pending update lines by delivery list and current/future date.",
     "idx_line_update_receipts_user": "Per-user review state for update lines.",
+    "idx_reject_events_date_time": "Reject history grouped by delivery date and event time.",
+    "idx_reject_events_order_item": "Reject lookup by order and item.",
+    "idx_packing_list_prints_time": "Packing-list print history newest first.",
+    "idx_manual_delivery_entries_date": "Manual delivery-list entries by delivery date.",
     "idx_machine_events_machine_time": "Machine event timeline.",
     "idx_machine_events_scanner_time": "Scanner event timeline.",
     "idx_machine_events_order_item": "Production lookup by order and item.",
 }
-
 
 JSON_COLUMNS = {
     "audit_events": {"payload_json"},
@@ -132,26 +132,26 @@ JSON_COLUMNS = {
     "email_outbox": {"to_emails", "cc_emails", "payload_json"},
     "machines": {"metadata_json"},
     "scanners": {"metadata_json"},
-    "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "created_at"},
-    "line_update_receipts": {"notice_id", "user_id", "seen_at"},
     "machine_events": {"metadata_json"},
+    "reject_events": {"affected_list_ids_json"},
+    "packing_list_prints": {"snapshot_json"},
+    "manual_delivery_entries": {"target_list_ids_json"},
 }
-
 
 TIMESTAMP_COLUMNS = {
     "schema_migrations": {"applied_at_utc"},
     "delivery_lists": {"created_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
-    "line_items": {"created_at_utc", "updated_at_utc", "deleted_at_utc"},
+    "line_items": {"last_rejected_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
     "scan_events": {"created_at"},
     "audit_events": {"created_at"},
     "sessions": {"created_at", "expires_at", "last_seen_at"},
     "racks": {"created_at", "updated_at", "completed_at", "departed_at", "returned_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
     "rack_items": {"added_at", "removed_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
     "bay_assignments": {"assigned_at", "cleared_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
-    "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "created_at"},
-    "line_update_receipts": {"notice_id", "user_id", "seen_at"},
     "line_update_notices": {"created_at"},
     "line_update_receipts": {"seen_at"},
+    "reject_events": {"rejected_at"},
+    "packing_list_prints": {"printed_at"},
+    "manual_delivery_entries": {"created_at"},
     "machine_events": {"created_at_utc"},
 }
-

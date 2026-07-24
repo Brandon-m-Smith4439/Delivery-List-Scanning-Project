@@ -204,6 +204,15 @@ const state = {
   scanRenderFrame: 0,
   scanViewportMobile: null,
   lastGlassFilterSignature: "",
+  scanPageInitialized: false,
+  adminSelectedImportRunKey: "",
+  adminImportSelectionLocked: false,
+  adminPinnedImportEntries: [],
+  rejectCatalog: { reasons: [], locations: [] },
+  rejectHistory: [],
+  rejectMatches: [],
+  packingListHistory: [],
+  operationsModalKind: "",
 };
 
 // DLS_AUTOMATION_LIST_REFRESH_BRIDGE_V121
@@ -698,6 +707,16 @@ const els = {
   rackCreateOpenBtn: document.getElementById("rackCreateOpenBtn"),
   rackSetCreateOpenBtn: document.getElementById("rackSetCreateOpenBtn"),
   rackEditOpenBtn: document.getElementById("rackEditOpenBtn"),
+  rackPackingHistoryBtn: document.getElementById("rackPackingHistoryBtn"),
+
+  rejectsPage: document.getElementById("rejectsPage"),
+  rejectSummary: document.getElementById("rejectSummary"),
+  rejectHistory: document.getElementById("rejectHistory"),
+  rejectSearchInput: document.getElementById("rejectSearchInput"),
+  rejectDateFrom: document.getElementById("rejectDateFrom"),
+  rejectDateTo: document.getElementById("rejectDateTo"),
+  rejectRefreshBtn: document.getElementById("rejectRefreshBtn"),
+  rejectLogOpenBtn: document.getElementById("rejectLogOpenBtn"),
 
   bayMapPage: document.getElementById("bayMapPage"),
   bayOverviewStats: document.getElementById("bayOverviewStats"),
@@ -836,6 +855,12 @@ const els = {
   adminModalTitle: document.getElementById("adminModalTitle"),
   adminModalBody: document.getElementById("adminModalBody"),
   adminModalClose: document.getElementById("adminModalClose"),
+  operationsModal: document.getElementById("operationsModal"),
+  operationsModalBackdrop: document.getElementById("operationsModalBackdrop"),
+  operationsModalTitle: document.getElementById("operationsModalTitle"),
+  operationsModalEyebrow: document.getElementById("operationsModalEyebrow"),
+  operationsModalBody: document.getElementById("operationsModalBody"),
+  operationsModalClose: document.getElementById("operationsModalClose"),
   folderImportBtn: document.getElementById("folderImportBtn"),
   tempFolderInput: document.getElementById("tempFolderInput"),
   importPreviewBox: document.getElementById("importPreviewBox"),
@@ -4449,6 +4474,32 @@ function setActiveList(listId) {
 }
 
 /**
+ * Merge per-user operational flags into the current list before its first paint.
+ * This keeps New/Updated, manual-only, and reject status synchronized without a
+ * second visible list render after the operator selects a delivery list.
+ */
+function applyOperationalLineFlags(payload, listId = state.activeListId) {
+  if (!payload || String(state.activeListId || "") !== String(listId || "")) return;
+  const rows = Array.isArray(payload.items) ? payload.items : [];
+  const byId = new Map(rows.map((item) => [String(item.lineItemId || item.id || ""), item]));
+  state.items = state.items.map((item) => {
+    const current = byId.get(String(item.id || "")) || {};
+    return {
+      ...item,
+      manualOnly: Boolean(current.manualOnly),
+      manualSource: String(current.manualSource || ""),
+      internalRejectCount: Number(current.internalRejectCount || 0),
+      lastRejectReason: String(current.lastRejectReason || ""),
+      lastRejectLocation: String(current.lastRejectLocation || ""),
+      lastRejectedAt: String(current.lastRejectedAt || ""),
+      hasUnseenUpdate: Boolean(current.hasUnseenUpdate),
+      userUpdateState: String(current.userUpdateState || ""),
+      userUpdateNoticeIds: Array.isArray(current.userUpdateNoticeIds) ? current.userUpdateNoticeIds.slice() : [],
+    };
+  });
+}
+
+/**
  * Purpose: Run the activate list workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
@@ -4458,21 +4509,24 @@ async function activateList(listId, navigate = true) {
   const previousDeliveryDate = String(state.meta?.deliveryDate || "").trim();
   const previousSearch = state.search;
   const changingList = listId !== state.activeListId;
+  let lineFlags = null;
   if (state.backend) {
-    const payload = await fetchJson(`/api/delivery-lists/${encodeURIComponent(listId)}`);
+    const [payload, flagsPayload] = await Promise.all([
+      fetchJson(`/api/delivery-lists/${encodeURIComponent(listId)}`),
+      fetchJson(`/api/operations/line-flags?listId=${encodeURIComponent(listId)}`).catch(() => null),
+    ]);
     applyBackendPayload(payload);
+    lineFlags = flagsPayload;
+    applyOperationalLineFlags(lineFlags, listId);
   } else {
     setActiveList(listId);
   }
   const nextDeliveryDate = String(state.meta?.deliveryDate || "").trim();
   const changingDate = Boolean(changingList && previousDeliveryDate !== nextDeliveryDate);
   if (changingDate) {
-    // A date change starts a new work context and clears the item search.
     state.search = "";
     if (els.searchInput) els.searchInput.value = "";
   } else if (changingList) {
-    // Preserve the exact search while operators move between stages on the
-    // same delivery date, even if list-specific local state was restored.
     state.search = previousSearch;
     if (els.searchInput) els.searchInput.value = previousSearch;
   }
@@ -4485,6 +4539,9 @@ async function activateList(listId, navigate = true) {
     showPage("scan");
   } else {
     renderScanPage();
+  }
+  if (lineFlags) {
+    window.DLSLineUpdates?.applyPayload?.(lineFlags, listId, { prompt: navigate, render: false });
   }
   if (navigate || document.activeElement === els.scanInput) els.scanInput?.focus();
 }
@@ -4591,6 +4648,9 @@ function isRemakeOrRush(item) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function isNewOrUpdatedItem(item) {
+  if (state.backend) {
+    return Boolean(item?.hasUnseenUpdate || item?.userUpdateState);
+  }
   return /\b(NEW LINE|NEW|UPDATED|UPDATE|CHANGED|CHANGE)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
 }
 
@@ -5674,6 +5734,7 @@ function renderItemRow(item) {
   const markers = [
     isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
     isRushItem(item) ? '<span class="row-marker rush-marker">Rush</span>' : "",
+    item.manualOnly ? '<span class="row-marker manual-only-marker">Manual scan only</span>' : "",
   ]
     .filter(Boolean)
     .join("");
@@ -5685,12 +5746,16 @@ function renderItemRow(item) {
     ? `<span class="last-scan-note">Scanned: ${escapeHtml(formatDateTime(item.lastScannedAt))}${item.lastScannedStation ? ` - ${escapeHtml(item.lastScannedStation)}` : ""}</span>`
     : "";
 
+  const rejectRibbon = Number(item.internalRejectCount || 0) > 0
+    ? `<span class="internal-reject-ribbon"><b>INTERNAL REJECT</b><span>${escapeHtml(item.lastRejectReason || "Rejected")} at ${escapeHtml(item.lastRejectLocation || "Unknown location")}</span><small>${escapeHtml(item.lastRejectedAt ? formatDateTime(item.lastRejectedAt) : "")}</small></span>`
+    : "";
+
   return `
-    <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""}" data-id="${escapeHtml(item.id)}">
-      <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span>${lastScanNote}</td>
+    <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectRibbon ? "has-internal-reject" : ""}" data-id="${escapeHtml(item.id)}">
+      <td>${rejectRibbon}<span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span>${lastScanNote}</td>
       <td>${escapeHtml(item.order)}</td>
       <td>${escapeHtml(item.item)}</td>
-      <td><span class="qty-pill ${status}">${item.scanned} / ${item.qty}</span></td>
+      <td><span class="qty-pill ${status}" title="${escapeHtml(item.scanned)} scanned of ${escapeHtml(item.qty)}">${escapeHtml(item.qty)}</span></td>
       <td>${escapeHtml(item.dimensions)}</td>
       <td>${escapeHtml(item.customer)}</td>
       <td>${markers}</td>
@@ -6285,28 +6350,14 @@ function renderRacksPage() {
   };
 
   /**
-   * Purpose: Run the rack status text workflow for the browser application.
-   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-   */
-  const rackStatusText = (rack) => rackStatusLabel(rack);
-
-  /**
-   * Purpose: Run the rack status class workflow for the browser application.
-   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-   */
-  const rackStatusClass = (rack) => rackStatusClassName(rack);
-
-  /**
    * Purpose: Render the render rack board card workflow using the existing shared UI state.
    * Effects: Updates visible dom state, may update shared client state.
    * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
    */
   const renderRackBoardCard = (rack) => {
     const selected = state.selectedRackOverviewCode === rack.code;
-    const statusText = rackStatusText(rack);
-    const statusClass = rackStatusClass(rack);
+    const statusText = rackStatusLabel(rack);
+    const statusClass = rackStatusClassName(rack);
     const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
     const destinationPill = rack.destination
       ? `<small class="rack-destination-pill ${escapeHtml(rackDestinationClass(rack.destination))}">${escapeHtml(rackDestinationLabel(rack.destination))}</small>`
@@ -6401,7 +6452,6 @@ function renderRacksPage() {
       "";
   }
 
-  const selectedRack = state.racks.find((rack) => rack.code === state.selectedRackOverviewCode) || selectedGroupRacks[0] || state.racks[0] || null;
 
   /**
    * Purpose: Render the render rack set card workflow using the existing shared UI state.
@@ -6439,70 +6489,6 @@ function renderRacksPage() {
    * Effects: Updates visible dom state, may update shared client state.
    * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
    */
-  const renderSelectedRackDetails = (rack) => {
-    if (!rack) {
-      return `
-        <section class="rack-detail-panel">
-          <div class="admin-empty">No racks available. Create a rack to get started.</div>
-        </section>
-      `;
-    }
-
-    const hasItems = Number(rack.qty || 0) > 0;
-    const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
-    const rackState = String(rack.status || "").toLowerCase();
-    const isComplete = rackState === "closed";
-    const isInTransit = rackState === "in transit";
-    const statusText = rackStatusText(rack);
-    const statusClass = rackStatusClass(rack);
-    const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
-
-    return `
-      <section class="rack-detail-panel ${escapeHtml(statusClass)}">
-        <header class="rack-detail-header">
-          <div>
-            <span class="rack-detail-eyebrow">Selected Rack</span>
-            <h2>${escapeHtml(isTruck ? "Truck / No Rack" : rack.code)}</h2>
-            <p>${escapeHtml(rack.name || rack.type || "")}</p>
-          </div>
-
-          <div class="rack-detail-stats">
-            <span><small>Pieces</small><strong>${escapeHtml(rack.qty || 0)}</strong></span>
-            <span><small>Status</small><strong>${escapeHtml(statusText)}</strong></span>
-            ${rack.departedAt ? `<span class="rack-detail-departure"><small>Outbound scan</small><strong>${escapeHtml(formatDateTime(rack.departedAt))}</strong></span>` : ""}
-          </div>
-        </header>
-
-        <div class="rack-detail-actions">
-          ${
-            hasItems
-              ? isInTransit
-                ? rackIsReceived(rack)
-                  ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
-                  : `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" data-rack-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>`
-                : isComplete
-                  ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
-                  : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
-              : ""
-          }
-
-          <button type="button" data-rack-print="${escapeHtml(rack.code)}" ${hasItems && (isComplete || isInTransit) ? "" : "disabled"}>${printLabel}</button>
-        </div>
-
-        <div class="rack-detail-pieces">
-          <div class="rack-detail-subheading">
-            <strong>Pieces in ${escapeHtml(isTruck ? "Truck" : rack.code)}</strong>
-            <span>${escapeHtml(rack.qty || 0)} pcs</span>
-          </div>
-
-          <div class="rack-item-list">
-            ${hasItems ? renderRackItems(rack) : `<p class="admin-empty">No pieces assigned.</p>`}
-          </div>
-        </div>
-      </section>
-    `;
-  };
-
   const selectedSetQty = selectedGroupAllRacks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
   const visibleSetQty = selectedGroupRacks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
 
@@ -6553,7 +6539,6 @@ function renderRacksPage() {
       </div>
     </section>
 
-    ${renderSelectedRackDetails(selectedRack)}
   `;
 }
 
@@ -6934,7 +6919,7 @@ function rackPackingListUrl(rackCode, deliveryDate = "") {
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function printSelectedRackPackingSlip(rackCode = state.selectedRackCode) {
+async function printSelectedRackPackingSlip(rackCode = state.selectedRackCode, deliveryDateOverride = "") {
   const selectedCode = rackCodeForScan(rackCode);
   if (!selectedCode) return;
   const rack = state.racks.find((item) => item.code === selectedCode);
@@ -6943,7 +6928,17 @@ function printSelectedRackPackingSlip(rackCode = state.selectedRackCode) {
     return;
   }
   const activeList = state.lists.find((list) => list.id === state.activeListId);
-  const dateParam = isTruckRack(rack) && activeList?.deliveryDate ? activeList.deliveryDate : "";
+  const dateParam = deliveryDateOverride || (isTruckRack(rack) && activeList?.deliveryDate ? activeList.deliveryDate : "");
+  if (state.backend) {
+    try {
+      await fetchJson("/api/racks/packing-history", {
+        method: "POST",
+        body: JSON.stringify({ rackCode: selectedCode, deliveryDate: dateParam }),
+      });
+    } catch (error) {
+      console.warn("Packing-list history snapshot could not be saved", error);
+    }
+  }
   launchManagedPrint(rackPackingListUrl(selectedCode, dateParam));
 }
 
@@ -7162,7 +7157,7 @@ function renderMobileCards() {
           <article class="mobile-list-card ${selected ? "is-selected" : ""}" data-id="${escapeHtml(item.id)}">
             <span><small>Order #</small><b>${escapeHtml(item.order)}</b></span>
             <span><small>Item #</small><b>${escapeHtml(item.item)}</b></span>
-            <span><small>Qty</small><b><span class="qty-pill ${status}">${item.scanned} / ${item.qty}</span></b></span>
+            <span><small>Qty</small><b><span class="qty-pill ${status}" title="${escapeHtml(item.scanned)} scanned of ${escapeHtml(item.qty)}">${escapeHtml(item.qty)}</span></b></span>
             <span class="dims"><small>Dimensions</small><b>${escapeHtml(item.dimensions)}</b></span>
             <span class="card-status">${mark}</span>
             <span class="card-customer">${escapeHtml(item.customer)}</span>
@@ -9296,6 +9291,7 @@ function showPage(page) {
   if (page === "admin" && !hasAnyPermission(["view_admin", "manage_users", "manage_stations", "edit_delivery_lists"])) page = "home";
   if (page === "bays" && !hasAnyPermission(["view_bays", "view_indian_trail"])) page = "home";
   if (page === "racks" && !hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) page = "home";
+  if (page === "rejects" && !hasPermission("view_lists")) page = "home";
   const pageChanged = state.page !== page;
   if (page === "home") state.expandedDeliveryDate = "";
   state.page = page;
@@ -9313,6 +9309,7 @@ function showPage(page) {
   if (page === "home") renderHome();
   if (page === "scan") renderScanPage();
   if (page === "racks") refreshRacksPage().catch((error) => showInlineError(error.message, true));
+  if (page === "rejects") refreshRejectPage().catch((error) => showInlineError(error.message, true));
   if (page === "bays") {
     if (pageChanged) els.bayFlowPanel?.classList.add("is-entering");
     refreshBayMapPage()
@@ -16128,7 +16125,7 @@ function activeRecentImports(imports = state.adminRecentImports || []) {
  */
 function renderAdminDeliveryLists() {
   if (!els.adminDeliveryLists) return;
-  els.adminDeliveryLists.innerHTML = importHistoryRows(activeRecentImports());
+  els.adminDeliveryLists.innerHTML = renderAdminImportRunBrowser(activeRecentImports());
 }
 
 /**
@@ -16158,6 +16155,7 @@ function openAdminModal(kind, options = null) {
     rackSetForm: "Rack Set",
     racks: "Edit Racks",
     recentScans: "All Scans",
+    rejectSettings: "Reject Reasons & Locations",
   };
   els.adminModalTitle.textContent = options?.title || titleMap[kind] || "Admin";
   els.adminModal.dataset.kind = kind;
@@ -16217,6 +16215,9 @@ async function closeAdminModal() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function adminModalContent(kind) {
+  if (kind === "rejectSettings") {
+    return rejectSettingsModalHtml();
+  }
   if (kind === "deliveryLists") {
     state.adminDeliveryListVisiblePastDays = ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS;
     return `
@@ -17608,6 +17609,25 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
         </div>
       </div>
 
+      <details class="manual-order-create-panel">
+        <summary><span>+ Add an order manually</span><small>Uses the selected delivery date and requires an explicit route.</small></summary>
+        <form id="manualOrderCreateForm" class="manual-order-create-form">
+          <div class="manual-order-form-grid">
+            <label><span>Order # *</span><input name="order" inputmode="numeric" required></label>
+            <label><span>Item # *</span><input name="item" inputmode="numeric" required></label>
+            <label><span>Qty *</span><input name="qty" type="number" min="1" value="1" required></label>
+            <label><span>Route *</span><select name="route" required><option value="">Choose route...</option><option value="IT">Indian Trail</option><option value="CPU">Customer Pickup</option><option value="DTC">Deliver to Customer</option><option value="GNV">Greenville</option></select></label>
+            <label><span>Customer *</span><input name="customer" required></label>
+            <label><span>Job Nr.</span><input name="job"></label>
+            <label><span>Glass / Product *</span><input name="product" required></label>
+            <label><span>Dimensions *</span><input name="dimensions" placeholder="72 x 36" required></label>
+            <label><span>Process note</span><input name="processState" placeholder="Optional"></label>
+            <label class="manual-order-only-toggle"><input name="manualOnly" type="checkbox"><span><strong>Manual scanning item only</strong><small>Use when this order cannot be scanned by barcode.</small></span></label>
+          </div>
+          <div class="manual-order-create-actions"><button type="submit">Add Order to Workflow</button><span id="manualOrderCreateStatus"></span></div>
+        </form>
+      </details>
+
       <div id="manualEditModalResults" class="admin-table manual-edit-modal-results">${resultsHtml}</div>
     </div>
   `;
@@ -17801,12 +17821,12 @@ function renderImportHistory(imports) {
   const activeImports = activeRecentImports(state.adminRecentImports);
 
   if (els.adminDeliveryLists) {
-    els.adminDeliveryLists.innerHTML = importHistoryRows(activeImports);
+    els.adminDeliveryLists.innerHTML = renderAdminImportRunBrowser(activeImports);
   }
 
   if (!els.importHistory) return;
 
-  els.importHistory.innerHTML = importHistoryRows(activeImports);
+  els.importHistory.innerHTML = renderAdminImportRunBrowser(activeImports);
 }
 
 /**
@@ -21231,6 +21251,748 @@ function exportStaticCsv() {
   URL.revokeObjectURL(url);
 }
 
+/* --------------------------------------------------------------------------
+   v135 operational workflows
+   These functions own Reject Tracking, rack detail/history modals, manual order
+   creation, and stable import-run navigation. Keep new work in these owners
+   instead of appending page-specific override blocks elsewhere in the file.
+   -------------------------------------------------------------------------- */
+
+function openOperationsModal({ kind = "operations", eyebrow = "Operations", title = "Operations", body = "" } = {}) {
+  if (!els.operationsModal || !els.operationsModalBody) return;
+  state.operationsModalKind = kind;
+  if (els.operationsModalEyebrow) els.operationsModalEyebrow.textContent = eyebrow;
+  if (els.operationsModalTitle) els.operationsModalTitle.textContent = title;
+  els.operationsModalBody.innerHTML = body;
+  els.operationsModal.hidden = false;
+  if (els.operationsModalBackdrop) els.operationsModalBackdrop.hidden = false;
+  updateModalScrollLock();
+}
+
+function closeOperationsModal() {
+  state.operationsModalKind = "";
+  state.rackMoveItemId = "";
+  if (els.operationsModal) els.operationsModal.hidden = true;
+  if (els.operationsModalBackdrop) els.operationsModalBackdrop.hidden = true;
+  updateModalScrollLock();
+}
+
+function compactRackItemHtml(item, currentRackCode = state.selectedRackOverviewCode) {
+  const rackItemId = String(item.rackItemId || "");
+  const moveOpen = state.rackMoveItemId === rackItemId;
+  const destinationOptions = state.racks
+    .filter((target) => String(target.code) !== String(currentRackCode))
+    .map((target) => `<option value="${escapeHtml(target.code)}">${rackOptionLabel(target)}</option>`)
+    .join("");
+  return `
+    <article class="rack-modal-line ${moveOpen ? "is-moving" : ""}">
+      <div class="rack-modal-line-primary">
+        <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
+        <span>Qty ${escapeHtml(item.rackQty || 1)}</span>
+      </div>
+      <div class="rack-modal-line-details">
+        <span>${escapeHtml(item.customer || "No customer")}</span>
+        <span>${escapeHtml(item.job || item.product || "No job")}</span>
+        <span>${escapeHtml(item.dimensions || "No dimensions")}</span>
+        <span>${escapeHtml(item.deliveryDate ? formatDisplayDate(item.deliveryDate) : "No delivery date")}</span>
+      </div>
+      ${item.rackAddedAt ? `<small class="rack-modal-line-time">Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}</small>` : ""}
+      ${hasPermission("manage_racks") ? `
+        <div class="rack-modal-line-actions">
+          <button class="icon-only icon-move" type="button" data-rack-modal-move-open="${escapeHtml(rackItemId)}" title="Move item" aria-label="Move ${escapeHtml(item.order)}-${escapeHtml(item.item)}"></button>
+          <button class="icon-only icon-trash danger" type="button" data-rack-modal-clear-item="${escapeHtml(rackItemId)}" data-rack-modal-clear-label="${escapeHtml(`${item.order}-${item.item}`)}" title="Clear item" aria-label="Clear ${escapeHtml(item.order)}-${escapeHtml(item.item)}"></button>
+        </div>
+        ${moveOpen ? `
+          <div class="rack-modal-move-editor">
+            <label>
+              <span>Move to another rack</span>
+              <select data-rack-target="${escapeHtml(rackItemId)}">
+                <option value="">Select destination...</option>
+                ${destinationOptions}
+              </select>
+            </label>
+            <div class="rack-modal-move-actions">
+              <button type="button" class="secondary" data-rack-modal-move-cancel="${escapeHtml(rackItemId)}">Cancel</button>
+              <button type="button" data-rack-modal-move-confirm="${escapeHtml(rackItemId)}" ${destinationOptions ? "" : "disabled"}>Confirm Move</button>
+            </div>
+          </div>` : ""}` : ""}
+    </article>`;
+}
+
+function rackDetailsModalHtml(rack) {
+  if (!rack) return `<div class="admin-empty">Rack not found.</div>`;
+  const isTruck = isTruckRack(rack);
+  const status = String(rack.status || "Open");
+  const statusLower = status.toLowerCase();
+  const hasItems = Number(rack.qty || 0) > 0;
+  const items = rack.items || [];
+  const dateGroups = new Map();
+  for (const item of items) {
+    const key = String(item.deliveryDate || "No delivery date");
+    if (!dateGroups.has(key)) dateGroups.set(key, []);
+    dateGroups.get(key).push(item);
+  }
+  const itemHtml = isTruck
+    ? [...dateGroups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([deliveryDate, rows]) => `
+        <details class="rack-modal-date-group" open>
+          <summary><strong>${escapeHtml(deliveryDate === "No delivery date" ? deliveryDate : formatDisplayDate(deliveryDate))}</strong><span>${escapeHtml(rows.reduce((sum, row) => sum + Number(row.rackQty || 1), 0))} pcs</span></summary>
+          <div>${rows.map((item) => compactRackItemHtml(item, rack.code)).join("")}</div>
+        </details>`).join("")
+    : items.map((item) => compactRackItemHtml(item, rack.code)).join("");
+
+  return `
+    <section class="rack-details-modal-shell ${escapeHtml(rackStatusClassName(rack))}">
+      <header class="rack-details-modal-hero">
+        <div>
+          <span>${isTruck ? "Transport loading" : escapeHtml(rack.type || "Rack")}</span>
+          <h3>${escapeHtml(isTruck ? "Truck / No Rack" : rack.code)}</h3>
+          <p>${escapeHtml(rack.name || "")}</p>
+        </div>
+        <div class="rack-details-modal-kpis">
+          <span><small>Pieces</small><strong>${escapeHtml(rack.qty || 0)}</strong></span>
+          <span><small>Status</small><strong>${escapeHtml(rackStatusLabel(rack))}</strong></span>
+          ${rack.departedAt ? `<span><small>Outbound</small><strong>${escapeHtml(formatDateTime(rack.departedAt))}</strong></span>` : ""}
+        </div>
+      </header>
+      <div class="rack-details-modal-actions">
+        ${hasItems && statusLower === "open" ? `<button type="button" data-rack-modal-complete="${escapeHtml(rack.code)}">Complete Rack</button>` : ""}
+        ${hasItems && statusLower === "closed" ? `<button type="button" data-rack-modal-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : ""}
+        ${statusLower === "in transit" ? `<button type="button" data-rack-modal-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" class="secondary" data-rack-modal-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>` : ""}
+        <button type="button" data-rack-modal-print="${escapeHtml(rack.code)}" ${hasItems && ["closed", "in transit"].includes(statusLower) ? "" : "disabled"}>Print Packing List</button>
+      </div>
+      <div class="rack-details-modal-list-heading"><strong>Orders on this ${isTruck ? "truck" : "rack"}</strong><span>${escapeHtml(items.length)} lines</span></div>
+      <div class="rack-details-modal-list">${itemHtml || `<div class="admin-empty">No pieces are assigned.</div>`}</div>
+    </section>`;
+}
+
+function openRackDetailsModal(rackCode) {
+  const rack = state.racks.find((item) => String(item.code) === String(rackCode));
+  if (!rack) return;
+  state.selectedRackOverviewCode = rack.code;
+  openOperationsModal({
+    kind: "rack-details",
+    eyebrow: "Rack Overview",
+    title: rack.code === "T" ? "Truck / No Rack" : `Rack ${rack.code}`,
+    body: rackDetailsModalHtml(rack),
+  });
+}
+
+async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode) {
+  await ensureRacksLoaded();
+  renderRacksPage();
+  const rack = state.racks.find((item) => String(item.code) === String(rackCode));
+  if (rack && state.operationsModalKind === "rack-details") {
+    els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
+  } else if (!rack) {
+    closeOperationsModal();
+  }
+}
+
+function packingHistoryGroups(history = []) {
+  const groups = new Map();
+  for (const row of history) {
+    const day = String(row.printed_at || row.printedAt || "").slice(0, 10) || "Unknown date";
+    if (!groups.has(day)) groups.set(day, []);
+    groups.get(day).push(row);
+  }
+  return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a));
+}
+
+function packingHistoryModalHtml(history = state.packingListHistory) {
+  const groups = packingHistoryGroups(history);
+  return `
+    <section class="packing-history-shell">
+      <div class="packing-history-intro">
+        <div><strong>Previously printed packing lists</strong><span>Each record is an immutable snapshot of what was on the rack at print time.</span></div>
+        <label class="search-box"><span class="search-icon"></span><input id="packingHistorySearch" type="search" autocomplete="off" placeholder="Search rack, date, or user..."></label>
+      </div>
+      <div class="packing-history-groups" id="packingHistoryGroups">
+        ${groups.length ? groups.map(([day, rows]) => `
+          <details class="packing-history-day" open>
+            <summary><strong>${escapeHtml(day === "Unknown date" ? day : formatDisplayDate(day))}</strong><span>${escapeHtml(rows.length)} print${rows.length === 1 ? "" : "s"}</span></summary>
+            <div>
+              ${rows.map((row) => `
+                <article class="packing-history-row" data-packing-history-search="${escapeHtml([row.rack_code, row.rack_name, row.delivery_date, row.printed_by, row.printed_at].join(" ").toLowerCase())}">
+                  <div><strong>${escapeHtml(row.rack_name || row.rack_code)}</strong><span>${escapeHtml(row.rack_code)}</span></div>
+                  <div><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Mixed")}</strong></div>
+                  <div><small>Printed</small><strong>${escapeHtml(formatDateTime(row.printed_at))}</strong></div>
+                  <div><small>Contents</small><strong>${escapeHtml(row.piece_qty)} pcs · ${escapeHtml(row.line_count)} lines</strong></div>
+                  <div><small>Printed by</small><strong>${escapeHtml(row.printed_by || "system")}</strong></div>
+                  <button type="button" data-packing-history-print="${escapeHtml(row.id)}">Open Snapshot</button>
+                </article>`).join("")}
+            </div>
+          </details>`).join("") : `<div class="admin-empty">No packing lists have been printed since v135 history tracking was installed.</div>`}
+      </div>
+    </section>`;
+}
+
+async function openPackingHistoryModal() {
+  const payload = await fetchJson("/api/racks/packing-history?limit=500");
+  state.packingListHistory = payload.history || [];
+  openOperationsModal({
+    kind: "packing-history",
+    eyebrow: "Rack records",
+    title: "Packing List Print History",
+    body: packingHistoryModalHtml(),
+  });
+}
+
+function rejectCatalogOptions(items = [], selected = "") {
+  return items.map((item) => `<option value="${escapeHtml(item.label)}" ${String(item.label) === String(selected) ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("");
+}
+
+function rejectLogModalHtml() {
+  const reasons = state.rejectCatalog.reasons || [];
+  const locations = state.rejectCatalog.locations || [];
+  return `
+    <form id="rejectLogForm" class="reject-log-form">
+      <section class="reject-log-form-intro"><strong>Restart one broken piece</strong><span>The matching order/item is rolled back across its workflow stages. Rack and bay quantities are reduced when applicable.</span></section>
+      <div class="reject-log-grid">
+        <label><span>Order # *</span><input id="rejectOrderInput" name="order" inputmode="numeric" required></label>
+        <label><span>Item # *</span><input id="rejectItemInput" name="item" inputmode="numeric" required></label>
+        <label><span>Delivery date</span><input id="rejectDeliveryDateInput" name="deliveryDate" type="date"></label>
+        <label><span>Rejected Qty *</span><input name="qty" type="number" min="1" value="1" required></label>
+        <label><span>Reason *</span><select name="reason" required><option value="">Choose reason...</option>${rejectCatalogOptions(reasons)}</select></label>
+        <label><span>Where it broke *</span><select name="location" required><option value="">Choose location...</option>${rejectCatalogOptions(locations)}</select></label>
+        <label class="reject-notes"><span>Notes</span><textarea name="notes" rows="3" placeholder="Optional details..."></textarea></label>
+      </div>
+      <div id="rejectMatchPreview" class="reject-match-preview">Enter an order and item to verify the active delivery date.</div>
+      <div class="reject-log-actions"><button type="submit">Record Reject & Restart Piece</button><span id="rejectLogStatus"></span></div>
+    </form>`;
+}
+
+function rejectHistoryHtml(rejects = state.rejectHistory) {
+  if (!rejects.length) return `<div class="admin-empty">No internal rejects match the current filters.</div>`;
+  const groups = new Map();
+  for (const row of rejects) {
+    const key = String(row.delivery_date || "Unknown date");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([deliveryDate, rows]) => `
+    <details class="reject-date-group" open>
+      <summary><div><strong>${escapeHtml(deliveryDate === "Unknown date" ? deliveryDate : formatDisplayDate(deliveryDate))}</strong><span>${escapeHtml(rows.length)} reject${rows.length === 1 ? "" : "s"}</span></div><b>${escapeHtml(rows.reduce((sum, row) => sum + Number(row.qty || 0), 0))} pcs</b></summary>
+      <div class="reject-event-list">
+        ${rows.map((row) => `
+          <article class="reject-event-card">
+            <span class="reject-event-order"><small>Order / Item</small><strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong></span>
+            <span><small>Qty</small><strong>${escapeHtml(row.qty)}</strong></span>
+            <span><small>Reason</small><strong>${escapeHtml(row.reason_label)}</strong></span>
+            <span><small>Location</small><strong>${escapeHtml(row.location_label)}</strong></span>
+            <span><small>Logged</small><strong>${escapeHtml(formatDateTime(row.rejected_at))}</strong></span>
+            <span><small>By</small><strong>${escapeHtml(row.rejected_by || "system")}</strong></span>
+            <p>${escapeHtml(row.customer || row.job || row.product || "")}${row.notes ? ` · ${escapeHtml(row.notes)}` : ""}</p>
+          </article>`).join("")}
+      </div>
+    </details>`).join("");
+}
+
+function renderRejectSummary() {
+  if (!els.rejectSummary) return;
+  const rows = state.rejectHistory || [];
+  const today = todayKey();
+  const todayRows = rows.filter((row) => String(row.rejected_at || "").slice(0, 10) === today);
+  const thirtyDayCutoff = new Date();
+  thirtyDayCutoff.setDate(thirtyDayCutoff.getDate() - 30);
+  const recentRows = rows.filter((row) => new Date(row.rejected_at || 0) >= thirtyDayCutoff);
+  els.rejectSummary.innerHTML = [
+    miniStat("Reject events", rows.length),
+    miniStat("Rejected pieces", rows.reduce((sum, row) => sum + Number(row.qty || 0), 0)),
+    miniStat("Today", todayRows.reduce((sum, row) => sum + Number(row.qty || 0), 0)),
+    miniStat("Last 30 days", recentRows.reduce((sum, row) => sum + Number(row.qty || 0), 0)),
+  ].join("");
+}
+
+async function refreshRejectPage() {
+  const params = new URLSearchParams();
+  const query = els.rejectSearchInput?.value.trim() || "";
+  const dateFrom = els.rejectDateFrom?.value || "";
+  const dateTo = els.rejectDateTo?.value || "";
+  const status = document.getElementById("rejectPageStatus");
+  if (query) params.set("q", query);
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  params.set("limit", "1000");
+
+  if (els.rejectRefreshBtn) els.rejectRefreshBtn.disabled = true;
+  if (status) {
+    status.className = "reject-page-status is-loading";
+    status.textContent = "Loading reject history...";
+  }
+  if (els.rejectHistory) {
+    els.rejectHistory.innerHTML = `<div class="admin-empty loading"><strong>Loading internal rejects...</strong><span class="loading-bar"><i></i></span></div>`;
+  }
+
+  const [historyResult, catalogResult] = await Promise.allSettled([
+    fetchJson(`/api/rejects?${params.toString()}`),
+    fetchJson("/api/rejects/catalog"),
+  ]);
+
+  try {
+    if (historyResult.status === "rejected") throw historyResult.reason;
+    const history = historyResult.value || {};
+    state.rejectHistory = Array.isArray(history.rejects) ? history.rejects : [];
+    renderRejectSummary();
+    if (els.rejectHistory) els.rejectHistory.innerHTML = rejectHistoryHtml();
+
+    if (catalogResult.status === "fulfilled") {
+      const catalog = catalogResult.value || {};
+      state.rejectCatalog = {
+        reasons: Array.isArray(catalog.reasons) ? catalog.reasons : [],
+        locations: Array.isArray(catalog.locations) ? catalog.locations : [],
+      };
+    }
+
+    if (status) {
+      const catalogWarning = catalogResult.status === "rejected"
+        ? " Reject reasons and locations could not be refreshed; existing choices were kept."
+        : "";
+      status.className = `reject-page-status${catalogWarning ? " is-warning" : ""}`;
+      status.textContent = `${state.rejectHistory.length} reject event${state.rejectHistory.length === 1 ? "" : "s"} loaded.${catalogWarning}`;
+    }
+  } catch (error) {
+    state.rejectHistory = [];
+    renderRejectSummary();
+    if (els.rejectHistory) {
+      els.rejectHistory.innerHTML = `<div class="admin-empty is-error"><strong>Reject history could not be loaded</strong><span>${escapeHtml(error?.message || "The server did not return reject history.")}</span><button type="button" data-reject-retry>Try Again</button></div>`;
+    }
+    if (status) {
+      status.className = "reject-page-status is-error";
+      status.textContent = error?.message || "Reject history could not be loaded.";
+    }
+    throw error;
+  } finally {
+    if (els.rejectRefreshBtn) els.rejectRefreshBtn.disabled = false;
+  }
+}
+
+async function openRejectLogModal() {
+  const catalogReady = state.rejectCatalog.reasons.length && state.rejectCatalog.locations.length;
+  if (!catalogReady && state.backend) {
+    const payload = await fetchJson("/api/rejects/catalog");
+    state.rejectCatalog = {
+      reasons: Array.isArray(payload.reasons) ? payload.reasons : [],
+      locations: Array.isArray(payload.locations) ? payload.locations : [],
+    };
+  }
+  openOperationsModal({
+    kind: "reject-log",
+    eyebrow: "Quality incident",
+    title: "Log Internal Reject",
+    body: rejectLogModalHtml(),
+  });
+  const status = document.getElementById("rejectLogStatus");
+  if (status && (!state.rejectCatalog.reasons.length || !state.rejectCatalog.locations.length)) {
+    status.textContent = "An Admin must add at least one reject reason and break location before a reject can be recorded.";
+  }
+  document.getElementById("rejectOrderInput")?.focus();
+}
+
+async function previewRejectMatch() {
+  const order = document.getElementById("rejectOrderInput")?.value.trim() || "";
+  const item = document.getElementById("rejectItemInput")?.value.trim() || "";
+  const target = document.getElementById("rejectMatchPreview");
+  if (!target) return;
+  if (!order || !item) {
+    state.rejectMatches = [];
+    target.className = "reject-match-preview";
+    target.textContent = "Enter an order and item to verify the active delivery date.";
+    return;
+  }
+  target.className = "reject-match-preview is-loading";
+  target.textContent = "Checking active delivery lists...";
+  try {
+    const payload = await fetchJson(`/api/rejects/matches?order=${encodeURIComponent(order)}&item=${encodeURIComponent(item)}`);
+    state.rejectMatches = payload.matches || [];
+    if (!state.rejectMatches.length) {
+      target.innerHTML = `<strong>No active match found</strong><span>Check the order and item before submitting.</span>`;
+      target.className = "reject-match-preview is-error";
+      return;
+    }
+    const match = state.rejectMatches[0];
+    const dateInput = document.getElementById("rejectDeliveryDateInput");
+    if (dateInput && !dateInput.value) dateInput.value = match.delivery_date || "";
+    target.innerHTML = `<strong>${escapeHtml(match.order_no)}-${escapeHtml(match.item_no)} · ${escapeHtml(formatDisplayDate(match.delivery_date))}</strong><span>${escapeHtml(match.customer || match.job || match.product || "Active delivery-list item")} · Qty ${escapeHtml(match.qty || 0)} · ${escapeHtml(match.stages || "")}</span>`;
+    target.className = "reject-match-preview is-valid";
+  } catch (error) {
+    target.textContent = error.message;
+    target.className = "reject-match-preview is-error";
+  }
+}
+
+async function submitRejectLog(form) {
+  const status = document.getElementById("rejectLogStatus");
+  const submitButton = form.querySelector('button[type="submit"]');
+  const data = Object.fromEntries(new FormData(form).entries());
+  data.qty = Number(data.qty || 1);
+  if (!state.rejectMatches.length) await previewRejectMatch();
+  if (!state.rejectMatches.length) throw new Error("Verify a matching active order and item before recording the reject.");
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Recording Reject...";
+  }
+  if (status) status.textContent = "Saving reject and restarting the piece...";
+  try {
+    const payload = await fetchJson("/api/rejects", { method: "POST", body: JSON.stringify(data) });
+    state.rejectHistory = payload.rejects || state.rejectHistory;
+    closeOperationsModal();
+    await refreshRejectPage();
+    window.DLSLineUpdates?.clearCache?.();
+    if (state.activeListId) await activateList(state.activeListId, false);
+    showSaveConfirmation(payload.message || "Internal reject was recorded and the piece was restarted.");
+  } finally {
+    if (submitButton?.isConnected) {
+      submitButton.disabled = false;
+      submitButton.textContent = "Record Reject & Restart Piece";
+    }
+  }
+}
+
+function rejectSettingsModalHtml() {
+  const reasons = state.rejectCatalog.reasons || [];
+  const locations = state.rejectCatalog.locations || [];
+  const section = (kind, title, rows) => `
+    <section class="reject-settings-column">
+      <header><strong>${escapeHtml(title)}</strong><span>${escapeHtml(rows.length)} active</span></header>
+      <form class="reject-catalog-add" data-reject-catalog-form="${escapeHtml(kind)}"><input name="label" required placeholder="Add ${escapeHtml(kind)}..."><button type="submit">Add</button></form>
+      <div class="reject-catalog-list">
+        ${rows.map((row) => `<article><span>${escapeHtml(row.label)}</span><button class="icon-only icon-trash danger" type="button" data-reject-catalog-remove="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.label)}"></button></article>`).join("") || `<div class="admin-empty">No active values.</div>`}
+      </div>
+    </section>`;
+  return `<div class="reject-settings-shell">${section("reason", "Reject reasons", reasons)}${section("location", "Break locations", locations)}</div>`;
+}
+
+async function loadRejectSettingsModal() {
+  const payload = await fetchJson("/api/rejects/catalog");
+  state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [] };
+  if (els.adminModal?.dataset.kind === "rejectSettings" && els.adminModalBody) {
+    els.adminModalBody.innerHTML = rejectSettingsModalHtml();
+  }
+}
+
+async function submitManualOrderForm(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  data.listId = document.getElementById("manualEditModalStage")?.value || state.manualEditListId;
+  data.qty = Number(data.qty || 0);
+  data.manualOnly = form.elements.manualOnly.checked;
+  const status = document.getElementById("manualOrderCreateStatus");
+  if (status) status.textContent = "Checking automatic import window...";
+  const payload = await fetchJson("/api/admin/manual-order", { method: "POST", body: JSON.stringify(data) });
+  if (status) status.textContent = payload.message || "Order added.";
+  form.reset();
+  if (form.elements.qty) form.elements.qty.value = "1";
+  window.DLSLineUpdates?.clearCache?.();
+  await loadDeliveryLists(state.activeListId);
+  await runManualEditModalSearch(true);
+  showSaveConfirmation(payload.message || "Manual order added.");
+}
+
+function importRunTime(entry = {}) {
+  return String(entry.checkedAt || entry.importedAt || entry.updatedAt || entry.completedAt || entry.createdAt || "");
+}
+
+function importRunClassification(entries = []) {
+  const running = entries.some((entry) => entry.running === true || ["running", "pending", "in_progress"].includes(String(entry.classification || entry.status || "").toLowerCase()));
+  const failed = entries.some((entry) => String(entry.classification || entry.status || "").toLowerCase() === "failed" || (entry.errors || []).length);
+  const changed = entries.some((entry) => Number(entry.createdCount || 0) || Number(entry.updatedCount || 0) || Number(entry.changedPieceQty || 0) || Number(entry.addedPieceQty || 0));
+  const created = entries.some((entry) => Number(entry.createdCount || 0));
+  if (running) return { key: "running", label: "Running" };
+  if (failed) return { key: "failed", label: "Failed" };
+  if (created && changed) return { key: "new-updated", label: "New / Updated" };
+  if (changed) return { key: "updated", label: "Updated" };
+  return { key: "unchanged", label: "No Changes" };
+}
+
+function adminImportRunGroups(imports = []) {
+  const groups = new Map();
+  imports.forEach((entry, index) => {
+    const time = importRunTime(entry);
+    const base = String(entry.runId || entry.taskId || entry.batchId || entry.importBatchId || time || `run-${index}`);
+    const key = `${base}|${time}`;
+    if (!groups.has(key)) groups.set(key, { key, time, entries: [] });
+    groups.get(key).entries.push(entry);
+  });
+  if (state.adminPinnedImportEntries.length) {
+    const time = importRunTime(state.adminPinnedImportEntries[0]);
+    const key = state.adminSelectedImportRunKey || `notification|${time}`;
+    groups.set(key, { key, time, entries: state.adminPinnedImportEntries.slice(), pinned: true });
+  }
+  return [...groups.values()].sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).slice(0, 60);
+}
+
+function renderAdminImportRunBrowser(imports = []) {
+  const groups = adminImportRunGroups(imports);
+  if (!groups.length) return `<div class="admin-empty">No delivery-list import runs are available yet.</div>`;
+  if (!state.adminSelectedImportRunKey || !groups.some((group) => group.key === state.adminSelectedImportRunKey)) {
+    state.adminSelectedImportRunKey = groups[0].key;
+  }
+  const selected = groups.find((group) => group.key === state.adminSelectedImportRunKey) || groups[0];
+  const tabs = groups.map((group, index) => {
+    const status = importRunClassification(group.entries);
+    const dateCount = new Set(group.entries.map((entry) => entry.deliveryDate).filter(Boolean)).size;
+    return `
+      <button type="button" class="admin-import-run-tab ${group.key === selected.key ? "is-active" : ""} ${escapeHtml(status.key)}" data-admin-import-run="${escapeHtml(group.key)}" role="tab" aria-selected="${group.key === selected.key ? "true" : "false"}" tabindex="${group.key === selected.key ? "0" : "-1"}">
+        <span>${escapeHtml(group.time ? formatDateTime(group.time) : "Active lists")}</span>
+        <strong>${escapeHtml(status.label)}</strong>
+        <small>${escapeHtml(dateCount || group.entries.length)} date${(dateCount || group.entries.length) === 1 ? "" : "s"}</small>
+      </button>`;
+  }).join("");
+  const status = importRunClassification(selected.entries);
+  return `
+    <section class="admin-import-run-browser" data-selected-run="${escapeHtml(selected.key)}">
+      <div class="admin-import-run-tabs" role="tablist" aria-label="Import run history">${tabs}</div>
+      <div class="admin-import-run-selected-header ${escapeHtml(status.key)}">
+        <div><small>Selected automation run</small><strong>${escapeHtml(selected.time ? formatDateTime(selected.time) : "Active delivery lists")}</strong></div>
+        <span>${escapeHtml(status.label)}</span>
+      </div>
+      <div class="admin-import-run-details" role="tabpanel" aria-live="polite">${importHistoryRows(selected.entries)}</div>
+    </section>`;
+}
+
+function selectImportRun(key) {
+  const selectedKey = String(key || "");
+  const scrollPositions = new Map();
+  [els.adminDeliveryLists, els.importHistory].filter(Boolean).forEach((container) => {
+    scrollPositions.set(container, container.querySelector(".admin-import-run-tabs")?.scrollLeft || 0);
+  });
+  state.adminSelectedImportRunKey = selectedKey;
+  state.adminImportSelectionLocked = true;
+  const imports = activeRecentImports();
+  [els.adminDeliveryLists, els.importHistory].filter(Boolean).forEach((container) => {
+    container.innerHTML = renderAdminImportRunBrowser(imports);
+  });
+  window.requestAnimationFrame(() => {
+    scrollPositions.forEach((scrollLeft, container) => {
+      const tabList = container.querySelector(".admin-import-run-tabs");
+      if (tabList) tabList.scrollLeft = scrollLeft;
+    });
+    document.querySelector(`[data-admin-import-run="${CSS.escape(selectedKey)}"]`)?.focus({ preventScroll: true });
+  });
+}
+
+function importEntriesFromNotification(notification) {
+  const details = notification?.details || {};
+  const completedAt = String(details.completedAt || notification?.createdAt || "");
+  const sourceEntries = Array.isArray(details.importResults) ? details.importResults : [];
+  const entries = sourceEntries.map((entry, index) => ({
+    ...entry,
+    id: entry.id || `notification-${notification.id || "run"}-${index}`,
+    checkedAt: entry.checkedAt || completedAt,
+    importedAt: entry.importedAt || completedAt,
+    updatedAt: entry.updatedAt || completedAt,
+    runId: `notification-${notification.id || completedAt}`,
+    classification: entry.classification || (entry.errors?.length ? "failed" : ""),
+  }));
+  if (entries.length) return entries;
+
+  const failed = details.succeeded === false || Boolean(details.error);
+  const checkedDates = [
+    ...(Array.isArray(details.checkedDates) ? details.checkedDates : []),
+    ...(Array.isArray(details.publishedDates) ? details.publishedDates : []),
+    ...(Array.isArray(details.importedDates) ? details.importedDates : []),
+    ...(Array.isArray(details.pendingImportDates) ? details.pendingImportDates : []),
+  ].map(String).filter(Boolean);
+  const dates = [...new Set(checkedDates)].sort();
+  if (!dates.length) {
+    return [{
+      id: `notification-${notification.id || "run"}-summary`,
+      runId: `notification-${notification.id || completedAt}`,
+      deliveryDate: "",
+      sourceName: failed ? "Automation run failed" : "Automation run completed",
+      checkedAt: completedAt,
+      importedAt: completedAt,
+      updatedAt: completedAt,
+      classification: failed ? "failed" : "no_changes",
+      errors: failed ? [String(details.error || notification?.message || "Automation failed")] : [],
+      reason: failed ? "" : String(notification?.message || "No delivery-list changes were detected."),
+    }];
+  }
+  return dates.map((deliveryDate, index) => ({
+    id: `notification-${notification.id || "run"}-${index}`,
+    runId: `notification-${notification.id || completedAt}`,
+    deliveryDate,
+    sourceName: "Automation check",
+    checkedAt: completedAt,
+    importedAt: completedAt,
+    updatedAt: completedAt,
+    classification: failed ? "failed" : "no_changes",
+    errors: failed ? [String(details.error || notification?.message || "Automation failed")] : [],
+    reason: failed ? "" : String(notification?.message || "No delivery-list changes were detected."),
+  }));
+}
+
+function openImportNotificationRun(notification) {
+  const entries = importEntriesFromNotification(notification);
+  const time = String(notification?.details?.completedAt || notification?.createdAt || "");
+  state.adminPinnedImportEntries = entries;
+  state.adminSelectedImportRunKey = `notification-${notification?.id || time}|${time}`;
+  state.adminImportSelectionLocked = true;
+  showPage("admin");
+  window.setTimeout(() => {
+    renderAdminDeliveryLists();
+    els.adminDeliveryLists?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 80);
+}
+
+function filterPackingHistoryRows(query = "") {
+  const clean = String(query || "").trim().toLowerCase();
+  document.querySelectorAll("[data-packing-history-search]").forEach((row) => {
+    row.hidden = Boolean(clean) && !String(row.dataset.packingHistorySearch || "").includes(clean);
+  });
+}
+
+function wireV135OperationsEvents() {
+  els.operationsModalClose?.addEventListener("click", closeOperationsModal);
+  els.operationsModalBackdrop?.addEventListener("click", closeOperationsModal);
+  els.rackPackingHistoryBtn?.addEventListener("click", () => openPackingHistoryModal().catch((error) => showInlineError(error.message, true)));
+  els.rejectLogOpenBtn?.addEventListener("click", () => openRejectLogModal().catch((error) => showInlineError(error.message, true)));
+  els.rejectRefreshBtn?.addEventListener("click", () => refreshRejectPage().catch((error) => showInlineError(error.message, true)));
+  els.rejectSearchInput?.addEventListener("input", () => {
+    window.clearTimeout(els.rejectSearchInput._timer);
+    els.rejectSearchInput._timer = window.setTimeout(() => refreshRejectPage().catch(() => {}), 250);
+  });
+  els.rejectDateFrom?.addEventListener("change", () => refreshRejectPage().catch(() => {}));
+  els.rejectDateTo?.addEventListener("change", () => refreshRejectPage().catch(() => {}));
+
+  document.addEventListener("dls:open-delivery-list-management-import", (event) => {
+    // app.js owns notification-run navigation in v135. Stop the legacy automation
+    // listener from replacing this pinned snapshot with the newest run seconds later.
+    event.stopImmediatePropagation();
+    openImportNotificationRun(event.detail?.notification || {});
+  });
+
+  document.addEventListener("click", (event) => {
+    const rejectRetry = event.target.closest("[data-reject-retry]");
+    if (rejectRetry) {
+      event.preventDefault();
+      refreshRejectPage().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const runTab = event.target.closest("[data-admin-import-run]");
+    if (runTab) {
+      event.preventDefault();
+      selectImportRun(runTab.dataset.adminImportRun);
+      return;
+    }
+    const historyPrint = event.target.closest("[data-packing-history-print]");
+    if (historyPrint) {
+      launchManagedPrint(`/api/racks/packing-history/${encodeURIComponent(historyPrint.dataset.packingHistoryPrint)}/print`);
+      return;
+    }
+    const rackPrint = event.target.closest("[data-rack-modal-print]");
+    if (rackPrint) {
+      printSelectedRackPackingSlip(rackPrint.dataset.rackModalPrint).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const complete = event.target.closest("[data-rack-modal-complete]");
+    if (complete) {
+      completeRack(complete.dataset.rackModalComplete).then(() => refreshOpenRackDetails(complete.dataset.rackModalComplete)).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const uncomplete = event.target.closest("[data-rack-modal-uncomplete]");
+    if (uncomplete) {
+      uncompleteRack(uncomplete.dataset.rackModalUncomplete).then(() => refreshOpenRackDetails(uncomplete.dataset.rackModalUncomplete)).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const returned = event.target.closest("[data-rack-modal-return]");
+    if (returned) {
+      returnRack(returned.dataset.rackModalReturn).then(() => refreshOpenRackDetails(returned.dataset.rackModalReturn)).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const notOnWay = event.target.closest("[data-rack-modal-not-on-way]");
+    if (notOnWay) {
+      markRackNotOnTheWay(notOnWay.dataset.rackModalNotOnWay).then(() => refreshOpenRackDetails(notOnWay.dataset.rackModalNotOnWay)).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const moveOpen = event.target.closest("[data-rack-modal-move-open]");
+    if (moveOpen) {
+      event.preventDefault();
+      const rackItemId = String(moveOpen.dataset.rackModalMoveOpen || "");
+      state.rackMoveItemId = state.rackMoveItemId === rackItemId ? "" : rackItemId;
+      const rack = state.racks.find((item) => String(item.code) === String(state.selectedRackOverviewCode));
+      if (rack && els.operationsModalBody) els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
+      return;
+    }
+    const moveCancel = event.target.closest("[data-rack-modal-move-cancel]");
+    if (moveCancel) {
+      event.preventDefault();
+      state.rackMoveItemId = "";
+      const rack = state.racks.find((item) => String(item.code) === String(state.selectedRackOverviewCode));
+      if (rack && els.operationsModalBody) els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
+      return;
+    }
+    const moveConfirm = event.target.closest("[data-rack-modal-move-confirm]");
+    if (moveConfirm) {
+      event.preventDefault();
+      const currentRackCode = state.selectedRackOverviewCode;
+      moveRackItem(moveConfirm.dataset.rackModalMoveConfirm)
+        .then(() => refreshOpenRackDetails(currentRackCode))
+        .catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const clearItem = event.target.closest("[data-rack-modal-clear-item]");
+    if (clearItem) {
+      clearRackItem(clearItem.dataset.rackModalClearItem, clearItem.dataset.rackModalClearLabel).then(() => refreshOpenRackDetails()).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const removeCatalog = event.target.closest("[data-reject-catalog-remove]");
+    if (removeCatalog) {
+      fetchJson("/api/rejects/catalog/remove", {
+        method: "POST",
+        body: JSON.stringify({ kind: removeCatalog.dataset.rejectCatalogRemove, id: Number(removeCatalog.dataset.rejectCatalogId || 0) }),
+      }).then((payload) => {
+        state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [] };
+        if (els.adminModalBody) els.adminModalBody.innerHTML = rejectSettingsModalHtml();
+      }).catch((error) => showInlineError(error.message, true));
+    }
+  });
+
+  document.addEventListener("input", (event) => {
+    if (event.target.matches("#packingHistorySearch")) filterPackingHistoryRows(event.target.value);
+    if (event.target.matches("#rejectOrderInput, #rejectItemInput")) {
+      window.clearTimeout(event.target.form?._rejectPreviewTimer);
+      if (event.target.form) event.target.form._rejectPreviewTimer = window.setTimeout(() => previewRejectMatch(), 300);
+    }
+  });
+
+  document.addEventListener("submit", (event) => {
+    if (event.target.matches("#rejectLogForm")) {
+      event.preventDefault();
+      submitRejectLog(event.target).catch((error) => {
+        const status = document.getElementById("rejectLogStatus");
+        if (status) status.textContent = error.message;
+      });
+      return;
+    }
+    if (event.target.matches("#manualOrderCreateForm")) {
+      event.preventDefault();
+      submitManualOrderForm(event.target).catch((error) => {
+        const status = document.getElementById("manualOrderCreateStatus");
+        if (status) status.textContent = error.message;
+      });
+      return;
+    }
+    const catalogForm = event.target.closest("[data-reject-catalog-form]");
+    if (catalogForm) {
+      event.preventDefault();
+      const label = new FormData(catalogForm).get("label");
+      fetchJson("/api/rejects/catalog", {
+        method: "POST",
+        body: JSON.stringify({ kind: catalogForm.dataset.rejectCatalogForm, label }),
+      }).then((payload) => {
+        state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [] };
+        if (els.adminModalBody) els.adminModalBody.innerHTML = rejectSettingsModalHtml();
+      }).catch((error) => showInlineError(error.message, true));
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    const rejectSettingsButton = event.target.closest('[data-admin-modal="rejectSettings"]');
+    if (rejectSettingsButton) window.setTimeout(() => loadRejectSettingsModal().catch((error) => showInlineError(error.message, true)), 0);
+  });
+}
+
+
 /**
  * Purpose: Run the start polling workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -21274,6 +22036,16 @@ function stopPolling() {
 async function loadAuthenticatedApp(params = new URLSearchParams(window.location.search)) {
   await loadStations();
   await loadDeliveryLists(params.get("list") || "");
+  if (!params.get("list")) {
+    const today = todayKey();
+    const todayStaging = state.lists.find((list) =>
+      String(list.deliveryDate || "") === today && /staging/i.test(`${list.stage || ""} ${list.scanner || ""}`)
+    );
+    if (todayStaging) {
+      await activateList(todayStaging.id, false);
+      state.scanPageInitialized = true;
+    }
+  }
   loadHomeReportSummary();
   if (params.get("list")) {
     showPage("scan");
@@ -21375,6 +22147,7 @@ function wireEvents() {
     }
   });
   state.eventsWired = true;
+  wireV135OperationsEvents();
   initLanguageSystem();
   initCustomSelectSystem();
   syncSidebarState();
@@ -22149,9 +22922,7 @@ function wireEvents() {
 
       state.selectedRackOverviewCode = rackSelectCard.dataset.rackSelect || "";
       state.rackMoveItemId = "";
-
-      renderRacksPage();
-
+      openRackDetailsModal(state.selectedRackOverviewCode);
       return;
     }
   });
@@ -22166,8 +22937,7 @@ function wireEvents() {
 
     state.selectedRackOverviewCode = rackSelectCard.dataset.rackSelect || "";
     state.rackMoveItemId = "";
-
-    renderRacksPage();
+    openRackDetailsModal(state.selectedRackOverviewCode);
   });
 
   els.rackCreateOpenBtn?.addEventListener("click", () => openRackForm(""));
