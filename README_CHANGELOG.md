@@ -1,14 +1,11 @@
-## v129 - Reliable Desktop Shortcut Creation
+## v129 - Legacy Floor Column Repair Before v097 Migration
 
-- Repaired `Create Desktop Shortcut.bat` so it validates Windows PowerShell, quotes the companion-script path, preserves the real exit code, and always pauses on success or failure instead of closing without useful feedback.
-- Replaced the obsolete `Start Delivery Scanner Web App.bat` reference with the maintained `Start-DeliveryScannerWebApp.bat` launcher.
-- Removed the stale executable-first shortcut behavior so the shortcut always starts the current project source through the maintained launcher rather than an older packaged EXE.
-- Uses the Windows known Desktop folder through `WScript.Shell`, including redirected and OneDrive-backed desktops, with safe fallbacks for standard local profiles.
-- Creates a `cmd.exe` shortcut with correctly nested quoting so project folders containing spaces, ampersands, parentheses, or other command-sensitive characters launch correctly.
-- Preserves the current project folder as the shortcut working directory and uses the packaged scanner icon when it exists.
-- Verifies the saved shortcut target, arguments, and working directory before reporting success.
-- Added focused regression checks for the maintained launcher name, command quoting, desktop resolution, visible BAT failure handling, and removal of legacy launcher references.
-- Advanced browser asset cache keys to v129.
+- Fixed floor database transfer failing during the v097 `line_items` rebuild with `sqlite3.OperationalError: no such column: priority_delivery_date`.
+- Runs the maintained `_upgrade_v096_columns` compatibility repair before migration 002 whenever the database has not yet reached the v097 production schema.
+- Repairs both unversioned legacy floor databases and databases that already contain the v096 baseline record but predate late-v096 additive fields.
+- Reuses the existing idempotent column definitions for source route, priority delivery, direct-to-truck, rack lifecycle, import metadata, bay layout, user station/email, and related compatibility fields instead of duplicating schema logic in the transfer tool.
+- Preserves migration checksums and the existing verified-backup, integrity-check, foreign-key-check, row-count comparison, failed-copy retention, and automatic target rollback protections.
+- Added regression tests for both affected legacy migration paths and advanced browser asset cache keys to v129.
 
 ## v128 - Windows Project-Root Quoting Fix
 

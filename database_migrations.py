@@ -134,11 +134,34 @@ def baseline_legacy_v096(connection: Any, owner: Any) -> bool:
     return True
 
 
+def prepare_v096_compatibility_columns(connection: Any, owner: Any, installed: dict[int, dict[str, Any]]) -> None:
+    """Add historical v096 compatibility columns before the v097 table rebuild.
+
+    Some floor databases predate late-v096 additive fields such as
+    ``priority_delivery_date`` and ``priority_direct_to_truck`` but otherwise
+    contain the complete operational schema. The v097 migration rebuilds
+    ``line_items`` and therefore must normalize those additive columns first.
+    This step is idempotent and also repairs databases that already carry the
+    v096 baseline record but were created before those fields were introduced.
+    """
+    if 2 in installed:
+        return
+    upgrader = getattr(owner, "_upgrade_v096_columns", None)
+    if not callable(upgrader):
+        raise MigrationError(
+            "The database requires pre-v097 compatibility repair, but the current store does not provide it."
+        )
+    upgrader(connection)
+    connection.commit()
+
+
 def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:
     """Handle run sqlite migrations for the maintained Delivery List Scanner workflow."""
     ensure_migration_table(connection)
     baseline_legacy_v096(connection, owner)
     validate_installed_checksums(connection)
+    installed = installed_migrations(connection)
+    prepare_v096_compatibility_columns(connection, owner, installed)
     installed = installed_migrations(connection)
     applied: list[int] = []
     for migration in MIGRATIONS:
