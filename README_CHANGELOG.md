@@ -1,3 +1,17 @@
+## v132 - Floor Computer Hourly Folder-Import Setup
+
+- Added `Setup-Floor-Folder-Import-Automation.bat` as a dedicated one-click installer for floor computers that only consume workbooks from the shared Temp Delivery Lists folder.
+- Copies the maintained automation runtime into `C:\DeliveryListAutomation\Scripts`, fixing the missing `Install-DeliveryListSqlAutomationTasks.ps1` failure without requiring A+W SQL access.
+- Preserves any existing installed automation configuration and runtime scripts in a timestamped `C:\DeliveryListAutomation\Backups\v132-floor-folder-import-*` folder before replacement.
+- Forces `folder-import-only` mode, sets the incremental interval to 60 minutes, keeps the broader daily full-window safety refresh, and records the floor-specific audit user.
+- Creates `Run-Incremental.cmd`, `Run-Full.cmd`, `Run-Now.cmd`, and `Show-Status.cmd` in the maintained working root.
+- Updated Task Scheduler preflight so floor mode verifies shared-folder read access and scanner compatibility without querying A+W SQL or requiring workbook write permission.
+- Kept the existing SQL connectivity, workbook generation, destination-write, and scanner preflight unchanged for authorized central SQL modes.
+- Disables the older built-in 5 PM importer for the current floor Windows user to prevent overlapping duplicate imports.
+- Added `docs/FLOOR_FOLDER_IMPORT_AUTOMATION.md` with setup, verification, task names, runtime paths, backup behavior, and troubleshooting guidance.
+- Preserved the production scanner database, scan history, quantities, racks, bays, Rush/Remake state, import history, and per-user review data.
+- Advanced browser asset cache keys to v132.
+
 ## v131 - Audited Route-Consolidation Preservation Validation
 
 - Fixed floor database transfer validation stopping after a successful migration because `line_items` decreased from 15,096 to 15,068.

@@ -1,6 +1,12 @@
-# Delivery List SQL Automation Runtime v121 + v125 Maintenance Patch
+# Delivery List Automation Runtime v132
 
-This folder is installed to `C:\DeliveryListAutomation\Scripts` by the maintained SQL automation setup. The v125 changed-files package does not replace the scanner database or automation configuration.
+This folder is installed to `C:\DeliveryListAutomation\Scripts` by either the central SQL setup or the v132 floor-folder setup. The setup does not replace the scanner database or generated delivery-list workbooks.
+
+## v132 floor-computer folder import setup
+
+Floor computers do not need A+W SQL access. Run `Setup-Floor-Folder-Import-Automation.bat` from the current scanner project folder. The setup copies the maintained runtime to `C:\DeliveryListAutomation\Scripts`, preserves any existing configuration with a timestamped backup, forces `folder-import-only` mode, sets the interval to 60 minutes, creates the command wrappers, validates scanner compatibility, and installs the scheduled tasks.
+
+The floor scheduler preflight now verifies read access to the Temp Delivery Lists folder and scanner compatibility without querying A+W SQL or requiring permission to write workbooks to the shared folder. The central authorized SQL computer keeps the existing SQL/workbook preflight unchanged.
 
 ## v125 safe Task Scheduler command handling
 

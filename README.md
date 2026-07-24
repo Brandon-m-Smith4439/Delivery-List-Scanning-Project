@@ -1,6 +1,8 @@
 # Delivery List Scanner
 
-Current maintained release: **v131**. SQLite remains the active/default backend.
+Current maintained release: **v132**. SQLite remains the active/default backend.
+
+v132 adds a dedicated one-click floor-computer setup for hourly imports from the shared Temp Delivery Lists folder. It installs the missing runtime scripts under `C:\DeliveryListAutomation\Scripts`, preserves existing automation configuration with timestamped backups, forces folder-import-only mode, sets the interval to 60 minutes, creates and verifies the scheduled tasks, and skips A+W SQL and workbook-write preflight checks on floor computers while keeping the central SQL workflow unchanged.
 
 v131 fixes the floor transfer false-positive that treated the maintained route-membership repair as lost data. When startup merges duplicate receiving-stage copies of the same logical order item, the transfer now allows the lower raw `line_items` count only after verifying every removed row has the maintained merge audit, remains represented by an equivalent receiving row, and retains at least the same quantity and scanned progress. Staging, outbound, unaudited, or quantity-reducing removals still fail and roll back.
 
@@ -70,16 +72,25 @@ The utility does not modify the old database. It backs up both the old source an
 
 This is a replacement-and-upgrade operation, not a merge of two separately active databases. It supports the maintained v096-compatible SQLite schema and later. See `docs/FLOOR_DATABASE_TRANSFER.md`.
 
-## Automated A+W delivery-list imports
+## Automated delivery-list imports
 
-The maintained v121+ automation package is under `automation\sql_delivery_export`.
+The maintained automation package is under `automation\sql_delivery_export`.
 
-1. For an existing v121-v124 installation, extract the newest changed-files package into the project folder and run `Apply-v125-AutomationPatch.bat` once. This safely backs up and replaces only the installed SQL schedule installer; it does not change configuration, scanner data, existing tasks, or workbooks.
-2. Open **Admin > Import / Update Delivery List**, save the settings, and choose **Save & Install Schedule** again. The installer now checks PowerShell syntax and runs the SQL/workbook/scanner preflight before creating tasks.
-3. Run `C:\DeliveryListAutomation\Verify-SQL-And-Import.cmd` and enter a known delivery date. This performs a real read-only A+W SQL query, enforces the configured known-date count comparison, rebuilds and validates the workbook, imports it through the maintained scanner workflow, and confirms every expected stage list exists.
-4. Continue using the control center for Folder Import Only, SQL Export Only, SQL Export and Import, schedule settings, logs, and notifications.
+### Floor computers: import the shared folder every hour
 
-See `automation\sql_delivery_export\README.md` for the installed runtime, repair steps, and verification details.
+1. Extract the newest changed-files package into the current scanner project folder.
+2. Close the scanner web app/server window.
+3. Run `Setup-Floor-Folder-Import-Automation.bat` once.
+4. Restart the scanner web app and confirm **Admin > Import / Update Delivery List** shows **Import Temp Folder Only** with the schedule installed.
+5. Run `C:\DeliveryListAutomation\Run-Now.cmd` for a visible manual verification.
+
+The floor setup copies the maintained runtime to `C:\DeliveryListAutomation\Scripts`, uses the existing shared Temp Delivery Lists folder, creates a 60-minute incremental task plus the normal daily full-window safety task, and disables the older built-in 5 PM importer for that Windows user. It does not query A+W SQL or replace the scanner database.
+
+### Central authorized computer: query SQL, export, and import
+
+Use the normal SQL automation setup and the Admin control center. Run `C:\DeliveryListAutomation\Verify-SQL-And-Import.cmd` with a known delivery date to verify the read-only SQL query, workbook generation, publication, maintained scanner import, and expected stage lists.
+
+See `automation\sql_delivery_export\README.md` for the installed runtime and `docs\FLOOR_FOLDER_IMPORT_AUTOMATION.md` for the floor-computer setup and troubleshooting steps.
 
 ## Database operations
 
@@ -97,14 +108,15 @@ The existing sound-volume slider remains available for floor testing. At 100%, t
 
 ## Microsoft Graph email
 
-Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v125 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
+Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v132 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
 
 After BLDR IT provides the Entra tenant ID, application/client ID, and a client-secret value, run `Configure-MicrosoftGraphEmail.bat` once. The secret is encrypted for the current Windows account and loaded only in memory by the normal scanner launcher. See `docs/MICROSOFT_GRAPH_EMAIL.md` for the IT and testing steps.
 
 ## Project documentation
 
 - Ongoing version history: `README_CHANGELOG.md`
-- Automated A+W SQL export/import: `automation/sql_delivery_export/README.md`
+- Automated SQL export/import runtime: `automation/sql_delivery_export/README.md`
+- Floor hourly folder-import setup: `docs/FLOOR_FOLDER_IMPORT_AUTOMATION.md`
 - Floor database transfer and recovery: `docs/FLOOR_DATABASE_TRANSFER.md`
 - Folder cleanup and required-file guide: `docs/FOLDER_CLEANUP_GUIDE.md`
 - Function and ownership map: `docs/CODE_REFERENCE.md`
@@ -123,7 +135,7 @@ After BLDR IT provides the Entra tenant ID, application/client ID, and a client-
 
 - `data` — required SQLite database and local scanner data. Keep it and back it up.
 - `logs` — generated diagnostics. Safe to clear while the app is stopped.
-- `C:\DeliveryListAutomation` — local SQL automation runtime, staging, logs, state, and scheduled-task files created by the maintained setup.
+- `C:\DeliveryListAutomation` — local automation runtime, staging, logs, state, and scheduled-task files for either central SQL/export mode or floor folder-import-only mode.
 
 A terminal whose prompt points to another project folder, such as `Showers Programmer`, is being opened by that project or its updater; the scanner launcher fixes its Python working directory to this project folder.
 

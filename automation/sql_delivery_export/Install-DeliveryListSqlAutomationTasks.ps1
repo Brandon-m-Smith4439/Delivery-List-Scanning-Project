@@ -82,7 +82,7 @@ function Assert-ScheduledTasksCommandSucceeded {
 }
 
 if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
-    throw "Run Setup-DeliveryListSqlAutomation.bat first. Configuration was not found: $ConfigPath"
+    throw "Automation configuration was not found: $ConfigPath. Run Setup-Floor-Folder-Import-Automation.bat on a floor computer or the SQL automation setup on the authorized central computer."
 }
 
 $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -90,7 +90,7 @@ $incrementalCmd = Join-Path $config.WorkingRoot "Run-Incremental.cmd"
 $fullCmd = Join-Path $config.WorkingRoot "Run-Full.cmd"
 if (-not (Test-Path -LiteralPath $incrementalCmd -PathType Leaf) -or
     -not (Test-Path -LiteralPath $fullCmd -PathType Leaf)) {
-    throw "Automation command files are missing. Run setup again."
+    throw "Automation command files are missing. Run Setup-Floor-Folder-Import-Automation.bat again on a floor computer, or rerun the central SQL automation setup."
 }
 
 $scriptRoot = Split-Path -Parent $ConfigPath
@@ -120,17 +120,62 @@ $syntaxTargets = @(
 )
 Assert-PowerShellSyntax -Paths $syntaxTargets
 
-Write-Host "PowerShell syntax check passed for $($syntaxTargets.Count) maintained SQL automation scripts." -ForegroundColor Green
-Write-Host "Running the SQL, workbook, destination, and scanner compatibility preflight..."
-& $powerShellPath `
-    -NoProfile `
-    -ExecutionPolicy Bypass `
-    -File $runner `
-    -Mode RuntimeTest `
-    -RunAction Configured `
-    -ConfigPath $ConfigPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Automation preflight failed. Review the latest file in $($config.WorkingRoot)\Logs before installing scheduled tasks."
+Write-Host "PowerShell syntax check passed for $($syntaxTargets.Count) maintained automation scripts." -ForegroundColor Green
+$automationMode = [string]$config.Automation.Mode
+if ($automationMode -eq "folder-import-only") {
+    Write-Host "Running the floor folder-access and scanner compatibility preflight..."
+    $destinationFolder = [string]$config.DestinationFolder
+    if ([string]::IsNullOrWhiteSpace($destinationFolder) -or
+        -not (Test-Path -LiteralPath $destinationFolder -PathType Container)) {
+        throw "The Temp Delivery Lists folder cannot be reached: $destinationFolder"
+    }
+
+    try {
+        [void](Get-ChildItem -LiteralPath $destinationFolder -File -ErrorAction Stop | Select-Object -First 1)
+    }
+    catch {
+        throw "The Temp Delivery Lists folder cannot be read by this Windows account: $destinationFolder"
+    }
+
+    $projectRoot = [string]$config.ProjectRoot
+    foreach ($requiredName in @("server.py", "scanner_config.py", "delivery_store.py")) {
+        $requiredPath = Join-Path $projectRoot $requiredName
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "Required scanner file is missing: $requiredPath"
+        }
+    }
+
+    $pythonPath = [string]$config.Runtime.PythonPath
+    if ([string]::IsNullOrWhiteSpace($pythonPath) -or
+        -not (Test-Path -LiteralPath $pythonPath -PathType Leaf)) {
+        throw "Python runtime is not configured for floor folder imports. Run Setup-Floor-Folder-Import-Automation.bat again."
+    }
+    $pythonArguments = @()
+    if ($null -ne $config.Runtime.PythonArguments) {
+        $pythonArguments = @($config.Runtime.PythonArguments | ForEach-Object { [string]$_ })
+    }
+    $compatibilityPath = Join-Path $scriptRoot "validate_scanner_compatibility.py"
+    if (-not (Test-Path -LiteralPath $compatibilityPath -PathType Leaf)) {
+        throw "Scanner compatibility validator is missing: $compatibilityPath"
+    }
+    & $pythonPath @pythonArguments $compatibilityPath --project-root $projectRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "Scanner compatibility validation failed for the floor folder-import runtime."
+    }
+    Write-Host "Floor folder-import preflight passed without querying A+W SQL." -ForegroundColor Green
+}
+else {
+    Write-Host "Running the SQL, workbook, destination, and scanner compatibility preflight..."
+    & $powerShellPath `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $runner `
+        -Mode RuntimeTest `
+        -RunAction Configured `
+        -ConfigPath $ConfigPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Automation preflight failed. Review the latest file in $($config.WorkingRoot)\Logs before installing scheduled tasks."
+    }
 }
 
 $interval = [int]$config.Schedule.IncrementalIntervalMinutes
@@ -179,7 +224,7 @@ foreach ($taskName in @($incrementalTask, $fullTask)) {
         -FailureMessage "Windows Task Scheduler did not retain the task after creation: $taskName"
 }
 
-Write-Host "Created scheduled tasks:" -ForegroundColor Green
+Write-Host "Created scheduled tasks for mode $automationMode:" -ForegroundColor Green
 Write-Host "- ${incrementalTask}: every $interval minutes while $taskUser is logged on"
 Write-Host "- ${fullTask}: daily at $fullTime while $taskUser is logged on"
 Write-Host ""
