@@ -4,7 +4,7 @@ Floor computers should import existing workbooks from the shared **Temp Delivery
 
 ## One-time setup
 
-1. Extract the v133 changed-files package into the current scanner project folder.
+1. Extract the v134 changed-files package into the current scanner project folder.
 2. Close the scanner web app/server window.
 3. Run `Setup-Floor-Folder-Import-Automation.bat` from the project folder.
 4. The setup uses the configured Temp Delivery Lists folder, sets the automatic mode to `folder-import-only`, and sets the incremental interval to 60 minutes.
@@ -33,7 +33,7 @@ The setup also creates:
 
 Existing runtime scripts and `sql-export.config.json` are backed up under:
 
-`C:\DeliveryListAutomation\Backups\v133-floor-folder-import-<timestamp>`
+`C:\DeliveryListAutomation\Backups\v134-floor-folder-import-<timestamp>`
 
 The scanner database is not copied, replaced, or reset by this setup.
 
@@ -67,12 +67,16 @@ Then review:
 
 ### Setup BAT opens briefly and closes
 
-V133 removes the parenthesized CMD blocks that were broken by project folders such as `Delivery-List-Scanning-Project-main (5)`. Replace both root launchers from the v133 package before retrying. The setup launcher now remains open after every handled result. Diagnostic files are written to:
+V133 and later remove the parenthesized CMD blocks that were broken by project folders such as `Delivery-List-Scanning-Project-main (5)`. Replace both root launchers from the current package before retrying. The setup launcher now remains open after every handled result. Diagnostic files are written to:
 
 - `logs\floor-folder-import-setup-launch.log`
 - `logs\floor-folder-import-setup-error.log`
 
 The desktop shortcut launcher uses the same safe path handling and writes `logs\desktop-shortcut-launch.log`.
+
+### PowerShell syntax validation fails at line 227
+
+V134 fixes the installer message that previously used `$automationMode:` inside a double-quoted string. PowerShell treated the colon as part of the variable reference and stopped before creating scheduled tasks. Replace `automation\sql_delivery_export\Install-DeliveryListSqlAutomationTasks.ps1` from v134 and rerun the floor setup.
 
 ### Missing scheduled-task script
 

@@ -1,3 +1,12 @@
+## v134 - Floor Scheduler PowerShell Interpolation Fix
+
+- Fixed `Install-DeliveryListSqlAutomationTasks.ps1` failing syntax validation at line 227 before Task Scheduler installation began.
+- Delimited the automation-mode variable as `${automationMode}:` so PowerShell does not interpret the literal colon as part of the variable name.
+- Preserved the existing `${incrementalTask}:` and `${fullTask}:` task-summary fixes.
+- The floor setup still copies the runtime into `C:\DeliveryListAutomation\Scripts`, validates the installed PowerShell files, verifies scanner compatibility, and only then creates the hourly folder-import tasks.
+- Existing scanner data, imported delivery lists, automation configuration backups, and SQL isolation remain unchanged.
+- Advanced floor-setup and browser release markers to v134.
+
 ## v133 - Safe Windows Batch Launchers for Parenthesized Project Paths
 
 - Fixed `Setup-Floor-Folder-Import-Automation.bat` opening briefly and closing before the PowerShell installer started when the project folder contained parentheses, such as `Delivery-List-Scanning-Project-main (5)`.

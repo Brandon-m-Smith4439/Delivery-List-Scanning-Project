@@ -73,16 +73,16 @@ class SafeBatchLauncherTests(unittest.TestCase):
         text = FLOOR_PS1.read_text(encoding="utf-8")
         self.assertIn("trap {", text)
         self.assertIn("floor-folder-import-setup-error.log", text)
-        self.assertIn('Set-JsonProperty -Object $config -Name "Version" -Value "v133"', text)
-        self.assertIn("v133-floor-folder-import-", text)
+        self.assertIn('Set-JsonProperty -Object $config -Name "Version" -Value "v134"', text)
+        self.assertIn("v134-floor-folder-import-", text)
 
     def test_release_markers_are_consistent(self) -> None:
-        self.assertIn("Current maintained release: **v133**", README.read_text(encoding="utf-8"))
-        self.assertTrue(CHANGELOG.read_text(encoding="utf-8").startswith("## v133"))
-        self.assertIn("Extract the v133 changed-files package", DOC.read_text(encoding="utf-8"))
+        self.assertIn("Current maintained release: **v134**", README.read_text(encoding="utf-8"))
+        self.assertTrue(CHANGELOG.read_text(encoding="utf-8").startswith("## v134"))
+        self.assertIn("Extract the v134 changed-files package", DOC.read_text(encoding="utf-8"))
         index = INDEX.read_text(encoding="utf-8")
-        self.assertEqual(index.count("20260724-v133"), 6)
-        self.assertNotIn("20260724-v132", index)
+        self.assertEqual(index.count("20260724-v134"), 6)
+        self.assertNotIn("20260724-v133", index)
 
     def test_batch_files_use_windows_line_endings(self) -> None:
         for path in (FLOOR_BAT, SHORTCUT_BAT):

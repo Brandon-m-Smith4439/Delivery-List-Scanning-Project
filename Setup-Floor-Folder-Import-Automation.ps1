@@ -194,7 +194,7 @@ function Assert-PowerShellSyntax {
 }
 
 Write-Host ""
-Write-Host "Delivery List Scanner - Floor Folder Import Setup v133" -ForegroundColor Cyan
+Write-Host "Delivery List Scanner - Floor Folder Import Setup v134" -ForegroundColor Cyan
 Write-Host "This computer will import existing workbooks from the Temp Delivery Lists folder." -ForegroundColor DarkGray
 Write-Host "It will not query A+W SQL or create delivery-list workbooks." -ForegroundColor DarkGray
 Write-Host ""
@@ -227,7 +227,7 @@ foreach ($folder in @("Staging", "Logs", "Failed", "State", "Scripts", "Backups"
     [void](New-Item -ItemType Directory -Path (Join-Path $WorkingRoot $folder) -Force)
 }
 $scriptRoot = Join-Path $WorkingRoot "Scripts"
-$backupRoot = Join-Path $WorkingRoot ("Backups\v133-floor-folder-import-{0}" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+$backupRoot = Join-Path $WorkingRoot ("Backups\v134-floor-folder-import-{0}" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
 [void](New-Item -ItemType Directory -Path $backupRoot -Force)
 
 $configPath = Join-Path $scriptRoot "sql-export.config.json"
@@ -277,7 +277,7 @@ if ([string]::IsNullOrWhiteSpace($resolvedDestination)) {
     throw "The Temp Delivery Lists folder is not configured."
 }
 
-Set-JsonProperty -Object $config -Name "Version" -Value "v133"
+Set-JsonProperty -Object $config -Name "Version" -Value "v134"
 Set-JsonProperty -Object $config -Name "ProjectRoot" -Value $resolvedProjectRoot
 Set-JsonProperty -Object $config -Name "WorkingRoot" -Value $WorkingRoot
 Set-JsonProperty -Object $config -Name "DestinationFolder" -Value $resolvedDestination

@@ -1,7 +1,7 @@
 @echo off
 setlocal DisableDelayedExpansion
 
-title Delivery List Scanner - Floor Folder Import Setup v133
+title Delivery List Scanner - Floor Folder Import Setup v134
 
 set "PROJECT_ROOT=%~dp0"
 if not defined PROJECT_ROOT goto :missing_project_root
@@ -16,7 +16,7 @@ goto :finish
 
 :run_setup
 echo ================================================================
-echo  Delivery List Scanner - Floor Folder Import Setup v133
+echo  Delivery List Scanner - Floor Folder Import Setup v134
 echo ================================================================
 echo.
 echo This installs hourly imports from the Temp Delivery Lists folder.
@@ -43,7 +43,7 @@ exit /b %SETUP_EXIT_CODE%
 echo ERROR: Setup script was not found.
 echo Expected file: "%SCRIPT_PATH%"
 echo.
-echo Extract the complete v133 update into the scanner project folder and try again.
+echo Extract the complete v134 update into the scanner project folder and try again.
 exit /b 2
 
 :missing_powershell

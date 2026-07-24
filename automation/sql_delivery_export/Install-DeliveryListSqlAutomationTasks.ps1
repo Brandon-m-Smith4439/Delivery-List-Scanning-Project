@@ -224,7 +224,7 @@ foreach ($taskName in @($incrementalTask, $fullTask)) {
         -FailureMessage "Windows Task Scheduler did not retain the task after creation: $taskName"
 }
 
-Write-Host "Created scheduled tasks for mode $automationMode:" -ForegroundColor Green
+Write-Host "Created scheduled tasks for mode ${automationMode}:" -ForegroundColor Green
 Write-Host "- ${incrementalTask}: every $interval minutes while $taskUser is logged on"
 Write-Host "- ${fullTask}: daily at $fullTime while $taskUser is logged on"
 Write-Host ""
