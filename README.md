@@ -1,6 +1,10 @@
 # Delivery List Scanner
 
-Current maintained release: **v127**. SQLite remains the active/default backend.
+Current maintained release: **v129**. SQLite remains the active/default backend.
+
+v129 repairs the Windows desktop-shortcut installer. The BAT now validates Windows PowerShell, keeps success and failure messages visible, and calls the companion script with quoted paths. The PowerShell creator now targets the maintained `Start-DeliveryScannerWebApp.bat` launcher instead of the obsolete spaced filename, resolves redirected/OneDrive Desktop folders, safely handles project paths containing spaces or symbols, uses the packaged scanner icon when available, replaces an existing shortcut, and verifies the saved target, arguments, and working directory before reporting success.
+
+v128 fixes the Windows project-root quoting failure in the floor database transfer launcher. The BAT now removes its trailing directory separator before passing the current project path to Python, and the Python tool defensively repairs the malformed `project-main" --interactive` argument produced by already-extracted v127 launchers.
 
 v127 fixes the floor database transfer BAT closing immediately after a pasted path. The source-path prompt now runs inside Python instead of CMD, preventing spaces, ampersands, parentheses, quotes, and other Windows path characters from breaking batch parsing. The launcher always reaches a visible success/failure screen, waits for a keypress before closing, supports drag-and-drop through an environment handoff, and writes `logs\floor-database-transfer-launch.log` for startup diagnostics.
 
@@ -40,6 +44,8 @@ The v097 numbered/checksummed SQLite migrations, verified backups, constraints, 
 3. Double-click `Start-DeliveryScannerWebApp.bat`.
 4. Keep the single launcher window open while the local server is running. The scanner no longer starts a second Python console.
 
+To add a desktop launcher, double-click `Create Desktop Shortcut.bat` from the project folder. It creates or replaces the current user's **Glass Delivery Scanner** shortcut and points it to the maintained `Start-DeliveryScannerWebApp.bat` launcher.
+
 SQLite remains the active/default database. The production database is:
 
 `data\delivery-scanner-pilot.db`
@@ -52,7 +58,7 @@ Use `Transfer-Floor-Database-To-Current-Version.bat` when updating a floor compu
 
 1. Close the old and new Delivery List Scanner server windows.
 2. Keep the old project folder unchanged.
-3. Extract the v126 changed-files package into the newest/current project folder.
+3. Extract the newest changed-files package into the newest/current project folder.
 4. Double-click `Transfer-Floor-Database-To-Current-Version.bat`.
 5. Paste the old project folder, old `data` folder, or old `delivery-scanner-pilot.db` path.
 6. Confirm the displayed source and target paths by typing `TRANSFER`.
@@ -89,7 +95,7 @@ The existing sound-volume slider remains available for floor testing. At 100%, t
 
 ## Microsoft Graph email
 
-Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v125 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
+Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v129 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
 
 After BLDR IT provides the Entra tenant ID, application/client ID, and a client-secret value, run `Configure-MicrosoftGraphEmail.bat` once. The secret is encrypted for the current Windows account and loaded only in memory by the normal scanner launcher. See `docs/MICROSOFT_GRAPH_EMAIL.md` for the IT and testing steps.
 

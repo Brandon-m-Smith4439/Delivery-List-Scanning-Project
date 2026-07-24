@@ -42,7 +42,7 @@ A database file can also be dragged directly onto the BAT file. The BAT passes a
 
 ## Launcher troubleshooting
 
-The v127 launcher always pauses before closing. It also writes `logs\floor-database-transfer-launch.log` with the project folder, chosen Python runtime, and exit code.
+The v128 launcher normalizes its own project folder before passing it to Python and always pauses before closing. It also writes `logs\floor-database-transfer-launch.log` with the project folder, chosen Python runtime, and exit code.
 
 When the transfer prompt does not appear:
 
@@ -50,6 +50,7 @@ When the transfer prompt does not appear:
 2. Confirm `tools\upgrade_floor_database.py` exists below the BAT.
 3. Open `logs\floor-database-transfer-launch.log` to see which Python runtime was selected or why startup failed.
 4. Run the BAT again and paste the old path only when the Python prompt appears.
+5. A message containing `project-main" --interactive` means the older v127 BAT was still being run; replace the BAT with the v128 copy.
 
 ## Verify after transfer
 

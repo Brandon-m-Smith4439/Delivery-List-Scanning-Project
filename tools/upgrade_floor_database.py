@@ -118,7 +118,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Keep the failed upgraded target in place instead of restoring the prior target.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    repair_merged_windows_project_root(args)
+    return args
+
+
+def repair_merged_windows_project_root(args: argparse.Namespace) -> None:
+    """Repair the Windows trailing-backslash quoting failure from older BAT launchers.
+
+    A quoted argument ending in a backslash can escape its closing quote under the
+    Windows command-line parser. In the affected launcher, ``--interactive`` was
+    consequently appended to the project-root value. The current BAT removes the
+    trailing separator before launch, while this guard keeps already-extracted old
+    launchers from producing a misleading missing-project error.
+    """
+    raw = str(args.project_root or "")
+    for suffix in ('" --interactive', "' --interactive"):
+        if raw.endswith(suffix):
+            args.project_root = raw[: -len(suffix)]
+            args.interactive = True
+            return
 
 
 def prompt_source_path() -> str:

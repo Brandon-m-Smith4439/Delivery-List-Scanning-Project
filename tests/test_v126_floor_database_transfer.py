@@ -1,4 +1,4 @@
-"""Safety tests for the v127 floor database transfer utility."""
+"""Safety tests for the v128 floor database transfer utility."""
 
 from __future__ import annotations
 
@@ -93,7 +93,41 @@ class FloorDatabaseTransferTests(unittest.TestCase):
         self.assertIn("--interactive", text)
         self.assertIn("pause >nul", text)
         self.assertIn("floor-database-transfer-launch.log", text)
+        self.assertIn('for %%I in ("%PROJECT_ROOT%.") do set "PROJECT_ROOT=%%~fI"', text)
+        self.assertIn('set "SCRIPT=%PROJECT_ROOT%\\tools\\upgrade_floor_database.py"', text)
+        self.assertNotIn('set "SCRIPT=%PROJECT_ROOT%tools\\upgrade_floor_database.py"', text)
         self.assertNotIn("set /p", text.lower())
+
+    def test_legacy_merged_project_root_argument_is_repaired(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            project = temp / "current-project"
+            target = create_fake_project(project)
+            old_project = temp / "old-floor-project"
+            source = old_project / "data" / "delivery-scanner-pilot.db"
+            create_floor_database(source)
+
+            merged_project_argument = f'{project}" --interactive'
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--project-root",
+                    merged_project_argument,
+                    "--yes",
+                ],
+                input=str(old_project) + "\n",
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Old floor project/database path:", result.stdout)
+            con = sqlite3.connect(target)
+            try:
+                self.assertEqual(con.execute("SELECT id FROM delivery_lists").fetchone()[0], "floor-list")
+            finally:
+                con.close()
 
     def test_interactive_source_prompt_accepts_a_folder_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

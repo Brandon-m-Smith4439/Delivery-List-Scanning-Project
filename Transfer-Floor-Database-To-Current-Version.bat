@@ -3,8 +3,9 @@ setlocal EnableExtensions DisableDelayedExpansion
 title Delivery List Scanner - Floor Database Transfer
 
 set "PROJECT_ROOT=%~dp0"
-set "SCRIPT=%PROJECT_ROOT%tools\upgrade_floor_database.py"
-set "LOG_DIR=%PROJECT_ROOT%logs"
+for %%I in ("%PROJECT_ROOT%.") do set "PROJECT_ROOT=%%~fI"
+set "SCRIPT=%PROJECT_ROOT%\tools\upgrade_floor_database.py"
+set "LOG_DIR=%PROJECT_ROOT%\logs"
 set "LAUNCH_LOG=%LOG_DIR%\floor-database-transfer-launch.log"
 set "EXIT_CODE=1"
 set "DLS_FLOOR_TRANSFER_SOURCE=%~1"
@@ -28,9 +29,9 @@ echo.
 
 if not exist "%SCRIPT%" goto missing_script
 
-if exist "%PROJECT_ROOT%.venv\Scripts\python.exe" goto run_dot_venv
-if exist "%PROJECT_ROOT%venv\Scripts\python.exe" goto run_venv
-if exist "%PROJECT_ROOT%python\python.exe" goto run_bundled_python
+if exist "%PROJECT_ROOT%\.venv\Scripts\python.exe" goto run_dot_venv
+if exist "%PROJECT_ROOT%\venv\Scripts\python.exe" goto run_venv
+if exist "%PROJECT_ROOT%\python\python.exe" goto run_bundled_python
 where py.exe >nul 2>&1
 if not errorlevel 1 goto run_py_launcher
 where python.exe >nul 2>&1
@@ -38,20 +39,20 @@ if not errorlevel 1 goto run_path_python
 goto missing_python
 
 :run_dot_venv
->>"%LAUNCH_LOG%" echo Python: %PROJECT_ROOT%.venv\Scripts\python.exe
-"%PROJECT_ROOT%.venv\Scripts\python.exe" "%SCRIPT%" --project-root "%PROJECT_ROOT%" --interactive
+>>"%LAUNCH_LOG%" echo Python: %PROJECT_ROOT%\.venv\Scripts\python.exe
+"%PROJECT_ROOT%\.venv\Scripts\python.exe" "%SCRIPT%" --project-root "%PROJECT_ROOT%" --interactive
 set "EXIT_CODE=%errorlevel%"
 goto finished
 
 :run_venv
->>"%LAUNCH_LOG%" echo Python: %PROJECT_ROOT%venv\Scripts\python.exe
-"%PROJECT_ROOT%venv\Scripts\python.exe" "%SCRIPT%" --project-root "%PROJECT_ROOT%" --interactive
+>>"%LAUNCH_LOG%" echo Python: %PROJECT_ROOT%\venv\Scripts\python.exe
+"%PROJECT_ROOT%\venv\Scripts\python.exe" "%SCRIPT%" --project-root "%PROJECT_ROOT%" --interactive
 set "EXIT_CODE=%errorlevel%"
 goto finished
 
 :run_bundled_python
->>"%LAUNCH_LOG%" echo Python: %PROJECT_ROOT%python\python.exe
-"%PROJECT_ROOT%python\python.exe" "%SCRIPT%" --project-root "%PROJECT_ROOT%" --interactive
+>>"%LAUNCH_LOG%" echo Python: %PROJECT_ROOT%\python\python.exe
+"%PROJECT_ROOT%\python\python.exe" "%SCRIPT%" --project-root "%PROJECT_ROOT%" --interactive
 set "EXIT_CODE=%errorlevel%"
 goto finished
 
@@ -71,7 +72,7 @@ goto finished
 echo ERROR: The database transfer tool is missing:
 echo   %SCRIPT%
 echo.
-echo Extract the complete v127 changed-files package into the current project
+echo Extract the complete v128 changed-files package into the current project
 echo before running this BAT again.
 >>"%LAUNCH_LOG%" echo ERROR: Missing transfer tool: %SCRIPT%
 set "EXIT_CODE=1"
