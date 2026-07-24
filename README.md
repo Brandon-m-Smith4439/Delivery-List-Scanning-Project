@@ -1,6 +1,8 @@
 # Delivery List Scanner
 
-Current maintained release: **v130**. SQLite remains the active/default backend.
+Current maintained release: **v131**. SQLite remains the active/default backend.
+
+v131 fixes the floor transfer false-positive that treated the maintained route-membership repair as lost data. When startup merges duplicate receiving-stage copies of the same logical order item, the transfer now allows the lower raw `line_items` count only after verifying every removed row has the maintained merge audit, remains represented by an equivalent receiving row, and retains at least the same quantity and scanned progress. Staging, outbound, unaudited, or quantity-reducing removals still fail and roll back.
 
 v130 completes the canonical v096 schema before running the v097 production migration on older floor databases. This safely creates missing support tables such as `system_metadata` and adds any missing late-v096 columns without replacing existing rows, fixing the transfer failure that occurred after the main migrations when startup tried to read a table absent from early development databases.
 

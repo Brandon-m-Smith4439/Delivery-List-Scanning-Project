@@ -1,3 +1,15 @@
+## v131 - Audited Route-Consolidation Preservation Validation
+
+- Fixed floor database transfer validation stopping after a successful migration because `line_items` decreased from 15,096 to 15,068.
+- Recognizes the maintained startup repair that merges obsolete duplicate receiving-stage route copies into one current destination row.
+- Allows a lower raw `line_items` count only when every removed row is a receiving-stage row and has an explicit `merge_line_item_reference` audit record.
+- Verifies an equivalent logical line item still exists for the same delivery date and barcode/source identity.
+- Verifies the retained row has at least the same required quantity and scanned progress as every consolidated row.
+- Continues to reject any missing Staging or Outbound row, unaudited deletion, missing logical item, reduced quantity, reduced scan progress, missing table, integrity error, or foreign-key violation.
+- Records the number of safely consolidated rows and the semantic validation result in `transfer-report.json`.
+- Preserves verified backups, failed-copy retention, and automatic restoration of the previous current-project database on any real validation failure.
+- Advanced browser asset cache keys to v131.
+
 ## v130 - Complete Legacy v096 Schema Before Migration
 
 - Fixed floor database upgrades reaching the current schema version and then failing during startup with `no such table: system_metadata`.

@@ -12,7 +12,7 @@ The transfer is a **database replacement and schema upgrade**, not a merge of tw
 4. Places a snapshot of the old floor database at the current project's configured SQLite path.
 5. Runs the current app's maintained `delivery_store.py` initialization and numbered migrations.
 6. Runs SQLite integrity and foreign-key checks.
-7. Confirms that tables from the old database still exist and that their record counts did not decrease.
+7. Confirms that tables from the old database still exist. Raw record counts must not decrease except for audited duplicate receiving-route line items that the maintained startup repair safely consolidates.
 8. Writes a JSON report and all backups under `data\backups\floor-database-transfer-<timestamp>`.
 
 The transfer preserves the complete floor database, including delivery lists, line items, scan quantities and history, users, permissions, racks, rack assignments, bays, bay assignments, import history, settings, and audit records that exist in the selected database.
@@ -65,7 +65,7 @@ Check these areas before treating the new copy as the floor production copy:
 - Rush, remake, route, and manual-edit state is retained.
 - The Admin import history is present.
 
-The transfer report lists before-and-after row counts for every pre-existing application table.
+The transfer report lists before-and-after row counts for every pre-existing application table. When duplicate receiving-route copies are consolidated, the `line_items` entry also records the consolidated-row count and the semantic preservation check.
 
 ## Automatic recovery behavior
 
@@ -86,3 +86,18 @@ The current migration system can baseline and upgrade the maintained v096-compat
 Some early floor databases contain the main scanner tables but predate later v096 support tables and fields. Before the v097 production migration rebuilds constrained tables, the transfer now reruns the maintained v096 schema method in an idempotent mode. It creates only missing support tables such as `system_metadata`, adds only missing compatibility columns, and leaves every existing row in place.
 
 This specifically fixes the observed sequence where migration 002 and migration 003 completed, but normal startup then failed while reading `system_metadata`. The original floor database remains untouched, and the guarded target replacement is still rolled back automatically if any later validation fails.
+## Audited receiving-route consolidation in v131
+
+Older floor databases can contain more than one receiving-stage copy of the same logical order item because customer route rules changed over time. During current startup, `repair_route_stage_memberships_if_needed` keeps the correct receiving destination and merges the obsolete receiving copies. This can make the raw `line_items` count smaller even though the operational item, quantity, and scan progress are preserved.
+
+The transfer no longer treats that specific maintained repair as automatic data loss. A decrease is accepted only when all of these checks pass:
+
+- every removed row belonged to a receiving stage, never Staging or Outbound;
+- every removed line-item ID appears in a `merge_line_item_reference` audit record;
+- an equivalent row remains for the same delivery date and barcode/source identity;
+- the remaining row keeps at least the same quantity;
+- the remaining row keeps at least the same scanned quantity; and
+- all normal table, integrity, foreign-key, and schema-version checks still pass.
+
+Any unexplained removal still fails the transfer and restores the previous current-project database.
+

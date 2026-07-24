@@ -65,7 +65,7 @@ class TransferReport:
     expected_schema_version: int
     source_snapshot: dict[str, Any]
     upgraded_snapshot: dict[str, Any]
-    preserved_table_counts: dict[str, dict[str, int]]
+    preserved_table_counts: dict[str, dict[str, Any]]
     status: str
     message: str
 
@@ -255,6 +255,200 @@ def table_counts(connection: sqlite3.Connection) -> dict[str, int]:
     return result
 
 
+def table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    """Return the current columns for one SQLite table."""
+    return {str(row["name"]) for row in connection.execute(
+        f"PRAGMA table_info({quote_identifier(table)})"
+    ).fetchall()}
+
+
+def selectable_column(
+    table_alias: str, columns: set[str], column: str, output_name: str, default_sql: str = "''"
+) -> str:
+    """Build a SELECT expression that tolerates older optional columns."""
+    if column in columns:
+        return f"{table_alias}.{quote_identifier(column)} AS {quote_identifier(output_name)}"
+    return f"{default_sql} AS {quote_identifier(output_name)}"
+
+
+def line_item_preservation_rows(path: Path) -> dict[str, dict[str, Any]]:
+    """Read the stable line-item identity fields used by transfer validation.
+
+    Early floor databases do not all have the same optional columns, so this
+    reader selects only columns that exist and supplies safe defaults for the
+    rest. The resulting records are read-only validation data.
+    """
+    connection = connect_read_only(path)
+    try:
+        tables = set(user_tables(connection))
+        if "line_items" not in tables or "delivery_lists" not in tables:
+            return {}
+        line_columns = table_columns(connection, "line_items")
+        list_columns = table_columns(connection, "delivery_lists")
+        required_line = {"id", "list_id", "order_no", "item_no", "qty", "scanned_qty"}
+        required_list = {"id", "delivery_date", "stage"}
+        if not required_line.issubset(line_columns) or not required_list.issubset(list_columns):
+            return {}
+
+        expressions = [
+            selectable_column("li", line_columns, "id", "line_id"),
+            selectable_column("li", line_columns, "list_id", "list_id"),
+            selectable_column("li", line_columns, "source_id", "source_id"),
+            selectable_column("li", line_columns, "barcode", "barcode"),
+            selectable_column("li", line_columns, "order_no", "order_no"),
+            selectable_column("li", line_columns, "item_no", "item_no"),
+            selectable_column("li", line_columns, "job", "job"),
+            selectable_column("li", line_columns, "customer", "customer"),
+            selectable_column("li", line_columns, "qty", "qty", "0"),
+            selectable_column("li", line_columns, "scanned_qty", "scanned_qty", "0"),
+            selectable_column("dl", list_columns, "delivery_date", "delivery_date"),
+            selectable_column("dl", list_columns, "stage", "stage"),
+            selectable_column("dl", list_columns, "scanner", "scanner"),
+        ]
+        rows = connection.execute(
+            "SELECT " + ", ".join(expressions)
+            + " FROM line_items li LEFT JOIN delivery_lists dl ON dl.id = li.list_id"
+        ).fetchall()
+        return {str(row["line_id"]): dict(row) for row in rows}
+    finally:
+        connection.close()
+
+
+def stage_family(value: Any) -> str:
+    """Reduce a stage label to the three route-copy families used by the app."""
+    text = str(value or "").strip().lower()
+    if "staging" in text:
+        return "staging"
+    if "outbound" in text:
+        return "outbound"
+    return "receiving"
+
+
+def logical_line_item_key(record: dict[str, Any]) -> tuple[str, str, str]:
+    """Return a route-copy-independent logical identity for one line item."""
+    source_token = str(record.get("barcode") or "").strip()
+    if not source_token:
+        source_token = str(record.get("source_id") or "").strip()
+    if not source_token:
+        source_token = "|".join(
+            str(record.get(name) or "").strip()
+            for name in ("order_no", "item_no", "job", "customer")
+        )
+    return (
+        str(record.get("delivery_date") or "").strip(),
+        source_token,
+        stage_family(record.get("stage")),
+    )
+
+
+def merged_line_item_ids(path: Path) -> set[str]:
+    """Read source IDs recorded by the maintained route-duplicate merge audit."""
+    connection = connect_read_only(path)
+    try:
+        if "audit_events" not in set(user_tables(connection)):
+            return set()
+        columns = table_columns(connection, "audit_events")
+        if not {"action", "payload_json"}.issubset(columns):
+            return set()
+        rows = connection.execute(
+            "SELECT payload_json FROM audit_events WHERE action = ?",
+            ("merge_line_item_reference",),
+        ).fetchall()
+        merged: set[str] = set()
+        for row in rows:
+            try:
+                payload = json.loads(str(row["payload_json"] or "{}"))
+            except json.JSONDecodeError:
+                continue
+            source_id = str(payload.get("sourceLineItemId") or "").strip()
+            if source_id:
+                merged.add(source_id)
+        return merged
+    finally:
+        connection.close()
+
+
+def validate_line_item_consolidation(source_path: Path, upgraded_path: Path) -> dict[str, Any]:
+    """Validate an intentional reduction caused by route-copy consolidation.
+
+    Current startup repairs can merge duplicate receiving-stage copies of the
+    same logical item. A raw row-count comparison treats that safe repair as
+    data loss. This check allows the reduction only when every removed row is a
+    receiving-stage duplicate, every removal has the maintained merge audit,
+    and an equivalent logical row remains with at least the same quantity and
+    scanned progress.
+    """
+    before = line_item_preservation_rows(source_path)
+    after = line_item_preservation_rows(upgraded_path)
+    if not before or not after:
+        raise TransferError(
+            "Line-item counts decreased, but the transfer could not read enough legacy "
+            "identity data to prove that the removed rows were safe route duplicates."
+        )
+
+    removed_ids = sorted(set(before) - set(after))
+    if not removed_ids:
+        raise TransferError(
+            "Line-item counts decreased without identifiable removed line-item IDs."
+        )
+
+    non_receiving = [
+        line_id for line_id in removed_ids
+        if stage_family(before[line_id].get("stage")) != "receiving"
+    ]
+    if non_receiving:
+        raise TransferError(
+            "Line-item preservation failed because staging or outbound rows disappeared: "
+            + ", ".join(non_receiving[:10])
+        )
+
+    audited_merges = merged_line_item_ids(upgraded_path)
+    unaudited = [line_id for line_id in removed_ids if line_id not in audited_merges]
+    if unaudited:
+        raise TransferError(
+            "Line-item preservation failed because removed rows were not recorded by the "
+            "maintained route-duplicate merge audit: " + ", ".join(unaudited[:10])
+        )
+
+    after_groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for record in after.values():
+        after_groups.setdefault(logical_line_item_key(record), []).append(record)
+
+    missing_logical: list[str] = []
+    quantity_regressions: list[str] = []
+    for line_id in removed_ids:
+        source_record = before[line_id]
+        candidates = after_groups.get(logical_line_item_key(source_record), [])
+        if not candidates:
+            missing_logical.append(line_id)
+            continue
+        old_qty = int(source_record.get("qty") or 0)
+        old_scanned = int(source_record.get("scanned_qty") or 0)
+        max_qty = max(int(record.get("qty") or 0) for record in candidates)
+        max_scanned = max(int(record.get("scanned_qty") or 0) for record in candidates)
+        if max_qty < old_qty or max_scanned < old_scanned:
+            quantity_regressions.append(
+                f"{line_id} (qty {old_qty}->{max_qty}, scanned {old_scanned}->{max_scanned})"
+            )
+
+    if missing_logical:
+        raise TransferError(
+            "Line-item preservation failed because no equivalent receiving row remained for: "
+            + ", ".join(missing_logical[:10])
+        )
+    if quantity_regressions:
+        raise TransferError(
+            "Line-item preservation failed because consolidated quantities or scan progress decreased: "
+            + "; ".join(quantity_regressions[:10])
+        )
+
+    return {
+        "consolidated_rows": len(removed_ids),
+        "audited_merge_rows": len(removed_ids),
+        "validation": "audited receiving-route duplicates consolidated; logical quantities and scan progress preserved",
+    }
+
+
 def schema_version(connection: sqlite3.Connection) -> int:
     exists = connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
@@ -402,9 +596,13 @@ def run_current_migrations(project_root: Path, target_path: Path) -> tuple[list[
 
 
 def compare_preserved_counts(
-    source_counts: dict[str, int], upgraded_counts: dict[str, int]
-) -> dict[str, dict[str, int]]:
-    result: dict[str, dict[str, int]] = {}
+    source_counts: dict[str, int],
+    upgraded_counts: dict[str, int],
+    *,
+    source_path: Path | None = None,
+    upgraded_path: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
     missing_tables: list[str] = []
     decreased: list[str] = []
     for table, old_count in sorted(source_counts.items()):
@@ -415,8 +613,13 @@ def compare_preserved_counts(
             continue
         new_count = int(upgraded_counts[table])
         result[table] = {"before": int(old_count), "after": new_count}
-        if new_count < int(old_count):
-            decreased.append(f"{table} ({old_count} -> {new_count})")
+        if new_count >= int(old_count):
+            continue
+        if table == "line_items" and source_path is not None and upgraded_path is not None:
+            consolidation = validate_line_item_consolidation(source_path, upgraded_path)
+            result[table].update(consolidation)
+            continue
+        decreased.append(f"{table} ({old_count} -> {new_count})")
     if missing_tables:
         raise TransferError(
             "The upgraded database is missing table(s) that existed in the old floor database: "
@@ -575,7 +778,16 @@ def run_transfer(args: argparse.Namespace) -> Path:
         preserved = compare_preserved_counts(
             source_snapshot.table_counts,
             upgraded_snapshot.table_counts,
+            source_path=source_backup,
+            upgraded_path=target,
         )
+        line_item_result = preserved.get("line_items", {})
+        if line_item_result.get("consolidated_rows"):
+            print(
+                "Validated intentional receiving-route consolidation: "
+                f"{line_item_result['consolidated_rows']} duplicate line-item row(s) merged "
+                "with audit records and scan progress preserved."
+            )
         report.upgraded_snapshot = asdict(upgraded_snapshot)
         report.preserved_table_counts = preserved
         report.status = "success"
