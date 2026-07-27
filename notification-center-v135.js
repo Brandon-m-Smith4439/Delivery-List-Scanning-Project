@@ -17,10 +17,13 @@
   let summary = null;
   let toast = null;
   let toastTimer = 0;
+  let rejectToast = null;
+  let rejectToastTimer = 0;
   let notifications = [];
   let username = "anonymous";
   let pollTimer = 0;
   let newestAutomationId = 0;
+  let newestRejectId = 0;
   let currentPromptListId = "";
   let currentFlags = null;
   const flagsByList = new Map();
@@ -68,8 +71,12 @@
     return String(item?.details?.source || "").trim().toLowerCase() === "sql-delivery-automation";
   }
 
+  function isInternalRejectNotification(item) {
+    return String(item?.details?.source || "").trim().toLowerCase() === "internal-reject";
+  }
+
   function storageKey() {
-    return `dls.notification-center.last-seen.v135.${username.toLowerCase()}`;
+    return `dls.notification-center.last-seen.v138.${username.toLowerCase()}`;
   }
 
   function lastSeenId() {
@@ -121,6 +128,13 @@
     toast.setAttribute("role", "status");
     toast.setAttribute("aria-live", "polite");
     document.body.append(toast);
+
+    rejectToast = document.createElement("aside");
+    rejectToast.className = "internal-reject-notification-toast";
+    rejectToast.hidden = true;
+    rejectToast.setAttribute("role", "alert");
+    rejectToast.setAttribute("aria-live", "assertive");
+    document.body.append(rejectToast);
 
     button.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -185,7 +199,11 @@
       const id = Number(item.id || 0);
       const type = String(item.type || "notice").toLowerCase();
       const unreadClass = id > lastSeenId() ? " is-unread" : "";
-      const action = isAutomationNotification(item) ? "Open saved import run" : "View details";
+      const action = isAutomationNotification(item)
+        ? "Open saved import run"
+        : isInternalRejectNotification(item)
+          ? "Open reject tracking"
+          : "View details";
       return `
         <button class="notification-center-item${unreadClass}" type="button" data-notification-id="${id}" data-type="${escapeHtml(type)}">
           <span class="notification-center-type-icon" aria-hidden="true">${typeSymbol(type)}</span>
@@ -229,6 +247,14 @@
 
   async function openNotification(item) {
     await markNotification(Number(item.id || 0));
+    if (isInternalRejectNotification(item)) {
+      closePanel();
+      dismissRejectToast();
+      document.dispatchEvent(new CustomEvent("dls:open-internal-reject-notification", {
+        detail: { notification: item },
+      }));
+      return;
+    }
     if (!isAutomationNotification(item)) return;
     closePanel();
     dismissToast();
@@ -244,6 +270,40 @@
     window.setTimeout(() => {
       if (!toast.classList.contains("is-visible")) toast.hidden = true;
     }, 180);
+  }
+
+  function dismissRejectToast() {
+    clearTimeout(rejectToastTimer);
+    if (!rejectToast) return;
+    rejectToast.classList.remove("is-visible");
+    window.setTimeout(() => {
+      if (!rejectToast.classList.contains("is-visible")) rejectToast.hidden = true;
+    }, 180);
+  }
+
+  function showInternalRejectToast(item) {
+    if (!rejectToast || !item) return;
+    const details = item.details || {};
+    rejectToast.innerHTML = `
+      <span class="internal-reject-toast-icon" aria-hidden="true">IR</span>
+      <span class="internal-reject-toast-copy">
+        <small>Internal reject reported</small>
+        <strong>${escapeHtml(item.title || "Internal reject logged")}</strong>
+        <span>${escapeHtml(item.message || "A piece was rejected and restarted.")}</span>
+        <b>Order ${escapeHtml(details.order || "-")} · Item ${escapeHtml(details.item || "-")} · ${escapeHtml(details.location || "Location not specified")}</b>
+      </span>
+      <button class="internal-reject-toast-open" type="button">View</button>
+      <button class="internal-reject-toast-ack" type="button">Acknowledge</button>`;
+    rejectToast.querySelector(".internal-reject-toast-open")?.addEventListener("click", () => openNotification(item));
+    rejectToast.querySelector(".internal-reject-toast-ack")?.addEventListener("click", async () => {
+      await markNotification(Number(item.id || 0));
+      dismissRejectToast();
+    });
+    rejectToast.hidden = false;
+    requestAnimationFrame(() => rejectToast.classList.add("is-visible"));
+    clearTimeout(rejectToastTimer);
+    rejectToastTimer = window.setTimeout(dismissRejectToast, 30000);
+    window.playAppSound?.("notification", { force: true });
   }
 
   function showAutomationToast(item) {
@@ -292,6 +352,16 @@
           }
         }
       }
+      const newestReject = notifications.filter(isInternalRejectNotification).reduce(
+        (candidate, item) => Number(item.id || 0) > Number(candidate?.id || 0) ? item : candidate,
+        null,
+      );
+      const nextRejectId = Number(newestReject?.id || 0);
+      if (nextRejectId > newestRejectId) {
+        const shouldToastReject = newestRejectId > 0;
+        newestRejectId = nextRejectId;
+        if (shouldToastReject && nextRejectId > lastSeenId()) showInternalRejectToast(newestReject);
+      }
       if (options.markRead) await markAllRead();
       else renderNotifications();
     } catch (error) {
@@ -338,7 +408,7 @@
     });
     currentFlags = flags;
     if (options.render !== false && typeof renderScanPage === "function") renderScanPage();
-    renderUpdateBanner(flags);
+    renderReviewControl(flags);
     document.dispatchEvent(new CustomEvent("dls:line-update-flags-applied", { detail: flags }));
   }
 
@@ -365,45 +435,48 @@
     return request;
   }
 
-  function bannerHost() {
-    return document.querySelector("#scanPage .scan-filter-toolbar") || document.querySelector("#scanPage .list-toolbar");
+  function reviewControlElements() {
+    return {
+      control: document.getElementById("scanUpdateReviewControl"),
+      summary: document.getElementById("scanUpdateReviewSummary"),
+      review: document.getElementById("scanUpdateReviewBtn"),
+      acknowledge: document.getElementById("scanUpdateMarkReviewedBtn"),
+    };
   }
 
-  function ensureUpdateBanner() {
-    let banner = document.getElementById("userLineUpdateBannerV135");
-    if (banner?.isConnected) return banner;
-    const toolbar = bannerHost();
-    if (!toolbar) return null;
-    banner = document.createElement("section");
-    banner.id = "userLineUpdateBannerV135";
-    banner.className = "user-line-update-banner v135";
-    banner.hidden = true;
-    toolbar.insertAdjacentElement("afterend", banner);
-    return banner;
-  }
-
-  function renderUpdateBanner(flags = currentFlags) {
-    const banner = ensureUpdateBanner();
-    if (!banner) return;
-    if (!flags || !flags.pendingLineCount || String(flags.listId) !== String(state?.activeListId || "")) {
-      banner.hidden = true;
+  function renderReviewControl(flags = currentFlags) {
+    const elements = reviewControlElements();
+    const activeListId = String(state?.activeListId || "");
+    if (!elements.control) return;
+    if (!flags || !flags.pendingLineCount || String(flags.listId) !== activeListId) {
+      elements.control.hidden = true;
       return;
     }
-    const reviewed = reviewedSignatureByList.get(flags.listId) === flags.signature && Boolean(flags.signature);
+
+    const updatedFilterActive = Boolean(state?.activeFilters?.has?.("updated"));
+    const reviewComplete = reviewedSignatureByList.get(flags.listId) === flags.signature && Boolean(flags.signature);
     const parts = [];
     if (flags.newLineCount) parts.push(`${flags.newLineCount} new`);
     if (flags.updatedLineCount) parts.push(`${flags.updatedLineCount} updated`);
-    banner.innerHTML = `
-      <span class="user-line-update-banner-icon" aria-hidden="true">!</span>
-      <span class="user-line-update-banner-copy">
-        <strong>${flags.pendingLineCount} line update${flags.pendingLineCount === 1 ? "" : "s"} waiting for your review</strong>
-        <span>${escapeHtml(parts.join(" and ") || "Delivery-list changes")}. This status is personal to your account.</span>
-      </span>
-      <button class="user-line-update-review" type="button">Review updates</button>
-      <button class="user-line-update-ack" type="button" ${reviewed ? "" : "disabled"}>Mark reviewed</button>`;
-    banner.hidden = false;
-    banner.querySelector(".user-line-update-review")?.addEventListener("click", () => reviewUpdates(flags));
-    banner.querySelector(".user-line-update-ack")?.addEventListener("click", () => acknowledgeUpdates(flags));
+    if (elements.summary) {
+      elements.summary.textContent = `${parts.join(" · ") || `${flags.pendingLineCount} changed`} line${flags.pendingLineCount === 1 ? "" : "s"} for your account`;
+    }
+    if (elements.review) {
+      elements.review.textContent = updatedFilterActive ? "Updates Shown" : "Review Updates";
+      elements.review.disabled = updatedFilterActive;
+      elements.review.onclick = () => reviewUpdates(flags);
+    }
+    if (elements.acknowledge) {
+      elements.acknowledge.hidden = !updatedFilterActive;
+      elements.acknowledge.disabled = !updatedFilterActive || !reviewComplete;
+      elements.acknowledge.textContent = "Mark Reviewed";
+      elements.acknowledge.title = reviewComplete
+        ? "Clear the displayed New/Updated status for your account"
+        : "Use Review Updates first so the changed lines are displayed";
+      elements.acknowledge.onclick = () => acknowledgeUpdates(flags);
+    }
+    elements.control.classList.toggle("is-reviewing", updatedFilterActive);
+    elements.control.hidden = false;
   }
 
   function closeUpdatePrompt() {
@@ -424,9 +497,9 @@
         <button class="line-update-review-close" type="button" aria-label="Close">×</button>
         <span class="line-update-review-icon" aria-hidden="true">!</span>
         <div>
-          <small>Delivery list changed</small>
-          <h2 id="lineUpdatePromptTitle">${flags.pendingLineCount} new or updated line${flags.pendingLineCount === 1 ? "" : "s"}</h2>
-          <p>Review the highlighted lines, then mark them reviewed when you are finished.</p>
+          <small>Delivery list updated</small>
+          <h2 id="lineUpdatePromptTitle">${flags.pendingLineCount} changed line${flags.pendingLineCount === 1 ? "" : "s"} need review</h2>
+          <p>${flags.newLineCount ? `${flags.newLineCount} new` : ""}${flags.newLineCount && flags.updatedLineCount ? " · " : ""}${flags.updatedLineCount ? `${flags.updatedLineCount} updated` : ""}. Review them now, then use Mark Reviewed beside Filters.</p>
         </div>
         <button class="line-update-review-primary" type="button">Review now</button>
       </section>`;
@@ -446,7 +519,7 @@
     }
     reviewedSignatureByList.set(flags.listId, flags.signature);
     if (typeof renderScanPage === "function") renderScanPage();
-    renderUpdateBanner(flags);
+    renderReviewControl(flags);
     document.getElementById("listPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -456,8 +529,7 @@
       if (typeof showFloatingNotice === "function") showFloatingNotice("Review the updated lines before marking them reviewed.", "notice");
       return;
     }
-    const banner = ensureUpdateBanner();
-    const buttonElement = banner?.querySelector(".user-line-update-ack");
+    const buttonElement = document.getElementById("scanUpdateMarkReviewedBtn");
     if (buttonElement) {
       buttonElement.disabled = true;
       buttonElement.textContent = "Saving...";
@@ -479,6 +551,7 @@
       }
       if (typeof renderScanPage === "function") renderScanPage();
       if (typeof showSaveConfirmation === "function") showSaveConfirmation("The new and updated status is cleared for your account on this list.");
+      renderReviewControl(refreshed);
       document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", { detail: { listId: flags.listId } }));
     } catch (error) {
       if (buttonElement) {
@@ -490,6 +563,7 @@
   }
 
   async function initialize() {
+    document.getElementById("userLineUpdateBannerV135")?.remove();
     ensureUi();
     if (!host) {
       window.setTimeout(initialize, 500);
@@ -526,8 +600,12 @@
     review: reviewUpdates,
     acknowledge: acknowledgeUpdates,
     getCurrent: () => currentFlags,
+    getCached: (listId) => flagsByList.get(String(listId || "")) || null,
     clearCache: (listId = "") => listId ? flagsByList.delete(String(listId)) : flagsByList.clear(),
   };
+
+  document.addEventListener("dls:scan-filters-changed", () => renderReviewControl(currentFlags));
+  document.addEventListener("dls:user-line-updates-reviewed", () => renderReviewControl(currentFlags));
 
   document.addEventListener("dls:delivery-list-catalog-synced", () => {
     flagsByList.clear();

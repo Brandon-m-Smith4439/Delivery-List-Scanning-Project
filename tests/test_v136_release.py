@@ -17,10 +17,10 @@ def test_v136_cache_markers_and_release_docs():
     html = read("index.html")
     readme = read("README.md")
     changelog = read("README_CHANGELOG.md")
-    assert html.count("20260724-v136") >= 3
-    assert "Current maintained release: **v136**" in readme
-    assert changelog.startswith("## v136 - Interface Stability")
-    assert (ROOT / "docs" / "V136_INTERFACE_STABILITY.md").is_file()
+    assert html.count("20260727-v138") >= 3
+    assert "Current maintained release: **v138**" in readme
+    assert "## v136 - Interface Stability" in changelog
+    assert (ROOT / "docs" / "V136_INTERFACE_STABILITY.md").is_file() or (ROOT / "docs" / "V137_INTERFACE_AND_WORKFLOW_VERIFICATION.md").is_file()
 
 
 def test_rack_modal_uses_global_status_helpers_and_no_duplicate_local_wrappers():

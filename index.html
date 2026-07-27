@@ -10,9 +10,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="styles.css?v=20260724-v136">
-    <link rel="stylesheet" href="delivery-automation-ui.css?v=20260724-v136">
-    <link rel="stylesheet" href="notification-center-ui.css?v=20260724-v136">
+    <link rel="stylesheet" href="styles.css?v=20260727-v143">
+    <link rel="stylesheet" href="delivery-automation-ui.css?v=20260727-v143">
+    <link rel="stylesheet" href="notification-center-ui.css?v=20260727-v143">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <!-- SECTION: Authentication and password reset -->
@@ -325,9 +325,14 @@
               <details class="scan-filter-drawer" id="scanFilterDrawer">
                 <summary aria-label="Open delivery-list filters">
                   <span class="filter-icon" aria-hidden="true"></span>
-                  <span>Filters</span>
-                  <strong class="scan-filter-priority-state is-clear" id="scanFilterPriorityState" aria-label="No open remakes or rushes">&#10003;</strong>
-                  <b id="scanActiveFilterCount">0</b>
+                  <span class="scan-filter-summary-label">Filters</span>
+                  <span class="scan-filter-glance" aria-label="Priority filter summary">
+                    <span class="scan-filter-glance-badge is-remake" id="scanFilterRemakeBadge" title="Remake pieces"><i>RM</i><b>0</b></span>
+                    <span class="scan-filter-glance-badge is-rush" id="scanFilterRushBadge" title="Rush pieces"><i>R</i><b>0</b></span>
+                    <span class="scan-filter-glance-badge is-updated" id="scanFilterUpdatedBadge" title="New or updated pieces"><i>NEW</i><b>0</b></span>
+                    <span class="scan-filter-glance-badge is-reject" id="scanFilterRejectBadge" title="Internal reject pieces"><i>IR</i><b>0</b></span>
+                  </span>
+                  <strong class="scan-filter-priority-state is-clear" id="scanFilterPriorityState" aria-label="No open remakes or rushes" hidden>&#10003;</strong>
                 </summary>
                 <div class="scan-filter-drawer-panel">
                   <header class="scan-filter-panel-header">
@@ -365,6 +370,7 @@
                     <div class="scan-filter-options">
                       <button class="tab priority-tab" data-filter="remakes" type="button">Remakes <span id="countRemakes">(0)</span></button>
                       <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">(0)</span></button>
+                      <button class="tab priority-tab internal-reject-filter" data-filter="internal-rejects" type="button">Internal Rejects <span id="countInternalRejects">(0)</span></button>
                       <button class="tab" data-filter="updated" type="button">New/Updated <span id="countUpdated">(0)</span></button>
                       <button class="tab" data-filter="errors" type="button">Errors <span id="countErrors">(0)</span></button>
                     </div>
@@ -398,6 +404,12 @@
               <div class="scan-active-filter-bar" id="scanActiveFilterBar" aria-live="polite">
                 <span class="scan-active-filter-empty">No filters applied</span>
                 <div class="scan-active-filter-chips" id="scanActiveFilterChips"></div>
+              </div>
+              <div class="scan-update-review-control" id="scanUpdateReviewControl" hidden aria-live="polite">
+                <span class="scan-update-review-icon" aria-hidden="true"></span>
+                <span class="scan-update-review-copy" id="scanUpdateReviewSummary">New or updated lines are ready to review.</span>
+                <button class="scan-update-review-button" id="scanUpdateReviewBtn" type="button">Review</button>
+                <button class="scan-update-reviewed-button" id="scanUpdateMarkReviewedBtn" type="button" disabled>Mark Reviewed</button>
               </div>
             </div>
 
@@ -661,29 +673,64 @@
 
       <!-- SECTION: Internal reject tracking and process restart history -->
       <section class="page-view rejects-page" id="rejectsPage" hidden>
-        <div class="page-heading rejects-heading">
-          <div>
-            <span class="page-eyebrow">Quality and process recovery</span>
-            <h1>Internal Reject Tracking</h1>
-            <p>Log broken glass, restart the affected piece through production, and keep a searchable reject history.</p>
-          </div>
-          <button id="rejectLogOpenBtn" type="button" data-permission-any="scan,manual_adjust,resolve_exceptions">Log Internal Reject</button>
-        </div>
+        <section class="panel reject-workspace-v142 reject-workspace-v143">
+          <header class="reject-workspace-header-v142 reject-workspace-header-v143">
+            <div class="reject-workspace-title-v142 reject-workspace-title-v143">
+              <span class="reject-workspace-icon-v142 reject-workspace-icon-v143" aria-hidden="true">IR</span>
+              <div>
+                <span class="page-eyebrow">Quality recovery</span>
+                <h1>Internal Rejects</h1>
+                <p>Log a broken piece, restart its workflow, and review reject history by incident date.</p>
+              </div>
+            </div>
+            <div class="reject-header-actions-v143">
+              <button id="rejectLogOpenBtn" class="primary reject-log-open-button" type="button" data-permission-any="scan,manual_adjust,resolve_exceptions">
+                <span class="reject-log-open-icon" aria-hidden="true"></span>
+                <span>Log Internal Reject</span>
+              </button>
+              <div class="reject-header-utility-v143">
+                <button id="rejectRefreshBtn" class="secondary reject-refresh-button" type="button"><span class="reject-refresh-icon" aria-hidden="true"></span><span>Refresh</span></button>
+                <button id="rejectClearFiltersBtn" class="secondary reject-clear-filters" type="button" title="Clear reject filters"><span class="reject-clear-icon" aria-hidden="true"></span><span>Clear</span></button>
+              </div>
+            </div>
+          </header>
 
-        <section class="reject-summary-grid" id="rejectSummary"></section>
-
-        <section class="panel reject-history-panel">
-          <div class="reject-history-toolbar">
-            <label class="search-box">
+          <div class="reject-toolbar-v142 reject-toolbar-v143" aria-label="Reject history filters">
+            <label class="search-box reject-search-control">
               <span class="search-icon"></span>
-              <input id="rejectSearchInput" type="search" autocomplete="off" placeholder="Search order, item, customer, reason, or location...">
+              <input id="rejectSearchInput" type="search" autocomplete="off" placeholder="Search by order, item, reason, or machine...">
             </label>
-            <label><span>From</span><input id="rejectDateFrom" type="date"></label>
-            <label><span>Through</span><input id="rejectDateTo" type="date"></label>
-            <button id="rejectRefreshBtn" type="button">Refresh</button>
+
+            <label class="reject-filter-field reject-range-preset-field">
+              <span>Incident range</span>
+              <select id="rejectDatePreset">
+                <option value="all">All rejected dates</option>
+                <option value="today">Today</option>
+                <option value="7-days">Last 7 days</option>
+                <option value="30-days">Last 30 days</option>
+                <option value="custom">Custom range</option>
+              </select>
+            </label>
+
+            <label class="reject-filter-field"><span>From</span><input id="rejectDateFrom" type="date"></label>
+            <label class="reject-filter-field"><span>Through</span><input id="rejectDateTo" type="date"></label>
+
+            <label class="reject-filter-field reject-location-filter-field">
+              <span>Location</span>
+              <select id="rejectLocationFilter"><option value="">All locations</option></select>
+            </label>
           </div>
-          <div id="rejectPageStatus" class="reject-page-status" role="status" aria-live="polite">Reject history has not been loaded yet.</div>
-          <div id="rejectHistory" class="reject-history-list"></div>
+
+          <div id="rejectPageStatus" class="reject-page-status" role="status" aria-live="polite" hidden></div>
+
+          <section id="rejectSummaryBar" class="reject-summary-bar-v143" aria-label="Reject summary" aria-live="polite">
+            <article><span class="reject-summary-icon events" aria-hidden="true"></span><div><strong>0</strong><small>Total rejects</small></div></article>
+            <article><span class="reject-summary-icon locations" aria-hidden="true"></span><div><strong>0</strong><small>Machines / locations</small></div></article>
+            <article><span class="reject-summary-icon users" aria-hidden="true"></span><div><strong>0</strong><small>Users</small></div></article>
+            <article class="is-quantity"><span class="reject-summary-icon quantity" aria-hidden="true"></span><div><strong>0 pcs</strong><small>Total rejected quantity</small></div></article>
+          </section>
+
+          <div id="rejectHistory" class="reject-history-list reject-timeline-history-v143"></div>
         </section>
       </section>
 
@@ -798,39 +845,29 @@
             </div>
 
             <div class="bay-scanner-sticky-slot">
-              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v2 bay-scanner-panel-v105" aria-label="Indian Trail bay scanner">
-                <header class="bay-scanner-header-v105">
-                  <div class="bay-scanner-title-v105">
-                    <span class="bay-scanner-eyebrow-v105">Indian Trail operations</span>
+              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v2 bay-scanner-panel-v105 bay-scanner-panel-v137" aria-label="Indian Trail bay scanner">
+                <header class="bay-scanner-header-v105 bay-scanner-header-v137">
+                  <div class="bay-scanner-title-v105 bay-scanner-title-v137">
+                    <span class="bay-scanner-eyebrow-v105">Indian Trail receiving</span>
                     <h2>Bay Scanner</h2>
-                    <p>Add glass to a selected bay or remove it from its current bay.</p>
+                    <p>Add or remove glass in three clear steps.</p>
                   </div>
-                  <span class="bay-scanner-mode-summary-v105">
+                  <span class="bay-scanner-mode-summary-v105 bay-scanner-mode-summary-v137">
                     <i aria-hidden="true"></i>
+                    <span>Mode</span>
                     <b id="bayScannerModeSummary">Remove from bay</b>
                   </span>
                 </header>
 
-                <section class="progress-band bay-panel-route-band bay-panel-route-band-v2 bay-route-status-v105">
-                  <div class="progress-title bay-route-title-v105">
-                    <span class="cube-icon"></span>
-                    <div>
-                      <small>Live route progress</small>
-                      <strong>Indian Trail Route</strong>
-                    </div>
+                <section class="bay-route-status-v137" aria-label="Indian Trail route progress">
+                  <div class="bay-route-status-heading-v137">
+                    <span class="cube-icon" aria-hidden="true"></span>
+                    <div><small>Route progress</small><strong>Indian Trail</strong></div>
                   </div>
-                  <div class="bay-panel-route-mini" id="bayPanelRouteMini">
-                    <div class="bay-panel-route-node outbound">
-                      <small>Outbound</small>
-                      <strong>0/0</strong>
-                    </div>
-                    <button class="bay-panel-route-lane" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest">
-                      <span>0 pieces in transit</span>
-                    </button>
-                    <div class="bay-panel-route-node inbound">
-                      <small>Received</small>
-                      <strong>0/0</strong>
-                    </div>
+                  <div class="bay-panel-route-mini bay-panel-route-mini-v137" id="bayPanelRouteMini">
+                    <div class="bay-panel-route-node outbound"><small>Outbound</small><strong>0/0</strong></div>
+                    <button class="bay-panel-route-lane" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest"><span>0 pieces in transit</span></button>
+                    <div class="bay-panel-route-node inbound"><small>Received</small><strong>0/0</strong></div>
                     <div class="bay-dual-progress" data-bay-dual-progress>
                       <div class="bay-dual-progress-half is-outbound" role="progressbar" aria-label="Outbound completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i style="width:0%"></i></div>
                       <span class="bay-dual-progress-center" aria-hidden="true"><b>✦</b></span>
@@ -841,84 +878,56 @@
                   </div>
                 </section>
 
-                <form class="scan-form bay-scan-form bay-scan-command-form-v105" id="bayScanOutForm">
-                  <section class="bay-scan-workflow-v105" aria-label="Bay scan workflow">
-                    <div class="bay-workflow-step-v105 bay-action-step-v105">
-                      <span class="bay-workflow-number-v105">1</span>
-                      <div class="bay-workflow-copy-v105">
-                        <strong>Choose action</strong>
-                        <small>What should happen to the scanned piece?</small>
-                      </div>
-                      <div class="bay-scan-mode-card bay-scan-mode-card-v105">
+                <form class="scan-form bay-scan-form bay-scan-command-form-v105 bay-scan-command-form-v137" id="bayScanOutForm">
+                  <section class="bay-scan-workflow-v105 bay-scan-workflow-v137" aria-label="Bay scan workflow">
+                    <section class="bay-scan-step-card-v137 bay-action-step-v105">
+                      <header><span>1</span><div><strong>Choose the action</strong><small>Add to a selected bay or remove from the current bay.</small></div></header>
+                      <div class="bay-scan-mode-card bay-scan-mode-card-v105 bay-scan-mode-card-v137">
                         <label class="bay-mode-option is-remove">
                           <input id="bayScanRemoveMode" name="bayScanVisualMode" type="radio" value="remove" checked>
                           <span><strong>Remove</strong><small>Find current bay</small></span>
                         </label>
                         <label class="bay-mode-option is-add">
                           <input id="bayScanModeToggle" name="bayScanVisualMode" type="radio" value="add">
-                          <span><strong>Add</strong><small>Place into bay</small></span>
+                          <span><strong>Add</strong><small>Use target bay</small></span>
                         </label>
                       </div>
-                    </div>
+                    </section>
 
-                    <div class="bay-workflow-step-v105 bay-target-step-v105">
-                      <span class="bay-workflow-number-v105">2</span>
-                      <div class="bay-workflow-copy-v105">
-                        <strong>Target bay</strong>
-                        <small id="bayScannerTargetState">Current bay is found automatically in Remove mode.</small>
-                      </div>
-                      <div class="bay-add-row bay-target-row-v105">
+                    <section class="bay-scan-step-card-v137 bay-target-step-v105">
+                      <header><span>2</span><div><strong>Confirm the target bay</strong><small id="bayScannerTargetState">Remove mode finds the current bay automatically.</small></div></header>
+                      <div class="bay-add-row bay-target-row-v105 bay-target-row-v137">
                         <label class="bay-code-field">
-                          <span>Bay code</span>
-                          <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Click bay or type code">
+                          <span>Target bay code</span>
+                          <input id="bayScanBayInput" type="text" autocomplete="off" placeholder="Click a bay or enter its code">
                         </label>
                         <button class="bay-target-clear" id="bayTargetClearBtn" type="button">Clear</button>
                       </div>
-                    </div>
+                    </section>
 
-                    <div class="bay-workflow-step-v105 bay-barcode-step-v105">
-                      <span class="bay-workflow-number-v105">3</span>
-                      <div class="bay-workflow-copy-v105">
-                        <strong>Scan piece</strong>
-                        <small>Scan the barcode or enter it manually, then press Enter.</small>
-                      </div>
-                      <div class="bay-scan-input-row-v105">
-                        <div class="scan-input-wrap bay-command-scan-input-v105">
-                          <span class="barcode-icon"></span>
+                    <section class="bay-scan-step-card-v137 bay-barcode-step-v105">
+                      <header><span>3</span><div><strong>Scan the piece</strong><small>Scan the barcode or type it and press Enter.</small></div></header>
+                      <div class="bay-scan-input-row-v105 bay-scan-input-row-v137">
+                        <div class="scan-input-wrap bay-command-scan-input-v105 bay-command-scan-input-v137">
+                          <span class="barcode-icon" aria-hidden="true"></span>
                           <input id="bayScanOutInput" type="text" autocomplete="off" placeholder="Scan order to remove from bay...">
                         </div>
-                        <button class="bay-scan-submit-v105" type="submit">Submit Scan</button>
+                        <button class="bay-scan-submit-v105 bay-scan-submit-v137" type="submit">Submit Scan</button>
                       </div>
-                      <div class="bay-scan-utility-row-v105" aria-label="Bay scan undo and redo">
-                        <span>Correction tools</span>
-                        <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action">
-                          <span class="undo-icon"></span>
-                          <small>Undo</small>
-                        </button>
-                        <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action">
-                          <span class="redo-icon"></span>
-                          <small>Redo</small>
-                        </button>
+                      <div class="bay-scan-utility-row-v105 bay-scan-utility-row-v137" aria-label="Bay scan correction tools">
+                        <span>Correct last action</span>
+                        <button class="icon-button undo-redo-icon undo-icon-button" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action"><span class="undo-icon"></span><small>Undo</small></button>
+                        <button class="icon-button undo-redo-icon redo-icon-button" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action"><span class="redo-icon"></span><small>Redo</small></button>
                       </div>
-                    </div>
+                    </section>
                   </section>
 
-                  <details class="bay-manual-disclosure-v105">
-                    <summary>
-                      <span class="bay-manual-icon-v105" aria-hidden="true"></span>
-                      <span><strong>Manual entry</strong><small>Use order and item when a barcode is unavailable.</small></span>
-                      <i aria-hidden="true"></i>
-                    </summary>
-                    <section class="manual-scan-form bay-manual-card-v105">
-                      <div class="manual-scan-row bay-manual-row-v105">
-                        <label>
-                          <span>Order Nr.</span>
-                          <input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="231707" required>
-                        </label>
-                        <label>
-                          <span>Item Nr.</span>
-                          <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="001" required>
-                        </label>
+                  <details class="bay-manual-disclosure-v105 bay-manual-disclosure-v137">
+                    <summary><span class="bay-manual-icon-v105" aria-hidden="true"></span><span><strong>Manual entry</strong><small>Order and item when a barcode cannot scan</small></span><i aria-hidden="true"></i></summary>
+                    <section class="manual-scan-form bay-manual-card-v105 bay-manual-card-v137">
+                      <div class="manual-scan-row bay-manual-row-v105 bay-manual-row-v137">
+                        <label><span>Order number</span><input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="231707" required></label>
+                        <label><span>Item number</span><input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="001" required></label>
                         <input id="bayManualQtyInput" type="hidden" value="1">
                         <button id="bayManualSubmitBtn" type="button">Submit Manual Scan</button>
                       </div>
@@ -926,23 +935,16 @@
                   </details>
                 </form>
 
-                <section class="last-scan compact-scan-history bay-scan-history-v105">
-                  <header class="bay-scan-history-heading-v105">
-                    <div>
-                      <small>Latest activity</small>
-                      <h3>Bay Scan History</h3>
-                    </div>
+                <section class="last-scan compact-scan-history bay-scan-history-v105 bay-scan-history-v137">
+                  <header class="bay-scan-history-heading-v105 bay-scan-history-heading-v137">
+                    <div><small>Latest activity</small><h3>Last Bay Scan</h3></div>
                     <span class="bay-scan-status-v105" id="bayScanOutStatus">Waiting</span>
                     <button id="bayAllScansBtn" type="button">All Scans</button>
                   </header>
-                  <div class="last-card bay-last-card-v105" id="bayLastCard">
+                  <div class="last-card bay-last-card-v105 bay-last-card-v137" id="bayLastCard">
                     <div class="last-card-status"></div>
-                    <div class="bay-last-location-v105">
-                      <span>Current bay</span>
-                      <b id="bayLastBay">-</b>
-                      <strong id="bayLastTitle">No bay scans yet</strong>
-                    </div>
-                    <div class="bay-last-meta-v105">
+                    <div class="bay-last-location-v105"><span>Current bay</span><b id="bayLastBay">-</b><strong id="bayLastTitle">No bay scans yet</strong></div>
+                    <div class="bay-last-meta-v105 bay-last-meta-v137">
                       <span><small>Action</small><b id="bayLastAction">-</b></span>
                       <span><small>Order</small><b id="bayLastOrder">-</b></span>
                       <span><small>Time</small><b id="bayLastTime">-</b></span>
@@ -950,25 +952,10 @@
                     </div>
                   </div>
 
-                  <details class="bay-recent-disclosure-v105" open>
-                    <summary>
-                      <span><strong>Recent bay scans</strong><small>Quick confirmation of the latest actions</small></span>
-                      <b id="bayRecentScanCountLabel">Latest 1</b>
-                    </summary>
-                    <div class="recent-table-wrap compact bay-recent-table-wrap-v105">
-                      <table class="recent-table bay-recent-table-v105">
-                        <thead>
-                          <tr>
-                            <th>Action</th>
-                            <th>Order</th>
-                            <th>Current Bay</th>
-                            <th>Time</th>
-                            <th>Check</th>
-                            <th>Change Location</th>
-                          </tr>
-                        </thead>
-                        <tbody id="bayScanOutRecent"></tbody>
-                      </table>
+                  <details class="bay-recent-disclosure-v105 bay-recent-disclosure-v137">
+                    <summary><span><strong>Recent bay scans</strong><small>Open scan history</small></span><b id="bayRecentScanCountLabel">Latest 1</b></summary>
+                    <div class="recent-table-wrap compact bay-recent-table-wrap-v105 bay-recent-table-wrap-v137">
+                      <table class="recent-table bay-recent-table-v105"><thead><tr><th>Action</th><th>Order</th><th>Current Bay</th><th>Time</th><th>Check</th><th>Change Location</th></tr></thead><tbody id="bayScanOutRecent"></tbody></table>
                     </div>
                   </details>
                 </section>
@@ -1464,8 +1451,8 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-    <script src="app.js?v=20260724-v136"></script>
-  <script src="delivery-automation-ui.js?v=20260724-v136"></script>
-  <script src="notification-center-v135.js?v=20260724-v136"></script>
+    <script src="app.js?v=20260727-v143"></script>
+  <script src="delivery-automation-ui.js?v=20260727-v143"></script>
+  <script src="notification-center-v135.js?v=20260727-v143"></script>
 </body>
 </html>

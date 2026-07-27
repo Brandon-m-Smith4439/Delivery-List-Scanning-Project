@@ -86,7 +86,7 @@ class SafeBatchLauncherTests(unittest.TestCase):
         self.assertTrue(changelog.startswith(f"## v{release}"))
         self.assertIn("Extract the v134 changed-files package", DOC.read_text(encoding="utf-8"))
         index = INDEX.read_text(encoding="utf-8")
-        markers = re.findall(r"20260724-v(\d+)", index)
+        markers = re.findall(r"2026\d{4}-v(\d+)", index)
         self.assertEqual(len(markers), 6)
         self.assertEqual(set(markers), {str(release)})
 

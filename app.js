@@ -32,13 +32,14 @@ const ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS = 21;
 const ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS = 7;
 const SCAN_FILTER_GROUPS = Object.freeze({
   status: Object.freeze(["remaining", "partial", "complete"]),
-  attention: Object.freeze(["remakes", "rushes", "priority", "updated", "errors"]),
+  attention: Object.freeze(["remakes", "rushes", "internal-rejects", "priority", "updated", "errors"]),
   route: Object.freeze(["indian-trail-route", "cpu-route", "dtc-route", "greenville-route"]),
 });
 const SCAN_FILTER_LABELS = Object.freeze({
   remaining: "Not Scanned",
   partial: "Partial",
   complete: "Complete",
+  "internal-rejects": "Internal Rejects",
   remakes: "Remakes",
   rushes: "Rushes",
   updated: "New/Updated",
@@ -208,9 +209,18 @@ const state = {
   adminSelectedImportRunKey: "",
   adminImportSelectionLocked: false,
   adminPinnedImportEntries: [],
+  adminTodayImportEntries: [],
+  adminTodayImportLoaded: false,
+  adminTodayImportDate: "",
+  adminImportRunPage: 1,
+  adminImportRunsPerPage: 5,
+  pendingUpdateDates: new Map(),
+  pendingUpdateDatesRequestId: 0,
   rejectCatalog: { reasons: [], locations: [] },
   rejectHistory: [],
   rejectMatches: [],
+  rejectLogOpening: false,
+  rejectMatchRequestId: 0,
   packingListHistory: [],
   operationsModalKind: "",
 };
@@ -416,6 +426,24 @@ function dlsAutomationApplyImportSnapshot(detail = {}) {
 document.addEventListener("dls:delivery-list-data-refreshed", (event) => {
   const detail = event.detail && typeof event.detail === "object" ? event.detail : {};
   dlsAutomationApplyImportSnapshot(detail);
+  window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 250);
+});
+
+document.addEventListener("dls:user-line-updates-reviewed", (event) => {
+  const reviewedListId = String(event.detail?.listId || "");
+  const reviewedList = state.lists.find((list) => String(list.id || "") === reviewedListId);
+  const reviewedDate = String(reviewedList?.deliveryDate || "");
+  if (reviewedDate) {
+    state.pendingUpdateDates.delete(reviewedDate);
+    renderDeliveryListSelect();
+    syncAllCustomSelects();
+  }
+  window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 220);
+});
+
+document.addEventListener("dls:open-internal-reject-notification", () => {
+  showPage("rejects");
+  window.setTimeout(() => els.rejectHistory?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
 });
 
 const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v3";
@@ -666,13 +694,21 @@ const els = {
   totalItemsText: document.getElementById("totalItemsText"),
   scanFilterDrawer: document.getElementById("scanFilterDrawer"),
   scanFilterPriorityState: document.getElementById("scanFilterPriorityState"),
-  scanActiveFilterCount: document.getElementById("scanActiveFilterCount"),
+  scanFilterRemakeBadge: document.getElementById("scanFilterRemakeBadge"),
+  scanFilterRushBadge: document.getElementById("scanFilterRushBadge"),
+  scanFilterUpdatedBadge: document.getElementById("scanFilterUpdatedBadge"),
+  scanFilterRejectBadge: document.getElementById("scanFilterRejectBadge"),
+  scanUpdateReviewControl: document.getElementById("scanUpdateReviewControl"),
+  scanUpdateReviewSummary: document.getElementById("scanUpdateReviewSummary"),
+  scanUpdateReviewBtn: document.getElementById("scanUpdateReviewBtn"),
+  scanUpdateMarkReviewedBtn: document.getElementById("scanUpdateMarkReviewedBtn"),
   scanActiveFilterBar: document.getElementById("scanActiveFilterBar"),
   scanActiveFilterChips: document.getElementById("scanActiveFilterChips"),
   countAll: document.getElementById("countAll"),
   countRemaining: document.getElementById("countRemaining"),
   countPartial: document.getElementById("countPartial"),
   countComplete: document.getElementById("countComplete"),
+  countInternalRejects: document.getElementById("countInternalRejects"),
   countRemakes: document.getElementById("countRemakes"),
   countRushes: document.getElementById("countRushes"),
   countUpdated: document.getElementById("countUpdated"),
@@ -710,11 +746,14 @@ const els = {
   rackPackingHistoryBtn: document.getElementById("rackPackingHistoryBtn"),
 
   rejectsPage: document.getElementById("rejectsPage"),
-  rejectSummary: document.getElementById("rejectSummary"),
   rejectHistory: document.getElementById("rejectHistory"),
   rejectSearchInput: document.getElementById("rejectSearchInput"),
+  rejectDatePreset: document.getElementById("rejectDatePreset"),
   rejectDateFrom: document.getElementById("rejectDateFrom"),
   rejectDateTo: document.getElementById("rejectDateTo"),
+  rejectLocationFilter: document.getElementById("rejectLocationFilter"),
+  rejectSummaryBar: document.getElementById("rejectSummaryBar"),
+  rejectClearFiltersBtn: document.getElementById("rejectClearFiltersBtn"),
   rejectRefreshBtn: document.getElementById("rejectRefreshBtn"),
   rejectLogOpenBtn: document.getElementById("rejectLogOpenBtn"),
 
@@ -3016,6 +3055,18 @@ function syncCustomSelect(select) {
   trigger.setAttribute("aria-expanded", customSelectUi.openSelect === select ? "true" : "false");
   trigger.title = option?.textContent?.trim() || customSelectAccessibleLabel(select);
   value.textContent = customSelectSelectedText(select);
+  const indicator = trigger.querySelector(".custom-select-value-indicator");
+  const indicatorKind = String(option?.dataset.customIndicator || "").trim();
+  const indicatorCount = Math.max(Number(option?.dataset.customIndicatorCount || 0), 0);
+  trigger.classList.toggle("has-indicator", Boolean(indicatorKind));
+  if (indicator) {
+    indicator.hidden = !indicatorKind;
+    indicator.className = `custom-select-value-indicator${indicatorKind ? ` is-${indicatorKind}` : ""}`;
+    indicator.textContent = indicatorKind === "new" ? "!" : "";
+    indicator.title = indicatorKind === "new"
+      ? `${indicatorCount || "Unreviewed"} new or updated line${indicatorCount === 1 ? "" : "s"} on this delivery date`
+      : "";
+  }
 
   shell.hidden = hidden;
   shell.classList.toggle("is-disabled", disabled);
@@ -3188,6 +3239,7 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", row.index === select.selectedIndex ? "true" : "false");
     button.classList.toggle("is-selected", row.index === select.selectedIndex);
+    button.classList.toggle("is-date-option", select.id === "deliveryDateSelect");
 
     const label = document.createElement("span");
     label.className = "custom-select-option-label";
@@ -3197,7 +3249,18 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     check.className = "custom-select-option-check";
     check.setAttribute("aria-hidden", "true");
 
-    button.append(label, check);
+    const indicatorKind = String(row.option.dataset.customIndicator || "").trim();
+    const indicatorCount = Math.max(Number(row.option.dataset.customIndicatorCount || 0), 0);
+    const indicator = document.createElement("span");
+    button.classList.toggle("has-indicator", Boolean(indicatorKind));
+    indicator.className = `custom-select-option-indicator${indicatorKind ? ` is-${indicatorKind}` : ""}`;
+    indicator.hidden = !indicatorKind;
+    indicator.textContent = indicatorKind === "new" ? "!" : "";
+    indicator.title = indicatorKind === "new"
+      ? `${indicatorCount || "Unreviewed"} new or updated line${indicatorCount === 1 ? "" : "s"} on this delivery date`
+      : "";
+
+    button.append(label, indicator, check);
     optionsHost.append(button);
 
     button.addEventListener("click", () => {
@@ -3208,6 +3271,7 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
       closeCustomSelect(true);
 
       if (changed) {
+        void playAppSound("collapse_close");
         select.dispatchEvent(new Event("input", { bubbles: true }));
         select.dispatchEvent(new Event("change", { bubbles: true }));
       }
@@ -3228,10 +3292,12 @@ function openCustomSelect(select) {
   if (!customSelectIsEligible(select) || select.disabled) return;
   if (customSelectUi.openSelect === select) {
     closeCustomSelect(true);
+    void playAppSound("collapse_close");
     return;
   }
 
   closeCustomSelect(false);
+  void playAppSound("collapse_open");
   customSelectUi.openSelect = select;
 
   const shell = select.closest(".custom-select-shell");
@@ -3244,6 +3310,7 @@ function openCustomSelect(select) {
   menu._timedConfirmationShell = timedConfirmationShell || null;
   timedConfirmationShell?._setCustomSelectOpen?.(true);
   menu.id = `${select.id || `customSelect${Date.now()}`}Menu`;
+  menu.dataset.selectId = select.id || "";
   menu.setAttribute("role", "listbox");
   menu.setAttribute("aria-label", customSelectAccessibleLabel(select));
 
@@ -3343,11 +3410,16 @@ function enhanceCustomSelect(select) {
   const value = document.createElement("span");
   value.className = "custom-select-value";
 
+  const indicator = document.createElement("span");
+  indicator.className = "custom-select-value-indicator";
+  indicator.hidden = true;
+  indicator.setAttribute("aria-hidden", "true");
+
   const arrow = document.createElement("span");
   arrow.className = "custom-select-arrow";
   arrow.setAttribute("aria-hidden", "true");
 
-  trigger.append(value, arrow);
+  trigger.append(value, indicator, arrow);
   select.parentNode?.insertBefore(shell, select);
   shell.append(select, trigger);
 
@@ -3436,7 +3508,9 @@ function initCustomSelectSystem() {
   });
 
   document.addEventListener("change", (event) => {
-    if (event.target instanceof HTMLSelectElement) queueMicrotask(() => syncCustomSelect(event.target));
+    if (!(event.target instanceof HTMLSelectElement)) return;
+    queueMicrotask(() => syncCustomSelect(event.target));
+    if (event.target.dataset.customSelectEnhanced !== "true") void playAppSound("collapse_close");
   }, true);
   window.addEventListener("resize", () => customSelectUi.openSelect && positionCustomSelectMenu());
   document.addEventListener("scroll", (event) => {
@@ -5183,6 +5257,7 @@ function scanFilterGroup(filter) {
 function itemMatchesScanFilter(item, filter) {
   const status = itemStatus(item);
   if (filter === "remaining" || filter === "partial" || filter === "complete") return status === filter;
+  if (filter === "internal-rejects") return Number(item.internalRejectCount || 0) > 0;
   if (filter === "errors") return hasScanError(item);
   if (filter === "remakes") return isRemakeItem(item);
   if (filter === "rushes") return isRushItem(item);
@@ -5227,7 +5302,6 @@ function renderActiveScanFilters() {
   const selectionCount = selected.length + selectedGlassTypes.length;
   const priorityOpen = unscannedPieceCount(state.items.filter((item) => isRemakeItem(item) || isRushItem(item)));
 
-  if (els.scanActiveFilterCount) els.scanActiveFilterCount.textContent = String(selectionCount);
   if (els.scanFilterPriorityState) {
     els.scanFilterPriorityState.textContent = priorityOpen ? "!" : "\u2713";
     els.scanFilterPriorityState.classList.toggle("has-alert", Boolean(priorityOpen));
@@ -5264,6 +5338,9 @@ function toggleScanFilter(filter) {
     state.activeFilters.add(filter);
   }
   syncScanFilterButtons();
+  document.dispatchEvent(new CustomEvent("dls:scan-filters-changed", {
+    detail: { filters: [...state.activeFilters] },
+  }));
 }
 
 /**
@@ -5575,6 +5652,16 @@ function bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTota
   `;
 }
 
+/** Update one compact Filters-button badge without rebuilding the drawer. */
+function updateScanFilterGlanceBadge(element, count, label) {
+  if (!element) return;
+  const value = Math.max(Number(count || 0), 0);
+  const countElement = element.querySelector("b");
+  if (countElement) countElement.textContent = String(value);
+  element.classList.toggle("has-items", value > 0);
+  element.setAttribute("aria-label", `${value} ${label}`);
+}
+
 /**
  * Purpose: Render the render counts workflow using the existing shared UI state.
  * Effects: Updates visible dom state, may update shared client state.
@@ -5592,12 +5679,14 @@ function renderCounts() {
   const remakeItems = state.items.filter(isRemakeItem);
   const rushItems = state.items.filter(isRushItem);
   const updatedItems = state.items.filter(isNewOrUpdatedItem);
+  const internalRejectItems = state.items.filter((item) => Number(item.internalRejectCount || 0) > 0);
 
   const remakeOpen = unscannedPieceCount(remakeItems);
   const remakeAll = pieceCount(remakeItems);
   const rushOpen = unscannedPieceCount(rushItems);
   const rushAll = pieceCount(rushItems);
   const updatedCount = pieceCount(updatedItems);
+  const internalRejectCount = pieceCount(internalRejectItems);
 
   const routeCounts = {
     "indian-trail-route": pieceCount(state.items.filter((item) => routeCategory(item) === "indian_trail")),
@@ -5609,6 +5698,7 @@ function renderCounts() {
   if (els.countRemaining) els.countRemaining.textContent = `(${stats.remainingItems})`;
   if (els.countPartial) els.countPartial.textContent = `(${stats.partialItems})`;
   if (els.countComplete) els.countComplete.textContent = `(${stats.completeItems})`;
+  if (els.countInternalRejects) els.countInternalRejects.textContent = `(${internalRejectCount})`;
   if (els.countRemakes) els.countRemakes.textContent = `(${remakeAll})`;
   if (els.countRushes) els.countRushes.textContent = `(${rushAll})`;
   document.querySelectorAll('[data-filter="remakes"]').forEach((button) => {
@@ -5619,7 +5709,15 @@ function renderCounts() {
     button.classList.toggle("has-alert", Boolean(rushOpen));
     button.classList.toggle("is-clear", !rushOpen);
   });
+  document.querySelectorAll('[data-filter="internal-rejects"]').forEach((button) => {
+    button.classList.toggle("has-alert", Boolean(internalRejectCount));
+    button.classList.toggle("is-clear", !internalRejectCount);
+  });
   if (els.countUpdated) els.countUpdated.textContent = `(${updatedCount})`;
+  updateScanFilterGlanceBadge(els.scanFilterRemakeBadge, remakeAll, "remake pieces");
+  updateScanFilterGlanceBadge(els.scanFilterRushBadge, rushAll, "rush pieces");
+  updateScanFilterGlanceBadge(els.scanFilterUpdatedBadge, updatedCount, "new or updated pieces");
+  updateScanFilterGlanceBadge(els.scanFilterRejectBadge, internalRejectCount, "internal reject pieces");
   if (els.countErrors) els.countErrors.textContent = `(${stats.errorCount})`;
 
   document.querySelectorAll('[data-filter="errors"]').forEach((button) => {
@@ -5730,14 +5828,14 @@ function renderItemRow(item) {
     : "";
   const location = locationLabel(item);
   const locationHtml = rackLocationDropdown(item, location);
+  const rejectCount = Number(item.internalRejectCount || 0);
 
   const markers = [
     isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
     isRushItem(item) ? '<span class="row-marker rush-marker">Rush</span>' : "",
+    rejectCount > 0 ? '<span class="row-marker internal-reject-marker">IR</span>' : "",
     item.manualOnly ? '<span class="row-marker manual-only-marker">Manual scan only</span>' : "",
-  ]
-    .filter(Boolean)
-    .join("");
+  ].filter(Boolean).join("");
 
   const rowError = hasScanError(item);
   const processClass = rowError ? "error" : status;
@@ -5745,14 +5843,26 @@ function renderItemRow(item) {
   const lastScanNote = item.lastScannedAt
     ? `<span class="last-scan-note">Scanned: ${escapeHtml(formatDateTime(item.lastScannedAt))}${item.lastScannedStation ? ` - ${escapeHtml(item.lastScannedStation)}` : ""}</span>`
     : "";
-
-  const rejectRibbon = Number(item.internalRejectCount || 0) > 0
-    ? `<span class="internal-reject-ribbon"><b>INTERNAL REJECT</b><span>${escapeHtml(item.lastRejectReason || "Rejected")} at ${escapeHtml(item.lastRejectLocation || "Unknown location")}</span><small>${escapeHtml(item.lastRejectedAt ? formatDateTime(item.lastRejectedAt) : "")}</small></span>`
+  const rejectReason = item.lastRejectReason || "Internal reject";
+  const rejectLocation = item.lastRejectLocation || "Unknown process location";
+  const rejectTime = item.lastRejectedAt ? formatDateTime(item.lastRejectedAt) : "Time not available";
+  const rejectIncidentRow = rejectCount > 0
+    ? `<tr class="internal-reject-detail-row" data-reject-detail-for="${escapeHtml(item.id)}">
+        <td colspan="10">
+          <div class="internal-reject-incident-strip">
+            <span class="internal-reject-incident-badge">IR</span>
+            <span><small>Internal reject reason</small><strong>${escapeHtml(rejectReason)}</strong></span>
+            <span><small>Broke at / machine</small><strong>${escapeHtml(rejectLocation)}</strong></span>
+            <span><small>Rejected</small><strong>${escapeHtml(rejectTime)}</strong></span>
+            <span class="internal-reject-incident-count">${escapeHtml(rejectCount)} event${rejectCount === 1 ? "" : "s"}</span>
+          </div>
+        </td>
+      </tr>`
     : "";
 
   return `
-    <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectRibbon ? "has-internal-reject" : ""}" data-id="${escapeHtml(item.id)}">
-      <td>${rejectRibbon}<span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span>${lastScanNote}</td>
+    <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectCount > 0 ? "has-internal-reject" : ""}" data-id="${escapeHtml(item.id)}">
+      <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span>${lastScanNote}</td>
       <td>${escapeHtml(item.order)}</td>
       <td>${escapeHtml(item.item)}</td>
       <td><span class="qty-pill ${status}" title="${escapeHtml(item.scanned)} scanned of ${escapeHtml(item.qty)}">${escapeHtml(item.qty)}</span></td>
@@ -5763,7 +5873,7 @@ function renderItemRow(item) {
       <td class="location-cell">${locationHtml}</td>
       <td><span class="process-pill ${processClass}">${escapeHtml(processText)}</span></td>
     </tr>
-  `;
+    ${rejectIncidentRow}`;
 }
 
 /**
@@ -6927,8 +7037,10 @@ async function printSelectedRackPackingSlip(rackCode = state.selectedRackCode, d
     showFloatingNotice("Complete this rack before printing its packing list.", "notice");
     return;
   }
-  const activeList = state.lists.find((list) => list.id === state.activeListId);
-  const dateParam = deliveryDateOverride || (isTruckRack(rack) && activeList?.deliveryDate ? activeList.deliveryDate : "");
+  // A rack-details print represents the rack's complete live contents. Do not
+  // silently filter truck racks by whichever Scan-page date happens to be active.
+  // Explicit date buttons still pass deliveryDateOverride for a one-date print.
+  const dateParam = String(deliveryDateOverride || "").trim();
   if (state.backend) {
     try {
       await fetchJson("/api/racks/packing-history", {
@@ -7531,7 +7643,10 @@ function renderDeliveryListSelect() {
   const activeDate = selectedDeliveryDate();
   if (els.deliveryDateSelect) {
     els.deliveryDateSelect.innerHTML = groups
-      .map((group) => `<option value="${escapeHtml(group.date)}">${escapeHtml(formatDisplayDate(group.date))}</option>`)
+      .map((group) => {
+        const pendingCount = Math.max(Number(state.pendingUpdateDates.get(group.date) || 0), 0);
+        return `<option value="${escapeHtml(group.date)}" data-custom-indicator="${pendingCount ? "new" : ""}" data-custom-indicator-count="${pendingCount}">${escapeHtml(formatDisplayDate(group.date))}</option>`;
+      })
       .join("");
     els.deliveryDateSelect.value = activeDate;
   }
@@ -7560,6 +7675,71 @@ function renderDeliveryListSelect() {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+
+
+/**
+ * Return one representative list per delivery date for the date-selector review marker.
+ * Staging owns the operator review workflow when available; otherwise the first accessible
+ * stage is used. This prevents duplicate stage notices from keeping a date icon visible.
+ */
+function pendingUpdateMarkerLists(lists = state.lists) {
+  const byDate = new Map();
+  (Array.isArray(lists) ? lists : []).forEach((list) => {
+    const deliveryDate = String(list?.deliveryDate || "").trim();
+    if (!deliveryDate) return;
+    if (!byDate.has(deliveryDate)) byDate.set(deliveryDate, []);
+    byDate.get(deliveryDate).push(list);
+  });
+  return [...byDate.values()].map((dateLists) =>
+    dateLists.find((list) => /staging/i.test(`${list.stage || ""} ${list.scanner || ""}`))
+    || dateLists.find((list) => String(list.id || "") === String(state.activeListId || ""))
+    || dateLists[0]
+  ).filter(Boolean);
+}
+
+/**
+ * Refresh the per-user delivery-date markers shown in the Scan page date selector.
+ * Uses the maintained line-flags endpoint so one user's review never clears another user's icon.
+ */
+async function refreshPendingUpdateDates({ force = false } = {}) {
+  if (!state.backend || !Array.isArray(state.lists) || !state.lists.length) {
+    state.pendingUpdateDates = new Map();
+    renderDeliveryListSelect();
+    syncAllCustomSelects();
+    return;
+  }
+  if (!window.DLSLineUpdates?.loadAndApply) {
+    window.setTimeout(() => refreshPendingUpdateDates({ force }).catch(() => {}), 450);
+    return;
+  }
+
+  const requestId = ++state.pendingUpdateDatesRequestId;
+  const dateCounts = new Map();
+  const lists = pendingUpdateMarkerLists();
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < lists.length) {
+      const list = lists[cursor++];
+      try {
+        const flags = await window.DLSLineUpdates.loadAndApply(list.id, {
+          force,
+          prompt: false,
+          render: false,
+        });
+        const pending = Math.max(Number(flags?.pendingLineCount || 0), 0);
+        if (pending) dateCounts.set(list.deliveryDate, (dateCounts.get(list.deliveryDate) || 0) + pending);
+      } catch {
+        // A single inaccessible or stale stage must not block the remaining date markers.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(5, lists.length) }, worker));
+  if (requestId !== state.pendingUpdateDatesRequestId) return;
+  state.pendingUpdateDates = dateCounts;
+  renderDeliveryListSelect();
+  syncAllCustomSelects();
+}
+
 function applyPermissionUi() {
   const displayName = state.user ? state.user.displayName || state.user.username : "Demo";
   const roleText = state.user?.roles?.length ? state.user.roles.join(", ") : state.backend ? "Signed in" : "Local demo";
@@ -16125,7 +16305,16 @@ function activeRecentImports(imports = state.adminRecentImports || []) {
  */
 function renderAdminDeliveryLists() {
   if (!els.adminDeliveryLists) return;
+  const today = todayKey();
+  if (state.adminTodayImportDate && state.adminTodayImportDate !== today) {
+    state.adminTodayImportEntries = [];
+    state.adminTodayImportLoaded = false;
+    state.adminTodayImportDate = "";
+    state.adminImportRunPage = 1;
+    state.adminSelectedImportRunKey = "";
+  }
   els.adminDeliveryLists.innerHTML = renderAdminImportRunBrowser(activeRecentImports());
+  if (!state.adminTodayImportLoaded) void refreshAdminTodayImportRuns({ render: true });
 }
 
 /**
@@ -16141,8 +16330,8 @@ function openAdminModal(kind, options = null) {
   const titleMap = {
     deliveryLists: "All Delivery Lists",
     deliveryActions: "Delivery List Actions",
-    users: "All Users",
-    roles: "Edit Role Permissions",
+    users: "User Access Management",
+    roles: "Roles & Permissions",
     sessions: "Active Sessions",
     stations: "Stations",
     customerRoutes: "Edit Customer Routes",
@@ -16163,6 +16352,9 @@ function openAdminModal(kind, options = null) {
   if (kind === "lookups") {
     syncLookupManagerFormGuidance();
     filterLookupManagerLibrary(state.lookupManagerSearch || "");
+  }
+  if (kind === "users") {
+    wireUserManagerControls();
   }
   els.adminModal.hidden = false;
   if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = false;
@@ -16239,55 +16431,7 @@ function adminModalContent(kind) {
     `;
   }
   if (kind === "users") {
-    return `
-      <section class="users-modal-shell">
-        <form id="createUserFormModal" class="admin-form admin-modal-create-user users-create-card">
-          <label>
-            <span>BFS Email</span>
-            <input id="newUserEmailModal" type="email" autocomplete="off" placeholder="name@bfs.local">
-          </label>
-
-          <label>
-            <span>Username</span>
-            <input id="newUserNameModal" type="text" autocomplete="off" placeholder="Defaults to BFS email">
-          </label>
-
-          <label>
-            <span>Display Name</span>
-            <input id="newUserDisplayModal" type="text" autocomplete="off" placeholder="Enter display name">
-          </label>
-
-          <label>
-            <span>Password</span>
-            <input id="newUserPasswordModal" type="password" autocomplete="new-password" placeholder="Enter password">
-          </label>
-
-          <label>
-            <span>Role</span>
-            <select id="newUserRoleModal">
-              ${ROLE_OPTIONS.map((role) => `<option>${escapeHtml(role)}</option>`).join("")}
-            </select>
-          </label>
-
-          <label>
-            <span>Station</span>
-            <select id="newUserStationModal">
-              <option value="">No assigned station</option>
-              ${state.stations.map((station) => `<option value="${escapeHtml(station)}">${escapeHtml(station)}</option>`).join("")}
-            </select>
-          </label>
-
-          <button type="submit" class="users-add-button">
-            <span class="user-action-icon icon-user-add" aria-hidden="true"></span>
-            <strong>Add user</strong>
-          </button>
-        </form>
-
-        <div class="users-table-wrap">
-          ${renderAdminUsersTable(true, state.adminUsers.length || 1)}
-        </div>
-      </section>
-    `;
+    return userManagerModalHtml();
   }
   if (kind === "roles") {
     return rolePermissionsModalHtml();
@@ -17392,6 +17536,26 @@ function rolePermissionCountText(role, permissions) {
  * Effects: Updates visible dom state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function roleCreatePermissionCategoryHtml(category) {
+  return `
+    <details class="permission-category role-create-permission-category" open>
+      <summary>
+        <span><strong>${escapeHtml(category.title)}</strong><small>${escapeHtml(category.description)}</small></span>
+        <b>${escapeHtml(category.permissions.length)} options</b>
+      </summary>
+      <div class="role-permission-grid">
+        ${category.permissions.map((permission) => `
+          <label>
+            <input type="checkbox" value="${escapeHtml(permission)}">
+            <span class="permission-option-copy">
+              <strong>${escapeHtml(permissionLabel(permission))}</strong>
+              <small>${escapeHtml(permissionDescription(permission))}</small>
+            </span>
+          </label>`).join("")}
+      </div>
+    </details>`;
+}
+
 function rolePermissionsModalHtml() {
   const roles = state.adminRoles || [];
   const permissions = state.allPermissions || [];
@@ -17401,48 +17565,136 @@ function rolePermissionsModalHtml() {
   }
 
   const categories = categorizedPermissions(permissions);
+  const assignedPermissionCount = new Set(roles.flatMap((role) => role.permissions || [])).size;
 
   return `
-    <div class="role-permission-editor">
-      <div class="role-permission-intro">
-        <strong>Role Permissions</strong>
-        <span>Open a role, review permissions by page/action group, then save that role.</span>
-      </div>
+    <div class="role-permission-editor role-manager-v142">
+      <section class="role-manager-overview">
+        <div>
+          <span class="role-manager-eyebrow">Access control</span>
+          <strong>Roles &amp; Permissions</strong>
+          <p>Create purpose-built roles, then open any role to fine-tune exactly what its users can and cannot do.</p>
+        </div>
+        <div class="role-manager-overview-stats">
+          <span><b>${escapeHtml(roles.length)}</b><small>Roles</small></span>
+          <span><b>${escapeHtml(permissions.length)}</b><small>Available permissions</small></span>
+          <span><b>${escapeHtml(assignedPermissionCount)}</b><small>Permissions in use</small></span>
+        </div>
+      </section>
 
-      ${roles
-        .map((role) => {
-          const selected = new Set(role.permissions || []);
-          const roleOpen = state.rolePermissionOpenRoles.has(role.name);
+      <details class="role-create-card">
+        <summary>
+          <span class="role-create-summary-icon" aria-hidden="true"></span>
+          <span><strong>Create a new role</strong><small>Name the role, describe its purpose, and choose only the permissions it needs.</small></span>
+          <i aria-hidden="true"></i>
+        </summary>
+        <form id="createRoleForm" class="role-create-form">
+          <div class="role-create-fields">
+            <label><span>Role name *</span><input id="newRoleName" name="name" type="text" maxlength="60" autocomplete="off" placeholder="Example: Shipping Lead" required></label>
+            <label><span>Description</span><input id="newRoleDescription" name="description" type="text" maxlength="240" autocomplete="off" placeholder="What this role is responsible for"></label>
+          </div>
+          <div class="role-create-permission-toolbar">
+            <div><strong>Starting permissions</strong><span>Unchecked permissions will not be granted.</span></div>
+            <div>
+              <button type="button" class="secondary" data-role-create-selection="all">Select all</button>
+              <button type="button" class="secondary" data-role-create-selection="none">Clear all</button>
+            </div>
+          </div>
+          <div class="role-create-permission-list">
+            ${categories.map(roleCreatePermissionCategoryHtml).join("")}
+          </div>
+          <footer class="role-create-footer">
+            <span id="createRoleStatus">A role may be created with no permissions and configured later.</span>
+            <button type="submit" class="primary">Create Role</button>
+          </footer>
+        </form>
+      </details>
 
-          return `
-            <details class="role-permission-card" data-role-card="${escapeHtml(role.name)}" ${roleOpen ? "open" : ""}>
-              <summary class="role-permission-summary">
-                <span class="role-collapse-icon" aria-hidden="true"></span>
+      <section class="role-library">
+        <header><div><strong>Existing roles</strong><span>Open a role, change permission selections, then save that role.</span></div><b>${escapeHtml(roles.length)} total</b></header>
+        <div class="role-library-list">
+          ${roles.map((role) => {
+            const selected = new Set(role.permissions || []);
+            const roleOpen = state.rolePermissionOpenRoles.has(role.name);
+            return `
+              <details class="role-permission-card" data-role-card="${escapeHtml(role.name)}" ${roleOpen ? "open" : ""}>
+                <summary class="role-permission-summary">
+                  <span class="role-collapse-icon" aria-hidden="true"></span>
+                  <span class="role-permission-title">
+                    <strong>${escapeHtml(role.name)}</strong>
+                    <small>${escapeHtml(role.description || permissionSummaryFromPermissions(role.permissions || []))}</small>
+                  </span>
+                  <span class="role-permission-count">${escapeHtml(rolePermissionCountText(role, permissions))}</span>
+                  <button type="button" class="role-permission-save" data-save-role-permissions="${escapeHtml(role.name)}" title="Save ${escapeHtml(role.name)} permissions">Save</button>
+                </summary>
+                <div class="role-permission-body">
+                  ${categories.map((category) => rolePermissionCategoryHtml(role.name, category, selected)).join("")}
+                </div>
+              </details>`;
+          }).join("")}
+        </div>
+      </section>
+    </div>`;
+}
 
-                <span class="role-permission-title">
-                  <strong>${escapeHtml(role.name)}</strong>
-                  <small>${escapeHtml(role.description || permissionSummaryFromPermissions(role.permissions || []))}</small>
-                </span>
+async function createRoleFromForm(form) {
+  const data = new FormData(form);
+  const name = String(data.get("name") || "").trim();
+  const description = String(data.get("description") || "").trim();
+  const permissions = [...form.querySelectorAll('.role-create-permission-list input[type="checkbox"]:checked')]
+    .map((input) => input.value)
+    .filter(Boolean);
+  const status = form.querySelector("#createRoleStatus");
+  const submit = form.querySelector('button[type="submit"]');
 
-                <span class="role-permission-count">${escapeHtml(rolePermissionCountText(role, permissions))}</span>
+  if (!name) {
+    status.textContent = "Enter a role name.";
+    form.querySelector("#newRoleName")?.focus();
+    return;
+  }
 
-                <button
-                  type="button"
-                  class="role-permission-save"
-                  data-save-role-permissions="${escapeHtml(role.name)}"
-                  title="Save ${escapeHtml(role.name)} permissions"
-                >Save</button>
-              </summary>
+  if (!permissions.length) {
+    const confirmed = await confirmWebAppAction({
+      title: "Create role with no permissions?",
+      message: `Create <strong>${escapeHtml(name)}</strong> without any permissions?`,
+      details: "The role will exist, but users assigned to it will not be able to open application features until permissions are added.",
+      confirmLabel: "Create Empty Role",
+      danger: false,
+    });
+    if (!confirmed) return;
+  }
 
-              <div class="role-permission-body">
-                ${categories.map((category) => rolePermissionCategoryHtml(role.name, category, selected)).join("")}
-              </div>
-            </details>
-          `;
-        })
-        .join("")}
-    </div>
-  `;
+  submit.disabled = true;
+  status.textContent = "Creating role...";
+  try {
+    const payload = await fetchJson("/api/admin/roles", {
+      method: "POST",
+      body: JSON.stringify({ name, description, permissions }),
+    });
+    state.adminRoles = payload.roles || [];
+    state.allPermissions = payload.permissions || state.allPermissions;
+    state.rolePermissionOpenRoles.add(name);
+    if (els.adminModalBody) els.adminModalBody.innerHTML = adminModalContent("roles");
+    await refreshAdminPage();
+    showSaveConfirmation(`${name} was created and is ready to assign to users.`);
+  } catch (error) {
+    status.textContent = error.message;
+    throw error;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+function setCreateRolePermissionSelection(mode) {
+  const form = document.getElementById("createRoleForm");
+  if (!form) return;
+  const checked = mode === "all";
+  form.querySelectorAll('.role-create-permission-list input[type="checkbox"]').forEach((input) => {
+    input.checked = checked;
+    input.closest("label")?.classList.toggle("is-checked", checked);
+  });
+  const status = form.querySelector("#createRoleStatus");
+  if (status) status.textContent = checked ? "All available permissions selected." : "All permissions cleared.";
 }
 
 /**
@@ -18703,6 +18955,267 @@ function userActionButtonHtml({ className = "", attr = "", label = "", icon = ""
   `;
 }
 
+function availableRoleNames() {
+  const names = (state.adminRoles || [])
+    .map((role) => String(role?.name || "").trim())
+    .filter(Boolean);
+
+  return names.length ? [...new Set(names)].sort((a, b) => a.localeCompare(b)) : ROLE_OPTIONS.slice();
+}
+
+/**
+ * Purpose: Render one labeled User Manager action using the shared icon library.
+ * Effects: Produces markup only; delegated click handlers perform the actual action.
+ * Flow: Applies a consistent tone, accessible label, and optional disabled state.
+ */
+function userManagerActionButtonHtml({ tone = "secondary", attr = "", label = "", icon = "", disabled = false }) {
+  const safeLabel = escapeHtml(label);
+
+  return `
+    <button
+      type="button"
+      class="user-manager-action-button is-${escapeHtml(tone)}"
+      ${attr}
+      ${disabled ? "disabled" : ""}
+      aria-label="${safeLabel}"
+      title="${safeLabel}"
+    >
+      <span class="user-action-icon ${escapeHtml(icon)}" aria-hidden="true"></span>
+      <span class="user-manager-button-label">${safeLabel}</span>
+    </button>
+  `;
+}
+
+/**
+ * Purpose: Build the complete Edit Users workspace without relying on a wide table.
+ * Effects: Produces the modal markup from current user, session, role, and station state.
+ * Flow: Shows a compact overview, an expandable create form, filters, and expandable user cards.
+ */
+function userManagerModalHtml() {
+  const users = state.adminUsers || [];
+  const activeSessionUsers = new Set((state.activeSessions || []).map((session) => String(session.username || "").toLowerCase()));
+  const activeCount = users.filter((user) => Boolean(user.active)).length;
+  const inactiveCount = Math.max(users.length - activeCount, 0);
+  const signedInCount = users.filter((user) => activeSessionUsers.has(String(user.username || "").toLowerCase())).length;
+
+  return `
+    <section class="users-modal-shell user-manager-v141">
+      <section class="user-manager-overview" aria-label="User account summary">
+        <div class="user-manager-overview-copy">
+          <span class="user-manager-eyebrow">Accounts & access</span>
+          <strong>Manage people without losing sight of the important details.</strong>
+          <p>Create accounts, assign roles and stations, reset passwords, and control sign-in access from one organized workspace.</p>
+        </div>
+        <div class="user-manager-overview-stats">
+          <span><b>${escapeHtml(users.length)}</b><small>Total users</small></span>
+          <span class="is-active"><b>${escapeHtml(activeCount)}</b><small>Active</small></span>
+          <span class="is-online"><b>${escapeHtml(signedInCount)}</b><small>Signed in</small></span>
+          <span class="is-inactive"><b>${escapeHtml(inactiveCount)}</b><small>Inactive</small></span>
+        </div>
+      </section>
+
+      <section class="user-manager-create-card">
+        <button id="userManagerCreateToggle" class="user-manager-create-toggle" type="button" aria-expanded="false" aria-controls="createUserFormModal">
+          <span class="user-manager-summary-icon" aria-hidden="true"><i class="user-action-icon icon-user-add"></i></span>
+          <span>
+            <strong>Add a new user</strong>
+            <small>Create a sign-in profile and assign its starting role and station.</small>
+          </span>
+          <i aria-hidden="true"></i>
+        </button>
+        <form id="createUserFormModal" class="admin-form admin-modal-create-user user-manager-create-form" hidden>
+          <div class="user-manager-create-layout">
+            <section class="user-manager-create-section is-profile">
+              <header>
+                <span class="user-manager-create-section-icon icon-user" aria-hidden="true"></span>
+                <div><strong>Account details</strong><small>Identity and sign-in information for the new profile.</small></div>
+              </header>
+              <div class="user-manager-create-profile-grid">
+                <label class="user-manager-field is-wide">
+                  <span>BFS email</span>
+                  <input id="newUserEmailModal" type="email" autocomplete="off" placeholder="name@barefootandcompany.com">
+                  <small>Used for sign-in and account identification.</small>
+                </label>
+                <label class="user-manager-field">
+                  <span>Username</span>
+                  <input id="newUserNameModal" type="text" autocomplete="off" placeholder="Defaults to BFS email">
+                  <small>Optional when the BFS email is used as the username.</small>
+                </label>
+                <label class="user-manager-field">
+                  <span>Display name</span>
+                  <input id="newUserDisplayModal" type="text" autocomplete="off" placeholder="First and last name">
+                  <small>Shown throughout the scanner app.</small>
+                </label>
+                <label class="user-manager-field is-wide">
+                  <span>Temporary password</span>
+                  <input id="newUserPasswordModal" type="password" autocomplete="new-password" placeholder="Enter a secure temporary password">
+                  <small>Give this password to the user through an approved internal channel.</small>
+                </label>
+              </div>
+            </section>
+
+            <section class="user-manager-create-section is-access">
+              <header>
+                <span class="user-manager-create-section-icon icon-shield" aria-hidden="true"></span>
+                <div><strong>Starting access</strong><small>Choose the role and first workstation assignment.</small></div>
+              </header>
+              <div class="user-manager-create-access-grid">
+                <label class="user-manager-field">
+                  <span>Starting role</span>
+                  <select id="newUserRoleModal">
+                    ${availableRoleNames().map((role) => `<option>${escapeHtml(role)}</option>`).join("")}
+                  </select>
+                  <small>Controls permissions and page access.</small>
+                </label>
+                <label class="user-manager-field">
+                  <span>Starting station</span>
+                  <select id="newUserStationModal">
+                    <option value="">No assigned station</option>
+                    ${state.stations.map((station) => `<option value="${escapeHtml(station)}">${escapeHtml(station)}</option>`).join("")}
+                  </select>
+                  <small>Additional stations can be assigned after creation.</small>
+                </label>
+              </div>
+              <div class="user-manager-create-guidance">
+                <strong>Before creating</strong>
+                <span>Confirm the role is appropriate. Custom roles created in Roles &amp; Permissions appear here automatically.</span>
+              </div>
+            </section>
+          </div>
+
+          <footer class="user-manager-create-actions">
+            <span>Required: username or BFS email, plus a password.</span>
+            <button type="submit" class="users-add-button">
+              <span class="user-action-icon icon-user-add" aria-hidden="true"></span>
+              <strong>Create user</strong>
+            </button>
+          </footer>
+        </form>
+      </section>
+
+      <section class="user-manager-directory">
+        <header class="user-manager-directory-header">
+          <div>
+            <span class="user-manager-eyebrow">User directory</span>
+            <strong>Current accounts</strong>
+            <small>Open a user to edit access, password, status, or account details.</small>
+          </div>
+          <div class="user-manager-toolbar">
+            <label class="user-manager-search">
+              <span class="search-icon" aria-hidden="true"></span>
+              <input id="userManagerSearch" type="search" autocomplete="off" placeholder="Search name, username, email, role, or station">
+            </label>
+            <label class="user-manager-toolbar-field">
+              <span>Status</span>
+              <select id="userManagerStatusFilter">
+                <option value="">All statuses</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="online">Signed in</option>
+                <option value="offline">Logged out</option>
+              </select>
+            </label>
+            <label class="user-manager-toolbar-field">
+              <span>Role</span>
+              <select id="userManagerRoleFilter">
+                <option value="">All roles</option>
+                ${availableRoleNames().map((role) => `<option value="${escapeHtml(role.toLowerCase())}">${escapeHtml(role)}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+        </header>
+
+        <div class="user-manager-result-bar">
+          <span id="userManagerResultsSummary">Showing ${escapeHtml(users.length)} user${users.length === 1 ? "" : "s"}</span>
+          <span>Expand one account at a time to keep the workspace focused.</span>
+        </div>
+
+        <div class="users-table-wrap user-manager-list-wrap">
+          ${renderAdminUsersTable(true, users.length || 1)}
+          <div id="userManagerEmptyState" class="user-manager-empty" hidden>
+            <strong>No users match these filters</strong>
+            <span>Clear the search or choose a different status or role.</span>
+          </div>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+/**
+ * Purpose: Apply the Edit Users search, status, and role filters in place.
+ * Effects: Shows or hides rendered user cards and updates the result summary.
+ * Flow: Reads current controls, evaluates card metadata, and keeps all data local to the modal.
+ */
+function applyUserManagerFilters() {
+  const shell = els.adminModalBody?.querySelector(".user-manager-v141");
+  if (!shell) return;
+
+  const query = String(shell.querySelector("#userManagerSearch")?.value || "").trim().toLowerCase();
+  const status = String(shell.querySelector("#userManagerStatusFilter")?.value || "").trim().toLowerCase();
+  const role = String(shell.querySelector("#userManagerRoleFilter")?.value || "").trim().toLowerCase();
+  const cards = Array.from(shell.querySelectorAll("[data-user-manager-card]"));
+  let visibleCount = 0;
+
+  cards.forEach((card) => {
+    const cardStatus = String(card.dataset.userStatus || "").toLowerCase();
+    const sessionStatus = String(card.dataset.userSession || "").toLowerCase();
+    const roles = String(card.dataset.userRoles || "").toLowerCase().split("|").filter(Boolean);
+    const matchesQuery = !query || String(card.dataset.userSearch || "").toLowerCase().includes(query);
+    const matchesStatus = !status || cardStatus === status || sessionStatus === status;
+    const matchesRole = !role || roles.includes(role);
+    const visible = matchesQuery && matchesStatus && matchesRole;
+    card.hidden = !visible;
+    if (visible) visibleCount += 1;
+  });
+
+  const summary = shell.querySelector("#userManagerResultsSummary");
+  if (summary) {
+    summary.textContent = visibleCount === cards.length
+      ? `Showing ${visibleCount} user${visibleCount === 1 ? "" : "s"}`
+      : `Showing ${visibleCount} of ${cards.length} users`;
+  }
+
+  const empty = shell.querySelector("#userManagerEmptyState");
+  if (empty) empty.hidden = visibleCount > 0;
+}
+
+/**
+ * Purpose: Activate Edit Users filters after the modal markup is inserted or refreshed.
+ * Effects: Adds local listeners and restores optional filter values.
+ * Flow: Guards against duplicate wiring, restores state, then performs the first filter pass.
+ */
+function wireUserManagerControls(saved = {}) {
+  const shell = els.adminModalBody?.querySelector(".user-manager-v141");
+  if (!shell || shell.dataset.userManagerWired === "true") return;
+  shell.dataset.userManagerWired = "true";
+
+  const search = shell.querySelector("#userManagerSearch");
+  const status = shell.querySelector("#userManagerStatusFilter");
+  const role = shell.querySelector("#userManagerRoleFilter");
+
+  if (search && saved.query) search.value = saved.query;
+  if (status && saved.status) status.value = saved.status;
+  if (role && saved.role) role.value = saved.role;
+
+  search?.addEventListener("input", applyUserManagerFilters);
+  status?.addEventListener("change", applyUserManagerFilters);
+  role?.addEventListener("change", applyUserManagerFilters);
+
+  const createToggle = shell.querySelector("#userManagerCreateToggle");
+  const createForm = shell.querySelector("#createUserFormModal");
+  createToggle?.addEventListener("click", () => {
+    const expanded = createToggle.getAttribute("aria-expanded") === "true";
+    createToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+    createToggle.closest(".user-manager-create-card")?.classList.toggle("is-open", !expanded);
+    if (createForm) createForm.hidden = expanded;
+    void playAppSound(expanded ? "collapse_close" : "collapse_open");
+    if (!expanded) window.setTimeout(() => shell.querySelector("#newUserEmailModal")?.focus(), 120);
+  });
+
+  applyUserManagerFilters();
+}
+
 /**
  * Purpose: Run the generate temporary password workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -18729,11 +19242,19 @@ function generateTemporaryPassword(length = 12) {
  */
 async function refreshAdminUsersUi() {
   const usersModalOpen = Boolean(els.adminModal && !els.adminModal.hidden && els.adminModalBody?.querySelector(".users-modal-shell"));
+  const savedFilters = usersModalOpen
+    ? {
+        query: els.adminModalBody?.querySelector("#userManagerSearch")?.value || "",
+        status: els.adminModalBody?.querySelector("#userManagerStatusFilter")?.value || "",
+        role: els.adminModalBody?.querySelector("#userManagerRoleFilter")?.value || "",
+      }
+    : {};
 
   await refreshAdminPage();
 
   if (usersModalOpen && els.adminModalBody) {
     els.adminModalBody.innerHTML = adminModalContent("users");
+    wireUserManagerControls(savedFilters);
   }
 }
 
@@ -19082,174 +19603,213 @@ function renderAdminUsersTable(editable = false, limit = 5) {
   }
 
   return `
-    <div class="users-table">
-      <div class="users-table-head">
-        <span>User</span>
-        <span>Email</span>
-        <span>Role</span>
-        <span>Station</span>
-        <span>Permissions / Notes</span>
-        <span>Password</span>
-        <span>Status</span>
-        <span>Actions</span>
-      </div>
+    <div class="user-manager-cards" id="userManagerCards">
+      ${users
+        .map((user) => {
+          const active = Boolean(user.active);
+          const username = String(user.username || "");
+          const roles = user.roles || [];
+          const primaryRole = roles[0] || "No role";
+          const stageAccess = user.stageAccess || [];
+          const assignedStations = userAssignedStations(user);
+          const loggedIn = activeSessionUsers.has(username.toLowerCase());
+          const stationLabel = assignedStations.length
+            ? `${assignedStations.length} station${assignedStations.length === 1 ? "" : "s"}`
+            : "No station";
+          const searchText = [
+            user.displayName,
+            username,
+            user.email,
+            ...roles,
+            ...assignedStations,
+            permissionSummaryForUser(user),
+            ...stageAccess,
+          ].filter(Boolean).join(" ").toLowerCase();
 
-      <div class="users-table-body">
-        ${users
-          .map((user) => {
-            const active = Boolean(user.active);
-            const username = String(user.username || "");
-            const roles = user.roles || [];
-            const stageAccess = user.stageAccess || [];
-            const assignedStations = userAssignedStations(user);
-            const assignedStation = assignedStations[0] || "";
-            const loggedIn = activeSessionUsers.has(username.toLowerCase());
+          return `
+            <details
+              class="user-manager-card ${active ? "is-active-user" : "is-inactive-user"}"
+              data-user-manager-card
+              data-user-search="${escapeHtml(searchText)}"
+              data-user-status="${active ? "active" : "inactive"}"
+              data-user-session="${loggedIn ? "online" : "offline"}"
+              data-user-roles="${escapeHtml(roles.map((role) => String(role).toLowerCase()).join("|"))}"
+            >
+              <summary class="user-manager-card-summary">
+                <span class="user-avatar ${escapeHtml(userAccentClass(user))}">${escapeHtml(userInitials(user))}</span>
 
-            return `
-              <article class="user-admin-row ${active ? "is-active-user" : "is-inactive-user"}">
-                <div class="user-admin-main">
-                  <span class="user-avatar ${escapeHtml(userAccentClass(user))}">${escapeHtml(userInitials(user))}</span>
+                <span class="user-manager-identity">
+                  <strong>${escapeHtml(user.displayName || username)}</strong>
+                  <span>${escapeHtml(user.email || "No BFS email saved")}</span>
+                  <small>@${escapeHtml(username)}</small>
+                </span>
 
-                  <span class="user-admin-name">
-                    <strong>${escapeHtml(user.displayName || username)}</strong>
-                    <small>${escapeHtml(username)}</small>
+                <span class="user-manager-access-summary">
+                  <b>${escapeHtml(primaryRole)}</b>
+                  <small>${escapeHtml(stationLabel)}</small>
+                </span>
+
+                <span class="user-manager-status-summary">
+                  <span class="user-status-pill ${active ? "active" : "inactive"}">
+                    <i></i>${active ? "Active" : "Inactive"}
                   </span>
-                </div>
+                  <span class="user-session-pill ${loggedIn ? "is-online" : "is-offline"}">${loggedIn ? "Signed in" : "Logged out"}</span>
+                </span>
 
-                <label class="user-admin-email user-admin-email-edit">
-                  <span>BFS sign-in email</span>
-                  <input data-user-email="${escapeHtml(username)}" type="email" autocomplete="off" value="${escapeHtml(user.email || "")}" placeholder="name@barefootandcompany.com">
-                </label>
+                <span class="user-manager-expand-indicator" aria-hidden="true"></span>
+              </summary>
 
-                <div class="user-admin-role">
+              <div class="user-manager-card-body">
+                <section class="user-manager-settings-panel">
+                  <header class="user-manager-section-heading">
+                    <span class="user-manager-section-icon" aria-hidden="true"><i class="user-action-icon icon-shield"></i></span>
+                    <span><strong>Access & profile</strong><small>Role, stations, sign-in email, and stage access.</small></span>
+                  </header>
+
+                  <div class="user-manager-profile-grid">
+                    <label class="user-manager-field user-admin-email-edit">
+                      <span>BFS sign-in email</span>
+                      <input data-user-email="${escapeHtml(username)}" type="email" autocomplete="off" value="${escapeHtml(user.email || "")}" placeholder="name@barefootandcompany.com">
+                    </label>
+
+                    <label class="user-manager-field user-admin-role">
+                      <span>Role</span>
+                      ${
+                        hasPermission("manage_roles")
+                          ? `<select data-user-role-select="${escapeHtml(username)}">
+                              ${availableRoleNames().map((role) => `<option value="${escapeHtml(role)}" ${roles.includes(role) ? "selected" : ""}>${escapeHtml(role)}</option>`).join("")}
+                            </select>`
+                          : `<strong class="user-manager-readonly-value">${escapeHtml(roles.join(", ") || "No role")}</strong>`
+                      }
+                    </label>
+                  </div>
+
+                  <div class="user-manager-station-panel">
+                    <div class="user-manager-station-heading">
+                      <span><strong>Assigned stations</strong><small>Select every station this user may work from.</small></span>
+                      <b>${escapeHtml(assignedStations.length)}</b>
+                    </div>
+                    ${
+                      hasPermission("manage_roles")
+                        ? `<div class="station-assignment-list" data-user-station-list="${escapeHtml(username)}">
+                            ${state.stations
+                              .map((station) => `
+                                <label class="station-assignment-option">
+                                  <input type="checkbox" value="${escapeHtml(station)}" ${assignedStations.includes(station) ? "checked" : ""}>
+                                  <span>${escapeHtml(station)}</span>
+                                </label>
+                              `)
+                              .join("")}
+                          </div>`
+                        : `<span class="user-manager-readonly-value">${escapeHtml(assignedStations.join(", ") || "No assigned station")}</span>`
+                    }
+                  </div>
+
+                  <div class="user-manager-permission-summary">
+                    <span><strong>${escapeHtml(permissionSummaryForUser(user))}</strong><small>Permission summary</small></span>
+                    <span><strong>${escapeHtml(stageAccess.join(", ") || "No stage access")}</strong><small>Visible stages</small></span>
+                  </div>
+
                   ${
                     hasPermission("manage_roles")
-                      ? `
-                        <select data-user-role-select="${escapeHtml(username)}">
-                          ${ROLE_OPTIONS.map((role) => `<option value="${escapeHtml(role)}" ${roles.includes(role) ? "selected" : ""}>${escapeHtml(role)}</option>`).join("")}
-                        </select>
-                      `
-                      : `<span>${escapeHtml(roles.join(", ") || "No role")}</span>`
+                      ? `<div class="user-manager-panel-actions">
+                          ${userManagerActionButtonHtml({
+                            tone: "primary",
+                            attr: `data-update-user-role="${escapeHtml(username)}"`,
+                            label: "Save access changes",
+                            icon: "icon-save-user",
+                          })}
+                        </div>`
+                      : ""
                   }
-                </div>
+                </section>
 
-                <div class="user-admin-station user-admin-station-list">
-                  ${
-                    hasPermission("manage_roles")
-                      ? `
-                        <div class="station-assignment-list" data-user-station-list="${escapeHtml(username)}">
-                          ${state.stations
-                            .map((station) => `
-                              <label class="station-assignment-option">
-                                <input type="checkbox" value="${escapeHtml(station)}" ${assignedStations.includes(station) ? "checked" : ""}>
-                                <span>${escapeHtml(station)}</span>
-                              </label>
-                            `)
-                            .join("")}
-                        </div>
-                      `
-                      : `<span>${escapeHtml(assignedStations.join(", ") || "No assigned station")}</span>`
-                  }
-                </div>
+                <section class="user-manager-settings-panel">
+                  <header class="user-manager-section-heading">
+                    <span class="user-manager-section-icon" aria-hidden="true"><i class="user-action-icon icon-key"></i></span>
+                    <span><strong>Password reset</strong><small>Create a new temporary password without exposing the existing one.</small></span>
+                  </header>
 
-                <div class="user-admin-permissions">
-                  <strong>${escapeHtml(permissionSummaryForUser(user))}</strong>
-                  <small>Stages: ${escapeHtml(stageAccess.join(", ") || "No stage access")}</small>
-                </div>
-
-                <div class="user-admin-password">
                   ${
                     hasPermission("update_user_passwords")
-                      ? `
-                        <div class="password-reset-row polished">
-  <input data-user-password="${escapeHtml(username)}" type="password" placeholder="New password">
-  ${userActionButtonHtml({
-    className: "secondary",
-    attr: `data-generate-user-password="${escapeHtml(username)}"`,
-    label: "Generate temporary password",
-    icon: "icon-key",
-  })}
-  ${userActionButtonHtml({
-    className: "secondary",
-    attr: `data-toggle-password="${escapeHtml(username)}"`,
-    label: "Show password",
-    icon: "icon-eye",
-  })}
-  ${userActionButtonHtml({
-    className: "primary",
-    attr: `data-update-user-password="${escapeHtml(username)}"`,
-    label: "Save password",
-    icon: "icon-save-user",
-  })}
-</div>
-<small class="password-note">
-  Existing password cannot be viewed.<br>
-  Generate or enter a new one, then save it.
-</small>
-                      `
-                      : `<span class="protected-pill">Protected</span>`
+                      ? `<label class="user-manager-field user-manager-password-field">
+                          <span>New temporary password</span>
+                          <input data-user-password="${escapeHtml(username)}" type="password" autocomplete="new-password" placeholder="Enter or generate a new password">
+                          <small>Existing passwords cannot be viewed.</small>
+                        </label>
+                        <div class="user-manager-password-actions">
+                          ${userManagerActionButtonHtml({
+                            tone: "secondary",
+                            attr: `data-generate-user-password="${escapeHtml(username)}"`,
+                            label: "Generate",
+                            icon: "icon-key",
+                          })}
+                          ${userManagerActionButtonHtml({
+                            tone: "secondary",
+                            attr: `data-toggle-password="${escapeHtml(username)}"`,
+                            label: "Show",
+                            icon: "icon-eye",
+                          })}
+                          ${userManagerActionButtonHtml({
+                            tone: "primary",
+                            attr: `data-update-user-password="${escapeHtml(username)}"`,
+                            label: "Save password",
+                            icon: "icon-save-user",
+                          })}
+                        </div>`
+                      : `<div class="user-manager-protected-state"><span class="protected-pill">Protected</span><small>You do not have permission to reset this password.</small></div>`
                   }
-                </div>
+                </section>
 
-                <div class="user-admin-status">
-                  <span class="user-status-pill ${active ? "active" : "inactive"}">
-                    <i></i>
-                    ${active ? "Active profile" : "Inactive profile"}
-                  </span>
+                <aside class="user-manager-account-panel">
+                  <header class="user-manager-section-heading">
+                    <span class="user-manager-section-icon" aria-hidden="true"><i class="user-action-icon icon-user"></i></span>
+                    <span><strong>Account status</strong><small>Control whether this profile can sign in.</small></span>
+                  </header>
 
-                  <span class="user-session-pill ${loggedIn ? "is-online" : "is-offline"}">${loggedIn ? "Signed in" : "Logged out"}</span>
-                </div>
+                  <div class="user-manager-account-state">
+                    <span class="user-status-pill ${active ? "active" : "inactive"}"><i></i>${active ? "Active profile" : "Inactive profile"}</span>
+                    <span class="user-session-pill ${loggedIn ? "is-online" : "is-offline"}">${loggedIn ? "Currently signed in" : "Not signed in"}</span>
+                  </div>
 
-                <div class="user-admin-actions">
-                  ${
-                    hasPermission("manage_roles")
-                      ? userActionButtonHtml({
-                          className: "secondary",
-                          attr: `data-update-user-role="${escapeHtml(username)}"`,
-                          label: "Save role",
-                          icon: "icon-shield",
-                        })
-                      : ""
-                  }
-
-                  ${
-                    active && hasPermission("deactivate_users")
-                      ? userActionButtonHtml({
-                          className: "danger",
-                          attr: `data-deactivate-user="${escapeHtml(username)}"`,
-                          label: "Deactivate",
-                          icon: "icon-power",
-                        })
-                      : ""
-                  }
-
-                  ${
-                    !active && hasPermission("reactivate_users")
-                      ? userActionButtonHtml({
-                          className: "success",
-                          attr: `data-reactivate-user="${escapeHtml(username)}"`,
-                          label: "Activate",
-                          icon: "icon-power",
-                        })
-                      : ""
-                  }
-
-                  ${
-                    hasPermission("manage_users")
-                      ? userActionButtonHtml({
-                          className: "danger",
-                          attr: `data-delete-user="${escapeHtml(username)}"`,
-                          label: "Delete user",
-                          icon: "icon-trash",
-                        })
-                      : ""
-                  }
-                </div>
-              </article>
-            `;
-          })
-          .join("")}
-      </div>
+                  <div class="user-manager-account-actions">
+                    ${
+                      active && hasPermission("deactivate_users")
+                        ? userManagerActionButtonHtml({
+                            tone: "warning",
+                            attr: `data-deactivate-user="${escapeHtml(username)}"`,
+                            label: "Deactivate user",
+                            icon: "icon-power",
+                          })
+                        : ""
+                    }
+                    ${
+                      !active && hasPermission("reactivate_users")
+                        ? userManagerActionButtonHtml({
+                            tone: "success",
+                            attr: `data-reactivate-user="${escapeHtml(username)}"`,
+                            label: "Activate user",
+                            icon: "icon-power",
+                          })
+                        : ""
+                    }
+                    ${
+                      hasPermission("manage_users")
+                        ? userManagerActionButtonHtml({
+                            tone: "danger",
+                            attr: `data-delete-user="${escapeHtml(username)}"`,
+                            label: "Delete user",
+                            icon: "icon-trash",
+                          })
+                        : ""
+                    }
+                  </div>
+                </aside>
+              </div>
+            </details>
+          `;
+        })
+        .join("")}
     </div>
   `;
 }
@@ -21261,6 +21821,7 @@ function exportStaticCsv() {
 function openOperationsModal({ kind = "operations", eyebrow = "Operations", title = "Operations", body = "" } = {}) {
   if (!els.operationsModal || !els.operationsModalBody) return;
   state.operationsModalKind = kind;
+  els.operationsModal.dataset.kind = kind;
   if (els.operationsModalEyebrow) els.operationsModalEyebrow.textContent = eyebrow;
   if (els.operationsModalTitle) els.operationsModalTitle.textContent = title;
   els.operationsModalBody.innerHTML = body;
@@ -21272,6 +21833,8 @@ function openOperationsModal({ kind = "operations", eyebrow = "Operations", titl
 function closeOperationsModal() {
   state.operationsModalKind = "";
   state.rackMoveItemId = "";
+  if (els.operationsModal) delete els.operationsModal.dataset.kind;
+  state.rejectLogOpening = false;
   if (els.operationsModal) els.operationsModal.hidden = true;
   if (els.operationsModalBackdrop) els.operationsModalBackdrop.hidden = true;
   updateModalScrollLock();
@@ -21441,66 +22004,257 @@ function rejectCatalogOptions(items = [], selected = "") {
   return items.map((item) => `<option value="${escapeHtml(item.label)}" ${String(item.label) === String(selected) ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("");
 }
 
-function rejectLogModalHtml() {
+function rejectDateKey(offsetDays = 0) {
+  const value = new Date();
+  value.setHours(12, 0, 0, 0);
+  value.setDate(value.getDate() + Number(offsetDays || 0));
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function rejectFilterDescription() {
+  const query = els.rejectSearchInput?.value.trim() || "";
+  const dateFrom = els.rejectDateFrom?.value || "";
+  const dateTo = els.rejectDateTo?.value || "";
+  const parts = [];
+  if (dateFrom && dateTo && dateFrom === dateTo) parts.push(`rejected on ${formatDisplayDate(dateFrom)}`);
+  else if (dateFrom && dateTo) parts.push(`rejected from ${formatDisplayDate(dateFrom)} through ${formatDisplayDate(dateTo)}`);
+  else if (dateFrom) parts.push(`rejected from ${formatDisplayDate(dateFrom)}`);
+  else if (dateTo) parts.push(`rejected through ${formatDisplayDate(dateTo)}`);
+  else parts.push("all rejected dates");
+  if (query) parts.push(`matching “${query}”`);
+  return parts.join(" · ");
+}
+
+function syncRejectDateLimits() {
+  const from = els.rejectDateFrom?.value || "";
+  const to = els.rejectDateTo?.value || "";
+  if (els.rejectDateFrom) els.rejectDateFrom.max = to;
+  if (els.rejectDateTo) els.rejectDateTo.min = from;
+}
+
+function setRejectDatePreset(value, { refresh = true } = {}) {
+  const preset = String(value || "all");
+  if (els.rejectDatePreset) els.rejectDatePreset.value = preset;
+  if (!els.rejectDateFrom || !els.rejectDateTo) return;
+  if (preset === "custom") {
+    syncRejectDateLimits();
+    if (refresh) els.rejectDateFrom.focus();
+    return;
+  }
+  if (preset === "today") {
+    els.rejectDateFrom.value = rejectDateKey(0);
+    els.rejectDateTo.value = rejectDateKey(0);
+  } else if (preset === "7-days") {
+    els.rejectDateFrom.value = rejectDateKey(-6);
+    els.rejectDateTo.value = rejectDateKey(0);
+  } else if (preset === "30-days") {
+    els.rejectDateFrom.value = rejectDateKey(-29);
+    els.rejectDateTo.value = rejectDateKey(0);
+  } else if (preset === "all") {
+    els.rejectDateFrom.value = "";
+    els.rejectDateTo.value = "";
+  }
+  syncRejectDateLimits();
+  if (refresh) refreshRejectPage().catch((error) => showInlineError(error.message, true));
+}
+
+function markRejectDateRangeCustom() {
+  syncRejectDateLimits();
+  if (els.rejectDatePreset) els.rejectDatePreset.value = "custom";
+}
+
+function clearRejectFilters() {
+  if (els.rejectSearchInput) {
+    window.clearTimeout(els.rejectSearchInput._timer);
+    els.rejectSearchInput.value = "";
+  }
+  setRejectDatePreset("all", { refresh: false });
+  if (els.rejectLocationFilter) els.rejectLocationFilter.value = "";
+  renderRejectPage();
+  refreshRejectPage().catch((error) => showInlineError(error.message, true));
+}
+
+function rejectLogModalHtml({ catalogLoading = false, catalogError = "" } = {}) {
   const reasons = state.rejectCatalog.reasons || [];
   const locations = state.rejectCatalog.locations || [];
+  const catalogReady = reasons.length > 0 && locations.length > 0;
+  const submitDisabled = catalogLoading || !catalogReady;
+  const catalogMessage = catalogLoading
+    ? "Loading reject reasons and break locations..."
+    : catalogError
+      ? catalogError
+      : catalogReady
+        ? "Enter an order and item, then verify the piece before recording the reject."
+        : "An Admin must add at least one reject reason and break location before a reject can be recorded.";
   return `
-    <form id="rejectLogForm" class="reject-log-form">
-      <section class="reject-log-form-intro"><strong>Restart one broken piece</strong><span>The matching order/item is rolled back across its workflow stages. Rack and bay quantities are reduced when applicable.</span></section>
-      <div class="reject-log-grid">
-        <label><span>Order # *</span><input id="rejectOrderInput" name="order" inputmode="numeric" required></label>
-        <label><span>Item # *</span><input id="rejectItemInput" name="item" inputmode="numeric" required></label>
-        <label><span>Delivery date</span><input id="rejectDeliveryDateInput" name="deliveryDate" type="date"></label>
-        <label><span>Rejected Qty *</span><input name="qty" type="number" min="1" value="1" required></label>
-        <label><span>Reason *</span><select name="reason" required><option value="">Choose reason...</option>${rejectCatalogOptions(reasons)}</select></label>
-        <label><span>Where it broke *</span><select name="location" required><option value="">Choose location...</option>${rejectCatalogOptions(locations)}</select></label>
-        <label class="reject-notes"><span>Notes</span><textarea name="notes" rows="3" placeholder="Optional details..."></textarea></label>
-      </div>
-      <div id="rejectMatchPreview" class="reject-match-preview">Enter an order and item to verify the active delivery date.</div>
-      <div class="reject-log-actions"><button type="submit">Record Reject & Restart Piece</button><span id="rejectLogStatus"></span></div>
+    <form id="rejectLogForm" class="reject-log-form reject-log-form-v138">
+      <section class="reject-log-hero-v138">
+        <span class="reject-log-hero-icon-v138" aria-hidden="true"></span>
+        <div>
+          <small>Internal quality incident</small>
+          <strong>Log one broken piece and restart its production workflow</strong>
+          <p>Nothing changes until the order and item are verified and the reject is submitted.</p>
+        </div>
+      </section>
+
+      <section class="reject-log-step-v138">
+        <header>
+          <span>1</span>
+          <div><strong>Find the affected piece</strong><small>Use the exact order and item shown on the delivery list.</small></div>
+        </header>
+        <div class="reject-log-identify-grid-v138">
+          <label><span>Order number *</span><input id="rejectOrderInput" name="order" inputmode="numeric" autocomplete="off" required></label>
+          <label><span>Item number *</span><input id="rejectItemInput" name="item" inputmode="numeric" autocomplete="off" required></label>
+          <label><span>Delivery date</span><input id="rejectDeliveryDateInput" name="deliveryDate" type="date"><small>Filled automatically after verification.</small></label>
+          <label><span>Rejected quantity *</span><input name="qty" type="number" min="1" value="1" required><small>Usually one broken piece.</small></label>
+          <button id="rejectVerifyBtn" class="secondary reject-verify-button" type="button">
+            <span class="reject-verify-icon" aria-hidden="true"></span>
+            <span>Verify Item</span>
+          </button>
+        </div>
+        <div id="rejectMatchPreview" class="reject-match-preview" aria-live="polite">
+          <span class="reject-match-state-icon" aria-hidden="true"></span>
+          <div><strong>Waiting for an order and item</strong><span>Verification confirms the active delivery date and stages that will be restarted.</span></div>
+        </div>
+      </section>
+
+      <section class="reject-log-step-v138">
+        <header>
+          <span>2</span>
+          <div><strong>Describe what happened</strong><small>Choose a standardized reason and the process location where the glass broke.</small></div>
+        </header>
+        <div class="reject-log-incident-grid-v138">
+          <label><span>Reject reason *</span><select id="rejectReasonSelect" name="reason" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading reasons..." : "Choose reason..."}</option>${rejectCatalogOptions(reasons)}</select></label>
+          <label><span>Break location *</span><select id="rejectLocationSelect" name="location" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading locations..." : "Choose location..."}</option>${rejectCatalogOptions(locations)}</select></label>
+          <label class="reject-notes"><span>Investigation notes</span><textarea name="notes" rows="3" placeholder="Optional details such as the defect, handling issue, or equipment condition..."></textarea></label>
+        </div>
+      </section>
+
+      <section class="reject-impact-note">
+        <span class="reject-impact-icon" aria-hidden="true"></span>
+        <div><strong>What happens after submission</strong><span>The rejected quantity is removed from current rack/bay assignments and its affected process scans are reset. Existing audit history remains intact.</span></div>
+      </section>
+
+      <footer class="reject-log-actions reject-log-actions-v138">
+        <div><strong>Ready to record the reject?</strong><span id="rejectLogStatus" class="${catalogError || (!catalogReady && !catalogLoading) ? "is-warning" : catalogLoading ? "is-loading" : ""}">${escapeHtml(catalogMessage)}</span></div>
+        <div class="reject-log-action-buttons">
+          <button class="secondary" type="button" data-operations-close>Cancel</button>
+          <button class="primary reject-log-submit-v138" type="submit" ${submitDisabled ? "disabled" : ""}>
+            <span aria-hidden="true"></span>
+            <span>Record Reject &amp; Restart Piece</span>
+          </button>
+        </div>
+      </footer>
     </form>`;
 }
 
-function rejectHistoryHtml(rejects = state.rejectHistory) {
-  if (!rejects.length) return `<div class="admin-empty">No internal rejects match the current filters.</div>`;
-  const groups = new Map();
-  for (const row of rejects) {
-    const key = String(row.delivery_date || "Unknown date");
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(row);
-  }
-  return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([deliveryDate, rows]) => `
-    <details class="reject-date-group" open>
-      <summary><div><strong>${escapeHtml(deliveryDate === "Unknown date" ? deliveryDate : formatDisplayDate(deliveryDate))}</strong><span>${escapeHtml(rows.length)} reject${rows.length === 1 ? "" : "s"}</span></div><b>${escapeHtml(rows.reduce((sum, row) => sum + Number(row.qty || 0), 0))} pcs</b></summary>
-      <div class="reject-event-list">
-        ${rows.map((row) => `
-          <article class="reject-event-card">
-            <span class="reject-event-order"><small>Order / Item</small><strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong></span>
-            <span><small>Qty</small><strong>${escapeHtml(row.qty)}</strong></span>
-            <span><small>Reason</small><strong>${escapeHtml(row.reason_label)}</strong></span>
-            <span><small>Location</small><strong>${escapeHtml(row.location_label)}</strong></span>
-            <span><small>Logged</small><strong>${escapeHtml(formatDateTime(row.rejected_at))}</strong></span>
-            <span><small>By</small><strong>${escapeHtml(row.rejected_by || "system")}</strong></span>
-            <p>${escapeHtml(row.customer || row.job || row.product || "")}${row.notes ? ` · ${escapeHtml(row.notes)}` : ""}</p>
-          </article>`).join("")}
-      </div>
-    </details>`).join("");
+function formatRejectTime(value) {
+  if (!value) return "Unknown time";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function renderRejectSummary() {
-  if (!els.rejectSummary) return;
-  const rows = state.rejectHistory || [];
-  const today = todayKey();
-  const todayRows = rows.filter((row) => String(row.rejected_at || "").slice(0, 10) === today);
-  const thirtyDayCutoff = new Date();
-  thirtyDayCutoff.setDate(thirtyDayCutoff.getDate() - 30);
-  const recentRows = rows.filter((row) => new Date(row.rejected_at || 0) >= thirtyDayCutoff);
-  els.rejectSummary.innerHTML = [
-    miniStat("Reject events", rows.length),
-    miniStat("Rejected pieces", rows.reduce((sum, row) => sum + Number(row.qty || 0), 0)),
-    miniStat("Today", todayRows.reduce((sum, row) => sum + Number(row.qty || 0), 0)),
-    miniStat("Last 30 days", recentRows.reduce((sum, row) => sum + Number(row.qty || 0), 0)),
-  ].join("");
+function rejectSelectedLocation() {
+  return String(els.rejectLocationFilter?.value || "").trim();
+}
+
+function rejectRowsForView(rejects = state.rejectHistory) {
+  const location = rejectSelectedLocation();
+  if (!location) return Array.isArray(rejects) ? rejects.slice() : [];
+  return (Array.isArray(rejects) ? rejects : []).filter((row) => String(row.location_label || "") === location);
+}
+
+function updateRejectLocationOptions(rejects = state.rejectHistory) {
+  if (!els.rejectLocationFilter) return;
+  const selected = rejectSelectedLocation();
+  const locations = [...new Set((Array.isArray(rejects) ? rejects : [])
+    .map((row) => String(row.location_label || "").trim())
+    .filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  els.rejectLocationFilter.innerHTML = `<option value="">All locations</option>${locations.map((location) => `<option value="${escapeHtml(location)}">${escapeHtml(location)}</option>`).join("")}`;
+  els.rejectLocationFilter.value = locations.includes(selected) ? selected : "";
+}
+
+function renderRejectSummary(rejects = rejectRowsForView()) {
+  if (!els.rejectSummaryBar) return;
+  const rows = Array.isArray(rejects) ? rejects : [];
+  const totalQty = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
+  const locations = new Set(rows.map((row) => String(row.location_label || "").trim()).filter(Boolean));
+  const users = new Set(rows.map((row) => String(row.rejected_by || "").trim()).filter(Boolean));
+  els.rejectSummaryBar.innerHTML = `
+    <article><span class="reject-summary-icon events" aria-hidden="true"></span><div><strong>${rows.length}</strong><small>Total rejects</small></div></article>
+    <article><span class="reject-summary-icon locations" aria-hidden="true"></span><div><strong>${locations.size}</strong><small>Machines / locations</small></div></article>
+    <article><span class="reject-summary-icon users" aria-hidden="true"></span><div><strong>${users.size}</strong><small>Users</small></div></article>
+    <article class="is-quantity"><span class="reject-summary-icon quantity" aria-hidden="true"></span><div><strong>${totalQty} pc${totalQty === 1 ? "" : "s"}</strong><small>Total rejected quantity</small></div></article>`;
+}
+
+function rejectTimelineDetailHtml(row) {
+  const customer = row.customer || "Not available";
+  const job = row.job || "Not available";
+  const product = row.product || "Not available";
+  const notes = row.notes || "No investigation notes were entered for this reject.";
+  return `
+    <div class="reject-timeline-detail-grid-v143">
+      <span><small>Customer</small><strong>${escapeHtml(customer)}</strong></span>
+      <span><small>Job number</small><strong>${escapeHtml(job)}</strong></span>
+      <span><small>Product</small><strong>${escapeHtml(product)}</strong></span>
+      <span class="is-notes"><small>Investigation notes</small><strong>${escapeHtml(notes)}</strong></span>
+    </div>`;
+}
+
+function rejectHistoryHtml(rejects = rejectRowsForView()) {
+  if (!rejects.length) {
+    return `<div class="reject-empty-state"><span aria-hidden="true"></span><div><strong>No internal rejects found</strong><p>No records match ${escapeHtml(rejectFilterDescription())}${rejectSelectedLocation() ? ` at ${escapeHtml(rejectSelectedLocation())}` : ""}. Clear the filters or try a different search.</p></div></div>`;
+  }
+  const groups = new Map();
+  for (const row of rejects) {
+    const rejectedDate = String(row.rejected_at || "").slice(0, 10) || "Unknown date";
+    if (!groups.has(rejectedDate)) groups.set(rejectedDate, []);
+    groups.get(rejectedDate).push(row);
+  }
+  return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([rejectedDate, rows], groupIndex) => {
+    const sortedRows = rows.slice().sort((a, b) => String(b.rejected_at || "").localeCompare(String(a.rejected_at || "")));
+    return `
+      <details class="reject-date-group reject-timeline-group-v143" ${groupIndex === 0 ? "open" : ""}>
+        <summary class="reject-timeline-date-summary-v143">
+          <div class="reject-timeline-date-title-v143">
+            <span class="reject-timeline-calendar-v143" aria-hidden="true"></span>
+            <strong>${escapeHtml(rejectedDate === "Unknown date" ? rejectedDate : formatDisplayDate(rejectedDate))}</strong>
+            <b>${rows.length} event${rows.length === 1 ? "" : "s"}</b>
+          </div>
+          <span class="reject-date-group-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="reject-timeline-list-v143">
+          ${sortedRows.map((row) => `
+            <details class="reject-timeline-event-v143">
+              <summary class="reject-timeline-event-summary-v143">
+                <time>${escapeHtml(formatRejectTime(row.rejected_at))}</time>
+                <span class="reject-timeline-node-v143" aria-hidden="true"></span>
+                <div class="reject-timeline-card-v143">
+                  <span class="reject-timeline-ir-v143" aria-hidden="true">IR</span>
+                  <div class="reject-timeline-identity-v143"><small>Order / Item</small><strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong><span>${escapeHtml(row.customer || row.job || row.product || "No customer or job description")}</span></div>
+                  <b class="reject-timeline-qty-v143">${escapeHtml(row.qty)} pc${Number(row.qty || 0) === 1 ? "" : "s"}</b>
+                  <span class="reject-timeline-field-v143"><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Not available")}</strong></span>
+                  <span class="reject-timeline-field-v143"><small>Reason</small><strong>${escapeHtml(row.reason_label || "Not specified")}</strong></span>
+                  <span class="reject-timeline-field-v143"><small>Machine / location</small><strong>${escapeHtml(row.location_label || "Not specified")}</strong></span>
+                  <span class="reject-timeline-field-v143"><small>Rejected by</small><strong>${escapeHtml(row.rejected_by || "system")}</strong></span>
+                  <span class="reject-timeline-details-label-v143">Details<i aria-hidden="true"></i></span>
+                </div>
+              </summary>
+              <div class="reject-timeline-event-details-v143">${rejectTimelineDetailHtml(row)}</div>
+            </details>`).join("")}
+        </div>
+      </details>`;
+  }).join("");
+}
+
+function renderRejectPage() {
+  const rows = rejectRowsForView();
+  renderRejectSummary(rows);
+  if (els.rejectHistory) els.rejectHistory.innerHTML = rejectHistoryHtml(rows);
 }
 
 async function refreshRejectPage() {
@@ -21509,6 +22263,16 @@ async function refreshRejectPage() {
   const dateFrom = els.rejectDateFrom?.value || "";
   const dateTo = els.rejectDateTo?.value || "";
   const status = document.getElementById("rejectPageStatus");
+  syncRejectDateLimits();
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    const message = "The From date cannot be later than the Through date.";
+    if (status) {
+      status.hidden = false;
+      status.className = "reject-page-status is-error";
+      status.textContent = message;
+    }
+    throw new Error(message);
+  }
   if (query) params.set("q", query);
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
@@ -21516,11 +22280,12 @@ async function refreshRejectPage() {
 
   if (els.rejectRefreshBtn) els.rejectRefreshBtn.disabled = true;
   if (status) {
+    status.hidden = false;
     status.className = "reject-page-status is-loading";
-    status.textContent = "Loading reject history...";
+    status.textContent = `Loading rejects for ${rejectFilterDescription()}...`;
   }
   if (els.rejectHistory) {
-    els.rejectHistory.innerHTML = `<div class="admin-empty loading"><strong>Loading internal rejects...</strong><span class="loading-bar"><i></i></span></div>`;
+    els.rejectHistory.innerHTML = `<div class="reject-loading-state"><span aria-hidden="true"></span><div><strong>Loading internal reject history</strong><p>Checking ${escapeHtml(rejectFilterDescription())}.</p></div></div>`;
   }
 
   const [historyResult, catalogResult] = await Promise.allSettled([
@@ -21532,8 +22297,8 @@ async function refreshRejectPage() {
     if (historyResult.status === "rejected") throw historyResult.reason;
     const history = historyResult.value || {};
     state.rejectHistory = Array.isArray(history.rejects) ? history.rejects : [];
-    renderRejectSummary();
-    if (els.rejectHistory) els.rejectHistory.innerHTML = rejectHistoryHtml();
+    updateRejectLocationOptions();
+    renderRejectPage();
 
     if (catalogResult.status === "fulfilled") {
       const catalog = catalogResult.value || {};
@@ -21545,18 +22310,20 @@ async function refreshRejectPage() {
 
     if (status) {
       const catalogWarning = catalogResult.status === "rejected"
-        ? " Reject reasons and locations could not be refreshed; existing choices were kept."
+        ? "Reject reasons and locations could not be refreshed; existing choices were kept."
         : "";
+      status.hidden = !catalogWarning;
       status.className = `reject-page-status${catalogWarning ? " is-warning" : ""}`;
-      status.textContent = `${state.rejectHistory.length} reject event${state.rejectHistory.length === 1 ? "" : "s"} loaded.${catalogWarning}`;
+      status.textContent = catalogWarning;
     }
   } catch (error) {
     state.rejectHistory = [];
-    renderRejectSummary();
+    renderRejectSummary([]);
     if (els.rejectHistory) {
-      els.rejectHistory.innerHTML = `<div class="admin-empty is-error"><strong>Reject history could not be loaded</strong><span>${escapeHtml(error?.message || "The server did not return reject history.")}</span><button type="button" data-reject-retry>Try Again</button></div>`;
+      els.rejectHistory.innerHTML = `<div class="reject-empty-state is-error"><span aria-hidden="true"></span><div><strong>Reject history could not be loaded</strong><p>${escapeHtml(error?.message || "The server did not return reject history.")}</p><button class="secondary" type="button" data-reject-retry>Try Again</button></div></div>`;
     }
     if (status) {
+      status.hidden = false;
       status.className = "reject-page-status is-error";
       status.textContent = error?.message || "Reject history could not be loaded.";
     }
@@ -21566,57 +22333,113 @@ async function refreshRejectPage() {
   }
 }
 
-async function openRejectLogModal() {
-  const catalogReady = state.rejectCatalog.reasons.length && state.rejectCatalog.locations.length;
-  if (!catalogReady && state.backend) {
-    const payload = await fetchJson("/api/rejects/catalog");
-    state.rejectCatalog = {
-      reasons: Array.isArray(payload.reasons) ? payload.reasons : [],
-      locations: Array.isArray(payload.locations) ? payload.locations : [],
-    };
+function updateRejectCatalogControls() {
+  const reason = document.getElementById("rejectReasonSelect");
+  const location = document.getElementById("rejectLocationSelect");
+  const submit = document.querySelector("#rejectLogForm .reject-log-submit-v138");
+  const status = document.getElementById("rejectLogStatus");
+  const reasons = state.rejectCatalog.reasons || [];
+  const locations = state.rejectCatalog.locations || [];
+  if (reason) {
+    const previous = reason.value;
+    reason.innerHTML = `<option value="">Choose reason...</option>${rejectCatalogOptions(reasons, previous)}`;
+    reason.disabled = false;
   }
+  if (location) {
+    const previous = location.value;
+    location.innerHTML = `<option value="">Choose location...</option>${rejectCatalogOptions(locations, previous)}`;
+    location.disabled = false;
+  }
+  const ready = reasons.length > 0 && locations.length > 0;
+  if (submit) submit.disabled = !ready;
+  if (status) {
+    status.className = ready ? "" : "is-warning";
+    status.textContent = ready
+      ? "Enter an order and item, then verify the piece before recording the reject."
+      : "An Admin must add at least one reject reason and break location before a reject can be recorded.";
+  }
+}
+
+async function openRejectLogModal() {
+  if (state.rejectLogOpening) return;
+  state.rejectLogOpening = true;
+  const trigger = els.rejectLogOpenBtn;
+  trigger?.setAttribute("aria-busy", "true");
+  state.rejectMatches = [];
+  const catalogReady = state.rejectCatalog.reasons.length > 0 && state.rejectCatalog.locations.length > 0;
   openOperationsModal({
     kind: "reject-log",
-    eyebrow: "Quality incident",
+    eyebrow: "Quality recovery",
     title: "Log Internal Reject",
-    body: rejectLogModalHtml(),
+    body: rejectLogModalHtml({ catalogLoading: !catalogReady && state.backend }),
   });
-  const status = document.getElementById("rejectLogStatus");
-  if (status && (!state.rejectCatalog.reasons.length || !state.rejectCatalog.locations.length)) {
-    status.textContent = "An Admin must add at least one reject reason and break location before a reject can be recorded.";
+  window.requestAnimationFrame(() => document.getElementById("rejectOrderInput")?.focus());
+  try {
+    if (!catalogReady && state.backend) {
+      const payload = await fetchJson("/api/rejects/catalog");
+      state.rejectCatalog = {
+        reasons: Array.isArray(payload.reasons) ? payload.reasons : [],
+        locations: Array.isArray(payload.locations) ? payload.locations : [],
+      };
+      if (state.operationsModalKind === "reject-log") updateRejectCatalogControls();
+    }
+  } catch (error) {
+    const status = document.getElementById("rejectLogStatus");
+    if (status) {
+      status.className = "is-warning";
+      status.textContent = `Reject choices could not be loaded: ${error.message}`;
+    }
+  } finally {
+    state.rejectLogOpening = false;
+    trigger?.removeAttribute("aria-busy");
   }
-  document.getElementById("rejectOrderInput")?.focus();
 }
 
 async function previewRejectMatch() {
   const order = document.getElementById("rejectOrderInput")?.value.trim() || "";
   const item = document.getElementById("rejectItemInput")?.value.trim() || "";
   const target = document.getElementById("rejectMatchPreview");
+  const verifyButton = document.getElementById("rejectVerifyBtn");
+  const requestId = ++state.rejectMatchRequestId;
   if (!target) return;
   if (!order || !item) {
     state.rejectMatches = [];
     target.className = "reject-match-preview";
-    target.textContent = "Enter an order and item to verify the active delivery date.";
+    target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Waiting for an order and item</strong><span>Enter both values before verification.</span></div>`;
     return;
   }
+  if (verifyButton) {
+    verifyButton.disabled = true;
+    verifyButton.classList.add("is-loading");
+  }
   target.className = "reject-match-preview is-loading";
-  target.textContent = "Checking active delivery lists...";
+  target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Checking active delivery lists</strong><span>Verifying the order, item, delivery date, and affected stages...</span></div>`;
   try {
     const payload = await fetchJson(`/api/rejects/matches?order=${encodeURIComponent(order)}&item=${encodeURIComponent(item)}`);
+    if (requestId !== state.rejectMatchRequestId) return;
     state.rejectMatches = payload.matches || [];
     if (!state.rejectMatches.length) {
-      target.innerHTML = `<strong>No active match found</strong><span>Check the order and item before submitting.</span>`;
+      target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>No active match found</strong><span>Check the order and item, or confirm the delivery list is active.</span></div>`;
       target.className = "reject-match-preview is-error";
       return;
     }
-    const match = state.rejectMatches[0];
+    const requestedDate = document.getElementById("rejectDeliveryDateInput")?.value || "";
+    const match = state.rejectMatches.find((row) => String(row.delivery_date || "") === requestedDate) || state.rejectMatches[0];
     const dateInput = document.getElementById("rejectDeliveryDateInput");
-    if (dateInput && !dateInput.value) dateInput.value = match.delivery_date || "";
-    target.innerHTML = `<strong>${escapeHtml(match.order_no)}-${escapeHtml(match.item_no)} · ${escapeHtml(formatDisplayDate(match.delivery_date))}</strong><span>${escapeHtml(match.customer || match.job || match.product || "Active delivery-list item")} · Qty ${escapeHtml(match.qty || 0)} · ${escapeHtml(match.stages || "")}</span>`;
+    if (dateInput) dateInput.value = match.delivery_date || "";
+    const stageList = String(match.stages || "").split(",").map((value) => value.trim()).filter(Boolean);
+    target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>${escapeHtml(match.order_no)}-${escapeHtml(match.item_no)} verified for ${escapeHtml(formatDisplayDate(match.delivery_date))}</strong><span>${escapeHtml(match.customer || match.job || match.product || "Active delivery-list item")} · Qty ${escapeHtml(match.qty || 0)}</span><div class="reject-match-stage-list">${stageList.map((stage) => `<b>${escapeHtml(stage)}</b>`).join("")}</div></div>`;
     target.className = "reject-match-preview is-valid";
   } catch (error) {
-    target.textContent = error.message;
+    if (requestId !== state.rejectMatchRequestId) return;
+    state.rejectMatches = [];
+    target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Verification failed</strong><span>${escapeHtml(error.message)}</span></div>`;
     target.className = "reject-match-preview is-error";
+  } finally {
+    if (requestId === state.rejectMatchRequestId && verifyButton) {
+      verifyButton.disabled = false;
+      verifyButton.classList.remove("is-loading");
+    }
   }
 }
 
@@ -21627,11 +22450,16 @@ async function submitRejectLog(form) {
   data.qty = Number(data.qty || 1);
   if (!state.rejectMatches.length) await previewRejectMatch();
   if (!state.rejectMatches.length) throw new Error("Verify a matching active order and item before recording the reject.");
+  const verified = state.rejectMatches.find((match) => String(match.delivery_date || "") === String(data.deliveryDate || "")) || state.rejectMatches[0];
+  if (!data.deliveryDate && verified?.delivery_date) data.deliveryDate = verified.delivery_date;
   if (submitButton) {
     submitButton.disabled = true;
-    submitButton.textContent = "Recording Reject...";
+    submitButton.innerHTML = `<span aria-hidden="true"></span><span>Recording Reject...</span>`;
   }
-  if (status) status.textContent = "Saving reject and restarting the piece...";
+  if (status) {
+    status.textContent = "Saving the reject and restarting the affected piece...";
+    status.className = "is-saving";
+  }
   try {
     const payload = await fetchJson("/api/rejects", { method: "POST", body: JSON.stringify(data) });
     state.rejectHistory = payload.rejects || state.rejectHistory;
@@ -21640,10 +22468,16 @@ async function submitRejectLog(form) {
     window.DLSLineUpdates?.clearCache?.();
     if (state.activeListId) await activateList(state.activeListId, false);
     showSaveConfirmation(payload.message || "Internal reject was recorded and the piece was restarted.");
+  } catch (error) {
+    if (status) {
+      status.textContent = error.message;
+      status.className = "is-warning";
+    }
+    throw error;
   } finally {
     if (submitButton?.isConnected) {
       submitButton.disabled = false;
-      submitButton.textContent = "Record Reject & Restart Piece";
+      submitButton.innerHTML = `<span aria-hidden="true"></span><span>Record Reject &amp; Restart Piece</span>`;
     }
   }
 }
@@ -21703,21 +22537,109 @@ function importRunClassification(entries = []) {
   return { key: "unchanged", label: "No Changes" };
 }
 
+function importRunLocalDate(entry = {}) {
+  const timestamp = importRunTime(entry);
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+}
+
+
+function importRunEntrySignature(entry = {}) {
+  return [
+    String(entry.deliveryDate || ""),
+    String(entry.sourceName || entry.fileName || ""),
+    String(entry.classification || entry.status || ""),
+    Number(entry.createdCount || 0),
+    Number(entry.updatedCount || 0),
+    Number(entry.changedPieceQty || 0),
+    Number(entry.addedPieceQty || 0),
+    Number(entry.removedPieceQty || 0),
+    Array.isArray(entry.errors) ? entry.errors.join("|") : "",
+  ].join("");
+}
+
+function importRunGroupSignature(entries = []) {
+  return (Array.isArray(entries) ? entries : []).map(importRunEntrySignature).sort().join("\n");
+}
+
+function collapseDuplicateImportRunGroups(groups = []) {
+  const deduplicated = [];
+  [...groups].sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).forEach((group) => {
+    const signature = importRunGroupSignature(group.entries);
+    const timeMs = new Date(group.time || "").getTime();
+    const duplicate = deduplicated.find((candidate) => {
+      if (!signature || candidate.signature !== signature) return false;
+      if (!Number.isFinite(timeMs) || !Number.isFinite(candidate.timeMs)) return false;
+      return Math.abs(candidate.timeMs - timeMs) <= 10000;
+    });
+    if (!duplicate) {
+      deduplicated.push({ group: { ...group, entries: group.entries.slice() }, signature, timeMs });
+      return;
+    }
+
+    group.entries.forEach((entry) => {
+      const entrySignature = importRunEntrySignature(entry);
+      if (!duplicate.group.entries.some((current) => importRunEntrySignature(current) === entrySignature)) {
+        duplicate.group.entries.push(entry);
+      }
+    });
+    if (Number.isFinite(timeMs) && timeMs < duplicate.timeMs) {
+      duplicate.group.time = group.time;
+      duplicate.timeMs = timeMs;
+    }
+    if (String(duplicate.group.key || "").startsWith("notification-") && !String(group.key || "").startsWith("notification-")) {
+      duplicate.group.key = group.key;
+    }
+  });
+  return deduplicated.map((item) => item.group);
+}
+
 function adminImportRunGroups(imports = []) {
   const groups = new Map();
-  imports.forEach((entry, index) => {
+  const today = todayKey();
+  const pool = [...(imports || []), ...(state.adminTodayImportEntries || [])]
+    .filter((entry) => importRunLocalDate(entry) === today);
+  pool.forEach((entry, index) => {
     const time = importRunTime(entry);
     const base = String(entry.runId || entry.taskId || entry.batchId || entry.importBatchId || time || `run-${index}`);
     const key = `${base}|${time}`;
     if (!groups.has(key)) groups.set(key, { key, time, entries: [] });
-    groups.get(key).entries.push(entry);
+    const duplicate = groups.get(key).entries.some((current) =>
+      String(current.deliveryDate || "") === String(entry.deliveryDate || "")
+      && String(current.sourceName || current.fileName || "") === String(entry.sourceName || entry.fileName || "")
+    );
+    if (!duplicate) groups.get(key).entries.push(entry);
   });
+  const collapsed = collapseDuplicateImportRunGroups([...groups.values()]);
   if (state.adminPinnedImportEntries.length) {
     const time = importRunTime(state.adminPinnedImportEntries[0]);
     const key = state.adminSelectedImportRunKey || `notification|${time}`;
-    groups.set(key, { key, time, entries: state.adminPinnedImportEntries.slice(), pinned: true });
+    collapsed.push({ key, time, entries: state.adminPinnedImportEntries.slice(), pinned: true });
   }
-  return [...groups.values()].sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).slice(0, 60);
+  return collapsed.sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).slice(0, 100);
+}
+
+async function refreshAdminTodayImportRuns({ render = true } = {}) {
+  if (!state.backend) return;
+  try {
+    const payload = await fetchJson("/api/notifications/history?limit=100");
+    const today = todayKey();
+    const automationNotifications = (payload.notifications || []).filter((notification) => {
+      const source = String(notification?.details?.source || "").toLowerCase();
+      const created = new Date(notification.createdAt || "");
+      if (source !== "sql-delivery-automation" || Number.isNaN(created.getTime())) return false;
+      const localKey = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}-${String(created.getDate()).padStart(2, "0")}`;
+      return localKey === today;
+    });
+    state.adminTodayImportEntries = automationNotifications.flatMap(importEntriesFromNotification);
+    state.adminTodayImportDate = today;
+    if (render && els.adminDeliveryLists && state.page === "admin") renderAdminDeliveryLists();
+  } catch (error) {
+    console.warn("Today's import runs could not be loaded:", error);
+  } finally {
+    state.adminTodayImportLoaded = true;
+  }
 }
 
 function renderAdminImportRunBrowser(imports = []) {
@@ -21725,9 +22647,18 @@ function renderAdminImportRunBrowser(imports = []) {
   if (!groups.length) return `<div class="admin-empty">No delivery-list import runs are available yet.</div>`;
   if (!state.adminSelectedImportRunKey || !groups.some((group) => group.key === state.adminSelectedImportRunKey)) {
     state.adminSelectedImportRunKey = groups[0].key;
+    state.adminImportRunPage = 1;
   }
-  const selected = groups.find((group) => group.key === state.adminSelectedImportRunKey) || groups[0];
-  const tabs = groups.map((group, index) => {
+  const selectedIndex = Math.max(groups.findIndex((group) => group.key === state.adminSelectedImportRunKey), 0);
+  const pageSize = Math.max(Number(state.adminImportRunsPerPage || 5), 1);
+  const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
+  const selectedPage = Math.floor(selectedIndex / pageSize) + 1;
+  if (selectedPage !== state.adminImportRunPage) state.adminImportRunPage = selectedPage;
+  state.adminImportRunPage = Math.min(Math.max(Number(state.adminImportRunPage || 1), 1), totalPages);
+  const pageStart = (state.adminImportRunPage - 1) * pageSize;
+  const visibleGroups = groups.slice(pageStart, pageStart + pageSize);
+  const selected = groups[selectedIndex] || groups[0];
+  const tabs = visibleGroups.map((group) => {
     const status = importRunClassification(group.entries);
     const dateCount = new Set(group.entries.map((entry) => entry.deliveryDate).filter(Boolean)).size;
     return `
@@ -21738,9 +22669,17 @@ function renderAdminImportRunBrowser(imports = []) {
       </button>`;
   }).join("");
   const status = importRunClassification(selected.entries);
+  const pager = totalPages > 1 ? `
+    <nav class="admin-import-run-pager" aria-label="Today's import run pages">
+      <button type="button" data-admin-import-page="${state.adminImportRunPage - 1}" ${state.adminImportRunPage <= 1 ? "disabled" : ""}>Previous</button>
+      <span>Runs ${pageStart + 1}-${Math.min(pageStart + pageSize, groups.length)} of ${groups.length} · Page ${state.adminImportRunPage} of ${totalPages}</span>
+      <button type="button" data-admin-import-page="${state.adminImportRunPage + 1}" ${state.adminImportRunPage >= totalPages ? "disabled" : ""}>Next</button>
+    </nav>` : "";
   return `
     <section class="admin-import-run-browser" data-selected-run="${escapeHtml(selected.key)}">
+      <div class="admin-import-run-day-heading"><div><small>Today's automation runs</small><strong>${escapeHtml(formatDisplayDate(todayKey()))}</strong></div><span>Showing up to five runs per page</span></div>
       <div class="admin-import-run-tabs" role="tablist" aria-label="Import run history">${tabs}</div>
+      ${pager}
       <div class="admin-import-run-selected-header ${escapeHtml(status.key)}">
         <div><small>Selected automation run</small><strong>${escapeHtml(selected.time ? formatDateTime(selected.time) : "Active delivery lists")}</strong></div>
         <span>${escapeHtml(status.label)}</span>
@@ -21774,15 +22713,18 @@ function importEntriesFromNotification(notification) {
   const details = notification?.details || {};
   const completedAt = String(details.completedAt || notification?.createdAt || "");
   const sourceEntries = Array.isArray(details.importResults) ? details.importResults : [];
-  const entries = sourceEntries.map((entry, index) => ({
-    ...entry,
-    id: entry.id || `notification-${notification.id || "run"}-${index}`,
-    checkedAt: entry.checkedAt || completedAt,
-    importedAt: entry.importedAt || completedAt,
-    updatedAt: entry.updatedAt || completedAt,
-    runId: `notification-${notification.id || completedAt}`,
-    classification: entry.classification || (entry.errors?.length ? "failed" : ""),
-  }));
+  const entries = sourceEntries.map((entry, index) => {
+    const resultTime = String(entry.checkedAt || entry.importedAt || entry.updatedAt || completedAt);
+    return {
+      ...entry,
+      id: entry.id || `notification-${notification.id || "run"}-${index}`,
+      checkedAt: resultTime,
+      importedAt: entry.importedAt || resultTime,
+      updatedAt: entry.updatedAt || resultTime,
+      runId: entry.runId || entry.taskId || entry.batchId || entry.importBatchId || `notification-${notification.id || completedAt}`,
+      classification: entry.classification || (entry.errors?.length ? "failed" : ""),
+    };
+  });
   if (entries.length) return entries;
 
   const failed = details.succeeded === false || Boolean(details.error);
@@ -21841,19 +22783,112 @@ function filterPackingHistoryRows(query = "") {
   });
 }
 
+
+function automationHistoryDayLabel(timestampText) {
+  const text = String(timestampText || "").trim();
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  }
+  return text.split(",").slice(0, 1).join(",") || "Unknown date";
+}
+
+function automationHistoryStatus(entries) {
+  if (entries.some((entry) => entry.classList.contains("is-failed"))) return { label: "Failed", className: "is-failed" };
+  if (entries.some((entry) => entry.classList.contains("is-new-updated") || entry.classList.contains("is-new"))) return { label: "New / Updated", className: "is-new-updated" };
+  if (entries.some((entry) => entry.classList.contains("is-updated"))) return { label: "Updated", className: "is-updated" };
+  return { label: "No Changes", className: "is-no-changes" };
+}
+
+function enhanceAutomationImportHistoryResults(results) {
+  if (!results || results.dataset.v139Grouped === "true") return;
+  const entries = [...results.children].filter((child) => child.matches?.("details.import-history-entry"));
+  if (!entries.length) return;
+  const days = new Map();
+  entries.forEach((entry) => {
+    const timeText = entry.querySelector(".import-history-entry-meta strong")?.textContent?.trim() || "Unknown time";
+    const dayLabel = automationHistoryDayLabel(timeText);
+    if (!days.has(dayLabel)) days.set(dayLabel, new Map());
+    if (!days.get(dayLabel).has(timeText)) days.get(dayLabel).set(timeText, []);
+    days.get(dayLabel).get(timeText).push(entry);
+  });
+
+  const fragment = document.createDocumentFragment();
+  [...days.entries()].forEach(([dayLabel, runs]) => {
+    const dayEntries = [...runs.values()].flat();
+    const dayStatus = automationHistoryStatus(dayEntries);
+    const day = document.createElement("details");
+    day.className = `automation-history-day ${dayStatus.className}`;
+    day.innerHTML = `<summary><span class="automation-history-chevron" aria-hidden="true"></span><div><small>Automation day</small><strong>${escapeHtml(dayLabel)}</strong><span>${dayEntries.length} delivery-list result${dayEntries.length === 1 ? "" : "s"} across ${runs.size} run${runs.size === 1 ? "" : "s"}</span></div><b>${escapeHtml(dayStatus.label)}</b></summary><div class="automation-history-day-body"></div>`;
+    const dayBody = day.querySelector(".automation-history-day-body");
+    [...runs.entries()].forEach(([timeText, runEntries]) => {
+      const runStatus = automationHistoryStatus(runEntries);
+      const run = document.createElement("details");
+      run.className = `automation-history-run ${runStatus.className}`;
+      run.innerHTML = `<summary><span class="automation-history-chevron" aria-hidden="true"></span><div><small>Run time</small><strong>${escapeHtml(timeText)}</strong><span>${runEntries.length} delivery list${runEntries.length === 1 ? "" : "s"} checked</span></div><b>${escapeHtml(runStatus.label)}</b></summary><div class="automation-history-run-body"></div>`;
+      const runBody = run.querySelector(".automation-history-run-body");
+      runEntries.forEach((entry) => runBody.append(entry));
+      dayBody.append(run);
+    });
+    fragment.append(day);
+  });
+  results.replaceChildren(fragment);
+  results.dataset.v139Grouped = "true";
+}
+
+function initializeAutomationHistoryGrouping() {
+  const regroup = (results) => {
+    if (!results || ![...results.children].some((child) => child.matches?.("details.import-history-entry"))) return;
+    delete results.dataset.v139Grouped;
+    window.queueMicrotask(() => enhanceAutomationImportHistoryResults(results));
+  };
+  const observer = new MutationObserver((mutations) => {
+    const targets = new Set();
+    mutations.forEach((mutation) => {
+      const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
+      const owningResults = target?.id === "importHistoryResults" ? target : target?.closest?.("#importHistoryResults");
+      if (owningResults) targets.add(owningResults);
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof Element)) return;
+        if (node.id === "importHistoryResults") targets.add(node);
+        node.querySelectorAll?.("#importHistoryResults").forEach((results) => targets.add(results));
+      });
+    });
+    targets.forEach(regroup);
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  document.querySelectorAll("#importHistoryResults").forEach(regroup);
+}
+
 function wireV135OperationsEvents() {
   els.operationsModalClose?.addEventListener("click", closeOperationsModal);
   els.operationsModalBackdrop?.addEventListener("click", closeOperationsModal);
   els.rackPackingHistoryBtn?.addEventListener("click", () => openPackingHistoryModal().catch((error) => showInlineError(error.message, true)));
-  els.rejectLogOpenBtn?.addEventListener("click", () => openRejectLogModal().catch((error) => showInlineError(error.message, true)));
+  els.rejectLogOpenBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    openRejectLogModal().catch((error) => showInlineError(error.message, true));
+  });
   els.rejectRefreshBtn?.addEventListener("click", () => refreshRejectPage().catch((error) => showInlineError(error.message, true)));
   els.rejectSearchInput?.addEventListener("input", () => {
     window.clearTimeout(els.rejectSearchInput._timer);
     els.rejectSearchInput._timer = window.setTimeout(() => refreshRejectPage().catch(() => {}), 250);
   });
-  els.rejectDateFrom?.addEventListener("change", () => refreshRejectPage().catch(() => {}));
-  els.rejectDateTo?.addEventListener("change", () => refreshRejectPage().catch(() => {}));
+  els.rejectDatePreset?.addEventListener("change", () => setRejectDatePreset(els.rejectDatePreset.value));
+  els.rejectDateFrom?.addEventListener("change", () => {
+    markRejectDateRangeCustom();
+    refreshRejectPage().catch(() => {});
+  });
+  els.rejectDateTo?.addEventListener("change", () => {
+    markRejectDateRangeCustom();
+    refreshRejectPage().catch(() => {});
+  });
+  els.rejectClearFiltersBtn?.addEventListener("click", clearRejectFilters);
+  els.rejectLocationFilter?.addEventListener("change", renderRejectPage);
 
+  document.addEventListener("dls:delivery-list-import-history-changed", () => {
+    state.adminTodayImportLoaded = false;
+    void refreshAdminTodayImportRuns({ render: true });
+  });
   document.addEventListener("dls:open-delivery-list-management-import", (event) => {
     // app.js owns notification-run navigation in v135. Stop the legacy automation
     // listener from replacing this pinned snapshot with the newest run seconds later.
@@ -21862,6 +22897,18 @@ function wireV135OperationsEvents() {
   });
 
   document.addEventListener("click", (event) => {
+    const operationsClose = event.target.closest("[data-operations-close]");
+    if (operationsClose) {
+      event.preventDefault();
+      closeOperationsModal();
+      return;
+    }
+    const rejectVerify = event.target.closest("#rejectVerifyBtn");
+    if (rejectVerify) {
+      event.preventDefault();
+      previewRejectMatch().catch((error) => showInlineError(error.message, true));
+      return;
+    }
     const rejectRetry = event.target.closest("[data-reject-retry]");
     if (rejectRetry) {
       event.preventDefault();
@@ -21872,6 +22919,16 @@ function wireV135OperationsEvents() {
     if (runTab) {
       event.preventDefault();
       selectImportRun(runTab.dataset.adminImportRun);
+      return;
+    }
+    const runPage = event.target.closest("[data-admin-import-page]");
+    if (runPage && !runPage.disabled) {
+      event.preventDefault();
+      state.adminImportRunPage = Math.max(Number(runPage.dataset.adminImportPage || 1), 1);
+      const groups = adminImportRunGroups(activeRecentImports());
+      const first = groups[(state.adminImportRunPage - 1) * state.adminImportRunsPerPage];
+      if (first) state.adminSelectedImportRunKey = first.key;
+      renderAdminDeliveryLists();
       return;
     }
     const historyPrint = event.target.closest("[data-packing-history-print]");
@@ -21950,12 +23007,27 @@ function wireV135OperationsEvents() {
   document.addEventListener("input", (event) => {
     if (event.target.matches("#packingHistorySearch")) filterPackingHistoryRows(event.target.value);
     if (event.target.matches("#rejectOrderInput, #rejectItemInput")) {
-      window.clearTimeout(event.target.form?._rejectPreviewTimer);
-      if (event.target.form) event.target.form._rejectPreviewTimer = window.setTimeout(() => previewRejectMatch(), 300);
+      state.rejectMatches = [];
+      const preview = document.getElementById("rejectMatchPreview");
+      if (preview) {
+        preview.className = "reject-match-preview";
+        preview.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Item details changed</strong><span>Select Verify Item to confirm the active delivery list.</span></div>`;
+      }
     }
   });
 
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !event.target.matches("#rejectOrderInput, #rejectItemInput")) return;
+    event.preventDefault();
+    previewRejectMatch().catch((error) => showInlineError(error.message, true));
+  });
+
   document.addEventListener("submit", (event) => {
+    if (event.target.matches("#createRoleForm")) {
+      event.preventDefault();
+      createRoleFromForm(event.target).catch((error) => showInlineError(error.message, true));
+      return;
+    }
     if (event.target.matches("#rejectLogForm")) {
       event.preventDefault();
       submitRejectLog(event.target).catch((error) => {
@@ -22148,6 +23220,8 @@ function wireEvents() {
   });
   state.eventsWired = true;
   wireV135OperationsEvents();
+  initializeAutomationHistoryGrouping();
+  window.setTimeout(() => refreshPendingUpdateDates({ force: false }).catch(() => {}), 700);
   initLanguageSystem();
   initCustomSelectSystem();
   syncSidebarState();
@@ -22976,6 +24050,12 @@ function wireEvents() {
     event.preventDefault();
     createUserFromForm().catch((error) => showInlineError(error.message));
   });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !event.target.matches("#rejectOrderInput, #rejectItemInput")) return;
+    event.preventDefault();
+    previewRejectMatch().catch((error) => showInlineError(error.message, true));
+  });
+
   document.addEventListener("submit", (event) => {
     if (event.target.closest("#createUserFormModal")) {
       event.preventDefault();
@@ -24091,7 +25171,14 @@ function wireEvents() {
       const username = togglePasswordButton.dataset.togglePassword;
       const input = document.querySelector(`[data-user-password="${CSS.escape(username)}"]`);
 
-      if (input) input.type = input.type === "password" ? "text" : "password";
+      if (input) {
+        input.type = input.type === "password" ? "text" : "password";
+        const showing = input.type === "text";
+        const label = togglePasswordButton.querySelector(".user-manager-button-label");
+        if (label) label.textContent = showing ? "Hide" : "Show";
+        togglePasswordButton.title = showing ? "Hide password" : "Show password";
+        togglePasswordButton.setAttribute("aria-label", showing ? "Hide password" : "Show password");
+      }
 
       return;
     }
@@ -24147,6 +25234,13 @@ function wireEvents() {
         })
         .catch((error) => showInlineError(error.message));
 
+      return;
+    }
+
+    const createRoleSelectionButton = event.target.closest("[data-role-create-selection]");
+    if (createRoleSelectionButton) {
+      event.preventDefault();
+      setCreateRolePermissionSelection(createRoleSelectionButton.dataset.roleCreateSelection || "none");
       return;
     }
 

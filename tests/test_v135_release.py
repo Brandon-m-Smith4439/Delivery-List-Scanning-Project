@@ -22,7 +22,7 @@ def read(name: str) -> str:
 
 def test_release_cache_markers_and_new_pages_are_wired():
     html = read("index.html")
-    assert "20260724-v136" in html
+    assert "20260727-v138" in html
     assert "notification-center-v135.js" in html
     assert "notification-center-ui.js" not in html
     assert 'data-page-target="rejects"' in html
@@ -59,8 +59,8 @@ def test_frontend_contains_requested_workflow_owners():
     for marker in required_app_markers:
         assert marker in app
     assert "event.stopImmediatePropagation();" in app
-    assert "Review updates" in notification
-    assert "Mark reviewed" in notification
+    assert "Review Updates" in notification
+    assert "Mark Reviewed" in notification
     assert "noticeIds: flags.noticeIds" in notification
     assert "flagsByList.clear();" in notification
     assert "options.render !== false" in notification

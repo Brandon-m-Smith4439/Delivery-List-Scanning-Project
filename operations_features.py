@@ -285,10 +285,10 @@ class OperationsFeatureService:
         clauses = ["1 = 1"]
         params: list[Any] = []
         if date_from:
-            clauses.append("delivery_date >= ?")
+            clauses.append("substr(rejected_at, 1, 10) >= ?")
             params.append(date_from)
         if date_to:
-            clauses.append("delivery_date <= ?")
+            clauses.append("substr(rejected_at, 1, 10) <= ?")
             params.append(date_to)
         if query:
             like = f"%{clean_text(query, 120)}%"
@@ -492,6 +492,28 @@ class OperationsFeatureService:
                     "scanQtyReduced": total_scan_reduction,
                 },
             )
+            notifier = getattr(self.store, "create_app_notification", None)
+            if callable(notifier):
+                notifier(
+                    con,
+                    "warning",
+                    "Internal reject logged",
+                    f"Order {order} / Item {item}: {qty} piece{'s' if qty != 1 else ''} rejected at {location} ({reason}).",
+                    username,
+                    payload={
+                        "source": "internal-reject",
+                        "rejectId": reject_id,
+                        "order": order,
+                        "item": item,
+                        "qty": qty,
+                        "deliveryDate": delivery_date,
+                        "reason": reason,
+                        "location": location,
+                        "rejectedAt": rejected_at,
+                    },
+                    expires_in_hours=72,
+                    acknowledge_creator=False,
+                )
             con.commit()
         return {
             "ok": True,

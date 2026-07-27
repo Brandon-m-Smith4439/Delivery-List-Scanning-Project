@@ -1,3 +1,167 @@
+## v143 - Internal Reject Timeline Redesign
+
+### Internal Reject Tracking
+
+- Rebuilt the page to match the approved timeline concept with one polished quality-recovery workspace.
+- Added a strong IR page identity, primary Log Internal Reject action, and compact Refresh/Clear controls.
+- Rebalanced search, incident-range, From, Through, and Location controls into one readable toolbar.
+- Added a live filtered summary for total reject events, unique machines/locations, users, and rejected quantity.
+- Changed reject history into collapsible date groups with a vertical incident timeline.
+- Added expandable event cards that keep the normal view concise while exposing customer, job, product, and notes on demand.
+- Kept grouping based on the rejected/logged date and kept delivery date visible on every incident card.
+- Hid the routine success status line after data loads while preserving loading, warning, and failure feedback.
+- Advanced browser cache keys to v143.
+
+### Safety and validation
+
+- Preserved the existing reject logging API, process-reset behavior, search, date filters, and catalog controls.
+- Added release checks for timeline structure, summary metrics, location filtering, version markers, unique HTML IDs, JavaScript syntax, and CSS balance.
+
+## v142 - Custom Roles and Interface Refinements
+
+### Roles and users
+
+- Added a guided **Create a new role** workflow to Roles & Permissions.
+- Administrators can enter a role name and description, then explicitly select or omit every available permission.
+- Added Select all and Clear all permission actions while keeping zero-permission roles possible after confirmation.
+- Added a guarded `/api/admin/roles` create endpoint through an idempotent backend patch that preserves current `server.py` and `delivery_store.py` changes.
+- Rejects case-insensitive duplicate role names and unknown permissions.
+- Records role creation in the existing audit history.
+- Newly created roles automatically appear in Create User, existing-user role selectors, and the User Directory role filter.
+- Rebalanced Create User into Account Details and Starting Access panels so the form uses the full modal width and remains readable at smaller sizes.
+
+### Internal rejects and Scan presentation
+
+- Simplified Reject Tracking into one professional workspace with a single title, primary action, filter toolbar, status line, and history area.
+- Removed duplicated page headings and workflow-tag clutter.
+- Changed the `IR` row flag to white text on a dark, restrained pulsing red background.
+- Added a full-width incident strip below rejected Scan rows showing reject reason, break location/machine, rejected date/time, and event count.
+- Preserved the normal line-item columns and flags instead of squeezing long incident details into the Job Nr. cell.
+
+### Filters and navigation
+
+- Changed glass-type filters from equal-width truncated cells to content-aware wrapping buttons that show the complete glass description.
+- Corrected sidebar navigation line height and lower padding so letter descenders are no longer clipped.
+- Advanced browser cache keys to v142.
+
+### Safety and validation
+
+- Added timestamped backend backups and automatic syntax validation to `Apply-v142-RoleManagementPatch`.
+- The backend patch is repeat-safe and restores the original files if final validation fails.
+- Added v142 release checks for custom-role wiring, dynamic role options, Reject page ownership, full-width reject details, adaptive glass filters, sidebar text containment, version markers, and unique HTML IDs.
+
+## v141 - User Access Management Redesign
+
+- Replaced the Edit Users modal's wide eight-column table with a responsive, expandable user-card directory.
+- Added a polished user-management overview showing total, active, signed-in, and inactive account counts.
+- Added local search plus Status and Role filters for faster account lookup.
+- Added an expandable, guided Create User form with clearer labels, field help, and responsive layout.
+- Organized each user into Access & Profile, Password Reset, and Account Status sections.
+- Preserved every existing backend workflow for email, role, multi-station assignment, password generation/reset, activation, deactivation, and deletion.
+- Replaced icon-only account actions with labeled, accessible buttons while retaining the existing icon library.
+- Preserved user-directory filters after saving or refreshing an account.
+- Added desktop, compact desktop, tablet, and mobile layouts without horizontal scrolling.
+- Added v141 regression checks for markup ownership, event wiring, version markers, CSS structure, and responsive containment.
+
+## v140 - Attention Filters, Reject Controls, and Import Run Deduplication
+
+- Moved **Internal Rejects** from the Status filter group into **Attention** beside Remakes and Rushes.
+- Applied the shared priority-button alert/clear presentation to Internal Rejects.
+- Made the Filters `IR` counter neutral gray at zero and red only when rejected pieces exist.
+- Stabilized the Scan page delivery-date selector width when an unreviewed-update indicator is present.
+- Removed the redundant checkmark from the selected delivery-date menu row; the selected highlight remains.
+- Limited date-level New/Updated markers to one canonical workflow stage per date so duplicate stage notices do not keep an icon visible after review.
+- Immediately clears the reviewed date marker, then verifies the result against the server-side per-user receipts.
+- Removed Reject Tracking's Reject events, Rejected pieces, Rejected today, and Affected orders statistic cards.
+- Rebuilt the Reject search field with one clean outline instead of nested rounded borders.
+- Enlarged and modernized the Reject From/Through date controls.
+- Preserved original import-result timestamps and run IDs when building notification history entries.
+- Added content-and-time deduplication so the latest import snapshot and its notification copy cannot appear as two runs a few seconds apart.
+- Added v140 tests for filter placement, conditional IR styling, date-selector geometry/review cleanup, Reject page cleanup, and near-time import-run deduplication.
+
+## v139 - Dropdown Audio, Internal Reject Awareness, and Import Run History
+
+### Dropdowns and Scan filters
+
+- Added the existing subtle open/close swoosh to maintained dropdown opening and selection.
+- Added per-user New/Updated indicators to Scan delivery-date options.
+- Added Internal Rejects to the Status filters, a red `IR` row flag, and a labeled `IR` Filters counter.
+- Removed the unidentified trailing Filters count.
+
+### Internal rejects
+
+- Reject date filters now use the reject/logged timestamp.
+- Reject history groups by logged date while each record displays its delivery date and complete reject details.
+- Internal rejects create persistent bell notifications and a nonintrusive 30-second alert with View and Acknowledge actions.
+
+### Import run organization
+
+- Delivery List Management loads the current local day’s automation runs, displays five per page, and resets the current-day view after the date changes.
+- Automation Control Center history is nested into collapsible day groups, run-time groups, and individual delivery-list results.
+
+### Validation
+
+- Added v139 regression coverage for selector audio, date indicators, Internal Reject filtering/notification behavior, current-day run pagination, nested automation history, IDs, syntax, and CSS integrity.
+
+## v138 - Internal Reject Page and Entry Workflow
+
+### Reject Tracking page
+
+- Rebuilt the page header into a focused quality-recovery command area with a standard primary **Log Internal Reject** action.
+- Replaced generic mini-stat blocks with professional reject-event, rejected-piece, today, and affected-order summary cards.
+- Redesigned the history filter into a labeled delivery-date workflow with All Dates, Today, Last 7 Days, Last 30 Days, and Custom Range presets.
+- Added From/Through range validation, linked date input limits, a dedicated Clear Filters action, and clearer active-filter status text.
+- Redesigned date groups and reject records so order/item, quantity, reason, break location, logged time, user, and notes remain readable without oversized rows.
+- Added polished loading, empty, retry, warning, and error states.
+
+### Log Internal Reject GUI
+
+- Added a direct click owner for the static Reject-page button instead of relying only on document-level delegation.
+- Opens the reject window immediately, even while reasons and locations are still loading, preventing a slow catalog request from making the action appear broken.
+- Added an explicit **Verify Item** button and Enter-key verification for order/item fields.
+- Invalidates an old match whenever the order or item changes, preventing submission against stale verification data.
+- Shows the verified delivery date, quantity, and affected stages before submission.
+- Added clear catalog loading/failure guidance, a workflow-impact notice, Cancel action, and a responsive submit bar.
+- Added a modal ownership marker so reject-specific sizing and layout do not affect rack/history dialogs.
+
+### Maintenance and validation
+
+- Removed superseded v137 reject-modal selectors and stale responsive reject overrides instead of adding another duplicate override layer.
+- Advanced browser cache keys and per-user notification storage namespace to v138.
+- Added v138 release tests for repeatable button ownership, immediate modal opening, date presets, validation, explicit verification, responsive layout, unique IDs, JavaScript syntax, and CSS duplicate detection.
+
+## v137 - Bay Scanner Readability, Packing Lists, and Review Workflow
+
+### Bay Scanner redesign
+
+- Reworked the Bay Map scanner into a contained, readable three-step workflow with larger operational text and shorter instructions.
+- Compacted route progress into one horizontal Outbound / In Transit / Received summary with readable percentages.
+- Kept target selection, barcode entry, Submit, Undo, Redo, manual entry, latest result, and recent history within the right rail at desktop and responsive widths.
+- Added final high-specificity ownership rules so older Bay Scanner compatibility layers cannot restore the broken two-column layout on narrower screens.
+
+### Rack packing-list correction
+
+- Stopped rack-detail and Truck packing-list printing from silently inheriting the currently selected Scan-page delivery date.
+- Rack/Truck detail printing now includes all active pieces currently assigned to the selected rack.
+- Explicit date-specific print buttons still pass a delivery date when the user deliberately chooses one.
+- Packing-list history snapshots use the same corrected selection scope.
+
+### Internal rejects and destructive icons
+
+- Rebuilt the Log Internal Reject GUI into clear Identify and Describe steps with a verification preview and a single deliberate submit action.
+- Replaced the one-time static button binding with a guarded delegated trigger so the Log Internal Reject button can be used repeatedly after closing the modal.
+- Added visible loading protection while reject catalogs are being requested.
+- Changed trash icon buttons to white surfaces with visible red icons at rest; hover/focus intentionally reverses them to white on red.
+
+### New/Updated review and Scan filters
+
+- Removed the duplicate personalized New/Updated banner previously injected below the Scan filters.
+- Kept and polished the bottom-right personalized review prompt.
+- Added Review Updates and Mark Reviewed controls beside Filters; Mark Reviewed appears only while the New/Updated filter is displaying the exact pending notice set.
+- Added compact Remake, Rush, and New/Updated count badges directly in the Filters summary.
+- Made the glass-type selector a responsive, vertically scrollable grid so large glass catalogs do not overlap.
+- Advanced browser asset cache keys to v137.
+
 ## v136 - Interface Stability and Professional Control Polish
 
 ### Rack Overview and Reject Tracking

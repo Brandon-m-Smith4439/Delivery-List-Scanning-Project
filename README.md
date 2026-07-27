@@ -1,22 +1,48 @@
 # Delivery List Scanner
 
-Current maintained release: **v136**. SQLite remains the active/default backend.
+Current maintained release: **v143**. SQLite remains the active/default backend.
 
-v136 is a focused interface-stability release over v135. Rack cards now open the maintained rack-details GUI correctly, Reject Tracking reports loading and server failures directly instead of silently leaving the page blank, and Delivery List Management import-run tabs remain visible, readable, selected, and horizontally positioned while live import data refreshes.
+v143 redesigns Internal Reject Tracking to match the approved timeline concept: a clear quality-recovery header, compact filters, live summary strip, date-grouped incident timeline, and expandable reject details. Existing reject logging, searching, date filtering, catalog loading, and process-reset behavior remain unchanged.
 
-The button system is now flatter and more professional. It is scoped to actual action controls rather than navigation cards, filters, and tabs. Colored action buttons—including Global Search, Print / Export, Admin editor commands, rack actions, reject actions, and Bay Scanner submit controls—share consistent hover, press, focus, primary, secondary, success, and destructive behavior without the previous glossy treatment.
+## Install v143 over v142
 
-The Bay Scanner right rail now owns its width, keeps each workflow step inside the panel, and scrolls wide scan history inside the card instead of pushing half the scanner off the page. Admin editor GUIs share a polished modal frame and form surface, and Reject Tracking now has a proper shield icon in the side navigation.
+1. Close the Delivery List Scanner server.
+2. Extract `Delivery_List_Scanner_v143_Changed_Files.zip` into the current v142 project folder and replace the included files.
+3. Restart the scanner normally.
+4. Hard-refresh the browser once with `Ctrl+F5` so the `20260727-v143` cache keys take effect.
 
-## Install v136 over v135
+No database migration or backend patch is required. Keep the v142 role-management backend patch already installed.
 
-1. Close the scanner web app/server window.
-2. Extract `Delivery_List_Scanner_v136_Changed_Files.zip` into the current v135 project folder and replace the included files.
-3. Start the web app normally.
-4. Hard-refresh the browser once with `Ctrl+F5` so the `20260724-v136` asset cache keys take effect.
-5. Verify Rack Overview, Reject Tracking, Bay Map scanning, Admin editor GUIs, and Delivery List Management import-run tabs.
+## v143 highlights
 
-No database migration or patch BAT is required for v136. Keep the v135 database migration and operations patch already installed.
+- Internal Reject Tracking now matches the approved timeline-based design direction.
+- Added a polished quality-recovery header with the primary Log Internal Reject action and compact Refresh/Clear controls.
+- Added search, incident range, From, Through, and live Location filters in one balanced toolbar.
+- Added a filtered summary strip for reject events, machines/locations, users, and rejected quantity.
+- Reject history is grouped by incident date and rendered as a vertical timeline with readable compact cards.
+- Each reject card shows order/item, quantity, delivery date, reason, machine/location, user, and time at a glance.
+- Details expand in place to show customer, job, product, and investigation notes.
+- Loading and error feedback remains visible, while successful loads no longer consume permanent vertical space.
+
+
+## v142 highlights
+
+- Create custom roles with a name, description, and explicit permission checklist.
+- Select all or clear all permissions while building a new role.
+- Existing roles remain expandable and independently editable.
+- Custom roles immediately appear throughout user management.
+- Create User uses a balanced two-panel layout with full-width email/password fields.
+- Reject Tracking uses one header, one filter toolbar, and one history workspace.
+- Internal Reject flags use white text on a dark pulsing red background.
+- Each rejected line displays a full-width incident strip containing reason, process location/machine, and rejected time.
+- Glass-type filter buttons grow or wrap to show the complete label instead of truncating it.
+- Sidebar navigation labels use safe line height and padding so characters such as `y`, `g`, and `p` are not clipped.
+
+v138 rebuilt the Internal Reject Tracking page, date filters, repeatable reject-entry window, and explicit item verification workflow.
+
+v137 improved the Bay Scanner, rack/truck packing-list scope, personalized update review, filter counts, glass-type layout, and the first reject-entry redesign.
+
+v136 stabilized rack-card modal opening, Reject Tracking error states, Admin import-run tabs, button ownership, Admin editor framing, and Bay Scanner width containment.
 
 v134 fixes the floor folder-import scheduler installer failing PowerShell syntax validation at `Install-DeliveryListSqlAutomationTasks.ps1:227`. The task mode variable is explicitly delimited before the literal colon, so the hourly folder-import tasks can be created normally. The floor setup continues to validate the installed PowerShell files before touching Task Scheduler.
 
@@ -135,6 +161,12 @@ After BLDR IT provides the Entra tenant ID, application/client ID, and a client-
 ## Project documentation
 
 - Ongoing version history: `README_CHANGELOG.md`
+- v140 Attention/Reject/import deduplication: `docs/V140_ATTENTION_REJECT_AND_IMPORT_DEDUPE.md`
+- v142 roles, rejects, and layout refinements: `docs/V142_ROLE_AND_REJECT_REFINEMENTS.md`
+- v141 User Access Management redesign: `docs/V141_USER_ACCESS_MANAGER.md`
+- v139 dropdown/reject/import history: `docs/V139_DROPDOWN_REJECT_AND_IMPORT_HISTORY.md`
+- v138 Reject Tracking redesign: `docs/V138_REJECT_TRACKING_REDESIGN.md`
+- v137 interface and workflow verification: `docs/V137_INTERFACE_AND_WORKFLOW_VERIFICATION.md`
 - v136 interface stability checks: `docs/V136_INTERFACE_STABILITY.md`
 - v135 operations workflows: `docs/V135_OPERATIONS_WORKFLOWS.md`
 - Automated SQL export/import runtime: `automation/sql_delivery_export/README.md`
