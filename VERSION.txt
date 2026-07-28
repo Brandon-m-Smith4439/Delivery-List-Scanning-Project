@@ -1,8 +1,1 @@
-Delivery List Scanner
-Release: v148
-Release type: Bay Scanner history and flow refinement
-Base release: v147
-Cache key: 20260728-v148
-Database schema migration: none
-Store-layer history filter: yes
-Preview images: none
+149

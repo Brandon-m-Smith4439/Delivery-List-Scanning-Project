@@ -1,39 +1,26 @@
-Delivery List Scanner v148 changed-files release
+Delivery List Scanner v149 changed-files release
 
-Root files
-- Apply-v148-BayScannerHistoryAndFlowRefinement.bat
-- Apply-v148-BayScannerHistoryAndFlowRefinement.py
-- Build-v148-Full-Project-Package.bat
-- Build-v148-Full-Project-Package.py
-- Run-v148-BayScanner-Validation.bat
-- Validate-v148-BayScanner.py
-- README_v148_INSTALL.txt
-- RELEASE_MANIFEST.txt
-- SHA256SUMS.txt
+Installer:
+- Apply-v149-BayScannerStickyFitAndInputRefinement.bat
+- Apply-v149-BayScannerStickyFitAndInputRefinement.py
+
+Validation:
+- Run-v149-BayScanner-Validation.bat
+- Validate-v149-BayScanner.py
+- v149_payload/tests/test_v149_release.py
+
+Payload:
+- v149_payload/bay-scanner-v149-fragment.html
+- v149_payload/bay-scanner-v149.css
+- v149_payload/docs/V149_BAY_SCANNER_STICKY_FIT_AND_INPUT_REFINEMENT.md
+
+Full-project builder:
+- Build-v149-Full-Project-Package.bat
+- Build-v149-Full-Project-Package.py
+
+Documentation:
+- README_v149_INSTALL.txt
+- docs/V149_PACKAGE_VALIDATION.md
 - VERSION.txt
 
-Payload files
-- v148_payload/bay-scanner-v148-fragment.html
-- v148_payload/bay-scanner-v148.css
-- v148_payload/docs/V148_BAY_SCANNER_HISTORY_AND_FLOW_REFINEMENT.md
-- v148_payload/tests/test_v148_release.py
-
-Installed project files modified
-- index.html
-- app.js
-- delivery_store.py
-- README.md
-- README_CHANGELOG.md
-- docs/TEST_REPORT.md when present
-- applicable historical release tests
-
-Installed project files added
-- bay-scanner-v148.css
-- docs/V148_BAY_SCANNER_HISTORY_AND_FLOW_REFINEMENT.md
-- tests/test_v148_release.py
-
-Superseded scanner styles removed when present
-- bay-scanner-v147.css
-- bay-scanner-v146.css
-- bay-scanner-v145.css
-- bay-scanner-v144.css
+No database, secrets, logs, backups, caches, compiled Python files, or PNG previews are included.

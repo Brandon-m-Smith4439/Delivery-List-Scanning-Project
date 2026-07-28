@@ -13265,6 +13265,14 @@ function fitBayLastLocationText() {
  * Flow: Normalizes the newest event, fills its summary fields, renders the common location editor, and fits the bay label after layout.
  */
 function renderBayLastScanCard(event) {
+  // DLS_V149_LAST_BAY_CHECK_FEEDBACK
+  const bayLastCheck = document.getElementById("bayLastCheck");
+  if (bayLastCheck) {
+    const check = bayScanCheckFeedbackV149(event);
+    bayLastCheck.textContent = check.label;
+    bayLastCheck.className = `bay-scan-check-v149 is-${check.key}`;
+  }
+
   const hasEvent = Boolean(event);
   const tone = hasEvent ? bayEventTone(event) : "notice";
   const when = new Date(event?.time || event?.createdAt || "");
@@ -13320,8 +13328,20 @@ function bayScanRecentLimit() {
  * Effects: Updates the Bay scanner history card, row count label, and location controls.
  * Flow: Keeps the latest event in Last Scan, then shows one normal-screen row or the existing two fullscreen rows.
  */
+function bayScanCheckFeedbackV149(event) {
+  const signal = `${event?.eventType || ""} ${event?.reason || ""}`.toLowerCase();
+  if (!event) return { key: "neutral", label: "-" };
+  if (/(error|failed|failure|invalid|blocked|bad scan)/.test(signal)) {
+    return { key: "error", label: "Failed" };
+  }
+  if (/(warning|notice|duplicate|verify|check)/.test(signal)) {
+    return { key: "warning", label: "Check" };
+  }
+  return { key: "success", label: "Success" };
+}
+
 function renderBayRecentActions() {
-  // DLS_V148_COMPACT_BAY_RECENT_HISTORY
+  // DLS_V149_SINGLE_BAY_RECENT_HISTORY
   const excludedEventTypes = new Set([
     "UpdateBayLayout",
     "CreateBay",
@@ -13335,14 +13355,14 @@ function renderBayRecentActions() {
   const latestEvent = events[0] || null;
   renderBayLastScanCard(latestEvent);
 
-  const recentEvents = events.slice(0, 2);
+  const recentEvents = events.slice(0, 1);
   if (els.bayRecentScanCountLabel) {
-    els.bayRecentScanCountLabel.textContent = `${recentEvents.length} recent`;
+    els.bayRecentScanCountLabel.textContent = recentEvents.length ? "Latest 1" : "No recent";
   }
   if (!els.bayScanOutRecent) return;
 
   if (!recentEvents.length) {
-    els.bayScanOutRecent.innerHTML = '<tr class="bay-recent-empty-v148"><td colspan="4">No recent bay scans</td></tr>';
+    els.bayScanOutRecent.innerHTML = '<tr class="bay-recent-empty-v149"><td colspan="5">No recent bay scans</td></tr>';
     return;
   }
 
@@ -13361,13 +13381,15 @@ function renderBayRecentActions() {
     );
     const moveControl = bayEventMoveControlHtml(event);
     const currentBayControl = moveControl || `<span title="${escapeHtml(currentBay)}">${escapeHtml(currentBay)}</span>`;
+    const check = bayScanCheckFeedbackV149(event);
 
     return `
-      <tr class="bay-recent-row-v148">
+      <tr class="bay-recent-row-v149">
         <td data-label="Order Nr."><b title="${escapeHtml(order)}">${escapeHtml(order)}</b></td>
         <td data-label="Job Nr."><span title="${escapeHtml(job)}">${escapeHtml(job)}</span></td>
-        <td data-label="Action"><span class="bay-recent-action-v148" title="${escapeHtml(action)}">${escapeHtml(action)}</span></td>
-        <td data-label="Current Bay" class="bay-recent-current-bay-v148">${currentBayControl}</td>
+        <td data-label="Action"><span class="bay-recent-action-v149" title="${escapeHtml(action)}">${escapeHtml(action)}</span></td>
+        <td data-label="Current Bay" class="bay-recent-current-bay-v149">${currentBayControl}</td>
+        <td data-label="Check" class="bay-recent-check-v149"><span class="bay-scan-check-v149 is-${check.key}">${escapeHtml(check.label)}</span></td>
       </tr>
     `;
   }).join("");

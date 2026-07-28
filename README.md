@@ -1,18 +1,32 @@
 # Delivery List Scanner
 
-Current maintained release: **v148**. SQLite remains the active/default backend.
+Current maintained release: **v149**. SQLite remains the active/default backend.
 
-v148 finishes the compact Bay Scanner workflow after floor review. The non-sticky Bay Map action toolbar and scanner now sit directly together in normal flow, while only the scanner becomes sticky after it reaches the top. Recent Bay Scans stays open in a compact four-column table, percentage labels disappear in Remove mode, and structural Bay Map edits are excluded from scan history.
+v149 finishes the compact Bay Scanner fit and input pass. Add mode now stays fully visible, Recent Bay Scans is limited to one compact movement, and the sticky scanner fills the viewport from 5 px below the top to 5 px above the bottom in both normal and fullscreen operation. Check feedback is restored to the latest and recent scan surfaces, while destination, manual entry, Undo, Redo, and Submit controls use a cleaner shared-button treatment.
 
-## Install v148 over v147
+## Install v149 over v148
 
 1. Close the Delivery List Scanner server.
-2. Extract `Delivery_List_Scanner_v148_Bay_Scanner_History_And_Flow_Refinement_Changed_Files.zip` into the current v147 project folder and replace the included files.
-3. Run `Apply-v148-BayScannerHistoryAndFlowRefinement.bat` once.
+2. Extract `Delivery_List_Scanner_v149_Bay_Scanner_Sticky_Fit_And_Input_Refinement_Changed_Files.zip` into the current v148 project folder and replace the included files.
+3. Run `Apply-v149-BayScannerStickyFitAndInputRefinement.bat` once.
 4. Restart the scanner normally.
-5. Hard-refresh the browser once with `Ctrl+F5` so the `20260728-v148` cache keys take effect.
+5. Hard-refresh the browser once with `Ctrl+F5` so the `20260728-v149` cache keys take effect.
 
-No database migration is required. v148 applies a small store-layer history filter so layout-edit events no longer enter or appear in Bay Scan history. Existing scan events, bay assignments, audit records, permissions, and scanner behavior are preserved.
+No database migration or backend patch is required. Existing Bay Scan history filtering from v148, physical scan events, assignments, permissions, and APIs remain unchanged.
+
+## v149 highlights
+
+- Reduced Recent Bay Scans to one compact row so Add mode cannot cover the latest-scan card.
+- Restored a Check field to both Latest Activity and Recent Bay Scans.
+- Added clear Success, Check, Failed, and neutral feedback badges.
+- Sized the sticky panel to `100dvh - 10px` with 5 px top and bottom viewport spacing.
+- Applied the same sticky fit in browser fullscreen.
+- Closed the rail-layout gap while keeping the Bay Map action buttons outside the sticky slot.
+- Rebuilt Add destination as one contained Target Bay row.
+- Condensed Manual Scan into one aligned row with matching input surfaces.
+- Changed Undo and Redo to icon-only application buttons with accessible labels.
+- Applied the shared application button treatment to Manual Submit and Clear.
+- No PNG previews were generated or packaged.
 
 ## v148 highlights
 

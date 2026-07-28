@@ -1,3 +1,28 @@
+## v149 - Bay Scanner Sticky Fit and Input Refinement
+
+### Bay Map scanner
+
+- Limited Recent Bay Scans to one compact physical movement so the latest-scan card remains visible in Add mode.
+- Restored Check feedback to Latest Activity and Recent Bay Scans with Success, Check, Failed, and neutral states.
+- Sized the sticky scanner from 5 px below the viewport top to 5 px above its bottom.
+- Preserved the same five-pixel sticky fit in fullscreen.
+- Closed the remaining Bay Map rail spacing while keeping action buttons in normal, non-sticky flow.
+- Rebuilt Add destination as one contained Target Bay input and Clear action.
+- Condensed Manual Scan into one aligned row with consistent input heights and surfaces.
+- Converted Undo and Redo to icon-only controls with accessible labels.
+- Applied maintained application button classes to Manual Submit and Clear.
+- Advanced browser cache keys to v149.
+
+### Compatibility
+
+- Preserved v148 structural-event filtering, Bay Scan APIs, assignment movement, All Scans, permissions, and database schema.
+- No database migration or backend patch is required.
+- No PNG previews were generated or packaged.
+
+### Validation
+
+- Added v149 checks for a one-row history limit, Check feedback, five-pixel sticky viewport fit, fullscreen fit, toolbar separation, simplified destination/manual controls, icon-only correction buttons, shared action styles, unique IDs, and code-only release hygiene.
+
 ## v148 - Bay Scanner History and Flow Refinement
 
 ### Bay Map scanner

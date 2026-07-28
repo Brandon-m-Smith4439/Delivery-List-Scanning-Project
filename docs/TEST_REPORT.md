@@ -1,3 +1,14 @@
+## v149 Bay Scanner sticky-fit and input verification
+
+- Verified Add mode retains the latest activity and one recent scan without overlap.
+- Verified the sticky panel is 5 px from the top and bottom in normal and fullscreen operation.
+- Verified the Bay Map action toolbar remains outside the sticky scanner.
+- Verified Check feedback is present in Latest Activity and Recent Bay Scans.
+- Verified destination and manual inputs share contained, aligned surfaces without clipping.
+- Verified Undo and Redo are icon-only accessible application buttons.
+- Verified Manual Submit and Clear use maintained application button classes.
+- Verified required IDs remain unique and no database migration is introduced.
+
 # Test Report
 
 ## v148 Bay Scanner history and flow verification
