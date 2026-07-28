@@ -88,14 +88,14 @@ def main() -> int:
         raise ValueError("Notification title is required.")
 
     project_root = Path(request["project_root"]).expanduser().resolve()
-    required_files = [project_root / "scanner_config.py", project_root / "delivery_store.py"]
+    required_files = [project_root / "backend" / "config.py", project_root / "backend" / "store.py"]
     missing = [str(path) for path in required_files if not path.is_file()]
     if missing:
         raise FileNotFoundError("Required scanner files were not found: " + ", ".join(missing))
 
     sys.path.insert(0, str(project_root))
-    from scanner_config import load_config
-    from delivery_store import create_store
+    from backend.config import load_config
+    from backend.store import create_store
 
     config = load_config(project_root)
     store = create_store(config)

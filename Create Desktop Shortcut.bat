@@ -6,7 +6,7 @@ title Delivery List Scanner - Create Desktop Shortcut
 set "SCRIPT_DIR=%~dp0"
 if not defined SCRIPT_DIR goto :missing_project_root
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-set "SHORTCUT_SCRIPT=%SCRIPT_DIR%\Create-DeliveryScannerShortcut.ps1"
+set "SHORTCUT_SCRIPT=%SCRIPT_DIR%\scripts\windows\Create-DeliveryScannerShortcut.ps1"
 set "LOG_DIR=%SCRIPT_DIR%\logs"
 set "LOG_PATH=%LOG_DIR%\desktop-shortcut-launch.log"
 

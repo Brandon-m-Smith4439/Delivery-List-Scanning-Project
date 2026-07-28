@@ -1085,7 +1085,7 @@ try {
         Test-DestinationWriteAccess -Config $script:Config
         $projectRoot = [string]$script:Config.ProjectRoot
         if (-not [string]::IsNullOrWhiteSpace($projectRoot)) {
-            foreach ($requiredName in @("scanner_config.py", "delivery_store.py")) {
+            foreach ($requiredName in @("backend\config.py", "backend\store.py")) {
                 $requiredPath = Join-Path $projectRoot $requiredName
                 if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
                     throw "Required scanner file is missing: $requiredPath"

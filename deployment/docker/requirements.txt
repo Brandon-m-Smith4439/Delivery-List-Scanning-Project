@@ -1,0 +1,3 @@
+# Optional dependencies used only when DLS_DATABASE_TYPE=azure-sql.
+pyodbc
+sqlglot

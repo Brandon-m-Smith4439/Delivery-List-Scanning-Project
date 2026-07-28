@@ -5,6 +5,11 @@
 .git
 .gitignore
 __pycache__
+.pytest_cache
+_verification
+backups
+logs
+v*_payload
 *.pyc
 *.pyo
 *.db
@@ -13,5 +18,5 @@ __pycache__
 *.zip
 .env
 .env.*
-!/.env.azure.example
+!/deployment/azure/app-service.env.example
 data/secrets

@@ -1,18 +1,29 @@
 # Delivery List Scanner
 
-Current maintained release: **v149**. SQLite remains the active/default backend.
+Current maintained release: **v150**. SQLite remains the active/default backend.
 
-v149 finishes the compact Bay Scanner fit and input pass. Add mode now stays fully visible, Recent Bay Scans is limited to one compact movement, and the sticky scanner fills the viewport from 5 px below the top to 5 px above the bottom in both normal and fullscreen operation. Check feedback is restored to the latest and recent scan surfaces, while destination, manual entry, Undo, Redo, and Submit controls use a cleaner shared-button treatment.
+v150 corrects the remaining Bay Scanner control alignment and scan-feedback details. Target Bay now sits on its own clean row beneath Add/Remove, Manual Scan uses aligned labeled fields with a larger item field and Submit action, Route Pulse percentage labels are removed in both modes, and Latest/Recent scan status is shown with compact semantic icons and matching card/row colors.
 
-## Install v149 over v148
+## Install v150 over v149
 
 1. Close the Delivery List Scanner server.
-2. Extract `Delivery_List_Scanner_v149_Bay_Scanner_Sticky_Fit_And_Input_Refinement_Changed_Files.zip` into the current v148 project folder and replace the included files.
-3. Run `Apply-v149-BayScannerStickyFitAndInputRefinement.bat` once.
+2. Extract `Delivery_List_Scanner_v150_Bay_Scanner_Control_Alignment_And_Status_Refinement_Changed_Files.zip` into the current v149 project folder and replace the included files.
+3. Run `Apply-v150-BayScannerControlAlignmentAndStatusRefinement.bat` once.
 4. Restart the scanner normally.
-5. Hard-refresh the browser once with `Ctrl+F5` so the `20260728-v149` cache keys take effect.
+5. Hard-refresh the browser once with `Ctrl+F5` so the `20260728-v150` cache keys take effect.
 
-No database migration or backend patch is required. Existing Bay Scan history filtering from v148, physical scan events, assignments, permissions, and APIs remain unchanged.
+No database migration or backend patch is required. Existing Bay Scan behavior, one-row recent history, assignment movement, permissions, and APIs remain unchanged.
+
+## v150 highlights
+
+- Moved Target Bay below the Add/Remove selector with reliable spacing and aligned Clear action.
+- Rebuilt Manual Scan with labels above the Order and Item fields.
+- Kept Order wide, increased the Item field, enlarged Submit, and increased the section height slightly.
+- Removed Route Pulse percentage labels in both Add and Remove modes.
+- Replaced status words with check, warning, X, or neutral icons.
+- Applied matching green, amber, red, or neutral tones to Latest Activity and Recent Bay Scan surfaces.
+- Preserved one recent scan, sticky viewport fit, and all existing Bay Scanner workflows.
+- No PNG previews were generated or packaged.
 
 ## v149 highlights
 
@@ -173,7 +184,7 @@ The v097 numbered/checksummed SQLite migrations, verified backups, constraints, 
 ## Start the local web app
 
 1. Keep `Start-DeliveryScannerWebApp.bat` and `Start-DeliveryScannerWebApp.ps1` beside `server.py`.
-2. Keep the existing `data` folder in the project folder. A separate `assets` folder is not required for this maintained release package.
+2. Keep the existing `data`, `assets`, `sounds`, and `static` folders in the project folder.
 3. Double-click `Start-DeliveryScannerWebApp.bat`.
 4. Keep the single launcher window open while the local server is running. The scanner no longer starts a second Python console.
 
@@ -183,21 +194,12 @@ SQLite remains the active/default database. The production database is:
 
 Keep this file and its `-wal`/`-shm` companions together whenever the app is running. Before any numbered schema upgrade, startup creates and verifies a version-labeled backup under `data\backups`. Production databases are never deleted or recreated automatically.
 
-## Floor database transfer and upgrade
+## Database preservation
 
-Use `Transfer-Floor-Database-To-Current-Version.bat` when updating a floor computer to a newer scanner build while keeping its existing SQLite data.
-
-1. Close the old and new Delivery List Scanner server windows.
-2. Keep the old project folder unchanged.
-3. Extract the newest changed-files package into the newest/current project folder.
-4. Double-click `Transfer-Floor-Database-To-Current-Version.bat`.
-5. Paste the old project folder, old `data` folder, or old `delivery-scanner-pilot.db` path.
-6. Confirm the displayed source and target paths by typing `TRANSFER`.
-7. Start the newest web app and verify users, delivery lists, scans, racks, and bays.
-
-The utility does not modify the old database. It backs up both the old source and the current target under `data\backups\floor-database-transfer-<timestamp>`, upgrades the copied database with the current app's numbered migrations, validates SQLite integrity/foreign keys, and confirms that record counts from every old table did not decrease. On failure, it preserves diagnostics and restores the database that was in the current project before the transfer.
-
-This is a replacement-and-upgrade operation, not a merge of two separately active databases. It supports the maintained v096-compatible SQLite schema and later. See `docs/FLOOR_DATABASE_TRANSFER.md`.
+The `data` folder is production state, not application source. Never replace or
+delete it during a code-only update. Stop the server and copy the complete
+folder, including SQLite `-wal` and `-shm` companions, before transferring a
+floor database to another checkout.
 
 ## Automated delivery-list imports
 
@@ -207,7 +209,7 @@ The maintained automation package is under `automation\sql_delivery_export`.
 
 1. Extract the newest changed-files package into the current scanner project folder.
 2. Close the scanner web app/server window.
-3. Run `Setup-Floor-Folder-Import-Automation.bat` once.
+3. Run `automation\sql_delivery_export\Setup-DeliveryListSqlAutomation.bat` once.
 4. Restart the scanner web app and confirm **Admin > Delivery Automation Control Center** shows **Import Temp Folder Only** with the schedule installed.
 5. Run `C:\DeliveryListAutomation\Run-Now.cmd` for a visible manual verification.
 
@@ -217,19 +219,35 @@ The floor setup copies the maintained runtime to `C:\DeliveryListAutomation\Scri
 
 Use the normal SQL automation setup and the Admin control center. Run `C:\DeliveryListAutomation\Verify-SQL-And-Import.cmd` with a known delivery date to verify the read-only SQL query, workbook generation, publication, maintained scanner import, and expected stage lists.
 
-See `automation\sql_delivery_export\README.md` for the installed runtime and `docs\FLOOR_FOLDER_IMPORT_AUTOMATION.md` for the floor-computer setup and troubleshooting steps.
+See `automation\sql_delivery_export\README.md` for the installed runtime and
+troubleshooting steps.
 
 ## Database operations
 
-- Health check: `py -3 tools\database_integrity_check.py data\delivery-scanner-pilot.db`
-- Maintenance while stopped: `py -3 tools\database_maintenance.py data\delivery-scanner-pilot.db --optimize --checkpoint`
-- Azure dry run: `py -3 migrate_sqlite_to_azure_sql.py --sqlite-path data\delivery-scanner-pilot.db`
+- Azure migration dry run: `py -3 -m database.migrate_sqlite_to_azure_sql --sqlite-path data\delivery-scanner-pilot.db`
+- SQLite migrations are owned by `database\migrations.py`.
+- The logical cross-database contract is owned by `database\contract.py`.
 
-See `docs\DATABASE_MIGRATIONS.md` before restoring or troubleshooting an upgrade.
+## Optional container deployment
+
+Docker and Azure App Service support files are organized under `deployment`.
+They are not required for normal Windows floor operation.
+
+- Container definition: `deployment\docker\Dockerfile`
+- Container-only dependencies: `deployment\docker\requirements.txt`
+- Azure App Service setting template:
+  `deployment\azure\app-service.env.example`
+
+Run the Docker build from the project root so the root `.dockerignore` protects
+local databases, secrets, logs, backups, and verification output:
+
+```powershell
+docker build -f deployment/docker/Dockerfile -t delivery-list-scanner .
+```
 
 ## Audio language
 
-The maintained sound pack is stored under `sounds\` as 44.1 kHz, 16-bit PCM mono WAV files. Open `sounds\preview_audio_pack.html` in a browser to audition the packaged cues without installing audio software. The web app loads semantic cue names from `app.js`, uses the existing shared volume/compressor chain, and falls back to synthesized tones only if a WAV file cannot be loaded.
+The maintained sound pack is stored under `sounds\` as 44.1 kHz, 16-bit PCM mono WAV files. Open `sounds\preview_audio_pack.html` in a browser to audition the packaged cues without installing audio software. The web app loads semantic cue names from `static\js\app.js`, uses the existing shared volume/compressor chain, and falls back to synthesized tones only if a WAV file cannot be loaded.
 
 The existing sound-volume slider remains available for floor testing. At 100%, the main operational files are mastered for production-floor use; the subtle expand/collapse and destructive-action cues are intentionally quieter and shorter so routine interface actions are less distracting.
 
@@ -237,45 +255,26 @@ The existing sound-volume slider remains available for floor testing. At 100%, t
 
 Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v132 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
 
-After BLDR IT provides the Entra tenant ID, application/client ID, and a client-secret value, run `Configure-MicrosoftGraphEmail.bat` once. The secret is encrypted for the current Windows account and loaded only in memory by the normal scanner launcher. See `docs/MICROSOFT_GRAPH_EMAIL.md` for the IT and testing steps.
+After BLDR IT provides the Entra tenant ID, application/client ID, and a client-secret value, run `Configure-MicrosoftGraphEmail.bat` once. The secret is encrypted for the current Windows account and loaded only in memory by the normal scanner launcher.
 
 ## Project documentation
 
 - Ongoing version history: `README_CHANGELOG.md`
-- v148 Bay Scanner history and flow refinement: `docs/V148_BAY_SCANNER_HISTORY_AND_FLOW_REFINEMENT.md`
-- v147 Bay Scanner route and sticky refinement: `docs/V147_BAY_SCANNER_CONTAINMENT_AND_STICKY_REFINEMENT.md`
-- v146 Bay Scanner workflow refinement: `docs/V146_BAY_SCANNER_WORKFLOW_REFINEMENT.md`
-- v145 Bay Scanner layout correction: `docs/V145_BAY_SCANNER_LAYOUT_CORRECTION.md`
-- v144 Bay Scanner operations console: `docs/V144_BAY_SCANNER_CONSOLE_REDESIGN.md`
-- v140 Attention/Reject/import deduplication: `docs/V140_ATTENTION_REJECT_AND_IMPORT_DEDUPE.md`
-- v142 roles, rejects, and layout refinements: `docs/V142_ROLE_AND_REJECT_REFINEMENTS.md`
-- v141 User Access Management redesign: `docs/V141_USER_ACCESS_MANAGER.md`
-- v139 dropdown/reject/import history: `docs/V139_DROPDOWN_REJECT_AND_IMPORT_HISTORY.md`
-- v138 Reject Tracking redesign: `docs/V138_REJECT_TRACKING_REDESIGN.md`
-- v137 interface and workflow verification: `docs/V137_INTERFACE_AND_WORKFLOW_VERIFICATION.md`
-- v136 interface stability checks: `docs/V136_INTERFACE_STABILITY.md`
-- v135 operations workflows: `docs/V135_OPERATIONS_WORKFLOWS.md`
+- Current folder ownership and cleanup guide: `docs/PROJECT_STRUCTURE.md`
 - Automated SQL export/import runtime: `automation/sql_delivery_export/README.md`
-- Floor hourly folder-import setup: `docs/FLOOR_FOLDER_IMPORT_AUTOMATION.md`
-- Floor database transfer and recovery: `docs/FLOOR_DATABASE_TRANSFER.md`
-- Folder cleanup and required-file guide: `docs/FOLDER_CLEANUP_GUIDE.md`
-- Function and ownership map: `docs/CODE_REFERENCE.md`
-- Maintained test instructions: `docs/TESTING.md`
-- Latest validation report: `docs/TEST_REPORT.md`
-- Reviewed architecture and maintenance baseline: `docs/PROJECT_REVIEW.md`
-- Microsoft Graph email setup: `docs/MICROSOFT_GRAPH_EMAIL.md`
-- Future Azure deployment: `docs/AZURE_DEPLOYMENT.md`
-- Canonical database contract: `docs/DATABASE_SCHEMA.md`
-- Migration and recovery guide: `docs/DATABASE_MIGRATIONS.md`
-- SQLite-to-SQL Server mapping: `docs/SQLITE_TO_SQLSERVER_MAPPING.md`
-- Database maintenance: `docs/DATABASE_MAINTENANCE.md`
-- Audio language and cue mapping: `docs/AUDIO_LANGUAGE.md`
 
 ## Important local folders
 
-- `data` — required SQLite database and local scanner data. Keep it and back it up.
-- `logs` — generated diagnostics. Safe to clear while the app is stopped.
-- `C:\DeliveryListAutomation` — local automation runtime, staging, logs, state, and scheduled-task files for either central SQL/export mode or floor folder-import-only mode.
+- `static` - maintained browser CSS, JavaScript, and image source.
+- `assets` - favicon and print-page assets referenced by the server.
+- `sounds` - maintained browser audio cues.
+- `data` - required SQLite database and local scanner state. Keep it and back it up.
+- `automation` - scheduled delivery-list import/export source and setup scripts.
+- `scripts` - optional Windows setup and diagnostic utilities.
+- `resources` - source material retained for A+W integration work.
+- `logs` - generated diagnostics. Safe to clear while the app is stopped.
+- `backups` - retained recovery copies. Review dates before removing anything.
+- `C:\DeliveryListAutomation` - installed automation runtime, staging, logs, and task state.
 
 A terminal whose prompt points to another project folder, such as `Showers Programmer`, is being opened by that project or its updater; the scanner launcher fixes its Python working directory to this project folder.
 

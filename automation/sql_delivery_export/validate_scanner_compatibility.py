@@ -23,14 +23,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     root = Path(args.project_root).expanduser().resolve()
-    required = [root / "scanner_config.py", root / "delivery_store.py"]
+    required = [root / "backend" / "config.py", root / "backend" / "store.py"]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise FileNotFoundError("Missing scanner files: " + ", ".join(missing))
 
     sys.path.insert(0, str(root))
-    from scanner_config import load_config
-    from delivery_store import create_store
+    from backend.config import load_config
+    from backend.store import create_store
 
     config = load_config(root)
     store = create_store(config)

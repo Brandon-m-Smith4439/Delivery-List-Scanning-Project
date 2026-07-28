@@ -138,7 +138,7 @@ if ($automationMode -eq "folder-import-only") {
     }
 
     $projectRoot = [string]$config.ProjectRoot
-    foreach ($requiredName in @("server.py", "scanner_config.py", "delivery_store.py")) {
+    foreach ($requiredName in @("server.py", "backend\config.py", "backend\store.py")) {
         $requiredPath = Join-Path $projectRoot $requiredName
         if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
             throw "Required scanner file is missing: $requiredPath"

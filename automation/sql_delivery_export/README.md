@@ -4,7 +4,11 @@ This folder is installed to `C:\DeliveryListAutomation\Scripts` by either the ce
 
 ## v132 floor-computer folder import setup
 
-Floor computers do not need A+W SQL access. Run `Setup-Floor-Folder-Import-Automation.bat` from the current scanner project folder. The setup copies the maintained runtime to `C:\DeliveryListAutomation\Scripts`, preserves any existing configuration with a timestamped backup, forces `folder-import-only` mode, sets the interval to 60 minutes, creates the command wrappers, validates scanner compatibility, and installs the scheduled tasks.
+Floor computers do not need A+W SQL access. Run
+`Setup-DeliveryListSqlAutomation.bat` from this folder. The setup copies the
+maintained runtime to `C:\DeliveryListAutomation\Scripts`, preserves existing
+configuration with a timestamped backup, creates the command wrappers,
+validates scanner compatibility, and installs the scheduled tasks.
 
 The floor scheduler preflight now verifies read access to the Temp Delivery Lists folder and scanner compatibility without querying A+W SQL or requiring permission to write workbooks to the shared folder. The central authorized SQL computer keeps the existing SQL/workbook preflight unchanged.
 
@@ -26,14 +30,9 @@ Before creating tasks, the installer now:
 4. Queries both tasks to confirm Windows retained them.
 5. Starts the incremental task once as a scheduler launch check.
 
-## Apply the patch to an existing installation
-
-1. Extract the v125 changed-files ZIP into the scanner project folder.
-2. Run `Apply-v125-AutomationPatch.bat`.
-3. The patch backs up the current installed scripts under `C:\DeliveryListAutomation\Backups`.
-4. Retry **Save & Install Schedule** in the Admin automation control center.
-
-The patch does not edit `sql-export.config.json`, the production database, or generated delivery-list workbooks.
+Historical patch overlays are no longer required by this source tree. Run the
+maintained setup to refresh the installed automation runtime; it does not
+rewrite the web app or replace the scanner database.
 
 ## Verify the real SQL query and scanner import
 
@@ -66,8 +65,5 @@ exist. This prevents a successful all-CPU, all-DTC, or all-Greenville delivery
 date from being reported as failed merely because no Indian Trail list is
 appropriate for that date.
 
-For an existing central SQL automation installation, run
-`Apply-ImportRouteVerificationFix.bat` from the scanner project folder. The
-patch creates a timestamped backup and replaces only
-`import_delivery_folder.py` and `verify_delivery_import.py` under
-`C:\DeliveryListAutomation\Scripts`.
+The maintained `import_delivery_folder.py` and `verify_delivery_import.py`
+already include this route-aware verification behavior.

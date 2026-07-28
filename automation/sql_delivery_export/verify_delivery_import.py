@@ -42,8 +42,8 @@ def main() -> int:
         raise FileNotFoundError(f"Generated workbook not found: {workbook}")
 
     sys.path.insert(0, str(project_root))
-    from scanner_config import load_config
-    from delivery_store import build_delivery_lists, create_store, load_delivery_source_payload
+    from backend.config import load_config
+    from backend.store import build_delivery_lists, create_store, load_delivery_source_payload
 
     payload = load_delivery_source_payload(workbook)
     config = load_config(project_root)

@@ -76,15 +76,15 @@ function Resolve-ScannerProjectRoot {
             continue
         }
         if ((Test-Path -LiteralPath (Join-Path $resolved "server.py") -PathType Leaf) -and
-            (Test-Path -LiteralPath (Join-Path $resolved "scanner_config.py") -PathType Leaf) -and
-            (Test-Path -LiteralPath (Join-Path $resolved "delivery_store.py") -PathType Leaf)) {
+            (Test-Path -LiteralPath (Join-Path $resolved "backend\config.py") -PathType Leaf) -and
+            (Test-Path -LiteralPath (Join-Path $resolved "backend\store.py") -PathType Leaf)) {
             return $resolved
         }
     }
 
     $manual = Read-Host "Enter the full Delivery List Scanning Project folder path"
     $resolvedManual = (Resolve-Path -LiteralPath $manual -ErrorAction Stop).Path
-    foreach ($requiredName in @("server.py", "scanner_config.py", "delivery_store.py")) {
+    foreach ($requiredName in @("server.py", "backend\config.py", "backend\store.py")) {
         if (-not (Test-Path -LiteralPath (Join-Path $resolvedManual $requiredName) -PathType Leaf)) {
             throw "The selected project folder is missing $requiredName"
         }
@@ -357,17 +357,9 @@ pause
 "@
 $statusContent | Set-Content -LiteralPath $statusCmd -Encoding ASCII
 
-if (-not $SkipProjectDocumentation) {
-    $docScript = Join-Path $scriptRoot "Apply-v121-ProjectIntegration.ps1"
-    & $powerShellPath -NoProfile -ExecutionPolicy Bypass -File $docScript -ProjectRoot $resolvedProjectRoot -WorkingRoot $WorkingRoot
-    if ($LASTEXITCODE -ne 0) {
-        throw "Exporter runtime passed, but the v121 project GUI integration could not be applied safely."
-    }
-}
-
 Write-Host ""
 Write-Host "Setup completed successfully." -ForegroundColor Green
-Write-Host "The v121 GUI integration was applied with timestamped backups. No production database file was replaced."
+Write-Host "Automation was configured without changing web-app source files or the production database."
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host "1. Restart the scanner web app if setup disabled its built-in 5 PM importer."

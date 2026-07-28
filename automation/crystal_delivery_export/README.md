@@ -24,7 +24,7 @@ That encrypted value can only be decrypted by the same Windows user on the same 
 
 ## Setup
 
-1. Run this package from the active Delivery List Scanner project folder—the folder containing `server.py`, `scanner_config.py`, `delivery_store.py`, `DeliveryList.rpt`, and the existing `data` folder.
+1. Run this package from the active Delivery List Scanner project folder—the folder containing `server.py`, the `backend` package, and the existing `data` folder.
 2. Double-click `Setup-DeliveryListAutomation.bat`.
 3. Enter the A+W SQL password when prompted. It is not displayed and is not saved as plain text.
 4. Setup creates:

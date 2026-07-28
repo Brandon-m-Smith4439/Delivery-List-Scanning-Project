@@ -1,0 +1,65 @@
+/*
+  Delivery List Scanner - Print Page Styles
+  Generated from the maintained v150 cascade during the static asset
+  organization pass. Keep shared rules in styles.css.
+*/
+
+@media print {
+
+  .top-actions,
+  .scan-panel,
+  .desktop-footer,
+  .mobile-nav,
+  .list-toolbar,
+  .summary-grid,
+  .bay-panel,
+  .alerts-panel,
+  .menu-panel,
+  .recent-panel,
+  .last-scan {
+    display: none !important;
+  }
+
+  .topbar {
+    min-height: 70px;
+    display: block;
+    padding: 0 0 12px;
+    border: 0;
+  }
+
+  .brand {
+    display: none;
+  }
+
+  .title-block {
+    text-align: left;
+  }
+
+  .title-block h1 {
+    font-size: 22px;
+  }
+
+  .workspace {
+    display: block;
+    padding: 0;
+  }
+
+  .list-panel {
+    border: 0;
+    box-shadow: none;
+  }
+
+  .table-wrap {
+    overflow: visible;
+  }
+
+  .delivery-table {
+    font-size: 10px;
+  }
+
+  .delivery-table thead th,
+  .delivery-table tbody td {
+    padding: 6px;
+  }
+}
+

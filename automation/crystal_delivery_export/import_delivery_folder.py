@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Import Crystal Report exports into the existing Delivery List Scanner store.
 
-This wrapper intentionally reuses scanner_config.py and delivery_store.py instead
+This wrapper intentionally reuses backend/config.py and backend/store.py instead
 of duplicating the scanner's import rules. The PowerShell exporter supplies the
 UNC folder through DLS_TEMP_DELIVERY_LISTS_PATH for this process only.
 """
@@ -33,16 +33,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     project_root = Path(args.project_root).expanduser().resolve()
-    if not (project_root / "scanner_config.py").is_file():
-        raise FileNotFoundError(f"scanner_config.py was not found under {project_root}")
-    if not (project_root / "delivery_store.py").is_file():
-        raise FileNotFoundError(f"delivery_store.py was not found under {project_root}")
+    if not (project_root / "backend" / "config.py").is_file():
+        raise FileNotFoundError(f"backend/config.py was not found under {project_root}")
+    if not (project_root / "backend" / "store.py").is_file():
+        raise FileNotFoundError(f"backend/store.py was not found under {project_root}")
 
     os.environ["DLS_TEMP_DELIVERY_LISTS_PATH"] = args.folder
     sys.path.insert(0, str(project_root))
 
-    from scanner_config import load_config
-    from delivery_store import create_store
+    from backend.config import load_config
+    from backend.store import create_store
 
     config = load_config(project_root)
     store = create_store(config)

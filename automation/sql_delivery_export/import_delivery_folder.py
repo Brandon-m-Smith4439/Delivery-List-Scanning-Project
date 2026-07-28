@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Import SQL-generated delivery workbooks through the maintained scanner store.
 
-The wrapper deliberately reuses scanner_config.py and delivery_store.py. It
+The wrapper deliberately reuses backend/config.py and backend/store.py. It
 never reimplements route, stage, scan-preservation, rack, bay, or audit rules.
 For SQL synchronization runs it also performs a read-only stage-list preflight:
 unchanged workbooks are reported without reimporting, while a deleted scanner
@@ -558,9 +558,9 @@ def main() -> int:
 
     sys.path.insert(0, str(project_root))
 
-    from scanner_config import load_config
+    from backend.config import load_config
     from delivery_import_safety import install_safe_delivery_import
-    from delivery_store import (
+    from backend.store import (
         build_delivery_lists,
         create_store,
         delivery_date_from_source_header,

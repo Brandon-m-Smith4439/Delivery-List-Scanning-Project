@@ -3,8 +3,8 @@
 #
 # Code map for future edits:
 # - Render helpers at the top generate printable delivery/rack reports.
-# - Handler.do_GET and Handler.do_POST route HTTP requests to delivery_store.py.
-# - Keep business rules in delivery_store.py where possible; this file should mainly
+# - Handler.do_GET and Handler.do_POST route HTTP requests to backend/store.py.
+# - Keep business rules in backend/store.py where possible; this file should mainly
 #   translate HTTP requests/responses and render printable HTML.
 
 """Local pilot server for the delivery-list scanner web app."""
@@ -27,11 +27,17 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from delivery_store import SESSION_COOKIE_NAME, create_store, public_route_label, request_station, request_user_name
-from scanner_config import load_config
-from delivery_automation_control import DeliveryAutomationController
-from operations_features import OperationsFeatureService
-from delivery_import_safety import install_safe_delivery_import
+from backend.automation_control import DeliveryAutomationController
+from backend.config import load_config
+from backend.import_safety import install_safe_delivery_import
+from backend.operations import OperationsFeatureService
+from backend.store import (
+    SESSION_COOKIE_NAME,
+    create_store,
+    public_route_label,
+    request_station,
+    request_user_name,
+)
 
 
 ROOT = Path(__file__).resolve().parent

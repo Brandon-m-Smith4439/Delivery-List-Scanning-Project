@@ -1,3 +1,50 @@
+## v151 - Project Structure Organization
+
+- Consolidated maintained browser behavior into `static\js\app.js`.
+- Organized application services under `backend` and database ownership under
+  `database` while retaining `server.py` as the root launcher.
+- Moved optional Docker and Azure App Service templates under `deployment`.
+- Added the missing container dependency manifest for the Azure SQL adapter.
+- Retained `.dockerignore`, `pytest.ini`, and the paired Windows launchers at
+  the root because Docker, pytest, and the BAT launcher discover them there.
+- Updated automation integration paths and project-structure validation.
+
+## v151 - Bay Scanner Target and Manual Control Alignment
+
+### Bay Map scanner
+
+- Rebuilt Target Bay as a dedicated label row followed by one aligned input-and-Clear control row, preventing overlap with the Add/Remove selector.
+- Increased separation beneath the mode selector so the Add destination remains visually distinct at normal and compact workstation heights.
+- Rebuilt Manual Scan with a section heading above one aligned Order Number, Item Number, and Submit row.
+- Increased the Manual Scan section height, widened the Item Number field, and enlarged Submit while preserving the wider Order Number field.
+- Removed Bay Scanner Route Pulse percentage labels in both Add and Remove modes while retaining Outbound, In Transit, and Received quantities.
+- Advanced only the changed Bay Scanner CSS and app JavaScript cache keys to v151.
+
+### Compatibility
+
+- Preserved existing Bay Scanner IDs, Add/Remove behavior, target selection, manual scan submission, route quantities, APIs, permissions, and database schema.
+- Limited this merge-friendly package to the four files changed for the correction.
+- No database migration, installer, BAT file, or backend patch is required.
+
+## v150 - Bay Scanner Control Alignment and Status Refinement
+
+### Bay Map scanner
+
+- Moved Target Bay onto a clean row beneath the Add/Remove selector and aligned its input with Clear.
+- Rebuilt Manual Scan with labels above aligned Order and Item fields.
+- Increased the Item field and Submit action while preserving the wider Order field.
+- Increased Manual Scan height slightly to prevent clipping.
+- Removed Route Pulse percentage labels in Add and Remove modes.
+- Replaced status text with compact semantic icons in Latest Activity and Recent Bay Scans.
+- Applied matching green, amber, red, and neutral background tones to scan-result surfaces.
+- Advanced browser cache keys to v150.
+
+### Compatibility
+
+- Preserved the single recent movement, sticky viewport fit, Bay Scan APIs, assignments, All Scans, permissions, and database schema.
+- No database migration or backend patch is required.
+- No PNG previews were generated or packaged.
+
 ## v149 - Bay Scanner Sticky Fit and Input Refinement
 
 ### Bay Map scanner
