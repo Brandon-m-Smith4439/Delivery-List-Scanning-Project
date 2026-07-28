@@ -26,9 +26,9 @@ def test_v138_release_markers_and_documentation():
     readme = read("README.md")
     changelog = read("README_CHANGELOG.md")
     notification = read("notification-center-v135.js")
-    assert html.count("20260728-v147") >= 6
-    assert "Current maintained release: **v147**" in readme
-    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
+    assert html.count("20260728-v148") >= 6
+    assert "Current maintained release: **v148**" in readme
+    assert changelog.startswith("## v148 - Bay Scanner History and Flow Refinement")
     assert (ROOT / "docs" / "V138_REJECT_TRACKING_REDESIGN.md").is_file()
     assert "last-seen.v138" in notification
 

@@ -1,18 +1,31 @@
 # Delivery List Scanner
 
-Current maintained release: **v147**. SQLite remains the active/default backend.
+Current maintained release: **v148**. SQLite remains the active/default backend.
 
-v147 tightens the Bay Map scanner after floor review. The blue header now contains only the Bay Scanner title, live state, and a fully contained Route Pulse. Remove mode hides Destination Control, legacy route connector graphics are suppressed, and only the scanner panel sticks near the top after the Bay Map action buttons scroll away.
+v148 finishes the compact Bay Scanner workflow after floor review. The non-sticky Bay Map action toolbar and scanner now sit directly together in normal flow, while only the scanner becomes sticky after it reaches the top. Recent Bay Scans stays open in a compact four-column table, percentage labels disappear in Remove mode, and structural Bay Map edits are excluded from scan history.
 
-## Install v147 over v146
+## Install v148 over v147
 
 1. Close the Delivery List Scanner server.
-2. Extract `Delivery_List_Scanner_v147_Bay_Scanner_Containment_Refinement_Changed_Files.zip` into the current v146 project folder and replace the included files.
-3. Run `Apply-v147-BayScannerContainmentRefinement.bat` once.
+2. Extract `Delivery_List_Scanner_v148_Bay_Scanner_History_And_Flow_Refinement_Changed_Files.zip` into the current v147 project folder and replace the included files.
+3. Run `Apply-v148-BayScannerHistoryAndFlowRefinement.bat` once.
 4. Restart the scanner normally.
-5. Hard-refresh the browser once with `Ctrl+F5` so the `20260728-v147` cache keys take effect.
+5. Hard-refresh the browser once with `Ctrl+F5` so the `20260728-v148` cache keys take effect.
 
-No database migration or backend patch is required. Keep the existing v142 role-management and v135 operations patches already installed.
+No database migration is required. v148 applies a small store-layer history filter so layout-edit events no longer enter or appear in Bay Scan history. Existing scan events, bay assignments, audit records, permissions, and scanner behavior are preserved.
+
+## v148 highlights
+
+- Eliminated the large normal-flow gap between the static Bay Map action buttons and Bay Scanner.
+- Kept the action buttons non-sticky; only the scanner panel sticks after reaching the top.
+- Removed the `Just now` / waiting badge beside the Bay Scanner title while preserving its compatibility ID as a hidden status node.
+- Hid the percentage labels under Route Pulse while Remove mode is selected.
+- Replaced the collapsible Recent Bay Scans disclosure with a permanently open compact table.
+- Reduced recent history to Order Nr., Job Nr., Action, and Current Bay.
+- Kept Current Bay editable through the existing location-change dropdown.
+- Removed horizontal and vertical scrolling from the recent history section.
+- Excluded structural layout edits from both Recent Bay Scans and All Scans history while retaining administrative audit records.
+- No PNG previews were generated or packaged.
 
 ## v147 highlights
 
@@ -215,6 +228,7 @@ After BLDR IT provides the Entra tenant ID, application/client ID, and a client-
 ## Project documentation
 
 - Ongoing version history: `README_CHANGELOG.md`
+- v148 Bay Scanner history and flow refinement: `docs/V148_BAY_SCANNER_HISTORY_AND_FLOW_REFINEMENT.md`
 - v147 Bay Scanner route and sticky refinement: `docs/V147_BAY_SCANNER_CONTAINMENT_AND_STICKY_REFINEMENT.md`
 - v146 Bay Scanner workflow refinement: `docs/V146_BAY_SCANNER_WORKFLOW_REFINEMENT.md`
 - v145 Bay Scanner layout correction: `docs/V145_BAY_SCANNER_LAYOUT_CORRECTION.md`

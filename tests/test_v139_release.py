@@ -19,9 +19,9 @@ def test_v139_release_markers_and_documentation():
     html = read("index.html")
     readme = read("README.md")
     changelog = read("README_CHANGELOG.md")
-    assert html.count("20260728-v147") >= 6
-    assert "Current maintained release: **v147**" in readme
-    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
+    assert html.count("20260728-v148") >= 6
+    assert "Current maintained release: **v148**" in readme
+    assert changelog.startswith("## v148 - Bay Scanner History and Flow Refinement")
     assert (ROOT / "docs" / "V139_DROPDOWN_REJECT_AND_IMPORT_HISTORY.md").is_file()
 
 

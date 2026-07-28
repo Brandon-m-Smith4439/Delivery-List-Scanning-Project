@@ -10631,7 +10631,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
 
     def get_bay_events(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Return detailed Bay Map history with each item's current move target."""
+        """Return item-linked physical Bay Map history with its current move target."""
+        # DLS_V148_BAY_SCAN_HISTORY_FILTER
         safe_limit = max(1, min(int(limit or 20), 250))
         with self.connect() as con:
             rows = con.execute(
@@ -10643,7 +10644,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                        old_bay.display_name AS old_bay_display,
                        new_bay.bay_code AS new_bay_code,
                        new_bay.display_name AS new_bay_display,
-                       li.order_no, li.item_no, li.customer, li.dimensions, li.product,
+                       li.order_no, li.item_no, li.customer, li.dimensions, li.product, li.job,
                        current_ba.id AS current_assignment_id,
                        current_bay.bay_code AS current_bay_code,
                        current_bay.display_name AS current_bay_display
@@ -10661,6 +10662,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     LIMIT 1
                 )
                 LEFT JOIN bays current_bay ON current_bay.id = current_ba.bay_id
+                WHERE COALESCE(be.line_item_id, '') <> ''
+                  AND be.event_type NOT IN ('UpdateBayLayout', 'CreateBay', 'DeleteBay', 'DeleteBayGroup')
                 ORDER BY be.id DESC
                 LIMIT ?
                 """,
@@ -10670,6 +10673,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return [
             {
                 "id": row["id"],
+                "lineItemId": row["line_item_id"] or "",
                 "eventType": row["event_type"],
                 "bayCode": row["bay_code"] or "",
                 "bayDisplay": row["bay_display"] or row["bay_code"] or "",
@@ -10682,6 +10686,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "currentBayDisplay": row["current_bay_display"] or row["current_bay_code"] or "",
                 "order": row["order_no"] or "",
                 "item": row["item_no"] or "",
+                "job": row["job"] or "",
                 "customer": row["customer"] or "",
                 "dimensions": row["dimensions"] or "",
                 "product": row["product"] or "",
@@ -12591,17 +12596,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         old_bay_id: int | None = None,
         new_bay_id: int | None = None,
     ) -> None:
-        """Purpose: Create bay event for the delivery-list scanner workflow.
-
-        Effects: This function reads or changes database records.
-        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
-        """
+        """Create one item movement event while excluding structural map edits."""
+        # DLS_V148_BAY_SCAN_HISTORY_FILTER
+        clean_event_type = str(event_type or "").strip()
+        if not str(line_item_id or "").strip() or clean_event_type in {
+            "UpdateBayLayout",
+            "CreateBay",
+            "DeleteBay",
+            "DeleteBayGroup",
+        }:
+            return
         con.execute(
             """
             INSERT INTO bay_events (bay_id, line_item_id, event_type, old_bay_id, new_bay_id, reason, user_name, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (bay_id, line_item_id, event_type, old_bay_id, new_bay_id, reason, user, now_iso()),
+            (bay_id, line_item_id, clean_event_type, old_bay_id, new_bay_id, reason, user, now_iso()),
         )
 
     def assign_bay(self, data: dict[str, Any], user: str) -> dict[str, Any]:

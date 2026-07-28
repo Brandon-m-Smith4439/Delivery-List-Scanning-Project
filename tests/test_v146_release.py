@@ -15,26 +15,26 @@ def read(name: str) -> str:
 
 def scanner_panel():
     soup = BeautifulSoup(read("index.html"), "html.parser")
-    panel = soup.select_one(".bay-scanner-panel-v147")
+    panel = soup.select_one(".bay-scanner-panel-v148")
     assert panel is not None
     return soup, panel
 
 
-def test_release_markers_are_v147() -> None:
+def test_release_markers_are_v148() -> None:
     index = read("index.html")
     readme = read("README.md")
     changelog = read("README_CHANGELOG.md")
-    assert "20260728-v147" in index
-    assert "bay-scanner-v147.css" in index
+    assert "20260728-v148" in index
+    assert "bay-scanner-v148.css" in index
     assert "bay-scanner-v145.css" not in index
-    assert "Current maintained release: **v147**" in readme
-    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
+    assert "Current maintained release: **v148**" in readme
+    assert changelog.startswith("## v148 - Bay Scanner History and Flow Refinement")
 
 
 def test_title_and_route_are_one_header() -> None:
     _, panel = scanner_panel()
-    header = panel.select_one(":scope > .bay-scanner-header-v147")
-    route = panel.select_one(".bay-route-pulse-v147")
+    header = panel.select_one(":scope > .bay-scanner-header-v148")
+    route = panel.select_one(".bay-route-pulse-v148")
     form = panel.select_one("#bayScanOutForm")
     assert header is not None and route is not None and form is not None
     assert route in header.descendants
@@ -42,14 +42,14 @@ def test_title_and_route_are_one_header() -> None:
 
 
 def test_route_pulse_is_contained_by_css() -> None:
-    css = read("bay-scanner-v147.css")
+    css = read("bay-scanner-v148.css")
     assert re.search(
-        r"\.bay-route-pulse-v147\s*\{[^}]*width:\s*100%\s*!important[^}]*max-width:\s*100%\s*!important[^}]*overflow:\s*hidden\s*!important",
+        r"\.bay-route-pulse-v148\s*\{[^}]*width:\s*100%\s*!important[^}]*max-width:\s*100%\s*!important[^}]*overflow:\s*hidden\s*!important",
         css,
         flags=re.S,
     )
     assert re.search(
-        r"\.bay-route-metrics-v147\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*0\.82fr\)\s+minmax\(0,\s*1\.3fr\)\s+minmax\(0,\s*0\.82fr\)",
+        r"\.bay-route-metrics-v148\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*0\.82fr\)\s+minmax\(0,\s*1\.3fr\)\s+minmax\(0,\s*0\.82fr\)",
         css,
         flags=re.S,
     )
@@ -57,18 +57,18 @@ def test_route_pulse_is_contained_by_css() -> None:
 
 def test_barcode_scan_uses_enter_and_overlay_corrections() -> None:
     _, panel = scanner_panel()
-    scan_surface = panel.select_one(".bay-command-scan-input-v147")
+    scan_surface = panel.select_one(".bay-command-scan-input-v148")
     assert scan_surface is not None
     assert scan_surface.select_one("#bayScanOutInput") is not None
     assert scan_surface.select_one("#bayUndoBtn") is not None
     assert scan_surface.select_one("#bayRedoBtn") is not None
     assert panel.find(string=lambda value: value and "Submit Scan" in value) is None
-    assert panel.select_one(".bay-scan-submit-v147") is None
+    assert panel.select_one(".bay-scan-submit-v148") is None
 
 
 def test_manual_scan_is_one_row_with_compact_item() -> None:
     _, panel = scanner_panel()
-    manual = panel.select_one(".bay-manual-inline-v147")
+    manual = panel.select_one(".bay-manual-inline-v148")
     assert manual is not None
     assert manual.name == "section"
     assert panel.select_one(".bay-manual-disclosure-v145") is None
@@ -78,7 +78,7 @@ def test_manual_scan_is_one_row_with_compact_item() -> None:
     assert order_input is not None and item_input is not None and submit is not None
     assert item_input.get("maxlength") == "3"
     assert item_input.get("pattern") == "[0-9]{1,3}"
-    css = read("bay-scanner-v147.css")
+    css = read("bay-scanner-v148.css")
     assert "grid-template-columns: minmax(150px, 1fr) 78px 92px !important" in css
 
 
@@ -134,11 +134,11 @@ def test_existing_bay_scanner_controls_are_preserved_once() -> None:
 
 
 def test_css_is_balanced_scoped_and_reduced_motion_safe() -> None:
-    css = read("bay-scanner-v147.css")
+    css = read("bay-scanner-v148.css")
     assert css.count("{") == css.count("}")
-    assert ".bay-scanner-panel-v147" in css
-    assert ".bay-action-buttons-v147" in css
-    assert ".bay-command-history-overlay-v147" in css
+    assert ".bay-scanner-panel-v148" in css
+    assert ".bay-action-buttons-v148" in css
+    assert ".bay-command-history-overlay-v148" in css
     assert "top: -15px !important" in css
     assert "prefers-reduced-motion: reduce" in css
-    assert ".bay-scan-submit-v147" not in css
+    assert ".bay-scan-submit-v148" not in css

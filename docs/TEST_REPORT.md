@@ -1,5 +1,16 @@
 # Test Report
 
+## v148 Bay Scanner history and flow verification
+
+- Verified the static Bay Map action toolbar and scanner are adjacent in normal flow.
+- Verified only the scanner slot is sticky.
+- Verified the title status node is hidden and the `Just now` badge is not visible.
+- Verified Remove mode hides Route Pulse percentage labels.
+- Verified Recent Bay Scans is permanently open, non-scrollable, and limited to four compact columns.
+- Verified Current Bay retains the existing move dropdown.
+- Verified structural Bay Map edits are excluded from Bay Scan history while audit records remain available.
+- Verified required Bay Scanner IDs remain unique and no schema migration is introduced.
+
 ## v147 Bay Scanner route and sticky verification
 
 - Verified the removed header copy and visible Current Mode card are absent from the rendered scanner.

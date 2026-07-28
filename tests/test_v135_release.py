@@ -22,7 +22,7 @@ def read(name: str) -> str:
 
 def test_release_cache_markers_and_new_pages_are_wired():
     html = read("index.html")
-    assert "20260728-v147" in html
+    assert "20260728-v148" in html
     assert "notification-center-v135.js" in html
     assert "notification-center-ui.js" not in html
     assert 'data-page-target="rejects"' in html

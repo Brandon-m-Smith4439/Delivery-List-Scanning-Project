@@ -13321,31 +13321,58 @@ function bayScanRecentLimit() {
  * Flow: Keeps the latest event in Last Scan, then shows one normal-screen row or the existing two fullscreen rows.
  */
 function renderBayRecentActions() {
-  const events = state.bayEvents || [];
-  const limit = bayScanRecentLimit();
-  renderBayLastScanCard(events[0] || null);
-  if (els.bayRecentScanCountLabel) els.bayRecentScanCountLabel.textContent = `Latest ${limit}`;
+  // DLS_V148_COMPACT_BAY_RECENT_HISTORY
+  const excludedEventTypes = new Set([
+    "UpdateBayLayout",
+    "CreateBay",
+    "DeleteBay",
+    "DeleteBayGroup",
+  ]);
+  const events = (Array.isArray(state.bayEvents) ? state.bayEvents : []).filter((event) => {
+    if (!event || excludedEventTypes.has(String(event.eventType || ""))) return false;
+    return Boolean(String(event.lineItemId || event.order || "").trim());
+  });
+  const latestEvent = events[0] || null;
+  renderBayLastScanCard(latestEvent);
+
+  const recentEvents = events.slice(0, 2);
+  if (els.bayRecentScanCountLabel) {
+    els.bayRecentScanCountLabel.textContent = `${recentEvents.length} recent`;
+  }
   if (!els.bayScanOutRecent) return;
-  const recentRows = events.slice(1, 1 + limit);
-  els.bayScanOutRecent.innerHTML = recentRows.length
-    ? recentRows.map((event) => {
-        const when = new Date(event.time || event.createdAt || "");
-        const time = Number.isNaN(when.getTime()) ? "" : when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-        const bay = event.currentBayDisplay || event.currentBayCode || event.bayDisplay || event.bayCode || event.newBayDisplay || event.newBayCode || event.oldBayDisplay || event.oldBayCode || "Not in bay";
-        const order = event.order ? `${event.order}-${event.item || ""}` : "Bay action";
-        const tone = bayEventTone(event);
-        return `
-          <tr class="${escapeHtml(tone)}">
-            <td>${escapeHtml(formatEventType(event.eventType || event.reason || "Bay action"))}</td>
-            <td>${escapeHtml(order)}</td>
-            <td>${escapeHtml(bay)}</td>
-            <td>${escapeHtml(time)}</td>
-            <td><span class="check-dot ${escapeHtml(tone)}" role="img" aria-label="${escapeHtml(tone === "error" ? "Needs review" : tone === "notice" ? "Notice" : "Successful")}"></span></td>
-            <td>${bayEventMoveControlHtml(event, true)}</td>
-          </tr>
-        `;
-      }).join("")
-    : `<tr><td colspan="6"><div class="bay-history-empty"><strong>Recent bay actions</strong><span>The next ${limit === 1 ? "action" : `${limit} actions`} will appear here.</span></div></td></tr>`;
+
+  if (!recentEvents.length) {
+    els.bayScanOutRecent.innerHTML = '<tr class="bay-recent-empty-v148"><td colspan="4">No recent bay scans</td></tr>';
+    return;
+  }
+
+  els.bayScanOutRecent.innerHTML = recentEvents.map((event) => {
+    const order = String(event.order || "-");
+    const job = String(event.job || "-");
+    const action = String(formatEventType(event.eventType || "") || "-");
+    const currentBay = String(
+      event.currentBayDisplay
+      || event.currentBayCode
+      || event.newBayDisplay
+      || event.newBayCode
+      || event.bayDisplay
+      || event.bayCode
+      || "-"
+    );
+    const moveControl = bayEventMoveControlHtml(event);
+    const currentBayControl = moveControl || `<span title="${escapeHtml(currentBay)}">${escapeHtml(currentBay)}</span>`;
+
+    return `
+      <tr class="bay-recent-row-v148">
+        <td data-label="Order Nr."><b title="${escapeHtml(order)}">${escapeHtml(order)}</b></td>
+        <td data-label="Job Nr."><span title="${escapeHtml(job)}">${escapeHtml(job)}</span></td>
+        <td data-label="Action"><span class="bay-recent-action-v148" title="${escapeHtml(action)}">${escapeHtml(action)}</span></td>
+        <td data-label="Current Bay" class="bay-recent-current-bay-v148">${currentBayControl}</td>
+      </tr>
+    `;
+  }).join("");
+
+  if (typeof syncAllCustomSelects === "function") syncAllCustomSelects();
 }
 
 /**

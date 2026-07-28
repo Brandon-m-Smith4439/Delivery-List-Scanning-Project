@@ -52,8 +52,8 @@ def test_release_markers_and_cache_keys_are_v144() -> None:
     readme = read(README)
     changelog = read(CHANGELOG)
 
-    assert "Current maintained release: **v147**" in readme
-    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
+    assert "Current maintained release: **v148**" in readme
+    assert changelog.startswith("## v148 - Bay Scanner History and Flow Refinement")
     assert "20260727-v143" not in index
     markers = re.findall(r"2026\d{4}-v(\d+)", index)
     assert markers

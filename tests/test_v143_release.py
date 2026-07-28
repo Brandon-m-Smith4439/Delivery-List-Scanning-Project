@@ -14,10 +14,10 @@ def test_v143_version_markers_and_docs():
     index = read("index.html")
     readme = read("README.md")
     changelog = read("README_CHANGELOG.md")
-    assert "20260728-v147" in index
+    assert "20260728-v148" in index
     assert "20260727-v142" not in index
-    assert "Current maintained release: **v147**" in readme
-    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
+    assert "Current maintained release: **v148**" in readme
+    assert changelog.startswith("## v148 - Bay Scanner History and Flow Refinement")
     assert (ROOT / "docs/V143_INTERNAL_REJECT_TIMELINE.md").is_file()
 
 

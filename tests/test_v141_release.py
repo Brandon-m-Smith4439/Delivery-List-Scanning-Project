@@ -16,11 +16,11 @@ def test_v141_cache_and_release_markers() -> None:
     readme = read("README.md")
     changelog = read("README_CHANGELOG.md")
 
-    assert "20260728-v147" in index
-    assert index.count("20260728-v147") == 7
-    assert "Current maintained release: **v147**" in readme
+    assert "20260728-v148" in index
+    assert index.count("20260728-v148") == 7
+    assert "Current maintained release: **v148**" in readme
     assert "Delivery_List_Scanner_v141_Changed_Files.zip" in readme
-    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
+    assert changelog.startswith("## v148 - Bay Scanner History and Flow Refinement")
 
 
 def test_edit_users_uses_card_workspace_not_wide_edit_table() -> None:

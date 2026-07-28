@@ -1,3 +1,28 @@
+## v148 - Bay Scanner History and Flow Refinement
+
+### Bay Map scanner
+
+- Removed the normal-flow gap between the non-sticky Bay Map action toolbar and the scanner panel.
+- Kept the action toolbar static while preserving the scanner-only sticky behavior.
+- Removed the visible live-time badge beside the Bay Scanner title and retained its ID as a hidden compatibility node.
+- Hid Route Pulse percentage labels in Remove mode while keeping quantity totals visible.
+- Replaced Recent Bay Scans' collapsible disclosure with a permanently open compact table.
+- Limited recent rows to Order Nr., Job Nr., Action, and editable Current Bay.
+- Removed horizontal and vertical scrolling from the recent history surface.
+- Advanced browser cache keys to v148.
+
+### History safety
+
+- Bay event history now returns only item-linked physical bay events.
+- Structural events such as layout updates, bay creation, and bay deletion are no longer inserted into Bay Scan history.
+- Existing historical structural events are filtered from Recent Bay Scans and All Scans.
+- Administrative audit records remain intact for accountability.
+- No database schema migration is required.
+
+### Validation
+
+- Added v148 checks for static-toolbar adjacency, scanner-only stickiness, hidden live badge, Remove-mode percentage suppression, permanently open non-scrollable history, four-column rendering, editable Current Bay, unique IDs, JavaScript ownership, and backend history filtering.
+
 ## v147 - Bay Scanner Route and Sticky Refinement
 
 ### Bay Map scanner

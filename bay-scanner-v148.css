@@ -1,13 +1,13 @@
 /*
-  Delivery List Scanner - Bay Scanner Containment and Sticky Refinement v147
+  Delivery List Scanner - Bay Scanner Compact History and Flow Refinement v148
   =============================================================
   This file is the maintained visual owner for the Bay Map action toolbar and
-  Bay Scanner. It intentionally resets legacy Bay Scanner grids inside the
-  v147 panel instead of adding a second competing workflow.
+  Bay Scanner. It keeps the action toolbar in normal flow, removes unused
+  scan-history chrome, and gives the compact scanner one maintained layout owner.
 */
 
 /* Bay Map action toolbar -------------------------------------------------- */
-.bay-action-buttons-v147 {
+.bay-action-buttons-v148 {
   position: static !important;
   top: auto !important;
   width: 100%;
@@ -15,12 +15,12 @@
   display: grid !important;
   grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   gap: 7px !important;
-  margin: 0 0 9px !important;
+  margin: 0 0 8px !important;
   padding: 0 !important;
   overflow: visible !important;
 }
 
-.bay-action-buttons-v147 > button {
+.bay-action-buttons-v148 > button {
   position: relative;
   min-width: 0 !important;
   min-height: 48px !important;
@@ -51,7 +51,7 @@
     transform 150ms ease !important;
 }
 
-.bay-action-buttons-v147 > button::after {
+.bay-action-buttons-v148 > button::after {
   content: "";
   position: absolute;
   inset: auto 10px 0;
@@ -63,8 +63,8 @@
   transition: opacity 150ms ease, transform 150ms ease;
 }
 
-.bay-action-buttons-v147 > button:hover:not(:disabled),
-.bay-action-buttons-v147 > button:focus-visible {
+.bay-action-buttons-v148 > button:hover:not(:disabled),
+.bay-action-buttons-v148 > button:focus-visible {
   outline: none !important;
   border-color: #7f9fc4 !important;
   background: linear-gradient(180deg, #ffffff 0%, #edf5ff 100%) !important;
@@ -73,17 +73,17 @@
   transform: translateY(-1px) !important;
 }
 
-.bay-action-buttons-v147 > button:hover:not(:disabled)::after,
-.bay-action-buttons-v147 > button:focus-visible::after {
+.bay-action-buttons-v148 > button:hover:not(:disabled)::after,
+.bay-action-buttons-v148 > button:focus-visible::after {
   opacity: 1;
   transform: scaleX(1);
 }
 
-.bay-action-buttons-v147 > button:active:not(:disabled) {
+.bay-action-buttons-v148 > button:active:not(:disabled) {
   transform: translateY(0) scale(0.985) !important;
 }
 
-.bay-action-buttons-v147 .bay-action-icon {
+.bay-action-buttons-v148 .bay-action-icon {
   width: 18px !important;
   height: 18px !important;
   flex: 0 0 18px !important;
@@ -92,37 +92,58 @@
   opacity: 0.96;
 }
 
+
+
+/* Keep the action toolbar and scanner adjacent in normal flow. Older Bay Map
+   rail layouts could distribute them across the available height, creating a
+   large empty gap. The toolbar remains static; only the scanner slot sticks. */
+.bay-right-rail:has(.bay-scanner-sticky-slot-v148) {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  align-content: flex-start !important;
+  justify-content: flex-start !important;
+  gap: 0 !important;
+}
+
+.bay-right-rail:has(.bay-scanner-sticky-slot-v148) > .bay-action-buttons-v148 {
+  flex: 0 0 auto !important;
+}
+
 /* Sticky position --------------------------------------------------------- */
 /* The five Bay Map action buttons remain in normal document flow. Only the
    scanner slot sticks after those buttons scroll away. */
-.bay-scanner-sticky-slot-v147 {
+.bay-scanner-sticky-slot-v148 {
   position: sticky !important;
   top: 8px !important;
   z-index: 9 !important;
   width: 100%;
   min-width: 0;
-  align-self: start;
+  align-self: stretch !important;
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
   scroll-margin-top: 8px;
 }
 
-body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
+body:has(:fullscreen) .bay-scanner-sticky-slot-v148 {
   top: 8px !important;
   scroll-margin-top: 8px;
 }
 
 /* Console shell ----------------------------------------------------------- */
-.bay-scanner-panel-v147 {
-  --bay147-navy: #0a326d;
-  --bay147-navy-deep: #061d43;
-  --bay147-blue: #175fe8;
-  --bay147-blue-dark: #104dbd;
-  --bay147-line: #c8d6e5;
-  --bay147-line-soft: #dde6ef;
-  --bay147-surface: #ffffff;
-  --bay147-soft: #f3f6fa;
-  --bay147-text: #102f58;
-  --bay147-muted: #64788f;
-  --bay147-green: #258b5a;
+.bay-scanner-panel-v148 {
+  --bay148-navy: #0a326d;
+  --bay148-navy-deep: #061d43;
+  --bay148-blue: #175fe8;
+  --bay148-blue-dark: #104dbd;
+  --bay148-line: #c8d6e5;
+  --bay148-line-soft: #dde6ef;
+  --bay148-surface: #ffffff;
+  --bay148-soft: #f3f6fa;
+  --bay148-text: #102f58;
+  --bay148-muted: #64788f;
+  --bay148-green: #258b5a;
 
   position: relative !important;
   width: 100% !important;
@@ -137,27 +158,27 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   overflow: hidden !important;
   border: 1px solid #a8bad0 !important;
   border-radius: 18px !important;
-  background: var(--bay147-soft) !important;
+  background: var(--bay148-soft) !important;
   box-shadow:
     0 16px 42px rgba(9, 35, 70, 0.17),
     0 2px 8px rgba(9, 35, 70, 0.07) !important;
   isolation: isolate;
-  animation: bayScannerEnterV147 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: bayScannerEnterV148 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.bay-scanner-panel-v147,
-.bay-scanner-panel-v147 * {
+.bay-scanner-panel-v148,
+.bay-scanner-panel-v148 * {
   box-sizing: border-box;
 }
 
-.bay-scanner-panel-v147 > * {
+.bay-scanner-panel-v148 > * {
   width: 100%;
   min-width: 0;
   max-width: 100%;
 }
 
 /* Combined title and route header ---------------------------------------- */
-.bay-scanner-panel-v147 .bay-scanner-header-v147 {
+.bay-scanner-panel-v148 .bay-scanner-header-v148 {
   position: relative;
   width: 100% !important;
   min-width: 0 !important;
@@ -173,13 +194,13 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   border-radius: 17px 17px 0 0 !important;
   background:
     radial-gradient(circle at 92% 8%, rgba(81, 151, 255, 0.35), transparent 34%),
-    linear-gradient(135deg, var(--bay147-navy-deep), var(--bay147-navy) 58%, #0e4b91) !important;
+    linear-gradient(135deg, var(--bay148-navy-deep), var(--bay148-navy) 58%, #0e4b91) !important;
   color: #ffffff;
   text-align: left !important;
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.12);
 }
 
-.bay-scanner-panel-v147 .bay-scanner-header-v147::before {
+.bay-scanner-panel-v148 .bay-scanner-header-v148::before {
   content: "";
   position: absolute;
   top: -55%;
@@ -189,10 +210,10 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   pointer-events: none;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.11), transparent);
   transform: skewX(-18deg);
-  animation: bayScannerHeaderSheenV147 8s ease-in-out infinite;
+  animation: bayScannerHeaderSheenV148 8s ease-in-out infinite;
 }
 
-.bay-scanner-panel-v147 .bay-scanner-heading-line-v147 {
+.bay-scanner-panel-v148 .bay-scanner-heading-line-v148 {
   position: relative;
   z-index: 2;
   width: 100%;
@@ -202,7 +223,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   gap: 9px !important;
 }
 
-.bay-scanner-panel-v147 .bay-scanner-heading-line-v147 h2 {
+.bay-scanner-panel-v148 .bay-scanner-heading-line-v148 h2 {
   min-width: 0;
   margin: 0 !important;
   color: #ffffff !important;
@@ -213,42 +234,16 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   text-align: left !important;
 }
 
-.bay-scanner-panel-v147 .bay-scanner-live-status-v147 {
-  min-width: 0;
-  max-width: 118px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  overflow: hidden;
-  padding: 4px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.21);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 0.62rem;
-  font-weight: 850;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  backdrop-filter: blur(8px);
+.bay-scanner-panel-v148 .bay-scanner-live-status-v148 {
+  display: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-scanner-live-status-v147::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  border-radius: 50%;
-  background: #4de294;
-  box-shadow: 0 0 0 3px rgba(77, 226, 148, 0.13);
-}
-
-.bay-scanner-panel-v147 .bay-scanner-mode-summary-v147[hidden] {
+.bay-scanner-panel-v148 .bay-scanner-mode-summary-v148[hidden] {
   display: none !important;
 }
 
 /* Route Pulse is contained inside the combined blue header. */
-.bay-scanner-panel-v147 .bay-route-pulse-v147 {
+.bay-scanner-panel-v148 .bay-route-pulse-v148 {
   position: relative !important;
   z-index: 1;
   width: 100% !important;
@@ -270,7 +265,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   isolation: isolate;
 }
 
-.bay-scanner-panel-v147 .bay-route-pulse-heading-v147 {
+.bay-scanner-panel-v148 .bay-route-pulse-heading-v148 {
   width: 100%;
   min-width: 0;
   display: flex !important;
@@ -279,23 +274,23 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   gap: 10px;
 }
 
-.bay-scanner-panel-v147 .bay-route-pulse-heading-v147 > div {
+.bay-scanner-panel-v148 .bay-route-pulse-heading-v148 > div {
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.bay-scanner-panel-v147 .bay-route-pulse-heading-v147 > div > span:last-child {
+.bay-scanner-panel-v148 .bay-route-pulse-heading-v148 > div > span:last-child {
   min-width: 0;
 }
 
-.bay-scanner-panel-v147 .bay-route-pulse-heading-v147 small,
-.bay-scanner-panel-v147 .bay-route-pulse-heading-v147 strong {
+.bay-scanner-panel-v148 .bay-route-pulse-heading-v148 small,
+.bay-scanner-panel-v148 .bay-route-pulse-heading-v148 strong {
   display: block;
 }
 
-.bay-scanner-panel-v147 .bay-route-pulse-heading-v147 small {
+.bay-scanner-panel-v148 .bay-route-pulse-heading-v148 small {
   color: rgba(211, 229, 252, 0.68);
   font-size: 0.55rem;
   font-weight: 900;
@@ -303,14 +298,14 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   text-transform: uppercase;
 }
 
-.bay-scanner-panel-v147 .bay-route-pulse-heading-v147 strong {
+.bay-scanner-panel-v148 .bay-route-pulse-heading-v148 strong {
   margin-top: 1px;
   color: #ffffff;
   font-size: 0.75rem;
   font-weight: 900;
 }
 
-.bay-scanner-panel-v147 .bay-route-pulse-icon-v147 {
+.bay-scanner-panel-v148 .bay-route-pulse-icon-v148 {
   position: relative;
   width: 25px;
   height: 25px;
@@ -321,7 +316,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   color: #cfe4ff;
 }
 
-.bay-scanner-panel-v147 .bay-route-pulse-icon-v147::before {
+.bay-scanner-panel-v148 .bay-route-pulse-icon-v148::before {
   content: "";
   position: absolute;
   inset: 6px;
@@ -329,7 +324,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   clip-path: polygon(50% 0, 93% 22%, 93% 72%, 50% 100%, 7% 72%, 7% 22%);
 }
 
-.bay-scanner-panel-v147 .bay-route-live-v147 {
+.bay-scanner-panel-v148 .bay-route-live-v148 {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -338,7 +333,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   font-weight: 850;
 }
 
-.bay-scanner-panel-v147 .bay-route-live-v147::before {
+.bay-scanner-panel-v148 .bay-route-live-v148::before {
   content: "";
   width: 6px;
   height: 6px;
@@ -347,7 +342,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   box-shadow: 0 0 0 3px rgba(68, 223, 142, 0.14);
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 {
   position: relative !important;
   inset: auto !important;
   width: 100% !important;
@@ -369,27 +364,27 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
 
 /* Remove the legacy dotted transit connector and arrow that otherwise draw
    across all Route Pulse metrics. */
-.bay-scanner-panel-v147 .bay-route-metrics-v147::before,
-.bay-scanner-panel-v147 .bay-route-metrics-v147::after,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-node::before,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-node::after,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane::before,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane::after,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane > span::before,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane > span::after,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress::before,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress::after {
+.bay-scanner-panel-v148 .bay-route-metrics-v148::before,
+.bay-scanner-panel-v148 .bay-route-metrics-v148::after,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-node::before,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-node::after,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane::before,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane::after,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane > span::before,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane > span::after,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress::before,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress::after {
   content: none !important;
   display: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 > * {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 > * {
   min-width: 0 !important;
   max-width: 100% !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-node,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-node,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane {
   position: relative !important;
   width: 100% !important;
   min-width: 0 !important;
@@ -410,20 +405,20 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   transform: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane {
   background: rgba(8, 43, 86, 0.72) !important;
   cursor: pointer;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane:hover,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane:focus-visible {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane:hover,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane:focus-visible {
   outline: none;
   border-color: rgba(185, 219, 255, 0.54) !important;
   background: rgba(14, 61, 117, 0.88) !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 small,
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane > span {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 small,
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane > span {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -439,13 +434,13 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   box-shadow: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 strong {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 strong {
   color: #ffffff !important;
   font-size: 0.78rem !important;
   font-weight: 900;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress {
   position: relative !important;
   grid-column: 1 / -1 !important;
   grid-row: auto !important;
@@ -456,7 +451,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   overflow: hidden !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress-half {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress-half {
   min-width: 0 !important;
   min-height: 8px;
   border-color: rgba(164, 201, 244, 0.25) !important;
@@ -464,33 +459,44 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   box-shadow: inset 0 1px 2px rgba(0, 9, 25, 0.42) !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress-half > i {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress-half > i {
   transition: width 460ms cubic-bezier(0.2, 0.8, 0.2, 1) !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress-center {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress-center {
   border-color: rgba(174, 209, 250, 0.34) !important;
   background: #123e77 !important;
   color: #d8ebff !important;
   box-shadow: 0 2px 7px rgba(0, 13, 34, 0.28) !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress-label {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress-label {
   color: rgba(211, 230, 252, 0.76) !important;
   font-size: 0.55rem !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress-label strong {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress-label strong {
   color: #ffffff !important;
   font-size: 0.61rem !important;
 }
 
-.bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress-label span {
+.bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress-label span {
   display: none !important;
 }
 
+/* Remove mode does not need percentage labels under the route bar. Counts
+   remain visible in the Outbound and Received cards; Add mode keeps percentages. */
+.bay-scanner-panel-v148:has(#bayScanRemoveMode:checked) .bay-route-metrics-v148 .bay-dual-progress-label {
+  display: none !important;
+}
+
+.bay-scanner-panel-v148:has(#bayScanRemoveMode:checked) .bay-route-metrics-v148 .bay-dual-progress {
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+}
+
 /* Scan form --------------------------------------------------------------- */
-.bay-scanner-panel-v147 .bay-scan-form-v147 {
+.bay-scanner-panel-v148 .bay-scan-form-v148 {
   width: 100% !important;
   min-width: 0 !important;
   max-width: 100% !important;
@@ -504,14 +510,14 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   background: transparent !important;
 }
 
-.bay-scanner-panel-v147 .bay-scan-form-v147 > * {
+.bay-scanner-panel-v148 .bay-scan-form-v148 > * {
   grid-column: 1 / -1 !important;
   width: 100% !important;
   min-width: 0 !important;
   max-width: 100% !important;
 }
 
-.bay-scanner-panel-v147 .bay-scan-command-v147 {
+.bay-scanner-panel-v148 .bay-scan-command-v148 {
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -522,54 +528,54 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   margin: 0 !important;
   padding: 10px !important;
   overflow: visible !important;
-  border: 1px solid var(--bay147-line) !important;
+  border: 1px solid var(--bay148-line) !important;
   border-radius: 14px !important;
-  background: var(--bay147-surface) !important;
+  background: var(--bay148-surface) !important;
   box-shadow: 0 6px 18px rgba(16, 45, 82, 0.07) !important;
 }
 
-.bay-scanner-panel-v147 .bay-scan-command-v147 > * {
+.bay-scanner-panel-v148 .bay-scan-command-v148 > * {
   width: 100% !important;
   min-width: 0 !important;
   max-width: 100% !important;
   margin: 0 !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-heading-v147 {
+.bay-scanner-panel-v148 .bay-command-heading-v148 {
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
   gap: 10px !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-heading-v147 > div {
+.bay-scanner-panel-v148 .bay-command-heading-v148 > div {
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.bay-scanner-panel-v147 .bay-command-heading-v147 > div > span:last-child {
+.bay-scanner-panel-v148 .bay-command-heading-v148 > div > span:last-child {
   min-width: 0;
 }
 
-.bay-scanner-panel-v147 .bay-command-heading-v147 strong,
-.bay-scanner-panel-v147 .bay-command-heading-v147 small {
+.bay-scanner-panel-v148 .bay-command-heading-v148 strong,
+.bay-scanner-panel-v148 .bay-command-heading-v148 small {
   display: block;
   min-width: 0;
 }
 
-.bay-scanner-panel-v147 .bay-command-heading-v147 strong {
-  color: var(--bay147-text);
+.bay-scanner-panel-v148 .bay-command-heading-v148 strong {
+  color: var(--bay148-text);
   font-size: 0.82rem;
   font-weight: 900;
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-command-heading-v147 small {
+.bay-scanner-panel-v148 .bay-command-heading-v148 small {
   margin-top: 2px;
   overflow: hidden;
-  color: var(--bay147-muted);
+  color: var(--bay148-muted);
   font-size: 0.64rem;
   font-weight: 650;
   line-height: 1.25;
@@ -577,7 +583,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-command-icon-v147 {
+.bay-scanner-panel-v148 .bay-command-icon-v148 {
   position: relative;
   width: 27px;
   height: 27px;
@@ -587,7 +593,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   color: #2d6199;
 }
 
-.bay-scanner-panel-v147 .bay-command-icon-v147::before {
+.bay-scanner-panel-v148 .bay-command-icon-v148::before {
   content: "";
   position: absolute;
   left: 6px;
@@ -599,7 +605,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   box-shadow: 0 5px 0 currentColor, 0 10px 0 currentColor;
 }
 
-.bay-scanner-panel-v147 .bay-command-sequence-v147 {
+.bay-scanner-panel-v148 .bay-command-sequence-v148 {
   flex: 0 0 auto;
   padding: 4px 7px;
   border: 1px solid #d1dce8;
@@ -612,7 +618,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
 }
 
 /* Mode selector ----------------------------------------------------------- */
-.bay-scanner-panel-v147 .bay-command-mode-v147 {
+.bay-scanner-panel-v148 .bay-command-mode-v148 {
   width: 100%;
   min-width: 0;
   display: grid !important;
@@ -625,7 +631,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   background: #edf2f7;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147 {
+.bay-scanner-panel-v148 .bay-mode-choice-v148 {
   position: relative !important;
   width: 100% !important;
   min-width: 0 !important;
@@ -652,19 +658,19 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
     color 150ms ease !important;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147:hover {
+.bay-scanner-panel-v148 .bay-mode-choice-v148:hover {
   border-color: #b5c8dd !important;
   background: rgba(255, 255, 255, 0.76) !important;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147:has(input:checked) {
+.bay-scanner-panel-v148 .bay-mode-choice-v148:has(input:checked) {
   border-color: #93acd0 !important;
   background: #ffffff !important;
   color: #173f73 !important;
   box-shadow: 0 4px 11px rgba(17, 56, 99, 0.1) !important;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147 input {
+.bay-scanner-panel-v148 .bay-mode-choice-v148 input {
   position: absolute !important;
   width: 1px !important;
   height: 1px !important;
@@ -672,14 +678,14 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   pointer-events: none;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147 > span {
+.bay-scanner-panel-v148 .bay-mode-choice-v148 > span {
   min-width: 0;
   display: block !important;
   writing-mode: horizontal-tb !important;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147 strong,
-.bay-scanner-panel-v147 .bay-mode-choice-v147 small {
+.bay-scanner-panel-v148 .bay-mode-choice-v148 strong,
+.bay-scanner-panel-v148 .bay-mode-choice-v148 small {
   display: block !important;
   min-width: 0;
   overflow: hidden;
@@ -688,20 +694,20 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147 strong {
+.bay-scanner-panel-v148 .bay-mode-choice-v148 strong {
   color: inherit !important;
   font-size: 0.75rem !important;
   font-weight: 900 !important;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147 small {
+.bay-scanner-panel-v148 .bay-mode-choice-v148 small {
   margin-top: 2px;
   color: #74869a !important;
   font-size: 0.59rem !important;
   font-weight: 650 !important;
 }
 
-.bay-scanner-panel-v147 .bay-mode-symbol-v147 {
+.bay-scanner-panel-v148 .bay-mode-symbol-v148 {
   position: relative;
   width: 27px;
   height: 27px;
@@ -710,18 +716,18 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   color: #4b6d91;
 }
 
-.bay-scanner-panel-v147 .is-remove .bay-mode-symbol-v147 {
+.bay-scanner-panel-v148 .is-remove .bay-mode-symbol-v148 {
   background: #fdebed;
   color: #b52e3b;
 }
 
-.bay-scanner-panel-v147 .is-add .bay-mode-symbol-v147 {
+.bay-scanner-panel-v148 .is-add .bay-mode-symbol-v148 {
   background: #e8f0fb;
   color: #2f6299;
 }
 
-.bay-scanner-panel-v147 .bay-mode-symbol-v147::before,
-.bay-scanner-panel-v147 .is-add .bay-mode-symbol-v147::after {
+.bay-scanner-panel-v148 .bay-mode-symbol-v148::before,
+.bay-scanner-panel-v148 .is-add .bay-mode-symbol-v148::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -733,12 +739,12 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   transform: translate(-50%, -50%);
 }
 
-.bay-scanner-panel-v147 .is-add .bay-mode-symbol-v147::after {
+.bay-scanner-panel-v148 .is-add .bay-mode-symbol-v148::after {
   width: 2px;
   height: 11px;
 }
 
-.bay-scanner-panel-v147 .bay-mode-check-v147 {
+.bay-scanner-panel-v148 .bay-mode-check-v148 {
   position: relative;
   width: 15px;
   height: 15px;
@@ -747,12 +753,12 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   background: #ffffff;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147:has(input:checked) .bay-mode-check-v147 {
+.bay-scanner-panel-v148 .bay-mode-choice-v148:has(input:checked) .bay-mode-check-v148 {
   border-color: #1a5aae;
   background: #1a5aae;
 }
 
-.bay-scanner-panel-v147 .bay-mode-choice-v147:has(input:checked) .bay-mode-check-v147::before {
+.bay-scanner-panel-v148 .bay-mode-choice-v148:has(input:checked) .bay-mode-check-v148::before {
   content: "";
   position: absolute;
   left: 4px;
@@ -766,16 +772,16 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
 
 /* Destination is relevant only when Add is selected. Remove mode keeps the
    scan path short and lets the backend locate the current bay automatically. */
-.bay-scanner-panel-v147:has(#bayScanRemoveMode:checked) .bay-command-target-v147 {
+.bay-scanner-panel-v148:has(#bayScanRemoveMode:checked) .bay-command-target-v148 {
   display: none !important;
 }
 
-.bay-scanner-panel-v147:has(#bayScanModeToggle:checked) .bay-command-target-v147 {
+.bay-scanner-panel-v148:has(#bayScanModeToggle:checked) .bay-command-target-v148 {
   display: grid !important;
 }
 
 /* Destination ------------------------------------------------------------- */
-.bay-scanner-panel-v147 .bay-command-target-v147 {
+.bay-scanner-panel-v148 .bay-command-target-v148 {
   width: 100%;
   min-width: 0;
   display: grid !important;
@@ -789,25 +795,25 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   transition: border-color 150ms ease, box-shadow 150ms ease !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-v147:focus-within {
+.bay-scanner-panel-v148 .bay-command-target-v148:focus-within {
   border-color: #8faed2 !important;
   box-shadow: 0 0 0 3px rgba(23, 95, 232, 0.08) !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-copy-v147 {
+.bay-scanner-panel-v148 .bay-command-target-copy-v148 {
   min-width: 0;
   align-self: center;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-copy-v147 > span,
-.bay-scanner-panel-v147 .bay-command-target-copy-v147 > strong,
-.bay-scanner-panel-v147 .bay-command-target-copy-v147 > small {
+.bay-scanner-panel-v148 .bay-command-target-copy-v148 > span,
+.bay-scanner-panel-v148 .bay-command-target-copy-v148 > strong,
+.bay-scanner-panel-v148 .bay-command-target-copy-v148 > small {
   display: block;
   min-width: 0;
   writing-mode: horizontal-tb !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-copy-v147 > span {
+.bay-scanner-panel-v148 .bay-command-target-copy-v148 > span {
   color: #66809c;
   font-size: 0.57rem;
   font-weight: 900;
@@ -816,7 +822,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-copy-v147 > strong {
+.bay-scanner-panel-v148 .bay-command-target-copy-v148 > strong {
   margin-top: 2px;
   color: #1b426f;
   font-size: 0.76rem;
@@ -825,7 +831,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-copy-v147 > small {
+.bay-scanner-panel-v148 .bay-command-target-copy-v148 > small {
   margin-top: 3px;
   color: #73869b;
   font-size: 0.61rem;
@@ -833,11 +839,11 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   line-height: 1.28;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-copy-v147 > small:empty {
+.bay-scanner-panel-v148 .bay-command-target-copy-v148 > small:empty {
   display: none;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-controls-v147 {
+.bay-scanner-panel-v148 .bay-command-target-controls-v148 {
   min-width: 0;
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) auto !important;
@@ -845,7 +851,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   align-items: end !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-controls-v147 label {
+.bay-scanner-panel-v148 .bay-command-target-controls-v148 label {
   min-width: 0;
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) !important;
@@ -853,14 +859,14 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   margin: 0 !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-target-controls-v147 label > span {
+.bay-scanner-panel-v148 .bay-command-target-controls-v148 label > span {
   color: #5c718b;
   font-size: 0.58rem;
   font-weight: 850;
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 #bayScanBayInput {
+.bay-scanner-panel-v148 #bayScanBayInput {
   width: 100% !important;
   min-width: 0 !important;
   min-height: 36px !important;
@@ -876,17 +882,17 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   box-shadow: none !important;
 }
 
-.bay-scanner-panel-v147 #bayScanBayInput:focus {
-  border-color: var(--bay147-blue) !important;
+.bay-scanner-panel-v148 #bayScanBayInput:focus {
+  border-color: var(--bay148-blue) !important;
   box-shadow: 0 0 0 3px rgba(23, 95, 232, 0.12) !important;
 }
 
-.bay-scanner-panel-v147 #bayScanBayInput:disabled {
+.bay-scanner-panel-v148 #bayScanBayInput:disabled {
   background: #edf1f5 !important;
   color: #78899b !important;
 }
 
-.bay-scanner-panel-v147 .bay-target-clear-v147 {
+.bay-scanner-panel-v148 .bay-target-clear-v148 {
   min-width: 64px !important;
   min-height: 36px !important;
   margin: 0 !important;
@@ -901,8 +907,8 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   transform: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-target-clear-v147:hover:not(:disabled),
-.bay-scanner-panel-v147 .bay-target-clear-v147:focus-visible {
+.bay-scanner-panel-v148 .bay-target-clear-v148:hover:not(:disabled),
+.bay-scanner-panel-v148 .bay-target-clear-v148:focus-visible {
   outline: none;
   border-color: #7f99b6 !important;
   background: #f0f5fa !important;
@@ -910,13 +916,13 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
 }
 
 /* Barcode input with Undo and Redo straddling its top-right border. */
-.bay-scanner-panel-v147 .bay-command-scan-v147 {
+.bay-scanner-panel-v148 .bay-command-scan-v148 {
   width: 100%;
   min-width: 0;
   padding-top: 8px;
 }
 
-.bay-scanner-panel-v147 .bay-command-scan-field-v147 {
+.bay-scanner-panel-v148 .bay-command-scan-field-v148 {
   min-width: 0;
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) !important;
@@ -924,7 +930,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   margin: 0 !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-scan-field-v147 > label {
+.bay-scanner-panel-v148 .bay-command-scan-field-v148 > label {
   color: #445f7c;
   font-size: 0.61rem;
   font-weight: 900;
@@ -933,7 +939,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-command-scan-input-v147 {
+.bay-scanner-panel-v148 .bay-command-scan-input-v148 {
   position: relative !important;
   width: 100% !important;
   min-width: 0 !important;
@@ -952,27 +958,27 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-scan-input-v147:hover {
+.bay-scanner-panel-v148 .bay-command-scan-input-v148:hover {
   border-color: #6e8fb7 !important;
   box-shadow: 0 5px 14px rgba(18, 55, 98, 0.08) !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-scan-input-v147:focus-within {
-  border-color: var(--bay147-blue) !important;
+.bay-scanner-panel-v148 .bay-command-scan-input-v148:focus-within {
+  border-color: var(--bay148-blue) !important;
   box-shadow:
     0 0 0 3px rgba(23, 95, 232, 0.14),
     0 7px 18px rgba(18, 55, 98, 0.11) !important;
   transform: translateY(-1px);
 }
 
-.bay-scanner-panel-v147 .bay-command-scan-input-v147 .barcode-icon {
+.bay-scanner-panel-v148 .bay-command-scan-input-v148 .barcode-icon {
   width: 20px !important;
   height: 20px !important;
   color: #2c65a8 !important;
   opacity: 0.92;
 }
 
-.bay-scanner-panel-v147 #bayScanOutInput {
+.bay-scanner-panel-v148 #bayScanOutInput {
   width: 100% !important;
   min-width: 0 !important;
   min-height: 35px !important;
@@ -988,12 +994,12 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   outline: none !important;
 }
 
-.bay-scanner-panel-v147 #bayScanOutInput::placeholder {
+.bay-scanner-panel-v148 #bayScanOutInput::placeholder {
   color: #8090a2 !important;
   font-weight: 650;
 }
 
-.bay-scanner-panel-v147 .bay-command-history-overlay-v147 {
+.bay-scanner-panel-v148 .bay-command-history-overlay-v148 {
   position: absolute !important;
   top: -15px !important;
   right: 8px !important;
@@ -1004,7 +1010,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   pointer-events: auto;
 }
 
-.bay-scanner-panel-v147 .bay-command-history-button-v147 {
+.bay-scanner-panel-v148 .bay-command-history-button-v148 {
   min-width: 62px !important;
   min-height: 30px !important;
   display: inline-flex !important;
@@ -1021,18 +1027,18 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   transform: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-history-button-v147 small {
+.bay-scanner-panel-v148 .bay-command-history-button-v148 small {
   color: inherit !important;
   font-size: 0.61rem !important;
   font-weight: 850 !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-history-button-v147 :where(.undo-icon, .redo-icon) {
+.bay-scanner-panel-v148 .bay-command-history-button-v148 :where(.undo-icon, .redo-icon) {
   color: inherit !important;
 }
 
-.bay-scanner-panel-v147 .bay-command-history-button-v147:hover:not(:disabled),
-.bay-scanner-panel-v147 .bay-command-history-button-v147:focus-visible {
+.bay-scanner-panel-v148 .bay-command-history-button-v148:hover:not(:disabled),
+.bay-scanner-panel-v148 .bay-command-history-button-v148:focus-visible {
   outline: none;
   border-color: #1766d1 !important;
   background: #1557b4 !important;
@@ -1042,7 +1048,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
 }
 
 /* One-row manual scan directly below the barcode input. */
-.bay-scanner-panel-v147 .bay-manual-inline-v147 {
+.bay-scanner-panel-v148 .bay-manual-inline-v148 {
   width: 100%;
   min-width: 0;
   display: grid !important;
@@ -1055,7 +1061,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   background: #f7f9fc !important;
 }
 
-.bay-scanner-panel-v147 .bay-manual-inline-v147 label {
+.bay-scanner-panel-v148 .bay-manual-inline-v148 label {
   min-width: 0;
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) !important;
@@ -1063,14 +1069,14 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   margin: 0 !important;
 }
 
-.bay-scanner-panel-v147 .bay-manual-inline-v147 label > span {
+.bay-scanner-panel-v148 .bay-manual-inline-v148 label > span {
   color: #5d718a;
   font-size: 0.57rem;
   font-weight: 850;
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-manual-inline-v147 input {
+.bay-scanner-panel-v148 .bay-manual-inline-v148 input {
   width: 100% !important;
   min-width: 0 !important;
   min-height: 36px !important;
@@ -1086,17 +1092,17 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   outline: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-manual-inline-v147 input:focus {
-  border-color: var(--bay147-blue) !important;
+.bay-scanner-panel-v148 .bay-manual-inline-v148 input:focus {
+  border-color: var(--bay148-blue) !important;
   box-shadow: 0 0 0 3px rgba(23, 95, 232, 0.1) !important;
 }
 
-.bay-scanner-panel-v147 #bayManualItemInput {
+.bay-scanner-panel-v148 #bayManualItemInput {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
-.bay-scanner-panel-v147 #bayManualSubmitBtn {
+.bay-scanner-panel-v148 #bayManualSubmitBtn {
   width: 92px !important;
   min-width: 92px !important;
   min-height: 36px !important;
@@ -1112,8 +1118,8 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   transform: none !important;
 }
 
-.bay-scanner-panel-v147 #bayManualSubmitBtn:hover:not(:disabled),
-.bay-scanner-panel-v147 #bayManualSubmitBtn:focus-visible {
+.bay-scanner-panel-v148 #bayManualSubmitBtn:hover:not(:disabled),
+.bay-scanner-panel-v148 #bayManualSubmitBtn:focus-visible {
   outline: none;
   filter: saturate(1.08) brightness(1.02);
   transform: translateY(-1px) !important;
@@ -1121,7 +1127,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
 }
 
 /* Latest activity --------------------------------------------------------- */
-.bay-scanner-panel-v147 .bay-scan-activity-v147 {
+.bay-scanner-panel-v148 .bay-scan-activity-v148 {
   width: auto !important;
   min-width: 0 !important;
   max-width: calc(100% - 20px) !important;
@@ -1138,7 +1144,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   box-shadow: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-scan-activity-heading-v147 {
+.bay-scanner-panel-v148 .bay-scan-activity-heading-v148 {
   min-width: 0;
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) auto !important;
@@ -1146,12 +1152,12 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   align-items: center !important;
 }
 
-.bay-scanner-panel-v147 .bay-scan-activity-heading-v147 small,
-.bay-scanner-panel-v147 .bay-scan-activity-heading-v147 h3 {
+.bay-scanner-panel-v148 .bay-scan-activity-heading-v148 small,
+.bay-scanner-panel-v148 .bay-scan-activity-heading-v148 h3 {
   display: block;
 }
 
-.bay-scanner-panel-v147 .bay-scan-activity-heading-v147 small {
+.bay-scanner-panel-v148 .bay-scan-activity-heading-v148 small {
   color: #7b8b9e;
   font-size: 0.56rem;
   font-weight: 900;
@@ -1159,14 +1165,14 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   text-transform: uppercase;
 }
 
-.bay-scanner-panel-v147 .bay-scan-activity-heading-v147 h3 {
+.bay-scanner-panel-v148 .bay-scan-activity-heading-v148 h3 {
   margin: 1px 0 0 !important;
   color: #183e69;
   font-size: 0.79rem !important;
   font-weight: 900;
 }
 
-.bay-scanner-panel-v147 #bayAllScansBtn {
+.bay-scanner-panel-v148 #bayAllScansBtn {
   min-height: 32px !important;
   margin: 0 !important;
   padding: 0 10px !important;
@@ -1179,14 +1185,14 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   box-shadow: none !important;
 }
 
-.bay-scanner-panel-v147 #bayAllScansBtn:hover,
-.bay-scanner-panel-v147 #bayAllScansBtn:focus-visible {
+.bay-scanner-panel-v148 #bayAllScansBtn:hover,
+.bay-scanner-panel-v148 #bayAllScansBtn:focus-visible {
   outline: none;
   border-color: #7f99b6 !important;
   background: #eef4fa !important;
 }
 
-.bay-scanner-panel-v147 .bay-last-card-v147 {
+.bay-scanner-panel-v148 .bay-last-card-v148 {
   position: relative;
   width: 100% !important;
   min-width: 0 !important;
@@ -1204,13 +1210,13 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease !important;
 }
 
-.bay-scanner-panel-v147 .bay-last-card-v147:hover {
+.bay-scanner-panel-v148 .bay-last-card-v148:hover {
   border-color: #aebfd2 !important;
   box-shadow: 0 5px 14px rgba(21, 51, 87, 0.07) !important;
   transform: translateY(-1px);
 }
 
-.bay-scanner-panel-v147 .bay-last-card-v147 .last-card-status {
+.bay-scanner-panel-v148 .bay-last-card-v148 .last-card-status {
   position: absolute !important;
   inset: 0 auto 0 0 !important;
   width: 3px !important;
@@ -1218,7 +1224,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   background: #8ca1b8;
 }
 
-.bay-scanner-panel-v147 .bay-last-location-v147 {
+.bay-scanner-panel-v148 .bay-last-location-v148 {
   min-width: 0;
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) !important;
@@ -1231,13 +1237,13 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   background: #ffffff;
 }
 
-.bay-scanner-panel-v147 .bay-last-location-v147 > span {
+.bay-scanner-panel-v148 .bay-last-location-v148 > span {
   color: #7a8a9d;
   font-size: 0.55rem !important;
   font-weight: 850;
 }
 
-.bay-scanner-panel-v147 .bay-last-location-v147 > b {
+.bay-scanner-panel-v148 .bay-last-location-v148 > b {
   overflow: hidden;
   color: #1752a1;
   font-size: 0.98rem !important;
@@ -1247,7 +1253,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-last-location-v147 > strong {
+.bay-scanner-panel-v148 .bay-last-location-v148 > strong {
   overflow: hidden;
   color: #405c78;
   font-size: 0.62rem !important;
@@ -1257,7 +1263,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-last-meta-v147 {
+.bay-scanner-panel-v148 .bay-last-meta-v148 {
   min-width: 0;
   display: grid !important;
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
@@ -1265,8 +1271,8 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   gap: 5px !important;
 }
 
-.bay-scanner-panel-v147 .bay-last-meta-v147 > span,
-.bay-scanner-panel-v147 .bay-last-meta-v147 > label {
+.bay-scanner-panel-v148 .bay-last-meta-v148 > span,
+.bay-scanner-panel-v148 .bay-last-meta-v148 > label {
   min-width: 0;
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) !important;
@@ -1279,13 +1285,13 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   background: #ffffff;
 }
 
-.bay-scanner-panel-v147 .bay-last-meta-v147 small {
+.bay-scanner-panel-v148 .bay-last-meta-v148 small {
   color: #7c8c9e;
   font-size: 0.52rem !important;
   font-weight: 850;
 }
 
-.bay-scanner-panel-v147 .bay-last-meta-v147 b {
+.bay-scanner-panel-v148 .bay-last-meta-v148 b {
   min-width: 0;
   overflow: hidden;
   color: #244a75;
@@ -1295,7 +1301,7 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-last-meta-v147 .bay-history-move-field {
+.bay-scanner-panel-v148 .bay-last-meta-v148 .bay-history-move-field {
   grid-column: 1 / -1 !important;
   display: grid !important;
   grid-template-columns: auto minmax(0, 1fr) !important;
@@ -1303,8 +1309,8 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   gap: 7px !important;
 }
 
-.bay-scanner-panel-v147 .bay-last-meta-v147 .bay-history-move-field select,
-.bay-scanner-panel-v147 .bay-last-meta-v147 .bay-history-move-field .custom-select-trigger {
+.bay-scanner-panel-v148 .bay-last-meta-v148 .bay-history-move-field select,
+.bay-scanner-panel-v148 .bay-last-meta-v148 .bay-history-move-field .custom-select-trigger {
   width: 100% !important;
   min-width: 0 !important;
   min-height: 28px !important;
@@ -1313,133 +1319,222 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
   font-size: 0.62rem !important;
 }
 
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 {
+.bay-scanner-panel-v148 .bay-recent-panel-v148 {
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 0 !important;
+  overflow: visible !important;
   border: 1px solid #d8e1eb;
   border-radius: 9px;
   background: #ffffff;
 }
 
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 > summary {
+.bay-scanner-panel-v148 .bay-recent-heading-v148 {
   width: 100%;
   min-width: 0;
   min-height: 31px;
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) auto 12px !important;
-  gap: 7px !important;
+  display: flex !important;
   align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
   margin: 0 !important;
   padding: 5px 8px !important;
-  list-style: none;
-  cursor: pointer;
+  border-bottom: 1px solid #dfe6ee;
   background: #f8fafc;
 }
 
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 > summary::-webkit-details-marker {
-  display: none;
+.bay-scanner-panel-v148 .bay-recent-heading-v148 > span {
+  min-width: 0;
 }
 
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 > summary:hover,
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 > summary:focus-visible {
-  outline: none;
-  background: #eef4fa;
-}
-
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 > summary strong,
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 > summary small {
+.bay-scanner-panel-v148 .bay-recent-heading-v148 strong,
+.bay-scanner-panel-v148 .bay-recent-heading-v148 small {
   display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 > summary strong {
+.bay-scanner-panel-v148 .bay-recent-heading-v148 strong {
   color: #2b507b;
   font-size: 0.65rem !important;
   font-weight: 900;
 }
 
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 > summary small,
-.bay-scanner-panel-v147 .bay-recent-disclosure-v147 > summary b {
-  margin-top: 1px;
+.bay-scanner-panel-v148 .bay-recent-heading-v148 small,
+.bay-scanner-panel-v148 .bay-recent-heading-v148 > b {
   color: #7b8b9d;
   font-size: 0.55rem !important;
   font-weight: 750;
 }
 
-.bay-scanner-panel-v147 .bay-disclosure-chevron-v147 {
-  width: 8px;
-  height: 8px;
-  justify-self: center;
-  border-right: 2px solid #607791;
-  border-bottom: 2px solid #607791;
-  transform: rotate(45deg) translate(-1px, -1px);
-  transition: transform 150ms ease;
+.bay-scanner-panel-v148 .bay-recent-heading-v148 > b {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid #d1dce8;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #496783;
+  white-space: nowrap;
 }
 
-.bay-scanner-panel-v147 details[open] > summary .bay-disclosure-chevron-v147 {
-  transform: rotate(225deg) translate(-1px, -1px);
+.bay-scanner-panel-v148 .bay-recent-table-wrap-v148 {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  max-height: none !important;
+  overflow: visible !important;
+  overscroll-behavior: auto !important;
+  scrollbar-width: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-recent-table-wrap-v147 {
-  max-width: 100%;
-  max-height: 176px;
-  overflow: auto !important;
-  border-top: 1px solid #dfe6ee;
-  animation: bayScannerDetailOpenV147 160ms ease both;
+.bay-scanner-panel-v148 .bay-recent-table-wrap-v148::-webkit-scrollbar {
+  display: none !important;
 }
 
-.bay-scanner-panel-v147 .bay-recent-table-wrap-v147 table {
-  min-width: 660px;
-  font-size: 0.62rem;
+.bay-scanner-panel-v148 .bay-recent-table-v148 {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+  border-collapse: collapse !important;
+  font-size: 0.6rem !important;
+}
+
+.bay-scanner-panel-v148 .bay-recent-order-col-v148 { width: 24%; }
+.bay-scanner-panel-v148 .bay-recent-job-col-v148 { width: 22%; }
+.bay-scanner-panel-v148 .bay-recent-action-col-v148 { width: 24%; }
+.bay-scanner-panel-v148 .bay-recent-bay-col-v148 { width: 30%; }
+
+.bay-scanner-panel-v148 .bay-recent-table-v148 th,
+.bay-scanner-panel-v148 .bay-recent-table-v148 td {
+  min-width: 0 !important;
+  max-width: 0;
+  padding: 5px 6px !important;
+  overflow: hidden !important;
+  border-bottom: 1px solid #e5ebf1 !important;
+  color: #355575;
+  line-height: 1.2 !important;
+  text-align: left !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.bay-scanner-panel-v148 .bay-recent-table-v148 th {
+  background: #f4f7fa !important;
+  color: #6f8194 !important;
+  font-size: 0.52rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.bay-scanner-panel-v148 .bay-recent-table-v148 tbody tr:last-child td {
+  border-bottom: 0 !important;
+}
+
+.bay-scanner-panel-v148 .bay-recent-table-v148 td > :where(b, span) {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bay-scanner-panel-v148 .bay-recent-table-v148 td > b {
+  color: #173f70;
+  font-size: 0.63rem;
+  font-weight: 900;
+}
+
+.bay-scanner-panel-v148 .bay-recent-action-v148 {
+  color: #315d8e;
+  font-weight: 850;
+}
+
+.bay-scanner-panel-v148 .bay-recent-current-bay-v148 {
+  overflow: visible !important;
+  max-width: none !important;
+}
+
+.bay-scanner-panel-v148 .bay-recent-current-bay-v148 .bay-history-move-field {
+  width: 100% !important;
+  min-width: 0 !important;
+  display: block !important;
+  margin: 0 !important;
+}
+
+.bay-scanner-panel-v148 .bay-recent-current-bay-v148 .bay-history-move-field > small {
+  display: none !important;
+}
+
+.bay-scanner-panel-v148 .bay-recent-current-bay-v148 :where(select, .custom-select-shell, .custom-select-trigger) {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 27px !important;
+  margin: 0 !important;
+  border-radius: 7px !important;
+  font-size: 0.59rem !important;
+}
+
+.bay-scanner-panel-v148 .bay-recent-empty-v148 td {
+  max-width: none !important;
+  padding: 8px !important;
+  color: #8290a0 !important;
+  text-align: center !important;
 }
 
 /* Compact workstation heights ------------------------------------------- */
 @media (min-width: 941px) and (max-height: 900px) {
-  .bay-scanner-sticky-slot-v147 {
+  .bay-scanner-sticky-slot-v148 {
     top: 8px !important;
     scroll-margin-top: 8px;
   }
 
-  .bay-scanner-panel-v147 .bay-scanner-header-v147 {
+  .bay-scanner-panel-v148 .bay-scanner-header-v148 {
     gap: 7px !important;
     padding: 9px 10px !important;
   }
 
-  .bay-scanner-panel-v147 .bay-command-heading-v147 small,
-  .bay-scanner-panel-v147 .bay-command-sequence-v147 {
+  .bay-scanner-panel-v148 .bay-command-heading-v148 small,
+  .bay-scanner-panel-v148 .bay-command-sequence-v148 {
     display: none !important;
   }
 
-  .bay-scanner-panel-v147 .bay-route-pulse-v147 {
+  .bay-scanner-panel-v148 .bay-route-pulse-v148 {
     gap: 4px !important;
     padding: 6px !important;
   }
 
-  .bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-node,
-  .bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-panel-route-lane {
+  .bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-node,
+  .bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-panel-route-lane {
     min-height: 31px !important;
   }
 
-  .bay-scanner-panel-v147 .bay-scan-form-v147 {
+  .bay-scanner-panel-v148 .bay-scan-form-v148 {
     padding-top: 6px !important;
   }
 
-  .bay-scanner-panel-v147 .bay-scan-command-v147 {
+  .bay-scanner-panel-v148 .bay-scan-command-v148 {
     gap: 6px !important;
     padding: 8px !important;
   }
 
-  .bay-scanner-panel-v147 .bay-mode-choice-v147 {
+  .bay-scanner-panel-v148 .bay-mode-choice-v148 {
     min-height: 44px !important;
     padding: 5px 8px !important;
   }
 
-  .bay-scanner-panel-v147 .bay-command-target-v147,
-  .bay-scanner-panel-v147 .bay-manual-inline-v147 {
+  .bay-scanner-panel-v148 .bay-command-target-v148,
+  .bay-scanner-panel-v148 .bay-manual-inline-v148 {
     padding: 6px !important;
   }
 
-  .bay-scanner-panel-v147 .bay-scan-activity-v147 {
+  .bay-scanner-panel-v148 .bay-scan-activity-v148 {
     margin-top: 6px !important;
     margin-bottom: 8px !important;
     padding: 6px !important;
@@ -1448,35 +1543,35 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
 
 /* Responsive widths ------------------------------------------------------ */
 @media (max-width: 1180px) {
-  .bay-scanner-panel-v147 .bay-command-target-v147 {
+  .bay-scanner-panel-v148 .bay-command-target-v148 {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
-  .bay-scanner-panel-v147 .bay-command-target-copy-v147 {
+  .bay-scanner-panel-v148 .bay-command-target-copy-v148 {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     gap: 7px;
     align-items: baseline;
   }
 
-  .bay-scanner-panel-v147 .bay-command-target-copy-v147 > strong {
+  .bay-scanner-panel-v148 .bay-command-target-copy-v148 > strong {
     margin-top: 0;
   }
 
-  .bay-scanner-panel-v147 .bay-command-target-copy-v147 > small {
+  .bay-scanner-panel-v148 .bay-command-target-copy-v148 > small {
     grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 940px) {
-  .bay-scanner-sticky-slot-v147 {
+  .bay-scanner-sticky-slot-v148 {
     position: static !important;
     top: auto !important;
     z-index: auto !important;
     scroll-margin-top: 0;
   }
 
-  .bay-action-buttons-v147 {
+  .bay-action-buttons-v148 {
     grid-template-columns: repeat(5, minmax(100px, 1fr)) !important;
     overflow-x: auto !important;
     padding-bottom: 4px !important;
@@ -1485,86 +1580,86 @@ body:has(:fullscreen) .bay-scanner-sticky-slot-v147 {
 }
 
 @media (max-width: 620px) {
-  .bay-action-buttons-v147 {
+  .bay-action-buttons-v148 {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     overflow: visible !important;
   }
 
-  .bay-scanner-panel-v147 .bay-command-mode-v147,
-  .bay-scanner-panel-v147 .bay-command-target-controls-v147,
-  .bay-scanner-panel-v147 .bay-last-card-v147,
-  .bay-scanner-panel-v147 .bay-last-meta-v147 {
+  .bay-scanner-panel-v148 .bay-command-mode-v148,
+  .bay-scanner-panel-v148 .bay-command-target-controls-v148,
+  .bay-scanner-panel-v148 .bay-last-card-v148,
+  .bay-scanner-panel-v148 .bay-last-meta-v148 {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
 
-  .bay-scanner-panel-v147 .bay-route-metrics-v147 {
+  .bay-scanner-panel-v148 .bay-route-metrics-v148 {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
-  .bay-scanner-panel-v147 .bay-route-pulse-v147 {
+  .bay-scanner-panel-v148 .bay-route-pulse-v148 {
     max-width: 100% !important;
     overflow: hidden !important;
   }
 
-  .bay-scanner-panel-v147 .bay-route-metrics-v147 .bay-dual-progress {
+  .bay-scanner-panel-v148 .bay-route-metrics-v148 .bay-dual-progress {
     grid-column: 1 !important;
   }
 
-  .bay-scanner-panel-v147 .bay-command-heading-v147 {
+  .bay-scanner-panel-v148 .bay-command-heading-v148 {
     align-items: flex-start !important;
     flex-direction: column !important;
   }
 
-  .bay-scanner-panel-v147 .bay-command-history-overlay-v147 {
+  .bay-scanner-panel-v148 .bay-command-history-overlay-v148 {
     position: static !important;
     grid-column: 1 / -1;
     justify-content: flex-end;
     margin: 5px 0 -1px;
   }
 
-  .bay-scanner-panel-v147 .bay-command-scan-input-v147 {
+  .bay-scanner-panel-v148 .bay-command-scan-input-v148 {
     grid-template-columns: 21px minmax(0, 1fr) !important;
     padding-right: 11px !important;
   }
 
-  .bay-scanner-panel-v147 .bay-manual-inline-v147 {
+  .bay-scanner-panel-v148 .bay-manual-inline-v148 {
     grid-template-columns: minmax(0, 1fr) 76px !important;
   }
 
-  .bay-scanner-panel-v147 #bayManualSubmitBtn {
+  .bay-scanner-panel-v148 #bayManualSubmitBtn {
     grid-column: 1 / -1;
     width: 100% !important;
   }
 
-  .bay-scanner-panel-v147 .bay-last-meta-v147 .bay-history-move-field {
+  .bay-scanner-panel-v148 .bay-last-meta-v148 .bay-history-move-field {
     grid-column: 1 !important;
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
 
 /* Motion ----------------------------------------------------------------- */
-@keyframes bayScannerEnterV147 {
+@keyframes bayScannerEnterV148 {
   from { opacity: 0; transform: translateY(7px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes bayScannerHeaderSheenV147 {
+@keyframes bayScannerHeaderSheenV148 {
   0%, 72% { left: -45%; opacity: 0; }
   78% { opacity: 1; }
   92%, 100% { left: 115%; opacity: 0; }
 }
 
-@keyframes bayScannerDetailOpenV147 {
+@keyframes bayScannerDetailOpenV148 {
   from { opacity: 0; transform: translateY(-3px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bay-scanner-panel-v147,
-  .bay-scanner-panel-v147 *,
-  .bay-action-buttons-v147 > button,
-  .bay-action-buttons-v147 > button::after {
+  .bay-scanner-panel-v148,
+  .bay-scanner-panel-v148 *,
+  .bay-action-buttons-v148 > button,
+  .bay-action-buttons-v148 > button::after {
     animation: none !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
