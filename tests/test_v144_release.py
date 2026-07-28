@@ -1,108 +1,118 @@
+"""Release-contract tests for the v144 Bay Scanner operations console."""
+
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-from bs4 import BeautifulSoup
-
 ROOT = Path(__file__).resolve().parents[1]
+INDEX = ROOT / "index.html"
+CSS = ROOT / "bay-scanner-v144.css"
+README = ROOT / "README.md"
+CHANGELOG = ROOT / "README_CHANGELOG.md"
+DOC = ROOT / "docs" / "V144_BAY_SCANNER_CONSOLE_REDESIGN.md"
+OBSOLETE_DOC = ROOT / "docs" / "V144_BOTTOM_DOCKED_BAY_SCANNER.md"
+
+REQUIRED_IDS = {
+    "bayScanOutForm",
+    "bayScanRemoveMode",
+    "bayScanModeToggle",
+    "bayScannerModeSummary",
+    "bayScannerTargetState",
+    "bayScanBayInput",
+    "bayTargetClearBtn",
+    "bayScanOutInput",
+    "bayUndoBtn",
+    "bayRedoBtn",
+    "bayManualOrderInput",
+    "bayManualItemInput",
+    "bayManualQtyInput",
+    "bayManualSubmitBtn",
+    "bayPanelRouteMini",
+    "bayScanOutStatus",
+    "bayAllScansBtn",
+    "bayLastCard",
+    "bayLastBay",
+    "bayLastTitle",
+    "bayLastAction",
+    "bayLastOrder",
+    "bayLastTime",
+    "bayLastMoveSelect",
+    "bayRecentScanCountLabel",
+    "bayScanOutRecent",
+}
 
 
-def read(name: str) -> str:
-    return (ROOT / name).read_text(encoding="utf-8")
+def read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
-def test_release_markers_are_v144() -> None:
-    index = read("index.html")
-    readme = read("README.md")
-    changelog = read("README_CHANGELOG.md")
-    assert "20260727-v144" in index
-    assert "Current maintained release: **v144**" in readme
-    assert changelog.startswith("## v144 - Bottom-Docked Indian Trail Bay Scanner")
+def test_release_markers_and_cache_keys_are_v144() -> None:
+    index = read(INDEX)
+    readme = read(README)
+    changelog = read(CHANGELOG)
+
+    assert "Current maintained release: **v147**" in readme
+    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
+    assert "20260727-v143" not in index
+    markers = re.findall(r"2026\d{4}-v(\d+)", index)
+    assert markers
+    assert set(markers) == {"144"}
+    assert 'href="bay-scanner-v144.css?v=20260727-v144"' in index
 
 
-def test_bay_scanner_is_outside_the_former_right_rail() -> None:
-    soup = BeautifulSoup(read("index.html"), "html.parser")
-    shell = soup.select_one(".bay-map-shell-v144")
-    right_rail = soup.select_one(".bay-right-rail-v144")
-    dock = soup.select_one(".bay-scanner-dock-slot-v144")
-    scanner = soup.select_one(".bay-scanner-dock-v144")
-    assert shell is not None
-    assert right_rail is not None
-    assert dock is not None
-    assert scanner is not None
-    assert scanner in dock.descendants
-    assert scanner not in right_rail.descendants
-    assert right_rail.select_one("#bayActionButtons") is not None
-    assert not right_rail.select(".bay-scanner-panel")
-    assert not soup.select(".bay-scanner-sticky-slot")
+def test_scanner_markup_is_compact_and_preserves_every_control_id_once() -> None:
+    index = read(INDEX)
+    ids = re.findall(r'\bid="([^"]+)"', index)
 
-
-def test_existing_bay_scanner_controls_are_preserved_once() -> None:
-    soup = BeautifulSoup(read("index.html"), "html.parser")
-    required_ids = {
-        "bayScanOutForm",
-        "bayScanRemoveMode",
-        "bayScanModeToggle",
-        "bayScanBayInput",
-        "bayTargetClearBtn",
-        "bayScanOutInput",
-        "bayUndoBtn",
-        "bayRedoBtn",
-        "bayManualOrderInput",
-        "bayManualItemInput",
-        "bayManualSubmitBtn",
-        "bayAllScansBtn",
-        "bayLastMoveSelect",
-        "bayScanOutRecent",
-    }
-    for element_id in required_ids:
-        assert len(soup.select(f"#{element_id}")) == 1, element_id
-
-
-def test_saved_floor_layout_remains_seven_columns() -> None:
-    css = read("styles.css")
-    assert re.search(
-        r"\.bay-map-page-v144\s+\.bay-floor-grid-v19\s*\{[^}]*grid-template-columns:\s*repeat\(7,\s*minmax\(0,\s*1fr\)\)\s*!important",
-        css,
-        flags=re.S,
-    )
-    assert "The seven saved physical columns remain unchanged" in css
-
-
-def test_v144_layout_owns_full_width_map_and_bottom_dock() -> None:
-    css = read("styles.css")
-    assert 'grid-template-areas:\n    "actions"\n    "map"\n    "scanner"\n    "details"' in css
-    assert ".bay-scanner-dock-slot-v144" in css
-    assert "position: fixed;" in css
-    assert "bottom: 10px;" in css
-    assert "padding-bottom: 286px;" in css
-    assert ".bay-scanner-dock-v144" in css
-    assert 'grid-template-areas: "dock-title dock-route dock-workflow dock-history";' in css
-
-
-
-def test_compact_mode_updates_preserve_the_mode_summary_structure() -> None:
-    app = read("app.js")
-    assert 'const modeValue = els.bayScannerModeSummary.querySelector("b")' in app
-    assert 'modeValue.textContent = adding ? "Add to bay" : "Remove from bay"' in app
-    assert '"Choose a bay for Add mode."' in app
-    assert '"Current bay is found automatically."' in app
-    assert '"Scan piece to add..."' in app
-
-def test_html_ids_are_unique() -> None:
-    soup = BeautifulSoup(read("index.html"), "html.parser")
-    ids = [tag["id"] for tag in soup.find_all(id=True)]
     duplicates = sorted({value for value in ids if ids.count(value) > 1})
-    assert not duplicates
+    assert duplicates == []
+    assert all(ids.count(value) == 1 for value in REQUIRED_IDS)
+
+    required_classes = (
+        "bay-scanner-panel-v144",
+        "bay-scanner-command-v144",
+        "bay-mode-segment-v144",
+        "bay-target-command-v144",
+        "bay-scan-core-v144",
+        "bay-route-status-v144",
+        "bay-scan-history-v144",
+    )
+    assert all(value in index for value in required_classes)
 
 
-def test_css_braces_are_balanced() -> None:
-    css = read("styles.css")
+def test_scan_command_keeps_primary_controls_together() -> None:
+    index = read(INDEX)
+    command_start = index.index('<section class="bay-scanner-command-v144"')
+    command_end = index.index('<details class="bay-manual-disclosure', command_start)
+    command = index[command_start:command_end]
+
+    assert command.index('id="bayScanRemoveMode"') < command.index('id="bayScanBayInput"')
+    assert command.index('id="bayScanBayInput"') < command.index('id="bayScanOutInput"')
+    assert command.index('id="bayScanOutInput"') < command.index('id="bayUndoBtn"')
+    assert command.index('id="bayUndoBtn"') < command.index('id="bayRedoBtn"')
+
+
+def test_stylesheet_is_scoped_balanced_and_motion_accessible() -> None:
+    css = read(CSS)
+
     assert css.count("{") == css.count("}")
+    assert ".bay-scanner-panel-v144" in css
+    assert "bayScannerEnterV144" in css
+    assert "bayScannerReadyPulseV144" in css
+    assert "bayScannerProgressSheenV144" in css
+    assert "@media (min-width: 941px) and (max-height: 900px)" in css
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr)) !important" in css
+    assert "@media (prefers-reduced-motion: reduce)" in css
+    assert re.search(r"(?m)^\s*button\s*\{", css) is None
+    assert re.search(r"(?m)^\s*body\s*\{", css) is None
+    assert ".app button" not in css
 
 
-def test_release_notes_document_no_backend_change() -> None:
-    notes = read("docs/V144_BOTTOM_DOCKED_BAY_SCANNER.md")
-    assert "No API, database, scan logic, permissions, or event handlers were changed." in notes
-    assert "seven saved physical columns" in notes
+def test_release_notes_preserve_backend_and_remove_the_abandoned_draft() -> None:
+    notes = read(DOC)
+
+    assert "No API routes, database schema, scan logic, permissions, event handlers" in notes
+    assert "prefers-reduced-motion" in notes
+    assert "v144 classes" in notes
+    assert not OBSOLETE_DOC.exists()

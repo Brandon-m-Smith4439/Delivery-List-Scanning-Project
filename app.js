@@ -2290,7 +2290,7 @@ const SPANISH_UI_V105 = new Map([
   ["Place into bay", "Colocar en bahía"],
   ["Target bay", "Bahía de destino"],
   ["Bay code", "Código de bahía"],
-  ["Current bay is found automatically in Remove mode.", "La bahía actual se encuentra automáticamente en modo Retirar."],
+  ["", "La bahía actual se encuentra automáticamente en modo Retirar."],
   ["Choose a target bay before scanning in Add mode.", "Elija una bahía de destino antes de escanear en modo Agregar."],
   ["Scan piece", "Escanear pieza"],
   ["Scan the barcode or enter it manually, then press Enter.", "Escanee el código o ingréselo manualmente y presione Enter."],
@@ -13511,7 +13511,7 @@ function updateBayScannerCommandState() {
   if (els.bayScannerTargetState) {
     els.bayScannerTargetState.textContent = adding
       ? (targetBay ? `Target selected: ${targetBay}` : "Choose a target bay before scanning in Add mode.")
-      : "Current bay is found automatically in Remove mode.";
+      : "";
   }
   if (els.bayScanOutInput) {
     els.bayScanOutInput.placeholder = adding ? "Scan order to add to selected bay..." : "Scan order to remove from bay...";

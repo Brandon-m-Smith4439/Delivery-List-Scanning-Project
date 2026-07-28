@@ -1,0 +1,59 @@
+Delivery List Scanner v147
+Bay Scanner Containment Refinement - Changed Files Release
+==========================================================
+
+Base release
+------------
+v146 Bay Scanner Workflow Refinement
+
+Install
+-------
+1. Close the scanner server.
+2. Extract this ZIP into the current v146 project folder.
+3. Run Apply-v147-BayScannerContainmentRefinement.bat.
+4. Restart the scanner and press Ctrl+F5 once.
+5. Run Run-v147-BayScanner-Validation.bat.
+
+Payload installed
+-----------------
+- bay-scanner-v147.css
+- Updated Bay Scanner fragment in index.html
+- Updated README.md
+- Updated README_CHANGELOG.md
+- Updated docs/TEST_REPORT.md when present
+- docs/V147_BAY_SCANNER_CONTAINMENT_AND_STICKY_REFINEMENT.md
+- tests/test_v147_release.py
+
+Interface changes
+-----------------
+- Removes unnecessary header copy and the visible Current Mode card.
+- Keeps Bay Scanner and Route Pulse in one continuous blue header.
+- Corrects Route Pulse colors and removes legacy connector graphics.
+- Contains all Route Pulse drawing inside the panel.
+- Hides Destination Control in Remove mode only.
+- Moves only the sticky scanner panel to an 8-pixel top offset.
+- Keeps Bay Map action buttons outside sticky ownership.
+
+Preserved
+---------
+- APIs and database schema
+- Permissions and business rules
+- Barcode and manual scanning
+- Undo/Redo
+- Transit manifest
+- Latest and recent scan history
+- Change Location
+
+Excluded
+--------
+- Production databases and WAL/SHM companions
+- Secrets and credentials
+- Logs, backups, and caches
+- Compiled Python files
+- PNG previews
+
+Superseded browser stylesheet removed during installation
+---------------------------------------------------------
+- bay-scanner-v146.css
+- bay-scanner-v145.css
+- bay-scanner-v144.css

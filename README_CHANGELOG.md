@@ -1,3 +1,88 @@
+## v147 - Bay Scanner Route and Sticky Refinement
+
+### Bay Map scanner
+
+- Removed the redundant receiving eyebrow, workflow sentence, and visible Current Mode summary from the blue header.
+- Kept the Bay Scanner title, live scan status, and Route Pulse in one continuous header surface.
+- Replaced bright Route Pulse surfaces with contained dark-blue metric cards.
+- Suppressed the legacy dotted transit connector, arrow, and inherited white transit pill styling.
+- Added paint containment to prevent Route Pulse elements from drawing outside the panel.
+- Hid Destination Control in Remove mode while preserving it for Add mode.
+- Changed only the scanner slot to `position: sticky` with an 8-pixel top offset; the Bay Map action toolbar remains in normal flow.
+- Advanced browser cache keys to v147.
+
+### Safety and validation
+
+- No API route, database schema, permission, scan rule, or backend workflow was changed.
+- Added v147 release checks for removed header copy, hidden mode summary, route pseudo-element suppression, dark route surfaces, mode-controlled Destination Control, sticky ownership, unique IDs, cache markers, and CSS integrity.
+
+## v146 - Bay Scanner Workflow Refinement
+
+### Bay Map scanner
+
+- Merged the title and Route Pulse into one continuous blue header with all route metrics contained inside the panel.
+- Updated Remove copy from `Find the piece's current bay` to `Finds the piece's current bay`.
+- Removed the redundant `Current bay is found automatically in Remove mode.` guidance.
+- Removed the main barcode Submit Scan button; scanner input and Enter continue to use the maintained form workflow.
+- Moved Undo and Redo onto the scan field's upper-right border for faster correction access.
+- Replaced collapsible Manual Entry with one Order / Item / Submit row directly below the barcode input.
+- Made the Order field flexible and larger, while Item is compact and limited to three numeric characters.
+- Preserved route-manifest access, latest activity, recent history, All Scans, and Change Location.
+- Advanced browser cache keys to v146.
+
+### Safety and validation
+
+- No API route, database schema, permission, scan rule, or backend workflow was changed.
+- Added v146 release checks for header nesting, route containment, removed copy, no barcode submit button, overlay correction controls, manual-row geometry, unique IDs, cache markers, and CSS integrity.
+
+## v145 - Bay Scanner Layout Correction
+
+### Bay Map scanning panel
+
+- Corrected the first v144 console after real floor rendering showed older Bay Scanner grid rules still influencing the new markup.
+- Moved Indian Trail Route Pulse above Scan Command so route state is visible before the operator begins a bay scan.
+- Removed inherited panel padding and made the blue header meet the outside border and both rounded top corners.
+- Replaced the remaining v105/v137 layout-owner classes with dedicated v145 markup while preserving every operational element ID.
+- Explicitly reset the scanner form, command, mode, destination, barcode, manual-entry, and activity grids so they cannot collapse into implicit narrow columns.
+- Kept Remove/Add, Target Bay, Bay Code, Clear, barcode input, Submit Scan, Undo, and Redo in stable readable rows.
+- Raised the sticky desktop offset to 68 pixels normally and 60 pixels on short floor-computer displays; the initial unscrolled position remains unchanged.
+- Rebuilt the five Bay Map workflow buttons as an evenly sized toolbar with readable labels, consistent icon sizing, and restrained interaction feedback.
+- Kept Recent Bay Scans visible in the short-height sticky layout while maintaining complete-panel visibility.
+- Preserved Manual Entry, All Scans, route manifest access, latest result, location correction, and all existing scanner workflows.
+
+### Safety and validation
+
+- No API, database, permission, scan, bay-assignment, transit, undo/redo, or event-handler behavior changed.
+- Replaced the v144 scoped stylesheet with the v145 owner instead of loading another override layer.
+- Added focused checks for route-before-command ordering, flush header ownership, sticky offsets, professional action-toolbar ownership, stable command rows, unique IDs, cache keys, and release documentation.
+- Rendered the corrected panel at normal and 1366x768 sticky workstation sizes and verified it remains stable even when aggressive legacy grid rules are simulated.
+- Advanced browser cache keys to v145.
+
+## v144 - Bay Scanner Operations Console Redesign
+
+### Bay Map scanning panel
+
+- Completely rebuilt the Indian Trail Bay Scanner presentation as a compact scan-first operations console.
+- Replaced the vertically stacked three-step cards with a single command surface that keeps action, target bay, barcode, Submit, Undo, and Redo together.
+- Made the barcode field and primary Submit Scan button the strongest visual controls.
+- Reworked Add and Remove into a professional segmented mode selector with clear semantic states.
+- Combined target-bay instructions and entry into a compact destination strip that remains understandable in Remove mode.
+- Condensed route progress into a small Outbound / In Transit / Received pulse without removing the manifest shortcut or dual progress behavior.
+- Kept Manual Entry and Recent Bay Scans available as compact disclosures instead of permanent tall sections.
+- Redesigned latest activity to keep current bay, result, order, time, and location correction readable in the right rail.
+- Added restrained panel entrance, live-status pulse, header sheen, progress motion, focus feedback, disclosure transitions, and submit-button polish.
+- Added a compact-height desktop state that reduces helper copy and reorganizes latest activity while preserving every operational control.
+- Added `prefers-reduced-motion` handling so all decorative motion can be disabled without affecting workflow.
+
+### Safety and validation
+
+- Preserved every maintained Bay Scanner HTML ID used by `app.js`.
+- Did not change API routes, database schema, permissions, scan logic, undo/redo behavior, or event handlers.
+- Added a scoped `bay-scanner-v144.css` owner instead of adding more broad rules to the already layered global stylesheet.
+- Added patch validation for unique HTML IDs, required controls, cache keys, release markers, CSS balance, scoped ownership, and reduced-motion support.
+- Replaced the unused bottom-docked v144 draft note with the finalized right-rail console documentation.
+- Advanced browser cache keys to v144.
+
 ## v143 - Internal Reject Timeline Redesign
 
 ### Internal Reject Tracking

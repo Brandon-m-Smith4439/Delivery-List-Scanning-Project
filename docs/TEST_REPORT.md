@@ -1,5 +1,42 @@
 # Test Report
 
+## v147 Bay Scanner route and sticky verification
+
+- Verified the removed header copy and visible Current Mode card are absent from the rendered scanner.
+- Verified Route Pulse is nested inside the blue header, uses dark contained surfaces, and suppresses legacy connector pseudo-elements.
+- Verified Destination Control is hidden by Remove mode and shown by Add mode.
+- Verified the scanner slot alone is sticky at 8 pixels while the Bay Map action toolbar remains static.
+- Verified required Bay Scanner IDs remain unique and no database/backend files are changed.
+
+## v146 Bay Scanner workflow verification
+
+- Verified Route Pulse is nested inside the blue Bay Scanner header and cannot exceed the panel width.
+- Verified the barcode workflow has no Submit Scan button and still retains the maintained form and input IDs.
+- Verified Undo and Redo are children of the scan input surface.
+- Verified Manual Scan is one visible row with a larger Order field, compact three-character Item field, and right-side Submit button.
+- Verified the removed Remove-mode sentence is absent from index.html and app.js.
+- Verified required Bay Scanner IDs remain unique and no database/backend files are changed.
+
+## v145 Bay Scanner layout verification
+
+- Reproduced the v144 failure shape with simulated legacy scanner padding, three-column form ownership, old mode layout, and compressed Bay Map action-button rules.
+- Verified the v145 scoped owners keep Scan Command, Remove/Add, Destination Control, barcode entry, Submit, Undo, and Redo in full-width ordered rows despite those simulated conflicts.
+- Verified Route Pulse renders before Scan Command and the blue header begins at the panel's outside rounded edge.
+- Verified the short-height sticky state positions the panel at 60 pixels and keeps the complete 659-pixel panel inside a 768-pixel viewport when the Bay Map rail is tall enough for sticky travel.
+- Verified all maintained Bay Scanner IDs remain present exactly once.
+- Verified CSS parsing, balanced braces, responsive rules, and reduced-motion handling.
+- No database or backend validation was required because v145 changes presentation only.
+
+## v144 Bay Scanner console validation
+
+- Applied the v144 patch twice against a disposable v143-shaped project to verify repeat-safe markup, documentation, test, and cache-key updates.
+- The focused v144 release suite passed **5/5** checks after the first and second patch runs; one historical release-marker check also passed for **6/6** focused checks total.
+- Verified every maintained Bay Scanner ID remains unique and present exactly once.
+- Verified the scoped stylesheet has balanced braces, reduced-motion handling, responsive rules, and no unscoped body or button ownership.
+- Rendered the final console in Chromium at normal and short desktop heights; the panel measured about 744 px at 1050 px viewport height and about 536 px at 768-900 px short-height desktop viewports.
+- Confirmed the installer creates timestamped backups and removes the abandoned bottom-docked v144 draft after preserving it in the backup folder.
+- Full project validation still must be run after applying the package to the complete local repository because the execution environment could not clone the full GitHub archive.
+
 ## v100 audio and manual-editor verification
 
 - The complete unittest suite passed **21/21** tests.

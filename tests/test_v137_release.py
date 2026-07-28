@@ -25,9 +25,9 @@ def test_v137_release_markers_and_documentation():
     html = read("index.html")
     readme = read("README.md")
     changelog = read("README_CHANGELOG.md")
-    assert html.count("20260727-v138") >= 6
-    assert "Current maintained release: **v138**" in readme
-    assert changelog.startswith("## v138 - Internal Reject Page")
+    assert html.count("20260728-v147") >= 6
+    assert "Current maintained release: **v147**" in readme
+    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
     assert (ROOT / "docs" / "V137_INTERFACE_AND_WORKFLOW_VERIFICATION.md").is_file()
     assert "notification-center-v137.css" not in html
 

@@ -50,7 +50,7 @@ def test_release_metadata_advanced() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
     index = (ROOT / "index.html").read_text(encoding="utf-8")
-    assert "Current maintained release: **v129**" in readme
-    assert changelog.startswith("## v129 - Reliable Desktop Shortcut Creation")
+    assert "Current maintained release: **v147**" in readme
+    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
     assert "20260724-v129" in index
     assert "20260724-v128" not in index

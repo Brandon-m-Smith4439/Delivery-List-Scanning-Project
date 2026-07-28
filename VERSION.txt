@@ -1,0 +1,8 @@
+Delivery List Scanner
+Release: v147
+Release type: Bay Scanner browser-interface refinement
+Base release: v146
+Cache key: 20260728-v147
+Database migration: none
+Backend patch: none
+Preview images: none

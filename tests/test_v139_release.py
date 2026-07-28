@@ -19,9 +19,9 @@ def test_v139_release_markers_and_documentation():
     html = read("index.html")
     readme = read("README.md")
     changelog = read("README_CHANGELOG.md")
-    assert html.count("20260727-v139") >= 6
-    assert "Current maintained release: **v139**" in readme
-    assert changelog.startswith("## v139 - Dropdown Audio")
+    assert html.count("20260728-v147") >= 6
+    assert "Current maintained release: **v147**" in readme
+    assert changelog.startswith("## v147 - Bay Scanner Route and Sticky Refinement")
     assert (ROOT / "docs" / "V139_DROPDOWN_REJECT_AND_IMPORT_HISTORY.md").is_file()
 
 

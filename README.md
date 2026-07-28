@@ -1,17 +1,71 @@
 # Delivery List Scanner
 
-Current maintained release: **v143**. SQLite remains the active/default backend.
+Current maintained release: **v147**. SQLite remains the active/default backend.
 
-v143 redesigns Internal Reject Tracking to match the approved timeline concept: a clear quality-recovery header, compact filters, live summary strip, date-grouped incident timeline, and expandable reject details. Existing reject logging, searching, date filtering, catalog loading, and process-reset behavior remain unchanged.
+v147 tightens the Bay Map scanner after floor review. The blue header now contains only the Bay Scanner title, live state, and a fully contained Route Pulse. Remove mode hides Destination Control, legacy route connector graphics are suppressed, and only the scanner panel sticks near the top after the Bay Map action buttons scroll away.
 
-## Install v143 over v142
+## Install v147 over v146
 
 1. Close the Delivery List Scanner server.
-2. Extract `Delivery_List_Scanner_v143_Changed_Files.zip` into the current v142 project folder and replace the included files.
-3. Restart the scanner normally.
-4. Hard-refresh the browser once with `Ctrl+F5` so the `20260727-v143` cache keys take effect.
+2. Extract `Delivery_List_Scanner_v147_Bay_Scanner_Containment_Refinement_Changed_Files.zip` into the current v146 project folder and replace the included files.
+3. Run `Apply-v147-BayScannerContainmentRefinement.bat` once.
+4. Restart the scanner normally.
+5. Hard-refresh the browser once with `Ctrl+F5` so the `20260728-v147` cache keys take effect.
 
-No database migration or backend patch is required. Keep the v142 role-management backend patch already installed.
+No database migration or backend patch is required. Keep the existing v142 role-management and v135 operations patches already installed.
+
+## v147 highlights
+
+- Removed `Indian Trail receiving`, the header workflow sentence, and the visible Current Mode card.
+- Kept the Bay Scanner title and Route Pulse inside one continuous blue header.
+- Recolored Route Pulse metrics with restrained dark-blue surfaces instead of bright white controls.
+- Removed the inherited dotted connector and arrow that crossed the Route Pulse section.
+- Added strict paint and width containment so Route Pulse remains inside the rounded panel.
+- Hid Destination Control whenever Remove is selected and restored it immediately for Add mode.
+- Moved only the sticky scanner panel to an 8-pixel top offset; Bay Map action buttons remain non-sticky.
+- Preserved barcode scanning, Undo/Redo, Manual Scan, All Scans, recent history, location correction, permissions, API calls, and scan behavior.
+- No PNG previews were generated or packaged.
+
+## v146 highlights
+
+- Merged the Bay Scanner title and Indian Trail Route Pulse into one blue header surface.
+- Contained every Route Pulse metric, transit control, and progress element within the panel width.
+- Changed Remove guidance to `Finds the piece's current bay`.
+- Removed the redundant Remove-mode sentence beneath Destination Control.
+- Removed the barcode Submit Scan button; barcode entry continues to submit through Enter and scanner input.
+- Positioned Undo and Redo halfway across the scan field's upper-right border.
+- Replaced the collapsible Manual Entry card with one always-visible horizontal row.
+- Made Manual Order wider than Item and limited Item to three numeric characters.
+- Kept the Manual Submit button on the right side of the same row.
+- Preserved All Scans, recent history, location correction, permissions, API calls, and scan behavior.
+- Added responsive and reduced-motion handling without generating or packaging preview images.
+
+## v145 highlights
+
+- Moved Indian Trail Route Pulse directly below the blue Bay Scanner header.
+- Removed the gray inset around the header so the blue surface reaches both rounded top corners.
+- Rebuilt Scan Command with dedicated v145 layout classes so older grid rules cannot compress it into narrow columns.
+- Kept Remove/Add, Destination Control, Bay Code, Clear, barcode entry, Submit Scan, Undo, and Redo in clear horizontal workflow rows.
+- Moved the sticky desktop position slightly higher without changing the panel's initial unscrolled location.
+- Rebuilt Old Bays, Rush / Remake, Manage Items, Edit Bays, and Edit Map as a balanced professional action toolbar.
+- Preserved Manual Entry, Latest Activity, Recent Bay Scans, All Scans, and Change Location.
+- Added responsive and reduced-motion handling without changing scanner behavior.
+- Preserved all Bay Scanner IDs, permissions, API calls, scan logic, and event handlers.
+
+## v144 highlights
+
+- Replaced the tall three-card Bay Scanner workflow with one compact scan command console.
+- Made the barcode field and Submit Scan action the visual priority for production-floor use.
+- Rebuilt Add/Remove as a clear segmented mode control with semantic state styling.
+- Combined target-bay guidance and bay-code entry into one compact destination strip.
+- Kept Undo and Redo immediately below the barcode command without consuming a full workflow card.
+- Condensed Indian Trail Outbound / In Transit / Received progress into a small live route pulse.
+- Kept Manual Entry and Recent Bay Scans collapsed until needed.
+- Reworked the latest-scan card so bay, action, order, time, and location correction stay readable.
+- Added restrained entrance, status-pulse, focus, progress, disclosure, and button animations.
+- Added a dedicated short-height desktop layout so the complete panel remains visible at common 1366x768 floor-computer resolutions.
+- Added a complete reduced-motion fallback for accessibility and floor devices that disable animation.
+- Preserved all existing Bay Scanner IDs, permissions, API calls, scan logic, and event handlers.
 
 ## v143 highlights
 
@@ -161,6 +215,10 @@ After BLDR IT provides the Entra tenant ID, application/client ID, and a client-
 ## Project documentation
 
 - Ongoing version history: `README_CHANGELOG.md`
+- v147 Bay Scanner route and sticky refinement: `docs/V147_BAY_SCANNER_CONTAINMENT_AND_STICKY_REFINEMENT.md`
+- v146 Bay Scanner workflow refinement: `docs/V146_BAY_SCANNER_WORKFLOW_REFINEMENT.md`
+- v145 Bay Scanner layout correction: `docs/V145_BAY_SCANNER_LAYOUT_CORRECTION.md`
+- v144 Bay Scanner operations console: `docs/V144_BAY_SCANNER_CONSOLE_REDESIGN.md`
 - v140 Attention/Reject/import deduplication: `docs/V140_ATTENTION_REJECT_AND_IMPORT_DEDUPE.md`
 - v142 roles, rejects, and layout refinements: `docs/V142_ROLE_AND_REJECT_REFINEMENTS.md`
 - v141 User Access Management redesign: `docs/V141_USER_ACCESS_MANAGER.md`
