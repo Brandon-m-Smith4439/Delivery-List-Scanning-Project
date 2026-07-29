@@ -1,3 +1,4 @@
+<!-- File: automation/sql_delivery_export/README.md -->
 # Delivery List Automation Runtime v132
 
 This folder is installed to `C:\DeliveryListAutomation\Scripts` by either the central SQL setup or the v132 floor-folder setup. The setup does not replace the scanner database or generated delivery-list workbooks.

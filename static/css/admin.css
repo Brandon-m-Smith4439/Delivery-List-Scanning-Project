@@ -1,3 +1,4 @@
+/* File: static/css/admin.css */
 /*
   Delivery List Scanner - Admin Page Styles
   Generated from the maintained v150 cascade during the static asset
@@ -3991,9 +3992,11 @@ button.custom-select-trigger:hover:not(:disabled),
 
 
 
+.admin-page .admin-dashboard-heading,
 .admin-page .admin-kpi-row,
 .admin-page .admin-layout {
-  margin-inline: 14px;
+  width: 100%;
+  margin-inline: 0;
 }
 
 
@@ -6266,5 +6269,754 @@ button.custom-select-trigger:hover:not(:disabled),
 @keyframes dls-import-result-focus-pulse {
   0%, 100% { box-shadow: inherit; }
   20%, 65% { box-shadow: 0 0 0 3px rgba(42, 119, 190, 0.28), 0 14px 34px rgba(15, 55, 95, 0.14); }
+}
+
+/* ========================================================================== */
+/* v158 Administration workspace visual polish                               */
+/* ========================================================================== */
+.admin-page .admin-last-updated {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid #cbbde3;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .88);
+  color: #563b82;
+  font-size: 11px;
+  font-weight: 900;
+  box-shadow: 0 6px 14px rgba(62, 35, 108, .06);
+}
+
+.admin-page .admin-kpi-row {
+  gap: 12px;
+}
+
+.admin-page .admin-kpi-row .mini-stat {
+  position: relative;
+  min-height: 110px;
+  overflow: hidden;
+  border-color: #d2c7e5;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(101, 64, 168, .08), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #faf8fd 100%);
+  box-shadow: 0 10px 24px rgba(62, 35, 108, .065);
+}
+
+.admin-page .admin-kpi-row .mini-stat::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #7d58bd, #4c2d82);
+}
+
+.admin-page .admin-dashboard-card {
+  overflow: hidden;
+  padding: 16px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(101, 64, 168, .035), transparent 30%),
+    linear-gradient(180deg, #ffffff 0%, #fbfafd 100%);
+}
+
+.admin-page .admin-dashboard-card > .section-heading {
+  min-height: 42px;
+  margin: -4px -4px 13px;
+  padding: 4px 4px 10px;
+  border-bottom: 1px solid #e1dbea;
+}
+
+.admin-page .admin-dashboard-card .section-heading h2 {
+  font-size: 17px;
+}
+
+.admin-page .admin-table {
+  border: 1px solid #e0dbea;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.admin-page .admin-table th {
+  background: linear-gradient(180deg, #f8f5fc 0%, #f1edf8 100%);
+  color: #3f2b68;
+  font-size: 10.5px;
+  font-weight: 950;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.admin-page .admin-table tbody tr:hover {
+  background: #faf8fd;
+}
+
+.admin-page :is(.admin-form, .lookup-manager-form, .customer-route-modal-form, .rack-manager-quick-edit) {
+  border-color: #ddd3eb;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fcfbfe 0%, #f7f4fb 100%);
+}
+
+.admin-page .admin-form button,
+.admin-page .panel > button,
+.admin-page .station-add-row button,
+.admin-page .admin-table button,
+.admin-page .link-button {
+  border-radius: 9px;
+}
+
+.admin-page .compact-list > div,
+.admin-page .result-list article,
+.admin-page .admin-user-preview-row,
+.admin-page .customer-route-rule-row,
+.admin-page .lookup-row {
+  border-color: #dfd8e9;
+  border-radius: 11px;
+  box-shadow: 0 6px 16px rgba(62, 35, 108, .035);
+}
+
+
+
+/* ========================================================================== */
+/* v160 Administration Control Center modal system                            */
+/* ========================================================================== */
+#adminModal.admin-modal-panel {
+  --admin-control-navy: #0d234d;
+  --admin-control-blue: #174f93;
+  --admin-control-blue-strong: #0b63bd;
+  --admin-control-blue-soft: #eaf3ff;
+  --admin-control-line: #d7e1ef;
+  --admin-control-muted: #60708b;
+  --admin-control-surface: #f5f8fc;
+
+  width: min(1220px, calc(100vw - 34px));
+  height: min(900px, calc(100vh - 34px));
+  max-height: calc(100vh - 34px);
+  display: grid !important;
+  grid-template-rows: minmax(118px, auto) 54px minmax(0, 1fr) !important;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(183, 199, 220, .92);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 32px 94px rgba(4, 17, 42, .34);
+}
+
+#adminModal[data-kind="deliveryLists"],
+#adminModal[data-kind="deliveryActions"],
+#adminModal[data-kind="manualEdit"],
+#adminModal[data-kind="users"],
+#adminModal[data-kind="roles"],
+#adminModal[data-kind="customerRoutes"],
+#adminModal[data-kind="customerEmails"],
+#adminModal[data-kind="lookups"],
+#adminModal[data-kind="bayScannerRules"],
+#adminModal[data-kind="bayAutoAssigner"],
+#adminModal[data-kind="rejectSettings"],
+#adminModal[data-kind="racks"],
+#adminModal[data-kind="recentScans"] {
+  width: min(1460px, calc(100vw - 28px));
+  height: min(930px, calc(100vh - 28px));
+  max-height: calc(100vh - 28px);
+}
+
+#adminModal > .admin-control-center-header {
+  position: relative !important;
+  z-index: 3;
+  grid-row: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 118px !important;
+  height: auto !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) max-content !important;
+  align-items: start !important;
+  gap: 24px;
+  margin: 0 !important;
+  padding: 24px 28px 22px !important;
+  overflow: hidden;
+  border-bottom: 0;
+  color: #fff;
+  background:
+    radial-gradient(circle at 90% 15%, rgba(78, 146, 233, .34), transparent 32%),
+    linear-gradient(135deg, #0b1d42 0%, #123c76 58%, #15558e 100%);
+}
+
+#adminModal > .admin-control-center-header::before {
+  content: "";
+  position: absolute;
+  right: 84px;
+  bottom: -72px;
+  width: 236px;
+  height: 236px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.admin-modal-heading-copy {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.admin-modal-eyebrow {
+  display: block;
+  color: #d8e9ff !important;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+#adminModal > .admin-control-center-header h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: visible;
+  color: #fff !important;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 950;
+  line-height: 1.05;
+  letter-spacing: -.02em;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+#adminModal > .admin-control-center-header p {
+  max-width: 790px;
+  margin: 3px 0 0;
+  color: rgba(255, 255, 255, .9) !important;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.admin-modal-heading-actions {
+  position: relative;
+  z-index: 4;
+  min-width: max-content;
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  justify-self: end;
+}
+
+.admin-modal-health-pill {
+  min-width: 0;
+  max-width: 240px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .10);
+  overflow: hidden;
+  color: #fff !important;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-modal-health-pill > span {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-modal-health-pill i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #6de3a2;
+  box-shadow: 0 0 0 4px rgba(109, 227, 162, .16);
+}
+
+#adminModal > .admin-control-center-header .modal-close-x {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 5;
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  flex: 0 0 42px;
+  border-color: rgba(255, 255, 255, .34);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  font-size: 24px;
+}
+
+#adminModal > .admin-control-center-header .modal-close-x:hover,
+#adminModal > .admin-control-center-header .modal-close-x:focus-visible {
+  outline: none;
+  border-color: rgba(255, 255, 255, .55);
+  background: rgba(255, 255, 255, .22);
+  color: #fff;
+}
+
+.admin-modal-context-strip {
+  position: relative;
+  z-index: 2;
+  grid-row: 2;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--admin-control-line);
+  background: #fff;
+  scrollbar-width: thin;
+}
+
+.admin-modal-context-strip > span {
+  position: relative;
+  min-height: 54px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 15px;
+  color: #697991;
+  font-size: 13px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.admin-modal-context-strip > span.is-active {
+  color: var(--admin-control-blue);
+}
+
+.admin-modal-context-strip > span.is-active::after {
+  content: "";
+  position: absolute;
+  left: 15px;
+  right: 15px;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--admin-control-blue-strong);
+}
+
+.admin-context-icon {
+  position: relative;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  color: currentColor;
+}
+
+.admin-context-icon.workspace::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  box-shadow: inset 0 4px 0 -2px currentColor;
+}
+
+.admin-context-icon.live::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.admin-context-icon.live::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.admin-context-icon.audit::before {
+  content: "";
+  position: absolute;
+  inset: 1px 3px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+}
+
+.admin-context-icon.audit::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 5px;
+  width: 4px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(42deg);
+}
+
+#adminModalBody {
+  position: relative;
+  z-index: 1;
+  grid-row: 3;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: none !important;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 24px 26px 28px;
+  background: linear-gradient(180deg, #fbfcfe 0%, #f3f7fb 100%);
+}
+
+#adminModalBody > :is(
+  .manual-edit-shell,
+  .users-modal-shell,
+  .role-permission-editor,
+  .customer-route-modal-shell,
+  .customer-email-modal-shell,
+  .lookup-manager-shell,
+  .reject-settings-shell,
+  .bay-scanner-rules-shell,
+  .bay-auto-assigner-shell,
+  .rack-manager-shell,
+  .rack-modal-form
+) {
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+}
+
+#adminModal[data-kind="deliveryLists"] #adminModalBody,
+#adminModal[data-kind="deliveryActions"] #adminModalBody,
+#adminModal[data-kind="sessions"] #adminModalBody,
+#adminModal[data-kind="stations"] #adminModalBody,
+#adminModal[data-kind="recentScans"] #adminModalBody {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 16px;
+}
+
+#adminModalBody > :is(.admin-table, .compact-list, .station-add-row),
+#adminModalBody :is(
+  .admin-delivery-window-note,
+  .manual-edit-modal-tools,
+  .role-manager-overview,
+  .role-create-card,
+  .role-library,
+  .user-manager-hero,
+  .user-manager-toolbar,
+  .user-manager-create-form,
+  .user-manager-account-panel,
+  .customer-route-modal-intro,
+  .customer-route-modal-form,
+  .customer-route-modal-list,
+  .customer-email-intro,
+  .customer-email-smtp-section,
+  .customer-email-test-section,
+  .customer-email-form,
+  .customer-email-list-section,
+  .customer-email-cc-section,
+  .customer-email-outbox-section,
+  .lookup-manager-hero,
+  .lookup-editor-card,
+  .lookup-manager-list,
+  .reject-settings-column,
+  .bay-scanner-rules-shell > section,
+  .bay-auto-card,
+  .bay-auto-assigner-form,
+  .rack-manager-topbar,
+  .rack-manager-quick-edit,
+  .rack-manager-set-edit,
+  .rack-manager-group,
+  .rack-modal-form
+) {
+  min-width: 0;
+  border: 1px solid var(--admin-control-line);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(20, 48, 85, .05);
+}
+
+#adminModalBody :is(
+  .role-manager-overview,
+  .user-manager-hero,
+  .customer-route-modal-intro,
+  .customer-email-intro,
+  .lookup-manager-hero,
+  .bay-scanner-rules-shell > section:first-child,
+  .bay-auto-assigner-shell > header,
+  .rack-manager-topbar
+) {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(23, 79, 147, .08), transparent 36%),
+    linear-gradient(180deg, #ffffff 0%, #f4f8fe 100%);
+}
+
+#adminModalBody :is(
+  .role-library > header,
+  .customer-email-list-section > header,
+  .customer-email-cc-section > header,
+  .customer-email-outbox-section > header,
+  .reject-settings-column > header,
+  .rack-manager-group > header,
+  .bay-auto-card > header,
+  .bay-scanner-rules-shell section > header
+) {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--admin-control-line);
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fc 100%);
+}
+
+#adminModalBody :is(
+  .role-library > header,
+  .customer-email-list-section > header,
+  .customer-email-cc-section > header,
+  .customer-email-outbox-section > header,
+  .reject-settings-column > header,
+  .rack-manager-group > header,
+  .bay-auto-card > header,
+  .bay-scanner-rules-shell section > header
+) strong {
+  color: var(--admin-control-navy);
+  font-size: 15px;
+  font-weight: 950;
+}
+
+#adminModalBody :is(
+  .role-library > header,
+  .customer-email-list-section > header,
+  .customer-email-cc-section > header,
+  .customer-email-outbox-section > header,
+  .reject-settings-column > header,
+  .rack-manager-group > header,
+  .bay-auto-card > header,
+  .bay-scanner-rules-shell section > header
+) span {
+  color: var(--admin-control-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+#adminModalBody .admin-modal-search {
+  min-height: 48px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #c9d5e5;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(20, 48, 85, .05);
+}
+
+#adminModalBody .admin-table {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-color: var(--admin-control-line);
+  border-radius: 16px;
+  background: #fff;
+}
+
+#adminModalBody .admin-table table {
+  width: 100%;
+}
+
+#adminModalBody .admin-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #f4f8fd 0%, #eaf1f9 100%);
+  color: #28466f;
+  font-size: 10.5px;
+  font-weight: 950;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+#adminModalBody .admin-table tbody tr:hover {
+  background: #f5f9ff;
+}
+
+#adminModalBody :is(
+  .admin-delivery-edit-list,
+  .manual-edit-card-list,
+  .role-library-list,
+  .user-manager-user-list,
+  .customer-route-modal-list,
+  .customer-email-rule-list,
+  .customer-email-outbox-list,
+  .lookup-row-list,
+  .reject-catalog-list,
+  .rack-manager-rows
+) {
+  min-width: 0;
+}
+
+#adminModalBody :is(
+  .admin-delivery-date-group,
+  .manual-edit-card,
+  .role-permission-card,
+  .user-manager-user-card,
+  .customer-route-rule-row,
+  .customer-email-row,
+  .email-outbox-row,
+  .lookup-row,
+  .reject-catalog-list article,
+  .bay-auto-card,
+  .rack-manager-row,
+  .compact-list > div
+) {
+  border-color: #d9e3f0;
+  border-radius: 13px;
+  box-shadow: 0 6px 16px rgba(20, 48, 85, .04);
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+#adminModalBody :is(
+  .admin-delivery-date-group,
+  .manual-edit-card,
+  .role-permission-card,
+  .user-manager-user-card,
+  .customer-route-rule-row,
+  .customer-email-row,
+  .email-outbox-row,
+  .lookup-row,
+  .rack-manager-row,
+  .compact-list > div
+):hover {
+  border-color: #a9c1df;
+  background: #f9fbff;
+  box-shadow: 0 10px 24px rgba(20, 48, 85, .075);
+}
+
+#adminModalBody :is(.admin-form, form, .station-add-row) :is(input, select, textarea),
+#adminModalBody > .station-add-row input {
+  min-width: 0;
+  border-color: #c9d5e5;
+  border-radius: 10px;
+  background: #fff;
+}
+
+#adminModalBody :is(input, select, textarea):focus {
+  outline: none;
+  border-color: #3c82cf;
+  box-shadow: 0 0 0 3px rgba(36, 117, 205, .12);
+}
+
+#adminModalBody button:not(.modal-close-x):not(.icon-only) {
+  border-radius: 10px;
+  font-weight: 850;
+}
+
+#adminModalBody :is(
+  .role-create-footer,
+  .lookup-form-actions,
+  .customer-route-modal-actions,
+  .manual-edit-modal-actions,
+  .rack-manager-set-actions,
+  .modal-actions
+) {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--admin-control-line);
+  background: #fbfdff;
+}
+
+#adminModalBody .admin-empty {
+  border-color: #cbd8e7;
+  border-radius: 13px;
+  background: #fff;
+  color: var(--admin-control-muted);
+  padding: 14px;
+}
+
+#adminModal[data-kind="deliveryLists"] #adminModalBody,
+#adminModal[data-kind="deliveryActions"] #adminModalBody,
+#adminModal[data-kind="manualEdit"] #adminModalBody {
+  overflow-x: hidden;
+}
+
+#adminModal[data-kind="deliveryLists"] :is(.admin-delivery-edit-list, .admin-delivery-date-group),
+#adminModal[data-kind="manualEdit"] :is(.manual-edit-shell, .manual-edit-card-list, .manual-edit-card) {
+  width: 100%;
+  max-width: 100%;
+}
+
+@media (max-width: 900px) {
+  #adminModal > .admin-control-center-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 14px;
+    padding: 20px 22px;
+  }
+
+  .admin-modal-heading-actions {
+    justify-content: space-between;
+  }
+
+  .admin-modal-context-strip {
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 760px) {
+  #adminModal.admin-modal-panel,
+  #adminModal[data-kind] {
+    width: calc(100vw - 14px);
+    height: calc(100vh - 14px);
+    max-height: calc(100vh - 14px);
+    grid-template-rows: auto 54px minmax(0, 1fr) !important;
+    border-radius: 16px;
+  }
+
+  #adminModal > .admin-control-center-header {
+    min-height: 0 !important;
+    padding: 17px 18px;
+  }
+
+  #adminModal > .admin-control-center-header h2 {
+    font-size: 25px;
+  }
+
+  #adminModal > .admin-control-center-header p {
+    font-size: 12px;
+  }
+
+  .admin-modal-health-pill {
+    max-width: calc(100vw - 90px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #adminModalBody {
+    padding: 14px;
+  }
+}
+
+/* ========================================================================== */
+/* v163 Modal hidden-state ownership                                          */
+/* ========================================================================== */
+/* The Control Center panel uses display:grid !important while open. These ID
+   selectors deliberately outrank that presentation rule whenever JavaScript
+   restores the native hidden attribute. */
+#adminModal[hidden],
+#adminModalBackdrop[hidden] {
+  display: none !important;
 }
 

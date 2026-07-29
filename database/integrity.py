@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# File: database/integrity.py
 """Validate a Delivery List Scanner SQLite database without changing it."""
 
 from __future__ import annotations

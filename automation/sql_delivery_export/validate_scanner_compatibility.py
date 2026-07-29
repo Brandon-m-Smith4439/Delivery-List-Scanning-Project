@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# File: automation/sql_delivery_export/validate_scanner_compatibility.py
 """Validate the current scanner's public configuration/store integration points.
 
 This script imports the latest scanner code without initializing or modifying its

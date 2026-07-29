@@ -1,18 +1,116 @@
+<!-- File: README.md -->
 # Delivery List Scanner
 
-Current maintained release: **v150**. SQLite remains the active/default backend.
+Current maintained release: **v163**. SQLite remains the active/default backend.
 
-v150 corrects the remaining Bay Scanner control alignment and scan-feedback details. Target Bay now sits on its own clean row beneath Add/Remove, Manual Scan uses aligned labeled fields with a larger item field and Submit action, Route Pulse percentage labels are removed in both modes, and Latest/Recent scan status is shown with compact semantic icons and matching card/row colors.
+v163 fixes the Control Center modals being permanently visible at startup. The Admin and Operations panels now obey their native hidden state, close normally, clear stale editor content, and reopen with the requested GUI only.
 
-## Install v150 over v149
+## Install v163 over v162
 
 1. Close the Delivery List Scanner server.
-2. Extract `Delivery_List_Scanner_v150_Bay_Scanner_Control_Alignment_And_Status_Refinement_Changed_Files.zip` into the current v149 project folder and replace the included files.
-3. Run `Apply-v150-BayScannerControlAlignmentAndStatusRefinement.bat` once.
-4. Restart the scanner normally.
-5. Hard-refresh the browser once with `Ctrl+F5` so the `20260728-v150` cache keys take effect.
+2. Extract `Delivery_List_Scanner_v163_Modal_Hidden_State_And_Close_Repair_Changed_Files.zip` into the current project folder and replace the included files.
+3. Restart the scanner and hard-refresh the browser with `Ctrl+F5`.
 
-No database migration or backend patch is required. Existing Bay Scan behavior, one-row recent history, assignment movement, permissions, and APIs remain unchanged.
+No database migration or backend update is required. Existing Admin, rack, scan, automation, permission, and API behavior remains unchanged.
+
+## v163 highlights
+
+- Restored native hidden-state ownership for the shared Admin Control Center modal and backdrop.
+- Applied the same protection to Individual Rack and Packing List History Operations modals.
+- Prevented `display: grid !important` from forcing either modal visible during startup or after closing.
+- Added defensive ARIA state updates, stale-content cleanup, and Operations Control Center class cleanup when windows close.
+- Advanced Admin, Racks, and JavaScript cache keys to v163.
+
+## v162 highlights
+
+- Restored one vertically centered font system across the complete in-row Scanned pill, including label, date, time, separators, and station.
+- Increased Flags, Route, Location, and Progress text to a consistent readable production-floor size.
+- Corrected the missing Location width delimiter so the maintained 100% Scan-table geometry is parsed reliably.
+- Made the Admin Control Center hero, context rail, and editor canvas explicit non-overlapping grid rows.
+- Made the Operations/Rack Control Center hero, context rail, and editor canvas use the same protected layering.
+- Increased and protected the close buttons, constrained long status pills, and restored high-contrast hero text in every touched GUI.
+- Advanced the Scan, Racks, and Admin stylesheet cache keys to v162.
+
+## v161 highlights
+
+- Condensed in-row scan dates to month/day and times to compact lowercase forms such as `4:30pm`.
+- Reserved scan-pill space only in Job Nr., keeping Order and Item vertically aligned with the remaining line-item columns.
+- Added the active delivery-list date to the Scan panel title.
+- Removed the generic selected color from individual rack cards so Open, Complete, On the Way, Received, and Empty formatting remains visible.
+- Added Control Center headers, context rails, status pills, guided canvases, and polished content cards to Individual Rack and Packing List History windows.
+- Strengthened the existing Edit Racks, Rack, and Rack Set Admin editors with matching rack-specific Control Center surfaces.
+
+## v160 highlights
+
+- Rebuilt the shared Admin modal header to match the Delivery Automation Control Center format.
+- Added a contextual eyebrow, task-specific description, live status pill, and workspace rail to every Admin GUI.
+- Added specific descriptions and context labels for delivery lists, manual editing, users, roles, sessions, stations, routes, emails, lookups, rejects, bay rules, auto-assignment, racks, and scan history.
+- Standardized section cards, tables, forms, search bars, list rows, empty states, and command/footer areas.
+- Preserved all IDs, event delegation, API requests, permissions, editor state, and save behavior.
+
+v159 corrected the v158 page-polish alignment regressions, restored the main Scan panel hierarchy, extended the polished Admin design to the maintained editor windows, and added thin compatibility bridges for installed automation that still imports the pre-v151 root module names.
+
+v158 tightens the Scan table and brings the Home, Scan, Racks, and Admin workspaces up to the same polished visual standard as Internal Rejects. The last-scan pill now ends at Item, compact operational columns use a complete 100% width contract, and the Progress column reaches the panel edge without the white strip introduced by the earlier clearance workaround.
+
+## Install v158 over v157
+
+1. Close the Delivery List Scanner server.
+2. Extract `Delivery_List_Scanner_v158_Core_Page_Visual_Polish_And_Scan_Table_Refinement_Changed_Files.zip` into the current project folder and replace the included files.
+3. Restart the scanner normally.
+4. Hard-refresh the browser once with `Ctrl+F5` so the `20260729-v158` stylesheet cache keys take effect.
+
+No database migration, backend patch, or JavaScript replacement is required. Reject management, scanning behavior, rack/bay workflows, permissions, and APIs remain unchanged.
+
+## v158 highlights
+
+- Limited the in-row last-scan pill to Job Nr. through Item.
+- Condensed Flags, Route, and Location while preserving wrapping and selector usability.
+- Rebuilt the Scan table as an exact 100% column contract and removed the right-side white strip after Progress.
+- Added Rejects-quality hero headings, layered surfaces, hierarchy, spacing, borders, and interaction polish to Home, Scan, Racks, and Admin.
+- Kept all existing IDs, controls, workflows, responsive behavior, and page ownership boundaries.
+
+## v157 highlights
+
+- Replaced the separate Last Scan ribbon with a compact in-row pill.
+- Anchored the pill inside Job Nr. while allowing it to visually extend through Customer.
+- Kept the pill absolutely positioned so its date, time, and station cannot affect table width.
+- Preserved the plain whole-number QTY presentation.
+- Renamed Item Nr. to Item and Process State to Progress.
+- Increased the Progress column and reserved right-edge clearance so its full border and content stay visible.
+- Preserved Internal Reject ribbon containment and every v155 width-safety rule.
+
+## v156 highlights
+
+- Replaced the QTY progress-style pill with a plain centered whole number.
+- Removed the full scan timestamp and station from the Job Nr. cell.
+- Added a compact blue Last Scan ribbon above every scanned line item.
+- Displays the last scan date, time, and station in one readable contained sentence.
+- Uses the same six-column ribbon span and four-column alignment tail as Internal Rejects.
+- Added a reusable detail-ribbon containment contract for future warning, timing, and audit ribbons.
+- Preserved the fixed percentage-based table layout and all v155 overflow protections.
+
+## v155 highlights
+
+- Removed Delivery Date from the Scan-page internal-reject ribbon.
+- Removed the trailing event-count and investigation-note mini-cells from the ribbon.
+- Increased the remaining ribbon label and value sizes while preserving the slim presentation.
+- Added a fixed 100% percentage-based Scan-table column contract.
+- Removed the hard 118-pixel Location-column minimum that could force the table wider than its panel.
+- Contained long scan timestamps, process states, flags, location controls, badges, and future detail ribbons within their assigned columns.
+- Added responsive ribbon wrapping without changing the underlying line-item or reject data.
+- Preserved Admin reject editing/deletion, reject filtering, line flags, scanner behavior, and all backend APIs.
+
+## v154 highlights
+
+- Added Edit and Delete controls to Reject Timeline rows for users whose assigned role is exactly **Admin**.
+- Added server-side Admin-role enforcement for both reject mutation endpoints.
+- Edit Reject supports reason, machine/location, quantity, incident date/time, and investigation notes while keeping order, item, job, product, delivery date, and original creator locked.
+- Delete Reject removes the reject record and recalculates line-item reject flags without restoring historical scans, rack quantities, bay assignments, or process state.
+- Every edit and deletion writes an audit event containing the prior record and the resulting reject summary.
+- Expanded line flags with the latest reject quantity, user, notes, delivery date, event count, and event ID.
+- Rebuilt the Scan-page internal-reject ribbon as a slim polished strip spanning Job Nr. through Customer.
+- The ribbon shows reason, machine/location, rejected quantity, rejected by, incident time, delivery date, event count, and whether investigation notes exist.
+- Preserved all existing reject creation, process restart, notification, filter, and timeline behavior.
 
 ## v150 highlights
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# File: server.py
 # Delivery List Scanner local web/API server.
 #
 # Code map for future edits:
@@ -1014,6 +1015,18 @@ class Handler(SimpleHTTPRequestHandler):
         return user
 
 
+    def require_admin_role(self) -> dict | None:
+        """Require the built-in Admin role for destructive reject management."""
+        user = self.current_user()
+        if not user:
+            self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+            return None
+        roles = {str(role).strip().lower() for role in (user.get("roles") or [])}
+        if "admin" not in roles:
+            self.send_json({"error": "Admin role required", "role": "Admin"}, HTTPStatus.FORBIDDEN)
+            return None
+        return user
+
     def require_confirmation_text(self, data: dict, required_text: str) -> bool:
         """Purpose: Run the require confirmation text workflow for the delivery-list scanner.
 
@@ -1608,6 +1621,20 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(OPERATIONS.create_reject(data, user["username"]))
+                return
+
+            if parsed.path == "/api/rejects/update":
+                user = self.require_admin_role()
+                if not user:
+                    return
+                self.send_json(OPERATIONS.update_reject(data, user["username"]))
+                return
+
+            if parsed.path == "/api/rejects/delete":
+                user = self.require_admin_role()
+                if not user:
+                    return
+                self.send_json(OPERATIONS.delete_reject(data, user["username"]))
                 return
 
             if parsed.path == "/api/rejects/catalog":

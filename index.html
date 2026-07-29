@@ -1,3 +1,4 @@
+<!-- File: index.html -->
 <!--
   Delivery List Scanner shell.
   Keep this file as stable markup for the main pages and modal anchors.
@@ -11,11 +12,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260728-v150">
-    <link rel="stylesheet" href="static/css/home.css?v=20260728-v150">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260728-v150">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260728-v150">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260728-v150">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260729-v158">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260728-v154">
+    <link rel="stylesheet" href="static/css/home.css?v=20260729-v159">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260729-v162">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260729-v163">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260729-v163">
     <link rel="stylesheet" href="static/css/print.css?v=20260728-v150">
     <link rel="stylesheet" href="static/css/bays.css?v=20260728-v151">
 </head>
@@ -443,14 +445,14 @@
                   <tr>
                     <th>Job Nr.</th>
                     <th>Order Nr.</th>
-                    <th>Item Nr.</th>
+                    <th>Item</th>
                     <th>Qty.</th>
                     <th>Dimensions</th>
                     <th>Customer</th>
                     <th>Flags</th>
                     <th>Route</th>
                     <th>Location</th>
-                    <th>Process State</th>
+                    <th>Progress</th>
                   </tr>
                 </thead>
                 <tbody id="listRows"></tbody>
@@ -677,35 +679,38 @@
 
 
       <!-- SECTION: Internal reject tracking and process restart history -->
-      <section class="page-view rejects-page" id="rejectsPage" hidden>
-        <section class="panel reject-workspace-v142 reject-workspace-v143">
-          <header class="reject-workspace-header-v142 reject-workspace-header-v143">
-            <div class="reject-workspace-title-v142 reject-workspace-title-v143">
-              <span class="reject-workspace-icon-v142 reject-workspace-icon-v143" aria-hidden="true">IR</span>
-              <div>
-                <span class="page-eyebrow">Quality recovery</span>
-                <h1>Internal Rejects</h1>
-                <p>Log a broken piece, restart its workflow, and review reject history by incident date.</p>
-              </div>
-            </div>
-            <div class="reject-header-actions-v143">
-              <button id="rejectLogOpenBtn" class="primary reject-log-open-button" type="button" data-permission-any="scan,manual_adjust,resolve_exceptions">
-                <span class="reject-log-open-icon" aria-hidden="true"></span>
-                <span>Log Internal Reject</span>
-              </button>
-              <div class="reject-header-utility-v143">
-                <button id="rejectRefreshBtn" class="secondary reject-refresh-button" type="button"><span class="reject-refresh-icon" aria-hidden="true"></span><span>Refresh</span></button>
-                <button id="rejectClearFiltersBtn" class="secondary reject-clear-filters" type="button" title="Clear reject filters"><span class="reject-clear-icon" aria-hidden="true"></span><span>Clear</span></button>
-              </div>
+      <section class="page-view rejects-page rejects-page-v151" id="rejectsPage" hidden>
+        <section class="panel reject-workspace-v151">
+          <header class="reject-page-heading-v151">
+            <div>
+              <span class="page-eyebrow">Quality recovery</span>
+              <h1>Internal Rejects</h1>
+              <p>Track when pieces were rejected, why they failed, and who recorded each incident.</p>
             </div>
           </header>
 
-          <div class="reject-toolbar-v142 reject-toolbar-v143" aria-label="Reject history filters">
+          <div class="reject-command-bar-v151" aria-label="Reject history tools">
             <label class="search-box reject-search-control">
               <span class="search-icon"></span>
-              <input id="rejectSearchInput" type="search" autocomplete="off" placeholder="Search by order, item, reason, or machine...">
+              <input id="rejectSearchInput" type="search" autocomplete="off" placeholder="Search order, item, customer, reason, or machine...">
             </label>
+            <button id="rejectFiltersBtn" class="secondary reject-filters-button-v151" type="button" aria-controls="rejectFilterPanel" aria-expanded="false">
+              <span class="reject-filters-icon-v151" aria-hidden="true"></span>
+              <span>Filters</span>
+              <b id="rejectFilterCount" hidden>0</b>
+            </button>
+            <button id="rejectClearFiltersBtn" class="secondary reject-clear-filters" type="button" title="Clear reject filters">
+              <span class="reject-clear-icon" aria-hidden="true"></span>
+              <span>Clear</span>
+            </button>
+            <span class="reject-command-spacer-v151" aria-hidden="true"></span>
+            <button id="rejectLogOpenBtn" class="primary reject-log-open-button" type="button" data-permission-any="scan,manual_adjust,resolve_exceptions">
+              <span class="reject-log-open-icon" aria-hidden="true"></span>
+              <span>Log Internal Reject</span>
+            </button>
+          </div>
 
+          <section id="rejectFilterPanel" class="reject-filter-panel-v151" aria-label="Reject history filters" hidden>
             <label class="reject-filter-field reject-range-preset-field">
               <span>Incident range</span>
               <select id="rejectDatePreset">
@@ -716,28 +721,45 @@
                 <option value="custom">Custom range</option>
               </select>
             </label>
-
             <label class="reject-filter-field"><span>From</span><input id="rejectDateFrom" type="date"></label>
             <label class="reject-filter-field"><span>Through</span><input id="rejectDateTo" type="date"></label>
-
             <label class="reject-filter-field reject-location-filter-field">
-              <span>Location</span>
-              <select id="rejectLocationFilter"><option value="">All locations</option></select>
+              <span>Machine / location</span>
+              <select id="rejectLocationFilter"><option value="">All machines / locations</option></select>
             </label>
-          </div>
+            <label class="reject-filter-field">
+              <span>Reason</span>
+              <select id="rejectReasonFilter"><option value="">All reasons</option></select>
+            </label>
+            <label class="reject-filter-field">
+              <span>Rejected by</span>
+              <select id="rejectUserFilter"><option value="">All users</option></select>
+            </label>
+          </section>
 
           <div id="rejectPageStatus" class="reject-page-status" role="status" aria-live="polite" hidden></div>
 
-          <section id="rejectSummaryBar" class="reject-summary-bar-v143" aria-label="Reject summary" aria-live="polite">
+          <section id="rejectSummaryBar" class="reject-summary-bar-v151" aria-label="Reject summary" aria-live="polite">
             <article><span class="reject-summary-icon events" aria-hidden="true"></span><div><strong>0</strong><small>Total rejects</small></div></article>
             <article><span class="reject-summary-icon locations" aria-hidden="true"></span><div><strong>0</strong><small>Machines / locations</small></div></article>
             <article><span class="reject-summary-icon users" aria-hidden="true"></span><div><strong>0</strong><small>Users</small></div></article>
             <article class="is-quantity"><span class="reject-summary-icon quantity" aria-hidden="true"></span><div><strong>0 pcs</strong><small>Total rejected quantity</small></div></article>
           </section>
 
-          <div id="rejectHistory" class="reject-history-list reject-timeline-history-v143"></div>
+          <section class="reject-timeline-section-v151" aria-labelledby="rejectTimelineTitle">
+            <header class="reject-timeline-heading-v151">
+              <div>
+                <span>Incident history</span>
+                <h2 id="rejectTimelineTitle">Reject Timeline</h2>
+                <p>Newest incidents appear first. Open a row to review its investigation notes.</p>
+              </div>
+              <b id="rejectTimelineCount">0 events</b>
+            </header>
+            <div id="rejectHistory" class="reject-history-list reject-timeline-history-v151"></div>
+          </section>
         </section>
       </section>
+
 
       <!-- SECTION: Indian Trail bay map, receiving scanner, and bay modals -->
       <section class="page-view bay-map-page bay-map-page-v2" id="bayMapPage" hidden>
@@ -1455,30 +1477,51 @@
 
 
     <!-- SECTION: Shared operational workflow modal (racks, rejects, and history) -->
-    <div class="modal-backdrop operations-modal-backdrop" id="operationsModalBackdrop" hidden></div>
-    <section class="modal-panel operations-modal-panel" id="operationsModal" hidden>
-      <div class="section-heading operations-modal-heading">
-        <div>
+    <div class="modal-backdrop operations-modal-backdrop" id="operationsModalBackdrop" aria-hidden="true" hidden></div>
+    <section class="modal-panel operations-modal-panel" id="operationsModal" aria-hidden="true" hidden>
+      <header class="section-heading operations-modal-heading">
+        <div class="operations-modal-heading-copy">
           <small id="operationsModalEyebrow">Operations</small>
           <h2 id="operationsModalTitle">Operations</h2>
+          <p id="operationsModalDescription"></p>
         </div>
-        <button id="operationsModalClose" class="modal-close-x" type="button" aria-label="Close operations window">×</button>
+        <div class="operations-modal-heading-actions">
+          <span class="operations-modal-health-pill"><i aria-hidden="true"></i><span id="operationsModalStatusText">Live operations</span></span>
+          <button id="operationsModalClose" class="modal-close-x" type="button" aria-label="Close operations window">×</button>
+        </div>
+      </header>
+      <div class="operations-modal-context-strip" aria-label="Operations workspace context">
+        <span class="is-active"><i class="operations-context-icon workspace" aria-hidden="true"></i><b id="operationsModalContextLabel">Operations workspace</b></span>
+        <span><i class="operations-context-icon live" aria-hidden="true"></i>Live scanner data</span>
+        <span><i class="operations-context-icon audit" aria-hidden="true"></i>Changes are audited</span>
       </div>
       <div id="operationsModalBody"></div>
     </section>
 
     <!-- SECTION: Shared administration editor modal -->
-    <div class="modal-backdrop" id="adminModalBackdrop" hidden></div>
-    <section class="modal-panel admin-modal-panel" id="adminModal" hidden>
-      <div class="section-heading">
-        <h2 id="adminModalTitle">Admin</h2>
-        <button id="adminModalClose" class="modal-close-x" type="button" aria-label="Close admin window">×</button>
+    <div class="modal-backdrop" id="adminModalBackdrop" aria-hidden="true" hidden></div>
+    <section class="modal-panel admin-modal-panel" id="adminModal" aria-hidden="true" hidden>
+      <header class="section-heading admin-control-center-header">
+        <div class="admin-modal-heading-copy">
+          <span class="admin-modal-eyebrow" id="adminModalEyebrow">Administration</span>
+          <h2 id="adminModalTitle">Admin</h2>
+          <p id="adminModalDescription">Manage scanner configuration and operational records.</p>
+        </div>
+        <div class="admin-modal-heading-actions">
+          <span class="admin-modal-health-pill"><i aria-hidden="true"></i><span id="adminModalStatusText">Admin access</span></span>
+          <button id="adminModalClose" class="modal-close-x" type="button" aria-label="Close admin window">×</button>
+        </div>
+      </header>
+      <div class="admin-modal-context-strip" aria-label="Administration workspace context">
+        <span class="is-active"><i class="admin-context-icon workspace" aria-hidden="true"></i><b id="adminModalContextLabel">Management workspace</b></span>
+        <span><i class="admin-context-icon live" aria-hidden="true"></i>Live scanner data</span>
+        <span><i class="admin-context-icon audit" aria-hidden="true"></i>Changes are audited</span>
       </div>
       <div id="adminModalBody"></div>
     </section>
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260728-v151-static2"></script>
+  <script src="static/js/app.js?v=20260729-v163"></script>
 </body>
 </html>

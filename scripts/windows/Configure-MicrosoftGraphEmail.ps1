@@ -1,3 +1,4 @@
+# File: scripts/windows/Configure-MicrosoftGraphEmail.ps1
 param()
 
 $ErrorActionPreference = "Stop"

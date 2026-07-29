@@ -1,3 +1,4 @@
+# File: automation/sql_delivery_export/Initialize-DeliveryListSqlAutomation.ps1
 [CmdletBinding()]
 param(
     [string]$WorkingRoot = "C:\DeliveryListAutomation",

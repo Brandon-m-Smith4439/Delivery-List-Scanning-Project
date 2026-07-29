@@ -1,6 +1,217 @@
+# File: README_CHANGELOG.md
+
+## v163 - Modal Hidden State and Close Repair
+
+### Startup and close behavior
+
+- Fixed the shared Admin Control Center window being visible immediately when the web app loaded.
+- Restored the X button and backdrop close behavior by ensuring the modal-specific grid rules cannot override the native `hidden` attribute.
+- Applied the same hidden-state protection to the Operations window used by Individual Rack and Packing List History.
+- Cleared stale modal content after closing so a previously opened editor cannot remain painted or replace a supposedly closed permanent window.
+- Removed the Operations Control Center presentation class on close and synchronized `aria-hidden` state for both panels and backdrops.
+
+### Compatibility
+
+- Preserved every editor workflow, permission check, API request, unsaved manual-edit confirmation, rack operation, and database behavior.
+- No database migration or backend update is required.
+
+## v162 - Scan Typography and Control Center Layering Repair
+
+### Scan-row readability
+
+- Unified the Scanned pill label, date, time, separators, and station on one centered baseline with one readable font size.
+- Increased Flags, Route, Location, and Progress text from the overly compact v158 sizes while preserving the maintained column widths.
+- Corrected the missing semicolon in the Location width declaration so the browser consistently honors the complete fixed-width table contract.
+
+### GUI layering and contrast
+
+- Made the Administration Control Center header, context rail, and editor canvas explicit protected grid rows.
+- Applied the same layer ownership to Individual Rack and Packing List History Operations windows.
+- Prevented generic modal header rules from squeezing the status pill and close button into a narrow column.
+- Increased and protected the close controls, constrained long status labels, and forced readable high-contrast hero text.
+- Kept editor content beneath the header and context rail instead of allowing it to visually cover either surface.
+
+### Compatibility
+
+- Preserved every existing editor layout, event handler, permission check, API request, rack action, and scan record.
+- No database migration, backend update, or JavaScript replacement is required.
+
+## v161 - Scan Timestamp, Rack Status, and Rack Control Centers
+
+### Scan-page presentation
+
+- Condensed last-scan dates to month/day and times to a compact lowercase format such as `4:30pm` while preserving the full timestamp in hover text.
+- Reserved the in-row scan-pill space only in the Job Nr. cell so Order and Item remain vertically aligned with QTY, Dimensions, Customer, Flags, Route, Location, and Progress.
+- Added the active delivery-list date to the Scan panel title beside the stage name.
+
+### Rack status integrity
+
+- Removed the generic selected class from individual rack cards.
+- Kept selection state available through `aria-current` while preserving Open, Complete, On the Way, Received, and Empty visual formatting.
+
+### Rack GUI Control Centers
+
+- Added the Administration-style Control Center hero, live-status pill, context rail, guided canvas, and section-card treatment to Individual Rack and Packing List History windows.
+- Added dynamic rack context and status labels to the Individual Rack header.
+- Strengthened Edit Racks, Rack, and Rack Set Admin editor surfaces without changing their existing forms or event handlers.
+
+### Compatibility
+
+- Preserved existing API calls, permission checks, rack actions, packing-list snapshots, scan data, and database behavior.
+- No database migration or backend update is required.
+
+## v160 - Administration Control Center GUI System
+
+### Shared Admin window format
+
+- Rebuilt the shared Administration modal around the same structural design language as the Delivery Automation Control Center.
+- Added a descriptive navy hero, task-specific eyebrow, explanatory copy, live-status pill, and a workspace context rail.
+- Added maintained profiles for Delivery Lists, Delivery List Actions, Manual Edit, Users, Roles, Sessions, Stations, Customer Routes, Customer Emails, Lookups, Reject Settings, Bay Scanner Rules, Bay Auto Assigner, Racks, Rack Sets, and All Scans.
+
+### Editor consistency
+
+- Standardized the working canvas, section cards, headers, tables, search controls, forms, list rows, empty states, and command/footer areas.
+- Expanded data-heavy Admin editors while preserving responsive full-screen behavior on narrow displays.
+- Kept all existing editor-specific layouts and workflows instead of replacing them with one generic form.
+
+### Compatibility
+
+- Preserved all existing IDs, delegated event handlers, API calls, permission checks, unsaved-change protection, editor refreshes, and database behavior.
+- No database migration or backend update is required.
+
+
+## v159 - Admin Editors, Scan Panel, and Automation Compatibility
+
+### Page alignment and Scan panel
+
+- Moved the Home Delivery List Overview text away from the decorative header accent.
+- Aligned the Admin header, KPI cards, and dashboard sections to the same full-width grid edge.
+- Restored the main Scan panel's navy progress header after the v158 surface rule incorrectly treated it as a white content card.
+- Re-established distinct bordered cards for transportation, bay override, barcode entry, manual scan, manual assignment, and scan history.
+
+### Administration editor polish
+
+- Added a consistent purple Admin modal header, larger working canvas, refined backdrop surface, and stronger form/table hierarchy.
+- Applied the shared editor treatment to Delivery List Management, Manual Delivery List Edit, Roles & Permissions, User Access Management, Customer Routes, Customer Email Rules, Lookup Manager, Reject Reasons & Locations, Bay Scanner Rules, and Bay Auto Assigner.
+- Preserved all existing HTML IDs, event handlers, API requests, permissions, and editor workflows.
+
+### Automation compatibility
+
+- Added thin root-level `scanner_config.py` and `delivery_store.py` compatibility bridges for installed automation created before the v151 backend organization.
+- Both bridges re-export the maintained `backend.config` and `backend.store` implementations; no database or business rules are duplicated.
+- This resolves legacy scanner-root checks that reported the organized project was missing the old root module filenames.
+- No database migration is required.
+
+## v158 - Core Page Visual Polish and Scan Table Refinement
+
+### Scan table geometry
+
+- Reduced the in-row Last Scan pill so it ends at the Item column.
+- Condensed Flags, Route, and Location to smaller production-safe widths while keeping markers, route labels, and rack controls contained.
+- Reallocated the recovered width to Job Nr., Dimensions, and Customer.
+- Replaced the two-pixel table clearance workaround with an exact 100% column contract.
+- Removed the exposed white strip after Progress and removed the final cell's right border so the table meets the panel edge cleanly.
+
+### Cross-page visual polish
+
+- Added a shared professional hero treatment to Home, Scan, Racks, and Admin using each page's own accent color.
+- Refined page backgrounds, panel hierarchy, borders, radii, shadows, typography, section headings, controls, and hover/focus feedback.
+- Polished Home delivery progress, finder controls, list cards, and statistics surfaces.
+- Polished the Scan command area, filter/table surfaces, row groups, compact operational columns, and scanner cards.
+- Polished Rack set navigation, rack cards, detail panels, statuses, and management controls.
+- Polished Admin KPI cards, management panels, tables, forms, lists, and last-updated status.
+
+### Compatibility
+
+- No JavaScript, backend, API, database, permission, reject-management, scanning, rack, or bay behavior changed.
+- Advanced only the five changed stylesheet cache keys to `20260729-v158`; the unchanged JavaScript bundle remains on v157.
+
+## v157 - In-Row Scan Pill and Progress Column
+
+### Scan-page line presentation
+
+- Replaced the separate Last Scan ribbon with a small scan-information pill inside the normal line-item row.
+- Anchored the pill to the Job Nr. cell and allowed it to paint across Order, Item, QTY, Dimensions, and Customer without creating or resizing table columns.
+- Kept date, time, and station on one compact line with ellipsis protection for long station names.
+- Preserved QTY as a plain centered whole number.
+
+### Headers and width containment
+
+- Renamed the Scan table headers from Item Nr. to Item and Process State to Progress.
+- Rebalanced the fixed table contract to give Progress more room.
+- Reserved two physical pixels and one percentage point inside the table so the final Progress edge is not clipped by the list panel.
+- Kept Internal Reject and future supplemental ribbons contained within the maintained table width.
+- No backend, API, permission, database, reject-management, scan-history, rack, or bay behavior changed.
+- Advanced only the Scan stylesheet and application JavaScript cache keys to v157.
+
+## v156 - Scan Time Ribbon and Plain Quantity
+
+### Scan-page line presentation
+
+- Replaced the QTY pill with a plain centered integer while preserving scanned-versus-total information in the cell tooltip.
+- Removed the long `Scanned: date/time - station` line from the Job Nr. column.
+- Added a compact blue Last Scan ribbon above each scanned line item.
+- Displays the date, time, and station in one readable line rather than multiple narrow information cells.
+- Keeps the scan ribbon inside the same Job Nr.-through-Customer six-column span used by Internal Rejects.
+
+### Width safety and compatibility
+
+- Added one reusable detail-ribbon containment contract for scan-time, Internal Reject, and future warning/audit ribbons.
+- Supplemental ribbons cannot create new table columns, minimum widths, or horizontal overflow.
+- Preserved the v155 fixed percentage-based table contract, location containment, process wrapping, and flag containment.
+- No API, database, permission, reject-management, scanning, rack, or bay behavior changed.
+- Advanced only the Scan stylesheet and application JavaScript cache keys to v156.
+
+## v155 - Reject Ribbon Simplification and Scan Table Containment
+
+### Internal-reject ribbon
+
+- Removed Delivery Date from the Scan-page reject ribbon.
+- Removed the trailing event-count and investigation-note capsules.
+- Increased the remaining Reason, Machine / Location, Qty, Rejected By, and Incident typography.
+- Kept the ribbon limited to Job Nr. through Customer and allowed it to wrap responsively at narrower widths.
+
+### Scan table width safety
+
+- Replaced automatic table sizing with a maintained 100% percentage-based column contract.
+- Removed the hard 118-pixel minimum from the Location column.
+- Constrained long scan timestamps, process labels, flags, location selectors, badges, and ribbon content to their assigned columns.
+- Prevented current and future row-detail ribbons from enlarging the delivery-list panel and producing horizontal page scroll.
+
+### Compatibility
+
+- No backend, API, permission, database, or reject-history behavior changed.
+- Advanced only the Scan stylesheet and application JavaScript cache keys to v155.
+
+## v154 - Admin Reject Management and Scan Ribbon Polish
+
+### Admin-only reject management
+
+- Added Edit and Delete actions to each Reject Timeline incident for the built-in Admin role only.
+- Enforced the Admin role independently on the server for `/api/rejects/update` and `/api/rejects/delete`; UI visibility is not treated as authorization.
+- Edit Reject updates reason, machine/location, rejected quantity, incident date/time, and investigation notes while keeping the affected order/item identity and original creator immutable.
+- Delete Reject removes the selected reject event and recalculates cumulative line-item reject flags from remaining events.
+- Editing or deleting a reject intentionally does not replay, restore, or reverse the original scan, rack, bay, or process rollback.
+- Added append-only audit records for both edits and deletions, including the prior reject data and recalculated line summary.
+
+### Scan-page reject awareness
+
+- Rebuilt the internal-reject ribbon as a compact polished strip above the affected line item.
+- Limited the ribbon to the Job Nr. through Customer columns so Flags, Route, Location, and Process State retain their normal table alignment.
+- Added reason, machine/location, rejected quantity, rejected user, incident time, delivery date, event count, and investigation-note status.
+- Expanded the line-flags response with current reject event details and separated cumulative rejected-piece quantity from reject-event count.
+
+### Compatibility
+
+- No database migration is required.
+- Existing reject creation, scan reduction, rack removal, bay clearing, notifications, catalog management, and Reject Timeline filtering remain unchanged.
+- Advanced only the changed Rejects, Scan, and application JavaScript cache keys to v154.
+
 ## v151 - Project Structure Organization
 
 - Consolidated maintained browser behavior into `static\js\app.js`.
+- Moved Rejects page, reject workflow, timeline, and internal-reject
+  presentation rules from the global stylesheet into `static\css\rejects.css`.
 - Organized application services under `backend` and database ownership under
   `database` while retaining `server.py` as the root launcher.
 - Moved optional Docker and Azure App Service templates under `deployment`.

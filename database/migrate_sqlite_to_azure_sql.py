@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# File: database/migrate_sqlite_to_azure_sql.py
 """Validate and migrate Delivery List Scanner SQLite data to Azure SQL.
 
 The default mode is a preflight-only dry run. Supplying ``--execute`` performs

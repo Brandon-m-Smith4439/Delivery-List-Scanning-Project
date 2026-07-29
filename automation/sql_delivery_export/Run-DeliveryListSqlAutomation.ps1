@@ -1,3 +1,4 @@
+# File: automation/sql_delivery_export/Run-DeliveryListSqlAutomation.ps1
 [CmdletBinding()]
 param(
     [ValidateSet("RuntimeTest", "Test", "Incremental", "Full", "Custom", "FolderImport")]

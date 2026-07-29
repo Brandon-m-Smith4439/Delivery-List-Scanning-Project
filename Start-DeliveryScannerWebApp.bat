@@ -1,4 +1,5 @@
 @echo off
+rem File: Start-DeliveryScannerWebApp.bat
 setlocal
 
 rem Remove the downloaded-file security marker from the PowerShell launcher, then run it.

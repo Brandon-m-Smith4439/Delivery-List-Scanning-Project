@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# File: automation/crystal_delivery_export/import_delivery_folder.py
 """Import Crystal Report exports into the existing Delivery List Scanner store.
 
 This wrapper intentionally reuses backend/config.py and backend/store.py instead

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# File: automation/sql_delivery_export/publish_automation_notification.py
 """Publish exporter results through the scanner's existing notification system.
 
 v121 accepts a small JSON request file from PowerShell. This avoids Windows

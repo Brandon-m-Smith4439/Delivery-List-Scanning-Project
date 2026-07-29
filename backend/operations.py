@@ -1,3 +1,5 @@
+# File: backend/operations.py
+
 """Operational extensions for Delivery List Scanner v135.
 
 This module keeps newer workflows isolated from the large legacy store class while
@@ -91,25 +93,51 @@ class OperationsFeatureService:
         )
 
     def line_flags(self, list_id: str, username: str) -> dict[str, Any]:
-        """Return per-user update flags plus manual/reject metadata for one list."""
+        """Return per-user update flags plus the latest reject details for one list."""
         self._require_sqlite()
         clean_list_id = clean_text(list_id, 255)
         with self.store.connect() as con:
             user_id = self._user_id(con, username)
             rows = con.execute(
                 """
+                WITH reject_ranked AS (
+                    SELECT re.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY re.delivery_date, re.order_no, re.item_no
+                               ORDER BY re.rejected_at DESC, re.id DESC
+                           ) AS reject_rank,
+                           COUNT(*) OVER (
+                               PARTITION BY re.delivery_date, re.order_no, re.item_no
+                           ) AS reject_event_count,
+                           SUM(re.qty) OVER (
+                               PARTITION BY re.delivery_date, re.order_no, re.item_no
+                           ) AS reject_piece_count
+                    FROM reject_events re
+                )
                 SELECT li.id,
                        COALESCE(li.manual_only, 0) AS manual_only,
                        COALESCE(li.manual_source, '') AS manual_source,
-                       COALESCE(li.internal_reject_count, 0) AS internal_reject_count,
-                       COALESCE(li.last_reject_reason, '') AS last_reject_reason,
-                       COALESCE(li.last_reject_location, '') AS last_reject_location,
-                       COALESCE(li.last_rejected_at, '') AS last_rejected_at,
+                       COALESCE(rr.reject_piece_count, li.internal_reject_count, 0) AS internal_reject_count,
+                       COALESCE(rr.reject_event_count, 0) AS reject_event_count,
+                       COALESCE(rr.id, 0) AS last_reject_id,
+                       COALESCE(rr.qty, 0) AS last_reject_qty,
+                       COALESCE(rr.reason_label, li.last_reject_reason, '') AS last_reject_reason,
+                       COALESCE(rr.location_label, li.last_reject_location, '') AS last_reject_location,
+                       COALESCE(rr.rejected_at, li.last_rejected_at, '') AS last_rejected_at,
+                       COALESCE(rr.rejected_by, '') AS last_rejected_by,
+                       COALESCE(rr.notes, '') AS last_reject_notes,
+                       COALESCE(rr.delivery_date, dl.delivery_date, '') AS last_reject_delivery_date,
                        n.id AS notice_id,
                        n.change_type AS change_type,
                        n.created_at AS notice_created_at,
                        r.notice_id AS receipt_notice_id
                 FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                LEFT JOIN reject_ranked rr
+                  ON rr.delivery_date = dl.delivery_date
+                 AND rr.order_no = li.order_no
+                 AND rr.item_no = li.item_no
+                 AND rr.reject_rank = 1
                 LEFT JOIN line_update_notices n
                   ON n.line_item_id = li.id
                  AND n.list_id = li.list_id
@@ -133,9 +161,15 @@ class OperationsFeatureService:
                     "manualOnly": bool(row["manual_only"]),
                     "manualSource": str(row["manual_source"] or ""),
                     "internalRejectCount": int(row["internal_reject_count"] or 0),
+                    "rejectEventCount": int(row["reject_event_count"] or 0),
+                    "lastRejectId": int(row["last_reject_id"] or 0),
+                    "lastRejectQty": int(row["last_reject_qty"] or 0),
                     "lastRejectReason": str(row["last_reject_reason"] or ""),
                     "lastRejectLocation": str(row["last_reject_location"] or ""),
                     "lastRejectedAt": str(row["last_rejected_at"] or ""),
+                    "lastRejectedBy": str(row["last_rejected_by"] or ""),
+                    "lastRejectNotes": str(row["last_reject_notes"] or ""),
+                    "lastRejectDeliveryDate": str(row["last_reject_delivery_date"] or ""),
                     "userUpdateState": "",
                     "userUpdateNoticeIds": [],
                     "hasUnseenUpdate": False,
@@ -306,6 +340,170 @@ class OperationsFeatureService:
                 params,
             ).fetchall()
         return {"rejects": [dict(row) for row in rows]}
+
+    @staticmethod
+    def _normalized_reject_timestamp(value: Any) -> str:
+        text = clean_text(value, 64)
+        if not text:
+            raise ValueError("Reject date and time are required")
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("Reject date and time are invalid") from exc
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+    @staticmethod
+    def _sync_reject_line_summary(con: Any, delivery_date: str, order: str, item: str) -> dict[str, Any]:
+        events = con.execute(
+            """
+            SELECT id, qty, reason_label, location_label, rejected_at
+            FROM reject_events
+            WHERE delivery_date = ? AND order_no = ? AND item_no = ?
+            ORDER BY rejected_at DESC, id DESC
+            """,
+            (delivery_date, order, item),
+        ).fetchall()
+        total_qty = sum(max(as_int(row_value(event, "qty"), 0), 0) for event in events)
+        latest = events[0] if events else None
+        reason = str(row_value(latest, "reason_label", ""))
+        location = str(row_value(latest, "location_label", ""))
+        rejected_at = str(row_value(latest, "rejected_at", ""))
+        updated_at = utc_now()
+        con.execute(
+            """
+            UPDATE line_items
+            SET internal_reject_count = ?,
+                last_reject_reason = ?,
+                last_reject_location = ?,
+                last_rejected_at = ?,
+                updated_at_utc = ?
+            WHERE id IN (
+                SELECT li.id
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE dl.delivery_date = ? AND li.order_no = ? AND li.item_no = ?
+            )
+            """,
+            (total_qty, reason, location, rejected_at, updated_at, delivery_date, order, item),
+        )
+        return {
+            "eventCount": len(events),
+            "pieceCount": total_qty,
+            "latestRejectId": as_int(row_value(latest, "id"), 0),
+        }
+
+    def update_reject(self, data: dict[str, Any], username: str) -> dict[str, Any]:
+        """Edit reject reporting fields without replaying the original floor rollback."""
+        self._require_sqlite()
+        reject_id = as_int(data.get("id"), 0)
+        if reject_id <= 0:
+            raise ValueError("A reject record is required")
+        reason = clean_text(data.get("reason"), 120)
+        location = clean_text(data.get("location"), 120)
+        notes = clean_text(data.get("notes"), 500)
+        qty = max(1, as_int(data.get("qty"), 1))
+        rejected_at = self._normalized_reject_timestamp(data.get("rejectedAt"))
+        if not reason or not location:
+            raise ValueError("Reject reason and machine/location are required")
+
+        with self.store.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM reject_events WHERE id = ?", (reject_id,)).fetchone()
+            if not row:
+                raise ValueError("Reject record was not found")
+            before = dict(row)
+            max_row = con.execute(
+                """
+                SELECT MAX(li.qty) AS max_qty
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE dl.delivery_date = ? AND li.order_no = ? AND li.item_no = ?
+                """,
+                (str(row["delivery_date"]), str(row["order_no"]), str(row["item_no"])),
+            ).fetchone()
+            max_qty = max(as_int(row_value(max_row, "max_qty"), qty), 1)
+            if qty > max_qty:
+                raise ValueError(f"Reject quantity cannot be greater than the line quantity ({max_qty})")
+
+            con.execute(
+                """
+                UPDATE reject_events
+                SET qty = ?, reason_label = ?, location_label = ?, notes = ?, rejected_at = ?
+                WHERE id = ?
+                """,
+                (qty, reason, location, notes, rejected_at, reject_id),
+            )
+            summary = self._sync_reject_line_summary(
+                con,
+                str(row["delivery_date"]),
+                str(row["order_no"]),
+                str(row["item_no"]),
+            )
+            self._audit(
+                con,
+                "internal_reject",
+                str(reject_id),
+                "update_internal_reject",
+                username,
+                {
+                    "before": before,
+                    "after": {
+                        "qty": qty,
+                        "reason": reason,
+                        "location": location,
+                        "notes": notes,
+                        "rejectedAt": rejected_at,
+                    },
+                    "lineSummary": summary,
+                    "operationalRollbackChanged": False,
+                },
+            )
+            con.commit()
+        return {
+            "ok": True,
+            "message": f"Internal reject {reject_id} was updated. The original scan, rack, and bay rollback was not changed.",
+            **self.list_rejects(limit=1000),
+        }
+
+    def delete_reject(self, data: dict[str, Any], username: str) -> dict[str, Any]:
+        """Delete one reject record and recalculate flags without restoring old floor state."""
+        self._require_sqlite()
+        reject_id = as_int(data.get("id"), 0)
+        if reject_id <= 0:
+            raise ValueError("A reject record is required")
+        with self.store.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM reject_events WHERE id = ?", (reject_id,)).fetchone()
+            if not row:
+                raise ValueError("Reject record was not found")
+            deleted = dict(row)
+            con.execute("DELETE FROM reject_events WHERE id = ?", (reject_id,))
+            summary = self._sync_reject_line_summary(
+                con,
+                str(row["delivery_date"]),
+                str(row["order_no"]),
+                str(row["item_no"]),
+            )
+            self._audit(
+                con,
+                "internal_reject",
+                str(reject_id),
+                "delete_internal_reject",
+                username,
+                {
+                    "deleted": deleted,
+                    "lineSummary": summary,
+                    "operationalRollbackRestored": False,
+                },
+            )
+            con.commit()
+        return {
+            "ok": True,
+            "message": f"Internal reject {reject_id} was deleted. Historical scan, rack, and bay changes were left unchanged.",
+            **self.list_rejects(limit=1000),
+        }
 
     def create_reject(self, data: dict[str, Any], username: str) -> dict[str, Any]:
         """Log an internal reject and roll the rejected piece(s) back one process pass."""

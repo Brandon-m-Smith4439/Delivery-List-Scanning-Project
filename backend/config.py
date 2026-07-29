@@ -1,3 +1,4 @@
+# File: backend/config.py
 """Configuration for the delivery-list scanner pilot.
 
 The frontend should call relative API paths. Host names, ports, database paths,

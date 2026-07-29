@@ -1,3 +1,4 @@
+# File: database/migrations.py
 """Numbered SQLite migrations and verified pre-upgrade backup support."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+/* File: static/js/app.js */
 /*
   Delivery List Scanner UI
   ------------------------
@@ -218,6 +219,7 @@ const state = {
   pendingUpdateDatesRequestId: 0,
   rejectCatalog: { reasons: [], locations: [] },
   rejectHistory: [],
+  rejectHistoryRequestId: 0,
   rejectMatches: [],
   rejectLogOpening: false,
   rejectMatchRequestId: 0,
@@ -747,14 +749,19 @@ const els = {
 
   rejectsPage: document.getElementById("rejectsPage"),
   rejectHistory: document.getElementById("rejectHistory"),
+  rejectTimelineCount: document.getElementById("rejectTimelineCount"),
   rejectSearchInput: document.getElementById("rejectSearchInput"),
+  rejectFiltersBtn: document.getElementById("rejectFiltersBtn"),
+  rejectFilterCount: document.getElementById("rejectFilterCount"),
+  rejectFilterPanel: document.getElementById("rejectFilterPanel"),
   rejectDatePreset: document.getElementById("rejectDatePreset"),
   rejectDateFrom: document.getElementById("rejectDateFrom"),
   rejectDateTo: document.getElementById("rejectDateTo"),
   rejectLocationFilter: document.getElementById("rejectLocationFilter"),
+  rejectReasonFilter: document.getElementById("rejectReasonFilter"),
+  rejectUserFilter: document.getElementById("rejectUserFilter"),
   rejectSummaryBar: document.getElementById("rejectSummaryBar"),
   rejectClearFiltersBtn: document.getElementById("rejectClearFiltersBtn"),
-  rejectRefreshBtn: document.getElementById("rejectRefreshBtn"),
   rejectLogOpenBtn: document.getElementById("rejectLogOpenBtn"),
 
   bayMapPage: document.getElementById("bayMapPage"),
@@ -892,12 +899,19 @@ const els = {
   adminModal: document.getElementById("adminModal"),
   adminModalBackdrop: document.getElementById("adminModalBackdrop"),
   adminModalTitle: document.getElementById("adminModalTitle"),
+  adminModalEyebrow: document.getElementById("adminModalEyebrow"),
+  adminModalDescription: document.getElementById("adminModalDescription"),
+  adminModalStatusText: document.getElementById("adminModalStatusText"),
+  adminModalContextLabel: document.getElementById("adminModalContextLabel"),
   adminModalBody: document.getElementById("adminModalBody"),
   adminModalClose: document.getElementById("adminModalClose"),
   operationsModal: document.getElementById("operationsModal"),
   operationsModalBackdrop: document.getElementById("operationsModalBackdrop"),
   operationsModalTitle: document.getElementById("operationsModalTitle"),
   operationsModalEyebrow: document.getElementById("operationsModalEyebrow"),
+  operationsModalDescription: document.getElementById("operationsModalDescription"),
+  operationsModalStatusText: document.getElementById("operationsModalStatusText"),
+  operationsModalContextLabel: document.getElementById("operationsModalContextLabel"),
   operationsModalBody: document.getElementById("operationsModalBody"),
   operationsModalClose: document.getElementById("operationsModalClose"),
   folderImportBtn: document.getElementById("folderImportBtn"),
@@ -991,6 +1005,7 @@ const SPANISH_UI_TEXT = new Map([
   ["Job Nr.", "Num. de trabajo"],
   ["Order Nr.", "Num. de orden"],
   ["Item Nr.", "Num. de articulo"],
+  ["Item", "Articulo"],
   ["Qty.", "Cant."],
   ["Qty", "Cant."],
   ["Stage completion", "Finalización de etapa"],
@@ -1000,6 +1015,7 @@ const SPANISH_UI_TEXT = new Map([
   ["Customer", "Cliente"],
   ["Flags", "Indicadores"],
   ["Process State", "Estado del proceso"],
+  ["Progress", "Progreso"],
   ["Transportation Method", "Metodo de transporte"],
   ["Complete Rack", "Completar rack"],
   ["Complete", "Completar"],
@@ -3552,6 +3568,26 @@ function formatDateTime(value) {
 }
 
 /**
+ * Purpose: Split one scan timestamp into compact date and time labels for line-detail ribbons.
+ * Effects: Performs an in-memory calculation without changing shared state.
+ * Flow: Parses the stored timestamp once and returns safe display text for the Scan table.
+ */
+function formatScanDateTimeParts(value) {
+  if (!value) return { date: "Date not recorded", time: "Time not recorded" };
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return { date: String(value), time: "" };
+  }
+  return {
+    date: `${parsed.getMonth() + 1}/${parsed.getDate()}`,
+    time: parsed
+      .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      .replace(/\s+/g, "")
+      .toLowerCase(),
+  };
+}
+
+/**
  * Purpose: Run the today key workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
@@ -3803,6 +3839,11 @@ function hasPermission(permission) {
  */
 function hasAnyPermission(permissions) {
   return permissions.some((permission) => hasPermission(permission));
+}
+
+function isAdminUser() {
+  if (!state.backend) return false;
+  return (state.user?.roles || []).some((role) => String(role || "").trim().toLowerCase() === "admin");
 }
 
 /**
@@ -4563,9 +4604,15 @@ function applyOperationalLineFlags(payload, listId = state.activeListId) {
       manualOnly: Boolean(current.manualOnly),
       manualSource: String(current.manualSource || ""),
       internalRejectCount: Number(current.internalRejectCount || 0),
+      rejectEventCount: Number(current.rejectEventCount || 0),
+      lastRejectId: Number(current.lastRejectId || 0),
+      lastRejectQty: Number(current.lastRejectQty || 0),
       lastRejectReason: String(current.lastRejectReason || ""),
       lastRejectLocation: String(current.lastRejectLocation || ""),
       lastRejectedAt: String(current.lastRejectedAt || ""),
+      lastRejectedBy: String(current.lastRejectedBy || ""),
+      lastRejectNotes: String(current.lastRejectNotes || ""),
+      lastRejectDeliveryDate: String(current.lastRejectDeliveryDate || ""),
       hasUnseenUpdate: Boolean(current.hasUnseenUpdate),
       userUpdateState: String(current.userUpdateState || ""),
       userUpdateNoticeIds: Array.isArray(current.userUpdateNoticeIds) ? current.userUpdateNoticeIds.slice() : [],
@@ -5831,52 +5878,69 @@ function renderItemRow(item) {
     : "";
   const location = locationLabel(item);
   const locationHtml = rackLocationDropdown(item, location);
-  const rejectCount = Number(item.internalRejectCount || 0);
+  const rejectPieceCount = Number(item.internalRejectCount || 0);
 
   const markers = [
     isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
     isRushItem(item) ? '<span class="row-marker rush-marker">Rush</span>' : "",
-    rejectCount > 0 ? '<span class="row-marker internal-reject-marker">IR</span>' : "",
+    rejectPieceCount > 0 ? '<span class="row-marker internal-reject-marker">IR</span>' : "",
     item.manualOnly ? '<span class="row-marker manual-only-marker">Manual scan only</span>' : "",
   ].filter(Boolean).join("");
 
   const rowError = hasScanError(item);
   const processClass = rowError ? "error" : status;
   const processText = rowError ? item.errorReason || item.lastError || "Scan issue" : renderProcessState(item);
-  const lastScanNote = item.lastScannedAt
-    ? `<span class="last-scan-note">Scanned: ${escapeHtml(formatDateTime(item.lastScannedAt))}${item.lastScannedStation ? ` - ${escapeHtml(item.lastScannedStation)}` : ""}</span>`
+  const scanTimestamp = formatScanDateTimeParts(item.lastScannedAt);
+  const scanStation = String(item.lastScannedStation || "").trim();
+  const displayQty = Math.max(0, Math.trunc(Number(item.qty || 0)));
+  const scanPillTitle = item.lastScannedAt
+    ? `Last scanned ${formatDateTime(item.lastScannedAt)}${scanStation ? ` at ${scanStation}` : ""}`
+    : "";
+  const scanTimePill = item.lastScannedAt
+    ? `<span class="last-scan-pill-v157" title="${escapeHtml(scanPillTitle)}">
+        <span class="last-scan-pill-icon-v157" aria-hidden="true">&#10003;</span>
+        <span class="last-scan-pill-label-v157">Scanned</span>
+        <b>${escapeHtml(scanTimestamp.date)}</b>
+        ${scanTimestamp.time ? `<span class="last-scan-pill-divider-v157" aria-hidden="true">at</span><b>${escapeHtml(scanTimestamp.time)}</b>` : ""}
+        ${scanStation ? `<span class="last-scan-pill-divider-v157" aria-hidden="true">&bull;</span><em>${escapeHtml(scanStation)}</em>` : ""}
+      </span>`
     : "";
   const rejectReason = item.lastRejectReason || "Internal reject";
   const rejectLocation = item.lastRejectLocation || "Unknown process location";
   const rejectTime = item.lastRejectedAt ? formatDateTime(item.lastRejectedAt) : "Time not available";
-  const rejectIncidentRow = rejectCount > 0
-    ? `<tr class="internal-reject-detail-row" data-reject-detail-for="${escapeHtml(item.id)}">
-        <td colspan="10">
-          <div class="internal-reject-incident-strip">
-            <span class="internal-reject-incident-badge">IR</span>
-            <span><small>Internal reject reason</small><strong>${escapeHtml(rejectReason)}</strong></span>
-            <span><small>Broke at / machine</small><strong>${escapeHtml(rejectLocation)}</strong></span>
-            <span><small>Rejected</small><strong>${escapeHtml(rejectTime)}</strong></span>
-            <span class="internal-reject-incident-count">${escapeHtml(rejectCount)} event${rejectCount === 1 ? "" : "s"}</span>
+  const rejectQty = Number(item.lastRejectQty || rejectPieceCount || 0);
+  const rejectedBy = item.lastRejectedBy || "System";
+  const rejectIncidentRow = rejectPieceCount > 0
+    ? `<tr class="internal-reject-detail-row-v154" data-reject-detail-for="${escapeHtml(item.id)}" data-line-detail-ribbon="reject">
+        <td colspan="6">
+          <div class="internal-reject-incident-strip-v154 line-detail-strip-v156">
+            <span class="internal-reject-incident-badge-v154">IR</span>
+            <strong class="internal-reject-incident-title-v154">Internal Reject</strong>
+            <span><small>Reason</small><b>${escapeHtml(rejectReason)}</b></span>
+            <span><small>Machine / location</small><b>${escapeHtml(rejectLocation)}</b></span>
+            <span><small>Qty</small><b>${escapeHtml(rejectQty || rejectPieceCount)} pc${rejectQty === 1 ? "" : "s"}</b></span>
+            <span><small>Rejected by</small><b>${escapeHtml(rejectedBy)}</b></span>
+            <span><small>Incident</small><b>${escapeHtml(rejectTime)}</b></span>
           </div>
         </td>
+        <td class="internal-reject-detail-tail-v154" colspan="4" aria-hidden="true"></td>
       </tr>`
     : "";
 
   return `
-    <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectCount > 0 ? "has-internal-reject" : ""}" data-id="${escapeHtml(item.id)}">
-      <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span>${lastScanNote}</td>
+    ${rejectIncidentRow}
+    <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectPieceCount > 0 ? "has-internal-reject" : ""} ${item.lastScannedAt ? "has-scan-time-pill-v157" : ""}" data-id="${escapeHtml(item.id)}">
+      <td class="job-cell-v157"><span class="job-copy-v157"><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span></span>${scanTimePill}</td>
       <td>${escapeHtml(item.order)}</td>
       <td>${escapeHtml(item.item)}</td>
-      <td><span class="qty-pill ${status}" title="${escapeHtml(item.scanned)} scanned of ${escapeHtml(item.qty)}">${escapeHtml(item.qty)}</span></td>
+      <td class="qty-cell" title="${escapeHtml(item.scanned)} scanned of ${escapeHtml(displayQty)}"><span class="qty-value-v156">${escapeHtml(displayQty)}</span></td>
       <td>${escapeHtml(item.dimensions)}</td>
       <td>${escapeHtml(item.customer)}</td>
       <td>${markers}</td>
       <td>${routeTag}</td>
       <td class="location-cell">${locationHtml}</td>
       <td><span class="process-pill ${processClass}">${escapeHtml(processText)}</span></td>
-    </tr>
-    ${rejectIncidentRow}`;
+    </tr>`;
 }
 
 /**
@@ -6478,8 +6542,9 @@ function renderRacksPage() {
 
     return `
       <article
-        class="rack-board-card ${rackVisualClass(rack)} ${selected ? "is-selected" : ""}"
+        class="rack-board-card ${rackVisualClass(rack)}"
         data-rack-select="${escapeHtml(rack.code)}"
+        aria-current="${selected ? "true" : "false"}"
         tabindex="0"
         role="button"
         aria-label="View ${escapeHtml(isTruck ? "Truck" : rack.code)} details"
@@ -7627,7 +7692,7 @@ function renderMeta() {
   const dateText = formatDisplayDate(state.meta.deliveryDate);
   if (els.pageTitle) els.pageTitle.textContent = `Delivery List for ${dateText}`;
   if (els.stageSubtitle) els.stageSubtitle.textContent = state.meta.stage;
-  if (els.stageHeading) els.stageHeading.textContent = state.meta.stage;
+  if (els.stageHeading) els.stageHeading.textContent = dateText ? `${state.meta.stage} • ${dateText}` : state.meta.stage;
   if (els.scannerName) els.scannerName.textContent = state.meta.scanner;
   if (els.backendStatus) {
     els.backendStatus.textContent = state.backend ? "SQLite live" : "Local demo";
@@ -9492,6 +9557,7 @@ function showPage(page) {
   if (page === "home") renderHome();
   if (page === "scan") renderScanPage();
   if (page === "racks") refreshRacksPage().catch((error) => showInlineError(error.message, true));
+  // Reject history is refreshed on every page entry, replacing the old manual Refresh button.
   if (page === "rejects") refreshRejectPage().catch((error) => showInlineError(error.message, true));
   if (page === "bays") {
     if (pageChanged) els.bayFlowPanel?.classList.add("is-entering");
@@ -16369,6 +16435,170 @@ function renderAdminDeliveryLists() {
   if (!state.adminTodayImportLoaded) void refreshAdminTodayImportRuns({ render: true });
 }
 
+const ADMIN_MODAL_PROFILES = {
+  deliveryLists: {
+    title: "All Delivery Lists",
+    eyebrow: "Delivery List Management",
+    description: "Search active delivery dates, review stage progress, and open the maintained edit, reset, or delete actions.",
+    context: "Delivery list workspace",
+    status: "Live delivery data",
+    group: "records",
+  },
+  deliveryActions: {
+    title: "Delivery List Actions",
+    eyebrow: "Delivery List Management",
+    description: "Review delivery-list records and perform controlled list-level maintenance from one guided workspace.",
+    context: "List maintenance",
+    status: "Admin controlled",
+    group: "records",
+  },
+  manualEdit: {
+    title: "Manual Delivery List Edit",
+    eyebrow: "Delivery List Management",
+    description: "Locate a list, review its line items, and apply intentional manual corrections without changing unrelated stages.",
+    context: "Line-item editor",
+    status: "Unsaved changes protected",
+    group: "records",
+  },
+  users: {
+    title: "User Access Management",
+    eyebrow: "Access Control",
+    description: "Create accounts, review access, manage passwords, and maintain active user status across the scanner.",
+    context: "User workspace",
+    status: "Admin access",
+    group: "access",
+  },
+  roles: {
+    title: "Roles & Permissions",
+    eyebrow: "Access Control",
+    description: "Build purpose-specific roles and control exactly which scanner capabilities each role can use.",
+    context: "Permission workspace",
+    status: "Security settings",
+    group: "access",
+  },
+  sessions: {
+    title: "Active Sessions",
+    eyebrow: "Security & Activity",
+    description: "Review currently active scanner sessions, assigned stations, and recent user activity.",
+    context: "Session review",
+    status: "Live activity",
+    group: "access",
+  },
+  stations: {
+    title: "Stations",
+    eyebrow: "Scanner Configuration",
+    description: "Maintain the station names used for scan attribution, access rules, and operational reporting.",
+    context: "Station manager",
+    status: "Shared configuration",
+    group: "configuration",
+  },
+  customerRoutes: {
+    title: "Edit Customer Routes",
+    eyebrow: "Routing Configuration",
+    description: "Maintain customer matching rules, route destinations, and DTC address requirements in one controlled editor.",
+    context: "Route rule workspace",
+    status: "Routing authority",
+    group: "routing",
+  },
+  customerEmails: {
+    title: "Customer Email Rules",
+    eyebrow: "Customer Communications",
+    description: "Manage customer recipients, global CC addresses, test delivery, and retained email drafts.",
+    context: "Email workspace",
+    status: "Server-side credentials",
+    group: "communications",
+  },
+  lookups: {
+    title: "Lookup Manager",
+    eyebrow: "Data Standards",
+    description: "Maintain the approved product, route, and process values used by manual delivery-list editing.",
+    context: "Lookup workspace",
+    status: "Shared choices",
+    group: "configuration",
+  },
+  rejectSettings: {
+    title: "Reject Reasons & Locations",
+    eyebrow: "Quality Control",
+    description: "Maintain the approved reject reasons and break locations used by Internal Reject Tracking.",
+    context: "Reject settings",
+    status: "Quality data",
+    group: "quality",
+  },
+  bayScannerRules: {
+    title: "Bay Scanner Rules",
+    eyebrow: "Bay Operations",
+    description: "Control manual and barcode-based bay classification rules while preserving the maintained scan workflow.",
+    context: "Rule workspace",
+    status: "Indian Trail rules",
+    group: "bay",
+  },
+  bayAutoAssigner: {
+    title: "Bay Auto Assigner",
+    eyebrow: "Bay Operations",
+    description: "Tune bay classification thresholds and choose which glass categories require intentional manual assignment.",
+    context: "Auto-assignment settings",
+    status: "Preassignment rules",
+    group: "bay",
+  },
+  racks: {
+    title: "Edit Racks",
+    eyebrow: "Rack Configuration",
+    description: "Manage rack sets, rack identities, display order, and maintained rack availability from one workspace.",
+    context: "Rack manager",
+    status: "Shared rack layout",
+    group: "racks",
+  },
+  rackForm: {
+    title: "Rack",
+    eyebrow: "Rack Configuration",
+    description: "Create or update one rack while preserving its maintained set and operational identity.",
+    context: "Rack editor",
+    status: "Rack configuration",
+    group: "racks",
+  },
+  rackSetForm: {
+    title: "Rack Set",
+    eyebrow: "Rack Configuration",
+    description: "Create or update a rack grouping used by the Rack Overview workspace.",
+    context: "Rack-set editor",
+    status: "Rack configuration",
+    group: "racks",
+  },
+  recentScans: {
+    title: "All Scans",
+    eyebrow: "Scan Audit",
+    description: "Review recent scan activity, operational outcomes, and maintained location-correction controls.",
+    context: "Scan history",
+    status: "Live audit data",
+    group: "records",
+  },
+};
+
+function adminModalProfile(kind, options = null) {
+  const fallback = {
+    title: "Admin",
+    eyebrow: "Administration",
+    description: "Manage scanner configuration and operational records from one controlled workspace.",
+    context: "Management workspace",
+    status: "Admin access",
+    group: "configuration",
+  };
+  const profile = { ...fallback, ...(ADMIN_MODAL_PROFILES[kind] || {}) };
+  if (options?.title) profile.title = options.title;
+  return profile;
+}
+
+function applyAdminModalProfile(kind, options = null) {
+  const profile = adminModalProfile(kind, options);
+  if (els.adminModalTitle) els.adminModalTitle.textContent = profile.title;
+  if (els.adminModalEyebrow) els.adminModalEyebrow.textContent = profile.eyebrow;
+  if (els.adminModalDescription) els.adminModalDescription.textContent = profile.description;
+  if (els.adminModalContextLabel) els.adminModalContextLabel.textContent = profile.context;
+  if (els.adminModalStatusText) els.adminModalStatusText.textContent = profile.status;
+  if (els.adminModal) els.adminModal.dataset.group = profile.group;
+  return profile;
+}
+
 /**
  * Purpose: Open the open admin modal workflow using the existing shared UI state.
  * Effects: Updates visible dom state.
@@ -16379,26 +16609,7 @@ function openAdminModal(kind, options = null) {
   resetRolePermissionUiSession();
   }
   if (!els.adminModal || !els.adminModalBody || !els.adminModalTitle) return;
-  const titleMap = {
-    deliveryLists: "All Delivery Lists",
-    deliveryActions: "Delivery List Actions",
-    users: "User Access Management",
-    roles: "Roles & Permissions",
-    sessions: "Active Sessions",
-    stations: "Stations",
-    customerRoutes: "Edit Customer Routes",
-    customerEmails: "Customer Email Rules",
-    bayScannerRules: "Bay Scanner Rules",
-    bayAutoAssigner: "Bay Auto Assigner",
-    manualEdit: "Manual Delivery List Edit",
-    lookups: "Lookup Manager",
-    rackForm: "Rack",
-    rackSetForm: "Rack Set",
-    racks: "Edit Racks",
-    recentScans: "All Scans",
-    rejectSettings: "Reject Reasons & Locations",
-  };
-  els.adminModalTitle.textContent = options?.title || titleMap[kind] || "Admin";
+  applyAdminModalProfile(kind, options);
   els.adminModal.dataset.kind = kind;
   els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
   if (kind === "lookups") {
@@ -16409,7 +16620,11 @@ function openAdminModal(kind, options = null) {
     wireUserManagerControls();
   }
   els.adminModal.hidden = false;
-  if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = false;
+  els.adminModal.setAttribute("aria-hidden", "false");
+  if (els.adminModalBackdrop) {
+    els.adminModalBackdrop.hidden = false;
+    els.adminModalBackdrop.setAttribute("aria-hidden", "false");
+  }
   updateModalScrollLock();
   if (kind === "roles" && (!state.adminRoles.length || !state.allPermissions.length) && hasPermission("manage_roles")) {
     fetchJson("/api/admin/roles")
@@ -16446,9 +16661,15 @@ async function closeAdminModal() {
 
   if (els.adminModal) {
     els.adminModal.hidden = true;
+    els.adminModal.setAttribute("aria-hidden", "true");
     delete els.adminModal.dataset.kind;
+    delete els.adminModal.dataset.group;
   }
-  if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = true;
+  if (els.adminModalBackdrop) {
+    els.adminModalBackdrop.hidden = true;
+    els.adminModalBackdrop.setAttribute("aria-hidden", "true");
+  }
+  if (els.adminModalBody) els.adminModalBody.replaceChildren();
   updateModalScrollLock();
   return true;
 }
@@ -21870,25 +22091,87 @@ function exportStaticCsv() {
    instead of appending page-specific override blocks elsewhere in the file.
    -------------------------------------------------------------------------- */
 
-function openOperationsModal({ kind = "operations", eyebrow = "Operations", title = "Operations", body = "" } = {}) {
+const OPERATIONS_MODAL_PROFILES = {
+  "rack-details": {
+    controlCenter: true,
+    eyebrow: "Rack Operations",
+    description: "Review assigned pieces, current rack status, packing actions, and controlled rack recovery from one live workspace.",
+    context: "Individual rack workspace",
+    status: "Live rack data",
+    group: "racks",
+  },
+  "packing-history": {
+    controlCenter: true,
+    eyebrow: "Rack Records",
+    description: "Search immutable packing-list snapshots and reopen the exact rack contents captured at print time.",
+    context: "Packing history workspace",
+    status: "Audited snapshots",
+    group: "racks",
+  },
+};
+
+function applyOperationsModalProfile(kind, options = {}) {
+  const profile = { ...(OPERATIONS_MODAL_PROFILES[kind] || {}), ...options };
+  const controlCenter = Boolean(profile.controlCenter);
+  if (els.operationsModal) {
+    els.operationsModal.dataset.kind = kind;
+    els.operationsModal.dataset.group = profile.group || "operations";
+    els.operationsModal.classList.toggle("is-control-center", controlCenter);
+  }
+  if (els.operationsModalEyebrow) els.operationsModalEyebrow.textContent = profile.eyebrow || "Operations";
+  if (els.operationsModalTitle) els.operationsModalTitle.textContent = profile.title || "Operations";
+  if (els.operationsModalDescription) els.operationsModalDescription.textContent = profile.description || "";
+  if (els.operationsModalStatusText) els.operationsModalStatusText.textContent = profile.status || "Live operations";
+  if (els.operationsModalContextLabel) els.operationsModalContextLabel.textContent = profile.context || "Operations workspace";
+  return profile;
+}
+
+function openOperationsModal({
+  kind = "operations",
+  eyebrow = "",
+  title = "",
+  description = "",
+  context = "",
+  status = "",
+  group = "",
+  body = "",
+} = {}) {
   if (!els.operationsModal || !els.operationsModalBody) return;
   state.operationsModalKind = kind;
-  els.operationsModal.dataset.kind = kind;
-  if (els.operationsModalEyebrow) els.operationsModalEyebrow.textContent = eyebrow;
-  if (els.operationsModalTitle) els.operationsModalTitle.textContent = title;
+  applyOperationsModalProfile(kind, {
+    ...(eyebrow ? { eyebrow } : {}),
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(context ? { context } : {}),
+    ...(status ? { status } : {}),
+    ...(group ? { group } : {}),
+  });
   els.operationsModalBody.innerHTML = body;
   els.operationsModal.hidden = false;
-  if (els.operationsModalBackdrop) els.operationsModalBackdrop.hidden = false;
+  els.operationsModal.setAttribute("aria-hidden", "false");
+  if (els.operationsModalBackdrop) {
+    els.operationsModalBackdrop.hidden = false;
+    els.operationsModalBackdrop.setAttribute("aria-hidden", "false");
+  }
   updateModalScrollLock();
 }
 
 function closeOperationsModal() {
   state.operationsModalKind = "";
   state.rackMoveItemId = "";
-  if (els.operationsModal) delete els.operationsModal.dataset.kind;
+  if (els.operationsModal) {
+    delete els.operationsModal.dataset.kind;
+    delete els.operationsModal.dataset.group;
+    els.operationsModal.classList.remove("is-control-center");
+    els.operationsModal.hidden = true;
+    els.operationsModal.setAttribute("aria-hidden", "true");
+  }
   state.rejectLogOpening = false;
-  if (els.operationsModal) els.operationsModal.hidden = true;
-  if (els.operationsModalBackdrop) els.operationsModalBackdrop.hidden = true;
+  if (els.operationsModalBackdrop) {
+    els.operationsModalBackdrop.hidden = true;
+    els.operationsModalBackdrop.setAttribute("aria-hidden", "true");
+  }
+  if (els.operationsModalBody) els.operationsModalBody.replaceChildren();
   updateModalScrollLock();
 }
 
@@ -21988,6 +22271,8 @@ function openRackDetailsModal(rackCode) {
     kind: "rack-details",
     eyebrow: "Rack Overview",
     title: rack.code === "T" ? "Truck / No Rack" : `Rack ${rack.code}`,
+    context: rack.code === "T" ? "Truck loading workspace" : `${rack.type || "Rack"} workspace`,
+    status: rackStatusLabel(rack),
     body: rackDetailsModalHtml(rack),
   });
 }
@@ -21997,6 +22282,11 @@ async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode)
   renderRacksPage();
   const rack = state.racks.find((item) => String(item.code) === String(rackCode));
   if (rack && state.operationsModalKind === "rack-details") {
+    applyOperationsModalProfile("rack-details", {
+      title: rack.code === "T" ? "Truck / No Rack" : `Rack ${rack.code}`,
+      context: rack.code === "T" ? "Truck loading workspace" : `${rack.type || "Rack"} workspace`,
+      status: rackStatusLabel(rack),
+    });
     els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
   } else if (!rack) {
     closeOperationsModal();
@@ -22070,12 +22360,18 @@ function rejectFilterDescription() {
   const query = els.rejectSearchInput?.value.trim() || "";
   const dateFrom = els.rejectDateFrom?.value || "";
   const dateTo = els.rejectDateTo?.value || "";
+  const location = rejectSelectedLocation();
+  const reason = rejectSelectedReason();
+  const rejectedBy = rejectSelectedUser();
   const parts = [];
   if (dateFrom && dateTo && dateFrom === dateTo) parts.push(`rejected on ${formatDisplayDate(dateFrom)}`);
   else if (dateFrom && dateTo) parts.push(`rejected from ${formatDisplayDate(dateFrom)} through ${formatDisplayDate(dateTo)}`);
   else if (dateFrom) parts.push(`rejected from ${formatDisplayDate(dateFrom)}`);
   else if (dateTo) parts.push(`rejected through ${formatDisplayDate(dateTo)}`);
   else parts.push("all rejected dates");
+  if (location) parts.push(`at ${location}`);
+  if (reason) parts.push(`for ${reason}`);
+  if (rejectedBy) parts.push(`recorded by ${rejectedBy}`);
   if (query) parts.push(`matching “${query}”`);
   return parts.join(" · ");
 }
@@ -22093,6 +22389,7 @@ function setRejectDatePreset(value, { refresh = true } = {}) {
   if (!els.rejectDateFrom || !els.rejectDateTo) return;
   if (preset === "custom") {
     syncRejectDateLimits();
+    syncRejectFilterButton();
     if (refresh) els.rejectDateFrom.focus();
     return;
   }
@@ -22110,12 +22407,39 @@ function setRejectDatePreset(value, { refresh = true } = {}) {
     els.rejectDateTo.value = "";
   }
   syncRejectDateLimits();
+  syncRejectFilterButton();
   if (refresh) refreshRejectPage().catch((error) => showInlineError(error.message, true));
 }
 
 function markRejectDateRangeCustom() {
   syncRejectDateLimits();
   if (els.rejectDatePreset) els.rejectDatePreset.value = "custom";
+  syncRejectFilterButton();
+}
+
+function rejectActiveFilterCount() {
+  return [
+    els.rejectDateFrom?.value,
+    els.rejectDateTo?.value,
+    rejectSelectedLocation(),
+    rejectSelectedReason(),
+    rejectSelectedUser(),
+  ].filter(Boolean).length;
+}
+
+function syncRejectFilterButton() {
+  const count = rejectActiveFilterCount();
+  if (els.rejectFilterCount) {
+    els.rejectFilterCount.textContent = String(count);
+    els.rejectFilterCount.hidden = count === 0;
+  }
+  els.rejectFiltersBtn?.classList.toggle("is-active", count > 0);
+}
+
+function setRejectFilterPanelOpen(open) {
+  const isOpen = Boolean(open);
+  if (els.rejectFilterPanel) els.rejectFilterPanel.hidden = !isOpen;
+  if (els.rejectFiltersBtn) els.rejectFiltersBtn.setAttribute("aria-expanded", String(isOpen));
 }
 
 function clearRejectFilters() {
@@ -22125,6 +22449,10 @@ function clearRejectFilters() {
   }
   setRejectDatePreset("all", { refresh: false });
   if (els.rejectLocationFilter) els.rejectLocationFilter.value = "";
+  if (els.rejectReasonFilter) els.rejectReasonFilter.value = "";
+  if (els.rejectUserFilter) els.rejectUserFilter.value = "";
+  setRejectFilterPanelOpen(false);
+  syncRejectFilterButton();
   renderRejectPage();
   refreshRejectPage().catch((error) => showInlineError(error.message, true));
 }
@@ -22214,52 +22542,95 @@ function rejectSelectedLocation() {
   return String(els.rejectLocationFilter?.value || "").trim();
 }
 
-function rejectRowsForView(rejects = state.rejectHistory) {
-  const location = rejectSelectedLocation();
-  if (!location) return Array.isArray(rejects) ? rejects.slice() : [];
-  return (Array.isArray(rejects) ? rejects : []).filter((row) => String(row.location_label || "") === location);
+function rejectSelectedReason() {
+  return String(els.rejectReasonFilter?.value || "").trim();
 }
 
-function updateRejectLocationOptions(rejects = state.rejectHistory) {
-  if (!els.rejectLocationFilter) return;
-  const selected = rejectSelectedLocation();
-  const locations = [...new Set((Array.isArray(rejects) ? rejects : [])
-    .map((row) => String(row.location_label || "").trim())
-    .filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  els.rejectLocationFilter.innerHTML = `<option value="">All locations</option>${locations.map((location) => `<option value="${escapeHtml(location)}">${escapeHtml(location)}</option>`).join("")}`;
-  els.rejectLocationFilter.value = locations.includes(selected) ? selected : "";
+function rejectSelectedUser() {
+  return String(els.rejectUserFilter?.value || "").trim();
+}
+
+function rejectRowsForView(rejects = state.rejectHistory) {
+  const location = rejectSelectedLocation();
+  const reason = rejectSelectedReason();
+  const rejectedBy = rejectSelectedUser();
+  return (Array.isArray(rejects) ? rejects : []).filter((row) => {
+    if (location && String(row.location_label || "") !== location) return false;
+    if (reason && String(row.reason_label || "") !== reason) return false;
+    if (rejectedBy && String(row.rejected_by || "") !== rejectedBy) return false;
+    return true;
+  });
+}
+
+function replaceRejectFilterOptions(select, values, emptyLabel, selected) {
+  if (!select) return;
+  const normalized = [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>${normalized.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+  select.value = normalized.includes(selected) ? selected : "";
+}
+
+function updateRejectFilterOptions(rejects = state.rejectHistory) {
+  const rows = Array.isArray(rejects) ? rejects : [];
+  replaceRejectFilterOptions(
+    els.rejectLocationFilter,
+    rows.map((row) => row.location_label),
+    "All machines / locations",
+    rejectSelectedLocation(),
+  );
+  replaceRejectFilterOptions(
+    els.rejectReasonFilter,
+    rows.map((row) => row.reason_label),
+    "All reasons",
+    rejectSelectedReason(),
+  );
+  replaceRejectFilterOptions(
+    els.rejectUserFilter,
+    rows.map((row) => row.rejected_by),
+    "All users",
+    rejectSelectedUser(),
+  );
+  syncRejectFilterButton();
 }
 
 function renderRejectSummary(rejects = rejectRowsForView()) {
-  if (!els.rejectSummaryBar) return;
   const rows = Array.isArray(rejects) ? rejects : [];
   const totalQty = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
   const locations = new Set(rows.map((row) => String(row.location_label || "").trim()).filter(Boolean));
   const users = new Set(rows.map((row) => String(row.rejected_by || "").trim()).filter(Boolean));
-  els.rejectSummaryBar.innerHTML = `
-    <article><span class="reject-summary-icon events" aria-hidden="true"></span><div><strong>${rows.length}</strong><small>Total rejects</small></div></article>
-    <article><span class="reject-summary-icon locations" aria-hidden="true"></span><div><strong>${locations.size}</strong><small>Machines / locations</small></div></article>
-    <article><span class="reject-summary-icon users" aria-hidden="true"></span><div><strong>${users.size}</strong><small>Users</small></div></article>
-    <article class="is-quantity"><span class="reject-summary-icon quantity" aria-hidden="true"></span><div><strong>${totalQty} pc${totalQty === 1 ? "" : "s"}</strong><small>Total rejected quantity</small></div></article>`;
+  if (els.rejectSummaryBar) {
+    els.rejectSummaryBar.innerHTML = `
+      <article><span class="reject-summary-icon events" aria-hidden="true"></span><div><strong>${rows.length}</strong><small>Total rejects</small></div></article>
+      <article><span class="reject-summary-icon locations" aria-hidden="true"></span><div><strong>${locations.size}</strong><small>Machines / locations</small></div></article>
+      <article><span class="reject-summary-icon users" aria-hidden="true"></span><div><strong>${users.size}</strong><small>Users</small></div></article>
+      <article class="is-quantity"><span class="reject-summary-icon quantity" aria-hidden="true"></span><div><strong>${totalQty} pc${totalQty === 1 ? "" : "s"}</strong><small>Total rejected quantity</small></div></article>`;
+  }
+  if (els.rejectTimelineCount) {
+    els.rejectTimelineCount.textContent = `${rows.length} event${rows.length === 1 ? "" : "s"}`;
+  }
+}
+
+function rejectAdminActionHtml(row) {
+  if (!isAdminUser()) return "";
+  return `
+    <span class="reject-timeline-admin-actions-v154" aria-label="Admin reject actions">
+      <button class="reject-admin-action-v154 is-edit" type="button" data-reject-edit="${escapeHtml(row.id)}" title="Edit this reject">Edit</button>
+      <button class="reject-admin-action-v154 is-delete" type="button" data-reject-delete="${escapeHtml(row.id)}" title="Delete this reject">Delete</button>
+    </span>`;
 }
 
 function rejectTimelineDetailHtml(row) {
-  const customer = row.customer || "Not available";
-  const job = row.job || "Not available";
-  const product = row.product || "Not available";
   const notes = row.notes || "No investigation notes were entered for this reject.";
   return `
-    <div class="reject-timeline-detail-grid-v143">
-      <span><small>Customer</small><strong>${escapeHtml(customer)}</strong></span>
-      <span><small>Job number</small><strong>${escapeHtml(job)}</strong></span>
-      <span><small>Product</small><strong>${escapeHtml(product)}</strong></span>
-      <span class="is-notes"><small>Investigation notes</small><strong>${escapeHtml(notes)}</strong></span>
+    <div class="reject-timeline-notes-v151">
+      <small>Investigation notes</small>
+      <strong>${escapeHtml(notes)}</strong>
     </div>`;
 }
 
 function rejectHistoryHtml(rejects = rejectRowsForView()) {
   if (!rejects.length) {
-    return `<div class="reject-empty-state"><span aria-hidden="true"></span><div><strong>No internal rejects found</strong><p>No records match ${escapeHtml(rejectFilterDescription())}${rejectSelectedLocation() ? ` at ${escapeHtml(rejectSelectedLocation())}` : ""}. Clear the filters or try a different search.</p></div></div>`;
+    return `<div class="reject-empty-state"><span aria-hidden="true"></span><div><strong>No internal rejects found</strong><p>No records match ${escapeHtml(rejectFilterDescription())}. Clear the filters or try a different search.</p></div></div>`;
   }
   const groups = new Map();
   for (const row of rejects) {
@@ -22270,33 +22641,38 @@ function rejectHistoryHtml(rejects = rejectRowsForView()) {
   return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([rejectedDate, rows], groupIndex) => {
     const sortedRows = rows.slice().sort((a, b) => String(b.rejected_at || "").localeCompare(String(a.rejected_at || "")));
     return `
-      <details class="reject-date-group reject-timeline-group-v143" ${groupIndex === 0 ? "open" : ""}>
-        <summary class="reject-timeline-date-summary-v143">
-          <div class="reject-timeline-date-title-v143">
-            <span class="reject-timeline-calendar-v143" aria-hidden="true"></span>
+      <details class="reject-date-group reject-timeline-group-v151" ${groupIndex === 0 ? "open" : ""}>
+        <summary class="reject-timeline-date-summary-v151">
+          <div class="reject-timeline-date-title-v151">
+            <span class="reject-timeline-calendar-v151" aria-hidden="true"></span>
             <strong>${escapeHtml(rejectedDate === "Unknown date" ? rejectedDate : formatDisplayDate(rejectedDate))}</strong>
             <b>${rows.length} event${rows.length === 1 ? "" : "s"}</b>
           </div>
           <span class="reject-date-group-chevron" aria-hidden="true"></span>
         </summary>
-        <div class="reject-timeline-list-v143">
+        <div class="reject-timeline-list-v151">
           ${sortedRows.map((row) => `
-            <details class="reject-timeline-event-v143">
-              <summary class="reject-timeline-event-summary-v143">
+            <details class="reject-timeline-event-v151">
+              <summary class="reject-timeline-event-summary-v151">
                 <time>${escapeHtml(formatRejectTime(row.rejected_at))}</time>
-                <span class="reject-timeline-node-v143" aria-hidden="true"></span>
-                <div class="reject-timeline-card-v143">
-                  <span class="reject-timeline-ir-v143" aria-hidden="true">IR</span>
-                  <div class="reject-timeline-identity-v143"><small>Order / Item</small><strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong><span>${escapeHtml(row.customer || row.job || row.product || "No customer or job description")}</span></div>
-                  <b class="reject-timeline-qty-v143">${escapeHtml(row.qty)} pc${Number(row.qty || 0) === 1 ? "" : "s"}</b>
-                  <span class="reject-timeline-field-v143"><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Not available")}</strong></span>
-                  <span class="reject-timeline-field-v143"><small>Reason</small><strong>${escapeHtml(row.reason_label || "Not specified")}</strong></span>
-                  <span class="reject-timeline-field-v143"><small>Machine / location</small><strong>${escapeHtml(row.location_label || "Not specified")}</strong></span>
-                  <span class="reject-timeline-field-v143"><small>Rejected by</small><strong>${escapeHtml(row.rejected_by || "system")}</strong></span>
-                  <span class="reject-timeline-details-label-v143">Details<i aria-hidden="true"></i></span>
+                <span class="reject-timeline-node-v151" aria-hidden="true"></span>
+                <div class="reject-timeline-card-v151 ${isAdminUser() ? "has-admin-actions-v154" : ""}">
+                  <span class="reject-timeline-field-v151 is-job"><small>Job Nr.</small><strong>${escapeHtml(row.job || "Not available")}</strong></span>
+                  <div class="reject-timeline-identity-v151">
+                    <small>Order / Item</small>
+                    <strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong>
+                    <span>Delivery ${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "not available")}</span>
+                  </div>
+                  <span class="reject-timeline-field-v151 is-product"><small>Product</small><strong>${escapeHtml(row.product || "Not available")}</strong></span>
+                  <span class="reject-timeline-field-v151 is-reason"><small>Why rejected</small><strong>${escapeHtml(row.reason_label || "Not specified")}</strong></span>
+                  <span class="reject-timeline-field-v151 is-location"><small>Machine / location</small><strong>${escapeHtml(row.location_label || "Not specified")}</strong></span>
+                  <span class="reject-timeline-field-v151 is-user"><small>Rejected by</small><strong>${escapeHtml(row.rejected_by || "system")}</strong></span>
+                  <b class="reject-timeline-qty-v151">${escapeHtml(row.qty)} pc${Number(row.qty || 0) === 1 ? "" : "s"}</b>
+                  <span class="reject-timeline-details-label-v151">Notes<i aria-hidden="true"></i></span>
+                  ${rejectAdminActionHtml(row)}
                 </div>
               </summary>
-              <div class="reject-timeline-event-details-v143">${rejectTimelineDetailHtml(row)}</div>
+              <div class="reject-timeline-event-details-v151">${rejectTimelineDetailHtml(row)}</div>
             </details>`).join("")}
         </div>
       </details>`;
@@ -22306,10 +22682,138 @@ function rejectHistoryHtml(rejects = rejectRowsForView()) {
 function renderRejectPage() {
   const rows = rejectRowsForView();
   renderRejectSummary(rows);
+  syncRejectFilterButton();
   if (els.rejectHistory) els.rejectHistory.innerHTML = rejectHistoryHtml(rows);
 }
 
+function rejectRecordById(rejectId) {
+  return state.rejectHistory.find((row) => Number(row.id || 0) === Number(rejectId || 0)) || null;
+}
+
+function rejectDateTimeLocalValue(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function rejectCatalogOptions(rows, currentValue) {
+  const labels = [...new Set([
+    String(currentValue || "").trim(),
+    ...(Array.isArray(rows) ? rows.map((row) => String(row.label || "").trim()) : []),
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return labels.map((label) => `<option value="${escapeHtml(label)}" ${label === currentValue ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+}
+
+function rejectEditModalHtml(row) {
+  return `
+    <form id="rejectEditForm" class="reject-edit-form-v154">
+      <input type="hidden" name="id" value="${escapeHtml(row.id)}">
+      <section class="reject-edit-identity-v154">
+        <div><small>Order / Item</small><strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong></div>
+        <div><small>Job Nr.</small><strong>${escapeHtml(row.job || "Not available")}</strong></div>
+        <div><small>Product</small><strong>${escapeHtml(row.product || "Not available")}</strong></div>
+        <div><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Not available")}</strong></div>
+        <div><small>Originally recorded by</small><strong>${escapeHtml(row.rejected_by || "System")}</strong></div>
+      </section>
+      <section class="reject-edit-grid-v154">
+        <label><span>Reject reason</span><select name="reason" required>${rejectCatalogOptions(state.rejectCatalog.reasons, String(row.reason_label || ""))}</select></label>
+        <label><span>Machine / location</span><select name="location" required>${rejectCatalogOptions(state.rejectCatalog.locations, String(row.location_label || ""))}</select></label>
+        <label><span>Rejected quantity</span><input name="qty" type="number" min="1" step="1" value="${escapeHtml(row.qty || 1)}" required></label>
+        <label><span>Incident date and time</span><input name="rejectedAt" type="datetime-local" value="${escapeHtml(rejectDateTimeLocalValue(row.rejected_at))}" required></label>
+        <label class="reject-edit-notes-v154"><span>Investigation notes</span><textarea name="notes" rows="5" maxlength="500" placeholder="Add investigation details...">${escapeHtml(row.notes || "")}</textarea></label>
+      </section>
+      <aside class="reject-edit-safety-v154">
+        Editing changes reject reporting and the Scan-page reject ribbon. It does not replay or reverse the original scan, rack, bay, or process rollback.
+      </aside>
+      <footer class="reject-edit-actions-v154">
+        <span id="rejectEditStatus" role="status" aria-live="polite"></span>
+        <div>
+          <button class="secondary" type="button" data-operations-close>Cancel</button>
+          <button class="primary" type="submit">Save Reject Changes</button>
+        </div>
+      </footer>
+    </form>`;
+}
+
+async function openRejectEditModal(rejectId) {
+  if (!isAdminUser()) throw new Error("Admin role required to edit rejects.");
+  const row = rejectRecordById(rejectId);
+  if (!row) throw new Error("Reject record was not found. Refresh the page and try again.");
+  if (!(state.rejectCatalog.reasons || []).length || !(state.rejectCatalog.locations || []).length) {
+    const catalog = await fetchJson("/api/rejects/catalog");
+    state.rejectCatalog = {
+      reasons: Array.isArray(catalog.reasons) ? catalog.reasons : [],
+      locations: Array.isArray(catalog.locations) ? catalog.locations : [],
+    };
+  }
+  openOperationsModal({
+    kind: "reject-edit",
+    eyebrow: "Admin reject management",
+    title: `Edit Reject ${row.id}`,
+    body: rejectEditModalHtml(row),
+  });
+}
+
+async function refreshRejectMutationViews(payload) {
+  state.rejectHistory = Array.isArray(payload?.rejects) ? payload.rejects : state.rejectHistory;
+  updateRejectFilterOptions();
+  renderRejectPage();
+  window.DLSLineUpdates?.clearCache?.();
+  if (state.activeListId) await activateList(state.activeListId, false);
+}
+
+async function submitRejectEditForm(form) {
+  if (!isAdminUser()) throw new Error("Admin role required to edit rejects.");
+  const status = document.getElementById("rejectEditStatus");
+  const submitButton = form.querySelector('button[type="submit"]');
+  const data = Object.fromEntries(new FormData(form).entries());
+  data.id = Number(data.id || 0);
+  data.qty = Number(data.qty || 0);
+  const incidentDate = new Date(String(data.rejectedAt || ""));
+  if (Number.isNaN(incidentDate.getTime())) throw new Error("Enter a valid incident date and time.");
+  data.rejectedAt = incidentDate.toISOString();
+  if (submitButton) submitButton.disabled = true;
+  if (status) status.textContent = "Saving reject changes...";
+  try {
+    const payload = await fetchJson("/api/rejects/update", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    closeOperationsModal();
+    await refreshRejectMutationViews(payload);
+    showSaveConfirmation(payload.message || "Internal reject was updated.");
+  } catch (error) {
+    if (status) status.textContent = error.message;
+    throw error;
+  } finally {
+    if (submitButton?.isConnected) submitButton.disabled = false;
+  }
+}
+
+async function deleteRejectRecord(rejectId) {
+  if (!isAdminUser()) throw new Error("Admin role required to delete rejects.");
+  const row = rejectRecordById(rejectId);
+  if (!row) throw new Error("Reject record was not found. Refresh the page and try again.");
+  const confirmed = await confirmWebAppAction({
+    title: "Delete internal reject?",
+    message: `Delete reject <strong>#${escapeHtml(row.id)}</strong> for <strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong>?`,
+    details: `Reason: ${escapeHtml(row.reason_label || "Not specified")} · Incident: ${escapeHtml(formatDateTime(row.rejected_at))}. This removes the reject record and recalculates reject flags, but it does not restore scans, rack quantities, bay assignments, or process state changed when the reject was logged.`,
+    confirmLabel: "Delete Reject",
+    danger: true,
+  });
+  if (!confirmed) return;
+  const payload = await fetchJson("/api/rejects/delete", {
+    method: "POST",
+    body: JSON.stringify({ id: Number(row.id) }),
+  });
+  await refreshRejectMutationViews(payload);
+  playAppSound("destructive_action", { force: true });
+  showSaveConfirmation(payload.message || "Internal reject was deleted.");
+}
+
 async function refreshRejectPage() {
+  const requestId = ++state.rejectHistoryRequestId;
   const params = new URLSearchParams();
   const query = els.rejectSearchInput?.value.trim() || "";
   const dateFrom = els.rejectDateFrom?.value || "";
@@ -22330,7 +22834,6 @@ async function refreshRejectPage() {
   if (dateTo) params.set("dateTo", dateTo);
   params.set("limit", "1000");
 
-  if (els.rejectRefreshBtn) els.rejectRefreshBtn.disabled = true;
   if (status) {
     status.hidden = false;
     status.className = "reject-page-status is-loading";
@@ -22344,12 +22847,13 @@ async function refreshRejectPage() {
     fetchJson(`/api/rejects?${params.toString()}`),
     fetchJson("/api/rejects/catalog"),
   ]);
+  if (requestId !== state.rejectHistoryRequestId) return;
 
   try {
     if (historyResult.status === "rejected") throw historyResult.reason;
     const history = historyResult.value || {};
     state.rejectHistory = Array.isArray(history.rejects) ? history.rejects : [];
-    updateRejectLocationOptions();
+    updateRejectFilterOptions();
     renderRejectPage();
 
     if (catalogResult.status === "fulfilled") {
@@ -22369,6 +22873,7 @@ async function refreshRejectPage() {
       status.textContent = catalogWarning;
     }
   } catch (error) {
+    if (requestId !== state.rejectHistoryRequestId) return;
     state.rejectHistory = [];
     renderRejectSummary([]);
     if (els.rejectHistory) {
@@ -22380,8 +22885,6 @@ async function refreshRejectPage() {
       status.textContent = error?.message || "Reject history could not be loaded.";
     }
     throw error;
-  } finally {
-    if (els.rejectRefreshBtn) els.rejectRefreshBtn.disabled = false;
   }
 }
 
@@ -22920,7 +23423,9 @@ function wireV135OperationsEvents() {
     event.preventDefault();
     openRejectLogModal().catch((error) => showInlineError(error.message, true));
   });
-  els.rejectRefreshBtn?.addEventListener("click", () => refreshRejectPage().catch((error) => showInlineError(error.message, true)));
+  els.rejectFiltersBtn?.addEventListener("click", () => {
+    setRejectFilterPanelOpen(Boolean(els.rejectFilterPanel?.hidden));
+  });
   els.rejectSearchInput?.addEventListener("input", () => {
     window.clearTimeout(els.rejectSearchInput._timer);
     els.rejectSearchInput._timer = window.setTimeout(() => refreshRejectPage().catch(() => {}), 250);
@@ -22935,7 +23440,9 @@ function wireV135OperationsEvents() {
     refreshRejectPage().catch(() => {});
   });
   els.rejectClearFiltersBtn?.addEventListener("click", clearRejectFilters);
-  els.rejectLocationFilter?.addEventListener("change", renderRejectPage);
+  [els.rejectLocationFilter, els.rejectReasonFilter, els.rejectUserFilter].forEach((select) => {
+    select?.addEventListener("change", renderRejectPage);
+  });
 
   document.addEventListener("dls:delivery-list-import-history-changed", () => {
     state.adminTodayImportLoaded = false;
@@ -22959,6 +23466,20 @@ function wireV135OperationsEvents() {
     if (rejectVerify) {
       event.preventDefault();
       previewRejectMatch().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const rejectEdit = event.target.closest("[data-reject-edit]");
+    if (rejectEdit) {
+      event.preventDefault();
+      event.stopPropagation();
+      openRejectEditModal(Number(rejectEdit.dataset.rejectEdit || 0)).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const rejectDelete = event.target.closest("[data-reject-delete]");
+    if (rejectDelete) {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteRejectRecord(Number(rejectDelete.dataset.rejectDelete || 0)).catch((error) => showInlineError(error.message, true));
       return;
     }
     const rejectRetry = event.target.closest("[data-reject-retry]");
@@ -23084,6 +23605,14 @@ function wireV135OperationsEvents() {
       event.preventDefault();
       submitRejectLog(event.target).catch((error) => {
         const status = document.getElementById("rejectLogStatus");
+        if (status) status.textContent = error.message;
+      });
+      return;
+    }
+    if (event.target.matches("#rejectEditForm")) {
+      event.preventDefault();
+      submitRejectEditForm(event.target).catch((error) => {
+        const status = document.getElementById("rejectEditStatus");
         if (status) status.textContent = error.message;
       });
       return;
@@ -27075,9 +27604,15 @@ init().catch((error) => {
         manualOnly: Boolean(current.manualOnly),
         manualSource: String(current.manualSource || ""),
         internalRejectCount: Number(current.internalRejectCount || 0),
+        rejectEventCount: Number(current.rejectEventCount || 0),
+        lastRejectId: Number(current.lastRejectId || 0),
+        lastRejectQty: Number(current.lastRejectQty || 0),
         lastRejectReason: String(current.lastRejectReason || ""),
         lastRejectLocation: String(current.lastRejectLocation || ""),
         lastRejectedAt: String(current.lastRejectedAt || ""),
+        lastRejectedBy: String(current.lastRejectedBy || ""),
+        lastRejectNotes: String(current.lastRejectNotes || ""),
+        lastRejectDeliveryDate: String(current.lastRejectDeliveryDate || ""),
         hasUnseenUpdate: Boolean(current.hasUnseenUpdate),
         userUpdateState: String(current.userUpdateState || ""),
         userUpdateNoticeIds: Array.isArray(current.userUpdateNoticeIds) ? current.userUpdateNoticeIds.slice() : [],
