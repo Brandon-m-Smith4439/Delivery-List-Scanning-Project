@@ -1,3 +1,4 @@
+# File: database/contract.py
 """Canonical database contract shared by SQLite and Azure SQL tooling."""
 
 from __future__ import annotations

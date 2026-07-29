@@ -1,4 +1,5 @@
 @echo off
+rem File: Create Desktop Shortcut.bat
 setlocal DisableDelayedExpansion
 
 title Delivery List Scanner - Create Desktop Shortcut

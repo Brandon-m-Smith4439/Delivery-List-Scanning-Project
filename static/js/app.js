@@ -1,3 +1,4 @@
+/* File: static/js/app.js */
 /*
   Delivery List Scanner UI
   ------------------------
@@ -132,7 +133,7 @@ const state = {
   bayEditorSelectedBay: "",
   adminCustomerRouteRules: [],
   customerEmailSettings: { contacts: [], cc: [], outbox: [] },
-  bayScannerSettings: { manualRules: [], barcodeRules: [] },
+  bayScannerSettings: { manualRules: [], barcodeRules: [], destinationOverrideMinutes: 15 },
   bayAutoAssignSettings: {
     standardMaxInches: 59.99,
     tallMinInches: 60,
@@ -164,6 +165,8 @@ const state = {
   manualEditResultRows: [],
   manualEditTotalRows: 0,
   manualEditVisibleCount: 20,
+  manualEditGlassTypes: [],
+  manualEditFilters: { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] },
   manualEditSearchTimer: null,
   manualEditSearchRequestId: 0,
   expandedRackGroups: new Set(),
@@ -228,6 +231,7 @@ const state = {
   pendingUpdateDatesRequestId: 0,
   rejectCatalog: { reasons: [], locations: [] },
   rejectHistory: [],
+  rejectHistoryRequestId: 0,
   rejectMatches: [],
   rejectLogOpening: false,
   rejectMatchRequestId: 0,
@@ -757,14 +761,19 @@ const els = {
 
   rejectsPage: document.getElementById("rejectsPage"),
   rejectHistory: document.getElementById("rejectHistory"),
+  rejectTimelineCount: document.getElementById("rejectTimelineCount"),
   rejectSearchInput: document.getElementById("rejectSearchInput"),
+  rejectFiltersBtn: document.getElementById("rejectFiltersBtn"),
+  rejectFilterCount: document.getElementById("rejectFilterCount"),
+  rejectFilterPanel: document.getElementById("rejectFilterPanel"),
   rejectDatePreset: document.getElementById("rejectDatePreset"),
   rejectDateFrom: document.getElementById("rejectDateFrom"),
   rejectDateTo: document.getElementById("rejectDateTo"),
   rejectLocationFilter: document.getElementById("rejectLocationFilter"),
+  rejectReasonFilter: document.getElementById("rejectReasonFilter"),
+  rejectUserFilter: document.getElementById("rejectUserFilter"),
   rejectSummaryBar: document.getElementById("rejectSummaryBar"),
   rejectClearFiltersBtn: document.getElementById("rejectClearFiltersBtn"),
-  rejectRefreshBtn: document.getElementById("rejectRefreshBtn"),
   rejectLogOpenBtn: document.getElementById("rejectLogOpenBtn"),
 
   bayMapPage: document.getElementById("bayMapPage"),
@@ -908,12 +917,29 @@ const els = {
   adminModal: document.getElementById("adminModal"),
   adminModalBackdrop: document.getElementById("adminModalBackdrop"),
   adminModalTitle: document.getElementById("adminModalTitle"),
+  adminModalEyebrow: document.getElementById("adminModalEyebrow"),
+  adminModalDescription: document.getElementById("adminModalDescription"),
+  adminModalStatusText: document.getElementById("adminModalStatusText"),
+  adminModalSectionTabs: document.getElementById("adminModalSectionTabs"),
+  adminModalWorkspaceTab: document.getElementById("adminModalWorkspaceTab"),
+  adminModalWorkspaceTabLabel: document.getElementById("adminModalWorkspaceTabLabel"),
+  adminModalHistoryTab: document.getElementById("adminModalHistoryTab"),
+  adminModalHistory: document.getElementById("adminModalHistory"),
+  adminModalHistorySummary: document.getElementById("adminModalHistorySummary"),
+  adminModalHistoryCount: document.getElementById("adminModalHistoryCount"),
+  adminModalHistoryList: document.getElementById("adminModalHistoryList"),
   adminModalBody: document.getElementById("adminModalBody"),
   adminModalClose: document.getElementById("adminModalClose"),
   operationsModal: document.getElementById("operationsModal"),
   operationsModalBackdrop: document.getElementById("operationsModalBackdrop"),
   operationsModalTitle: document.getElementById("operationsModalTitle"),
   operationsModalEyebrow: document.getElementById("operationsModalEyebrow"),
+  operationsModalDescription: document.getElementById("operationsModalDescription"),
+  operationsModalStatusText: document.getElementById("operationsModalStatusText"),
+  operationsModalHistory: document.getElementById("operationsModalHistory"),
+  operationsModalHistorySummary: document.getElementById("operationsModalHistorySummary"),
+  operationsModalHistoryCount: document.getElementById("operationsModalHistoryCount"),
+  operationsModalHistoryList: document.getElementById("operationsModalHistoryList"),
   operationsModalBody: document.getElementById("operationsModalBody"),
   operationsModalClose: document.getElementById("operationsModalClose"),
   folderImportBtn: document.getElementById("folderImportBtn"),
@@ -1007,6 +1033,7 @@ const SPANISH_UI_TEXT = new Map([
   ["Job Nr.", "Num. de trabajo"],
   ["Order Nr.", "Num. de orden"],
   ["Item Nr.", "Num. de articulo"],
+  ["Item", "Articulo"],
   ["Qty.", "Cant."],
   ["Qty", "Cant."],
   ["Stage completion", "Finalización de etapa"],
@@ -1016,6 +1043,7 @@ const SPANISH_UI_TEXT = new Map([
   ["Customer", "Cliente"],
   ["Flags", "Indicadores"],
   ["Process State", "Estado del proceso"],
+  ["Progress", "Progreso"],
   ["Transportation Method", "Metodo de transporte"],
   ["Complete Rack", "Completar rack"],
   ["Complete", "Completar"],
@@ -1127,6 +1155,7 @@ const SPANISH_UI_TEXT = new Map([
   ["Edit Physical Bay Map", "Editar mapa físico de bahías"],
   ["Edit auto assigner", "Editar asignación automática"],
   ["Edit customer routes", "Editar rutas de clientes"],
+  ["Edit automated DL import", "Editar importación automática de listas"],
   ["Edit delivery lists", "Editar listas de entrega"],
   ["Edit emails", "Editar correos"],
   ["Edit lookups", "Editar catálogos"],
@@ -3603,6 +3632,26 @@ function formatDateTime(value) {
 }
 
 /**
+ * Purpose: Split one scan timestamp into compact date and time labels for line-detail ribbons.
+ * Effects: Performs an in-memory calculation without changing shared state.
+ * Flow: Parses the stored timestamp once and returns safe display text for the Scan table.
+ */
+function formatScanDateTimeParts(value) {
+  if (!value) return { date: "Date not recorded", time: "Time not recorded" };
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return { date: String(value), time: "" };
+  }
+  return {
+    date: `${parsed.getMonth() + 1}/${parsed.getDate()}`,
+    time: parsed
+      .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      .replace(/\s+/g, "")
+      .toLowerCase(),
+  };
+}
+
+/**
  * Purpose: Run the today key workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
@@ -3856,6 +3905,11 @@ function hasAnyPermission(permissions) {
   return permissions.some((permission) => hasPermission(permission));
 }
 
+function isAdminUser() {
+  if (!state.backend) return false;
+  return (state.user?.roles || []).some((role) => String(role || "").trim().toLowerCase() === "admin");
+}
+
 /**
  * Purpose: Update the set control allowed workflow using the existing shared UI state.
  * Effects: May update shared client state.
@@ -4038,7 +4092,12 @@ async function fetchJson(url, options = {}) {
     }
     throw new Error(message);
   }
-  return response.json();
+  const payload = await response.json();
+  const method = String(options.method || "GET").toUpperCase();
+  if (method !== "GET" && (url.startsWith("/api/admin/") || url.startsWith("/api/racks/") || url.startsWith("/api/operations/"))) {
+    window.setTimeout(() => refreshOpenModalActionHistory().catch(() => {}), 80);
+  }
+  return payload;
 }
 
 /**
@@ -4614,9 +4673,15 @@ function applyOperationalLineFlags(payload, listId = state.activeListId) {
       manualOnly: Boolean(current.manualOnly),
       manualSource: String(current.manualSource || ""),
       internalRejectCount: Number(current.internalRejectCount || 0),
+      rejectEventCount: Number(current.rejectEventCount || 0),
+      lastRejectId: Number(current.lastRejectId || 0),
+      lastRejectQty: Number(current.lastRejectQty || 0),
       lastRejectReason: String(current.lastRejectReason || ""),
       lastRejectLocation: String(current.lastRejectLocation || ""),
       lastRejectedAt: String(current.lastRejectedAt || ""),
+      lastRejectedBy: String(current.lastRejectedBy || ""),
+      lastRejectNotes: String(current.lastRejectNotes || ""),
+      lastRejectDeliveryDate: String(current.lastRejectDeliveryDate || ""),
       hasUnseenUpdate: Boolean(current.hasUnseenUpdate),
       userUpdateState: String(current.userUpdateState || ""),
       userUpdateNoticeIds: Array.isArray(current.userUpdateNoticeIds) ? current.userUpdateNoticeIds.slice() : [],
@@ -5879,52 +5944,69 @@ function renderItemRow(item) {
     : "";
   const location = locationLabel(item);
   const locationHtml = rackLocationDropdown(item, location);
-  const rejectCount = Number(item.internalRejectCount || 0);
+  const rejectPieceCount = Number(item.internalRejectCount || 0);
 
   const markers = [
     isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
     isRushItem(item) ? '<span class="row-marker rush-marker">Rush</span>' : "",
-    rejectCount > 0 ? '<span class="row-marker internal-reject-marker">IR</span>' : "",
+    rejectPieceCount > 0 ? '<span class="row-marker internal-reject-marker">IR</span>' : "",
     item.manualOnly ? '<span class="row-marker manual-only-marker">Manual scan only</span>' : "",
   ].filter(Boolean).join("");
 
   const rowError = hasScanError(item);
   const processClass = rowError ? "error" : status;
   const processText = rowError ? item.errorReason || item.lastError || "Scan issue" : renderProcessState(item);
-  const lastScanNote = item.lastScannedAt
-    ? `<span class="last-scan-note">Scanned: ${escapeHtml(formatDateTime(item.lastScannedAt))}${item.lastScannedStation ? ` - ${escapeHtml(item.lastScannedStation)}` : ""}</span>`
+  const scanTimestamp = formatScanDateTimeParts(item.lastScannedAt);
+  const scanStation = String(item.lastScannedStation || "").trim();
+  const displayQty = Math.max(0, Math.trunc(Number(item.qty || 0)));
+  const scanPillTitle = item.lastScannedAt
+    ? `Last scanned ${formatDateTime(item.lastScannedAt)}${scanStation ? ` at ${scanStation}` : ""}`
+    : "";
+  const scanTimePill = item.lastScannedAt
+    ? `<span class="last-scan-pill-v157" title="${escapeHtml(scanPillTitle)}">
+        <span class="last-scan-pill-icon-v157" aria-hidden="true">&#10003;</span>
+        <span class="last-scan-pill-label-v157">Scanned</span>
+        <b>${escapeHtml(scanTimestamp.date)}</b>
+        ${scanTimestamp.time ? `<span class="last-scan-pill-divider-v157" aria-hidden="true">at</span><b>${escapeHtml(scanTimestamp.time)}</b>` : ""}
+        ${scanStation ? `<span class="last-scan-pill-divider-v157" aria-hidden="true">&bull;</span><em>${escapeHtml(scanStation)}</em>` : ""}
+      </span>`
     : "";
   const rejectReason = item.lastRejectReason || "Internal reject";
   const rejectLocation = item.lastRejectLocation || "Unknown process location";
   const rejectTime = item.lastRejectedAt ? formatDateTime(item.lastRejectedAt) : "Time not available";
-  const rejectIncidentRow = rejectCount > 0
-    ? `<tr class="internal-reject-detail-row" data-reject-detail-for="${escapeHtml(item.id)}">
-        <td colspan="10">
-          <div class="internal-reject-incident-strip">
-            <span class="internal-reject-incident-badge">IR</span>
-            <span><small>Internal reject reason</small><strong>${escapeHtml(rejectReason)}</strong></span>
-            <span><small>Broke at / machine</small><strong>${escapeHtml(rejectLocation)}</strong></span>
-            <span><small>Rejected</small><strong>${escapeHtml(rejectTime)}</strong></span>
-            <span class="internal-reject-incident-count">${escapeHtml(rejectCount)} event${rejectCount === 1 ? "" : "s"}</span>
+  const rejectQty = Number(item.lastRejectQty || rejectPieceCount || 0);
+  const rejectedBy = item.lastRejectedBy || "System";
+  const rejectIncidentRow = rejectPieceCount > 0
+    ? `<tr class="internal-reject-detail-row-v154" data-reject-detail-for="${escapeHtml(item.id)}" data-line-detail-ribbon="reject">
+        <td colspan="6">
+          <div class="internal-reject-incident-strip-v154 line-detail-strip-v156">
+            <span class="internal-reject-incident-badge-v154">IR</span>
+            <strong class="internal-reject-incident-title-v154">Internal Reject</strong>
+            <span><small>Reason</small><b>${escapeHtml(rejectReason)}</b></span>
+            <span><small>Machine / location</small><b>${escapeHtml(rejectLocation)}</b></span>
+            <span><small>Qty</small><b>${escapeHtml(rejectQty || rejectPieceCount)} pc${rejectQty === 1 ? "" : "s"}</b></span>
+            <span><small>Rejected by</small><b>${escapeHtml(rejectedBy)}</b></span>
+            <span><small>Incident</small><b>${escapeHtml(rejectTime)}</b></span>
           </div>
         </td>
+        <td class="internal-reject-detail-tail-v154" colspan="4" aria-hidden="true"></td>
       </tr>`
     : "";
 
   return `
-    <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectCount > 0 ? "has-internal-reject" : ""}" data-id="${escapeHtml(item.id)}">
-      <td><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span>${lastScanNote}</td>
+    ${rejectIncidentRow}
+    <tr class="${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectPieceCount > 0 ? "has-internal-reject" : ""} ${item.lastScannedAt ? "has-scan-time-pill-v157" : ""}" data-id="${escapeHtml(item.id)}">
+      <td class="job-cell-v157"><span class="job-copy-v157"><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span></span>${scanTimePill}</td>
       <td>${escapeHtml(item.order)}</td>
       <td>${escapeHtml(item.item)}</td>
-      <td><span class="qty-pill ${status}" title="${escapeHtml(item.scanned)} scanned of ${escapeHtml(item.qty)}">${escapeHtml(item.qty)}</span></td>
+      <td class="qty-cell" title="${escapeHtml(item.scanned)} scanned of ${escapeHtml(displayQty)}"><span class="qty-value-v156">${escapeHtml(displayQty)}</span></td>
       <td>${escapeHtml(item.dimensions)}</td>
       <td>${escapeHtml(item.customer)}</td>
       <td>${markers}</td>
       <td>${routeTag}</td>
       <td class="location-cell">${locationHtml}</td>
       <td><span class="process-pill ${processClass}">${escapeHtml(processText)}</span></td>
-    </tr>
-    ${rejectIncidentRow}`;
+    </tr>`;
 }
 
 /**
@@ -6526,8 +6608,9 @@ function renderRacksPage() {
 
     return `
       <article
-        class="rack-board-card ${rackVisualClass(rack)} ${selected ? "is-selected" : ""}"
+        class="rack-board-card ${rackVisualClass(rack)}"
         data-rack-select="${escapeHtml(rack.code)}"
+        aria-current="${selected ? "true" : "false"}"
         tabindex="0"
         role="button"
         aria-label="View ${escapeHtml(isTruck ? "Truck" : rack.code)} details"
@@ -7675,7 +7758,7 @@ function renderMeta() {
   const dateText = formatDisplayDate(state.meta.deliveryDate);
   if (els.pageTitle) els.pageTitle.textContent = `Delivery List for ${dateText}`;
   if (els.stageSubtitle) els.stageSubtitle.textContent = state.meta.stage;
-  if (els.stageHeading) els.stageHeading.textContent = state.meta.stage;
+  if (els.stageHeading) els.stageHeading.textContent = dateText ? `${state.meta.stage} • ${dateText}` : state.meta.stage;
   if (els.scannerName) els.scannerName.textContent = state.meta.scanner;
   if (els.backendStatus) {
     els.backendStatus.textContent = state.backend ? "SQLite live" : "Local demo";
@@ -9542,6 +9625,7 @@ function showPage(page) {
   if (page === "home") renderHome();
   if (page === "scan") renderScanPage();
   if (page === "racks") refreshRacksPage().catch((error) => showInlineError(error.message, true));
+  // Reject history is refreshed on every page entry, replacing the old manual Refresh button.
   if (page === "rejects") refreshRejectPage().catch((error) => showInlineError(error.message, true));
   if (page === "bays") {
     if (pageChanged) els.bayFlowPanel?.classList.add("is-entering");
@@ -16814,6 +16898,259 @@ function renderAdminDeliveryLists() {
   if (!state.adminTodayImportLoaded) void refreshAdminTodayImportRuns({ render: true });
 }
 
+function actionHistoryLabel(action = "") {
+  return String(action || "Change")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function actionHistoryDateTime(value = "") {
+  if (!value) return "Unknown time";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString([], {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function actionHistoryDetail(event = {}) {
+  const payload = event.payload || {};
+  if (Array.isArray(payload.changedFields) && payload.changedFields.length) {
+    return `Changed ${payload.changedFields.map((field) => actionHistoryLabel(field)).join(", ")}`;
+  }
+  if (payload.destinationOverrideMinutes) return `${payload.destinationOverrideMinutes}-minute override window`;
+  if (payload.rackCode) return `Rack ${payload.rackCode}`;
+  if (event.reason) return event.reason;
+  return `${actionHistoryLabel(event.entityType || "record")} ${event.entityId || ""}`.trim();
+}
+
+function renderModalActionHistory(events = [], target = "admin") {
+  const isOperations = target === "operations";
+  const details = isOperations ? els.operationsModalHistory : els.adminModalHistory;
+  const summary = isOperations ? els.operationsModalHistorySummary : els.adminModalHistorySummary;
+  const count = isOperations ? els.operationsModalHistoryCount : els.adminModalHistoryCount;
+  const list = isOperations ? els.operationsModalHistoryList : els.adminModalHistoryList;
+  if (!details || !summary || !count || !list) return;
+  const rows = Array.isArray(events) ? events : [];
+  count.textContent = String(rows.length);
+  summary.textContent = rows.length
+    ? `Last change ${actionHistoryDateTime(rows[0].createdAt)} by ${rows[0].user || "system"}`
+    : "No recorded changes for this workspace yet";
+  list.innerHTML = rows.length
+    ? rows.map((event) => `
+        <article class="modal-action-history-row">
+          <span class="modal-action-history-icon" aria-hidden="true"></span>
+          <div>
+            <strong>${escapeHtml(actionHistoryLabel(event.action))}</strong>
+            <span>${escapeHtml(actionHistoryDetail(event))}</span>
+          </div>
+          <time datetime="${escapeHtml(event.createdAt || "")}">${escapeHtml(actionHistoryDateTime(event.createdAt))}</time>
+          <small>${escapeHtml(event.user || "system")}</small>
+        </article>
+      `).join("")
+    : `<div class="admin-empty">No action history has been recorded for this GUI yet.</div>`;
+}
+
+async function loadModalActionHistory(context, target = "admin") {
+  if (!state.backend || !context) return;
+  const payload = await fetchJson(`/api/admin/action-history?context=${encodeURIComponent(context)}&limit=20`);
+  renderModalActionHistory(payload.events || [], target);
+}
+
+async function refreshOpenModalActionHistory() {
+  if (els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind) {
+    await loadModalActionHistory(els.adminModal.dataset.kind, "admin");
+  }
+  if (els.operationsModal && !els.operationsModal.hidden && els.operationsModal.dataset.kind) {
+    await loadModalActionHistory(els.operationsModal.dataset.kind, "operations");
+  }
+}
+
+const ADMIN_MODAL_PROFILES = {
+  deliveryLists: {
+    title: "All Delivery Lists",
+    eyebrow: "Delivery List Management",
+    description: "Search active delivery dates, review stage progress, and open the maintained edit, reset, or delete actions.",
+    context: "Delivery list workspace",
+    status: "Live delivery data",
+    group: "records",
+  },
+  deliveryActions: {
+    title: "Delivery List Actions",
+    eyebrow: "Delivery List Management",
+    description: "Review delivery-list records and perform controlled list-level maintenance from one guided workspace.",
+    context: "List maintenance",
+    status: "Admin controlled",
+    group: "records",
+  },
+  manualEdit: {
+    title: "Manual Delivery List Edit",
+    eyebrow: "Delivery List Management",
+    description: "Locate a list, review its line items, and apply intentional manual corrections without changing unrelated stages.",
+    context: "Line-item editor",
+    status: "Unsaved changes protected",
+    group: "records",
+  },
+  users: {
+    title: "User Access Management",
+    eyebrow: "Access Control",
+    description: "Create accounts, review access, manage passwords, and maintain active user status across the scanner.",
+    context: "User workspace",
+    status: "Admin access",
+    group: "access",
+  },
+  roles: {
+    title: "Roles & Permissions",
+    eyebrow: "Access Control",
+    description: "Build purpose-specific roles and control exactly which scanner capabilities each role can use.",
+    context: "Permission workspace",
+    status: "Security settings",
+    group: "access",
+  },
+  sessions: {
+    title: "Active Sessions",
+    eyebrow: "Security & Activity",
+    description: "Review currently active scanner sessions, assigned stations, and recent user activity.",
+    context: "Session review",
+    status: "Live activity",
+    group: "access",
+  },
+  stations: {
+    title: "Stations",
+    eyebrow: "Scanner Configuration",
+    description: "Maintain the station names used for scan attribution, access rules, and operational reporting.",
+    context: "Station manager",
+    status: "Shared configuration",
+    group: "configuration",
+  },
+  customerRoutes: {
+    title: "Edit Customer Routes",
+    eyebrow: "Routing Configuration",
+    description: "Maintain customer matching rules, route destinations, and DTC address requirements in one controlled editor.",
+    context: "Route rule workspace",
+    status: "Routing authority",
+    group: "routing",
+  },
+  customerEmails: {
+    title: "Customer Email Rules",
+    eyebrow: "Customer Communications",
+    description: "Manage customer recipients, global CC addresses, test delivery, and retained email drafts.",
+    context: "Email workspace",
+    status: "Server-side credentials",
+    group: "communications",
+  },
+  lookups: {
+    title: "Lookup Manager",
+    eyebrow: "Data Standards",
+    description: "Maintain the approved product, route, and process values used by manual delivery-list editing.",
+    context: "Lookup workspace",
+    status: "Shared choices",
+    group: "configuration",
+  },
+  rejectSettings: {
+    title: "Reject Reasons & Locations",
+    eyebrow: "Quality Control",
+    description: "Maintain the approved reject reasons and break locations used by Internal Reject Tracking.",
+    context: "Reject settings",
+    status: "Quality data",
+    group: "quality",
+  },
+  bayScannerRules: {
+    title: "Bay Scanner Rules",
+    eyebrow: "Bay Operations",
+    description: "Control manual and barcode-based bay classification rules while preserving the maintained scan workflow.",
+    context: "Rule workspace",
+    status: "Indian Trail rules",
+    group: "bay",
+  },
+  bayAutoAssigner: {
+    title: "Bay Auto Assigner",
+    eyebrow: "Bay Operations",
+    description: "Tune bay classification thresholds and choose which glass categories require intentional manual assignment.",
+    context: "Auto-assignment settings",
+    status: "Preassignment rules",
+    group: "bay",
+  },
+  racks: {
+    title: "Edit Racks",
+    eyebrow: "Rack Configuration",
+    description: "Manage rack sets, rack identities, display order, and maintained rack availability from one workspace.",
+    context: "Rack manager",
+    status: "Shared rack layout",
+    group: "racks",
+  },
+  rackForm: {
+    title: "Rack",
+    eyebrow: "Rack Configuration",
+    description: "Create or update one rack while preserving its maintained set and operational identity.",
+    context: "Rack editor",
+    status: "Rack configuration",
+    group: "racks",
+  },
+  rackSetForm: {
+    title: "Rack Set",
+    eyebrow: "Rack Configuration",
+    description: "Create or update a rack grouping used by the Rack Overview workspace.",
+    context: "Rack-set editor",
+    status: "Rack configuration",
+    group: "racks",
+  },
+  recentScans: {
+    title: "All Scans",
+    eyebrow: "Scan Audit",
+    description: "Review recent scan activity, operational outcomes, and maintained location-correction controls.",
+    context: "Scan history",
+    status: "Live audit data",
+    group: "records",
+  },
+};
+
+function adminModalProfile(kind, options = null) {
+  const fallback = {
+    title: "Admin",
+    eyebrow: "Administration",
+    description: "Manage scanner configuration and operational records from one controlled workspace.",
+    context: "Management workspace",
+    status: "Admin access",
+    group: "configuration",
+  };
+  const profile = { ...fallback, ...(ADMIN_MODAL_PROFILES[kind] || {}) };
+  if (options?.title) profile.title = options.title;
+  return profile;
+}
+
+function setAdminModalSection(section = "workspace") {
+  const historySelected = section === "history";
+  if (els.adminModalWorkspaceTab) {
+    els.adminModalWorkspaceTab.classList.toggle("is-active", !historySelected);
+    els.adminModalWorkspaceTab.setAttribute("aria-selected", String(!historySelected));
+  }
+  if (els.adminModalHistoryTab) {
+    els.adminModalHistoryTab.classList.toggle("is-active", historySelected);
+    els.adminModalHistoryTab.setAttribute("aria-selected", String(historySelected));
+  }
+  if (els.adminModalBody) els.adminModalBody.hidden = historySelected;
+  if (els.adminModalHistory) els.adminModalHistory.hidden = !historySelected;
+  if (historySelected && els.adminModal?.dataset.kind) {
+    loadModalActionHistory(els.adminModal.dataset.kind, "admin").catch(() => renderModalActionHistory([], "admin"));
+  }
+}
+
+function applyAdminModalProfile(kind, options = null) {
+  const profile = adminModalProfile(kind, options);
+  if (els.adminModalTitle) els.adminModalTitle.textContent = profile.title;
+  if (els.adminModalEyebrow) els.adminModalEyebrow.textContent = profile.eyebrow;
+  if (els.adminModalDescription) els.adminModalDescription.textContent = profile.description;
+  if (els.adminModalStatusText) els.adminModalStatusText.textContent = profile.status;
+  if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = profile.title;
+  if (els.adminModal) els.adminModal.dataset.group = profile.group;
+  return profile;
+}
+
 /**
  * Purpose: Open the open admin modal workflow using the existing shared UI state.
  * Effects: Updates visible dom state.
@@ -16825,28 +17162,12 @@ function openAdminModal(kind, options = null) {
   }
   if (!els.adminModal || !els.adminModalBody || !els.adminModalTitle) return;
   delete els.adminModal.dataset.customView;
-  const titleMap = {
-    deliveryLists: "All Delivery Lists",
-    deliveryActions: "Delivery List Actions",
-    users: "User Access Management",
-    roles: "Roles & Permissions",
-    sessions: "Active Sessions",
-    stations: "Stations",
-    customerRoutes: "Edit Customer Routes",
-    customerEmails: "Customer Email Rules",
-    bayScannerRules: "Bay Scanner Rules",
-    bayAutoAssigner: "Bay Auto Assigner",
-    manualEdit: "Manual Delivery List Edit",
-    lookups: "Lookup Manager",
-    rackForm: "Rack",
-    rackSetForm: "Rack Set",
-    racks: "Edit Racks",
-    recentScans: "All Scans",
-    rejectSettings: "Reject Reasons & Locations",
-  };
-  els.adminModalTitle.textContent = options?.title || titleMap[kind] || "Admin";
+  applyAdminModalProfile(kind, options);
   els.adminModal.dataset.kind = kind;
   els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
+  setAdminModalSection("workspace");
+  renderModalActionHistory([], "admin");
+  loadModalActionHistory(kind, "admin").catch(() => renderModalActionHistory([], "admin"));
   if (kind === "lookups") {
     syncLookupManagerFormGuidance();
     filterLookupManagerLibrary(state.lookupManagerSearch || "");
@@ -16855,7 +17176,11 @@ function openAdminModal(kind, options = null) {
     wireUserManagerControls();
   }
   els.adminModal.hidden = false;
-  if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = false;
+  els.adminModal.setAttribute("aria-hidden", "false");
+  if (els.adminModalBackdrop) {
+    els.adminModalBackdrop.hidden = false;
+    els.adminModalBackdrop.setAttribute("aria-hidden", "false");
+  }
   updateModalScrollLock();
   if (kind === "roles" && (!state.adminRoles.length || !state.allPermissions.length) && hasPermission("manage_roles")) {
     fetchJson("/api/admin/roles")
@@ -16892,9 +17217,21 @@ async function closeAdminModal() {
 
   if (els.adminModal) {
     els.adminModal.hidden = true;
+    els.adminModal.setAttribute("aria-hidden", "true");
     delete els.adminModal.dataset.kind;
+    delete els.adminModal.dataset.group;
   }
-  if (els.adminModalBackdrop) els.adminModalBackdrop.hidden = true;
+  if (els.adminModalBackdrop) {
+    els.adminModalBackdrop.hidden = true;
+    els.adminModalBackdrop.setAttribute("aria-hidden", "true");
+  }
+  if (els.adminModalBody) {
+    els.adminModalBody.hidden = false;
+    els.adminModalBody.replaceChildren();
+  }
+  if (els.adminModalHistory) els.adminModalHistory.hidden = true;
+  setAdminModalSection("workspace");
+  renderModalActionHistory([], "admin");
   updateModalScrollLock();
   return true;
 }
@@ -18321,6 +18658,107 @@ function manualEditStageSummary(listId) {
  * Effects: Updates visible dom state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function manualEditFilterIsActive(group, value) {
+  if (group === "attention") return (state.manualEditFilters.attention || []).includes(value);
+  if (group === "glassType") {
+    const selected = state.manualEditFilters.glassTypes || [];
+    return value === "all" ? selected.length === 0 : selected.includes(value);
+  }
+  return String(state.manualEditFilters[group] || "all") === value;
+}
+
+function manualEditActiveFilterCount() {
+  return ["progress", "route", "location"].filter((key) => String(state.manualEditFilters[key] || "all") !== "all").length
+    + (state.manualEditFilters.attention || []).length
+    + (state.manualEditFilters.glassTypes || []).length;
+}
+
+function manualEditFilterButton(group, value, label) {
+  return `<button type="button" class="tab ${manualEditFilterIsActive(group, value) ? "is-active" : ""}" data-manual-edit-filter-group="${escapeHtml(group)}" data-manual-edit-filter-value="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
+}
+
+function manualEditFilterDrawerHtml() {
+  const routeOptions = uniqueText(["IT", "CPU", "DTC", "GNV", ...(state.manualEditLookups.routes || []).map((item) => item.value || item.label || "")]).filter(Boolean);
+  const glassTypeOptions = Array.isArray(state.manualEditGlassTypes) ? state.manualEditGlassTypes : [];
+  const activeCount = manualEditActiveFilterCount();
+  return `
+    <details class="scan-filter-drawer manual-edit-filter-drawer">
+      <summary aria-label="Filter editable delivery-list rows">
+        <span class="scan-filter-panel-icon" aria-hidden="true"></span>
+        <span>Filters</span>
+        <b>${escapeHtml(activeCount)}</b>
+      </summary>
+      <div class="scan-filter-drawer-panel manual-edit-filter-panel">
+        <div class="scan-filter-panel-header">
+          <div class="scan-filter-panel-title"><span class="scan-filter-panel-icon" aria-hidden="true"></span><div><strong>Find the right order faster</strong><span>Combine progress, route, glass type, location, and attention filters.</span></div></div>
+          <button type="button" data-manual-edit-filter-clear>Clear filters</button>
+        </div>
+        <section class="scan-filter-section">
+          <div class="scan-filter-section-heading"><h3>Progress</h3><span>Filter by scanned quantity.</span></div>
+          <div class="scan-filter-options">
+            ${manualEditFilterButton("progress", "all", "All")}
+            ${manualEditFilterButton("progress", "not-scanned", "Not scanned")}
+            ${manualEditFilterButton("progress", "partial", "Partial")}
+            ${manualEditFilterButton("progress", "complete", "Complete")}
+          </div>
+        </section>
+        <section class="scan-filter-section">
+          <div class="scan-filter-section-heading"><h3>Route</h3><span>Show one destination route.</span></div>
+          <div class="scan-filter-options">
+            ${manualEditFilterButton("route", "all", "All routes")}
+            ${routeOptions.map((route) => manualEditFilterButton("route", route, route === "IT" ? "Indian Trail" : route)).join("")}
+          </div>
+        </section>
+        <section class="scan-filter-section">
+          <div class="scan-filter-section-heading"><h3>Location</h3><span>Find unassigned, rack, or bay pieces.</span></div>
+          <div class="scan-filter-options">
+            ${manualEditFilterButton("location", "all", "Anywhere")}
+            ${manualEditFilterButton("location", "unassigned", "Unassigned")}
+            ${manualEditFilterButton("location", "rack", "In a rack")}
+            ${manualEditFilterButton("location", "bay", "In a bay")}
+          </div>
+        </section>
+        <section class="scan-filter-section scan-filter-glass-section manual-edit-glass-filter-section">
+          <div class="scan-filter-section-heading"><h3>Glass Type</h3><span>Only glass types present in the selected delivery-list stage are shown.</span></div>
+          <div class="scan-filter-options manual-edit-glass-filter-options">
+            ${manualEditFilterButton("glassType", "all", "All glass types")}
+            ${glassTypeOptions.length
+              ? glassTypeOptions.map((option) => manualEditFilterButton(
+                  "glassType",
+                  option.label,
+                  `${option.label} (${option.pieceQty} pcs)`,
+                )).join("")
+              : '<span class="manual-edit-glass-filter-empty">Load a delivery-list stage to see its glass types.</span>'}
+          </div>
+        </section>
+        <section class="scan-filter-section manual-edit-attention-filter-section">
+          <div class="scan-filter-section-heading"><h3>Attention</h3><span>Select one or several special conditions.</span></div>
+          <div class="scan-filter-options">
+            ${manualEditFilterButton("attention", "remake", "Remakes")}
+            ${manualEditFilterButton("attention", "rush", "Rushes")}
+            ${manualEditFilterButton("attention", "updated", "Updated")}
+            ${manualEditFilterButton("attention", "reject", "Internal rejects")}
+            ${manualEditFilterButton("attention", "manual", "Manual entries")}
+          </div>
+        </section>
+        <div class="scan-filter-panel-footer"><span>${escapeHtml(activeCount)} active filter${activeCount === 1 ? "" : "s"}</span><button type="button" data-manual-edit-filter-apply>Apply filters</button></div>
+      </div>
+    </details>
+  `;
+}
+
+function refreshManualEditFilterDrawer(openState = null) {
+  const drawer = document.querySelector(".manual-edit-filter-drawer");
+  if (!drawer) return;
+  const shouldOpen = openState === null ? drawer.open : Boolean(openState);
+  const template = document.createElement("template");
+  template.innerHTML = manualEditFilterDrawerHtml().trim();
+  const nextDrawer = template.content.firstElementChild;
+  if (!nextDrawer) return;
+  nextDrawer.open = shouldOpen;
+  drawer.replaceWith(nextDrawer);
+}
+
 function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a delivery list to load editable rows.</div>`) {
   const selected = state.manualEditListId || state.activeListId || state.lists[0]?.id || "";
   const stageLists = manualEditStageListsForCurrentDelivery(selected);
@@ -18348,18 +18786,22 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
           </select>
         </label>
 
-        <label class="manual-edit-control search-control">
-          <span>Search within stage</span>
-          <input id="manualEditModalSearch" type="search" autocomplete="off" value="${escapeHtml(state.manualEditQuery || "")}" placeholder="Order number, Job Nr., customer, route...">
-        </label>
+        <div class="manual-edit-search-with-filter">
+          <label class="manual-edit-control search-control">
+            <span>Search within stage</span>
+            <input id="manualEditModalSearch" type="search" autocomplete="off" value="${escapeHtml(state.manualEditQuery || "")}" placeholder="Order number, Job Nr., customer, route...">
+          </label>
+          ${manualEditFilterDrawerHtml()}
+        </div>
 
         <div class="manual-edit-tool-actions">
           <button id="manualEditModalSearchBtn" type="button">Search</button>
           <button id="manualEditModalReloadBtn" class="secondary" type="button">Load All</button>
+          <button type="button" class="secondary manual-edit-create-order-button" data-manual-order-toggle>Create New Order</button>
         </div>
       </div>
 
-      <details class="manual-order-create-panel">
+      <details class="manual-order-create-panel" id="manualOrderCreatePanel">
         <summary><span>+ Add an order manually</span><small>Uses the selected delivery date and requires an explicit route.</small></summary>
         <form id="manualOrderCreateForm" class="manual-order-create-form">
           <div class="manual-order-form-grid">
@@ -18431,9 +18873,11 @@ async function openManualEditForList(listId) {
   state.manualEditDirty = false;
   state.manualEditListId = listId || state.activeListId || state.lists[0]?.id || "";
   state.manualEditQuery = "";
+  state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
   state.manualEditResultRows = [];
   state.manualEditTotalRows = 0;
   state.manualEditVisibleCount = 20;
+  state.manualEditGlassTypes = [];
 
   openAdminModal("manualEdit");
 
@@ -18446,16 +18890,24 @@ async function openManualEditForList(listId) {
  * Effects: May call the backend api.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
-async function fetchManualEditBatch(query, listId, limit = 20, offset = 0) {
+async function fetchManualEditBatch(query, listId, limit = 20, offset = 0, filters = state.manualEditFilters) {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   if (listId) params.set("listId", listId);
   params.set("limit", String(limit));
   params.set("offset", String(offset));
+  if (filters?.progress && filters.progress !== "all") params.set("progress", filters.progress);
+  if (filters?.route && filters.route !== "all") params.set("route", filters.route);
+  if (filters?.location && filters.location !== "all") params.set("location", filters.location);
+  if (Array.isArray(filters?.attention) && filters.attention.length) params.set("attention", filters.attention.join(","));
+  for (const glassType of filters?.glassTypes || []) {
+    if (String(glassType || "").trim()) params.append("glassType", String(glassType).trim());
+  }
   const payload = await fetchJson(`/api/admin/line-items/search?${params.toString()}`);
   return {
     results: payload.results || [],
     total: Math.max(Number(payload.total || 0), (payload.results || []).length),
+    filterOptions: payload.filterOptions || { glassTypes: [] },
   };
 }
 
@@ -18477,6 +18929,8 @@ async function runManualEditModalSearch(loadAll = false) {
   if (loadAll) {
     const searchInput = document.getElementById("manualEditModalSearch");
     if (searchInput) searchInput.value = "";
+    state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
+    refreshManualEditFilterDrawer(false);
   }
 
   state.manualEditListId = stage;
@@ -18505,6 +18959,12 @@ async function runManualEditModalSearch(loadAll = false) {
   state.manualEditResultRows = resultPage.results;
   state.manualEditTotalRows = resultPage.total;
   state.manualEditVisibleCount = 20;
+  state.manualEditGlassTypes = Array.isArray(resultPage.filterOptions?.glassTypes)
+    ? resultPage.filterOptions.glassTypes
+    : [];
+  const availableGlassTypes = new Set(state.manualEditGlassTypes.map((option) => String(option.label || "")));
+  state.manualEditFilters.glassTypes = (state.manualEditFilters.glassTypes || []).filter((label) => availableGlassTypes.has(label));
+  refreshManualEditFilterDrawer(false);
   const html = manualEditResultsHtml(state.manualEditResultRows, state.manualEditVisibleCount, state.manualEditTotalRows);
 
   if (target) {
@@ -18520,6 +18980,7 @@ async function runManualEditModalSearch(loadAll = false) {
 
 /** Reveal the next batch of editable rows without another server request. */
 async function loadMoreManualEditRows() {
+  state.manualEditResultRows = state.manualEditResultRows.filter((item) => !item._manualEditFilterMismatch);
   const button = document.querySelector("[data-manual-edit-load-more]");
   if (button) {
     button.disabled = true;
@@ -20815,6 +21276,15 @@ function bayScannerRulesModalHtml() {
         <span class="email-smtp-badge is-live">Bay Map only</span>
       </section>
 
+      <section class="bay-rule-card bay-override-window-card">
+        <header><strong>Mixed-destination rack override window</strong><span>How long one approved override keeps that rack open to other destinations.</span></header>
+        <form id="bayOverrideWindowForm" class="bay-rule-form bay-override-window-form">
+          <label><span>Override minutes</span><input id="bayDestinationOverrideMinutes" type="number" min="1" max="120" step="1" value="${escapeHtml(settings.destinationOverrideMinutes || 15)}"></label>
+          <div class="bay-override-window-copy"><strong>Current behavior</strong><span>After a user confirms one destination mismatch, that rack accepts mixed destinations for this many minutes without another walk back to the computer.</span></div>
+          <button type="submit">Save Override Time</button>
+        </form>
+      </section>
+
       <section class="bay-rule-card">
         <header><strong>Remembered manual inputs</strong><span>Accepted without asking for confirmation.</span></header>
         <form id="bayManualRuleForm" class="bay-rule-form">
@@ -20867,6 +21337,18 @@ async function refreshBayScannerRules(openModal = false) {
  * Effects: May call the backend api.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+async function saveBayOverrideWindow() {
+  const destinationOverrideMinutes = Number(document.getElementById("bayDestinationOverrideMinutes")?.value || 15);
+  const payload = await fetchJson("/api/admin/bay-scanner-rules/settings", {
+    method: "POST",
+    body: JSON.stringify({ destinationOverrideMinutes }),
+  });
+  state.bayScannerSettings = payload || state.bayScannerSettings;
+  renderBayScannerRuleOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  showSaveConfirmation(`Rack destination overrides will remain active for ${destinationOverrideMinutes} minutes.`);
+}
+
 async function saveBayManualRule() {
   const matchType = document.getElementById("bayManualRuleType")?.value || "exact";
   const pattern = document.getElementById("bayManualRulePattern")?.value.trim() || "";
@@ -21698,6 +22180,25 @@ function manualEditChoiceHiddenInput(control) {
   return control?.querySelector(`[data-edit-field="${CSS.escape(field)}"]`) || null;
 }
 
+
+/**
+ * Return the value currently shown by a manual-edit choice control.
+ * Reading the visible control prevents a stale hidden mirror from discarding
+ * a route, location, product, or process selection during save.
+ */
+function manualEditVisibleChoiceValue(row, field) {
+  const control = row?.querySelector(`[data-choice-control][data-choice-field="${CSS.escape(field)}"]`);
+  if (!control) return row?.querySelector(`[data-edit-field="${CSS.escape(field)}"]`)?.value ?? "";
+
+  if (control.classList.contains("is-custom")) {
+    return control.querySelector(".manual-edit-custom-input")?.value ?? "";
+  }
+
+  const select = control.querySelector(".manual-edit-choice-select");
+  if (select && select.value !== MANUAL_EDIT_CUSTOM_VALUE) return select.value;
+  return manualEditChoiceHiddenInput(control)?.value ?? "";
+}
+
 /**
  * Purpose: Run the manual edit set choice value workflow for the browser application.
  * Effects: May update shared client state.
@@ -21913,12 +22414,26 @@ function manualEditLocationOptions(item) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function manualEditRouteSelectionValue(value) {
+  const raw = String(value || "").trim();
+  const designation = canonicalRouteDesignation(raw);
+  if (designation.matched) return designation.route || "INDIAN TRAIL";
+  return raw || "INDIAN TRAIL";
+}
+
 function manualEditRouteOptions() {
+  const seen = new Set();
   const lookupRoutes = lookupOptions(state.manualEditLookups?.routes || [], "Indian Trail / Standard")
-    .map(([value, label]) => [String(value || "").trim() || "IT", label]);
+    .map(([value, label]) => [manualEditRouteSelectionValue(value), label])
+    .filter(([value]) => {
+      const key = String(value || "").trim().toUpperCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   if (lookupRoutes.length > 1) return lookupRoutes;
   return [
-    ["IT", "Indian Trail / Standard"],
+    ["INDIAN TRAIL", "Indian Trail / Standard"],
     ["CPU", "Customer Pickup"],
     ["GNV", "Greenville"],
     ["DTC", "Deliver to Customer"],
@@ -22038,20 +22553,93 @@ function manualEditValidateRow(row) {
 }
 
 /**
+ * Return the editable values currently displayed in one expanded Manual Edit card.
+ * The clicked card is passed directly so stale or duplicate modal markup can never
+ * substitute a different row during save.
+ */
+function manualEditCollectRowData(row, lineItemId) {
+  const value = (field) => row?.querySelector(`[data-edit-field="${CSS.escape(field)}"]`)?.value ?? "";
+  const data = {
+    lineItemId: String(lineItemId || row?.dataset?.editRow || ""),
+    order: value("order"),
+    item: value("item"),
+    customer: value("customer"),
+    qty: value("qty"),
+    scanned: value("scanned"),
+    dimensions: value("dimensions"),
+    job: value("job"),
+    queueState: value("queueState"),
+  };
+
+  for (const field of ["location", "route", "processState", "product"]) {
+    data[field] = manualEditVisibleChoiceValue(row, field);
+  }
+
+  data.route = manualEditRouteSelectionValue(data.route);
+  data.routeOverride = data.route;
+  return data;
+}
+
+function manualEditOriginalRowData(row) {
+  try {
+    return JSON.parse(row?.dataset?.manualEditOriginal || "{}");
+  } catch (_error) {
+    return {};
+  }
+}
+
+function manualEditComparableValue(field, value) {
+  if (["qty", "scanned"].includes(field)) return Number(value || 0);
+  if (field === "item") {
+    const text = String(value || "").trim();
+    return /^\d+$/.test(text) ? text.padStart(3, "0") : text;
+  }
+  if (field === "order") {
+    const text = String(value || "").trim();
+    return /^\d+$/.test(text) ? String(Number(text)) : text;
+  }
+  if (field === "route") return manualEditRouteSelectionValue(value);
+  if (field === "location") return String(value || "").trim().toUpperCase();
+  return String(value ?? "");
+}
+
+function manualEditChangedFields(row, data) {
+  const original = manualEditOriginalRowData(row);
+  return [
+    "order",
+    "item",
+    "customer",
+    "qty",
+    "scanned",
+    "location",
+    "route",
+    "processState",
+    "product",
+    "dimensions",
+    "job",
+    "queueState",
+  ].filter((field) => (
+    manualEditComparableValue(field, data[field]) !== manualEditComparableValue(field, original[field])
+  ));
+}
+
+/**
  * Purpose: Run the manual edit results HTML workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.length) {
   const visibleRows = results.slice(0, Math.max(Number(visibleCount || 20), 20));
-  const totalRows = Math.max(Number(totalCount || 0), results.length);
-  const remainingRows = Math.max(totalRows - visibleRows.length, 0);
+  const totalRows = Math.max(Number(totalCount || 0), results.filter((item) => !item._manualEditFilterMismatch).length);
+  const pinnedRows = visibleRows.filter((item) => item._manualEditFilterMismatch).length;
+  const matchingVisibleRows = Math.max(visibleRows.length - pinnedRows, 0);
+  const remainingRows = Math.max(totalRows - matchingVisibleRows, 0);
 
   return results.length
     ? `
       <div class="manual-edit-result-summary">
-        <span>Showing ${escapeHtml(visibleRows.length)} of ${escapeHtml(totalRows)} row${totalRows === 1 ? "" : "s"}</span>
-        <small>Rows start collapsed. Expand one to edit it.</small>
+        <span>Showing ${escapeHtml(matchingVisibleRows)} of ${escapeHtml(totalRows)} matching row${totalRows === 1 ? "" : "s"}${pinnedRows ? ` + ${escapeHtml(pinnedRows)} recently updated` : ""}</span>
+        <small>${pinnedRows ? "The saved row remains visible until the next search or filter change." : "Rows start collapsed. Expand one to edit it."}</small>
       </div>
 
       <div class="manual-edit-card-list">
@@ -22062,13 +22650,40 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
             const qtyValue = Math.max(Number(item.qty || 0), 0);
             const scannedValue = Math.min(Math.max(Number(item.scanned || 0), 0), qtyValue);
             const locationValue = manualEditCurrentLocationValue(item);
+            const scannedClass = scannedValue > 0 ? " is-scanned" : " is-unscanned";
+            const completeClass = qtyValue > 0 && scannedValue >= qtyValue ? " is-complete" : "";
+            const updatedClass = item._manualEditJustUpdated ? " is-just-updated" : "";
+            const mismatchClass = item._manualEditFilterMismatch ? " is-filter-mismatch" : "";
+            const originalValues = {
+              order: item.order || "",
+              item: item.item || "",
+              customer: item.customer || "",
+              qty: qtyValue,
+              scanned: scannedValue,
+              location: locationValue,
+              route: manualEditRouteSelectionValue(item.route),
+              processState: item.processState || "",
+              product: item.product || "",
+              dimensions: item.dimensions || "",
+              job: item.job || "",
+              queueState: item.queueState || "",
+            };
 
             return `
-              <details class="manual-edit-card" data-edit-row="${escapeHtml(item.lineItemId)}">
+              <details
+                class="manual-edit-card${scannedClass}${completeClass}${updatedClass}${mismatchClass}"
+                data-edit-row="${escapeHtml(item.lineItemId)}"
+                data-manual-edit-original="${escapeHtml(JSON.stringify(originalValues))}"
+                ${item._manualEditJustUpdated ? "open" : ""}
+              >
                 <summary class="manual-edit-card-header">
                   <div class="manual-edit-card-title">
-                    <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
+                    <div class="manual-edit-card-title-line">
+                      <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
+                      <span class="manual-edit-scan-status ${scannedValue > 0 ? "is-scanned" : "is-unscanned"}">${scannedValue > 0 ? "Scanned" : "Not scanned"}</span>
+                    </div>
                     <span>${escapeHtml(item.job || "No Job Nr.")} &bull; ${escapeHtml(item.customer || "No customer")}</span>
+                    ${item._manualEditFilterMismatch ? `<small class="manual-edit-saved-filter-note">Saved successfully — this item no longer matches the active filters.</small>` : ""}
                   </div>
 
                   <div class="manual-edit-card-stage" title="${escapeHtml(stageText)}">
@@ -22139,7 +22754,7 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
                   ${manualEditChoiceFieldHtml({
                     field: "route",
                     label: "Route",
-                    value: item.route || "IT",
+                    value: manualEditRouteSelectionValue(item.route),
                     options: manualEditRouteOptions(),
                     customLabel: "Custom route...",
                   })}
@@ -22196,22 +22811,33 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
  * Effects: May call the backend api.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-async function saveManualLineItem(lineItemId) {
-  const row = document.querySelector(`[data-edit-row="${CSS.escape(lineItemId)}"]`);
+async function saveManualLineItem(lineItemId, sourceButton = null) {
+  const row = sourceButton?.closest("[data-edit-row]")
+    || document.querySelector(`[data-edit-row="${CSS.escape(lineItemId)}"]`);
 
   if (!row) return;
+
+  closeCustomSelect(false);
+  if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLSelectElement) {
+    document.activeElement.blur();
+  }
 
   if (!manualEditValidateRow(row)) {
     row.querySelector(".is-invalid")?.focus();
     return;
   }
 
-  const data = { lineItemId };
-  const saveButton = row.querySelector("[data-save-line-item]");
+  const data = manualEditCollectRowData(row, lineItemId);
+  const clientChangedFields = manualEditChangedFields(row, data);
+  const saveButton = sourceButton || row.querySelector("[data-save-line-item]");
 
-  row.querySelectorAll("[data-edit-field]").forEach((input) => {
-    data[input.dataset.editField] = input.value;
-  });
+  if (!clientChangedFields.length) {
+    showFloatingNotice("No edited values were detected in this row.", "notice");
+    return;
+  }
+
+  data.clientChangedFields = clientChangedFields;
+  data.originalValues = manualEditOriginalRowData(row);
 
   row.classList.add("is-saving");
   if (saveButton) saveButton.disabled = true;
@@ -22220,6 +22846,13 @@ async function saveManualLineItem(lineItemId) {
       method: "POST",
       body: JSON.stringify(data),
     });
+
+    if (!Number(payload.logicalUpdatedCount || 0)) {
+      throw new Error(
+        `The server did not apply the edited ${clientChangedFields.join(", ")} value${clientChangedFields.length === 1 ? "" : "s"}. `
+        + "The row has been left open so the entered values are not lost.",
+      );
+    }
 
     const payloadListId = String(payload.meta?.id || "");
     const catalogList = state.lists.find((list) => String(list.id || "") === payloadListId);
@@ -22252,11 +22885,62 @@ async function saveManualLineItem(lineItemId) {
       });
     }
 
+    const preferredListId = payload.destinationListId || payloadListId || state.activeListId;
+    await loadDeliveryLists(preferredListId);
+    const refreshLimit = Math.max(state.manualEditResultRows.filter((item) => !item._manualEditFilterMismatch).length, 20);
+    const refreshed = await fetchManualEditBatch(state.manualEditQuery, state.manualEditListId, refreshLimit, 0, state.manualEditFilters);
+    const verifiedItem = payload.updatedItem && Object.keys(payload.updatedItem).length
+      ? { ...payload.updatedItem }
+      : {
+          ...(resultItem || {}),
+          lineItemId,
+          order: data.order,
+          item: data.item,
+          customer: data.customer,
+          qty: Number(data.qty || 0),
+          scanned: Number(data.scanned || 0),
+          route: data.route,
+          processState: data.processState,
+          product: data.product,
+          dimensions: data.dimensions,
+          job: data.job,
+          queueState: data.queueState,
+          location: data.location,
+          locationDisplay: data.location,
+        };
+    const verifiedKey = `${String(verifiedItem.order || "")}::${String(verifiedItem.item || "").padStart(3, "0")}`;
+    const matchingIndex = refreshed.results.findIndex((item) => (
+      `${String(item.order || "")}::${String(item.item || "").padStart(3, "0")}` === verifiedKey
+    ));
+    if (matchingIndex >= 0) {
+      refreshed.results[matchingIndex] = {
+        ...refreshed.results[matchingIndex],
+        ...verifiedItem,
+        _manualEditJustUpdated: true,
+        _manualEditFilterMismatch: false,
+      };
+    } else {
+      refreshed.results.unshift({
+        ...verifiedItem,
+        _manualEditJustUpdated: true,
+        _manualEditFilterMismatch: true,
+      });
+    }
+    state.manualEditGlassTypes = Array.isArray(refreshed.filterOptions?.glassTypes)
+      ? refreshed.filterOptions.glassTypes
+      : state.manualEditGlassTypes;
+    const refreshedGlassTypes = new Set(state.manualEditGlassTypes.map((option) => String(option.label || "")));
+    state.manualEditFilters.glassTypes = (state.manualEditFilters.glassTypes || []).filter((label) => refreshedGlassTypes.has(label));
+    refreshManualEditFilterDrawer(false);
+    state.manualEditResultRows = refreshed.results;
+    state.manualEditTotalRows = refreshed.total;
+    state.manualEditVisibleCount = state.manualEditResultRows.length;
+    const resultsTarget = document.getElementById("manualEditModalResults");
+    if (resultsTarget) resultsTarget.innerHTML = manualEditResultsHtml(state.manualEditResultRows, state.manualEditVisibleCount, state.manualEditTotalRows);
+
     state.manualEditDirty = false;
-    row.classList.remove("is-saving");
-    row.classList.add("is-saved");
-    window.setTimeout(() => row.classList.remove("is-saved"), 1200);
-    showSaveConfirmation(payload.message || "Line item updated across its delivery-list stages.");
+    await refreshOpenModalActionHistory().catch(() => {});
+    showSaveConfirmation(payload.message || "Line item updated and verified.");
   } finally {
     row.classList.remove("is-saving");
     if (saveButton) saveButton.disabled = false;
@@ -22316,25 +23000,91 @@ function exportStaticCsv() {
    instead of appending page-specific override blocks elsewhere in the file.
    -------------------------------------------------------------------------- */
 
-function openOperationsModal({ kind = "operations", eyebrow = "Operations", title = "Operations", body = "" } = {}) {
+const OPERATIONS_MODAL_PROFILES = {
+  "rack-details": {
+    controlCenter: true,
+    eyebrow: "Rack Operations",
+    description: "Review assigned pieces, current rack status, packing actions, and controlled rack recovery from one live workspace.",
+    context: "Individual rack workspace",
+    status: "Live rack data",
+    group: "racks",
+  },
+  "packing-history": {
+    controlCenter: true,
+    eyebrow: "Rack Records",
+    description: "Search immutable packing-list snapshots and reopen the exact rack contents captured at print time.",
+    context: "Packing history workspace",
+    status: "Audited snapshots",
+    group: "racks",
+  },
+};
+
+function applyOperationsModalProfile(kind, options = {}) {
+  const profile = { ...(OPERATIONS_MODAL_PROFILES[kind] || {}), ...options };
+  const controlCenter = Boolean(profile.controlCenter);
+  if (els.operationsModal) {
+    els.operationsModal.dataset.kind = kind;
+    els.operationsModal.dataset.group = profile.group || "operations";
+    els.operationsModal.classList.toggle("is-control-center", controlCenter);
+  }
+  if (els.operationsModalEyebrow) els.operationsModalEyebrow.textContent = profile.eyebrow || "Operations";
+  if (els.operationsModalTitle) els.operationsModalTitle.textContent = profile.title || "Operations";
+  if (els.operationsModalDescription) els.operationsModalDescription.textContent = profile.description || "";
+  if (els.operationsModalStatusText) els.operationsModalStatusText.textContent = profile.status || "Live operations";
+  return profile;
+}
+
+function openOperationsModal({
+  kind = "operations",
+  eyebrow = "",
+  title = "",
+  description = "",
+  context = "",
+  status = "",
+  group = "",
+  body = "",
+} = {}) {
   if (!els.operationsModal || !els.operationsModalBody) return;
   state.operationsModalKind = kind;
-  els.operationsModal.dataset.kind = kind;
-  if (els.operationsModalEyebrow) els.operationsModalEyebrow.textContent = eyebrow;
-  if (els.operationsModalTitle) els.operationsModalTitle.textContent = title;
+  applyOperationsModalProfile(kind, {
+    ...(eyebrow ? { eyebrow } : {}),
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(context ? { context } : {}),
+    ...(status ? { status } : {}),
+    ...(group ? { group } : {}),
+  });
   els.operationsModalBody.innerHTML = body;
+  if (els.operationsModalHistory) els.operationsModalHistory.open = false;
+  renderModalActionHistory([], "operations");
+  loadModalActionHistory(kind, "operations").catch(() => renderModalActionHistory([], "operations"));
   els.operationsModal.hidden = false;
-  if (els.operationsModalBackdrop) els.operationsModalBackdrop.hidden = false;
+  els.operationsModal.setAttribute("aria-hidden", "false");
+  if (els.operationsModalBackdrop) {
+    els.operationsModalBackdrop.hidden = false;
+    els.operationsModalBackdrop.setAttribute("aria-hidden", "false");
+  }
   updateModalScrollLock();
 }
 
 function closeOperationsModal() {
   state.operationsModalKind = "";
   state.rackMoveItemId = "";
-  if (els.operationsModal) delete els.operationsModal.dataset.kind;
+  if (els.operationsModal) {
+    delete els.operationsModal.dataset.kind;
+    delete els.operationsModal.dataset.group;
+    els.operationsModal.classList.remove("is-control-center");
+    els.operationsModal.hidden = true;
+    els.operationsModal.setAttribute("aria-hidden", "true");
+  }
   state.rejectLogOpening = false;
-  if (els.operationsModal) els.operationsModal.hidden = true;
-  if (els.operationsModalBackdrop) els.operationsModalBackdrop.hidden = true;
+  if (els.operationsModalBackdrop) {
+    els.operationsModalBackdrop.hidden = true;
+    els.operationsModalBackdrop.setAttribute("aria-hidden", "true");
+  }
+  if (els.operationsModalBody) els.operationsModalBody.replaceChildren();
+  if (els.operationsModalHistory) els.operationsModalHistory.open = false;
+  renderModalActionHistory([], "operations");
   updateModalScrollLock();
 }
 
@@ -22434,6 +23184,8 @@ function openRackDetailsModal(rackCode) {
     kind: "rack-details",
     eyebrow: "Rack Overview",
     title: rack.code === "T" ? "Truck / No Rack" : `Rack ${rack.code}`,
+    context: rack.code === "T" ? "Truck loading workspace" : `${rack.type || "Rack"} workspace`,
+    status: rackStatusLabel(rack),
     body: rackDetailsModalHtml(rack),
   });
 }
@@ -22443,6 +23195,11 @@ async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode)
   renderRacksPage();
   const rack = state.racks.find((item) => String(item.code) === String(rackCode));
   if (rack && state.operationsModalKind === "rack-details") {
+    applyOperationsModalProfile("rack-details", {
+      title: rack.code === "T" ? "Truck / No Rack" : `Rack ${rack.code}`,
+      context: rack.code === "T" ? "Truck loading workspace" : `${rack.type || "Rack"} workspace`,
+      status: rackStatusLabel(rack),
+    });
     els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
   } else if (!rack) {
     closeOperationsModal();
@@ -22498,10 +23255,6 @@ async function openPackingHistoryModal() {
   });
 }
 
-function rejectCatalogOptions(items = [], selected = "") {
-  return items.map((item) => `<option value="${escapeHtml(item.label)}" ${String(item.label) === String(selected) ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("");
-}
-
 function rejectDateKey(offsetDays = 0) {
   const value = new Date();
   value.setHours(12, 0, 0, 0);
@@ -22516,12 +23269,18 @@ function rejectFilterDescription() {
   const query = els.rejectSearchInput?.value.trim() || "";
   const dateFrom = els.rejectDateFrom?.value || "";
   const dateTo = els.rejectDateTo?.value || "";
+  const location = rejectSelectedLocation();
+  const reason = rejectSelectedReason();
+  const rejectedBy = rejectSelectedUser();
   const parts = [];
   if (dateFrom && dateTo && dateFrom === dateTo) parts.push(`rejected on ${formatDisplayDate(dateFrom)}`);
   else if (dateFrom && dateTo) parts.push(`rejected from ${formatDisplayDate(dateFrom)} through ${formatDisplayDate(dateTo)}`);
   else if (dateFrom) parts.push(`rejected from ${formatDisplayDate(dateFrom)}`);
   else if (dateTo) parts.push(`rejected through ${formatDisplayDate(dateTo)}`);
   else parts.push("all rejected dates");
+  if (location) parts.push(`at ${location}`);
+  if (reason) parts.push(`for ${reason}`);
+  if (rejectedBy) parts.push(`recorded by ${rejectedBy}`);
   if (query) parts.push(`matching “${query}”`);
   return parts.join(" · ");
 }
@@ -22539,6 +23298,7 @@ function setRejectDatePreset(value, { refresh = true } = {}) {
   if (!els.rejectDateFrom || !els.rejectDateTo) return;
   if (preset === "custom") {
     syncRejectDateLimits();
+    syncRejectFilterButton();
     if (refresh) els.rejectDateFrom.focus();
     return;
   }
@@ -22556,12 +23316,39 @@ function setRejectDatePreset(value, { refresh = true } = {}) {
     els.rejectDateTo.value = "";
   }
   syncRejectDateLimits();
+  syncRejectFilterButton();
   if (refresh) refreshRejectPage().catch((error) => showInlineError(error.message, true));
 }
 
 function markRejectDateRangeCustom() {
   syncRejectDateLimits();
   if (els.rejectDatePreset) els.rejectDatePreset.value = "custom";
+  syncRejectFilterButton();
+}
+
+function rejectActiveFilterCount() {
+  return [
+    els.rejectDateFrom?.value,
+    els.rejectDateTo?.value,
+    rejectSelectedLocation(),
+    rejectSelectedReason(),
+    rejectSelectedUser(),
+  ].filter(Boolean).length;
+}
+
+function syncRejectFilterButton() {
+  const count = rejectActiveFilterCount();
+  if (els.rejectFilterCount) {
+    els.rejectFilterCount.textContent = String(count);
+    els.rejectFilterCount.hidden = count === 0;
+  }
+  els.rejectFiltersBtn?.classList.toggle("is-active", count > 0);
+}
+
+function setRejectFilterPanelOpen(open) {
+  const isOpen = Boolean(open);
+  if (els.rejectFilterPanel) els.rejectFilterPanel.hidden = !isOpen;
+  if (els.rejectFiltersBtn) els.rejectFiltersBtn.setAttribute("aria-expanded", String(isOpen));
 }
 
 function clearRejectFilters() {
@@ -22571,6 +23358,10 @@ function clearRejectFilters() {
   }
   setRejectDatePreset("all", { refresh: false });
   if (els.rejectLocationFilter) els.rejectLocationFilter.value = "";
+  if (els.rejectReasonFilter) els.rejectReasonFilter.value = "";
+  if (els.rejectUserFilter) els.rejectUserFilter.value = "";
+  setRejectFilterPanelOpen(false);
+  syncRejectFilterButton();
   renderRejectPage();
   refreshRejectPage().catch((error) => showInlineError(error.message, true));
 }
@@ -22660,52 +23451,95 @@ function rejectSelectedLocation() {
   return String(els.rejectLocationFilter?.value || "").trim();
 }
 
-function rejectRowsForView(rejects = state.rejectHistory) {
-  const location = rejectSelectedLocation();
-  if (!location) return Array.isArray(rejects) ? rejects.slice() : [];
-  return (Array.isArray(rejects) ? rejects : []).filter((row) => String(row.location_label || "") === location);
+function rejectSelectedReason() {
+  return String(els.rejectReasonFilter?.value || "").trim();
 }
 
-function updateRejectLocationOptions(rejects = state.rejectHistory) {
-  if (!els.rejectLocationFilter) return;
-  const selected = rejectSelectedLocation();
-  const locations = [...new Set((Array.isArray(rejects) ? rejects : [])
-    .map((row) => String(row.location_label || "").trim())
-    .filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  els.rejectLocationFilter.innerHTML = `<option value="">All locations</option>${locations.map((location) => `<option value="${escapeHtml(location)}">${escapeHtml(location)}</option>`).join("")}`;
-  els.rejectLocationFilter.value = locations.includes(selected) ? selected : "";
+function rejectSelectedUser() {
+  return String(els.rejectUserFilter?.value || "").trim();
+}
+
+function rejectRowsForView(rejects = state.rejectHistory) {
+  const location = rejectSelectedLocation();
+  const reason = rejectSelectedReason();
+  const rejectedBy = rejectSelectedUser();
+  return (Array.isArray(rejects) ? rejects : []).filter((row) => {
+    if (location && String(row.location_label || "") !== location) return false;
+    if (reason && String(row.reason_label || "") !== reason) return false;
+    if (rejectedBy && String(row.rejected_by || "") !== rejectedBy) return false;
+    return true;
+  });
+}
+
+function replaceRejectFilterOptions(select, values, emptyLabel, selected) {
+  if (!select) return;
+  const normalized = [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>${normalized.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+  select.value = normalized.includes(selected) ? selected : "";
+}
+
+function updateRejectFilterOptions(rejects = state.rejectHistory) {
+  const rows = Array.isArray(rejects) ? rejects : [];
+  replaceRejectFilterOptions(
+    els.rejectLocationFilter,
+    rows.map((row) => row.location_label),
+    "All machines / locations",
+    rejectSelectedLocation(),
+  );
+  replaceRejectFilterOptions(
+    els.rejectReasonFilter,
+    rows.map((row) => row.reason_label),
+    "All reasons",
+    rejectSelectedReason(),
+  );
+  replaceRejectFilterOptions(
+    els.rejectUserFilter,
+    rows.map((row) => row.rejected_by),
+    "All users",
+    rejectSelectedUser(),
+  );
+  syncRejectFilterButton();
 }
 
 function renderRejectSummary(rejects = rejectRowsForView()) {
-  if (!els.rejectSummaryBar) return;
   const rows = Array.isArray(rejects) ? rejects : [];
   const totalQty = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
   const locations = new Set(rows.map((row) => String(row.location_label || "").trim()).filter(Boolean));
   const users = new Set(rows.map((row) => String(row.rejected_by || "").trim()).filter(Boolean));
-  els.rejectSummaryBar.innerHTML = `
-    <article><span class="reject-summary-icon events" aria-hidden="true"></span><div><strong>${rows.length}</strong><small>Total rejects</small></div></article>
-    <article><span class="reject-summary-icon locations" aria-hidden="true"></span><div><strong>${locations.size}</strong><small>Machines / locations</small></div></article>
-    <article><span class="reject-summary-icon users" aria-hidden="true"></span><div><strong>${users.size}</strong><small>Users</small></div></article>
-    <article class="is-quantity"><span class="reject-summary-icon quantity" aria-hidden="true"></span><div><strong>${totalQty} pc${totalQty === 1 ? "" : "s"}</strong><small>Total rejected quantity</small></div></article>`;
+  if (els.rejectSummaryBar) {
+    els.rejectSummaryBar.innerHTML = `
+      <article><span class="reject-summary-icon events" aria-hidden="true"></span><div><strong>${rows.length}</strong><small>Total rejects</small></div></article>
+      <article><span class="reject-summary-icon locations" aria-hidden="true"></span><div><strong>${locations.size}</strong><small>Machines / locations</small></div></article>
+      <article><span class="reject-summary-icon users" aria-hidden="true"></span><div><strong>${users.size}</strong><small>Users</small></div></article>
+      <article class="is-quantity"><span class="reject-summary-icon quantity" aria-hidden="true"></span><div><strong>${totalQty} pc${totalQty === 1 ? "" : "s"}</strong><small>Total rejected quantity</small></div></article>`;
+  }
+  if (els.rejectTimelineCount) {
+    els.rejectTimelineCount.textContent = `${rows.length} event${rows.length === 1 ? "" : "s"}`;
+  }
+}
+
+function rejectAdminActionHtml(row) {
+  if (!isAdminUser()) return "";
+  return `
+    <span class="reject-timeline-admin-actions-v154" aria-label="Admin reject actions">
+      <button class="reject-admin-action-v154 is-edit" type="button" data-reject-edit="${escapeHtml(row.id)}" title="Edit this reject">Edit</button>
+      <button class="reject-admin-action-v154 is-delete" type="button" data-reject-delete="${escapeHtml(row.id)}" title="Delete this reject">Delete</button>
+    </span>`;
 }
 
 function rejectTimelineDetailHtml(row) {
-  const customer = row.customer || "Not available";
-  const job = row.job || "Not available";
-  const product = row.product || "Not available";
   const notes = row.notes || "No investigation notes were entered for this reject.";
   return `
-    <div class="reject-timeline-detail-grid-v143">
-      <span><small>Customer</small><strong>${escapeHtml(customer)}</strong></span>
-      <span><small>Job number</small><strong>${escapeHtml(job)}</strong></span>
-      <span><small>Product</small><strong>${escapeHtml(product)}</strong></span>
-      <span class="is-notes"><small>Investigation notes</small><strong>${escapeHtml(notes)}</strong></span>
+    <div class="reject-timeline-notes-v151">
+      <small>Investigation notes</small>
+      <strong>${escapeHtml(notes)}</strong>
     </div>`;
 }
 
 function rejectHistoryHtml(rejects = rejectRowsForView()) {
   if (!rejects.length) {
-    return `<div class="reject-empty-state"><span aria-hidden="true"></span><div><strong>No internal rejects found</strong><p>No records match ${escapeHtml(rejectFilterDescription())}${rejectSelectedLocation() ? ` at ${escapeHtml(rejectSelectedLocation())}` : ""}. Clear the filters or try a different search.</p></div></div>`;
+    return `<div class="reject-empty-state"><span aria-hidden="true"></span><div><strong>No internal rejects found</strong><p>No records match ${escapeHtml(rejectFilterDescription())}. Clear the filters or try a different search.</p></div></div>`;
   }
   const groups = new Map();
   for (const row of rejects) {
@@ -22716,33 +23550,38 @@ function rejectHistoryHtml(rejects = rejectRowsForView()) {
   return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([rejectedDate, rows], groupIndex) => {
     const sortedRows = rows.slice().sort((a, b) => String(b.rejected_at || "").localeCompare(String(a.rejected_at || "")));
     return `
-      <details class="reject-date-group reject-timeline-group-v143" ${groupIndex === 0 ? "open" : ""}>
-        <summary class="reject-timeline-date-summary-v143">
-          <div class="reject-timeline-date-title-v143">
-            <span class="reject-timeline-calendar-v143" aria-hidden="true"></span>
+      <details class="reject-date-group reject-timeline-group-v151" ${groupIndex === 0 ? "open" : ""}>
+        <summary class="reject-timeline-date-summary-v151">
+          <div class="reject-timeline-date-title-v151">
+            <span class="reject-timeline-calendar-v151" aria-hidden="true"></span>
             <strong>${escapeHtml(rejectedDate === "Unknown date" ? rejectedDate : formatDisplayDate(rejectedDate))}</strong>
             <b>${rows.length} event${rows.length === 1 ? "" : "s"}</b>
           </div>
           <span class="reject-date-group-chevron" aria-hidden="true"></span>
         </summary>
-        <div class="reject-timeline-list-v143">
+        <div class="reject-timeline-list-v151">
           ${sortedRows.map((row) => `
-            <details class="reject-timeline-event-v143">
-              <summary class="reject-timeline-event-summary-v143">
+            <details class="reject-timeline-event-v151">
+              <summary class="reject-timeline-event-summary-v151">
                 <time>${escapeHtml(formatRejectTime(row.rejected_at))}</time>
-                <span class="reject-timeline-node-v143" aria-hidden="true"></span>
-                <div class="reject-timeline-card-v143">
-                  <span class="reject-timeline-ir-v143" aria-hidden="true">IR</span>
-                  <div class="reject-timeline-identity-v143"><small>Order / Item</small><strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong><span>${escapeHtml(row.customer || row.job || row.product || "No customer or job description")}</span></div>
-                  <b class="reject-timeline-qty-v143">${escapeHtml(row.qty)} pc${Number(row.qty || 0) === 1 ? "" : "s"}</b>
-                  <span class="reject-timeline-field-v143"><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Not available")}</strong></span>
-                  <span class="reject-timeline-field-v143"><small>Reason</small><strong>${escapeHtml(row.reason_label || "Not specified")}</strong></span>
-                  <span class="reject-timeline-field-v143"><small>Machine / location</small><strong>${escapeHtml(row.location_label || "Not specified")}</strong></span>
-                  <span class="reject-timeline-field-v143"><small>Rejected by</small><strong>${escapeHtml(row.rejected_by || "system")}</strong></span>
-                  <span class="reject-timeline-details-label-v143">Details<i aria-hidden="true"></i></span>
+                <span class="reject-timeline-node-v151" aria-hidden="true"></span>
+                <div class="reject-timeline-card-v151 ${isAdminUser() ? "has-admin-actions-v154" : ""}">
+                  <span class="reject-timeline-field-v151 is-job"><small>Job Nr.</small><strong>${escapeHtml(row.job || "Not available")}</strong></span>
+                  <div class="reject-timeline-identity-v151">
+                    <small>Order / Item</small>
+                    <strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong>
+                    <span>Delivery ${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "not available")}</span>
+                  </div>
+                  <span class="reject-timeline-field-v151 is-product"><small>Product</small><strong>${escapeHtml(row.product || "Not available")}</strong></span>
+                  <span class="reject-timeline-field-v151 is-reason"><small>Why rejected</small><strong>${escapeHtml(row.reason_label || "Not specified")}</strong></span>
+                  <span class="reject-timeline-field-v151 is-location"><small>Machine / location</small><strong>${escapeHtml(row.location_label || "Not specified")}</strong></span>
+                  <span class="reject-timeline-field-v151 is-user"><small>Rejected by</small><strong>${escapeHtml(row.rejected_by || "system")}</strong></span>
+                  <b class="reject-timeline-qty-v151">${escapeHtml(row.qty)} pc${Number(row.qty || 0) === 1 ? "" : "s"}</b>
+                  <span class="reject-timeline-details-label-v151">Notes<i aria-hidden="true"></i></span>
+                  ${rejectAdminActionHtml(row)}
                 </div>
               </summary>
-              <div class="reject-timeline-event-details-v143">${rejectTimelineDetailHtml(row)}</div>
+              <div class="reject-timeline-event-details-v151">${rejectTimelineDetailHtml(row)}</div>
             </details>`).join("")}
         </div>
       </details>`;
@@ -22752,10 +23591,138 @@ function rejectHistoryHtml(rejects = rejectRowsForView()) {
 function renderRejectPage() {
   const rows = rejectRowsForView();
   renderRejectSummary(rows);
+  syncRejectFilterButton();
   if (els.rejectHistory) els.rejectHistory.innerHTML = rejectHistoryHtml(rows);
 }
 
+function rejectRecordById(rejectId) {
+  return state.rejectHistory.find((row) => Number(row.id || 0) === Number(rejectId || 0)) || null;
+}
+
+function rejectDateTimeLocalValue(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function rejectCatalogOptions(rows, currentValue) {
+  const labels = [...new Set([
+    String(currentValue || "").trim(),
+    ...(Array.isArray(rows) ? rows.map((row) => String(row.label || "").trim()) : []),
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return labels.map((label) => `<option value="${escapeHtml(label)}" ${label === currentValue ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+}
+
+function rejectEditModalHtml(row) {
+  return `
+    <form id="rejectEditForm" class="reject-edit-form-v154">
+      <input type="hidden" name="id" value="${escapeHtml(row.id)}">
+      <section class="reject-edit-identity-v154">
+        <div><small>Order / Item</small><strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong></div>
+        <div><small>Job Nr.</small><strong>${escapeHtml(row.job || "Not available")}</strong></div>
+        <div><small>Product</small><strong>${escapeHtml(row.product || "Not available")}</strong></div>
+        <div><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Not available")}</strong></div>
+        <div><small>Originally recorded by</small><strong>${escapeHtml(row.rejected_by || "System")}</strong></div>
+      </section>
+      <section class="reject-edit-grid-v154">
+        <label><span>Reject reason</span><select name="reason" required>${rejectCatalogOptions(state.rejectCatalog.reasons, String(row.reason_label || ""))}</select></label>
+        <label><span>Machine / location</span><select name="location" required>${rejectCatalogOptions(state.rejectCatalog.locations, String(row.location_label || ""))}</select></label>
+        <label><span>Rejected quantity</span><input name="qty" type="number" min="1" step="1" value="${escapeHtml(row.qty || 1)}" required></label>
+        <label><span>Incident date and time</span><input name="rejectedAt" type="datetime-local" value="${escapeHtml(rejectDateTimeLocalValue(row.rejected_at))}" required></label>
+        <label class="reject-edit-notes-v154"><span>Investigation notes</span><textarea name="notes" rows="5" maxlength="500" placeholder="Add investigation details...">${escapeHtml(row.notes || "")}</textarea></label>
+      </section>
+      <aside class="reject-edit-safety-v154">
+        Editing changes reject reporting and the Scan-page reject ribbon. It does not replay or reverse the original scan, rack, bay, or process rollback.
+      </aside>
+      <footer class="reject-edit-actions-v154">
+        <span id="rejectEditStatus" role="status" aria-live="polite"></span>
+        <div>
+          <button class="secondary" type="button" data-operations-close>Cancel</button>
+          <button class="primary" type="submit">Save Reject Changes</button>
+        </div>
+      </footer>
+    </form>`;
+}
+
+async function openRejectEditModal(rejectId) {
+  if (!isAdminUser()) throw new Error("Admin role required to edit rejects.");
+  const row = rejectRecordById(rejectId);
+  if (!row) throw new Error("Reject record was not found. Refresh the page and try again.");
+  if (!(state.rejectCatalog.reasons || []).length || !(state.rejectCatalog.locations || []).length) {
+    const catalog = await fetchJson("/api/rejects/catalog");
+    state.rejectCatalog = {
+      reasons: Array.isArray(catalog.reasons) ? catalog.reasons : [],
+      locations: Array.isArray(catalog.locations) ? catalog.locations : [],
+    };
+  }
+  openOperationsModal({
+    kind: "reject-edit",
+    eyebrow: "Admin reject management",
+    title: `Edit Reject ${row.id}`,
+    body: rejectEditModalHtml(row),
+  });
+}
+
+async function refreshRejectMutationViews(payload) {
+  state.rejectHistory = Array.isArray(payload?.rejects) ? payload.rejects : state.rejectHistory;
+  updateRejectFilterOptions();
+  renderRejectPage();
+  window.DLSLineUpdates?.clearCache?.();
+  if (state.activeListId) await activateList(state.activeListId, false);
+}
+
+async function submitRejectEditForm(form) {
+  if (!isAdminUser()) throw new Error("Admin role required to edit rejects.");
+  const status = document.getElementById("rejectEditStatus");
+  const submitButton = form.querySelector('button[type="submit"]');
+  const data = Object.fromEntries(new FormData(form).entries());
+  data.id = Number(data.id || 0);
+  data.qty = Number(data.qty || 0);
+  const incidentDate = new Date(String(data.rejectedAt || ""));
+  if (Number.isNaN(incidentDate.getTime())) throw new Error("Enter a valid incident date and time.");
+  data.rejectedAt = incidentDate.toISOString();
+  if (submitButton) submitButton.disabled = true;
+  if (status) status.textContent = "Saving reject changes...";
+  try {
+    const payload = await fetchJson("/api/rejects/update", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    closeOperationsModal();
+    await refreshRejectMutationViews(payload);
+    showSaveConfirmation(payload.message || "Internal reject was updated.");
+  } catch (error) {
+    if (status) status.textContent = error.message;
+    throw error;
+  } finally {
+    if (submitButton?.isConnected) submitButton.disabled = false;
+  }
+}
+
+async function deleteRejectRecord(rejectId) {
+  if (!isAdminUser()) throw new Error("Admin role required to delete rejects.");
+  const row = rejectRecordById(rejectId);
+  if (!row) throw new Error("Reject record was not found. Refresh the page and try again.");
+  const confirmed = await confirmWebAppAction({
+    title: "Delete internal reject?",
+    message: `Delete reject <strong>#${escapeHtml(row.id)}</strong> for <strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong>?`,
+    details: `Reason: ${escapeHtml(row.reason_label || "Not specified")} · Incident: ${escapeHtml(formatDateTime(row.rejected_at))}. This removes the reject record and recalculates reject flags, but it does not restore scans, rack quantities, bay assignments, or process state changed when the reject was logged.`,
+    confirmLabel: "Delete Reject",
+    danger: true,
+  });
+  if (!confirmed) return;
+  const payload = await fetchJson("/api/rejects/delete", {
+    method: "POST",
+    body: JSON.stringify({ id: Number(row.id) }),
+  });
+  await refreshRejectMutationViews(payload);
+  playAppSound("destructive_action", { force: true });
+  showSaveConfirmation(payload.message || "Internal reject was deleted.");
+}
+
 async function refreshRejectPage() {
+  const requestId = ++state.rejectHistoryRequestId;
   const params = new URLSearchParams();
   const query = els.rejectSearchInput?.value.trim() || "";
   const dateFrom = els.rejectDateFrom?.value || "";
@@ -22776,7 +23743,6 @@ async function refreshRejectPage() {
   if (dateTo) params.set("dateTo", dateTo);
   params.set("limit", "1000");
 
-  if (els.rejectRefreshBtn) els.rejectRefreshBtn.disabled = true;
   if (status) {
     status.hidden = false;
     status.className = "reject-page-status is-loading";
@@ -22790,12 +23756,13 @@ async function refreshRejectPage() {
     fetchJson(`/api/rejects?${params.toString()}`),
     fetchJson("/api/rejects/catalog"),
   ]);
+  if (requestId !== state.rejectHistoryRequestId) return;
 
   try {
     if (historyResult.status === "rejected") throw historyResult.reason;
     const history = historyResult.value || {};
     state.rejectHistory = Array.isArray(history.rejects) ? history.rejects : [];
-    updateRejectLocationOptions();
+    updateRejectFilterOptions();
     renderRejectPage();
 
     if (catalogResult.status === "fulfilled") {
@@ -22815,6 +23782,7 @@ async function refreshRejectPage() {
       status.textContent = catalogWarning;
     }
   } catch (error) {
+    if (requestId !== state.rejectHistoryRequestId) return;
     state.rejectHistory = [];
     renderRejectSummary([]);
     if (els.rejectHistory) {
@@ -22826,8 +23794,6 @@ async function refreshRejectPage() {
       status.textContent = error?.message || "Reject history could not be loaded.";
     }
     throw error;
-  } finally {
-    if (els.rejectRefreshBtn) els.rejectRefreshBtn.disabled = false;
   }
 }
 
@@ -23366,7 +24332,9 @@ function wireV135OperationsEvents() {
     event.preventDefault();
     openRejectLogModal().catch((error) => showInlineError(error.message, true));
   });
-  els.rejectRefreshBtn?.addEventListener("click", () => refreshRejectPage().catch((error) => showInlineError(error.message, true)));
+  els.rejectFiltersBtn?.addEventListener("click", () => {
+    setRejectFilterPanelOpen(Boolean(els.rejectFilterPanel?.hidden));
+  });
   els.rejectSearchInput?.addEventListener("input", () => {
     window.clearTimeout(els.rejectSearchInput._timer);
     els.rejectSearchInput._timer = window.setTimeout(() => refreshRejectPage().catch(() => {}), 250);
@@ -23381,7 +24349,9 @@ function wireV135OperationsEvents() {
     refreshRejectPage().catch(() => {});
   });
   els.rejectClearFiltersBtn?.addEventListener("click", clearRejectFilters);
-  els.rejectLocationFilter?.addEventListener("change", renderRejectPage);
+  [els.rejectLocationFilter, els.rejectReasonFilter, els.rejectUserFilter].forEach((select) => {
+    select?.addEventListener("change", renderRejectPage);
+  });
 
   document.addEventListener("dls:delivery-list-import-history-changed", () => {
     state.adminTodayImportLoaded = false;
@@ -23405,6 +24375,20 @@ function wireV135OperationsEvents() {
     if (rejectVerify) {
       event.preventDefault();
       previewRejectMatch().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const rejectEdit = event.target.closest("[data-reject-edit]");
+    if (rejectEdit) {
+      event.preventDefault();
+      event.stopPropagation();
+      openRejectEditModal(Number(rejectEdit.dataset.rejectEdit || 0)).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const rejectDelete = event.target.closest("[data-reject-delete]");
+    if (rejectDelete) {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteRejectRecord(Number(rejectDelete.dataset.rejectDelete || 0)).catch((error) => showInlineError(error.message, true));
       return;
     }
     const rejectRetry = event.target.closest("[data-reject-retry]");
@@ -23532,6 +24516,19 @@ function wireV135OperationsEvents() {
         const status = document.getElementById("rejectLogStatus");
         if (status) status.textContent = error.message;
       });
+      return;
+    }
+    if (event.target.matches("#rejectEditForm")) {
+      event.preventDefault();
+      submitRejectEditForm(event.target).catch((error) => {
+        const status = document.getElementById("rejectEditStatus");
+        if (status) status.textContent = error.message;
+      });
+      return;
+    }
+    if (event.target.matches("#bayOverrideWindowForm")) {
+      event.preventDefault();
+      saveBayOverrideWindow().catch((error) => showInlineError(error.message, true));
       return;
     }
     if (event.target.matches("#manualOrderCreateForm")) {
@@ -25421,6 +26418,13 @@ function wireEvents() {
         return;
       }
     }
+    const adminModalSectionButton = event.target.closest("[data-admin-modal-section]");
+    if (adminModalSectionButton && els.adminModal?.contains(adminModalSectionButton)) {
+      event.preventDefault();
+      setAdminModalSection(adminModalSectionButton.dataset.adminModalSection || "workspace");
+      return;
+    }
+
     const manualCustomClearButton = event.target.closest("[data-manual-custom-clear]");
     if (manualCustomClearButton) {
       event.preventDefault();
@@ -25446,6 +26450,55 @@ function wireEvents() {
       state.manualEditDirty = false;
       openAdminModal("deliveryLists");
 
+      return;
+    }
+    const manualFilterButton = event.target.closest("[data-manual-edit-filter-group]");
+    if (manualFilterButton) {
+      event.preventDefault();
+      const group = manualFilterButton.dataset.manualEditFilterGroup || "";
+      const value = manualFilterButton.dataset.manualEditFilterValue || "all";
+      if (group === "attention") {
+        const next = new Set(state.manualEditFilters.attention || []);
+        if (next.has(value)) next.delete(value); else next.add(value);
+        state.manualEditFilters.attention = [...next];
+      } else if (group === "glassType") {
+        if (value === "all") {
+          state.manualEditFilters.glassTypes = [];
+        } else {
+          const next = new Set(state.manualEditFilters.glassTypes || []);
+          if (next.has(value)) next.delete(value); else next.add(value);
+          state.manualEditFilters.glassTypes = [...next];
+        }
+      } else if (group) {
+        state.manualEditFilters[group] = value;
+      }
+      refreshManualEditFilterDrawer(true);
+      return;
+    }
+    if (event.target.closest("[data-manual-edit-filter-clear]")) {
+      event.preventDefault();
+      state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
+      refreshManualEditFilterDrawer(false);
+      runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("[data-manual-edit-filter-apply]")) {
+      event.preventDefault();
+      document.querySelector(".manual-edit-filter-drawer")?.removeAttribute("open");
+      runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("[data-manual-order-toggle]")) {
+      event.preventDefault();
+      const panel = document.getElementById("manualOrderCreatePanel");
+      if (panel) {
+        panel.open = true;
+        panel.classList.add("is-requested-open");
+        const results = document.getElementById("manualEditModalResults");
+        if (results) results.scrollTop = 0;
+        panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        window.setTimeout(() => panel.querySelector("input[name='order']")?.focus(), 180);
+      }
       return;
     }
     const manualModalSearchButton = event.target.closest("#manualEditModalSearchBtn");
@@ -25839,7 +26892,7 @@ function wireEvents() {
     if (saveLineItemButton) {
       event.preventDefault();
       event.stopPropagation();
-      saveManualLineItem(saveLineItemButton.dataset.saveLineItem).catch((error) => showInlineError(error.message));
+      saveManualLineItem(saveLineItemButton.dataset.saveLineItem, saveLineItemButton).catch((error) => showInlineError(error.message));
       return;
     }
     const deleteLineItemButton = event.target.closest("[data-delete-line-item]");
@@ -25989,3 +27042,1850 @@ function wireEvents() {
 init().catch((error) => {
   document.body.innerHTML = `<main class="app"><section class="last-card error"><strong>Unable to load delivery list</strong><p>${escapeHtml(error.message)}</p></section></main>`;
 });
+
+/* ==========================================================================
+   DELIVERY AUTOMATION CONTROL CENTER
+   ========================================================================== */
+(() => {
+  "use strict";
+
+  const API_ROOT = "/api/admin/delivery-automation";
+  const ACTION_LABELS = {
+    "folder-import-only": "Import Temp Folder Only",
+    "sql-export-only": "Query SQL & Export Only",
+    "sql-export-and-import": "Query SQL, Export & Import",
+  };
+  const RANGE_LABELS = {
+    "one-date": "one delivery date",
+    custom: "a custom date range",
+    incremental: "the normal automatic window",
+    full: "the full safety refresh window",
+  };
+
+  let modal = null;
+  let backdrop = null;
+  let pollTimer = null;
+  let lastDashboard = null;
+  let lastCompletedRunKey = "";
+  let recentImportsRefreshTimer = null;
+  let importHistoryModal = null;
+  let importHistorySearchTimer = null;
+  let lastImportHistoryPayload = null;
+  let importHistoryHasNewResults = false;
+  const importHistoryState = {
+    page: 1,
+    pageSize: 20,
+    query: "",
+    classification: "",
+    dateFrom: "",
+    dateTo: "",
+  };
+  let deliveryCatalogHeartbeat = null;
+  let deliveryCatalogRefreshInFlight = false;
+  let latestImportRefreshInFlight = false;
+  let lastDeliveryCatalogSignature = "";
+  let lastLatestImportSignature = "";
+  let autoFollowLog = true;
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  async function api(path = "", options = {}) {
+    const response = await fetch(`${API_ROOT}${path}`, {
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || payload.message || `Request failed (${response.status})`);
+    }
+    return payload;
+  }
+
+  function localDateIso(offset = 0) {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() + offset);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function formatTimestamp(value) {
+    if (!value) return "No completed run yet";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+
+  function formatDeliveryDate(value) {
+    const text = String(value || "").trim();
+    if (!text) return "Unknown date";
+    const parsed = new Date(`${text.slice(0, 10)}T12:00:00`);
+    if (Number.isNaN(parsed.getTime())) return text;
+    return parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function deliveryCatalogSignature(lists = []) {
+    return lists.map((item) => [
+      item.id,
+      item.deliveryDate,
+      item.revision,
+      item.status,
+      item.totalQty,
+      item.scannedQty,
+    ].map((value) => String(value ?? "")).join("|")).sort().join("\n");
+  }
+
+  function publishDeliveryCatalog(lists, source = "poll", force = false) {
+    if (!Array.isArray(lists)) return false;
+    const signature = deliveryCatalogSignature(lists);
+    if (!force && signature === lastDeliveryCatalogSignature) return false;
+    lastDeliveryCatalogSignature = signature;
+    document.dispatchEvent(new CustomEvent("dls:delivery-list-data-refreshed", {
+      detail: { lists, source, catalogOnly: true },
+    }));
+    return true;
+  }
+
+  function stampLatestImportResults(items, checkedAt = "") {
+    const completedAt = String(checkedAt || "").trim();
+    return (Array.isArray(items) ? items : []).map((item) => {
+      const stamped = { ...item };
+      if (completedAt) {
+        stamped.importedAt = completedAt;
+        stamped.checkedAt = completedAt;
+        stamped.updatedAt = completedAt;
+      }
+      stamped.stageSummaries = (Array.isArray(item?.stageSummaries) ? item.stageSummaries : [])
+        .map((stage) => completedAt
+          ? { ...stage, importedAt: completedAt, checkedAt: completedAt, updatedAt: completedAt }
+          : { ...stage });
+      return stamped;
+    });
+  }
+
+  function latestImportSignature(payload = {}) {
+    const results = Array.isArray(payload.latestImportResults)
+      ? payload.latestImportResults
+      : (Array.isArray(payload.recentImports) ? payload.recentImports : []);
+    return JSON.stringify({
+      latestRunKey: payload.latestRunKey || "",
+      lastCheckedAt: payload.lastCheckedAt || "",
+      results: results.map((item) => ({
+        deliveryDate: item.deliveryDate || "",
+        sourceName: item.sourceName || item.fileName || "",
+        classification: item.classification || "",
+        importedAt: item.importedAt || "",
+        checkedAt: item.checkedAt || "",
+        createdCount: Number(item.createdCount || 0),
+        reactivatedCount: Number(item.reactivatedCount || 0),
+        updatedCount: Number(item.updatedCount || 0),
+        addedPieceQty: Number(item.addedPieceQty || 0),
+        changedPieceQty: Number(item.changedPieceQty || 0),
+        errors: Array.isArray(item.errors) ? item.errors : [],
+      })),
+    });
+  }
+
+  function publishLatestImportResult(payload = {}, source = "latest-import", force = false) {
+    const rawResults = Array.isArray(payload.latestImportResults)
+      ? payload.latestImportResults
+      : (Array.isArray(payload.recentImports) ? payload.recentImports : []);
+    const results = stampLatestImportResults(rawResults, payload.lastCheckedAt || payload.latestRun?.completedAt || "");
+    const signature = latestImportSignature({ ...payload, latestImportResults: results });
+    if (!force && signature === lastLatestImportSignature) return false;
+    lastLatestImportSignature = signature;
+    updateAdminImportTimestamp(payload);
+    document.dispatchEvent(new CustomEvent("dls:delivery-list-data-refreshed", {
+      detail: {
+        lists: Array.isArray(payload.lists) ? payload.lists : undefined,
+        recentImports: results,
+        latestImportResults: results,
+        lastCheckedAt: payload.lastCheckedAt || "",
+        latestRun: payload.latestRun || {},
+        latestRunKey: payload.latestRunKey || "",
+        source,
+        catalogOnly: false,
+      },
+    }));
+    return true;
+  }
+
+  async function refreshLatestImportResult(force = false) {
+    if (latestImportRefreshInFlight || document.visibilityState === "hidden") return;
+    latestImportRefreshInFlight = true;
+    try {
+      const payload = await api("/latest-import");
+      publishLatestImportResult(payload, "latest-import", force);
+      if (Array.isArray(payload.lists)) {
+        publishDeliveryCatalog(payload.lists, "latest-import-catalog", force);
+      }
+    } catch {
+      // The next Admin visibility check, notification, or heartbeat retries.
+    } finally {
+      latestImportRefreshInFlight = false;
+    }
+  }
+
+  async function refreshDeliveryListCatalog(force = false) {
+    if (deliveryCatalogRefreshInFlight || document.visibilityState === "hidden") return;
+    deliveryCatalogRefreshInFlight = true;
+    try {
+      const response = await fetch("/api/delivery-lists", {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (response.status === 401 || response.status === 403) return;
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && Array.isArray(payload.lists)) {
+        publishDeliveryCatalog(payload.lists, "catalog-poll", force);
+      }
+    } catch {
+      // Keep scanning uninterrupted when a background catalog refresh cannot run.
+    } finally {
+      deliveryCatalogRefreshInFlight = false;
+    }
+  }
+
+  function startDeliveryCatalogHeartbeat() {
+    if (deliveryCatalogHeartbeat) return;
+    refreshDeliveryListCatalog(true);
+    if (adminPageIsVisible()) refreshLatestImportResult(true);
+    deliveryCatalogHeartbeat = window.setInterval(() => {
+      refreshDeliveryListCatalog(false);
+      if (adminPageIsVisible()) refreshLatestImportResult(false);
+    }, 10000);
+  }
+
+
+
+  function importResultsFromNotification(item) {
+    const details = item?.details && typeof item.details === "object" ? item.details : {};
+    return Array.isArray(details.importResults) ? details.importResults : [];
+  }
+
+  function openDeliveryListManagementFromNotification(item) {
+    const details = item?.details && typeof item.details === "object" ? item.details : {};
+    const adminButton = document.querySelector('[data-page-target="admin"]:not([hidden])');
+    const results = importResultsFromNotification(item);
+    const completedAt = String(details.completedAt || item?.createdAt || "");
+
+    if (!adminButton) {
+      const scanButton = document.querySelector('[data-page-target="scan"]:not([hidden])');
+      scanButton?.click();
+      window.setTimeout(() => {
+        const updatedFilter = document.querySelector('[data-filter="updated"]');
+        if (updatedFilter && !updatedFilter.classList.contains("active") && !updatedFilter.classList.contains("is-active")) {
+          updatedFilter.click();
+        }
+      }, 350);
+      return;
+    }
+
+    adminButton.click();
+    window.setTimeout(() => {
+      if (results.length) {
+        publishLatestImportResult({
+          latestImportResults: results,
+          recentImports: results,
+          lastCheckedAt: completedAt,
+          latestRunKey: `notification-${Number(item?.id || 0)}`,
+          latestRun: {
+            completedAt,
+            succeeded: details.succeeded,
+            mode: details.mode || "",
+            runAction: details.runAction || "",
+            error: details.error || "",
+          },
+        }, "notification-click", true);
+      } else {
+        refreshLatestImportResult(true);
+      }
+      const management = document.getElementById("adminDeliveryLists");
+      management?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const panel = management?.closest(".panel") || management;
+      panel?.classList.add("dls-import-result-focus");
+      window.setTimeout(() => panel?.classList.remove("dls-import-result-focus"), 1800);
+    }, 180);
+  }
+
+  function classificationDetails(value) {
+    const classification = String(value || "no_changes").toLowerCase();
+    const values = {
+      new: { label: "New", className: "is-new" },
+      updated: { label: "Updated", className: "is-updated" },
+      new_updated: { label: "New + Updated", className: "is-new-updated" },
+      failed: { label: "Failed", className: "is-failed" },
+      no_changes: { label: "No Changes", className: "is-no-changes" },
+    };
+    return values[classification] || values.no_changes;
+  }
+
+  function recentImportMessage(item) {
+    const classification = String(item.classification || "").toLowerCase();
+    const errors = Array.isArray(item.errors) ? item.errors.filter(Boolean) : [];
+    if (classification === "failed") {
+      return errors[0] || item.reason || "The scanner importer could not process this delivery-list file.";
+    }
+    if (classification === "no_changes" && item.reason) return String(item.reason);
+
+    const details = [];
+    const createdCount = Number(item.createdCount || 0);
+    const reactivatedCount = Number(item.reactivatedCount || 0);
+    const brandNewCount = Math.max(createdCount - reactivatedCount, 0);
+    if (brandNewCount) details.push(`${brandNewCount} new stage list${brandNewCount === 1 ? "" : "s"}`);
+    if (reactivatedCount) details.push(`${reactivatedCount} restored stage list${reactivatedCount === 1 ? "" : "s"}`);
+    if (Number(item.updatedCount || 0)) details.push(`${Number(item.updatedCount)} updated stage list${Number(item.updatedCount) === 1 ? "" : "s"}`);
+    if (Number(item.addedPieceQty || 0)) details.push(`${Number(item.addedPieceQty)} added piece${Number(item.addedPieceQty) === 1 ? "" : "s"}`);
+    if (Number(item.changedPieceQty || 0)) details.push(`${Number(item.changedPieceQty)} changed piece${Number(item.changedPieceQty) === 1 ? "" : "s"}`);
+    if (Number(item.removedPieceQty || 0)) details.push(`${Number(item.removedPieceQty)} removed source piece${Number(item.removedPieceQty) === 1 ? "" : "s"}`);
+    if (!details.length && Number(item.rowCount || 0)) details.push(`${Number(item.rowCount)} line item${Number(item.rowCount) === 1 ? "" : "s"}`);
+    if (!details.length) details.push("No delivery-list line changes detected");
+    return details.join(" · ");
+  }
+
+  function stageSummaryLabel(stage = {}) {
+    return String(
+      stage.label
+      || stage.stage
+      || stage.scanner
+      || stage.listLabel
+      || stage.listId
+      || "Delivery-list stage"
+    );
+  }
+
+  function stageSummaryStatus(stage = {}) {
+    const created = Boolean(stage.created);
+    const reactivated = Boolean(stage.reactivated);
+    const changedLines = Number(stage.changedLineCount || 0);
+    const changedPieces = Number(stage.changedPieceQty || 0);
+    const updatedPieces = Number(stage.updatedPieceQty || 0);
+    const addedPieces = Number(stage.addedPieceQty || stage.newPieceQty || 0);
+    const removedLines = Number(stage.removedLineCount || 0);
+    const removedPieces = Number(stage.removedPieceQty || 0);
+    const changed = changedLines > 0 || changedPieces > 0 || updatedPieces > 0 || addedPieces > 0 || removedLines > 0 || removedPieces > 0;
+
+    if ((created || reactivated) && changed) return { label: "New + Updated", className: "is-new-updated", newStage: true };
+    if (created || reactivated) return { label: "New Stage", className: "is-new", newStage: true };
+    if (changed) return { label: "Updated", className: "is-updated", newStage: false };
+    return { label: "No Changes", className: "is-no-changes", newStage: false };
+  }
+
+  function stageSummaryMessage(stage = {}) {
+    const parts = [];
+    const addedPieces = Number(stage.addedPieceQty || stage.newPieceQty || 0);
+    const updatedPieces = Number(stage.updatedPieceQty || 0);
+    const changedPieces = Number(stage.changedPieceQty || 0);
+    const changedLines = Number(stage.changedLineCount || 0);
+    const removedLines = Number(stage.removedLineCount || 0);
+    const removedPieces = Number(stage.removedPieceQty || 0);
+    const totalQty = Number(stage.totalQty || 0);
+
+    if (stage.reactivated) parts.push("Restored after deletion");
+    else if (stage.created) parts.push("Entirely new stage");
+    if (addedPieces) parts.push(`${addedPieces} added piece${addedPieces === 1 ? "" : "s"}`);
+    if (updatedPieces) parts.push(`${updatedPieces} updated piece${updatedPieces === 1 ? "" : "s"}`);
+    else if (changedPieces) parts.push(`${changedPieces} changed piece${changedPieces === 1 ? "" : "s"}`);
+    if (changedLines) parts.push(`${changedLines} changed line${changedLines === 1 ? "" : "s"}`);
+    if (removedLines) parts.push(`${removedLines} removed source line${removedLines === 1 ? "" : "s"}`);
+    if (removedPieces) parts.push(`${removedPieces} removed source piece${removedPieces === 1 ? "" : "s"}`);
+    if (!parts.length && totalQty) parts.push(`${totalQty} total piece${totalQty === 1 ? "" : "s"}`);
+    if (!parts.length) parts.push("No stage changes detected");
+    return parts.join(" · ");
+  }
+
+  function renderStageSummaries(item = {}) {
+    const stages = Array.isArray(item.stageSummaries) ? item.stageSummaries : [];
+    if (!stages.length) {
+      return `<div class="automation-import-stage-empty">${escapeHtml(recentImportMessage(item))}</div>`;
+    }
+    return `
+      <div class="automation-import-stage-list">
+        ${stages.map((stage) => {
+          const status = stageSummaryStatus(stage);
+          return `
+            <div class="automation-import-stage-row ${status.className}">
+              <div class="automation-import-stage-copy">
+                <strong>${escapeHtml(stageSummaryLabel(stage))}</strong>
+                <small>${escapeHtml(stageSummaryMessage(stage))}</small>
+              </div>
+              <span class="automation-import-stage-pill">${escapeHtml(status.label)}</span>
+            </div>`;
+        }).join("")}
+      </div>`;
+  }
+
+  function updateAdminImportTimestamp(payload = {}) {
+    lastImportHistoryPayload = payload;
+    const adminLastUpdated = document.getElementById("adminLastUpdated");
+    if (adminLastUpdated && payload.lastCheckedAt) {
+      adminLastUpdated.textContent = `Last updated: ${formatTimestamp(payload.lastCheckedAt)}`;
+    }
+  }
+
+  // Import history is part of the main control center. It refreshes only when
+  // the History tab is opened, a history control changes, Refresh is selected,
+  // or the complete control center closes and performs a hidden catalog sync.
+  function wireImportHistoryPanel() {
+    importHistoryModal = modal;
+    if (!importHistoryModal || importHistoryModal.dataset.historyWired === "true") return;
+    importHistoryModal.dataset.historyWired = "true";
+
+    importHistoryModal.querySelector("#importHistoryRefreshBtn").addEventListener("click", () => refreshImportHistory(false));
+    importHistoryModal.querySelector("#importHistoryClearBtn").addEventListener("click", () => {
+      importHistoryState.page = 1;
+      importHistoryState.query = "";
+      importHistoryState.classification = "";
+      importHistoryState.dateFrom = "";
+      importHistoryState.dateTo = "";
+      importHistoryModal.querySelector("#importHistorySearch").value = "";
+      importHistoryModal.querySelector("#importHistoryStatusFilter").value = "";
+      importHistoryModal.querySelector("#importHistoryDateFrom").value = "";
+      importHistoryModal.querySelector("#importHistoryDateTo").value = "";
+      refreshImportHistory(false);
+    });
+
+    importHistoryModal.querySelector("#importHistorySearch").addEventListener("input", (event) => {
+      clearTimeout(importHistorySearchTimer);
+      importHistorySearchTimer = window.setTimeout(() => {
+        importHistoryState.page = 1;
+        importHistoryState.query = event.target.value.trim();
+        refreshImportHistory(false);
+      }, 300);
+    });
+    importHistoryModal.querySelector("#importHistoryStatusFilter").addEventListener("change", (event) => {
+      importHistoryState.page = 1;
+      importHistoryState.classification = event.target.value;
+      refreshImportHistory(false);
+    });
+    importHistoryModal.querySelector("#importHistoryDateFrom").addEventListener("change", (event) => {
+      importHistoryState.page = 1;
+      importHistoryState.dateFrom = event.target.value;
+      refreshImportHistory(false);
+    });
+    importHistoryModal.querySelector("#importHistoryDateTo").addEventListener("change", (event) => {
+      importHistoryState.page = 1;
+      importHistoryState.dateTo = event.target.value;
+      refreshImportHistory(false);
+    });
+    importHistoryModal.querySelector("#importHistoryPageSize").addEventListener("change", (event) => {
+      importHistoryState.page = 1;
+      importHistoryState.pageSize = Number(event.target.value || 20);
+      refreshImportHistory(false);
+    });
+    importHistoryModal.querySelector("#importHistoryPager").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-history-page]");
+      if (!button || button.disabled) return;
+      importHistoryState.page = Number(button.dataset.historyPage || 1);
+      refreshImportHistory(false);
+    });
+  }
+
+  function importHistoryRequestPath() {
+    const params = new URLSearchParams({
+      page: String(importHistoryState.page),
+      pageSize: String(importHistoryState.pageSize),
+    });
+    if (importHistoryState.query) params.set("q", importHistoryState.query);
+    if (importHistoryState.classification) params.set("classification", importHistoryState.classification);
+    if (importHistoryState.dateFrom) params.set("dateFrom", importHistoryState.dateFrom);
+    if (importHistoryState.dateTo) params.set("dateTo", importHistoryState.dateTo);
+    return `/recent-imports?${params.toString()}`;
+  }
+
+  function historyPageNumbers(page, totalPages) {
+    const values = new Set([1, totalPages, page - 2, page - 1, page, page + 1, page + 2]);
+    return [...values].filter((value) => value >= 1 && value <= totalPages).sort((a, b) => a - b);
+  }
+
+  function renderImportHistoryPager(payload = {}) {
+    const pager = importHistoryModal?.querySelector("#importHistoryPager");
+    const pageSummary = importHistoryModal?.querySelector("#importHistoryPageSummary");
+    if (!pager || !pageSummary) return;
+    const page = Number(payload.page || 1);
+    const totalPages = Math.max(1, Number(payload.totalPages || 1));
+    pageSummary.textContent = `Page ${page} of ${totalPages}`;
+    const pageNumbers = historyPageNumbers(page, totalPages);
+    const buttons = [
+      `<button type="button" data-history-page="${Math.max(1, page - 1)}"${page <= 1 ? " disabled" : ""}>Previous</button>`,
+    ];
+    let previousNumber = 0;
+    pageNumbers.forEach((number) => {
+      if (previousNumber && number - previousNumber > 1) buttons.push('<span class="import-history-page-gap">…</span>');
+      buttons.push(`<button type="button" data-history-page="${number}" class="${number === page ? "is-active" : ""}"${number === page ? ' aria-current="page"' : ""}>${number}</button>`);
+      previousNumber = number;
+    });
+    buttons.push(`<button type="button" data-history-page="${Math.min(totalPages, page + 1)}"${page >= totalPages ? " disabled" : ""}>Next</button>`);
+    pager.innerHTML = buttons.join("");
+  }
+
+  function renderImportHistory(payload = {}) {
+    if (!importHistoryModal) return;
+    updateAdminImportTimestamp(payload);
+    const results = importHistoryModal.querySelector("#importHistoryResults");
+    const resultSummary = importHistoryModal.querySelector("#importHistoryResultSummary");
+    const lastChecked = importHistoryModal.querySelector("#importHistoryLastChecked");
+    const imports = Array.isArray(payload.imports)
+      ? payload.imports
+      : (Array.isArray(payload.recentImports) ? payload.recentImports : []);
+    const totalCount = Number(payload.totalCount ?? imports.length);
+    const page = Number(payload.page || 1);
+    const pageSize = Number(payload.pageSize || importHistoryState.pageSize);
+    const first = totalCount ? ((page - 1) * pageSize) + 1 : 0;
+    const last = totalCount ? Math.min(page * pageSize, totalCount) : 0;
+    resultSummary.textContent = totalCount
+      ? `Showing ${first}-${last} of ${totalCount} import result${totalCount === 1 ? "" : "s"}`
+      : "No import results match these filters";
+    lastChecked.textContent = payload.lastCheckedAt
+      ? `Last automation check ${formatTimestamp(payload.lastCheckedAt)}`
+      : "No automation check recorded";
+
+    if (!imports.length) {
+      results.innerHTML = `
+        <div class="import-history-empty">
+          <strong>No matching imports</strong>
+          <span>Adjust the search, status, or delivery-date filters.</span>
+        </div>`;
+      renderImportHistoryPager(payload);
+      return;
+    }
+
+    results.innerHTML = imports.map((item, index) => {
+      const status = classificationDetails(item.classification);
+      const sourceName = item.sourceName || `Delivery List ${item.deliveryDate || ""}`;
+      return `
+        <details class="import-history-entry automation-recent-import-row ${status.className}">
+          <summary class="import-history-entry-summary">
+            <span class="automation-recent-import-status">${escapeHtml(status.label)}</span>
+            <span class="import-history-entry-copy">
+              <strong>${escapeHtml(formatDeliveryDate(item.deliveryDate))}</strong>
+              <span>${escapeHtml(sourceName)}</span>
+              <small>${escapeHtml(recentImportMessage(item))}</small>
+            </span>
+            <span class="import-history-entry-meta">
+              <strong>${escapeHtml(formatTimestamp(item.importedAt))}</strong>
+              <span>${escapeHtml(item.importedBy || "system")}</span>
+              <i aria-hidden="true"></i>
+            </span>
+          </summary>
+          <div class="import-history-entry-details">
+            ${renderStageSummaries(item)}
+            <div class="import-history-entry-footnote">
+              <span><b>Source:</b> ${escapeHtml(item.importKind || "scanner import")}</span>
+              ${item.sourcePath ? `<span title="${escapeHtml(item.sourcePath)}"><b>Path:</b> ${escapeHtml(item.sourcePath)}</span>` : ""}
+            </div>
+          </div>
+        </details>`;
+    }).join("");
+    renderImportHistoryPager(payload);
+  }
+
+  async function refreshImportHistory(resetPage = false) {
+    createModal();
+    importHistoryModal = modal;
+    if (resetPage) importHistoryState.page = 1;
+    const results = importHistoryModal.querySelector("#importHistoryResults");
+    const previousScrollTop = results.scrollTop;
+    results.innerHTML = '<div class="import-history-loading"><span></span><strong>Loading import history...</strong></div>';
+    try {
+      const payload = await api(importHistoryRequestPath());
+      importHistoryState.page = Number(payload.page || importHistoryState.page);
+      importHistoryState.pageSize = Number(payload.pageSize || importHistoryState.pageSize);
+      renderImportHistory(payload);
+      results.scrollTop = resetPage ? 0 : previousScrollTop;
+      importHistoryHasNewResults = false;
+      const refreshButton = importHistoryModal.querySelector("#importHistoryRefreshBtn");
+      if (refreshButton) {
+        refreshButton.textContent = "Refresh";
+        refreshButton.classList.remove("has-new-results");
+      }
+      if (Array.isArray(payload.lists)) publishDeliveryCatalog(payload.lists, "import-history", true);
+    } catch (error) {
+      results.innerHTML = `<div class="import-history-empty is-error"><strong>Import history could not be loaded</strong><span>${escapeHtml(error.message)}</span></div>`;
+    }
+  }
+
+
+  async function refreshRecentImports(options = {}) {
+    clearTimeout(recentImportsRefreshTimer);
+    const refreshHistoryWindow = Boolean(options.refreshHistoryWindow);
+    await refreshLatestImportResult(true);
+    if (refreshHistoryWindow && importHistoryModal && !importHistoryModal.hidden) {
+      refreshImportHistory(false);
+    }
+  }
+
+  function scheduleRecentImportsRefresh(delay = 250, options = {}) {
+    clearTimeout(recentImportsRefreshTimer);
+    recentImportsRefreshTimer = setTimeout(() => refreshRecentImports(options), delay);
+  }
+
+  function adminPageIsVisible() {
+    const adminPage = document.getElementById("adminPage");
+    return Boolean(adminPage && !adminPage.hidden && document.visibilityState !== "hidden");
+  }
+
+  function observeAdminPage() {
+    const adminPage = document.getElementById("adminPage");
+    if (!adminPage) return;
+    const refreshAdminSources = () => {
+      if (adminPage.hidden) return;
+      refreshDeliveryListCatalog(true);
+      refreshLatestImportResult(true);
+    };
+    const observer = new MutationObserver(refreshAdminSources);
+    observer.observe(adminPage, { attributes: true, attributeFilter: ["hidden"] });
+    refreshAdminSources();
+  }
+
+  function actionCard(value, icon, title, description, tag, checked = false) {
+    return `
+      <label class="automation-action-card${checked ? " is-selected" : ""}" data-action-card="${value}">
+        <input type="radio" name="automationAction" value="${value}"${checked ? " checked" : ""}>
+        <span class="automation-card-icon ${icon}" aria-hidden="true"></span>
+        <span class="automation-card-copy">
+          <strong>${title}</strong>
+          <small>${description}</small>
+          <span class="automation-card-tag">${tag}</span>
+        </span>
+      </label>`;
+  }
+
+  function modeCard(value, icon, title, description, tag) {
+    return `
+      <label class="automation-mode-card" data-mode-card="${value}">
+        <input type="radio" name="automationMode" value="${value}">
+        <span class="automation-card-icon ${icon}" aria-hidden="true"></span>
+        <span class="automation-card-copy">
+          <strong>${title}</strong>
+          <small>${description}</small>
+          <span class="automation-card-tag">${tag}</span>
+        </span>
+      </label>`;
+  }
+
+  function createModal() {
+    if (modal) return;
+
+    backdrop = document.createElement("div");
+    backdrop.className = "delivery-automation-backdrop";
+    backdrop.hidden = true;
+
+    modal = document.createElement("section");
+    modal.className = "delivery-automation-modal";
+    modal.hidden = true;
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-labelledby", "deliveryAutomationTitle");
+    modal.innerHTML = `
+      <header class="delivery-automation-header">
+        <div class="delivery-automation-heading">
+          <span class="delivery-automation-eyebrow">Delivery List Management</span>
+          <h2 id="deliveryAutomationTitle">Automation Control Center</h2>
+          <p>Run a one-time update, choose what this computer does automatically, and review the latest result without leaving the scanner.</p>
+        </div>
+        <div class="delivery-automation-header-actions">
+          <span class="delivery-automation-health-pill" id="automationHeaderHealth"><i></i><span>Checking runtime</span></span>
+          <button class="delivery-automation-close" type="button" data-automation-close aria-label="Close automation window">×</button>
+        </div>
+      </header>
+
+      <nav class="delivery-automation-tabs" role="tablist" aria-label="Delivery list automation sections">
+        <button type="button" class="is-active" data-automation-tab="manual" role="tab" aria-selected="true"><span class="automation-tab-icon run" aria-hidden="true"></span>Run Manually</button>
+        <button type="button" data-automation-tab="settings" role="tab" aria-selected="false"><span class="automation-tab-icon schedule" aria-hidden="true"></span>Automatic Schedule</button>
+        <button type="button" data-automation-tab="status" role="tab" aria-selected="false"><span class="automation-tab-icon status" aria-hidden="true"></span>Status & Logs</button>
+        <button type="button" data-automation-tab="history" role="tab" aria-selected="false"><span class="automation-tab-icon history" aria-hidden="true"></span>Import History</button>
+      </nav>
+
+      <div class="delivery-automation-content">
+        <section class="delivery-automation-tab is-active" data-automation-panel="manual" role="tabpanel">
+          <div class="automation-section-heading">
+            <div><small>Step 1</small><h3>Choose what should happen</h3></div>
+            <span>Nothing runs until Start Update is selected.</span>
+          </div>
+
+          <div class="automation-action-grid">
+            ${actionCard("folder-import-only", "folder", "Import Temp Folder Only", "Reads existing delivery-list workbooks and imports changes into this scanner database. Does not contact A+W SQL.", "Floor computer", true)}
+            ${actionCard("sql-export-only", "database", "Query SQL & Export Only", "Queries A+W and publishes one workbook per delivery date without importing into this scanner database.", "Export only")}
+            ${actionCard("sql-export-and-import", "sync", "Query SQL, Export & Import", "Runs the complete central workflow: query A+W, publish dated workbooks, and immediately update the scanner.", "Central system")}
+          </div>
+
+          <div class="automation-section-heading">
+            <div><small>Step 2</small><h3>Choose the delivery-date window</h3></div>
+          </div>
+
+          <section class="automation-range-panel">
+            <div class="automation-range-intro">
+              <strong>Delivery dates to check</strong>
+              <p>Use one date for a targeted correction, a custom range for testing, or one of the saved automatic windows for a normal refresh.</p>
+              <div class="automation-run-summary" id="automationRunSummary">Import Temp Folder Only for one delivery date.</div>
+            </div>
+            <div class="automation-range-fields">
+              <label>
+                <span>Date window</span>
+                <select id="automationRangeMode">
+                  <option value="one-date">One delivery date</option>
+                  <option value="custom">Custom date range</option>
+                  <option value="incremental">Normal automatic window</option>
+                  <option value="full">Full safety refresh window</option>
+                </select>
+              </label>
+              <label data-automation-date-field="from"><span>Delivery date</span><input id="automationDateFrom" type="date"></label>
+              <label data-automation-date-field="to"><span>Through date</span><input id="automationDateTo" type="date"></label>
+            </div>
+          </section>
+
+          <footer class="automation-command-bar">
+            <div class="automation-command-state">
+              <strong id="automationManualHeading">Ready to run</strong>
+              <span id="automationManualMessage">Choose an operation and date window, then start the update.</span>
+            </div>
+            <button type="button" class="automation-primary-button" id="automationRunBtn">Start Update</button>
+          </footer>
+        </section>
+
+        <section class="delivery-automation-tab" data-automation-panel="settings" role="tabpanel">
+          <div class="automation-section-heading">
+            <div><small>Automatic behavior</small><h3>Choose this computer's role</h3></div>
+            <span id="automationScheduleBadge">Checking scheduled tasks...</span>
+          </div>
+
+          <div class="automation-mode-grid">
+            ${modeCard("disabled", "off", "Manual Only", "No scheduled delivery-list runs. All manual commands remain available.", "Disabled")}
+            ${modeCard("folder-import-only", "folder", "Import Folder", "Best for floor computers that can read the shared folder but cannot query A+W.", "Floor")}
+            ${modeCard("sql-export-only", "database", "Export SQL", "Queries A+W and keeps the Temp Delivery Lists folder current without importing locally.", "Publisher")}
+            ${modeCard("sql-export-and-import", "sync", "Full Workflow", "Queries, exports, and imports. Recommended for the authorized central host.", "Central")}
+          </div>
+
+          <section class="automation-settings-panel">
+            <div class="automation-settings-section">
+              <div class="automation-settings-section-heading">
+                <strong>Incremental schedule</strong>
+                <span>The frequent lightweight check used during the workday.</span>
+              </div>
+              <div class="automation-settings-grid">
+                <label><span>Run every</span><div class="automation-number-unit"><input id="automationInterval" type="number" min="5" max="1440" step="5"><b>minutes</b></div></label>
+                <label><span>Past delivery days</span><input id="automationPastDays" type="number" min="0" max="365"></label>
+                <label><span>Future delivery days</span><input id="automationFutureDays" type="number" min="0" max="365"></label>
+              </div>
+            </div>
+
+            <div class="automation-settings-section">
+              <div class="automation-settings-section-heading">
+                <strong>Daily full refresh</strong>
+                <span>The broader safety sweep that catches older and far-future changes.</span>
+              </div>
+              <div class="automation-settings-grid">
+                <label><span>Full refresh time</span><input id="automationFullTime" type="time"></label>
+                <label><span>Past delivery days</span><input id="automationFullPastDays" type="number" min="0" max="365"></label>
+                <label><span>Future delivery days</span><input id="automationFullFutureDays" type="number" min="0" max="365"></label>
+              </div>
+            </div>
+
+            <div class="automation-settings-section">
+              <div class="automation-settings-section-heading">
+                <strong>Files and notifications</strong>
+                <span>The bell keeps notification history even after a popup closes or scanning continues.</span>
+              </div>
+              <label class="automation-wide-field"><span>Temp Delivery Lists folder</span><input id="automationDestinationFolder" type="text" autocomplete="off"><small>Use the UNC path so scheduled tasks and floor computers do not depend on a mapped drive letter.</small></label>
+              <div class="automation-toggle-grid">
+                <label class="automation-toggle-card"><input id="automationNotifications" type="checkbox"><span><strong>Show brief popup alerts</strong><small>Display success and failure alerts while users are signed in. The bell history remains available separately.</small></span></label>
+                <label class="automation-toggle-card"><input id="automationNoChangeNotifications" type="checkbox"><span><strong>Notify when nothing changed</strong><small>Add an informational result after a successful check that found no workbook changes.</small></span></label>
+              </div>
+            </div>
+
+            <div class="automation-settings-actions">
+              <button type="button" class="automation-secondary-button" id="automationSaveBtn">Save Settings</button>
+              <button type="button" class="automation-primary-button" id="automationInstallScheduleBtn">Save & Install Schedule</button>
+              <button type="button" class="automation-danger-button" id="automationRemoveScheduleBtn">Disable Scheduled Tasks</button>
+            </div>
+            <p id="automationSettingsMessage" class="automation-inline-message">Settings have not been changed.</p>
+          </section>
+        </section>
+
+        <section class="delivery-automation-tab" data-automation-panel="status" role="tabpanel">
+          <div class="automation-section-heading">
+            <div><small>Runtime health</small><h3>Latest automation result</h3></div>
+            <button type="button" class="automation-text-button" id="automationRefreshStatusBtn">Refresh Status</button>
+          </div>
+
+          <section class="automation-status-hero" id="automationStatusHero">
+            <span class="automation-status-symbol" aria-hidden="true"></span>
+            <div class="automation-status-copy"><strong id="automationStatusTitle">Not run yet</strong><span id="automationStatusMessage">No automation result has been recorded.</span></div>
+            <span class="automation-status-time" id="automationStatusTime">No completed run yet</span>
+          </section>
+
+          <div id="automationStatusSummary" class="automation-status-summary"></div>
+          <details class="automation-log-details" id="automationLogDetails" open>
+            <summary>
+              <span>Live command log</span>
+              <small id="automationLogLineCount">0 lines</small>
+            </summary>
+            <div class="automation-log-toolbar">
+              <div class="automation-log-location">
+                <small>Log file</small>
+                <span id="automationLogPath">No log file recorded yet.</span>
+              </div>
+              <label class="automation-log-follow"><input id="automationLogFollow" type="checkbox" checked><span>Follow newest activity</span></label>
+              <button type="button" class="automation-text-button" id="automationCopyLogBtn">Copy Full Log</button>
+            </div>
+            <pre id="automationStatusLog" tabindex="0">No command output yet.</pre>
+          </details>
+        </section>
+
+        <section class="delivery-automation-tab import-history-workspace" data-automation-panel="history" role="tabpanel">
+          <div class="import-history-panel-heading">
+            <div>
+              <small>Delivery List Management</small>
+              <h3>Import Audit History</h3>
+              <p>Review the newest imports first, then search or filter older delivery-list results.</p>
+            </div>
+            <button class="automation-secondary-button" id="importHistoryRefreshBtn" type="button">Refresh</button>
+          </div>
+
+          <section class="import-history-toolbar" aria-label="Import history filters">
+            <label class="import-history-search search-box">
+              <span class="search-icon" aria-hidden="true"></span>
+              <input id="importHistorySearch" type="search" autocomplete="off" placeholder="Search date, filename, stage, user, status...">
+            </label>
+            <label>
+              <span>Status</span>
+              <select id="importHistoryStatusFilter">
+                <option value="">All statuses</option>
+                <option value="new">New</option>
+                <option value="updated">Updated</option>
+                <option value="new_updated">New + Updated</option>
+                <option value="no_changes">No Changes</option>
+                <option value="failed">Failed</option>
+              </select>
+            </label>
+            <label><span>Delivery date from</span><input id="importHistoryDateFrom" type="date"></label>
+            <label><span>Delivery date through</span><input id="importHistoryDateTo" type="date"></label>
+            <label>
+              <span>Rows per page</span>
+              <select id="importHistoryPageSize">
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+            <button class="automation-text-button import-history-clear" id="importHistoryClearBtn" type="button">Clear filters</button>
+          </section>
+
+          <section class="import-history-status-row">
+            <strong id="importHistoryResultSummary">Open Import History to load results.</strong>
+            <span id="importHistoryLastChecked">Waiting for current status</span>
+          </section>
+          <div class="import-history-results" id="importHistoryResults" aria-live="polite"></div>
+          <footer class="import-history-footer">
+            <span id="importHistoryPageSummary">Page 1 of 1</span>
+            <nav class="import-history-pager" id="importHistoryPager" aria-label="Import history pages"></nav>
+          </footer>
+        </section>
+      </div>`;
+
+    document.body.append(backdrop, modal);
+    wireImportHistoryPanel();
+
+    backdrop.addEventListener("click", closeModal);
+    modal.querySelector("[data-automation-close]").addEventListener("click", closeModal);
+    modal.querySelectorAll("[data-automation-tab]").forEach((button) => {
+      button.addEventListener("click", () => selectTab(button.dataset.automationTab));
+    });
+    modal.querySelectorAll('input[name="automationAction"]').forEach((input) => {
+      input.addEventListener("change", () => {
+        updateSelectedCards();
+        updateRunSummary();
+      });
+    });
+    modal.querySelectorAll('input[name="automationMode"]').forEach((input) => {
+      input.addEventListener("change", updateSelectedCards);
+    });
+    modal.querySelector("#automationRangeMode").addEventListener("change", () => {
+      updateDateVisibility();
+      updateRunSummary();
+    });
+    modal.querySelector("#automationDateFrom").addEventListener("change", updateRunSummary);
+    modal.querySelector("#automationDateTo").addEventListener("change", updateRunSummary);
+    modal.querySelector("#automationRunBtn").addEventListener("click", runManual);
+    modal.querySelector("#automationSaveBtn").addEventListener("click", () => saveSettings(false));
+    modal.querySelector("#automationInstallScheduleBtn").addEventListener("click", () => saveSettings(true));
+    modal.querySelector("#automationRemoveScheduleBtn").addEventListener("click", removeSchedule);
+    modal.querySelector("#automationRefreshStatusBtn").addEventListener("click", refreshDashboard);
+    modal.querySelector("#automationCopyLogBtn").addEventListener("click", copyFullLog);
+    modal.querySelector("#automationLogFollow").addEventListener("change", (event) => {
+      autoFollowLog = event.target.checked;
+      if (autoFollowLog) {
+        const log = modal.querySelector("#automationStatusLog");
+        log.scrollTop = log.scrollHeight;
+      }
+    });
+
+    modal.querySelector("#automationDateFrom").value = localDateIso();
+    modal.querySelector("#automationDateTo").value = localDateIso();
+    updateSelectedCards();
+    updateDateVisibility();
+    updateRunSummary();
+  }
+
+  function selectTab(name) {
+    modal.querySelectorAll("[data-automation-tab]").forEach((button) => {
+      const active = button.dataset.automationTab === name;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    modal.querySelectorAll("[data-automation-panel]").forEach((panel) => {
+      panel.classList.toggle("is-active", panel.dataset.automationPanel === name);
+    });
+    if (name === "history") {
+      refreshImportHistory(false);
+      window.setTimeout(() => modal.querySelector("#importHistorySearch")?.focus(), 30);
+    }
+  }
+
+  function updateSelectedCards() {
+    modal.querySelectorAll("[data-action-card]").forEach((card) => {
+      card.classList.toggle("is-selected", card.querySelector("input")?.checked === true);
+    });
+    modal.querySelectorAll("[data-mode-card]").forEach((card) => {
+      card.classList.toggle("is-selected", card.querySelector("input")?.checked === true);
+    });
+  }
+
+  function updateDateVisibility() {
+    const mode = modal.querySelector("#automationRangeMode").value;
+    const fromField = modal.querySelector('[data-automation-date-field="from"]');
+    const toField = modal.querySelector('[data-automation-date-field="to"]');
+    fromField.classList.toggle("automation-hidden", !["one-date", "custom"].includes(mode));
+    toField.classList.toggle("automation-hidden", mode !== "custom");
+    fromField.querySelector("span").textContent = mode === "one-date" ? "Delivery date" : "From date";
+  }
+
+  function updateRunSummary() {
+    const action = modal.querySelector('input[name="automationAction"]:checked')?.value || "folder-import-only";
+    const rangeMode = modal.querySelector("#automationRangeMode").value;
+    const dateFrom = modal.querySelector("#automationDateFrom").value;
+    const dateTo = modal.querySelector("#automationDateTo").value;
+    let suffix = RANGE_LABELS[rangeMode] || "the selected window";
+    if (rangeMode === "one-date" && dateFrom) suffix = `delivery date ${dateFrom}`;
+    if (rangeMode === "custom" && dateFrom && dateTo) suffix = `${dateFrom} through ${dateTo}`;
+    modal.querySelector("#automationRunSummary").textContent = `${ACTION_LABELS[action]} for ${suffix}.`;
+  }
+
+  function openModal() {
+    createModal();
+    backdrop.hidden = false;
+    modal.hidden = false;
+    document.body.classList.add("modal-open");
+    refreshDashboard();
+    scheduleRecentImportsRefresh(0);
+    const activeTab = modal.querySelector("[data-automation-tab].is-active")?.dataset.automationTab || "manual";
+    if (activeTab === "history") refreshImportHistory(false);
+    setTimeout(() => modal.querySelector("[data-automation-close]")?.focus(), 0);
+  }
+
+  function closeModal() {
+    if (!modal) return;
+    backdrop.hidden = true;
+    modal.hidden = true;
+    document.body.classList.remove("modal-open");
+    refreshRecentImports({ refreshHistoryWindow: false });
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function fillSettings(settings = {}) {
+    const mode = settings.automationMode || "sql-export-and-import";
+    const modeInput = modal.querySelector(`input[name="automationMode"][value="${CSS.escape(mode)}"]`);
+    if (modeInput) modeInput.checked = true;
+    modal.querySelector("#automationInterval").value = settings.intervalMinutes ?? 60;
+    modal.querySelector("#automationPastDays").value = settings.incrementalPastDays ?? 2;
+    modal.querySelector("#automationFutureDays").value = settings.incrementalFutureDays ?? 14;
+    modal.querySelector("#automationFullTime").value = settings.fullRefreshTime || "17:00";
+    modal.querySelector("#automationFullPastDays").value = settings.fullPastDays ?? 7;
+    modal.querySelector("#automationFullFutureDays").value = settings.fullFutureDays ?? 90;
+    modal.querySelector("#automationDestinationFolder").value = settings.destinationFolder || "";
+    modal.querySelector("#automationNotifications").checked = settings.notificationsEnabled !== false;
+    modal.querySelector("#automationNoChangeNotifications").checked = settings.notifyOnNoChanges !== false;
+    updateSelectedCards();
+  }
+
+  async function copyFullLog() {
+    const button = modal.querySelector("#automationCopyLogBtn");
+    const logText = modal.querySelector("#automationStatusLog").textContent || "";
+    const originalText = button.textContent;
+    try {
+      await navigator.clipboard.writeText(logText);
+      button.textContent = "Copied";
+    } catch {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(modal.querySelector("#automationStatusLog"));
+      selection.removeAllRanges();
+      selection.addRange(range);
+      button.textContent = "Log selected";
+    }
+    setTimeout(() => { button.textContent = originalText; }, 1600);
+  }
+
+  function renderStatus(dashboard) {
+    lastDashboard = dashboard;
+    const last = dashboard.lastRun || {};
+    const running = Boolean(dashboard.running || last.running);
+    const succeeded = last.succeeded;
+    const state = running ? "Automation is running" : succeeded === true ? "Update completed" : succeeded === false ? "Update failed" : "Not run yet";
+    const stateClass = running ? "is-running" : succeeded === true ? "is-success" : succeeded === false ? "is-error" : "";
+
+    const health = modal.querySelector("#automationHeaderHealth");
+    health.className = `delivery-automation-health-pill ${running ? "is-running" : dashboard.runtimeReady ? "is-ready" : ""}`;
+    health.querySelector("span").textContent = running ? "Update running" : dashboard.runtimeReady ? "Runtime ready" : "Runtime unavailable";
+
+    modal.querySelector("#automationScheduleBadge").textContent = dashboard.scheduleInstalled
+      ? "Scheduled tasks are installed"
+      : "Scheduled tasks are not installed";
+
+    const hero = modal.querySelector("#automationStatusHero");
+    hero.className = `automation-status-hero ${stateClass}`;
+    modal.querySelector("#automationStatusTitle").textContent = state;
+    modal.querySelector("#automationStatusMessage").textContent = running
+      ? last.currentStep || last.message || "Waiting for the next automation step..."
+      : last.message || "No automation result has been recorded.";
+    modal.querySelector("#automationStatusTime").textContent = running
+      ? `Started ${formatTimestamp(last.startedAt)}`
+      : formatTimestamp(last.completedAt);
+
+    const modeLabel = ACTION_LABELS[dashboard.settings?.automationMode] || (dashboard.settings?.automationMode === "disabled" ? "Manual Only" : "Not configured");
+    modal.querySelector("#automationStatusSummary").innerHTML = `
+      <article class="automation-status-card"><small>Runtime</small><strong>${dashboard.runtimeReady ? "Ready" : "Not installed"}</strong><span>${escapeHtml(dashboard.configPath || "Runtime configuration was not found.")}</span></article>
+      <article class="automation-status-card"><small>Automatic mode</small><strong>${escapeHtml(modeLabel)}</strong><span>${dashboard.scheduleInstalled ? "Windows scheduled tasks are active." : "Manual commands are still available."}</span></article>
+      <article class="automation-status-card"><small>Last command</small><strong>${escapeHtml(last.action ? ACTION_LABELS[last.action] || last.action : "No command")}</strong><span>Started by ${escapeHtml(last.startedBy || last.createdBy || "system")}</span></article>`;
+
+    const output = last.commandOutput || [last.stdout, last.stderr, last.error].filter(Boolean).join("\n\n");
+    const logElement = modal.querySelector("#automationStatusLog");
+    const wasNearBottom = logElement.scrollHeight - logElement.scrollTop - logElement.clientHeight < 48;
+    logElement.textContent = output || "No command output yet.";
+    const lineCount = Number(last.outputLineCount || (output ? output.split(/\r?\n/).length : 0));
+    modal.querySelector("#automationLogLineCount").textContent = `${lineCount} line${lineCount === 1 ? "" : "s"}${running ? " - live" : ""}`;
+    modal.querySelector("#automationLogPath").textContent = last.logPath || "No log file recorded yet.";
+    if (autoFollowLog || wasNearBottom) logElement.scrollTop = logElement.scrollHeight;
+    if (running || succeeded === false) modal.querySelector("#automationLogDetails").open = true;
+    modal.querySelector("#automationManualHeading").textContent = running ? "Update in progress" : succeeded === false ? "Last update failed" : "Ready to run";
+    modal.querySelector("#automationManualMessage").textContent = running
+      ? "The automation is running in the background. Status refreshes automatically."
+      : last.message || "Choose an operation and date window, then start the update.";
+
+    const completedRunKey = !running && last.completedAt
+      ? `${last.taskId || last.mode || "run"}|${last.completedAt}`
+      : "";
+    const importedResult = Array.isArray(last.importResults) && last.importResults.length > 0;
+    const importAction = ["folder-import-only", "sql-export-and-import"].includes(last.action)
+      || ["FolderImportOnly", "SqlExportAndImport"].includes(last.runAction);
+    if (completedRunKey && completedRunKey !== lastCompletedRunKey && (importedResult || importAction)) {
+      lastCompletedRunKey = completedRunKey;
+      scheduleRecentImportsRefresh(150);
+      window.setTimeout(() => refreshDeliveryListCatalog(true), 175);
+      window.setTimeout(() => refreshLatestImportResult(true), 200);
+    }
+
+    if (running) {
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = setTimeout(refreshDashboard, 1000);
+    }
+  }
+
+  async function refreshDashboard() {
+    if (!modal || modal.hidden) return;
+    try {
+      const dashboard = await api();
+      fillSettings(dashboard.settings);
+      renderStatus(dashboard);
+    } catch (error) {
+      modal.querySelector("#automationHeaderHealth").querySelector("span").textContent = "Status unavailable";
+      modal.querySelector("#automationManualMessage").textContent = error.message;
+      modal.querySelector("#automationSettingsMessage").textContent = error.message;
+    }
+  }
+
+  async function runManual() {
+    const button = modal.querySelector("#automationRunBtn");
+    const message = modal.querySelector("#automationManualMessage");
+    const heading = modal.querySelector("#automationManualHeading");
+    const action = modal.querySelector('input[name="automationAction"]:checked')?.value;
+    const rangeMode = modal.querySelector("#automationRangeMode").value;
+    button.disabled = true;
+    button.textContent = "Starting...";
+    heading.textContent = "Starting update";
+    message.textContent = "The command is being handed to the automation runtime.";
+    try {
+      await api("/run", {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          rangeMode,
+          dateFrom: modal.querySelector("#automationDateFrom").value,
+          dateTo: modal.querySelector("#automationDateTo").value,
+        }),
+      });
+      selectTab("status");
+      await refreshDashboard();
+    } catch (error) {
+      heading.textContent = "Could not start update";
+      message.textContent = error.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Start Update";
+    }
+  }
+
+  function settingsPayload() {
+    return {
+      automationMode: modal.querySelector('input[name="automationMode"]:checked')?.value || "disabled",
+      intervalMinutes: modal.querySelector("#automationInterval").value,
+      incrementalPastDays: modal.querySelector("#automationPastDays").value,
+      incrementalFutureDays: modal.querySelector("#automationFutureDays").value,
+      fullRefreshTime: modal.querySelector("#automationFullTime").value,
+      fullPastDays: modal.querySelector("#automationFullPastDays").value,
+      fullFutureDays: modal.querySelector("#automationFullFutureDays").value,
+      destinationFolder: modal.querySelector("#automationDestinationFolder").value,
+      notificationsEnabled: modal.querySelector("#automationNotifications").checked,
+      notifyOnNoChanges: modal.querySelector("#automationNoChangeNotifications").checked,
+    };
+  }
+
+  async function saveSettings(installSchedule) {
+    const message = modal.querySelector("#automationSettingsMessage");
+    const saveButton = installSchedule ? modal.querySelector("#automationInstallScheduleBtn") : modal.querySelector("#automationSaveBtn");
+    saveButton.disabled = true;
+    message.textContent = installSchedule ? "Saving settings and updating Windows scheduled tasks..." : "Saving settings...";
+    try {
+      await api("/config", { method: "POST", body: JSON.stringify(settingsPayload()) });
+      if (installSchedule) {
+        await api("/schedule/install", { method: "POST", body: "{}" });
+      }
+      message.textContent = installSchedule
+        ? "Settings saved and scheduled tasks installed successfully."
+        : "Settings saved. Reinstall the schedule when you need trigger times changed.";
+      await refreshDashboard();
+    } catch (error) {
+      message.textContent = error.message;
+    } finally {
+      saveButton.disabled = false;
+    }
+  }
+
+  async function removeSchedule() {
+    const message = modal.querySelector("#automationSettingsMessage");
+    if (!window.confirm("Disable both delivery-list automation scheduled tasks on this computer? Manual commands will remain available.")) return;
+    message.textContent = "Disabling scheduled tasks...";
+    try {
+      await api("/schedule/remove", { method: "POST", body: "{}" });
+      message.textContent = "Scheduled tasks disabled. Manual commands remain available.";
+      await refreshDashboard();
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (modal && !modal.hidden) closeModal();
+  });
+
+
+
+  document.addEventListener("dls:open-delivery-list-management-import", (event) => {
+    const item = event.detail?.notification;
+    if (item) openDeliveryListManagementFromNotification(item);
+  });
+
+  document.addEventListener("dls:delivery-list-import-history-changed", () => {
+    importHistoryHasNewResults = true;
+    const refreshButton = modal?.querySelector("#importHistoryRefreshBtn");
+    const historyPanel = modal?.querySelector('[data-automation-panel="history"]');
+    if (refreshButton && modal && !modal.hidden && historyPanel?.classList.contains("is-active")) {
+      refreshButton.textContent = "Refresh - new results";
+      refreshButton.classList.add("has-new-results");
+    }
+    scheduleRecentImportsRefresh(100, { refreshHistoryWindow: false });
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "hidden") {
+      refreshDeliveryListCatalog(true);
+      if (adminPageIsVisible()) refreshLatestImportResult(true);
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest("#folderImportBtn");
+    if (!target) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openModal();
+  }, true);
+
+  function initializeRecentImportHistory() {
+    observeAdminPage();
+    startDeliveryCatalogHeartbeat();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeRecentImportHistory, { once: true });
+  } else {
+    initializeRecentImportHistory();
+  }
+})();
+
+/* ==========================================================================
+   NOTIFICATION CENTER AND LINE UPDATE REVIEW
+   ========================================================================== */
+(() => {
+  "use strict";
+
+  const HISTORY_ENDPOINT = "/api/notifications/history?limit=75";
+  const ACK_ENDPOINT = "/api/notifications/acknowledge";
+  const READ_ALL_ENDPOINT = "/api/notifications/read-all";
+  const SESSION_ENDPOINT = "/api/session";
+  const FLAGS_ENDPOINT = "/api/operations/line-flags";
+  const UPDATE_ACK_ENDPOINT = "/api/operations/line-flags/acknowledge";
+  const POLL_MS = 10000;
+
+  let host = null;
+  let button = null;
+  let badge = null;
+  let panel = null;
+  let list = null;
+  let summary = null;
+  let toast = null;
+  let toastTimer = 0;
+  let rejectToast = null;
+  let rejectToastTimer = 0;
+  let notifications = [];
+  let username = "anonymous";
+  let pollTimer = 0;
+  let newestAutomationId = 0;
+  let newestRejectId = 0;
+  let currentPromptListId = "";
+  let currentFlags = null;
+  const flagsByList = new Map();
+  const inflightByList = new Map();
+  const reviewedSignatureByList = new Map();
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  async function jsonFetch(url, options = {}) {
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || payload.message || `Request failed (${response.status})`);
+    return payload;
+  }
+
+  function formatTime(value) {
+    const date = new Date(value || "");
+    if (Number.isNaN(date.getTime())) return String(value || "Unknown time");
+    const sameDay = date.toDateString() === new Date().toDateString();
+    return date.toLocaleString([], sameDay
+      ? { hour: "numeric", minute: "2-digit", second: "2-digit" }
+      : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
+
+  function typeSymbol(type) {
+    if (type === "success") return "✓";
+    if (type === "warning") return "!";
+    if (type === "error") return "×";
+    return "i";
+  }
+
+  function isAutomationNotification(item) {
+    return String(item?.details?.source || "").trim().toLowerCase() === "sql-delivery-automation";
+  }
+
+  function isInternalRejectNotification(item) {
+    return String(item?.details?.source || "").trim().toLowerCase() === "internal-reject";
+  }
+
+  function storageKey() {
+    return `dls.notification-center.last-seen.v138.${username.toLowerCase()}`;
+  }
+
+  function lastSeenId() {
+    const value = Number.parseInt(localStorage.getItem(storageKey()) || "0", 10);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function setLastSeenId(value) {
+    localStorage.setItem(storageKey(), String(Math.max(0, Number(value || 0))));
+  }
+
+  function ensureUi() {
+    if (host) return;
+    const actions = document.querySelector(".header-quick-actions") || document.querySelector(".header-actions");
+    if (!actions) return;
+
+    host = document.createElement("span");
+    host.className = "notification-center-host";
+    host.innerHTML = `
+      <button class="tool-button header-utility-button notification-center-button" id="notificationCenterBtn" type="button" aria-label="Open notifications" aria-expanded="false" title="Notifications">
+        <span class="notification-center-bell" aria-hidden="true"></span>
+        <span class="notification-center-badge" id="notificationCenterBadge" hidden>0</span>
+      </button>`;
+    const languageButton = actions.querySelector("#languageToggleBtn");
+    if (languageButton) actions.insertBefore(host, languageButton);
+    else actions.prepend(host);
+
+    button = host.querySelector("#notificationCenterBtn");
+    badge = host.querySelector("#notificationCenterBadge");
+
+    panel = document.createElement("aside");
+    panel.className = "notification-center-panel";
+    panel.hidden = true;
+    panel.innerHTML = `
+      <header class="notification-center-header">
+        <div class="notification-center-header-copy"><small>System messages</small><strong>Notifications</strong></div>
+        <button class="notification-center-close" type="button" aria-label="Close notifications">×</button>
+      </header>
+      <div class="notification-center-toolbar"><span id="notificationCenterSummary">Checking notifications...</span></div>
+      <div class="notification-center-list" id="notificationCenterList"></div>
+      <footer class="notification-center-footer">Import notifications open their exact saved run. New and updated delivery-list lines remain personal to your account until you mark them reviewed.</footer>`;
+    document.body.append(panel);
+    list = panel.querySelector("#notificationCenterList");
+    summary = panel.querySelector("#notificationCenterSummary");
+
+    toast = document.createElement("aside");
+    toast.className = "automation-update-toast";
+    toast.hidden = true;
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    document.body.append(toast);
+
+    rejectToast = document.createElement("aside");
+    rejectToast.className = "internal-reject-notification-toast";
+    rejectToast.hidden = true;
+    rejectToast.setAttribute("role", "alert");
+    rejectToast.setAttribute("aria-live", "assertive");
+    document.body.append(rejectToast);
+
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (panel.hidden) openPanel();
+      else closePanel();
+    });
+    panel.querySelector(".notification-center-close")?.addEventListener("click", closePanel);
+    panel.addEventListener("click", (event) => event.stopPropagation());
+    document.addEventListener("click", closePanel);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closePanel();
+        closeUpdatePrompt();
+      }
+    });
+    window.addEventListener("resize", positionPanel);
+  }
+
+  function positionPanel() {
+    if (!panel || panel.hidden || !button) return;
+    const rect = button.getBoundingClientRect();
+    const width = Math.min(410, window.innerWidth - 24);
+    panel.style.left = `${Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width))}px`;
+    panel.style.top = `${Math.min(window.innerHeight - 80, rect.bottom + 9)}px`;
+  }
+
+  function openPanel() {
+    if (!panel) return;
+    panel.hidden = false;
+    button?.classList.add("is-open");
+    button?.setAttribute("aria-expanded", "true");
+    positionPanel();
+    renderNotifications();
+    refreshNotifications({ markRead: true });
+  }
+
+  function closePanel() {
+    if (!panel) return;
+    panel.hidden = true;
+    button?.classList.remove("is-open");
+    button?.setAttribute("aria-expanded", "false");
+  }
+
+  function renderBadge() {
+    if (!badge) return;
+    const unread = notifications.filter((item) => Number(item.id || 0) > lastSeenId()).length;
+    badge.hidden = unread === 0;
+    badge.textContent = unread > 99 ? "99+" : String(unread);
+    button?.setAttribute("aria-label", unread ? `Open notifications, ${unread} unread` : "Open notifications");
+  }
+
+  function renderNotifications() {
+    renderBadge();
+    if (!list || !summary) return;
+    const unread = notifications.filter((item) => Number(item.id || 0) > lastSeenId()).length;
+    summary.textContent = unread ? `${unread} unread notification${unread === 1 ? "" : "s"}` : "You're caught up";
+    if (!notifications.length) {
+      list.innerHTML = `<div class="notification-center-empty"><div><strong>No notifications yet</strong><span>Automation results and system messages will appear here.</span></div></div>`;
+      return;
+    }
+    list.innerHTML = notifications.map((item) => {
+      const id = Number(item.id || 0);
+      const type = String(item.type || "notice").toLowerCase();
+      const unreadClass = id > lastSeenId() ? " is-unread" : "";
+      const action = isAutomationNotification(item)
+        ? "Open saved import run"
+        : isInternalRejectNotification(item)
+          ? "Open reject tracking"
+          : "View details";
+      return `
+        <button class="notification-center-item${unreadClass}" type="button" data-notification-id="${id}" data-type="${escapeHtml(type)}">
+          <span class="notification-center-type-icon" aria-hidden="true">${typeSymbol(type)}</span>
+          <span class="notification-center-item-copy">
+            <strong>${escapeHtml(item.title || "Notification")}</strong>
+            <span>${escapeHtml(item.message || "")}</span>
+            <small>${escapeHtml(formatTime(item.createdAt))} · ${escapeHtml(action)}</small>
+          </span>
+        </button>`;
+    }).join("");
+    list.querySelectorAll("[data-notification-id]").forEach((itemButton) => {
+      itemButton.addEventListener("click", () => {
+        const id = Number(itemButton.dataset.notificationId || 0);
+        const item = notifications.find((entry) => Number(entry.id || 0) === id);
+        if (item) openNotification(item);
+      });
+    });
+  }
+
+  async function markNotification(notificationId) {
+    if (!notificationId) return;
+    setLastSeenId(Math.max(lastSeenId(), notificationId));
+    renderNotifications();
+    try {
+      await jsonFetch(ACK_ENDPOINT, { method: "POST", body: JSON.stringify({ notificationId }) });
+    } catch (error) {
+      console.warn("Notification acknowledgement failed", error);
+    }
+  }
+
+  async function markAllRead() {
+    const maxId = notifications.reduce((value, item) => Math.max(value, Number(item.id || 0)), 0);
+    setLastSeenId(maxId);
+    renderNotifications();
+    try {
+      await jsonFetch(READ_ALL_ENDPOINT, { method: "POST", body: "{}" });
+    } catch (error) {
+      console.warn("Notification read-all failed", error);
+    }
+  }
+
+  async function openNotification(item) {
+    await markNotification(Number(item.id || 0));
+    if (isInternalRejectNotification(item)) {
+      closePanel();
+      dismissRejectToast();
+      document.dispatchEvent(new CustomEvent("dls:open-internal-reject-notification", {
+        detail: { notification: item },
+      }));
+      return;
+    }
+    if (!isAutomationNotification(item)) return;
+    closePanel();
+    dismissToast();
+    document.dispatchEvent(new CustomEvent("dls:open-delivery-list-management-import", {
+      detail: { notification: item },
+    }));
+  }
+
+  function dismissToast() {
+    clearTimeout(toastTimer);
+    if (!toast) return;
+    toast.classList.remove("is-visible");
+    window.setTimeout(() => {
+      if (!toast.classList.contains("is-visible")) toast.hidden = true;
+    }, 180);
+  }
+
+  function dismissRejectToast() {
+    clearTimeout(rejectToastTimer);
+    if (!rejectToast) return;
+    rejectToast.classList.remove("is-visible");
+    window.setTimeout(() => {
+      if (!rejectToast.classList.contains("is-visible")) rejectToast.hidden = true;
+    }, 180);
+  }
+
+  function showInternalRejectToast(item) {
+    if (!rejectToast || !item) return;
+    const details = item.details || {};
+    rejectToast.innerHTML = `
+      <span class="internal-reject-toast-icon" aria-hidden="true">IR</span>
+      <span class="internal-reject-toast-copy">
+        <small>Internal reject reported</small>
+        <strong>${escapeHtml(item.title || "Internal reject logged")}</strong>
+        <span>${escapeHtml(item.message || "A piece was rejected and restarted.")}</span>
+        <b>Order ${escapeHtml(details.order || "-")} · Item ${escapeHtml(details.item || "-")} · ${escapeHtml(details.location || "Location not specified")}</b>
+      </span>
+      <button class="internal-reject-toast-open" type="button">View</button>
+      <button class="internal-reject-toast-ack" type="button">Acknowledge</button>`;
+    rejectToast.querySelector(".internal-reject-toast-open")?.addEventListener("click", () => openNotification(item));
+    rejectToast.querySelector(".internal-reject-toast-ack")?.addEventListener("click", async () => {
+      await markNotification(Number(item.id || 0));
+      dismissRejectToast();
+    });
+    rejectToast.hidden = false;
+    requestAnimationFrame(() => rejectToast.classList.add("is-visible"));
+    clearTimeout(rejectToastTimer);
+    rejectToastTimer = window.setTimeout(dismissRejectToast, 30000);
+    window.playAppSound?.("notification", { force: true });
+  }
+
+  function showAutomationToast(item) {
+    if (!toast || !item) return;
+    const type = String(item.type || "notice").toLowerCase();
+    toast.dataset.type = type;
+    toast.innerHTML = `
+      <span class="automation-update-toast-icon" aria-hidden="true">${typeSymbol(type)}</span>
+      <span class="automation-update-toast-copy">
+        <strong>${escapeHtml(item.title || "Delivery lists updated")}</strong>
+        <span>${escapeHtml(item.message || "The delivery-list catalog has been checked.")}</span>
+      </span>
+      <button class="automation-update-toast-view" type="button">View run</button>
+      <button class="automation-update-toast-close" type="button" aria-label="Dismiss notification">×</button>`;
+    toast.querySelector(".automation-update-toast-view")?.addEventListener("click", () => openNotification(item));
+    toast.querySelector(".automation-update-toast-close")?.addEventListener("click", dismissToast);
+    toast.hidden = false;
+    requestAnimationFrame(() => toast.classList.add("is-visible"));
+    clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(dismissToast, 20000);
+  }
+
+  async function refreshNotifications(options = {}) {
+    try {
+      const payload = await jsonFetch(HISTORY_ENDPOINT);
+      notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+      const newest = notifications.filter(isAutomationNotification).reduce(
+        (candidate, item) => Number(item.id || 0) > Number(candidate?.id || 0) ? item : candidate,
+        null,
+      );
+      const nextId = Number(newest?.id || 0);
+      if (nextId > newestAutomationId) {
+        const shouldToast = newestAutomationId > 0;
+        newestAutomationId = nextId;
+        if (shouldToast) {
+          // A completed import can create new per-user line notices without changing
+          // the active list selection. Drop cached flags before the catalog refresh so
+          // the next render cannot reuse a stale "no updates" response.
+          flagsByList.clear();
+          reviewedSignatureByList.clear();
+          showAutomationToast(newest);
+          document.dispatchEvent(new CustomEvent("dls:delivery-list-import-history-changed", { detail: { notification: newest } }));
+          const activeListId = String(state?.activeListId || document.getElementById("deliveryStageSelect")?.value || "").trim();
+          if (activeListId) {
+            window.setTimeout(() => loadFlags(activeListId, { force: true, prompt: false }).catch(() => {}), 900);
+          }
+        }
+      }
+      const newestReject = notifications.filter(isInternalRejectNotification).reduce(
+        (candidate, item) => Number(item.id || 0) > Number(candidate?.id || 0) ? item : candidate,
+        null,
+      );
+      const nextRejectId = Number(newestReject?.id || 0);
+      if (nextRejectId > newestRejectId) {
+        const shouldToastReject = newestRejectId > 0;
+        newestRejectId = nextRejectId;
+        if (shouldToastReject && nextRejectId > lastSeenId()) showInternalRejectToast(newestReject);
+      }
+      if (options.markRead) await markAllRead();
+      else renderNotifications();
+    } catch (error) {
+      if (summary) summary.textContent = "Notifications unavailable";
+    } finally {
+      clearTimeout(pollTimer);
+      pollTimer = window.setTimeout(refreshNotifications, POLL_MS);
+    }
+  }
+
+  function normalizeFlags(payload, listId) {
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const noticeIds = Array.isArray(payload?.noticeIds)
+      ? payload.noticeIds.map(Number).filter((id) => id > 0).sort((a, b) => a - b)
+      : items.flatMap((item) => item.userUpdateNoticeIds || []).map(Number).filter((id) => id > 0).sort((a, b) => a - b);
+    return {
+      listId,
+      pendingLineCount: Number(payload?.pendingLineCount || items.filter((item) => item.hasUnseenUpdate).length || 0),
+      newLineCount: Number(payload?.newLineCount || items.filter((item) => item.userUpdateState === "new").length || 0),
+      updatedLineCount: Number(payload?.updatedLineCount || items.filter((item) => item.userUpdateState === "updated").length || 0),
+      noticeIds: [...new Set(noticeIds)],
+      signature: [...new Set(noticeIds)].join(","),
+      items,
+    };
+  }
+
+  function applyFlagsToCurrentList(flags, options = {}) {
+    if (typeof state !== "object" || String(state.activeListId || "") !== String(flags?.listId || "")) return;
+    const byId = new Map((flags.items || []).map((item) => [String(item.lineItemId || item.id || ""), item]));
+    state.items = (state.items || []).map((item) => {
+      const current = byId.get(String(item.id || "")) || {};
+      return {
+        ...item,
+        manualOnly: Boolean(current.manualOnly),
+        manualSource: String(current.manualSource || ""),
+        internalRejectCount: Number(current.internalRejectCount || 0),
+        rejectEventCount: Number(current.rejectEventCount || 0),
+        lastRejectId: Number(current.lastRejectId || 0),
+        lastRejectQty: Number(current.lastRejectQty || 0),
+        lastRejectReason: String(current.lastRejectReason || ""),
+        lastRejectLocation: String(current.lastRejectLocation || ""),
+        lastRejectedAt: String(current.lastRejectedAt || ""),
+        lastRejectedBy: String(current.lastRejectedBy || ""),
+        lastRejectNotes: String(current.lastRejectNotes || ""),
+        lastRejectDeliveryDate: String(current.lastRejectDeliveryDate || ""),
+        hasUnseenUpdate: Boolean(current.hasUnseenUpdate),
+        userUpdateState: String(current.userUpdateState || ""),
+        userUpdateNoticeIds: Array.isArray(current.userUpdateNoticeIds) ? current.userUpdateNoticeIds.slice() : [],
+      };
+    });
+    currentFlags = flags;
+    if (options.render !== false && typeof renderScanPage === "function") renderScanPage();
+    renderReviewControl(flags);
+    document.dispatchEvent(new CustomEvent("dls:line-update-flags-applied", { detail: flags }));
+  }
+
+  async function loadFlags(listId, options = {}) {
+    const cleanListId = String(listId || "").trim();
+    if (!cleanListId) return normalizeFlags({}, "");
+    if (!options.force && flagsByList.has(cleanListId)) {
+      const cached = flagsByList.get(cleanListId);
+      applyFlagsToCurrentList(cached, options);
+      if (options.prompt) maybeShowUpdatePrompt(cached);
+      return cached;
+    }
+    if (inflightByList.has(cleanListId)) return inflightByList.get(cleanListId);
+    const request = jsonFetch(`${FLAGS_ENDPOINT}?listId=${encodeURIComponent(cleanListId)}`)
+      .then((payload) => {
+        const flags = normalizeFlags(payload, cleanListId);
+        flagsByList.set(cleanListId, flags);
+        applyFlagsToCurrentList(flags, options);
+        if (options.prompt) maybeShowUpdatePrompt(flags);
+        return flags;
+      })
+      .finally(() => inflightByList.delete(cleanListId));
+    inflightByList.set(cleanListId, request);
+    return request;
+  }
+
+  function reviewControlElements() {
+    return {
+      control: document.getElementById("scanUpdateReviewControl"),
+      summary: document.getElementById("scanUpdateReviewSummary"),
+      review: document.getElementById("scanUpdateReviewBtn"),
+      acknowledge: document.getElementById("scanUpdateMarkReviewedBtn"),
+    };
+  }
+
+  function renderReviewControl(flags = currentFlags) {
+    const elements = reviewControlElements();
+    const activeListId = String(state?.activeListId || "");
+    if (!elements.control) return;
+    if (!flags || !flags.pendingLineCount || String(flags.listId) !== activeListId) {
+      elements.control.hidden = true;
+      return;
+    }
+
+    const updatedFilterActive = Boolean(state?.activeFilters?.has?.("updated"));
+    const reviewComplete = reviewedSignatureByList.get(flags.listId) === flags.signature && Boolean(flags.signature);
+    const parts = [];
+    if (flags.newLineCount) parts.push(`${flags.newLineCount} new`);
+    if (flags.updatedLineCount) parts.push(`${flags.updatedLineCount} updated`);
+    if (elements.summary) {
+      elements.summary.textContent = `${parts.join(" · ") || `${flags.pendingLineCount} changed`} line${flags.pendingLineCount === 1 ? "" : "s"} for your account`;
+    }
+    if (elements.review) {
+      elements.review.textContent = updatedFilterActive ? "Updates Shown" : "Review Updates";
+      elements.review.disabled = updatedFilterActive;
+      elements.review.onclick = () => reviewUpdates(flags);
+    }
+    if (elements.acknowledge) {
+      elements.acknowledge.hidden = !updatedFilterActive;
+      elements.acknowledge.disabled = !updatedFilterActive || !reviewComplete;
+      elements.acknowledge.textContent = "Mark Reviewed";
+      elements.acknowledge.title = reviewComplete
+        ? "Clear the displayed New/Updated status for your account"
+        : "Use Review Updates first so the changed lines are displayed";
+      elements.acknowledge.onclick = () => acknowledgeUpdates(flags);
+    }
+    elements.control.classList.toggle("is-reviewing", updatedFilterActive);
+    elements.control.hidden = false;
+  }
+
+  function closeUpdatePrompt() {
+    document.getElementById("lineUpdateReviewPromptV135")?.remove();
+    currentPromptListId = "";
+  }
+
+  function maybeShowUpdatePrompt(flags) {
+    if (!flags?.pendingLineCount || !flags.signature) return;
+    if (currentPromptListId === flags.listId && document.getElementById("lineUpdateReviewPromptV135")) return;
+    closeUpdatePrompt();
+    currentPromptListId = flags.listId;
+    const shell = document.createElement("div");
+    shell.id = "lineUpdateReviewPromptV135";
+    shell.className = "line-update-review-prompt-shell";
+    shell.innerHTML = `
+      <section class="line-update-review-prompt" role="dialog" aria-modal="false" aria-labelledby="lineUpdatePromptTitle">
+        <button class="line-update-review-close" type="button" aria-label="Close">×</button>
+        <span class="line-update-review-icon" aria-hidden="true">!</span>
+        <div>
+          <small>Delivery list updated</small>
+          <h2 id="lineUpdatePromptTitle">${flags.pendingLineCount} changed line${flags.pendingLineCount === 1 ? "" : "s"} need review</h2>
+          <p>${flags.newLineCount ? `${flags.newLineCount} new` : ""}${flags.newLineCount && flags.updatedLineCount ? " · " : ""}${flags.updatedLineCount ? `${flags.updatedLineCount} updated` : ""}. Review them now, then use Mark Reviewed beside Filters.</p>
+        </div>
+        <button class="line-update-review-primary" type="button">Review now</button>
+      </section>`;
+    document.body.append(shell);
+    shell.querySelector(".line-update-review-close")?.addEventListener("click", closeUpdatePrompt);
+    shell.querySelector(".line-update-review-primary")?.addEventListener("click", () => {
+      closeUpdatePrompt();
+      reviewUpdates(flags);
+    });
+  }
+
+  function reviewUpdates(flags = currentFlags) {
+    if (!flags?.signature) return;
+    if (typeof state === "object") {
+      state.activeFilters?.add?.("updated");
+      state.pageIndex = 1;
+    }
+    reviewedSignatureByList.set(flags.listId, flags.signature);
+    if (typeof renderScanPage === "function") renderScanPage();
+    renderReviewControl(flags);
+    document.getElementById("listPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function acknowledgeUpdates(flags = currentFlags) {
+    if (!flags?.listId || !flags?.signature) return;
+    if (reviewedSignatureByList.get(flags.listId) !== flags.signature) {
+      if (typeof showFloatingNotice === "function") showFloatingNotice("Review the updated lines before marking them reviewed.", "notice");
+      return;
+    }
+    const buttonElement = document.getElementById("scanUpdateMarkReviewedBtn");
+    if (buttonElement) {
+      buttonElement.disabled = true;
+      buttonElement.textContent = "Saving...";
+    }
+    try {
+      await jsonFetch(UPDATE_ACK_ENDPOINT, {
+        method: "POST",
+        body: JSON.stringify({ listId: flags.listId, noticeIds: flags.noticeIds }),
+      });
+      flagsByList.delete(flags.listId);
+      reviewedSignatureByList.delete(flags.listId);
+      const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
+      if (refreshed.pendingLineCount > 0) {
+        throw new Error("New updates arrived while you were reviewing. Review the latest changes before clearing them.");
+      }
+      if (typeof state === "object") {
+        state.activeFilters?.delete?.("updated");
+        state.pageIndex = 1;
+      }
+      if (typeof renderScanPage === "function") renderScanPage();
+      if (typeof showSaveConfirmation === "function") showSaveConfirmation("The new and updated status is cleared for your account on this list.");
+      renderReviewControl(refreshed);
+      document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", { detail: { listId: flags.listId } }));
+    } catch (error) {
+      if (buttonElement) {
+        buttonElement.disabled = false;
+        buttonElement.textContent = "Try again";
+      }
+      if (typeof showFloatingNotice === "function") showFloatingNotice(error.message, "error");
+    }
+  }
+
+  async function initialize() {
+    document.getElementById("userLineUpdateBannerV135")?.remove();
+    ensureUi();
+    if (!host) {
+      window.setTimeout(initialize, 500);
+      return;
+    }
+    try {
+      const session = await jsonFetch(SESSION_ENDPOINT);
+      if (!session.authenticated) {
+        host.hidden = true;
+        window.setTimeout(initialize, 3000);
+        return;
+      }
+      username = String(session.user?.username || session.user?.displayName || "user");
+      host.hidden = false;
+      await refreshNotifications();
+      const listId = String(document.getElementById("deliveryStageSelect")?.value || "");
+      if (listId) loadFlags(listId, { force: true, prompt: false }).catch(() => {});
+    } catch {
+      host.hidden = true;
+      window.setTimeout(initialize, 3000);
+    }
+  }
+
+  window.DLSLineUpdates = {
+    applyPayload: (payload, listId, options = {}) => {
+      const flags = normalizeFlags(payload, String(listId || ""));
+      flagsByList.set(flags.listId, flags);
+      applyFlagsToCurrentList(flags, options);
+      if (options.prompt) maybeShowUpdatePrompt(flags);
+      return flags;
+    },
+    loadAndApply: loadFlags,
+    refresh: (options = {}) => loadFlags(String(state?.activeListId || ""), { force: true, ...options }),
+    review: reviewUpdates,
+    acknowledge: acknowledgeUpdates,
+    getCurrent: () => currentFlags,
+    getCached: (listId) => flagsByList.get(String(listId || "")) || null,
+    clearCache: (listId = "") => listId ? flagsByList.delete(String(listId)) : flagsByList.clear(),
+  };
+
+  document.addEventListener("dls:scan-filters-changed", () => renderReviewControl(currentFlags));
+  document.addEventListener("dls:user-line-updates-reviewed", () => renderReviewControl(currentFlags));
+
+  document.addEventListener("dls:delivery-list-catalog-synced", () => {
+    flagsByList.clear();
+    const listId = String(state?.activeListId || "");
+    if (listId) loadFlags(listId, { force: true, prompt: false }).catch(() => {});
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      refreshNotifications();
+      const listId = String(state?.activeListId || "");
+      if (listId) loadFlags(listId, { force: true, prompt: false }).catch(() => {});
+    }
+  });
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+})();

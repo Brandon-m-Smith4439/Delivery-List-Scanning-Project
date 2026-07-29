@@ -1,4 +1,5 @@
 @echo off
+rem File: automation/sql_delivery_export/Setup-DeliveryListSqlAutomation.bat
 setlocal
 set "SCRIPT_DIR=%~dp0"
 set "POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"

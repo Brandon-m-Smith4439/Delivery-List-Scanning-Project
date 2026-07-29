@@ -1,3 +1,284 @@
+# File: README_CHANGELOG.md
+
+## v0.180 - Main and Rejects Integration with Manual Edit Glass Type Filters
+
+- Added a Glass Type section to the Manual Delivery List Edit filter drawer.
+- Populates glass choices from the product/glass types that actually exist in the selected delivery-list stage.
+- Displays the current piece quantity for each glass type.
+- Supports selecting multiple glass types with OR logic inside the group and AND logic with progress, route, location, attention, and text-search filters.
+- Keeps the stage's glass choices available when other filters return zero matching rows.
+- Refreshes glass choices whenever the selected delivery-list stage changes.
+- Integrated the Rejects feature line back into main while preserving main's
+  Bay Scanner, Old Bay attention, Current Priority Work, footer, and timed scan
+  feedback changes.
+- Resolved the two branches' independent release numbering into one sequential
+  `0.###` history without replacing the production database.
+- No database migration is required.
+
+## v0.179 - Manual Edit Exact Row Capture Repair
+
+- Changed Manual Edit Save to use the exact expanded card containing the clicked Save button instead of querying the entire document by line-item ID.
+- Added an original-value snapshot to every editable card and compares it with the current visible controls before saving.
+- Captures the current Route, Location, Process, Product, order, item, customer, quantity, dimensions, and job values synchronously before the request.
+- Sends the browser-detected changed fields with the save request for verification.
+- Prevents a server no-change response from rerendering the result list and erasing the operator's unsaved values.
+- Keeps the row open and reports a clear error when a detected edit is not confirmed by the server.
+
+## v0.178 - Manual Route Save and New Order Workspace Repair
+
+- Fixed manual-edit choice fields using a stale hidden mirror instead of the value currently displayed in the dropdown.
+- Route saves now send an explicit override and store Indian Trail as `INDIAN TRAIL`, preventing CPU inference from undoing the operator's choice.
+- Normalized route comparisons across sibling stage copies and exposed the applied route in the save response.
+- Rebuilt the Manual Edit layout so Create New Order has a dedicated non-shrinking row and loaded results scroll independently.
+- Added bounded scrolling to the expanded New Order card on shorter screens.
+
+## v0.177 - Manual Route Corrections and Functional Admin GUI Tabs
+
+- Fixed manual CPU-to-Indian Trail route changes being normalized back to the legacy inferred `IT` fallback.
+- Stores explicit Indian Trail manual routing, synchronizes workflow copies, moves the receiving record, and returns the verified updated row.
+- Keeps a just-saved row visible and expanded when it no longer matches active filters.
+- Added green scanned-row styling and clear Scanned / Not scanned status badges.
+- Moved the Manual Edit filter drawer to a viewport-level overlay so it remains fully visible with empty or short result sets.
+- Replaced the pink Administration palette with navy and blue surfaces.
+- Restored meaningful Workspace and Action History tabs to every Admin editor, including Edit Racks.
+
+## v0.176 - Verified Manual Editing, GUI Action History, and Timed Rack Overrides
+
+- Corrected Manual Delivery List Edit so one logical item is reported as one update even when its workflow-stage copies are synchronized.
+- Saves now reload and verify every affected delivery-list stage before showing success.
+- Added Scan-style filters for progress, route, location, remakes, rushes, updates, internal rejects, and manual entries.
+- Added a persistent Create New Order toolbar action that remains available after loading more rows.
+- Added real expandable Action History to each maintained Admin and Rack/Operations GUI.
+- Added a configurable 1-120 minute mixed-destination rack override window under Bay Scanner Rules, defaulting to 15 minutes.
+- Once one rack-destination mismatch is approved, additional destination combinations can be scanned into that rack until the window expires.
+
+## v0.175 - Simplified GUI Headers and Automation Action
+
+### Shared editor headers
+
+- Removed the decorative selected workspace tab, Live scanner data tab, and Changes are audited tab from regular Administration editors.
+- Removed the matching decorative context rail from Individual Rack and Packing List History Operations windows.
+- Converted both shared modal systems to a simpler two-row layout: polished hero header plus scrollable editor canvas.
+- Left the Delivery Automation Control Center's functional Run Manually, Automatic Schedule, Status & Logs, and Import History tabs unchanged.
+
+### Delivery List Management action
+
+- Moved the automation launcher into the Delivery List Management heading actions, immediately left of Edit delivery lists.
+- Renamed it to Edit automated DL import and changed it to the maintained blue text-button treatment.
+- Preserved the existing permission check and Automation Control Center open behavior.
+
+### Compatibility
+
+- Preserved all editor forms, event handlers, API requests, permissions, automation settings, and database behavior.
+- No database migration or backend update is required.
+
+## v0.174 - Modal Hidden State and Close Repair
+
+### Startup and close behavior
+
+- Fixed the shared Admin Control Center window being visible immediately when the web app loaded.
+- Restored the X button and backdrop close behavior by ensuring the modal-specific grid rules cannot override the native `hidden` attribute.
+- Applied the same hidden-state protection to the Operations window used by Individual Rack and Packing List History.
+- Cleared stale modal content after closing so a previously opened editor cannot remain painted or replace a supposedly closed permanent window.
+- Removed the Operations Control Center presentation class on close and synchronized `aria-hidden` state for both panels and backdrops.
+
+### Compatibility
+
+- Preserved every editor workflow, permission check, API request, unsaved manual-edit confirmation, rack operation, and database behavior.
+- No database migration or backend update is required.
+
+## v0.173 - Scan Typography and Control Center Layering Repair
+
+### Scan-row readability
+
+- Unified the Scanned pill label, date, time, separators, and station on one centered baseline with one readable font size.
+- Increased Flags, Route, Location, and Progress text from the overly compact v0.169 sizes while preserving the maintained column widths.
+- Corrected the missing semicolon in the Location width declaration so the browser consistently honors the complete fixed-width table contract.
+
+### GUI layering and contrast
+
+- Made the Administration Control Center header, context rail, and editor canvas explicit protected grid rows.
+- Applied the same layer ownership to Individual Rack and Packing List History Operations windows.
+- Prevented generic modal header rules from squeezing the status pill and close button into a narrow column.
+- Increased and protected the close controls, constrained long status labels, and forced readable high-contrast hero text.
+- Kept editor content beneath the header and context rail instead of allowing it to visually cover either surface.
+
+### Compatibility
+
+- Preserved every existing editor layout, event handler, permission check, API request, rack action, and scan record.
+- No database migration, backend update, or JavaScript replacement is required.
+
+## v0.172 - Scan Timestamp, Rack Status, and Rack Control Centers
+
+### Scan-page presentation
+
+- Condensed last-scan dates to month/day and times to a compact lowercase format such as `4:30pm` while preserving the full timestamp in hover text.
+- Reserved the in-row scan-pill space only in the Job Nr. cell so Order and Item remain vertically aligned with QTY, Dimensions, Customer, Flags, Route, Location, and Progress.
+- Added the active delivery-list date to the Scan panel title beside the stage name.
+
+### Rack status integrity
+
+- Removed the generic selected class from individual rack cards.
+- Kept selection state available through `aria-current` while preserving Open, Complete, On the Way, Received, and Empty visual formatting.
+
+### Rack GUI Control Centers
+
+- Added the Administration-style Control Center hero, live-status pill, context rail, guided canvas, and section-card treatment to Individual Rack and Packing List History windows.
+- Added dynamic rack context and status labels to the Individual Rack header.
+- Strengthened Edit Racks, Rack, and Rack Set Admin editor surfaces without changing their existing forms or event handlers.
+
+### Compatibility
+
+- Preserved existing API calls, permission checks, rack actions, packing-list snapshots, scan data, and database behavior.
+- No database migration or backend update is required.
+
+## v0.171 - Administration Control Center GUI System
+
+### Shared Admin window format
+
+- Rebuilt the shared Administration modal around the same structural design language as the Delivery Automation Control Center.
+- Added a descriptive navy hero, task-specific eyebrow, explanatory copy, live-status pill, and a workspace context rail.
+- Added maintained profiles for Delivery Lists, Delivery List Actions, Manual Edit, Users, Roles, Sessions, Stations, Customer Routes, Customer Emails, Lookups, Reject Settings, Bay Scanner Rules, Bay Auto Assigner, Racks, Rack Sets, and All Scans.
+
+### Editor consistency
+
+- Standardized the working canvas, section cards, headers, tables, search controls, forms, list rows, empty states, and command/footer areas.
+- Expanded data-heavy Admin editors while preserving responsive full-screen behavior on narrow displays.
+- Kept all existing editor-specific layouts and workflows instead of replacing them with one generic form.
+
+### Compatibility
+
+- Preserved all existing IDs, delegated event handlers, API calls, permission checks, unsaved-change protection, editor refreshes, and database behavior.
+- No database migration or backend update is required.
+
+
+## v0.170 - Admin Editors, Scan Panel, and Automation Compatibility
+
+### Page alignment and Scan panel
+
+- Moved the Home Delivery List Overview text away from the decorative header accent.
+- Aligned the Admin header, KPI cards, and dashboard sections to the same full-width grid edge.
+- Restored the main Scan panel's navy progress header after the v0.169 surface rule incorrectly treated it as a white content card.
+- Re-established distinct bordered cards for transportation, bay override, barcode entry, manual scan, manual assignment, and scan history.
+
+### Administration editor polish
+
+- Added a consistent purple Admin modal header, larger working canvas, refined backdrop surface, and stronger form/table hierarchy.
+- Applied the shared editor treatment to Delivery List Management, Manual Delivery List Edit, Roles & Permissions, User Access Management, Customer Routes, Customer Email Rules, Lookup Manager, Reject Reasons & Locations, Bay Scanner Rules, and Bay Auto Assigner.
+- Preserved all existing HTML IDs, event handlers, API requests, permissions, and editor workflows.
+
+### Automation compatibility
+
+- Added thin root-level `scanner_config.py` and `delivery_store.py` compatibility bridges for installed automation created before the v151 backend organization.
+- Both bridges re-export the maintained `backend.config` and `backend.store` implementations; no database or business rules are duplicated.
+- This resolves legacy scanner-root checks that reported the organized project was missing the old root module filenames.
+- No database migration is required.
+
+## v0.169 - Core Page Visual Polish and Scan Table Refinement
+
+### Scan table geometry
+
+- Reduced the in-row Last Scan pill so it ends at the Item column.
+- Condensed Flags, Route, and Location to smaller production-safe widths while keeping markers, route labels, and rack controls contained.
+- Reallocated the recovered width to Job Nr., Dimensions, and Customer.
+- Replaced the two-pixel table clearance workaround with an exact 100% column contract.
+- Removed the exposed white strip after Progress and removed the final cell's right border so the table meets the panel edge cleanly.
+
+### Cross-page visual polish
+
+- Added a shared professional hero treatment to Home, Scan, Racks, and Admin using each page's own accent color.
+- Refined page backgrounds, panel hierarchy, borders, radii, shadows, typography, section headings, controls, and hover/focus feedback.
+- Polished Home delivery progress, finder controls, list cards, and statistics surfaces.
+- Polished the Scan command area, filter/table surfaces, row groups, compact operational columns, and scanner cards.
+- Polished Rack set navigation, rack cards, detail panels, statuses, and management controls.
+- Polished Admin KPI cards, management panels, tables, forms, lists, and last-updated status.
+
+### Compatibility
+
+- No JavaScript, backend, API, database, permission, reject-management, scanning, rack, or bay behavior changed.
+- Advanced only the five changed stylesheet cache keys to `20260729-v158`; the unchanged JavaScript bundle remains on v157.
+
+## v0.168 - In-Row Scan Pill and Progress Column
+
+### Scan-page line presentation
+
+- Replaced the separate Last Scan ribbon with a small scan-information pill inside the normal line-item row.
+- Anchored the pill to the Job Nr. cell and allowed it to paint across Order, Item, QTY, Dimensions, and Customer without creating or resizing table columns.
+- Kept date, time, and station on one compact line with ellipsis protection for long station names.
+- Preserved QTY as a plain centered whole number.
+
+### Headers and width containment
+
+- Renamed the Scan table headers from Item Nr. to Item and Process State to Progress.
+- Rebalanced the fixed table contract to give Progress more room.
+- Reserved two physical pixels and one percentage point inside the table so the final Progress edge is not clipped by the list panel.
+- Kept Internal Reject and future supplemental ribbons contained within the maintained table width.
+- No backend, API, permission, database, reject-management, scan-history, rack, or bay behavior changed.
+- Advanced only the Scan stylesheet and application JavaScript cache keys to v157.
+
+## v0.167 - Scan Time Ribbon and Plain Quantity
+
+### Scan-page line presentation
+
+- Replaced the QTY pill with a plain centered integer while preserving scanned-versus-total information in the cell tooltip.
+- Removed the long `Scanned: date/time - station` line from the Job Nr. column.
+- Added a compact blue Last Scan ribbon above each scanned line item.
+- Displays the date, time, and station in one readable line rather than multiple narrow information cells.
+- Keeps the scan ribbon inside the same Job Nr.-through-Customer six-column span used by Internal Rejects.
+
+### Width safety and compatibility
+
+- Added one reusable detail-ribbon containment contract for scan-time, Internal Reject, and future warning/audit ribbons.
+- Supplemental ribbons cannot create new table columns, minimum widths, or horizontal overflow.
+- Preserved the v0.166 fixed percentage-based table contract, location containment, process wrapping, and flag containment.
+- No API, database, permission, reject-management, scanning, rack, or bay behavior changed.
+- Advanced only the Scan stylesheet and application JavaScript cache keys to v156.
+
+## v0.166 - Reject Ribbon Simplification and Scan Table Containment
+
+### Internal-reject ribbon
+
+- Removed Delivery Date from the Scan-page reject ribbon.
+- Removed the trailing event-count and investigation-note capsules.
+- Increased the remaining Reason, Machine / Location, Qty, Rejected By, and Incident typography.
+- Kept the ribbon limited to Job Nr. through Customer and allowed it to wrap responsively at narrower widths.
+
+### Scan table width safety
+
+- Replaced automatic table sizing with a maintained 100% percentage-based column contract.
+- Removed the hard 118-pixel minimum from the Location column.
+- Constrained long scan timestamps, process labels, flags, location selectors, badges, and ribbon content to their assigned columns.
+- Prevented current and future row-detail ribbons from enlarging the delivery-list panel and producing horizontal page scroll.
+
+### Compatibility
+
+- No backend, API, permission, database, or reject-history behavior changed.
+- Advanced only the Scan stylesheet and application JavaScript cache keys to v155.
+
+## v0.165 - Admin Reject Management and Scan Ribbon Polish
+
+### Admin-only reject management
+
+- Added Edit and Delete actions to each Reject Timeline incident for the built-in Admin role only.
+- Enforced the Admin role independently on the server for `/api/rejects/update` and `/api/rejects/delete`; UI visibility is not treated as authorization.
+- Edit Reject updates reason, machine/location, rejected quantity, incident date/time, and investigation notes while keeping the affected order/item identity and original creator immutable.
+- Delete Reject removes the selected reject event and recalculates cumulative line-item reject flags from remaining events.
+- Editing or deleting a reject intentionally does not replay, restore, or reverse the original scan, rack, bay, or process rollback.
+- Added append-only audit records for both edits and deletions, including the prior reject data and recalculated line summary.
+
+### Scan-page reject awareness
+
+- Rebuilt the internal-reject ribbon as a compact polished strip above the affected line item.
+- Limited the ribbon to the Job Nr. through Customer columns so Flags, Route, Location, and Process State retain their normal table alignment.
+- Added reason, machine/location, rejected quantity, rejected user, incident time, delivery date, event count, and investigation-note status.
+- Expanded the line-flags response with current reject event details and separated cumulative rejected-piece quantity from reject-event count.
+
+### Compatibility
+
+- No database migration is required.
+- Existing reject creation, scan reduction, rack removal, bay clearing, notifications, catalog management, and Reject Timeline filtering remain unchanged.
+- Advanced only the changed Rejects, Scan, and application JavaScript cache keys to v154.
+
 ## v0.164 - Old Bay Attention and Priority Work Management
 
 ### Old Bay attention
@@ -41,7 +322,7 @@
 - No migration, installer, BAT file, JavaScript change, image, or database replacement is required.
 - Advanced only the shared shell stylesheet cache key to v0.163.
 
-## v162 - Footer Grid Placement Correction
+## v0.162 - Footer Grid Placement Correction
 
 ### Global footer
 
@@ -56,7 +337,7 @@
 - No migration, installer, BAT file, image, or database replacement is required.
 - Advanced only the footer stylesheet cache key to v162.
 
-## v161 - Footer Ownership, Bay Barcode Recovery, and Timed Scan Errors
+## v0.161 - Footer Ownership, Bay Barcode Recovery, and Timed Scan Errors
 
 ### Global footer
 
@@ -69,7 +350,7 @@
 - Bay Map now searches every active Indian Trail destination list and binds a successful scan to the uniquely matched delivery date and line item.
 - Expanded alternate labels such as `43273429.5` and `43273429.30` to match the stored order number as well as barcode, source identity, Job Nr., and item number.
 - Preserved ambiguity protection so the scanner reports a clear correction instead of moving the wrong piece.
-- Kept the combined manual Order + Item formats from v160 and routed them through the corrected cross-date Bay matching path.
+- Kept the combined manual Order + Item formats from v0.160 and routed them through the corrected cross-date Bay matching path.
 
 ### Timed scan failures
 
@@ -83,7 +364,7 @@
 - No migration, installer, BAT file, database replacement, or server-route change is required.
 - Added `static/css/shell.css` as the final shared-shell owner and advanced only changed asset cache keys to v161.
 
-## v160 - Global Footer, Flexible Bay Entry, External Barcode Support, and Selected Bay Polish
+## v0.160 - Global Footer, Flexible Bay Entry, External Barcode Support, and Selected Bay Polish
 
 ### Global application footer
 
@@ -113,7 +394,7 @@
 - No migration, server-route change, installer, BAT file, image, or database replacement is required.
 - Advanced only the changed global stylesheet, Bay stylesheet, and application JavaScript cache keys to v160.
 
-## v159 - Bay Map Edit Header Cleanup and All Scans Visual Polish
+## v0.159 - Bay Map Edit Header Cleanup and All Scans Visual Polish
 
 ### Edit Physical Bay Map
 
@@ -135,7 +416,7 @@
 - No backend, migration, installer, BAT, image, or database change is required.
 - Advanced only the Bay Map stylesheet and application JavaScript cache keys to v159.
 
-## v158 - Expanded Fullscreen Bay History and Operations UI Polish
+## v0.158 - Expanded Fullscreen Bay History and Operations UI Polish
 
 ### Bay Scanner history
 
@@ -158,7 +439,7 @@
 - No backend, migration, installer, BAT, or database change is required.
 - Advanced only the Bay Map stylesheet and application JavaScript cache keys to v158.
 
-## v157 - Adaptive Bay History Loading and Preassignment Move Safety
+## v0.157 - Adaptive Bay History Loading and Preassignment Move Safety
 
 ### Bay Map scanner
 
@@ -175,11 +456,11 @@
 
 ### Compatibility
 
-- Preserved the v155 seven-day Bay Map activity retention, 25-row All Scans pagination, read-only Latest Activity, scanner follow behavior, permissions, and database schema.
+- Preserved the v0.155 seven-day Bay Map activity retention, 25-row All Scans pagination, read-only Latest Activity, scanner follow behavior, permissions, and database schema.
 - No migration, server-route change, CSS change, installer, or BAT file is required.
 - Advanced only the application JavaScript cache key to v157.
 
-## v156 - Bay Scanner Fixed-Width Follow and Adaptive Recent History
+## v0.156 - Bay Scanner Fixed-Width Follow and Adaptive Recent History
 
 ### Bay Map scanner
 
@@ -192,10 +473,10 @@
 
 ### Compatibility
 
-- Preserved the v155 seven-day Bay Map activity retention, 25-row All Scans pagination, Latest Activity summary, location correction, scan workflows, permissions, and database schema.
+- Preserved the v0.155 seven-day Bay Map activity retention, 25-row All Scans pagination, Latest Activity summary, location correction, scan workflows, permissions, and database schema.
 - Advanced only the changed Bay Map CSS and application JavaScript cache keys to v156.
 
-## v155 - Bay Scanner Sticky Follow, Latest Activity, and Paged History
+## v0.155 - Bay Scanner Sticky Follow, Latest Activity, and Paged History
 
 ### Bay Map scanner
 
@@ -220,7 +501,7 @@
 - No database schema migration is required.
 - Advanced the changed Bay Map CSS and application JavaScript cache keys to v155.
 
-## v154 - Bay Scanner Sticky Containing Block and Manual Row Alignment
+## v0.154 - Bay Scanner Sticky Containing Block and Manual Row Alignment
 
 ### Bay Map scanner
 
@@ -240,7 +521,7 @@
 - Changed only `index.html`, `static\css\bays.css`, and `README_CHANGELOG.md`.
 - No JavaScript, backend, database migration, installer, BAT file, or global stylesheet change is required.
 
-## v153 - Bay Scanner Sticky Ownership and Manual Row Correction
+## v0.153 - Bay Scanner Sticky Ownership and Manual Row Correction
 
 ### Bay Map scanner
 
@@ -248,7 +529,7 @@
 - Kept Old Bays, Rush / Remake, Manage Items, Edit Bays, and Edit Map in normal non-sticky document flow.
 - Forced the scanner to follow Edit Map with only the maintained four-pixel right-rail gap in normal and sticky workflows.
 - Eliminated the wrapper height and inherited grid-row behavior that repeatedly left a large blank area above Bay Scanner.
-- Replaced the older v150/v151 Manual Scan layout selectors with an isolated v153 one-row owner.
+- Replaced the older v150/v151 Manual Scan layout selectors with an isolated v0.153 one-row owner.
 - Kept Order Number and Item Number as in-field placeholders with hidden accessible labels.
 - Aligned Order Number, Item Number, and Submit on one 36-pixel control row and reduced the Manual Scan section height.
 - Advanced the Bay Map stylesheet cache key to v153.
@@ -259,7 +540,7 @@
 - Changed only `index.html`, `static\css\bays.css`, and `README_CHANGELOG.md`.
 - No JavaScript, backend, database migration, installer, BAT file, or global stylesheet change is required.
 
-## v152 - Bay Scanner Manual Alignment and Content Fit
+## v0.152 - Bay Scanner Manual Alignment and Content Fit
 
 ### Bay Map scanner
 
@@ -276,9 +557,11 @@
 - Limited the release package to the files changed for this correction.
 - No database migration, backend patch, installer, BAT file, or JavaScript change is required.
 
-## v151 - Project Structure Organization
+## v0.151 - Project Structure Organization and Bay Scanner Target Alignment
 
 - Consolidated maintained browser behavior into `static\js\app.js`.
+- Moved Rejects page, reject workflow, timeline, and internal-reject
+  presentation rules from the global stylesheet into `static\css\rejects.css`.
 - Organized application services under `backend` and database ownership under
   `database` while retaining `server.py` as the root launcher.
 - Moved optional Docker and Azure App Service templates under `deployment`.
@@ -286,8 +569,6 @@
 - Retained `.dockerignore`, `pytest.ini`, and the paired Windows launchers at
   the root because Docker, pytest, and the BAT launcher discover them there.
 - Updated automation integration paths and project-structure validation.
-
-## v151 - Bay Scanner Target and Manual Control Alignment
 
 ### Bay Map scanner
 
@@ -304,7 +585,7 @@
 - Limited this merge-friendly package to the four files changed for the correction.
 - No database migration, installer, BAT file, or backend patch is required.
 
-## v150 - Bay Scanner Control Alignment and Status Refinement
+## v0.150 - Bay Scanner Control Alignment and Status Refinement
 
 ### Bay Map scanner
 
@@ -323,7 +604,7 @@
 - No database migration or backend patch is required.
 - No PNG previews were generated or packaged.
 
-## v149 - Bay Scanner Sticky Fit and Input Refinement
+## v0.149 - Bay Scanner Sticky Fit and Input Refinement
 
 ### Bay Map scanner
 
@@ -348,7 +629,7 @@
 
 - Added v149 checks for a one-row history limit, Check feedback, five-pixel sticky viewport fit, fullscreen fit, toolbar separation, simplified destination/manual controls, icon-only correction buttons, shared action styles, unique IDs, and code-only release hygiene.
 
-## v148 - Bay Scanner History and Flow Refinement
+## v0.148 - Bay Scanner History and Flow Refinement
 
 ### Bay Map scanner
 
@@ -373,7 +654,7 @@
 
 - Added v148 checks for static-toolbar adjacency, scanner-only stickiness, hidden live badge, Remove-mode percentage suppression, permanently open non-scrollable history, four-column rendering, editable Current Bay, unique IDs, JavaScript ownership, and backend history filtering.
 
-## v147 - Bay Scanner Route and Sticky Refinement
+## v0.147 - Bay Scanner Route and Sticky Refinement
 
 ### Bay Map scanner
 
@@ -391,7 +672,7 @@
 - No API route, database schema, permission, scan rule, or backend workflow was changed.
 - Added v147 release checks for removed header copy, hidden mode summary, route pseudo-element suppression, dark route surfaces, mode-controlled Destination Control, sticky ownership, unique IDs, cache markers, and CSS integrity.
 
-## v146 - Bay Scanner Workflow Refinement
+## v0.146 - Bay Scanner Workflow Refinement
 
 ### Bay Map scanner
 
@@ -410,7 +691,7 @@
 - No API route, database schema, permission, scan rule, or backend workflow was changed.
 - Added v146 release checks for header nesting, route containment, removed copy, no barcode submit button, overlay correction controls, manual-row geometry, unique IDs, cache markers, and CSS integrity.
 
-## v145 - Bay Scanner Layout Correction
+## v0.145 - Bay Scanner Layout Correction
 
 ### Bay Map scanning panel
 
@@ -433,7 +714,7 @@
 - Rendered the corrected panel at normal and 1366x768 sticky workstation sizes and verified it remains stable even when aggressive legacy grid rules are simulated.
 - Advanced browser cache keys to v145.
 
-## v144 - Bay Scanner Operations Console Redesign
+## v0.144 - Bay Scanner Operations Console Redesign
 
 ### Bay Map scanning panel
 
@@ -458,7 +739,7 @@
 - Replaced the unused bottom-docked v144 draft note with the finalized right-rail console documentation.
 - Advanced browser cache keys to v144.
 
-## v143 - Internal Reject Timeline Redesign
+## v0.143 - Internal Reject Timeline Redesign
 
 ### Internal Reject Tracking
 
@@ -477,7 +758,7 @@
 - Preserved the existing reject logging API, process-reset behavior, search, date filters, and catalog controls.
 - Added release checks for timeline structure, summary metrics, location filtering, version markers, unique HTML IDs, JavaScript syntax, and CSS balance.
 
-## v142 - Custom Roles and Interface Refinements
+## v0.142 - Custom Roles and Interface Refinements
 
 ### Roles and users
 
@@ -510,7 +791,7 @@
 - The backend patch is repeat-safe and restores the original files if final validation fails.
 - Added v142 release checks for custom-role wiring, dynamic role options, Reject page ownership, full-width reject details, adaptive glass filters, sidebar text containment, version markers, and unique HTML IDs.
 
-## v141 - User Access Management Redesign
+## v0.141 - User Access Management Redesign
 
 - Replaced the Edit Users modal's wide eight-column table with a responsive, expandable user-card directory.
 - Added a polished user-management overview showing total, active, signed-in, and inactive account counts.
@@ -523,7 +804,7 @@
 - Added desktop, compact desktop, tablet, and mobile layouts without horizontal scrolling.
 - Added v141 regression checks for markup ownership, event wiring, version markers, CSS structure, and responsive containment.
 
-## v140 - Attention Filters, Reject Controls, and Import Run Deduplication
+## v0.140 - Attention Filters, Reject Controls, and Import Run Deduplication
 
 - Moved **Internal Rejects** from the Status filter group into **Attention** beside Remakes and Rushes.
 - Applied the shared priority-button alert/clear presentation to Internal Rejects.
@@ -539,7 +820,7 @@
 - Added content-and-time deduplication so the latest import snapshot and its notification copy cannot appear as two runs a few seconds apart.
 - Added v140 tests for filter placement, conditional IR styling, date-selector geometry/review cleanup, Reject page cleanup, and near-time import-run deduplication.
 
-## v139 - Dropdown Audio, Internal Reject Awareness, and Import Run History
+## v0.139 - Dropdown Audio, Internal Reject Awareness, and Import Run History
 
 ### Dropdowns and Scan filters
 
@@ -563,7 +844,7 @@
 
 - Added v139 regression coverage for selector audio, date indicators, Internal Reject filtering/notification behavior, current-day run pagination, nested automation history, IDs, syntax, and CSS integrity.
 
-## v138 - Internal Reject Page and Entry Workflow
+## v0.138 - Internal Reject Page and Entry Workflow
 
 ### Reject Tracking page
 
@@ -590,7 +871,7 @@
 - Advanced browser cache keys and per-user notification storage namespace to v138.
 - Added v138 release tests for repeatable button ownership, immediate modal opening, date presets, validation, explicit verification, responsive layout, unique IDs, JavaScript syntax, and CSS duplicate detection.
 
-## v137 - Bay Scanner Readability, Packing Lists, and Review Workflow
+## v0.137 - Bay Scanner Readability, Packing Lists, and Review Workflow
 
 ### Bay Scanner redesign
 
@@ -622,7 +903,7 @@
 - Made the glass-type selector a responsive, vertically scrollable grid so large glass catalogs do not overlap.
 - Advanced browser asset cache keys to v137.
 
-## v136 - Interface Stability and Professional Control Polish
+## v0.136 - Interface Stability and Professional Control Polish
 
 ### Rack Overview and Reject Tracking
 
@@ -650,7 +931,7 @@
 - Advanced browser asset cache keys to v136.
 - Added focused v136 release tests for rack modal helper ownership, reject resilience, tab accessibility, button scope, sidebar icon rendering, and Bay Scanner width containment.
 
-## v135 - Personalized Update Review and Operations Workflows
+## v0.135 - Personalized Update Review and Operations Workflows
 
 ### Personalized New/Updated review
 
@@ -719,7 +1000,7 @@
 - Added `docs/V135_OPERATIONS_WORKFLOWS.md` with installation, permission, review, reject, manual-order, rack-history, testing, and rollback guidance.
 - Advanced browser asset cache keys to v135.
 
-## v134 - Floor Scheduler PowerShell Interpolation Fix
+## v0.134 - Floor Scheduler PowerShell Interpolation Fix
 
 - Fixed `Install-DeliveryListSqlAutomationTasks.ps1` failing syntax validation at line 227 before Task Scheduler installation began.
 - Delimited the automation-mode variable as `${automationMode}:` so PowerShell does not interpret the literal colon as part of the variable name.
@@ -728,7 +1009,7 @@
 - Existing scanner data, imported delivery lists, automation configuration backups, and SQL isolation remain unchanged.
 - Advanced floor-setup and browser release markers to v134.
 
-## v133 - Safe Windows Batch Launchers for Parenthesized Project Paths
+## v0.133 - Safe Windows Batch Launchers for Parenthesized Project Paths
 
 - Fixed `Setup-Floor-Folder-Import-Automation.bat` opening briefly and closing before the PowerShell installer started when the project folder contained parentheses, such as `Delivery-List-Scanning-Project-main (5)`.
 - Fixed the same CMD parser failure in `Create Desktop Shortcut.bat`.
@@ -740,7 +1021,7 @@
 - Preserved the v132 folder-import-only runtime installation, hourly schedule, SQL isolation, scanner database, existing import configuration backups, and desktop-shortcut behavior.
 - Advanced browser asset cache keys to v133.
 
-## v132 - Floor Computer Hourly Folder-Import Setup
+## v0.132 - Floor Computer Hourly Folder-Import Setup
 
 - Added `Setup-Floor-Folder-Import-Automation.bat` as a dedicated one-click installer for floor computers that only consume workbooks from the shared Temp Delivery Lists folder.
 - Copies the maintained automation runtime into `C:\DeliveryListAutomation\Scripts`, fixing the missing `Install-DeliveryListSqlAutomationTasks.ps1` failure without requiring A+W SQL access.
@@ -754,7 +1035,7 @@
 - Preserved the production scanner database, scan history, quantities, racks, bays, Rush/Remake state, import history, and per-user review data.
 - Advanced browser asset cache keys to v132.
 
-## v131 - Audited Route-Consolidation Preservation Validation
+## v0.131 - Audited Route-Consolidation Preservation Validation
 
 - Fixed floor database transfer validation stopping after a successful migration because `line_items` decreased from 15,096 to 15,068.
 - Recognizes the maintained startup repair that merges obsolete duplicate receiving-stage route copies into one current destination row.
@@ -766,7 +1047,7 @@
 - Preserves verified backups, failed-copy retention, and automatic restoration of the previous current-project database on any real validation failure.
 - Advanced browser asset cache keys to v131.
 
-## v130 - Complete Legacy v096 Schema Before Migration
+## v0.130 - Complete Legacy v096 Schema Before Migration
 
 - Fixed floor database upgrades reaching the current schema version and then failing during startup with `no such table: system_metadata`.
 - Replays the canonical v096 schema creation method before migration 002 whenever the database has not yet reached v097.
@@ -777,14 +1058,14 @@
 - Corrected maintained release documentation that had remained labeled v128 after the v129 migration patch.
 - Advanced browser asset cache keys to v130.
 
-## v129 - Late-v096 Column Compatibility Repair
+## v0.129 - Late-v096 Column Compatibility Repair
 
 - Fixed the v097 migration failing with `no such column: priority_delivery_date` on older floor databases.
 - Runs the maintained v096 compatibility preparation before migration 002 so `source_route`, `priority_delivery_date`, and `priority_direct_to_truck` exist before `line_items` is rebuilt.
 - Supports both unversioned legacy databases and databases already marked with the v096 baseline.
 - Preserved migration checksums, existing operational data, verified backups, validation, and rollback behavior.
 
-## v128 - Windows Project-Root Quoting Fix
+## v0.128 - Windows Project-Root Quoting Fix
 
 - Fixed the floor database transfer failing before the source prompt with a malformed current-project value ending in `" --interactive`.
 - Normalizes the BAT project root to a full path without a trailing backslash before passing it as a quoted Python argument.
@@ -792,7 +1073,7 @@
 - Added a defensive Python compatibility repair for the exact malformed argument generated by already-extracted v127 launchers.
 - Added regression coverage for the Windows quoting failure while preserving interactive path entry, verified backups, migrations, validation, and rollback behavior.
 
-## v127 - Reliable Floor Database Transfer Launcher
+## v0.127 - Reliable Floor Database Transfer Launcher
 
 - Moved the old-project/database path prompt from the BAT command parser into the Python transfer tool so pasted paths containing spaces, ampersands, parentheses, quotes, and other CMD-sensitive characters cannot terminate the launcher.
 - Rebuilt the BAT as explicit non-nested execution labels for the project virtual environment, bundled Python, Windows Python launcher, and PATH Python fallback.
@@ -801,7 +1082,7 @@
 - Preserved drag-and-drop support through an environment handoff without embedding the pasted path in the Python command line.
 - Added an interactive-path regression test using a folder name containing an ampersand while preserving the v126 backup, migration, validation, and rollback protections.
 
-## v126 - Floor Database Transfer and Upgrade
+## v0.126 - Floor Database Transfer and Upgrade
 
 - Added `Transfer-Floor-Database-To-Current-Version.bat` for moving an existing floor SQLite database into the newest scanner project while preserving operational data.
 - Accepts the old project folder, old data folder, or direct `delivery-scanner-pilot.db` path, including drag-and-drop onto the BAT file.
@@ -815,7 +1096,7 @@
 - Added `docs/FLOOR_DATABASE_TRANSFER.md` and targeted success, rollback, and invalid-source tests.
 - Advanced browser asset cache keys to v126.
 
-## v125 - Safe Task Scheduler Native Command Handling
+## v0.125 - Safe Task Scheduler Native Command Handling
 
 - Fixed schedule installation failing when `schtasks.exe /Delete` reported that an obsolete legacy task did not exist.
 - Added one maintained Task Scheduler command wrapper that captures native stdout/stderr without allowing Windows PowerShell's `ErrorActionPreference = Stop` to convert expected `schtasks.exe` messages into terminating `NativeCommandError` records.
@@ -826,7 +1107,7 @@
 - Kept the v123-v124 SQL/export/import verification, parser checks, timestamp fixes, and legacy-script compatibility repairs intact.
 - Advanced browser asset cache keys to v125.
 
-## v124 - Legacy Scheduler Parser Hotfix
+## v0.124 - Legacy Scheduler Parser Hotfix
 
 - Fixed the remaining schedule-installation failure coming from the older `Install-DeliveryListAutomationTasks.ps1` file left in the shared installed automation Scripts folder.
 - Delimited `${incrementalTask}:` and `${fullTask}:` in the legacy Crystal task installer so the file is valid Windows PowerShell.
@@ -836,7 +1117,7 @@
 - Kept the v123 end-to-end SQL/export/import verifier and unchanged-list timestamp fixes intact.
 - Advanced browser asset cache keys to v124.
 
-## v123 - Schedule Installer Fix, Timestamp Persistence, and End-to-End Verification
+## v0.123 - Schedule Installer Fix, Timestamp Persistence, and End-to-End Verification
 
 - Fixed the PowerShell parser failure in `Install-DeliveryListSqlAutomationTasks.ps1` by delimiting task-name variables before literal colons.
 - Added a complete PowerShell syntax scan across the installed automation scripts before Windows scheduled tasks are created.
@@ -850,7 +1131,7 @@
 - Added explicit CSS maintenance rules requiring existing selectors, shared components, and design tokens to be reused before new declarations or override layers are introduced.
 - Advanced browser asset cache keys to v123.
 
-## v122 - CSS Ownership Map and No-Change Import Timestamps
+## v0.122 - CSS Ownership Map and No-Change Import Timestamps
 
 - Reorganized `styles.css` with a maintained table of contents and clearly labeled sections for global tokens, authentication, shell/header/sidebar, Home, Admin, Scan, shared components, Racks, Bay Map, compatibility layers, and current-release ownership.
 - Preserved CSS source order so historical compatibility layers keep the same cascade and visual behavior.
@@ -862,7 +1143,7 @@
 - Advanced browser asset cache keys to v122.
 - Confirmed the root and `automation/sql_delivery_export` automation assets are intentional deployment mirrors rather than competing runtime implementations.
 
-## v121 - Notification Timing and Review Reliability
+## v0.121 - Notification Timing and Review Reliability
 
 - Moved the delivery-list import toast to the bottom center of the page and extended it to 20 seconds.
 - Opening the bell notification menu now marks all currently displayed notifications read for that user.
@@ -871,7 +1152,7 @@
 - Sends the exact reviewed notice IDs when Mark reviewed is selected and verifies that no unseen notices remain.
 - Reloads the selected delivery list from the authenticated API after review and immediately removes New Line / Updated Line labels from the current user's visible rows.
 - Preserved per-user isolation, current/future-date limits, append-only scan history, scanning quantities, racks, bays, and import audit history.
-## v120 - Per-User Delivery-List Update Review
+## v0.120 - Per-User Delivery-List Update Review
 
 - Removed SQL delivery-list automation notices from the Rush/priority popup queue.
 - Added a compact, nonblocking toast that appears for only a few seconds after a new automation result arrives.
@@ -883,7 +1164,7 @@
 - Added an unobtrusive Scan-page review banner that requires Review updates before Mark reviewed is enabled, plus unseen counts in stage selectors.
 - Excludes removed or retired rows from the New/Updated review queue while preserving their immutable operational history.
 - Preserved append-only scan history, existing scan quantities, racks, bays, Rush/Remake state, import history, schedules, and the authoritative latest-import result.
-## v118 - Unified Import Center and Append-Only History-Safe Updates
+## v0.118 - Unified Import Center and Append-Only History-Safe Updates
 
 - Moved Import Audit History into the Import / Update Delivery List control center as a fourth tab.
 - Removed the separate Import history button and standalone history modal from Delivery List Management.
@@ -895,7 +1176,7 @@
 - Inserts genuinely new source lines, safely retires source-removed history-linked lines, and deletes only unreferenced removed lines.
 - Leaves non-SQLite/Azure SQL stores on their native import implementation.
 - Preserved live Delivery List Management rerendering, browser catalog sync, detailed logs, schedules, notifications, and workbook integrity validation.
-## v117 - Live Delivery Management Refresh and Stable Import History
+## v0.117 - Live Delivery Management Refresh and Stable Import History
 
 - Fixed Delivery List Management so the original scanner overview rerenders immediately when the live delivery-list catalog changes.
 - Preserved the current page, selected date, selected stage, and active scan workflow; no synthetic selector change events are fired.
@@ -907,7 +1188,7 @@
 - Preserves the complete normalized failed-import result at `C:\DeliveryListAutomation\State\last-import-result.json`.
 - Added repair guidance for damaged XLSX/XLSM files that require Query SQL, Export & Import on a SQL-authorized computer.
 - Preserved dedicated history search/pagination, notifications, schedules, scan quantities, route logic, rack and bay assignments, and database-busy retry behavior.
-## v116 - Dedicated Import Audit History
+## v0.116 - Dedicated Import Audit History
 
 - Restored the original Delivery List Management overview instead of replacing it with recent import results.
 - Added a separate Import History button and full-screen modal on the Admin page.
@@ -920,7 +1201,7 @@
 - Removed the obsolete inline Temp Delivery Lists folder and date-settings disclosure from Delivery List Management because those settings now live in the Automation Control Center.
 - Kept non-disruptive 10-second catalog synchronization so new dates and stages appear without refreshing or navigating users away from their current page.
 - Preserved scan quantities, route logic, rack and bay assignments, notifications, automation settings, and scheduled tasks.
-## v115 - Non-Disruptive Live Delivery-List Synchronization
+## v0.115 - Non-Disruptive Live Delivery-List Synchronization
 
 - Fixed the Admin page immediately redirecting to Scan when the v114 import-history refresh ran.
 - Removed artificial Date and Stage change events from background catalog refreshes.
@@ -931,7 +1212,7 @@
 - Added bounded retry and backoff for transient SQLite/Azure SQL lock or busy conditions so active scanner writes are favored.
 - Confirmed that SQL querying, workbook generation, validation, and network publishing do not write to the scanner database; only the final maintained import phase uses short transactions.
 - Preserved scan quantities, routes, racks, bays, audit history, notifications, configuration, and scheduled tasks.
-## v114 - Immediate Import History Refresh and Correct New-Stage Classification
+## v0.114 - Immediate Import History Refresh and Correct New-Stage Classification
 
 - Fixed the automation refreshing the hidden legacy import-history element instead of the visible Recent Delivery List Imports section.
 - Made the just-completed maintained folder-import result authoritative for New, Updated, New + Updated, No Changes, and Failed labels.
@@ -942,7 +1223,7 @@
 - Prevented older imports-table rows for the same workbook/date from overwriting the latest run result.
 - Retained Excel-compatible workbooks, integrity validation, missing-list recovery, complete logs, notifications, and UNC publishing.
 - Preserved scans, routes, racks, bays, audits, configuration, and scheduled tasks.
-## v113 - Workbook Integrity, Import Audit, and Deleted-List Recovery
+## v0.113 - Workbook Integrity, Import Audit, and Deleted-List Recovery
 
 - Fixed SQL-generated workbooks prompting Excel to repair the file and then opening without worksheet data.
 - Moved worksheet properties into the SpreadsheetML order required by Microsoft Excel and added full OOXML ZIP, XML, relationship, style-count, and worksheet-order validation.
@@ -953,7 +1234,7 @@
 - Preserved authoritative New, Updated, and New + Updated classifications from the scanner imports table while retaining newer No Changes and Failed runtime results.
 - Added deleted-stage recovery: when one or more expected scanner lists are missing, the wrapper routes that exact date through the maintained `import_delivery_folder` business workflow without direct table edits.
 - Preserved scan quantities, route/stage rules, rack and bay behavior, notifications, live logs, UNC publishing, and existing automation settings.
-## v112 - Successful No-Change Automation Runs
+## v0.112 - Successful No-Change Automation Runs
 
 - Fixed unchanged SQL checks failing with `Cannot bind argument to parameter 'Dates' because it is an empty array.`
 - Changed scanner-import date binding to safely accept an empty collection as a defensive fallback.
@@ -961,7 +1242,7 @@
 - Added a clear `No changed or pending delivery-list workbooks require scanner import.` log line.
 - No-change runs now complete successfully and publish the normal no-change notification instead of a failure notification.
 - Preserved changed-workbook imports, pending-import retries, authoritative Recent Delivery List Imports history, complete live logs, UNC publishing, and all scanner data.
-## v111 - Import Completion and Live Log Performance Fix
+## v0.111 - Import Completion and Live Log Performance Fix
 
 - Fixed the Status & Logs page appearing frozen after the scanner database import had already completed.
 - Stopped printing the complete per-file import result JSON to PowerShell stdout; the full normalized result remains stored for Recent Delivery List Imports.
@@ -971,7 +1252,7 @@
 - Added a clear transition log after the scanner importer returns and before its normalized result is processed.
 - Preserved v110 UNC/SMB publishing, complete per-run logs, notification reliability, and v109 accurate New/Updated/No Changes/Failed history.
 - Preserved all scanner workflows, scan quantities, rack/bay assignments, routes, audio, notification history, and the production database.
-## v110 - Live Automation Logs and Network Share Publishing Fix
+## v0.110 - Live Automation Logs and Network Share Publishing Fix
 
 - Fixed SQL workbook publishing to the shared Temp Delivery Lists UNC folder by avoiding `System.IO.File.Replace` on SMB/network paths, which caused `The path is not of a legal form.`
 - Added a network-share-compatible validated overwrite path while retaining atomic replacement for supported local filesystems.
@@ -983,7 +1264,7 @@
 - Added clearer progress messages for workbook building, validation, destination staging, overwrite/create actions, scanner importing, and notification publishing.
 - Preserved v109 authoritative **Recent Delivery List Imports** classification and retry behavior for New, Updated, New + Updated, No Changes, and Failed files.
 - Preserved all scanner workflows, scan quantities, rack/bay assignments, routes, audio, notification history, and the production database.
-## v109 - Accurate Automated Import History
+## v0.109 - Accurate Automated Import History
 
 - Connected automated SQL/folder imports to the scanner's authoritative `imports` table instead of relying on an isolated automation status summary.
 - Updated the Admin **Recent Delivery List Imports** section immediately after manual or scheduled automation completes.
@@ -994,7 +1275,7 @@
 - Merged authoritative `last-run.json` results into the web control center so completed runs retain import counts and date details.
 - Added a protected recent-import API endpoint and automatic Admin history refresh after automation notifications.
 - Preserved the v108 Control Center, notification bell, scanner workflows, scan quantities, rack/bay assignments, routes, audio, and production database.
-## v107 - Delivery List Automation Control Center
+## v0.107 - Delivery List Automation Control Center
 
 - Changed **Import / Update Delivery List** into a GUI control center instead of immediately running the folder importer.
 - Added three safe manual commands: **Import Temp Folder Only**, **Query SQL & Export Only**, and **Query SQL, Export & Import**.
@@ -1006,7 +1287,7 @@
 - Preserved all v105 Old Bay, Bay Scanner, audio, database, route, rack, and scanning behavior.
 # README Changelog
 
-## v106
+## v0.106
 - Added `automation/crystal_delivery_export`, a local Crystal Reports automation package that uses the existing SAP Crystal .NET runtime instead of a third-party report scheduler or mouse automation.
 - Added automatic `DeliveryDate` parameter injection for `DeliveryList.rpt`, SQL Server login application for report and subreport tables, and XLSX export through `ExportFormatType.ExcelWorkbook`.
 - Added Windows DPAPI credential storage so the A+W SQL password is entered only on the local workstation and is never stored in the repository or plain-text task commands.
@@ -1017,7 +1298,7 @@
 - Added static tests for the automation file set, known A+W report/database paths, secure credential workflow, safe publishing behavior, and reuse of the maintained scanner business layer.
 - Updated the maintained release summary and project documentation links to v106 without changing the v105 Bay Map interface or the v097 database migration contract.
 
-## v105
+## v0.105
 - Completely rebuilt the Old Bay Review modal as an Old Bay Control Center with a stronger header, compact operational summary, local search, age filters, sorting, and a dedicated printable-investigation action.
 - Added clear old-bay age severity treatments, bay and order/item identity, concise job/size/delivery/last-scan details, and a cleaner per-row snooze control.
 - Added explicit row selection, Select Visible/Clear Visible behavior, a live selected count, and safe bulk snoozing that affects only checked rows instead of silently snoozing every old-bay assignment.
@@ -1030,7 +1311,7 @@
 - Consolidated the latest Old Bay and Bay Scanner CSS ownership blocks instead of adding another duplicate override layer.
 - Added Spanish translations for the new Old Bay and Bay Scanner labels and advanced browser/sound cache keys to v105.
 
-## v104
+## v0.104
 - Reduced the normal-stage timed scan popup from a wide three-card layout to one concise result card with a compact header, readable order/item identity, customer, quantity, dimensions, glass/job, route, location, and optional rack correction.
 - Raised popup rack/bay custom-select menus above the timed card so expanded dropdowns no longer render behind it.
 - Kept the popup countdown paused for the complete dropdown interaction and while a rack correction request is being saved, even when the select temporarily loses focus or becomes disabled.
@@ -1043,7 +1324,7 @@
 - Reworked active Scan filter pills with compact category-specific status, attention, route, and glass treatments plus clearer remove controls.
 - Updated the audio manifest, audio guide, browser preview, README release summary, and browser/sound cache keys to v104.
 
-## v103
+## v0.103
 - Reconciled the checked-in v102 browser/sound-cache baseline with the maintained release metadata and advanced the edited package to v103; missing historical v101/v102 changelog entries were not reconstructed or guessed.
 - Added a distinct accepted-rack-barcode cue by mapping `RACK...` scans to the existing `print_ready.wav` identity instead of the normal item-scan sound.
 - Changed normal accepted item scans to use the former page-navigation/notification cue and retained `sounds/scan_success.wav` in the pack without mapping it, leaving it available for a future purpose.
@@ -1057,7 +1338,7 @@
 - Kept the Scan-page delivery-list search text when switching stages on the same delivery date and cleared it only when the delivery date changes.
 - Updated `sounds/audio_manifest.json`, the audio-pack guide and browser preview, the README release summary, and browser/sound cache keys for v103.
 
-## v100
+## v0.100
 - Restored the v098 operational and interface sound set for login/logout, saves, email, navigation, undo/redo, imports, racks, bays, permissions, notifications, and machine events; printing remains intentionally silent.
 - Unlocks Web Audio during the first pointer or keyboard gesture so asynchronous actions no longer lose browser audio permission.
 - Plays an immediate synthesized cue on first use while each distinct packaged WAV loads in the background for later actions, preventing delayed sounds from arriving after the related operation.
@@ -1069,7 +1350,7 @@
 - Lowered the Scan filter drawer below the expanded sidebar stacking layer.
 - Advanced browser cache keys to v100.
 
-## v099
+## v0.099
 - Restored Scan-page responsiveness by removing the 300 ms whole-document custom-select polling loop and relying on the existing mutation/change synchronization.
 - Stopped rendering both desktop rows and mobile cards during every Scan-page refresh; only the active viewport layout is now built.
 - Coalesced search and filter paints with `requestAnimationFrame` and avoided rebuilding unchanged glass-type controls.
@@ -1082,7 +1363,7 @@
 - Added a Windows local-time fallback for the daily importer when the optional IANA timezone package is unavailable.
 - Advanced browser cache keys to v099.
 
-## v098
+## v0.098
 - Added the complete Barefoot Delivery Scanner Audio Language with 27 distinct mastered mono WAV cues.
 - Replaced the four generic operational files with semantic cues for success, duplicate, warning, error, Rush, remake, completion, racks, bays, undo/redo, import, save, print, email, authentication, notifications, permissions, and future machine events.
 - Updated the shared Web Audio loader to resolve semantic cue names, cache decoded buffers, retain the shared compressor/volume chain, and fall back safely when a WAV cannot load.
@@ -1093,7 +1374,7 @@
 - Advanced browser and sound cache keys to v098.
 - Packaged the release as `Delivery_List_Scanner_v098.zip` without live databases, WAL/SHM files, logs, caches, or verification artifacts.
 
-## v097
+## v0.097
 - Added numbered, checksummed SQLite migrations with automatic legacy v096 baselining.
 - Added verified pre-upgrade backups using SQLite's online backup API; failed upgrades preserve the backup and never recreate production data.
 - Centralized the canonical logical database contract and documented SQLite-to-SQL Server type mappings.
@@ -1109,21 +1390,21 @@
 - Matched the sign-in logo frame to the expanded desktop sidebar logo and removed the oversized login-only glow.
 - Added the first editable four-cue WAV implementation used as the foundation for v098.
 
-## v096
+## v0.096
 - Matched the sign-in page logo to the expanded desktop sidebar logo.
 - Reduced the sign-in logo frame from 188 x 188 to 108 x 108.
 - Kept the sign-in logo square, proportional, and filled with the same sampled dark-blue background color used by the expanded sidebar logo.
 - Kept collapsed-sidebar and mobile-logo sizes unchanged.
 - Advanced browser cache keys to v096.
 
-## v095
+## v0.095
 - Reduced only the expanded desktop sidebar logo and its outline by 10%, from 120 x 120 to 108 x 108.
 - Kept the collapsed sidebar logo and mobile logo sizes unchanged.
 - Matched the inside of every logo outline to the logo image's sampled dark-blue background color: RGB 4, 43, 84.
 - Preserved the square frame, proportional image rendering, and existing sidebar alignment.
 - Advanced browser cache keys to v095.
 
-## v094
+## v0.094
 - Corrected the combined Barefoot and Builders FirstSource logo frames so every displayed version is a true square.
 - Set the sign-in logo frame to 188 x 188.
 - Kept the collapsed sidebar logo frame at 48 x 48.
@@ -1132,7 +1413,7 @@
 - Kept `object-fit: contain` so the supplied logo remains proportional inside each square frame.
 - Advanced browser cache keys to v094.
 
-## v093
+## v0.093
 - Removed the `object-fit: cover` logo rule that was stretching the combined logo into the outline.
 - Restored proportional `object-fit: contain` rendering for the sign-in, collapsed-sidebar, expanded-sidebar, and mobile logos.
 - Kept the existing displayed logo heights while allowing each image width to follow its natural aspect ratio.
@@ -1140,7 +1421,7 @@
 - Preserved the v092 sound volume controls and scan-sound behavior unchanged.
 - Advanced browser cache keys to v093.
 
-## v092
+## v0.092
 - Tight-cropped the supplied combined Barefoot + Builders FirstSource logo so the rounded frame hugs the visible branding instead of surrounding large internal margins.
 - Kept the rounded corners, subtle outline, and soft shadow for collapsed, expanded, mobile, and sign-in logo presentations.
 - Added a persistent scanner-sound volume slider to the temporary Scan and Bay Map sound-test panels.
@@ -1149,20 +1430,20 @@
 - Synchronized every visible volume slider and stored the selected setting in browser local storage.
 - Advanced browser cache keys to v092.
 
-## v091
+## v0.091
 - Added rounded corners to the supplied Barefoot + Builders FirstSource logo in the sign-in screen and sidebar.
 - Added a subtle light outline and soft shadow so the logo stands out slightly against the dark navigation background.
 - Replaced the collapsed Barefoot-only sidebar image with the same combined Barefoot + Builders FirstSource logo used in the expanded sidebar.
 - Kept the existing collapsed/expanded dimensions and sidebar navigation alignment unchanged.
 - Advanced browser cache keys to v091.
 
-## v090
+## v0.090
 - Replaced the existing combined Barefoot and Builders FirstSource brand image with the newly supplied logo.
 - Kept the existing webapp asset filename so the sign-in screen, expanded desktop sidebar, and mobile drawer all use the new logo without duplicating brand logic.
 - Preserved the collapsed sidebar's compact Barefoot icon so navigation remains readable at rail width.
 - Advanced browser cache keys to v090.
 
-## v089
+## v0.089
 - Combined the existing Barefoot & Company logo with the attached Builders FirstSource logo in a new stacked brand asset.
 - Preserved the supplied Builders FirstSource red side lines, red square/white 1 mark, and dark blue text.
 - Added `barefoot-builders-firstsource-logo.png` as the maintained combined logo asset.
@@ -1172,7 +1453,7 @@
 - Kept the collapsed desktop sidebar on the smaller Barefoot-only mark because the Builders FirstSource text is not readable at icon size.
 - Advanced browser cache keys to v089.
 
-## v088
+## v0.088
 - Increased the normal Scan-page Recent Scans history from one row to two rows while retaining five rows in fullscreen.
 - Restyled the global search input as a defined rectangular box with rounded corners, a visible border, and a subtle shadow while keeping the outer search wrapper removed.
 - Added one shared Web Audio sound engine with synthesized cues so the project does not require packaged sound files.
@@ -1186,7 +1467,7 @@
 - Added static and browser-rendered tests for the two-row history, rounded search field, sound engine, completion wiring, and temporary test controls.
 - Advanced browser cache keys to v088.
 
-## v087
+## v0.087
 - Increased the expanded desktop sidebar logo by approximately 25%, from 74 x 74 to 93 x 93.
 - Kept the collapsed sidebar logo at 48 x 48.
 - Added `--app-sidebar-logo-expanded-size` as the single documented CSS setting for future logo-size adjustments.
@@ -1194,7 +1475,7 @@
 - Preserved the fixed 126px brand section so page selector buttons and icons remain aligned between collapsed and expanded states.
 - Advanced browser cache keys to v087.
 
-## v086
+## v0.086
 - Reduced the expanded Barefoot sidebar logo by 65%, from 210 x 210 to 74 x 74.
 - Kept the collapsed sidebar logo at 48 x 48.
 - Reduced the fixed desktop sidebar brand section from 280px to 126px.
@@ -1202,7 +1483,7 @@
 - Kept one identical fixed brand-section height in both states so every selector and icon remains vertically aligned during hover expansion.
 - Advanced browser cache keys to v086.
 
-## v085
+## v0.085
 - Fixed the expanded Barefoot logo being reduced by a later responsive sidebar rule.
 - Added a final sidebar-specific logo ownership block so the expanded desktop logo renders up to 210 x 210.
 - Kept the collapsed sidebar logo at 48 x 48.
@@ -1212,7 +1493,7 @@
 - Added an explicit large-logo rule for the responsive mobile drawer as well.
 - Advanced browser cache keys to v085.
 
-## v084
+## v0.084
 - Reverted the collapsed sidebar Barefoot logo back to the smaller size so the rail stays clean when not hovered.
 - Reduced the collapsed sidebar logo from 72 x 72 back to 48 x 48.
 - Kept the large hover-only expanded brand presentation for the sidebar.
@@ -1220,7 +1501,7 @@
 - Set the expanded sidebar top brand section height to 280px so the larger logo sits centered and proportionate.
 - Advanced browser cache keys to v084.
 
-## v083
+## v0.083
 - Removed the outer global-search container chrome so the centered search bar and Search button sit cleanly in the header without the larger wrapper box.
 - Reduced the header global-search width from 640px to 560px for a cleaner centered layout.
 - Increased the sidebar Barefoot logo by 50% in both collapsed and expanded states.
@@ -1229,7 +1510,7 @@
 - Added a hover-only larger sidebar logo area so the expanded logo stays centered without wasting space when collapsed.
 - Advanced browser cache keys to v083.
 
-## v082
+## v0.082
 - Restored the operations sidebar on the Scan page.
 - Kept the sidebar collapsed by default and hover-expandable, matching Home, Racks, Bay Map, and Admin.
 - Preserved the sign-in-screen behavior that hides the entire application shell until authentication succeeds.

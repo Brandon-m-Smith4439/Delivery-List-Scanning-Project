@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# File: automation/sql_delivery_export/build_delivery_workbook.py
 """Build an A+W-style Delivery List workbook using only Python's standard library.
 
 The workbook intentionally places the scanner import fields in the same columns

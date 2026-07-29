@@ -1,3 +1,4 @@
+/* File: static/css/scan.css */
 /*
   Delivery List Scanner - Scan Page Styles
   Generated from the maintained v150 cascade during the static asset
@@ -75,9 +76,6 @@
 
 .delivery-table th:nth-child(9),
 .delivery-table td.location-cell {
-  width: 118px;
-  min-width: 118px;
-  max-width: 118px;
   padding-left: 6px;
   padding-right: 6px;
   text-align: center;
@@ -1363,3 +1361,676 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   content: "\2713";
 }
 
+/* ========================================================================== */
+/* 17. v158 contained Scan table, compact columns, and in-row scan pill     */
+/* ========================================================================== */
+
+/* The Scan table owns a complete 100% percentage contract. Long process
+   labels, rack selectors, flags, and supplemental ribbons may wrap or trim
+   but cannot widen the list panel or leave an exposed strip after Progress. */
+.scan-page .table-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+  padding-right: 0;
+  box-sizing: border-box;
+}
+
+.scan-page .delivery-table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin-right: 0;
+  table-layout: fixed;
+  box-sizing: border-box;
+}
+
+.scan-page .delivery-table th,
+.scan-page .delivery-table td {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.scan-page .delivery-table th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scan-page .delivery-table tbody tr > td[colspan],
+.scan-page .delivery-table tbody tr > td[colspan] > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.scan-page .delivery-table th:nth-child(1),
+.scan-page .delivery-table td:nth-child(1) {
+  width: 18%
+}
+
+.scan-page .delivery-table th:nth-child(2),
+.scan-page .delivery-table td:nth-child(2) {
+  width: 8%
+}
+
+.scan-page .delivery-table th:nth-child(3),
+.scan-page .delivery-table td:nth-child(3) {
+  width: 6%
+}
+
+.scan-page .delivery-table th:nth-child(4),
+.scan-page .delivery-table td:nth-child(4) {
+  width: 5%
+}
+
+.scan-page .delivery-table th:nth-child(5),
+.scan-page .delivery-table td:nth-child(5) {
+  width: 13%
+}
+
+.scan-page .delivery-table th:nth-child(6),
+.scan-page .delivery-table td:nth-child(6) {
+  width: 18%
+}
+
+.scan-page .delivery-table th:nth-child(7),
+.scan-page .delivery-table td:nth-child(7) {
+  width: 7%
+}
+
+.scan-page .delivery-table th:nth-child(8),
+.scan-page .delivery-table td:nth-child(8) {
+  width: 6%
+}
+
+.scan-page .delivery-table th:nth-child(9),
+.scan-page .delivery-table td.location-cell {
+  width: 8%;
+  min-width: 0;
+  max-width: none;
+}
+
+.scan-page .delivery-table th:nth-child(10),
+.scan-page .delivery-table td:nth-child(10) {
+  width: 11%
+}
+
+.scan-page .delivery-table th:last-child,
+.scan-page .delivery-table td:last-child {
+  padding-right: 12px;
+  border-right: 0;
+}
+
+.scan-page .delivery-table tbody td:not(.location-cell) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scan-page .delivery-table .job-title,
+.scan-page .delivery-table .job-subtitle,
+.scan-page .delivery-table .process-pill,
+.scan-page .delivery-table .location-badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scan-page .delivery-table .job-title,
+.scan-page .delivery-table .job-subtitle,
+.scan-page .delivery-table .job-copy-v157 {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.scan-page .delivery-table .process-pill {
+  display: inline-flex;
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.scan-page .delivery-table td:nth-child(7) {
+  white-space: normal;
+}
+
+.scan-page .delivery-table td:nth-child(7) .row-marker {
+  max-width: 100%;
+  margin: 1px 2px 1px 0;
+}
+
+.scan-page .delivery-table .line-rack-location-control,
+.scan-page .delivery-table .line-rack-location-control select,
+.scan-page .delivery-table .line-rack-location-control .custom-select-shell,
+.scan-page .delivery-table .line-rack-location-control .custom-select-trigger {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.scan-page .delivery-table .line-rack-location-control > span,
+.scan-page .delivery-table .custom-select-trigger,
+.scan-page .delivery-table .custom-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Supplemental rows such as Internal Reject remain confined to the maintained
+   Job Nr.-through-Customer and Flags-through-Progress split. */
+.scan-page .delivery-table tbody tr[data-line-detail-ribbon],
+.scan-page .delivery-table tbody tr[data-line-detail-ribbon]:hover {
+  background: transparent !important;
+}
+
+.scan-page .delivery-table tbody tr[data-line-detail-ribbon] > td {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.scan-page .delivery-table .line-detail-strip-v156 {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.scan-page .delivery-table td.qty-cell {
+  text-align: center;
+}
+
+.qty-value-v156 {
+  display: inline;
+  color: #10284b;
+  font-size: 13px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Last scan remains a small in-row pill. It is absolutely positioned so it
+   does not participate in table sizing. It now ends with Item instead of
+   stretching across quantity, dimensions, and customer. */
+.scan-page .delivery-table tbody tr.has-scan-time-pill-v157 > td.job-cell-v157 {
+  position: relative;
+  z-index: 4;
+  overflow: visible !important;
+  padding-bottom: 38px;
+}
+
+.scan-page .delivery-table tbody tr.has-scan-time-pill-v157 > td:nth-child(n + 2):nth-child(-n + 3) {
+  position: relative;
+  z-index: 1;
+  vertical-align: middle;
+}
+
+.last-scan-pill-v157 {
+  position: absolute;
+  z-index: 8;
+  left: 10px;
+  bottom: 6px;
+  width: calc(177.7778% - 22px);
+  max-width: calc(177.7778% - 22px);
+  min-width: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid #a9c4e6;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(247, 251, 255, .98), rgba(231, 241, 253, .98));
+  color: #234d7d;
+  padding: 2px 8px 2px 4px;
+  box-shadow: 0 2px 6px rgba(7, 42, 99, .08);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.last-scan-pill-v157 > :is(span, b, em) {
+  min-height: 18px;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.last-scan-pill-icon-v157 {
+  width: 18px;
+  height: 18px;
+  min-height: 18px !important;
+  flex: 0 0 18px;
+  justify-content: center;
+  border-radius: 50%;
+  background: #1762a7;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.last-scan-pill-label-v157 {
+  flex: 0 0 auto;
+  color: #335f8e;
+  font-size: inherit;
+  font-weight: 950;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+
+.last-scan-pill-v157 b {
+  flex: 0 0 auto;
+  color: #123f72;
+  font-size: inherit;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.last-scan-pill-divider-v157 {
+  flex: 0 0 auto;
+  color: #5f7c9d;
+  font-size: inherit;
+}
+
+.last-scan-pill-v157 em {
+  min-width: 0;
+  overflow: hidden;
+  color: #456788;
+  font-size: inherit;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.internal-reject-detail-row-v154,
+.internal-reject-detail-row-v154:hover {
+  background: transparent !important;
+}
+
+.delivery-table tbody .internal-reject-detail-row-v154 > td {
+  height: auto;
+  min-width: 0;
+  padding: 5px 0 0;
+  border: 0;
+  background: transparent;
+  vertical-align: bottom;
+}
+
+.delivery-table tbody .internal-reject-detail-row-v154 > td:first-child {
+  padding-left: 0;
+}
+
+.internal-reject-detail-tail-v154 {
+  pointer-events: none;
+}
+
+.internal-reject-incident-strip-v154 {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns:
+    auto
+    auto
+    minmax(0, 1.35fr)
+    minmax(0, 1.2fr)
+    minmax(50px, .45fr)
+    minmax(0, .8fr)
+    minmax(0, 1.15fr);
+  gap: 10px;
+  align-items: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 6px 10px 6px 8px;
+  border: 1px solid #a62738;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(255, 255, 255, .11), transparent 34%),
+    linear-gradient(100deg, #8f1424 0%, #a91d2f 48%, #7f1321 100%);
+  color: #fff;
+  box-shadow: 0 5px 12px rgba(93, 15, 28, .14);
+}
+
+.internal-reject-incident-strip-v154::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: linear-gradient(90deg, #ffb3bd, rgba(255, 255, 255, .22), #ffb3bd);
+}
+
+.internal-reject-incident-badge-v154 {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  border: 1px solid rgba(255, 255, 255, .52);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .04em;
+}
+
+.internal-reject-incident-title-v154 {
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 950;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.internal-reject-incident-strip-v154 > span:not(.internal-reject-incident-badge-v154) {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.internal-reject-incident-strip-v154 small {
+  overflow: hidden;
+  color: #ffdbe0;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.internal-reject-incident-strip-v154 b {
+  overflow: hidden;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 900;
+  line-height: 1.22;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delivery-table tbody tr.has-internal-reject > td {
+  border-top-color: #dfb3ba;
+}
+
+@media (max-width: 1180px) {
+  .internal-reject-incident-strip-v154 {
+    grid-template-columns: auto auto repeat(2, minmax(0, 1fr));
+    row-gap: 5px;
+  }
+
+  .internal-reject-incident-strip-v154 > span:nth-of-type(4),
+  .internal-reject-incident-strip-v154 > span:nth-of-type(5),
+  .internal-reject-incident-strip-v154 > span:nth-of-type(6) {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .scan-page .delivery-table {
+    font-size: 11px;
+  }
+
+  .last-scan-pill-v157 {
+    gap: 4px;
+    font-size: 9.5px;
+  }
+
+  .last-scan-pill-label-v157 {
+    display: none;
+  }
+
+  .last-scan-pill-v157 b {
+    font-size: 9.5px;
+  }
+
+  .internal-reject-incident-strip-v154 {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .internal-reject-incident-strip-v154 > span:not(.internal-reject-incident-badge-v154) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ========================================================================== */
+/* 18. v158 Scan workspace visual polish                                      */
+/* ========================================================================== */
+.scan-page > .scan-heading .scan-heading-controls {
+  padding: 10px 12px;
+  border: 1px solid #cbd9e8;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 8px 18px rgba(20, 48, 84, 0.06);
+  backdrop-filter: blur(8px);
+}
+
+.scan-page > .scan-heading .delivery-selector,
+.scan-page > .scan-heading .operator-field {
+  gap: 5px;
+}
+
+.scan-page > .scan-heading :is(.delivery-selector, .operator-field) > span:first-child {
+  color: #526a84;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.scan-page .list-panel,
+.scan-page .scanner-panel {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.scan-page .list-toolbar,
+.scan-page .list-table-controls,
+.scan-page .pager-row,
+.scan-page .list-footer {
+  border-color: #d7e2ef;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f9fe 100%);
+}
+
+.scan-page .scan-filter-toolbar {
+  border-bottom: 1px solid #d8e3ef;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(19, 92, 255, .055), transparent 34%),
+    #f8fbff;
+}
+
+.scan-page .delivery-table thead th {
+  height: 46px;
+  padding: 10px 9px;
+  border-right: 1px solid #dbe5f1;
+  border-bottom: 2px solid #bfcfe0;
+  background: linear-gradient(180deg, #edf4fc 0%, #e5eef8 100%);
+  color: #173d69;
+  font-size: 10.5px;
+  font-weight: 950;
+  letter-spacing: .055em;
+}
+
+.scan-page .delivery-table thead th:nth-child(n + 7):nth-child(-n + 9),
+.scan-page .delivery-table tbody td:nth-child(n + 7):nth-child(-n + 9) {
+  padding-left: 5px;
+  padding-right: 5px;
+  text-align: center;
+}
+
+.scan-page .delivery-table tbody td {
+  border-right-color: #edf2f7;
+  border-bottom-color: #e4ebf3;
+  background-clip: padding-box;
+}
+
+.scan-page .delivery-table tbody tr:not(.glass-group-row) {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
+}
+
+.scan-page .delivery-table tbody tr:not(.glass-group-row):hover {
+  background: #f2f7fd;
+}
+
+.scan-page .delivery-table td:nth-child(7) .row-marker,
+.scan-page .delivery-table .route-tag {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+  font-size: 11.5px;
+  font-weight: 850;
+  line-height: 1.15;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.scan-page .delivery-table .line-rack-location-control .custom-select-trigger,
+.scan-page .delivery-table .line-rack-location-control select {
+  min-height: 30px;
+  padding-inline: 6px;
+  font-size: 11.5px;
+  line-height: 1.15;
+}
+
+.scan-page .delivery-table .process-pill {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 6px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 850;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.scan-page .glass-group-row td {
+  padding: 0 !important;
+  background: #eef4fb;
+}
+
+.scan-page .glass-group-row button {
+  min-height: 46px;
+  border: 0;
+  border-left: 5px solid #547aa6;
+  border-radius: 0;
+  background: linear-gradient(90deg, #eaf2fb 0%, #f7faff 70%, #eef4fb 100%);
+  color: #173f6f;
+}
+
+.scan-page .scanner-panel > :is(.scan-form, .manual-scan-form, .last-scan, .recent-panel) {
+  border-color: #d4e1ef;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.scan-page .scanner-panel .scan-input-wrap {
+  border-width: 2px;
+  box-shadow: 0 8px 18px rgba(20, 48, 84, .06);
+}
+
+@media (max-width: 1180px) {
+  .scan-page > .scan-heading .scan-heading-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+
+
+/* ========================================================================== */
+/* 19. v159 main Scan panel restoration and contained visual hierarchy        */
+/* ========================================================================== */
+.scan-page .scanner-panel:not(.bay-scanner-panel) {
+  border-color: #bfd0e1;
+  background: linear-gradient(180deg, #ffffff 0%, #f5f9fe 100%);
+  box-shadow: 0 16px 36px rgba(13, 48, 84, 0.11);
+}
+
+.scan-page .scanner-panel > .scanner-summary-header:first-child {
+  position: relative;
+  overflow: hidden;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18) !important;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(255, 255, 255, 0.15), transparent 34%),
+    linear-gradient(135deg, #0d4f8c 0%, #072a63 72%, #041a3d 100%) !important;
+  color: #fff;
+  box-shadow:
+    inset 0 -4px 0 rgba(0, 0, 0, 0.12),
+    0 8px 20px rgba(7, 42, 99, 0.18) !important;
+}
+
+.scan-page .scanner-panel > .scanner-summary-header:first-child::after {
+  content: "";
+  position: absolute;
+  right: -35px;
+  top: -52px;
+  width: 132px;
+  height: 132px;
+  border: 18px solid rgba(255, 255, 255, 0.06);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.scan-page .scanner-summary-header .scanner-panel-title-row,
+.scan-page .scanner-summary-header .scanner-progress-row {
+  position: relative;
+  z-index: 1;
+}
+
+.scan-page .scanner-summary-header .progress-title,
+.scan-page .scanner-summary-header .progress-title strong {
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.scan-page .scanner-panel > :is(.scan-rack-panel, .outbound-rack-status-panel, .scan-bay-override-panel, .scan-form, .manual-scan-form, .manual-assign-panel, .last-scan) {
+  border: 1px solid #d2deeb;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(13, 48, 84, 0.055);
+}
+
+.scan-page .scanner-panel > :is(.scan-form, .manual-scan-form, .manual-assign-panel, .last-scan) {
+  padding: 11px 12px;
+}
+
+.scan-page .scanner-panel .section-heading {
+  min-height: 28px;
+  margin-bottom: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid #e2eaf3;
+}
+
+.scan-page .scanner-panel .section-heading h3,
+.scan-page .scanner-panel .recent-inline-heading h4 {
+  color: #173f6d;
+  font-weight: 950;
+}
+
+.scan-page .scanner-panel .last-card {
+  border: 1px solid #d5e1ee;
+  border-radius: 11px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+}
+
+.scan-page .scanner-panel .recent-table-wrap {
+  border: 1px solid #dce5ef;
+  border-radius: 10px;
+  background: #fff;
+}

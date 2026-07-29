@@ -1,3 +1,4 @@
+# File: scripts/windows/Create-DeliveryScannerShortcut.ps1
 [CmdletBinding()]
 param(
     [string]$ShortcutName = "Glass Delivery Scanner"

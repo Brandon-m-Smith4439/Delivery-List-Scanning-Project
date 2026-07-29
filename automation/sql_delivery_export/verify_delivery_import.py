@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# File: automation/sql_delivery_export/verify_delivery_import.py
 """Verify that one generated workbook has all expected scanner stage lists.
 
 This helper is read-only with respect to delivery-list data. It loads the same

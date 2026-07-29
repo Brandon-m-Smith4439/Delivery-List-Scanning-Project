@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# File: backend/automation_control.py
 """Server-side control plane for the Delivery List SQL automation GUI.
 
 The browser never receives database credentials or arbitrary command access. It

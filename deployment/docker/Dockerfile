@@ -1,3 +1,4 @@
+# File: deployment/docker/Dockerfile
 # Delivery List Scanner Azure App Service container.
 # Installs Python plus Microsoft ODBC Driver 18 so the same image can run SQLite now
 # and connect to Azure SQL later when DLS_DATABASE_TYPE is explicitly changed.

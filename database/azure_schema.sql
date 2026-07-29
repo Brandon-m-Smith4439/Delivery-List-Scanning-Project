@@ -1,3 +1,4 @@
+-- File: database/azure_schema.sql
 /*
   Delivery List Scanner - Azure SQL schema
   ----------------------------------------

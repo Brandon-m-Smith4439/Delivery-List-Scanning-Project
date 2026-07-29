@@ -1,3 +1,4 @@
+# File: automation/sql_delivery_export/delivery_import_safety.py
 """Non-destructive delivery-list import reconciliation for SQLite scanner databases.
 
 The scanner's immutable event triggers correctly prevent UPDATE/DELETE operations on

@@ -1,3 +1,4 @@
+# File: database/azure_compat.py
 """Azure SQL compatibility layer for the delivery-list scanner.
 
 The business layer was originally written against Python's sqlite3 connection API.

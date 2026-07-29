@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# File: server.py
 # Delivery List Scanner local web/API server.
 #
 # Code map for future edits:
@@ -1014,6 +1015,18 @@ class Handler(SimpleHTTPRequestHandler):
         return user
 
 
+    def require_admin_role(self) -> dict | None:
+        """Require the built-in Admin role for destructive reject management."""
+        user = self.current_user()
+        if not user:
+            self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+            return None
+        roles = {str(role).strip().lower() for role in (user.get("roles") or [])}
+        if "admin" not in roles:
+            self.send_json({"error": "Admin role required", "role": "Admin"}, HTTPStatus.FORBIDDEN)
+            return None
+        return user
+
     def require_confirmation_text(self, data: dict, required_text: str) -> bool:
         """Purpose: Run the require confirmation text workflow for the delivery-list scanner.
 
@@ -1302,7 +1315,38 @@ class Handler(SimpleHTTPRequestHandler):
             list_id = query_values.get("listId", [""])[0]
             limit = int(query_values.get("limit", ["20"])[0] or 20)
             offset = int(query_values.get("offset", ["0"])[0] or 0)
-            self.send_json(STORE.admin_search_line_items(query, list_id, limit, offset))
+            filters = {
+                "progress": query_values.get("progress", ["all"])[0],
+                "route": query_values.get("route", ["all"])[0],
+                "location": query_values.get("location", ["all"])[0],
+                "attention": [value for raw in query_values.get("attention", []) for value in str(raw).split(",") if value],
+                "glassTypes": [str(value).strip() for value in query_values.get("glassType", []) if str(value).strip()],
+            }
+            self.send_json(STORE.admin_search_line_items(query, list_id, limit, offset, filters))
+            return
+
+        if parsed.path == "/api/admin/action-history":
+            user = self.require_any_permission(
+                "view_admin",
+                "edit_delivery_lists",
+                "import_delivery_lists",
+                "manage_users",
+                "manage_roles",
+                "manage_stations",
+                "manage_customer_route_rules",
+                "manage_bay_layout",
+                "manage_racks",
+                "view_racks",
+                "scan_racks",
+                "view_active_sessions",
+                "view_own_scans",
+            )
+            if not user:
+                return
+            query_values = parse_qs(parsed.query)
+            context = query_values.get("context", [""])[0]
+            limit = int(query_values.get("limit", ["20"])[0] or 20)
+            self.send_json({"context": context, "events": STORE.list_gui_action_history(context, limit)})
             return
 
         if parsed.path == "/api/admin/sessions":
@@ -1637,6 +1681,20 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(OPERATIONS.create_reject(data, user["username"]))
                 return
 
+            if parsed.path == "/api/rejects/update":
+                user = self.require_admin_role()
+                if not user:
+                    return
+                self.send_json(OPERATIONS.update_reject(data, user["username"]))
+                return
+
+            if parsed.path == "/api/rejects/delete":
+                user = self.require_admin_role()
+                if not user:
+                    return
+                self.send_json(OPERATIONS.delete_reject(data, user["username"]))
+                return
+
             if parsed.path == "/api/rejects/catalog":
                 user = self.require_permission("view_admin")
                 if not user:
@@ -1931,6 +1989,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.remove_customer_email_cc(int(data.get("id") or 0), user["username"]))
+                return
+
+            if parsed.path == "/api/admin/bay-scanner-rules/settings":
+                user = self.require_permission("manage_bay_layout")
+                if not user:
+                    return
+                self.send_json(STORE.update_bay_scan_settings(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/bay-scanner-rules/manual":

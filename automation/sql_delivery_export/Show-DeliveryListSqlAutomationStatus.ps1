@@ -1,3 +1,4 @@
+# File: automation/sql_delivery_export/Show-DeliveryListSqlAutomationStatus.ps1
 [CmdletBinding()]
 param(
     [string]$ConfigPath = "C:\DeliveryListAutomation\Scripts\sql-export.config.json"

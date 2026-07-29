@@ -1,3 +1,4 @@
+# File: automation/sql_delivery_export/Initialize-DeliveryListSqlAutomation.ps1
 [CmdletBinding()]
 param(
     [string]$WorkingRoot = "C:\DeliveryListAutomation",
@@ -100,11 +101,22 @@ function Get-ProjectRelease {
         throw "README.md was not found in the selected scanner project."
     }
     $text = [IO.File]::ReadAllText($readmePath)
-    $match = [regex]::Match($text, 'Current maintained release:\s*\*\*v(?<version>\d+)\*\*')
+    $match = [regex]::Match($text, 'Current maintained release:\s*\*\*v(?<version>\d+(?:\.\d+)?)\*\*')
     if (-not $match.Success) {
         throw "The scanner README does not expose its maintained version."
     }
-    return [int]$match.Groups["version"].Value
+    $displayVersion = $match.Groups["version"].Value
+    $parts = $displayVersion.Split(".")
+    $sequence = if ($parts.Count -eq 2 -and $parts[0] -eq "0") {
+        [int]$parts[1]
+    }
+    else {
+        [int]$displayVersion
+    }
+    return [pscustomobject]@{
+        Display = $displayVersion
+        Sequence = $sequence
+    }
 }
 
 function Test-PythonCandidate {
@@ -171,11 +183,8 @@ Write-Host ""
 
 $resolvedProjectRoot = Resolve-ScannerProjectRoot -RequestedRoot $ProjectRoot
 $projectRelease = Get-ProjectRelease -Root $resolvedProjectRoot
-if ($projectRelease -lt 105) {
-    throw "The selected scanner is v$projectRelease. Update it to v105 or newer before installing this exporter."
-}
-if ($projectRelease -gt 121) {
-    throw "The selected scanner is v$projectRelease. This v121 installer will not modify a newer release."
+if ($projectRelease.Sequence -lt 105) {
+    throw "The selected scanner is v$($projectRelease.Display). Update it to v0.105 or newer before installing this exporter."
 }
 
 foreach ($folder in @("Staging", "Logs", "Failed", "State", "Scripts", "Backups")) {
@@ -260,7 +269,7 @@ if ([string]$config.Import.Mode -eq "direct-store" -and $disableBuiltInImporter)
     $env:DLS_DAILY_IMPORT_ENABLED = "0"
 }
 
-Write-Host "Scanner release: v$projectRelease"
+Write-Host "Scanner release: v$($projectRelease.Display)"
 Write-Host "Project root: $resolvedProjectRoot"
 Write-Host "Working root: $WorkingRoot"
 Write-Host "Python: $($python.Path) $($python.Arguments -join ' ') (version $($python.Version))"

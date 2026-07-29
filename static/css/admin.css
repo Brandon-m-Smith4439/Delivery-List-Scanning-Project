@@ -1,3 +1,4 @@
+/* File: static/css/admin.css */
 /*
   Delivery List Scanner - Admin Page Styles
   Generated from the maintained v150 cascade during the static asset
@@ -1169,19 +1170,6 @@
 
 
 
-.admin-primary-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-
-
-.admin-primary-actions #folderImportBtn {
-  width: 100%;
-  min-height: 46px;
-  justify-content: center;
-  font-size: 13px;
-}
 
 
 
@@ -1448,9 +1436,6 @@
 
 
 
-.admin-primary-actions button {
-  min-height: 38px;
-}
 
 
 
@@ -1798,9 +1783,6 @@
 
 
 
-  .admin-primary-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 
@@ -1813,8 +1795,7 @@
 
 
 
-  .admin-kpi-row,
-  .admin-primary-actions {
+  .admin-kpi-row {
     grid-template-columns: 1fr !important;
   }
 }
@@ -3991,9 +3972,11 @@ button.custom-select-trigger:hover:not(:disabled),
 
 
 
+.admin-page .admin-dashboard-heading,
 .admin-page .admin-kpi-row,
 .admin-page .admin-layout {
-  margin-inline: 14px;
+  width: 100%;
+  margin-inline: 0;
 }
 
 
@@ -4034,6 +4017,29 @@ button.custom-select-trigger:hover:not(:disabled),
   border-color: #6f94c3;
   background: #e3eefb;
   color: #173f70;
+}
+
+.admin-delivery-list-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#adminPage .admin-automation-link {
+  color: #135cff;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+#adminPage .admin-automation-link:hover:not(:disabled),
+#adminPage .admin-automation-link:focus-visible {
+  outline: none;
+  border-color: #a9c5f2;
+  background: #eef5ff;
+  color: #0d4fc5;
 }
 
 
@@ -6268,3 +6274,1305 @@ button.custom-select-trigger:hover:not(:disabled),
   20%, 65% { box-shadow: 0 0 0 3px rgba(42, 119, 190, 0.28), 0 14px 34px rgba(15, 55, 95, 0.14); }
 }
 
+/* ========================================================================== */
+/* v158 Administration workspace visual polish                               */
+/* ========================================================================== */
+.admin-page .admin-last-updated {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid #b9cbe5;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .9);
+  color: #174f93;
+  font-size: 11px;
+  font-weight: 900;
+  box-shadow: 0 6px 14px rgba(23, 79, 147, .07);
+}
+
+.admin-page .admin-kpi-row {
+  gap: 12px;
+}
+
+.admin-page .admin-kpi-row .mini-stat {
+  position: relative;
+  min-height: 110px;
+  overflow: hidden;
+  border-color: #c9d9ec;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(23, 79, 147, .075), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  box-shadow: 0 10px 24px rgba(23, 79, 147, .07);
+}
+
+.admin-page .admin-kpi-row .mini-stat::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #2f70c9, #174f93);
+}
+
+.admin-page .admin-dashboard-card {
+  overflow: hidden;
+  padding: 16px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(23, 79, 147, .04), transparent 30%),
+    linear-gradient(180deg, #ffffff 0%, #f9fcff 100%);
+}
+
+.admin-page .admin-dashboard-card > .section-heading {
+  min-height: 42px;
+  margin: -4px -4px 13px;
+  padding: 4px 4px 10px;
+  border-bottom: 1px solid #dce6f3;
+}
+
+.admin-page .admin-dashboard-card .section-heading h2 {
+  font-size: 17px;
+}
+
+.admin-page .admin-table {
+  border: 1px solid #d7e1ef;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.admin-page .admin-table th {
+  background: linear-gradient(180deg, #f5f9ff 0%, #eaf2ff 100%);
+  color: #173c69;
+  font-size: 10.5px;
+  font-weight: 950;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.admin-page .admin-table tbody tr:hover {
+  background: #f5f9ff;
+}
+
+.admin-page :is(.admin-form, .lookup-manager-form, .customer-route-modal-form, .rack-manager-quick-edit) {
+  border-color: #d4e0ef;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fcfdff 0%, #f4f8fd 100%);
+}
+
+.admin-page .admin-form button,
+.admin-page .panel > button,
+.admin-page .station-add-row button,
+.admin-page .admin-table button,
+.admin-page .link-button {
+  border-radius: 9px;
+}
+
+.admin-page .compact-list > div,
+.admin-page .result-list article,
+.admin-page .admin-user-preview-row,
+.admin-page .customer-route-rule-row,
+.admin-page .lookup-row {
+  border-color: #d8e3f1;
+  border-radius: 11px;
+  box-shadow: 0 6px 16px rgba(23, 79, 147, .04);
+}
+
+
+
+/* ========================================================================== */
+/* v160 Administration Control Center modal system                            */
+/* ========================================================================== */
+#adminModal.admin-modal-panel {
+  --admin-control-navy: #0d234d;
+  --admin-control-blue: #174f93;
+  --admin-control-blue-strong: #0b63bd;
+  --admin-control-blue-soft: #eaf3ff;
+  --admin-control-line: #d7e1ef;
+  --admin-control-muted: #60708b;
+  --admin-control-surface: #f5f8fc;
+
+  width: min(1220px, calc(100vw - 34px));
+  height: min(900px, calc(100vh - 34px));
+  max-height: calc(100vh - 34px);
+  display: grid !important;
+  grid-template-rows: minmax(118px, auto) minmax(0, 1fr) !important;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(183, 199, 220, .92);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 32px 94px rgba(4, 17, 42, .34);
+}
+
+#adminModal[data-kind="deliveryLists"],
+#adminModal[data-kind="deliveryActions"],
+#adminModal[data-kind="manualEdit"],
+#adminModal[data-kind="users"],
+#adminModal[data-kind="roles"],
+#adminModal[data-kind="customerRoutes"],
+#adminModal[data-kind="customerEmails"],
+#adminModal[data-kind="lookups"],
+#adminModal[data-kind="bayScannerRules"],
+#adminModal[data-kind="bayAutoAssigner"],
+#adminModal[data-kind="rejectSettings"],
+#adminModal[data-kind="racks"],
+#adminModal[data-kind="recentScans"] {
+  width: min(1460px, calc(100vw - 28px));
+  height: min(930px, calc(100vh - 28px));
+  max-height: calc(100vh - 28px);
+}
+
+#adminModal > .admin-control-center-header {
+  position: relative !important;
+  z-index: 3;
+  grid-row: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 118px !important;
+  height: auto !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) max-content !important;
+  align-items: start !important;
+  gap: 24px;
+  margin: 0 !important;
+  padding: 24px 28px 22px !important;
+  overflow: hidden;
+  border-bottom: 0;
+  color: #fff;
+  background:
+    radial-gradient(circle at 90% 15%, rgba(78, 146, 233, .34), transparent 32%),
+    linear-gradient(135deg, #0b1d42 0%, #123c76 58%, #15558e 100%);
+}
+
+#adminModal > .admin-control-center-header::before {
+  content: "";
+  position: absolute;
+  right: 84px;
+  bottom: -72px;
+  width: 236px;
+  height: 236px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.admin-modal-heading-copy {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.admin-modal-eyebrow {
+  display: block;
+  color: #d8e9ff !important;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+#adminModal > .admin-control-center-header h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: visible;
+  color: #fff !important;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 950;
+  line-height: 1.05;
+  letter-spacing: -.02em;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+#adminModal > .admin-control-center-header p {
+  max-width: 790px;
+  margin: 3px 0 0;
+  color: rgba(255, 255, 255, .9) !important;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.admin-modal-heading-actions {
+  position: relative;
+  z-index: 4;
+  min-width: max-content;
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  justify-self: end;
+}
+
+.admin-modal-health-pill {
+  min-width: 0;
+  max-width: 240px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .10);
+  overflow: hidden;
+  color: #fff !important;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-modal-health-pill > span {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-modal-health-pill i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #6de3a2;
+  box-shadow: 0 0 0 4px rgba(109, 227, 162, .16);
+}
+
+#adminModal > .admin-control-center-header .modal-close-x {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 5;
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  flex: 0 0 42px;
+  border-color: rgba(255, 255, 255, .34);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  font-size: 24px;
+}
+
+#adminModal > .admin-control-center-header .modal-close-x:hover,
+#adminModal > .admin-control-center-header .modal-close-x:focus-visible {
+  outline: none;
+  border-color: rgba(255, 255, 255, .55);
+  background: rgba(255, 255, 255, .22);
+  color: #fff;
+}
+
+
+#adminModalBody {
+  position: relative;
+  z-index: 1;
+  grid-row: 2;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: none !important;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 24px 26px 28px;
+  background: linear-gradient(180deg, #fbfcfe 0%, #f3f7fb 100%);
+}
+
+#adminModalBody > :is(
+  .manual-edit-shell,
+  .users-modal-shell,
+  .role-permission-editor,
+  .customer-route-modal-shell,
+  .customer-email-modal-shell,
+  .lookup-manager-shell,
+  .reject-settings-shell,
+  .bay-scanner-rules-shell,
+  .bay-auto-assigner-shell,
+  .rack-manager-shell,
+  .rack-modal-form
+) {
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+}
+
+#adminModal[data-kind="deliveryLists"] #adminModalBody,
+#adminModal[data-kind="deliveryActions"] #adminModalBody,
+#adminModal[data-kind="sessions"] #adminModalBody,
+#adminModal[data-kind="stations"] #adminModalBody,
+#adminModal[data-kind="recentScans"] #adminModalBody {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 16px;
+}
+
+#adminModalBody > :is(.admin-table, .compact-list, .station-add-row),
+#adminModalBody :is(
+  .admin-delivery-window-note,
+  .manual-edit-modal-tools,
+  .role-manager-overview,
+  .role-create-card,
+  .role-library,
+  .user-manager-hero,
+  .user-manager-toolbar,
+  .user-manager-create-form,
+  .user-manager-account-panel,
+  .customer-route-modal-intro,
+  .customer-route-modal-form,
+  .customer-route-modal-list,
+  .customer-email-intro,
+  .customer-email-smtp-section,
+  .customer-email-test-section,
+  .customer-email-form,
+  .customer-email-list-section,
+  .customer-email-cc-section,
+  .customer-email-outbox-section,
+  .lookup-manager-hero,
+  .lookup-editor-card,
+  .lookup-manager-list,
+  .reject-settings-column,
+  .bay-scanner-rules-shell > section,
+  .bay-auto-card,
+  .bay-auto-assigner-form,
+  .rack-manager-topbar,
+  .rack-manager-quick-edit,
+  .rack-manager-set-edit,
+  .rack-manager-group,
+  .rack-modal-form
+) {
+  min-width: 0;
+  border: 1px solid var(--admin-control-line);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(20, 48, 85, .05);
+}
+
+#adminModalBody :is(
+  .role-manager-overview,
+  .user-manager-hero,
+  .customer-route-modal-intro,
+  .customer-email-intro,
+  .lookup-manager-hero,
+  .bay-scanner-rules-shell > section:first-child,
+  .bay-auto-assigner-shell > header,
+  .rack-manager-topbar
+) {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(23, 79, 147, .08), transparent 36%),
+    linear-gradient(180deg, #ffffff 0%, #f4f8fe 100%);
+}
+
+#adminModalBody :is(
+  .role-library > header,
+  .customer-email-list-section > header,
+  .customer-email-cc-section > header,
+  .customer-email-outbox-section > header,
+  .reject-settings-column > header,
+  .rack-manager-group > header,
+  .bay-auto-card > header,
+  .bay-scanner-rules-shell section > header
+) {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--admin-control-line);
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fc 100%);
+}
+
+#adminModalBody :is(
+  .role-library > header,
+  .customer-email-list-section > header,
+  .customer-email-cc-section > header,
+  .customer-email-outbox-section > header,
+  .reject-settings-column > header,
+  .rack-manager-group > header,
+  .bay-auto-card > header,
+  .bay-scanner-rules-shell section > header
+) strong {
+  color: var(--admin-control-navy);
+  font-size: 15px;
+  font-weight: 950;
+}
+
+#adminModalBody :is(
+  .role-library > header,
+  .customer-email-list-section > header,
+  .customer-email-cc-section > header,
+  .customer-email-outbox-section > header,
+  .reject-settings-column > header,
+  .rack-manager-group > header,
+  .bay-auto-card > header,
+  .bay-scanner-rules-shell section > header
+) span {
+  color: var(--admin-control-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+#adminModalBody .admin-modal-search {
+  min-height: 48px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #c9d5e5;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(20, 48, 85, .05);
+}
+
+#adminModalBody .admin-table {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-color: var(--admin-control-line);
+  border-radius: 16px;
+  background: #fff;
+}
+
+#adminModalBody .admin-table table {
+  width: 100%;
+}
+
+#adminModalBody .admin-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #f4f8fd 0%, #eaf1f9 100%);
+  color: #28466f;
+  font-size: 10.5px;
+  font-weight: 950;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+#adminModalBody .admin-table tbody tr:hover {
+  background: #f5f9ff;
+}
+
+#adminModalBody :is(
+  .admin-delivery-edit-list,
+  .manual-edit-card-list,
+  .role-library-list,
+  .user-manager-user-list,
+  .customer-route-modal-list,
+  .customer-email-rule-list,
+  .customer-email-outbox-list,
+  .lookup-row-list,
+  .reject-catalog-list,
+  .rack-manager-rows
+) {
+  min-width: 0;
+}
+
+#adminModalBody :is(
+  .admin-delivery-date-group,
+  .manual-edit-card,
+  .role-permission-card,
+  .user-manager-user-card,
+  .customer-route-rule-row,
+  .customer-email-row,
+  .email-outbox-row,
+  .lookup-row,
+  .reject-catalog-list article,
+  .bay-auto-card,
+  .rack-manager-row,
+  .compact-list > div
+) {
+  border-color: #d9e3f0;
+  border-radius: 13px;
+  box-shadow: 0 6px 16px rgba(20, 48, 85, .04);
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+#adminModalBody :is(
+  .admin-delivery-date-group,
+  .manual-edit-card,
+  .role-permission-card,
+  .user-manager-user-card,
+  .customer-route-rule-row,
+  .customer-email-row,
+  .email-outbox-row,
+  .lookup-row,
+  .rack-manager-row,
+  .compact-list > div
+):hover {
+  border-color: #a9c1df;
+  background: #f9fbff;
+  box-shadow: 0 10px 24px rgba(20, 48, 85, .075);
+}
+
+#adminModalBody :is(.admin-form, form, .station-add-row) :is(input, select, textarea),
+#adminModalBody > .station-add-row input {
+  min-width: 0;
+  border-color: #c9d5e5;
+  border-radius: 10px;
+  background: #fff;
+}
+
+#adminModalBody :is(input, select, textarea):focus {
+  outline: none;
+  border-color: #3c82cf;
+  box-shadow: 0 0 0 3px rgba(36, 117, 205, .12);
+}
+
+#adminModalBody button:not(.modal-close-x):not(.icon-only) {
+  border-radius: 10px;
+  font-weight: 850;
+}
+
+#adminModalBody :is(
+  .role-create-footer,
+  .lookup-form-actions,
+  .customer-route-modal-actions,
+  .manual-edit-modal-actions,
+  .rack-manager-set-actions,
+  .modal-actions
+) {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--admin-control-line);
+  background: #fbfdff;
+}
+
+#adminModalBody .admin-empty {
+  border-color: #cbd8e7;
+  border-radius: 13px;
+  background: #fff;
+  color: var(--admin-control-muted);
+  padding: 14px;
+}
+
+#adminModal[data-kind="deliveryLists"] #adminModalBody,
+#adminModal[data-kind="deliveryActions"] #adminModalBody,
+#adminModal[data-kind="manualEdit"] #adminModalBody {
+  overflow-x: hidden;
+}
+
+#adminModal[data-kind="deliveryLists"] :is(.admin-delivery-edit-list, .admin-delivery-date-group),
+#adminModal[data-kind="manualEdit"] :is(.manual-edit-shell, .manual-edit-card-list, .manual-edit-card) {
+  width: 100%;
+  max-width: 100%;
+}
+
+@media (max-width: 900px) {
+  #adminModal > .admin-control-center-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 14px;
+    padding: 20px 22px;
+  }
+
+  .admin-modal-heading-actions {
+    justify-content: space-between;
+  }
+
+}
+
+@media (max-width: 760px) {
+  #adminModal.admin-modal-panel,
+  #adminModal[data-kind] {
+    width: calc(100vw - 14px);
+    height: calc(100vh - 14px);
+    max-height: calc(100vh - 14px);
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    border-radius: 16px;
+  }
+
+  #adminModal > .admin-control-center-header {
+    min-height: 0 !important;
+    padding: 17px 18px;
+  }
+
+  #adminModal > .admin-control-center-header h2 {
+    font-size: 25px;
+  }
+
+  #adminModal > .admin-control-center-header p {
+    font-size: 12px;
+  }
+
+  .admin-modal-health-pill {
+    max-width: calc(100vw - 90px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #adminModalBody {
+    padding: 14px;
+  }
+}
+
+/* ========================================================================== */
+/* v163 Modal hidden-state ownership                                          */
+/* ========================================================================== */
+/* The Control Center panel uses display:grid !important while open. These ID
+   selectors deliberately outrank that presentation rule whenever JavaScript
+   restores the native hidden attribute. */
+#adminModal[hidden],
+#adminModalBackdrop[hidden] {
+  display: none !important;
+}
+
+
+
+/* ========================================================================== */
+/* v164 Simplified editor headers and Delivery Automation action placement    */
+/* ========================================================================== */
+/* Regular Admin editors use a focused hero plus working canvas. The separate
+   Delivery Automation Control Center retains its own functional tab system. */
+
+
+/* ========================================================================== */
+/* v165 verified manual editing, real action history, and rack override rules */
+/* ========================================================================== */
+
+#adminModal.admin-modal-panel,
+#adminModal[data-kind] {
+  grid-template-rows: auto auto minmax(0, 1fr) !important;
+}
+
+.modal-action-history {
+  position: relative;
+  z-index: 3;
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid #d8e3f1;
+  background: #fff;
+}
+
+.modal-action-history > summary {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 22px;
+  color: #173c69;
+  cursor: pointer;
+  list-style: none;
+}
+
+.modal-action-history > summary::-webkit-details-marker {
+  display: none;
+}
+
+.modal-action-history > summary > span {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.modal-action-history > summary strong {
+  color: #0a2b59;
+  font-size: 12px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: .055em;
+}
+
+.modal-action-history > summary small {
+  min-width: 0;
+  overflow: hidden;
+  color: #5c6e87;
+  font-size: 11px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-action-history > summary > b {
+  min-width: 28px;
+  min-height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #c9d9ec;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #174f93;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.modal-action-history[open] > summary {
+  border-bottom: 1px solid #e1e9f4;
+  background: #f7faff;
+}
+
+.modal-action-history-list {
+  max-height: 230px;
+  overflow: auto;
+  display: grid;
+  gap: 7px;
+  padding: 10px 18px 14px;
+  background: #f8fbff;
+}
+
+.modal-action-history-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #dce6f3;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.modal-action-history-icon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #eaf3ff;
+  color: #135cff;
+}
+
+.modal-action-history-icon::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 4a8 8 0 1 1-7.4 5H2l3.5-3.5L9 9H6.7A6 6 0 1 0 12 6V4Zm-1 4h2v4.2l3 1.8-1 1.7-4-2.3V8Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 4a8 8 0 1 1-7.4 5H2l3.5-3.5L9 9H6.7A6 6 0 1 0 12 6V4Zm-1 4h2v4.2l3 1.8-1 1.7-4-2.3V8Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.modal-action-history-row > div {
+  min-width: 0;
+}
+
+.modal-action-history-row strong,
+.modal-action-history-row span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-action-history-row strong {
+  color: #0b2d5a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.modal-action-history-row span,
+.modal-action-history-row time,
+.modal-action-history-row small {
+  color: #61718a;
+  font-size: 10.5px;
+  font-weight: 750;
+}
+
+.modal-action-history-row time,
+.modal-action-history-row small {
+  white-space: nowrap;
+}
+
+#adminModal[data-kind="manualEdit"] #adminModalBody {
+  padding-top: 14px;
+}
+
+.manual-edit-shell {
+  position: relative;
+}
+
+.manual-edit-modal-tools {
+  position: sticky;
+  top: -14px;
+  z-index: 18;
+  display: grid !important;
+  grid-template-columns: minmax(230px, .72fr) minmax(360px, 1.35fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 13px !important;
+  box-shadow: 0 10px 24px rgba(20, 48, 85, .09) !important;
+}
+
+.manual-edit-search-with-filter {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.manual-edit-filter-drawer {
+  z-index: 90;
+}
+
+.manual-edit-filter-drawer > summary {
+  min-width: 112px;
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.manual-edit-filter-drawer > summary .scan-filter-panel-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.manual-edit-filter-drawer > summary .scan-filter-panel-icon::before {
+  width: 13px;
+  height: 13px;
+}
+
+.manual-edit-filter-panel {
+  right: 0;
+  left: auto;
+  width: min(860px, calc(100vw - 90px));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.manual-edit-filter-panel .scan-filter-panel-footer button {
+  min-height: 34px;
+  border: 1px solid #174f93;
+  border-radius: 8px;
+  background: #174f93;
+  color: #fff;
+  padding: 0 12px;
+  font-weight: 900;
+}
+
+.manual-edit-tool-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.manual-edit-create-order-button {
+  border-color: #88a9d2 !important;
+  color: #174f93 !important;
+  white-space: nowrap;
+}
+
+.manual-order-create-panel {
+  scroll-margin-top: 92px;
+}
+
+.manual-edit-load-more {
+  position: relative;
+  z-index: 1;
+}
+
+.bay-override-window-form {
+  grid-template-columns: minmax(150px, 210px) minmax(280px, 1fr) auto !important;
+}
+
+.bay-override-window-copy {
+  align-self: center;
+  min-width: 0;
+}
+
+.bay-override-window-copy strong,
+.bay-override-window-copy span {
+  display: block;
+}
+
+.bay-override-window-copy strong {
+  color: #0a2b59;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.bay-override-window-copy span {
+  margin-top: 3px;
+  color: #5d6f88;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+@media (max-width: 980px) {
+  .manual-edit-modal-tools,
+  .manual-edit-filter-panel,
+  .bay-override-window-form {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .manual-edit-tool-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .modal-action-history-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .modal-action-history-row time,
+  .modal-action-history-row small {
+    grid-column: 2;
+  }
+}
+
+/* ========================================================================== */
+/* v166 manual-route verification, filter overlay, and functional GUI tabs    */
+/* ========================================================================== */
+
+.admin-modal-section-tabs {
+  position: relative;
+  z-index: 4;
+  grid-row: 2;
+  min-height: 50px;
+  display: flex;
+  align-items: end;
+  gap: 6px;
+  overflow-x: auto;
+  border-bottom: 1px solid #d8e3f1;
+  background: #fff;
+  padding: 8px 20px 0;
+}
+
+.admin-modal-section-tabs button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: #536780;
+  padding: 0 15px;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.admin-modal-section-tabs button:hover,
+.admin-modal-section-tabs button:focus-visible {
+  outline: none;
+  background: #f3f7fd;
+  color: #174f93;
+}
+
+.admin-modal-section-tabs button.is-active {
+  border-color: #d2dfef;
+  border-bottom-color: #174f93;
+  background: #f7fbff;
+  color: #0b2d5a;
+}
+
+.admin-modal-section-tabs button b {
+  min-width: 23px;
+  height: 23px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #e7f1ff;
+  color: #174f93;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
+#adminModal.admin-modal-panel,
+#adminModal[data-kind] {
+  grid-template-rows: auto auto minmax(0, 1fr) !important;
+}
+
+#adminModalBody,
+#adminModalHistory {
+  grid-row: 3;
+  min-height: 0;
+}
+
+#adminModalBody[hidden],
+#adminModalHistory[hidden] {
+  display: none !important;
+}
+
+#adminModalHistory.modal-action-history {
+  overflow: auto;
+  border: 0;
+  background: linear-gradient(180deg, #fbfdff 0%, #f3f7fb 100%);
+  padding: 20px 24px 26px;
+}
+
+.modal-action-history-heading {
+  margin-bottom: 12px;
+  border: 1px solid #d6e2f1;
+  border-radius: 12px;
+  background: #fff;
+  padding: 13px 15px;
+}
+
+.modal-action-history-heading strong,
+.modal-action-history-heading small {
+  display: block;
+}
+
+.modal-action-history-heading strong {
+  color: #0b2d5a;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.modal-action-history-heading small {
+  margin-top: 3px;
+  color: #5c6e87;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+#adminModalHistory .modal-action-history-list {
+  max-height: none;
+  padding: 0;
+  background: transparent;
+}
+
+.manual-edit-filter-panel {
+  position: fixed !important;
+  top: clamp(150px, 20vh, 205px) !important;
+  right: auto !important;
+  left: 50% !important;
+  z-index: 1200 !important;
+  width: min(980px, calc(100vw - 54px)) !important;
+  max-height: calc(100vh - clamp(150px, 20vh, 205px) - 28px) !important;
+  transform: translateX(-50%);
+  overflow-y: auto !important;
+}
+
+.manual-edit-card {
+  transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+
+.manual-edit-card.is-scanned {
+  border-color: #9fd4ad !important;
+  background: linear-gradient(180deg, #f5fff7 0%, #eaf8ef 100%) !important;
+  box-shadow: inset 4px 0 0 #2fa84f, 0 8px 18px rgba(47, 168, 79, .07);
+}
+
+.manual-edit-card.is-scanned > summary,
+.manual-edit-card.is-scanned .manual-edit-card-body {
+  background: transparent !important;
+}
+
+.manual-edit-card.is-complete {
+  border-color: #70c489 !important;
+}
+
+.manual-edit-card.is-just-updated {
+  outline: 3px solid rgba(19, 92, 255, .16);
+  box-shadow: inset 4px 0 0 #2fa84f, 0 0 0 3px rgba(19, 92, 255, .11), 0 12px 24px rgba(23, 79, 147, .11);
+}
+
+.manual-edit-card.is-filter-mismatch {
+  border-color: #76a6df !important;
+}
+
+.manual-edit-card-title-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.manual-edit-scan-status {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d1dbe8;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  white-space: nowrap;
+}
+
+.manual-edit-scan-status.is-scanned {
+  border-color: #9fd4ad;
+  background: #e6f7eb;
+  color: #176b2d;
+}
+
+.manual-edit-scan-status.is-unscanned {
+  background: #f5f7fa;
+  color: #66758b;
+}
+
+.manual-edit-saved-filter-note {
+  display: block;
+  margin-top: 5px;
+  color: #174f93 !important;
+  font-size: 10.5px !important;
+  font-weight: 850 !important;
+  white-space: normal !important;
+}
+
+@media (max-width: 720px) {
+  .admin-modal-section-tabs {
+    padding-inline: 10px;
+  }
+
+  .admin-modal-section-tabs button {
+    padding-inline: 10px;
+  }
+
+  .manual-edit-filter-panel {
+    top: 112px !important;
+    width: calc(100vw - 20px) !important;
+    max-height: calc(100vh - 126px) !important;
+  }
+}
+
+
+
+/* ========================================================================== */
+/* v167 stable new-order workspace and explicit manual route controls          */
+/* ========================================================================== */
+
+#adminModal[data-kind="manualEdit"] #adminModalBody {
+  min-height: 0;
+  overflow: hidden !important;
+}
+
+#adminModal[data-kind="manualEdit"] .manual-edit-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid !important;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  align-content: stretch;
+  gap: 12px;
+}
+
+#adminModal[data-kind="manualEdit"] .manual-edit-nav-row,
+#adminModal[data-kind="manualEdit"] .manual-edit-modal-tools,
+#adminModal[data-kind="manualEdit"] .manual-order-create-panel {
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+#adminModal[data-kind="manualEdit"] .manual-edit-modal-tools {
+  position: relative !important;
+  top: auto !important;
+}
+
+#adminModal[data-kind="manualEdit"] .manual-order-create-panel {
+  position: relative;
+  z-index: 16;
+  max-height: none;
+  overflow: visible;
+  border: 1px solid #b9cde6;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(20, 48, 85, .07);
+}
+
+#adminModal[data-kind="manualEdit"] .manual-order-create-panel > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  color: #0b2d5a;
+  cursor: pointer;
+}
+
+#adminModal[data-kind="manualEdit"] .manual-order-create-panel[open] {
+  max-height: min(48vh, 540px);
+  overflow-y: auto;
+  box-shadow: 0 12px 28px rgba(20, 48, 85, .11);
+}
+
+#adminModal[data-kind="manualEdit"] .manual-order-create-panel[open] > summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid #d8e4f2;
+  background: #f7fbff;
+}
+
+#adminModal[data-kind="manualEdit"] .manual-order-create-form {
+  min-width: 0;
+  padding: 14px;
+}
+
+#adminModal[data-kind="manualEdit"] .manual-edit-modal-results {
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+}
+
+#adminModal[data-kind="manualEdit"] .manual-edit-choice-select[data-choice-field="route"] + .custom-select-shell,
+#adminModal[data-kind="manualEdit"] [data-choice-control][data-choice-field="route"] {
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  #adminModal[data-kind="manualEdit"] #adminModalBody {
+    overflow-y: auto !important;
+  }
+
+  #adminModal[data-kind="manualEdit"] .manual-edit-shell {
+    height: auto;
+    grid-template-rows: auto;
+  }
+
+  #adminModal[data-kind="manualEdit"] .manual-order-create-panel[open] {
+    max-height: none;
+  }
+
+  #adminModal[data-kind="manualEdit"] .manual-edit-modal-results {
+    overflow: visible !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* v169 Manual Edit glass-type filters                                        */
+/* ========================================================================== */
+
+.manual-edit-glass-filter-section,
+.manual-edit-attention-filter-section {
+  grid-column: 1 / -1;
+}
+
+.manual-edit-glass-filter-options {
+  max-height: 210px;
+  align-content: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 5px 5px 1px;
+  scrollbar-gutter: stable;
+}
+
+.manual-edit-glass-filter-options .tab {
+  max-width: 100%;
+  min-height: 36px;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.2;
+}
+
+.manual-edit-glass-filter-empty {
+  width: 100%;
+  border: 1px dashed #c9d7e8;
+  border-radius: 9px;
+  background: #f8fbff;
+  color: #62738a;
+  padding: 9px 10px;
+  font-size: 11px;
+  font-weight: 750;
+}

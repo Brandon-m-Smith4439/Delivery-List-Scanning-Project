@@ -1,3 +1,4 @@
+<!-- File: automation/crystal_delivery_export/README.md -->
 # Automated A+W Crystal Delivery List Export
 
 This package automates the existing A+W `DeliveryList.rpt` workflow without automating mouse clicks and without installing a third-party report scheduler.

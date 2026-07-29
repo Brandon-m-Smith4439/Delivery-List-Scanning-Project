@@ -1,6 +1,15 @@
+<!-- File: docs/PROJECT_STRUCTURE.md -->
 # Delivery List Scanner Project Structure
 
 This is the maintained source layout after the v150 organization pass.
+
+## File Headers
+
+Maintained text source and configuration files begin with a `File:` comment
+containing their project-relative path. The comment syntax follows each file
+format, and BAT headers remain after `@echo off` to avoid extra console output.
+JSON, binary assets, runtime data, logs, and single-value version files are
+excluded because comments would invalidate or alter them.
 
 ## Root
 
@@ -74,6 +83,7 @@ docker build -f deployment/docker/Dockerfile -t delivery-list-scanner .
 static/
   css/
     styles.css    shared tokens, login, shell, navigation, modals, and controls
+    rejects.css   Rejects page, reject workflow modals, timeline, and notices
     home.css      Home dashboard and delivery-list finder
     scan.css      Scan page, filters, tables, and scan feedback
     racks.css     rack overview and rack workflows

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# File: automation/sql_delivery_export/import_delivery_folder.py
 """Import SQL-generated delivery workbooks through the maintained scanner store.
 
 The wrapper deliberately reuses backend/config.py and backend/store.py. It
