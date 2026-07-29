@@ -1378,8 +1378,22 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/indian-trail/events":
             if not self.require_permission("view_bays"):
                 return
-            limit = parse_qs(parsed.query).get("limit", ["20"])[0]
-            self.send_json({"events": STORE.get_bay_events(int(limit or 20))})
+            params = parse_qs(parsed.query)
+
+            def bounded_positive_int(name: str, default: int, maximum: int) -> int:
+                try:
+                    value = int(params.get(name, [str(default)])[0] or default)
+                except (TypeError, ValueError):
+                    value = default
+                return max(1, min(value, maximum))
+
+            page = bounded_positive_int("page", 1, 100000)
+            requested_size = params.get("pageSize", params.get("limit", ["20"]))[0]
+            try:
+                page_size = max(1, min(int(requested_size or 20), 25))
+            except (TypeError, ValueError):
+                page_size = 20
+            self.send_json(STORE.get_bay_events_page(page, page_size))
             return
 
         if parsed.path == "/api/indian-trail/stale-bays":

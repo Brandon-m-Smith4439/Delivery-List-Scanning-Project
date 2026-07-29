@@ -11,13 +11,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260728-v150">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260729-v161">
     <link rel="stylesheet" href="static/css/home.css?v=20260728-v150">
     <link rel="stylesheet" href="static/css/scan.css?v=20260728-v150">
     <link rel="stylesheet" href="static/css/racks.css?v=20260728-v150">
     <link rel="stylesheet" href="static/css/admin.css?v=20260728-v150">
     <link rel="stylesheet" href="static/css/print.css?v=20260728-v150">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260728-v151">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260729-v160">
+    <link rel="stylesheet" href="static/css/shell.css?v=20260729-v0163">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <!-- SECTION: Authentication and password reset -->
@@ -763,7 +764,6 @@
               <h2>Edit Physical Bay Map</h2>
               <p>Drag compact bay-group cards between the insertion lines. Drop above, between, or below other groups to control the exact top-to-bottom order in each column. Bay names, bay counts, and bay rules remain in Edit Bays.</p>
             </div>
-            <button id="bayLayoutCloseBtn" type="button">Close</button>
           </div>
           <div class="bay-layout-tools bay-layout-tools-simple">
             <button class="icon-button undo-redo-icon undo-icon-button" id="bayLayoutUndoBtn" type="button" title="Undo layout change" aria-label="Undo layout change"><span class="undo-icon"></span><small>Undo</small></button>
@@ -849,8 +849,8 @@
               <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout"><span class="bay-action-icon layout"></span>Edit Map</button>
             </div>
 
-            <div class="bay-scanner-sticky-slot bay-scanner-sticky-slot-v150">
-              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v150" aria-label="Indian Trail bay scanner">
+            <div class="bay-scanner-sticky-anchor-v155" id="bayScannerStickyAnchor">
+              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v150 bay-scanner-sticky-panel-v155" id="bayScannerPanel" aria-label="Indian Trail bay scanner">
                 <header class="bay-scanner-header-v150">
                   <div class="bay-scanner-heading-line-v150">
                     <h2>Bay Scanner</h2>
@@ -927,50 +927,47 @@
                       </div>
                     </section>
 
-                    <section class="bay-manual-inline-v150" aria-label="Manual bay scan">
-                      <span class="bay-manual-heading-v151">Manual scan</span>
-                      <div class="bay-manual-controls-v151">
-                        <label class="bay-manual-order-v150">
-                          <span>Order number</span>
-                          <input id="bayManualOrderInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Order number" required>
-                        </label>
-                        <label class="bay-manual-item-v150">
-                          <span>Item number</span>
-                          <input id="bayManualItemInput" type="text" inputmode="numeric" autocomplete="off" maxlength="3" pattern="[0-9]{1,3}" placeholder="001" required>
-                        </label>
+                    <section class="bay-manual-inline-v160" aria-label="Manual bay scan">
+                      <div class="bay-manual-controls-v160">
+                        <input class="bay-manual-reference-v160" id="bayManualReferenceInput" type="text" inputmode="text" enterkeyhint="go" autocomplete="off" spellcheck="false" placeholder="Order + item (236505.1)" aria-label="Order number and item number" required>
                         <input id="bayManualQtyInput" type="hidden" value="1">
-                        <button class="tool-button primary-tool bay-manual-submit-v150" id="bayManualSubmitBtn" type="button">Submit</button>
+                        <button class="tool-button primary-tool bay-manual-submit-v160" id="bayManualSubmitBtn" type="button">Submit</button>
                       </div>
+                      <small class="bay-manual-format-help-v160">Accepted: 236505001, 236505 1, 236505.1, or 236505/1</small>
                     </section>
                   </section>
                 </form>
 
-                <section class="last-scan compact-scan-history bay-scan-activity-v150">
-                  <header class="bay-scan-activity-heading-v150">
-                    <div><small>Latest activity</small><h3>Bay Scan Activity</h3></div>
+                <section class="last-scan compact-scan-history bay-scan-activity-v150 bay-scan-activity-v155">
+                  <header class="bay-scan-activity-heading-v150 bay-scan-activity-heading-v155">
+                    <div><small>Latest activity</small><h3>Last Bay Scan</h3></div>
                     <button id="bayAllScansBtn" type="button">All Scans</button>
                   </header>
 
-                  <div class="last-card bay-last-card-v150" id="bayLastCard">
-                    <div class="last-card-status"></div>
-                    <div class="bay-last-location-v150">
-                      <span>Current bay</span>
-                      <b id="bayLastBay">-</b>
-                      <strong id="bayLastTitle">No bay scans yet</strong>
+                  <article class="bay-latest-card-v155 scan-status-neutral" id="bayLastCard">
+                    <header class="bay-latest-result-v155">
+                      <b id="bayLastCheck" class="bay-scan-check-v150 is-neutral" aria-label="No scan status" title="No scan status"><span aria-hidden="true">&minus;</span></b>
+                      <span><small>Scan result</small><strong id="bayLastStatusText">Waiting for scan</strong></span>
+                      <time id="bayLastTime">-</time>
+                    </header>
+                    <div class="bay-latest-primary-v155">
+                      <span class="bay-latest-bay-v155"><small>Current bay</small><strong id="bayLastBay">-</strong></span>
+                      <span><small>Action</small><strong id="bayLastAction">-</strong></span>
+                      <span><small>Order Nr.</small><strong id="bayLastOrder">-</strong></span>
+                      <span><small>Item Nr.</small><strong id="bayLastItem">-</strong></span>
                     </div>
-                    <div class="bay-last-meta-v150">
-                      <span><small>Action</small><b id="bayLastAction">-</b></span>
-                      <span><small>Order</small><b id="bayLastOrder">-</b></span>
-                      <span><small>Time</small><b id="bayLastTime">-</b></span>
-                      <span class="bay-last-check-field-v150"><small>Check</small><b id="bayLastCheck" class="bay-scan-check-v150 is-neutral" aria-label="No scan status" title="No scan status"><span aria-hidden="true">&minus;</span></b></span>
-                      <label class="bay-history-move-field"><small>Change location</small><select id="bayLastMoveSelect" data-bay-event-move disabled><option value="">No active bay item</option></select></label>
+                    <div class="bay-latest-secondary-v155">
+                      <span><small>Job Nr.</small><strong id="bayLastJob">-</strong></span>
+                      <span><small>Customer</small><strong id="bayLastCustomer">-</strong></span>
+                      <span><small>Scanned by</small><strong id="bayLastUser">-</strong></span>
                     </div>
-                  </div>
+                    <p class="bay-latest-message-v155"><small>Result details</small><strong id="bayLastTitle">No bay scans yet</strong></p>
+                  </article>
 
                   <section class="bay-recent-panel-v150" aria-label="Recent bay scans">
                     <header class="bay-recent-heading-v150">
                       <span><strong>Recent bay scans</strong><small>Latest physical bay movements</small></span>
-                      <b id="bayRecentScanCountLabel">Latest 1</b>
+                      <b id="bayRecentScanCountLabel">Latest 2</b>
                     </header>
                     <div class="recent-table-wrap compact bay-recent-table-wrap-v150">
                       <table class="recent-table bay-recent-table-v150">
@@ -1010,11 +1007,16 @@
           </section>
         </section>
         <div class="modal-backdrop" id="baySelectedBackdrop" hidden></div>
-        <section class="modal-panel bay-selected-modal" id="baySelectedModal" hidden>
-          <div class="section-heading">
-            <h2>Selected Bay</h2>
+        <section class="modal-panel bay-selected-modal bay-selected-modal-v160" id="baySelectedModal" hidden>
+          <header class="bay-selected-modal-header-v160">
+            <span class="bay-selected-modal-icon-v160" aria-hidden="true"></span>
+            <div>
+              <small>Indian Trail bay control</small>
+              <h2>Selected Bay</h2>
+              <p>Review bay fulfillment, choose scanner actions, and manage the glass assigned to this location.</p>
+            </div>
             <button id="baySelectedCloseBtn" class="modal-close-x" type="button" aria-label="Close selected bay">×</button>
-          </div>
+          </header>
           <div id="baySelectedPanel"></div>
         </section>
         <div class="modal-backdrop" id="staleBayBackdrop" hidden></div>
@@ -1322,11 +1324,28 @@
       </section>
     </main>
 
-    <footer class="desktop-footer">
-      <button class="scanner-select" type="button">Scanner: <strong id="scannerName">Airport Rd</strong></button>
-      <div class="footer-actions">
-        <button data-page-target="home" type="button">Home</button>
-        <button data-page-target="admin" type="button">Settings</button>
+    <footer class="desktop-footer desktop-footer-v0163" aria-label="Application footer">
+      <div class="footer-brand-v160">
+        <span class="footer-brand-mark-v160" aria-hidden="true"></span>
+        <span><strong>Delivery List Scanner</strong><small>Floor operations workspace</small></span>
+      </div>
+      <button class="scanner-select footer-scanner-v160" type="button" aria-label="Active scanner station">
+        <span class="footer-scanner-status-v160" aria-hidden="true"></span>
+        <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
+      </button>
+      <div class="footer-support-v0163">
+        <span class="footer-version-v0163" aria-label="Application version 0.163">
+          <small>Version</small>
+          <strong>0.163</strong>
+        </span>
+        <a
+          class="footer-report-bugs-v0163"
+          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.163&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
+          title="Report a Delivery List Scanner bug"
+        >
+          <span class="footer-bug-icon-v0163" aria-hidden="true"></span>
+          <span>Report Bugs</span>
+        </a>
       </div>
     </footer>
 
@@ -1479,6 +1498,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260728-v151-static2"></script>
+  <script src="static/js/app.js?v=20260729-v161"></script>
 </body>
 </html>

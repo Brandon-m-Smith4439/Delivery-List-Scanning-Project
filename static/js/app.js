@@ -120,6 +120,11 @@ const state = {
   bayLayout: null,
   bays: [],
   bayEvents: [],
+  bayAllScansPage: 1,
+  bayAllScansTotalPages: 1,
+  bayAllScansTotal: 0,
+  bayAllScansRequestId: 0,
+  bayScannerStickyResizeObserver: null,
   manageItemsQuery: "",
   manageItemsSelectedId: "",
   bayEditorSelectedGroup: "",
@@ -766,17 +771,23 @@ const els = {
   bayScanModeToggle: document.getElementById("bayScanModeToggle"),
   bayScannerModeSummary: document.getElementById("bayScannerModeSummary"),
   bayScannerTargetState: document.getElementById("bayScannerTargetState"),
-  bayManualOrderInput: document.getElementById("bayManualOrderInput"),
-  bayManualItemInput: document.getElementById("bayManualItemInput"),
+  bayManualReferenceInput: document.getElementById("bayManualReferenceInput"),
   bayManualQtyInput: document.getElementById("bayManualQtyInput"),
   bayManualSubmitBtn: document.getElementById("bayManualSubmitBtn"),
   bayScanOutStatus: document.getElementById("bayScanOutStatus"),
   bayScanOutRecent: document.getElementById("bayScanOutRecent"),
   bayRecentScanCountLabel: document.getElementById("bayRecentScanCountLabel"),
+  bayScannerStickyAnchor: document.getElementById("bayScannerStickyAnchor"),
+  bayScannerPanel: document.getElementById("bayScannerPanel"),
   bayLastCard: document.getElementById("bayLastCard"),
   bayLastTitle: document.getElementById("bayLastTitle"),
+  bayLastStatusText: document.getElementById("bayLastStatusText"),
   bayLastAction: document.getElementById("bayLastAction"),
   bayLastOrder: document.getElementById("bayLastOrder"),
+  bayLastItem: document.getElementById("bayLastItem"),
+  bayLastJob: document.getElementById("bayLastJob"),
+  bayLastCustomer: document.getElementById("bayLastCustomer"),
+  bayLastUser: document.getElementById("bayLastUser"),
   bayLastBay: document.getElementById("bayLastBay"),
   bayLastTime: document.getElementById("bayLastTime"),
   bayAllScansBtn: document.getElementById("bayAllScansBtn"),
@@ -853,7 +864,6 @@ const els = {
   staleBaySelectionCount: document.getElementById("staleBaySelectionCount"),
   staleBaySelectVisibleBtn: document.getElementById("staleBaySelectVisibleBtn"),
   bayLayoutManager: document.getElementById("bayLayoutManager"),
-  bayLayoutCloseBtn: document.getElementById("bayLayoutCloseBtn"),
   bayLayoutSelect: document.getElementById("bayLayoutSelect"),
   bayLayoutDisplayInput: document.getElementById("bayLayoutDisplayInput"),
   bayLayoutSectionInput: document.getElementById("bayLayoutSectionInput"),
@@ -3530,6 +3540,41 @@ function canonicalBarcode(order, item) {
 }
 
 /**
+ * Purpose: Parse one Bay Scanner manual reference into a six-digit order and one-to-three-digit item.
+ * Effects: Performs validation only and does not change browser or server state.
+ * Flow: Accepts compact and separated floor-entry formats while rejecting ambiguous values instead of guessing.
+ */
+function parseBayManualOrderItemReference(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const clean = cleanBarcode(text);
+  if (/^T200\d{12}$/.test(clean)) {
+    return {
+      order: clean.slice(4, 10),
+      item: clean.slice(10, 13),
+      barcode: clean,
+    };
+  }
+
+  const separated = text.match(/^\s*(\d{6})\s*(?:[.\/\\-]+|\s+)\s*(\d{1,3})\s*$/);
+  if (separated) {
+    const order = separated[1];
+    const item = separated[2].padStart(3, "0");
+    return { order, item, barcode: canonicalBarcode(order, item) };
+  }
+
+  const compact = text;
+  if (/^\d{7,9}$/.test(compact)) {
+    const order = compact.slice(0, 6);
+    const item = compact.slice(6).padStart(3, "0");
+    return { order, item, barcode: canonicalBarcode(order, item) };
+  }
+
+  return null;
+}
+
+/**
  * Purpose: Normalize the format display date workflow using the existing shared UI state.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
@@ -5637,7 +5682,6 @@ function bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTota
   const inboundPercent = safeInboundTotal ? Math.min((Number(inboundQty || 0) / safeInboundTotal) * 100, 100) : 0;
   const complete = safeOutboundTotal > 0 && safeInboundTotal > 0 && outboundPercent >= 100 && inboundPercent >= 100;
   const contextClass = options.context === "transit" ? "is-transit-card" : "";
-  const showLabels = options.showLabels !== false;
   return `
     <div class="bay-dual-progress ${contextClass} ${complete ? "is-filled" : ""} ${options.celebrate ? "is-celebrating" : ""}" data-bay-dual-progress data-progress-context="${escapeHtml(options.context || "scanner")}">
       <div class="bay-dual-progress-half is-outbound" role="progressbar" aria-label="Outbound completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(outboundPercent)}">
@@ -5647,10 +5691,8 @@ function bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTota
       <div class="bay-dual-progress-half is-received" role="progressbar" aria-label="Received completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(inboundPercent)}">
         <i style="width:${inboundPercent}%"></i>
       </div>
-      ${showLabels ? `
-        <div class="bay-dual-progress-label is-outbound"><span>Outbound</span><strong>${escapeHtml(formatPercent(outboundPercent))}</strong></div>
-        <div class="bay-dual-progress-label is-received"><span>Received</span><strong>${escapeHtml(formatPercent(inboundPercent))}</strong></div>
-      ` : ""}
+      <div class="bay-dual-progress-label is-outbound"><span>Outbound</span><strong>${escapeHtml(formatPercent(outboundPercent))}</strong></div>
+      <div class="bay-dual-progress-label is-received"><span>Received</span><strong>${escapeHtml(formatPercent(inboundPercent))}</strong></div>
     </div>
   `;
 }
@@ -9484,6 +9526,8 @@ function showPage(page) {
   document.querySelectorAll(".page-view").forEach((view) => {
     view.hidden = view.id !== `${page === "bays" ? "bayMap" : page}Page`;
   });
+  if (page === "bays") scheduleBayScannerStickyUpdateV155();
+  else resetBayScannerStickyV155();
   document.querySelectorAll("[data-page-target]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.pageTarget === page);
   });
@@ -9928,16 +9972,18 @@ function showStageScanConfirmation(result, options = {}) {
     Boolean(entry.overrideRequired)
   );
   const outcome = entry.ok ? "success" : isNotice ? "notice" : "error";
-  const title = entry.ok
+  const title = options.title || (entry.ok
     ? `${item.order || "Scan"}${item.item ? `-${item.item}` : ""} accepted`
     : isNotice
       ? (entry.message || result?.message || "Scan notice")
-      : (entry.message || result?.message || "Scan not accepted");
-  const message = [result?.message, entry.message, entry.reason]
+      : (entry.message || result?.message || "Scan not accepted"));
+  const message = [options.message, result?.message, entry.message, entry.reason]
     .map((value) => String(value || "").trim())
     .filter((value, index, values) => value && values.indexOf(value) === index)
     .join(" - ");
-  const stage = stageLabel(state.meta || {}) || state.meta?.stage || state.meta?.scanner || "Current stage";
+  const stage = options.stageLabel || stageLabel(state.meta || {}) || state.meta?.stage || state.meta?.scanner || "Current stage";
+  const enteredScan = String(options.rawScan || entry.barcode || result?.barcode || "").trim();
+  const hasItemDetails = Boolean(item.order || item.item || item.customer || item.job || item.product || item.dimensions);
   const quantity = item.qty == null
     ? "-"
     : `${Math.max(Number(item.scanned || 0), 0)} / ${Math.max(Number(item.qty || 0), 0)}`;
@@ -9973,15 +10019,23 @@ function showStageScanConfirmation(result, options = {}) {
         </header>
 
         <div class="scan-result-compact-body">
-          <div class="scan-result-compact-grid" aria-label="Scanned item details">
-            <span class="is-primary"><small>Order / Item</small><strong>${escapeHtml(item.order || "-")}<i>/</i>${escapeHtml(item.item || "-")}</strong></span>
-            <span class="is-customer"><small>Customer</small><strong title="${escapeHtml(item.customer || "-")}">${escapeHtml(item.customer || "-")}</strong></span>
-            <span><small>Qty</small><strong>${escapeHtml(quantity)}</strong></span>
-            <span><small>Dimensions</small><strong title="${escapeHtml(item.dimensions || "-")}">${escapeHtml(item.dimensions || "-")}</strong></span>
-            <span class="is-job"><small>Glass / Job</small><strong title="${escapeHtml(jobText)}">${escapeHtml(jobText)}</strong></span>
-            <span><small>Route</small><strong>${escapeHtml(routeLabel(item) || "-")}</strong></span>
-            <span><small>Location</small><strong title="${escapeHtml(location)}">${escapeHtml(location)}</strong></span>
-          </div>
+          ${outcome === "error" ? `
+            <div class="scan-result-error-guidance-v161" aria-label="Scan error details">
+              <span><small>Entered scan</small><strong>${escapeHtml(enteredScan || "No value captured")}</strong></span>
+              <span><small>What went wrong</small><strong>${escapeHtml(message || "The scanner could not accept this entry.")}</strong></span>
+            </div>
+          ` : ""}
+          ${hasItemDetails ? `
+            <div class="scan-result-compact-grid" aria-label="Scanned item details">
+              <span class="is-primary"><small>Order / Item</small><strong>${escapeHtml(item.order || "-")}<i>/</i>${escapeHtml(item.item || "-")}</strong></span>
+              <span class="is-customer"><small>Customer</small><strong title="${escapeHtml(item.customer || "-")}">${escapeHtml(item.customer || "-")}</strong></span>
+              <span><small>Qty</small><strong>${escapeHtml(quantity)}</strong></span>
+              <span><small>Dimensions</small><strong title="${escapeHtml(item.dimensions || "-")}">${escapeHtml(item.dimensions || "-")}</strong></span>
+              <span class="is-job"><small>Glass / Job</small><strong title="${escapeHtml(jobText)}">${escapeHtml(jobText)}</strong></span>
+              <span><small>Route</small><strong>${escapeHtml(routeLabel(item) || "-")}</strong></span>
+              <span><small>Location</small><strong title="${escapeHtml(location)}">${escapeHtml(location)}</strong></span>
+            </div>
+          ` : ""}
           ${canCorrectRack ? `
             <label class="scan-result-rack-field scan-result-rack-field-compact">
               <span>Correct rack / truck</span>
@@ -10026,6 +10080,20 @@ function showStageScanConfirmation(result, options = {}) {
   });
 
   return shell;
+}
+
+/**
+ * Show the same timed top-of-screen failure card for Scan-page and Bay Scanner errors.
+ * This keeps serious validation and backend failures visible long enough for an operator
+ * to read the entered value and the exact correction needed.
+ */
+function showScanFailureConfirmation(message, { stageLabel: failureStage = "Scanner", rawScan = "", title: failureTitle = "Scan not accepted" } = {}) {
+  const detail = String(message || "The scanner could not accept this entry.").trim();
+  scanFlash("error", "scan_error");
+  return showStageScanConfirmation(
+    { ok: false, eventType: "error", message: detail, barcode: rawScan },
+    { stageLabel: failureStage, rawScan, title: failureTitle },
+  );
 }
 
 /**
@@ -10156,9 +10224,8 @@ async function processScanInternal(rawScan, options = {}) {
       /indian trail/i.test(`${state.meta?.stage || ""} ${currentScanStation()}`);
     if (indianTrailReceive) {
       if (state.bayOverrideMode === "manual" && !state.selectedBayOverrideCode && !options.bayCode) {
-        showFloatingNotice("Choose a manual Indian Trail bay before scanning, or switch bay assignment back to Auto.", "error");
         els.scanBayOverrideSelect?.focus();
-        return;
+        throw new Error("Choose a manual Indian Trail bay before scanning, or switch bay assignment back to Auto.");
       }
       const result = await fetchJson("/api/indian-trail/receive", {
         method: "POST",
@@ -10278,8 +10345,7 @@ async function submitManualScan() {
   const order = digitsOnly(els.manualOrderInput?.value || "");
   const item = digitsOnly(els.manualItemInput?.value || "");
   if (!order || !item) {
-    showInlineError("Manual scan needs an order number and item number.", false);
-    return;
+    throw new Error("Manual scan needs an order number and item number.");
   }
   await processScan(canonicalBarcode(order, item), { isManual: true });
   if (els.manualOrderInput) els.manualOrderInput.value = "";
@@ -11106,7 +11172,7 @@ async function refreshBayMapPage() {
       fetchJson("/api/indian-trail/layout"),
       fetchJson("/api/indian-trail/bays"),
       hasPermission("view_indian_trail") ? fetchJson(`/api/indian-trail/summary${indianTrailDateQuery()}`) : Promise.resolve(null),
-      fetchJson("/api/indian-trail/events"),
+      fetchJson("/api/indian-trail/events?page=1&pageSize=6"),
     ]);
     state.bayLayout = layout;
     state.bays = baysPayload.bays || [];
@@ -11269,7 +11335,7 @@ function renderBayRouteFlow(summary) {
         <small>Received</small>
         <strong>${escapeHtml(inboundQty)}/${escapeHtml(inboundTotal)}</strong>
       </div>
-      ${bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTotal, { celebrate: celebrateRouteCompletion, showLabels: false })}
+      ${bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTotal, { celebrate: celebrateRouteCompletion })}
     `;
   }
 }
@@ -12732,6 +12798,7 @@ function renderBayMapPage() {
   renderBaySidePanels();
   renderBayFilterSummary();
   renderBayRecentActions();
+  scheduleBayScannerStickyUpdateV155();
 }
 
 /**
@@ -13235,113 +13302,27 @@ function bayEventMoveControlHtml(event, compact = false) {
 }
 
 /**
- * Purpose: Scale and wrap the Bay Map last-location label so long multi-word bay names remain large and fully readable.
- * Effects: Updates only the current bay-location text styles after layout or fullscreen changes.
- * Flow: Starts at the preferred large size, measures overflow, and reduces the font one pixel at a time to a safe minimum.
+ * Purpose: Keep the Latest Activity bay label contained without oversized inline text.
+ * Effects: Removes legacy font sizing and marks unusually long labels for CSS wrapping.
+ * Flow: Resets old inline sizing, then toggles one compact wrapping class from the current label length.
  */
 function fitBayLastLocationText() {
   const target = els.bayLastBay;
   if (!target || !target.isConnected) return;
   window.requestAnimationFrame(() => {
-    const box = target.parentElement;
-    if (!box) return;
-    const maxSize = document.fullscreenElement ? 38 : 32;
-    const minSize = 15;
-    target.style.fontSize = `${maxSize}px`;
-    target.style.lineHeight = "0.96";
-    target.style.whiteSpace = "normal";
-    target.style.overflowWrap = "anywhere";
-    target.style.textWrap = "balance";
-    let size = maxSize;
-    const maxHeight = Math.max(box.clientHeight - 42, 38);
-    while (size > minSize && (target.scrollWidth > target.clientWidth + 1 || target.scrollHeight > maxHeight)) {
-      size -= 1;
-      target.style.fontSize = `${size}px`;
-    }
-    target.dataset.fittedSize = String(size);
+    target.style.removeProperty("font-size");
+    target.style.removeProperty("line-height");
+    target.style.removeProperty("white-space");
+    target.style.removeProperty("overflow-wrap");
+    target.style.removeProperty("text-wrap");
+    target.classList.toggle("is-long", String(target.textContent || "").trim().length > 16);
   });
 }
 
-/**
- * Purpose: Render the Bay Map last-scan card with a prominent auto-fitted current location and shared move control.
- * Effects: Updates the existing last-scan fields, schedules bay-label fitting, and keeps the item relocation control synchronized.
- * Flow: Normalizes the newest event, fills its summary fields, renders the common location editor, and fits the bay label after layout.
- */
-function renderBayLastScanCard(event) {
-  // DLS_V150_ICON_ONLY_BAY_SCAN_STATUS
-  const bayLastCheck = document.getElementById("bayLastCheck");
-  const bayLastCard = document.getElementById("bayLastCard");
-  if (bayLastCheck) {
-    const check = bayScanCheckFeedbackV150(event);
-    bayLastCheck.innerHTML = `<span aria-hidden="true">${escapeHtml(check.icon)}</span>`;
-    bayLastCheck.className = `bay-scan-check-v150 is-${check.key}`;
-    bayLastCheck.setAttribute("aria-label", check.label);
-    bayLastCheck.setAttribute("title", check.label);
-    if (bayLastCard) {
-      bayLastCard.classList.remove("scan-status-success", "scan-status-warning", "scan-status-error", "scan-status-neutral");
-      bayLastCard.classList.add(`scan-status-${check.key}`);
-    }
-  }
-
-
-  const hasEvent = Boolean(event);
-  const tone = hasEvent ? bayEventTone(event) : "notice";
-  const when = new Date(event?.time || event?.createdAt || "");
-  const time = hasEvent && !Number.isNaN(when.getTime()) ? when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "-";
-  const bay = event?.currentBayDisplay || event?.currentBayCode || event?.bayDisplay || event?.bayCode || event?.newBayDisplay || event?.newBayCode || event?.oldBayDisplay || event?.oldBayCode || "-";
-  const order = event?.order ? `${event.order}-${event.item || ""}` : "-";
-  const action = hasEvent ? formatEventType(event.eventType || event.reason || "Bay action") : "-";
-  const title = hasEvent
-    ? [action, event?.reason].filter(Boolean).join(" - ")
-    : "No bay scans yet";
-
-  els.bayLastCard?.classList.remove("ok", "notice", "error");
-  els.bayLastCard?.classList.add(hasEvent ? tone : "notice");
-  if (els.bayLastTitle) els.bayLastTitle.textContent = title;
-  if (els.bayLastAction) els.bayLastAction.textContent = action;
-  if (els.bayLastOrder) els.bayLastOrder.textContent = order;
-  if (els.bayLastBay) {
-    els.bayLastBay.textContent = bay;
-    els.bayLastBay.title = bay === "-" ? "" : bay;
-    fitBayLastLocationText();
-  }
-  if (els.bayLastTime) els.bayLastTime.textContent = time;
-  const moveSelect = document.getElementById("bayLastMoveSelect");
-  if (moveSelect) {
-    const assignmentId = Number(event?.assignmentId || 0);
-    const currentBayCode = event?.currentBayCode || "";
-    const canMove = hasPermission("move_bay") || hasPermission("indian_trail_receive");
-    const moveEnabled = Boolean(assignmentId && currentBayCode && canMove);
-    moveSelect.disabled = !moveEnabled;
-    moveSelect.dataset.assignmentId = moveEnabled ? String(assignmentId) : "";
-    moveSelect.dataset.currentBay = moveEnabled ? currentBayCode : "";
-    moveSelect.dataset.orderLabel = event?.order ? `${event.order}-${event.item || ""}` : "item";
-    moveSelect.innerHTML = moveEnabled
-      ? bayEventMoveOptionsHtml(currentBayCode)
-      : `<option value="">${assignmentId && currentBayCode ? "View only" : "No active bay item"}</option>`;
-    syncCustomSelect(moveSelect);
-  }
-  if (els.bayScanOutStatus && !hasEvent) els.bayScanOutStatus.textContent = "Waiting";
-  if (els.bayScanOutStatus && hasEvent) els.bayScanOutStatus.textContent = tone === "error" ? "Needs review" : tone === "notice" ? "Notice" : "Just now";
-}
-
-/**
- * Purpose: Resolve how many Bay Map recent actions fit in the current display mode.
- * Effects: None; reads fullscreen and active-page state only.
- * Flow: Returns one row during normal operation and preserves the existing two-row fullscreen view.
- */
-function bayScanRecentLimit() {
-  return document.fullscreenElement && state.page === "bays" ? 2 : 1;
-}
-
-/**
- * Purpose: Render the Bay Map scanner's last action and responsive recent-action history.
- * Effects: Updates the Bay scanner history card, row count label, and location controls.
- * Flow: Keeps the latest event in Last Scan, then shows one normal-screen row or the existing two fullscreen rows.
- */
+/** Return icon, semantic color key, and accessible text for one Bay Map event. */
 function bayScanCheckFeedbackV150(event) {
   const signal = `${event?.eventType || ""} ${event?.reason || ""}`.toLowerCase();
-  if (!event) return { key: "neutral", icon: "−", label: "No scan status" };
+  if (!event) return { key: "neutral", icon: "−", label: "Waiting for scan" };
   if (/(error|failed|failure|invalid|blocked|bad scan)/.test(signal)) {
     return { key: "error", icon: "×", label: "Scan failed" };
   }
@@ -13351,8 +13332,72 @@ function bayScanCheckFeedbackV150(event) {
   return { key: "success", icon: "✓", label: "Successful scan" };
 }
 
+/**
+ * Purpose: Render one professional, read-only summary of the newest physical Bay Map event.
+ * Effects: Updates Latest Activity only; bay corrections are intentionally excluded here.
+ * Flow: Normalizes status, action, location, item identity, user, time, and result detail into fixed fields.
+ */
+function renderBayLastScanCard(event) {
+  const hasEvent = Boolean(event);
+  const check = bayScanCheckFeedbackV150(event);
+  const bayLastCheck = document.getElementById("bayLastCheck");
+  const when = new Date(event?.time || event?.createdAt || "");
+  const time = hasEvent && !Number.isNaN(when.getTime())
+    ? when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : "-";
+  const bay = event?.currentBayDisplay || event?.currentBayCode || event?.newBayDisplay
+    || event?.newBayCode || event?.bayDisplay || event?.bayCode || event?.oldBayDisplay
+    || event?.oldBayCode || "-";
+  const action = hasEvent ? (formatEventType(event.eventType || "Bay action") || "Bay action") : "-";
+  const detail = hasEvent
+    ? String(event?.reason || `${action} completed.`)
+    : "No bay scans yet";
+
+  if (bayLastCheck) {
+    bayLastCheck.innerHTML = `<span aria-hidden="true">${escapeHtml(check.icon)}</span>`;
+    bayLastCheck.className = `bay-scan-check-v150 is-${check.key}`;
+    bayLastCheck.setAttribute("aria-label", check.label);
+    bayLastCheck.setAttribute("title", check.label);
+  }
+  if (els.bayLastCard) {
+    els.bayLastCard.classList.remove("scan-status-success", "scan-status-warning", "scan-status-error", "scan-status-neutral");
+    els.bayLastCard.classList.add(`scan-status-${check.key}`);
+  }
+  if (els.bayLastStatusText) els.bayLastStatusText.textContent = check.label;
+  if (els.bayLastTitle) els.bayLastTitle.textContent = detail;
+  if (els.bayLastAction) els.bayLastAction.textContent = action;
+  if (els.bayLastOrder) els.bayLastOrder.textContent = event?.order || "-";
+  if (els.bayLastItem) els.bayLastItem.textContent = event?.item || "-";
+  if (els.bayLastJob) els.bayLastJob.textContent = event?.job || "-";
+  if (els.bayLastCustomer) els.bayLastCustomer.textContent = event?.customer || "-";
+  if (els.bayLastUser) els.bayLastUser.textContent = event?.user || "-";
+  if (els.bayLastBay) {
+    els.bayLastBay.textContent = bay;
+    els.bayLastBay.title = bay === "-" ? "" : bay;
+    fitBayLastLocationText();
+  }
+  if (els.bayLastTime) els.bayLastTime.textContent = time;
+  if (els.bayScanOutStatus) {
+    els.bayScanOutStatus.textContent = hasEvent
+      ? (check.key === "error" ? "Needs review" : check.key === "warning" ? "Notice" : "Ready")
+      : "Waiting";
+  }
+}
+
+/** Return the compact recent-scan limit for the active mode and fullscreen state. */
+function bayScanRecentLimit() {
+  const adding = Boolean(els.bayScanModeToggle?.checked);
+  const fullscreen = Boolean(document.fullscreenElement);
+  if (fullscreen) return adding ? 5 : 6;
+  return adding ? 1 : 2;
+}
+
+/**
+ * Purpose: Render the read-only Latest Activity and the mode-aware compact recent movements.
+ * Effects: Updates scanner history without exposing location changes outside All Scans.
+ * Flow: Filters structural events, renders the newest event, then applies the active mode/fullscreen row limit.
+ */
 function renderBayRecentActions() {
-  // DLS_V150_ICON_ONLY_BAY_SCAN_STATUS
   const excludedEventTypes = new Set([
     "UpdateBayLayout", "CreateBay", "DeleteBay", "DeleteBayGroup",
   ]);
@@ -13363,14 +13408,18 @@ function renderBayRecentActions() {
   const latestEvent = events[0] || null;
   renderBayLastScanCard(latestEvent);
 
-  const recentEvents = events.slice(0, 1);
+  const recentLimit = bayScanRecentLimit();
+  const recentEvents = events.slice(0, recentLimit);
   if (els.bayRecentScanCountLabel) {
-    els.bayRecentScanCountLabel.textContent = recentEvents.length ? "Latest 1" : "No recent";
+    els.bayRecentScanCountLabel.textContent = recentEvents.length
+      ? `Latest ${recentEvents.length}`
+      : "No recent";
   }
   if (!els.bayScanOutRecent) return;
 
   if (!recentEvents.length) {
     els.bayScanOutRecent.innerHTML = '<tr class="bay-recent-empty-v150"><td colspan="5">No recent bay scans</td></tr>';
+    scheduleBayScannerStickyUpdateV155();
     return;
   }
 
@@ -13382,8 +13431,6 @@ function renderBayRecentActions() {
       event.currentBayDisplay || event.currentBayCode || event.newBayDisplay
       || event.newBayCode || event.bayDisplay || event.bayCode || "-"
     );
-    const moveControl = bayEventMoveControlHtml(event);
-    const currentBayControl = moveControl || `<span title="${escapeHtml(currentBay)}">${escapeHtml(currentBay)}</span>`;
     const check = bayScanCheckFeedbackV150(event);
 
     return `
@@ -13391,20 +13438,78 @@ function renderBayRecentActions() {
         <td data-label="Order Nr."><b title="${escapeHtml(order)}">${escapeHtml(order)}</b></td>
         <td data-label="Job Nr."><span title="${escapeHtml(job)}">${escapeHtml(job)}</span></td>
         <td data-label="Action"><span class="bay-recent-action-v150" title="${escapeHtml(action)}">${escapeHtml(action)}</span></td>
-        <td data-label="Current Bay" class="bay-recent-current-bay-v150">${currentBayControl}</td>
+        <td data-label="Current Bay" class="bay-recent-current-bay-v150"><strong title="${escapeHtml(currentBay)}">${escapeHtml(currentBay)}</strong></td>
         <td data-label="Check" class="bay-recent-check-v150"><span class="bay-scan-check-v150 is-${check.key}" aria-label="${escapeHtml(check.label)}" title="${escapeHtml(check.label)}"><span aria-hidden="true">${escapeHtml(check.icon)}</span></span></td>
       </tr>
     `;
   }).join("");
+  scheduleBayScannerStickyUpdateV155();
+}
 
-  if (typeof syncAllCustomSelects === "function") syncAllCustomSelects();
+let bayScannerStickyFrameV155 = 0;
+
+/** Restore the Bay Scanner to normal flow when it should not be fixed. */
+function resetBayScannerStickyV155() {
+  const anchor = els.bayScannerStickyAnchor;
+  const panel = els.bayScannerPanel;
+  if (!anchor || !panel) return;
+  panel.classList.remove("is-fixed-v155");
+  panel.style.removeProperty("left");
+  panel.style.removeProperty("width");
+  panel.style.removeProperty("right");
+  panel.style.removeProperty("--bay-scanner-fixed-top-v155");
+  panel.style.removeProperty("--bay-scanner-fixed-left-v156");
+  panel.style.removeProperty("--bay-scanner-fixed-width-v156");
+  anchor.style.removeProperty("height");
 }
 
 /**
- * Purpose: Run the scroll to bay search match workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Keep only the Bay Scanner fixed after its normal position reaches the viewport top.
+ * Effects: Uses measured fixed positioning rather than relying on a fragile nested CSS sticky cascade.
+ * Flow: Preserves an anchor placeholder, fixes the panel at five pixels, and continuously matches the rail width.
  */
+function updateBayScannerStickyV155() {
+  const anchor = els.bayScannerStickyAnchor;
+  const panel = els.bayScannerPanel;
+  if (!anchor || !panel) return;
+  const disabled = state.page !== "bays"
+    || window.matchMedia("(max-width: 760px)").matches
+    || anchor.getClientRects().length === 0
+    || panel.getClientRects().length === 0;
+  if (disabled) {
+    resetBayScannerStickyV155();
+    return;
+  }
+
+  const anchorRect = anchor.getBoundingClientRect();
+  const headerBottom = Math.max(0, Math.ceil(els.appHeader?.getBoundingClientRect().bottom || 0));
+  const fixedTop = Math.max(5, headerBottom + 5);
+  const shouldFix = anchorRect.top <= fixedTop;
+  if (!shouldFix) {
+    resetBayScannerStickyV155();
+    return;
+  }
+
+  const placeholderHeight = Math.max(panel.scrollHeight, panel.getBoundingClientRect().height);
+  const fixedLeft = Math.max(5, Math.round(anchorRect.left));
+  const availableWidth = Math.max(1, Math.floor(window.innerWidth - fixedLeft - 5));
+  const fixedWidth = Math.max(1, Math.min(Math.round(anchorRect.width), availableWidth));
+  anchor.style.height = `${Math.ceil(placeholderHeight)}px`;
+  panel.classList.add("is-fixed-v155");
+  panel.style.setProperty("--bay-scanner-fixed-top-v155", `${fixedTop}px`);
+  panel.style.setProperty("--bay-scanner-fixed-left-v156", `${fixedLeft}px`);
+  panel.style.setProperty("--bay-scanner-fixed-width-v156", `${fixedWidth}px`);
+}
+
+/** Coalesce scroll, resize, fullscreen, and content-size updates into one paint. */
+function scheduleBayScannerStickyUpdateV155() {
+  if (bayScannerStickyFrameV155) return;
+  bayScannerStickyFrameV155 = window.requestAnimationFrame(() => {
+    bayScannerStickyFrameV155 = 0;
+    updateBayScannerStickyV155();
+  });
+}
+
 function scrollToBaySearchMatch() {
   if (!els.bayMapCanvas) return;
   renderBayMapPage();
@@ -13655,7 +13760,7 @@ async function runBayScan(barcode, { isManual = false, outboundOverride = false,
  */
 async function submitBayScanOut() {
   const barcode = els.bayScanOutInput?.value.trim() || "";
-  if (!barcode) return;
+  if (!barcode) throw new Error("Scan or enter a Bay barcode before submitting.");
   const result = await runBayScan(barcode, { isManual: false });
   if (!result) return;
   if (els.bayScanOutInput) els.bayScanOutInput.value = "";
@@ -13668,16 +13773,14 @@ async function submitBayScanOut() {
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
 async function submitManualBayScan() {
-  const order = digitsOnly(els.bayManualOrderInput?.value || "");
-  const item = digitsOnly(els.bayManualItemInput?.value || "");
-  if (!order || !item) {
-    throw new Error("Manual scan requires both an order number and an item number.");
+  const reference = parseBayManualOrderItemReference(els.bayManualReferenceInput?.value || "");
+  if (!reference) {
+    throw new Error("Enter the order and item together, for example 236505001, 236505 1, 236505.1, or 236505/1.");
   }
-  const result = await runBayScan(canonicalBarcode(order, item), { isManual: true });
+  const result = await runBayScan(reference.barcode, { isManual: true });
   if (!result) return;
-  if (els.bayManualOrderInput) els.bayManualOrderInput.value = "";
-  if (els.bayManualItemInput) els.bayManualItemInput.value = "";
-  els.bayManualOrderInput?.focus();
+  if (els.bayManualReferenceInput) els.bayManualReferenceInput.value = "";
+  els.bayManualReferenceInput?.focus();
 }
 
 
@@ -14319,41 +14422,160 @@ async function deleteBayEditorBay(bayCode) {
   showFloatingNotice(`Deleted ${bayCode}.`, "success");
 }
 
-/**
- * Purpose: Open the open bay all scans modal workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may call the backend api.
- * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
- */
-async function openBayAllScansModal() {
-  let events = state.bayEvents || [];
-  if (state.backend) {
-    try {
-      const payload = await fetchJson("/api/indian-trail/events?limit=250");
-      events = payload.events || events;
-      state.bayEvents = events;
-    } catch (error) {
-      showFloatingNotice(`Unable to refresh the full bay scan log: ${error.message}`, "notice");
-    }
-  }
+/** Build a compact page-number window for the All Bay Scans modal. */
+function bayAllScansPageNumbers(currentPage, totalPages) {
+  const start = Math.max(1, Math.min(currentPage - 2, Math.max(totalPages - 4, 1)));
+  const end = Math.min(totalPages, start + 4);
+  const pages = [];
+  for (let page = start; page <= end; page += 1) pages.push(page);
+  return pages;
+}
+
+/** Render one server-paginated All Bay Scans page and wire its pager. */
+function renderBayAllScansPage(payload) {
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+  const page = Math.max(Number(payload?.page || 1), 1);
+  const totalPages = Math.max(Number(payload?.totalPages || 1), 1);
+  const total = Math.max(Number(payload?.total || 0), 0);
+  const pageSize = Math.max(Number(payload?.pageSize || 25), 1);
+  state.bayAllScansPage = page;
+  state.bayAllScansTotalPages = totalPages;
+  state.bayAllScansTotal = total;
+
   const rows = events.length
     ? events.map((event) => {
         const when = new Date(event.time || event.createdAt || "");
-        const time = Number.isNaN(when.getTime()) ? escapeHtml(event.time || "") : escapeHtml(when.toLocaleString());
-        const scannedBay = event.bayDisplay || event.bayCode || event.newBayDisplay || event.newBayCode || event.oldBayDisplay || event.oldBayCode || "";
+        const time = Number.isNaN(when.getTime()) ? String(event.time || "") : when.toLocaleString();
         const currentBay = event.currentBayDisplay || event.currentBayCode || "Not in bay";
-        const order = event.order ? `${event.order}-${event.item || ""}` : "";
-        return `<tr><td>${escapeHtml(formatEventType(event.eventType))}</td><td>${escapeHtml(order)}</td><td>${escapeHtml(scannedBay)}</td><td><strong class="bay-current-location-cell">${escapeHtml(currentBay)}</strong></td><td>${escapeHtml(event.customer || "")}</td><td>${escapeHtml(event.reason || "")}</td><td>${escapeHtml(event.user || "")}</td><td>${time}</td><td>${bayEventMoveControlHtml(event)}</td></tr>`;
+        const action = formatEventType(event.eventType || "") || "Bay action";
+        const check = bayScanCheckFeedbackV150(event);
+        return `
+          <tr class="scan-status-${check.key}">
+            <td class="bay-all-scans-check-v159"><span class="bay-scan-check-v150 is-${check.key}" aria-label="${escapeHtml(check.label)}" title="${escapeHtml(check.label)}"><span aria-hidden="true">${escapeHtml(check.icon)}</span></span></td>
+            <td><span class="bay-all-scans-action-v159 is-${check.key}">${escapeHtml(action)}</span></td>
+            <td><strong class="bay-all-scans-order-v159">${escapeHtml(event.order || "-")}</strong></td>
+            <td><span class="bay-all-scans-item-v159">${escapeHtml(event.item || "-")}</span></td>
+            <td title="${escapeHtml(event.job || "")}">${escapeHtml(event.job || "-")}</td>
+            <td><strong class="bay-current-location-cell bay-all-scans-location-v159">${escapeHtml(currentBay)}</strong></td>
+            <td title="${escapeHtml(event.customer || "")}">${escapeHtml(event.customer || "-")}</td>
+            <td title="${escapeHtml(event.reason || "")}"><span class="bay-all-scans-detail-v159">${escapeHtml(event.reason || "No additional details")}</span></td>
+            <td><span class="bay-all-scans-user-v159">${escapeHtml(event.user || "-")}</span></td>
+            <td><time class="bay-all-scans-time-v159">${escapeHtml(time)}</time></td>
+            <td>${bayEventMoveControlHtml(event)}</td>
+          </tr>
+        `;
       }).join("")
-    : `<tr><td colspan="9">No bay scan history is available yet.</td></tr>`;
+    : '<tr class="bay-all-scans-empty-row-v159"><td colspan="11"><div><span aria-hidden="true">✓</span><strong>No retained Bay Map scans</strong><small>New physical bay movements will appear here for seven days.</small></div></td></tr>';
+
+  const pageButtons = bayAllScansPageNumbers(page, totalPages).map((pageNumber) => `
+    <button type="button" data-bay-all-scans-page="${pageNumber}" ${pageNumber === page ? 'class="is-active" aria-current="page"' : ""}>${pageNumber}</button>
+  `).join("");
+  const firstRecord = total ? ((page - 1) * pageSize) + 1 : 0;
+  const lastRecord = Math.min(page * pageSize, total);
+
   openAdminModal("custom", {
     title: "All Bay Scans",
     body: `
-      <div class="full-scans-modal bay-full-scans-modal">
-        <div class="section-heading"><h3>Indian Trail Bay Scan History</h3><span>${escapeHtml(events.length)} latest actions · active items can be relocated here</span></div>
-        <div class="admin-table full-scans-table"><table><thead><tr><th>Action</th><th>Order</th><th>Scanned Bay</th><th>Current Location</th><th>Customer</th><th>Reason</th><th>User</th><th>Time</th><th>Change Location</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="full-scans-modal bay-full-scans-modal bay-full-scans-modal-v159">
+        <header class="bay-all-scans-hero-v159">
+          <div class="bay-all-scans-title-v159">
+            <span class="bay-all-scans-title-icon-v159" aria-hidden="true"></span>
+            <div>
+              <small>Indian Trail activity archive</small>
+              <h3>Physical bay scan history</h3>
+              <p>Review recent movements and correct a current bay without changing the read-only scanner activity cards.</p>
+            </div>
+          </div>
+          <div class="bay-all-scans-summary-v159" aria-label="Bay scan history summary">
+            <span><small>Retained</small><strong>7 days</strong></span>
+            <span><small>Total scans</small><strong>${escapeHtml(total)}</strong></span>
+            <span><small>Current page</small><strong>${escapeHtml(page)} of ${escapeHtml(totalPages)}</strong></span>
+          </div>
+        </header>
+
+        <section class="bay-all-scans-guidance-v159">
+          <span class="bay-all-scans-guidance-icon-v159" aria-hidden="true"></span>
+          <div><strong>Location corrections belong here</strong><small>Use Change Location only when the physical piece is currently assigned to the wrong bay.</small></div>
+        </section>
+
+        <div class="admin-table full-scans-table bay-full-scans-table-v159">
+          <table>
+            <thead><tr><th>Check</th><th>Action</th><th>Order</th><th>Item</th><th>Job Nr.</th><th>Current Bay</th><th>Customer</th><th>Details</th><th>User</th><th>Time</th><th>Change Location</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <footer class="bay-all-scans-pager-v159" aria-label="Bay scan history pages">
+          <span><strong>${firstRecord}-${lastRecord}</strong> of ${total} retained scans</span>
+          <div>
+            <button class="is-direction" type="button" data-bay-all-scans-page="${Math.max(page - 1, 1)}" ${page <= 1 ? "disabled" : ""}>Previous</button>
+            ${pageButtons}
+            <button class="is-direction" type="button" data-bay-all-scans-page="${Math.min(page + 1, totalPages)}" ${page >= totalPages ? "disabled" : ""}>Next</button>
+          </div>
+        </footer>
       </div>
     `,
   });
+  if (els.adminModal) els.adminModal.dataset.customView = "bay-all-scans";
+  els.adminModalBody?.querySelectorAll("[data-bay-all-scans-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      const targetPage = Number(button.dataset.bayAllScansPage || 1);
+      void openBayAllScansModal(targetPage);
+    });
+  });
+  if (typeof syncAllCustomSelects === "function") syncAllCustomSelects();
+}
+
+/**
+ * Purpose: Open All Bay Scans immediately, then load only one 25-row server page.
+ * Effects: Shows a fast loading state, requests one page, and leaves location editing in this GUI only.
+ * Flow: Uses a request token to ignore stale responses and renders total/page metadata returned by the backend.
+ */
+async function openBayAllScansModal(page = 1) {
+  const requestedPage = Math.max(Number(page || 1), 1);
+  const requestId = Number(state.bayAllScansRequestId || 0) + 1;
+  state.bayAllScansRequestId = requestId;
+  openAdminModal("custom", {
+    title: "All Bay Scans",
+    body: `
+      <div class="full-scans-modal bay-full-scans-modal bay-full-scans-modal-v159 is-loading">
+        <header class="bay-all-scans-hero-v159">
+          <div class="bay-all-scans-title-v159">
+            <span class="bay-all-scans-title-icon-v159" aria-hidden="true"></span>
+            <div><small>Indian Trail activity archive</small><h3>Loading physical bay history</h3><p>Retrieving page ${requestedPage} with no more than 25 scans.</p></div>
+          </div>
+        </header>
+        <div class="bay-all-scans-loading-v159" role="status" aria-live="polite">
+          <span class="bay-all-scans-spinner-v159" aria-hidden="true"></span>
+          <div><strong>Loading retained scans</strong><small>Only the requested page is being downloaded.</small></div>
+        </div>
+      </div>
+    `,
+  });
+  if (els.adminModal) els.adminModal.dataset.customView = "bay-all-scans";
+  try {
+    const payload = state.backend
+      ? await fetchJson(`/api/indian-trail/events?page=${requestedPage}&pageSize=25`)
+      : { events: state.bayEvents || [], page: 1, pageSize: 25, total: (state.bayEvents || []).length, totalPages: 1 };
+    if (requestId !== state.bayAllScansRequestId || els.adminModal?.hidden) return;
+    renderBayAllScansPage(payload);
+  } catch (error) {
+    if (requestId !== state.bayAllScansRequestId) return;
+    openAdminModal("custom", {
+      title: "All Bay Scans",
+      body: `
+        <div class="bay-all-scans-error-v159" role="alert">
+          <span aria-hidden="true">!</span>
+          <div><strong>Unable to load Bay Scan history</strong><small>${escapeHtml(error.message)}</small></div>
+          <button type="button" data-bay-all-scans-retry="${requestedPage}">Try Again</button>
+        </div>
+      `,
+    });
+    if (els.adminModal) els.adminModal.dataset.customView = "bay-all-scans";
+    els.adminModalBody?.querySelector("[data-bay-all-scans-retry]")?.addEventListener("click", (event) => {
+      void openBayAllScansModal(Number(event.currentTarget.dataset.bayAllScansRetry || 1));
+    });
+  }
 }
 
 /**
@@ -16379,6 +16601,7 @@ function openAdminModal(kind, options = null) {
   resetRolePermissionUiSession();
   }
   if (!els.adminModal || !els.adminModalBody || !els.adminModalTitle) return;
+  delete els.adminModal.dataset.customView;
   const titleMap = {
     deliveryLists: "All Delivery Lists",
     deliveryActions: "Delivery List Actions",
@@ -23338,12 +23561,20 @@ function wireEvents() {
     renderRecent();
     renderBayRecentActions();
     fitBayLastLocationText();
+    scheduleBayScannerStickyUpdateV155();
   });
   window.addEventListener("resize", () => {
     syncSidebarState();
     syncFullscreenStickyPanelOffset();
     fitBayLastLocationText();
+    scheduleBayScannerStickyUpdateV155();
   });
+  window.addEventListener("scroll", scheduleBayScannerStickyUpdateV155, { passive: true });
+  if (window.ResizeObserver && els.bayScannerPanel && !state.bayScannerStickyResizeObserver) {
+    state.bayScannerStickyResizeObserver = new ResizeObserver(() => scheduleBayScannerStickyUpdateV155());
+    state.bayScannerStickyResizeObserver.observe(els.bayScannerPanel);
+    if (els.bayScannerStickyAnchor) state.bayScannerStickyResizeObserver.observe(els.bayScannerStickyAnchor);
+  }
   if (window.ResizeObserver && els.appHeader) {
     state.headerResizeObserver = new ResizeObserver(() => {
       syncFullscreenStickyPanelOffset();
@@ -23435,7 +23666,7 @@ function wireEvents() {
       playAppSound("bay_moved");
       showFloatingNotice(`Moved ${label} to ${newBayCode}.`, "success");
       renderBayRecentActions();
-      if (!els.adminModal?.hidden && els.adminModal?.dataset.kind === "custom") await openBayAllScansModal();
+      if (!els.adminModal?.hidden && els.adminModal?.dataset.customView === "bay-all-scans") await openBayAllScansModal(state.bayAllScansPage || 1);
     } catch (error) {
       moveSelect.value = currentBay;
       syncCustomSelect(moveSelect);
@@ -23679,8 +23910,11 @@ function wireEvents() {
     try {
       await processScan(els.scanInput.value);
     } catch (error) {
-      scanFlash("error", "scan_error");
-      showStageScanConfirmation({ ok: false, eventType: "error", message: error.message, barcode: els.scanInput.value });
+      showScanFailureConfirmation(error.message, {
+        stageLabel: stageLabel(state.meta || {}) || state.meta?.stage || "Scan page",
+        rawScan: els.scanInput.value,
+        title: "Scan not accepted",
+      });
     }
     els.scanInput.value = "";
     els.scanInput.focus();
@@ -23690,8 +23924,11 @@ function wireEvents() {
     try {
       await submitManualScan();
     } catch (error) {
-      scanFlash("error", "scan_error");
-      showStageScanConfirmation({ ok: false, eventType: "error", message: error.message });
+      showScanFailureConfirmation(error.message, {
+        stageLabel: stageLabel(state.meta || {}) || state.meta?.stage || "Manual scan",
+        rawScan: `${els.manualOrderInput?.value || ""} ${els.manualItemInput?.value || ""}`.trim(),
+        title: "Manual scan not accepted",
+      });
     }
   });
   els.manualAssignForm?.addEventListener("submit", async (event) => {
@@ -24373,10 +24610,32 @@ function wireEvents() {
   els.bayClearFiltersBtn?.addEventListener("click", resetBayFilters);
   els.bayScanOutForm?.addEventListener("submit", (event) => {
     event.preventDefault();
-    submitBayScanOut().catch((error) => showInlineError(error.message, true));
+    submitBayScanOut().catch((error) => showScanFailureConfirmation(error.message, {
+      stageLabel: "Bay Scanner",
+      rawScan: els.bayScanOutInput?.value || "",
+      title: "Bay scan not accepted",
+    }));
   });
-  els.bayManualSubmitBtn?.addEventListener("click", () => submitManualBayScan().catch((error) => showInlineError(error.message, true)));
-  document.querySelectorAll('input[name="bayScanVisualMode"]').forEach((input) => input.addEventListener("change", updateBayScannerCommandState));
+  els.bayManualSubmitBtn?.addEventListener("click", () => submitManualBayScan().catch((error) => showScanFailureConfirmation(error.message, {
+    stageLabel: "Bay Scanner - Manual entry",
+    rawScan: els.bayManualReferenceInput?.value || "",
+    title: "Manual Bay scan not accepted",
+  })));
+  els.bayManualReferenceInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+    submitManualBayScan().catch((error) => showScanFailureConfirmation(error.message, {
+      stageLabel: "Bay Scanner - Manual entry",
+      rawScan: els.bayManualReferenceInput?.value || "",
+      title: "Manual Bay scan not accepted",
+    }));
+  });
+  document.querySelectorAll('input[name="bayScanVisualMode"]').forEach((input) => input.addEventListener("change", () => {
+    updateBayScannerCommandState();
+    renderBayRecentActions();
+    scheduleBayScannerStickyUpdateV155();
+  }));
   els.bayScanBayInput?.addEventListener("input", updateBayScannerCommandState);
   document.getElementById("bayTargetClearBtn")?.addEventListener("click", () => {
     if (els.bayScanBayInput) els.bayScanBayInput.value = "";
@@ -24384,6 +24643,8 @@ function wireEvents() {
     if (removeMode) removeMode.checked = true;
     if (els.bayScanModeToggle) els.bayScanModeToggle.checked = false;
     updateBayScannerCommandState();
+    renderBayRecentActions();
+    scheduleBayScannerStickyUpdateV155();
     els.bayScanOutInput?.focus();
   });
   updateBayScannerCommandState();
@@ -24633,7 +24894,6 @@ function wireEvents() {
     event.preventDefault();
     submitSdi(true).catch((error) => showInlineError(error.message, true));
   });
-  els.bayLayoutCloseBtn?.addEventListener("click", () => closeBayLayoutManager());
   els.bayLayoutSelect?.addEventListener("change", () => populateBayLayoutForm());
   els.bayLayoutSaveBtn?.addEventListener("click", () => saveBayLayoutForm().catch((error) => showInlineError(error.message, true)));
   els.bayLayoutDeleteBtn?.addEventListener("click", () => deleteSelectedBay().catch((error) => showInlineError(error.message, true)));
@@ -25459,1844 +25719,3 @@ function wireEvents() {
 init().catch((error) => {
   document.body.innerHTML = `<main class="app"><section class="last-card error"><strong>Unable to load delivery list</strong><p>${escapeHtml(error.message)}</p></section></main>`;
 });
-
-/* ==========================================================================
-   DELIVERY AUTOMATION CONTROL CENTER
-   ========================================================================== */
-(() => {
-  "use strict";
-
-  const API_ROOT = "/api/admin/delivery-automation";
-  const ACTION_LABELS = {
-    "folder-import-only": "Import Temp Folder Only",
-    "sql-export-only": "Query SQL & Export Only",
-    "sql-export-and-import": "Query SQL, Export & Import",
-  };
-  const RANGE_LABELS = {
-    "one-date": "one delivery date",
-    custom: "a custom date range",
-    incremental: "the normal automatic window",
-    full: "the full safety refresh window",
-  };
-
-  let modal = null;
-  let backdrop = null;
-  let pollTimer = null;
-  let lastDashboard = null;
-  let lastCompletedRunKey = "";
-  let recentImportsRefreshTimer = null;
-  let importHistoryModal = null;
-  let importHistorySearchTimer = null;
-  let lastImportHistoryPayload = null;
-  let importHistoryHasNewResults = false;
-  const importHistoryState = {
-    page: 1,
-    pageSize: 20,
-    query: "",
-    classification: "",
-    dateFrom: "",
-    dateTo: "",
-  };
-  let deliveryCatalogHeartbeat = null;
-  let deliveryCatalogRefreshInFlight = false;
-  let latestImportRefreshInFlight = false;
-  let lastDeliveryCatalogSignature = "";
-  let lastLatestImportSignature = "";
-  let autoFollowLog = true;
-
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  async function api(path = "", options = {}) {
-    const response = await fetch(`${API_ROOT}${path}`, {
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-      ...options,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.error || payload.message || `Request failed (${response.status})`);
-    }
-    return payload;
-  }
-
-  function localDateIso(offset = 0) {
-    const date = new Date();
-    date.setHours(12, 0, 0, 0);
-    date.setDate(date.getDate() + offset);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
-  function formatTimestamp(value) {
-    if (!value) return "No completed run yet";
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return String(value);
-    return parsed.toLocaleString([], {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-
-
-  function formatDeliveryDate(value) {
-    const text = String(value || "").trim();
-    if (!text) return "Unknown date";
-    const parsed = new Date(`${text.slice(0, 10)}T12:00:00`);
-    if (Number.isNaN(parsed.getTime())) return text;
-    return parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-  }
-
-  function deliveryCatalogSignature(lists = []) {
-    return lists.map((item) => [
-      item.id,
-      item.deliveryDate,
-      item.revision,
-      item.status,
-      item.totalQty,
-      item.scannedQty,
-    ].map((value) => String(value ?? "")).join("|")).sort().join("\n");
-  }
-
-  function publishDeliveryCatalog(lists, source = "poll", force = false) {
-    if (!Array.isArray(lists)) return false;
-    const signature = deliveryCatalogSignature(lists);
-    if (!force && signature === lastDeliveryCatalogSignature) return false;
-    lastDeliveryCatalogSignature = signature;
-    document.dispatchEvent(new CustomEvent("dls:delivery-list-data-refreshed", {
-      detail: { lists, source, catalogOnly: true },
-    }));
-    return true;
-  }
-
-  function stampLatestImportResults(items, checkedAt = "") {
-    const completedAt = String(checkedAt || "").trim();
-    return (Array.isArray(items) ? items : []).map((item) => {
-      const stamped = { ...item };
-      if (completedAt) {
-        stamped.importedAt = completedAt;
-        stamped.checkedAt = completedAt;
-        stamped.updatedAt = completedAt;
-      }
-      stamped.stageSummaries = (Array.isArray(item?.stageSummaries) ? item.stageSummaries : [])
-        .map((stage) => completedAt
-          ? { ...stage, importedAt: completedAt, checkedAt: completedAt, updatedAt: completedAt }
-          : { ...stage });
-      return stamped;
-    });
-  }
-
-  function latestImportSignature(payload = {}) {
-    const results = Array.isArray(payload.latestImportResults)
-      ? payload.latestImportResults
-      : (Array.isArray(payload.recentImports) ? payload.recentImports : []);
-    return JSON.stringify({
-      latestRunKey: payload.latestRunKey || "",
-      lastCheckedAt: payload.lastCheckedAt || "",
-      results: results.map((item) => ({
-        deliveryDate: item.deliveryDate || "",
-        sourceName: item.sourceName || item.fileName || "",
-        classification: item.classification || "",
-        importedAt: item.importedAt || "",
-        checkedAt: item.checkedAt || "",
-        createdCount: Number(item.createdCount || 0),
-        reactivatedCount: Number(item.reactivatedCount || 0),
-        updatedCount: Number(item.updatedCount || 0),
-        addedPieceQty: Number(item.addedPieceQty || 0),
-        changedPieceQty: Number(item.changedPieceQty || 0),
-        errors: Array.isArray(item.errors) ? item.errors : [],
-      })),
-    });
-  }
-
-  function publishLatestImportResult(payload = {}, source = "latest-import", force = false) {
-    const rawResults = Array.isArray(payload.latestImportResults)
-      ? payload.latestImportResults
-      : (Array.isArray(payload.recentImports) ? payload.recentImports : []);
-    const results = stampLatestImportResults(rawResults, payload.lastCheckedAt || payload.latestRun?.completedAt || "");
-    const signature = latestImportSignature({ ...payload, latestImportResults: results });
-    if (!force && signature === lastLatestImportSignature) return false;
-    lastLatestImportSignature = signature;
-    updateAdminImportTimestamp(payload);
-    document.dispatchEvent(new CustomEvent("dls:delivery-list-data-refreshed", {
-      detail: {
-        lists: Array.isArray(payload.lists) ? payload.lists : undefined,
-        recentImports: results,
-        latestImportResults: results,
-        lastCheckedAt: payload.lastCheckedAt || "",
-        latestRun: payload.latestRun || {},
-        latestRunKey: payload.latestRunKey || "",
-        source,
-        catalogOnly: false,
-      },
-    }));
-    return true;
-  }
-
-  async function refreshLatestImportResult(force = false) {
-    if (latestImportRefreshInFlight || document.visibilityState === "hidden") return;
-    latestImportRefreshInFlight = true;
-    try {
-      const payload = await api("/latest-import");
-      publishLatestImportResult(payload, "latest-import", force);
-      if (Array.isArray(payload.lists)) {
-        publishDeliveryCatalog(payload.lists, "latest-import-catalog", force);
-      }
-    } catch {
-      // The next Admin visibility check, notification, or heartbeat retries.
-    } finally {
-      latestImportRefreshInFlight = false;
-    }
-  }
-
-  async function refreshDeliveryListCatalog(force = false) {
-    if (deliveryCatalogRefreshInFlight || document.visibilityState === "hidden") return;
-    deliveryCatalogRefreshInFlight = true;
-    try {
-      const response = await fetch("/api/delivery-lists", {
-        credentials: "same-origin",
-        cache: "no-store",
-        headers: { Accept: "application/json" },
-      });
-      if (response.status === 401 || response.status === 403) return;
-      const payload = await response.json().catch(() => ({}));
-      if (response.ok && Array.isArray(payload.lists)) {
-        publishDeliveryCatalog(payload.lists, "catalog-poll", force);
-      }
-    } catch {
-      // Keep scanning uninterrupted when a background catalog refresh cannot run.
-    } finally {
-      deliveryCatalogRefreshInFlight = false;
-    }
-  }
-
-  function startDeliveryCatalogHeartbeat() {
-    if (deliveryCatalogHeartbeat) return;
-    refreshDeliveryListCatalog(true);
-    if (adminPageIsVisible()) refreshLatestImportResult(true);
-    deliveryCatalogHeartbeat = window.setInterval(() => {
-      refreshDeliveryListCatalog(false);
-      if (adminPageIsVisible()) refreshLatestImportResult(false);
-    }, 10000);
-  }
-
-
-
-  function importResultsFromNotification(item) {
-    const details = item?.details && typeof item.details === "object" ? item.details : {};
-    return Array.isArray(details.importResults) ? details.importResults : [];
-  }
-
-  function openDeliveryListManagementFromNotification(item) {
-    const details = item?.details && typeof item.details === "object" ? item.details : {};
-    const adminButton = document.querySelector('[data-page-target="admin"]:not([hidden])');
-    const results = importResultsFromNotification(item);
-    const completedAt = String(details.completedAt || item?.createdAt || "");
-
-    if (!adminButton) {
-      const scanButton = document.querySelector('[data-page-target="scan"]:not([hidden])');
-      scanButton?.click();
-      window.setTimeout(() => {
-        const updatedFilter = document.querySelector('[data-filter="updated"]');
-        if (updatedFilter && !updatedFilter.classList.contains("active") && !updatedFilter.classList.contains("is-active")) {
-          updatedFilter.click();
-        }
-      }, 350);
-      return;
-    }
-
-    adminButton.click();
-    window.setTimeout(() => {
-      if (results.length) {
-        publishLatestImportResult({
-          latestImportResults: results,
-          recentImports: results,
-          lastCheckedAt: completedAt,
-          latestRunKey: `notification-${Number(item?.id || 0)}`,
-          latestRun: {
-            completedAt,
-            succeeded: details.succeeded,
-            mode: details.mode || "",
-            runAction: details.runAction || "",
-            error: details.error || "",
-          },
-        }, "notification-click", true);
-      } else {
-        refreshLatestImportResult(true);
-      }
-      const management = document.getElementById("adminDeliveryLists");
-      management?.scrollIntoView({ behavior: "smooth", block: "start" });
-      const panel = management?.closest(".panel") || management;
-      panel?.classList.add("dls-import-result-focus");
-      window.setTimeout(() => panel?.classList.remove("dls-import-result-focus"), 1800);
-    }, 180);
-  }
-
-  function classificationDetails(value) {
-    const classification = String(value || "no_changes").toLowerCase();
-    const values = {
-      new: { label: "New", className: "is-new" },
-      updated: { label: "Updated", className: "is-updated" },
-      new_updated: { label: "New + Updated", className: "is-new-updated" },
-      failed: { label: "Failed", className: "is-failed" },
-      no_changes: { label: "No Changes", className: "is-no-changes" },
-    };
-    return values[classification] || values.no_changes;
-  }
-
-  function recentImportMessage(item) {
-    const classification = String(item.classification || "").toLowerCase();
-    const errors = Array.isArray(item.errors) ? item.errors.filter(Boolean) : [];
-    if (classification === "failed") {
-      return errors[0] || item.reason || "The scanner importer could not process this delivery-list file.";
-    }
-    if (classification === "no_changes" && item.reason) return String(item.reason);
-
-    const details = [];
-    const createdCount = Number(item.createdCount || 0);
-    const reactivatedCount = Number(item.reactivatedCount || 0);
-    const brandNewCount = Math.max(createdCount - reactivatedCount, 0);
-    if (brandNewCount) details.push(`${brandNewCount} new stage list${brandNewCount === 1 ? "" : "s"}`);
-    if (reactivatedCount) details.push(`${reactivatedCount} restored stage list${reactivatedCount === 1 ? "" : "s"}`);
-    if (Number(item.updatedCount || 0)) details.push(`${Number(item.updatedCount)} updated stage list${Number(item.updatedCount) === 1 ? "" : "s"}`);
-    if (Number(item.addedPieceQty || 0)) details.push(`${Number(item.addedPieceQty)} added piece${Number(item.addedPieceQty) === 1 ? "" : "s"}`);
-    if (Number(item.changedPieceQty || 0)) details.push(`${Number(item.changedPieceQty)} changed piece${Number(item.changedPieceQty) === 1 ? "" : "s"}`);
-    if (Number(item.removedPieceQty || 0)) details.push(`${Number(item.removedPieceQty)} removed source piece${Number(item.removedPieceQty) === 1 ? "" : "s"}`);
-    if (!details.length && Number(item.rowCount || 0)) details.push(`${Number(item.rowCount)} line item${Number(item.rowCount) === 1 ? "" : "s"}`);
-    if (!details.length) details.push("No delivery-list line changes detected");
-    return details.join(" · ");
-  }
-
-  function stageSummaryLabel(stage = {}) {
-    return String(
-      stage.label
-      || stage.stage
-      || stage.scanner
-      || stage.listLabel
-      || stage.listId
-      || "Delivery-list stage"
-    );
-  }
-
-  function stageSummaryStatus(stage = {}) {
-    const created = Boolean(stage.created);
-    const reactivated = Boolean(stage.reactivated);
-    const changedLines = Number(stage.changedLineCount || 0);
-    const changedPieces = Number(stage.changedPieceQty || 0);
-    const updatedPieces = Number(stage.updatedPieceQty || 0);
-    const addedPieces = Number(stage.addedPieceQty || stage.newPieceQty || 0);
-    const removedLines = Number(stage.removedLineCount || 0);
-    const removedPieces = Number(stage.removedPieceQty || 0);
-    const changed = changedLines > 0 || changedPieces > 0 || updatedPieces > 0 || addedPieces > 0 || removedLines > 0 || removedPieces > 0;
-
-    if ((created || reactivated) && changed) return { label: "New + Updated", className: "is-new-updated", newStage: true };
-    if (created || reactivated) return { label: "New Stage", className: "is-new", newStage: true };
-    if (changed) return { label: "Updated", className: "is-updated", newStage: false };
-    return { label: "No Changes", className: "is-no-changes", newStage: false };
-  }
-
-  function stageSummaryMessage(stage = {}) {
-    const parts = [];
-    const addedPieces = Number(stage.addedPieceQty || stage.newPieceQty || 0);
-    const updatedPieces = Number(stage.updatedPieceQty || 0);
-    const changedPieces = Number(stage.changedPieceQty || 0);
-    const changedLines = Number(stage.changedLineCount || 0);
-    const removedLines = Number(stage.removedLineCount || 0);
-    const removedPieces = Number(stage.removedPieceQty || 0);
-    const totalQty = Number(stage.totalQty || 0);
-
-    if (stage.reactivated) parts.push("Restored after deletion");
-    else if (stage.created) parts.push("Entirely new stage");
-    if (addedPieces) parts.push(`${addedPieces} added piece${addedPieces === 1 ? "" : "s"}`);
-    if (updatedPieces) parts.push(`${updatedPieces} updated piece${updatedPieces === 1 ? "" : "s"}`);
-    else if (changedPieces) parts.push(`${changedPieces} changed piece${changedPieces === 1 ? "" : "s"}`);
-    if (changedLines) parts.push(`${changedLines} changed line${changedLines === 1 ? "" : "s"}`);
-    if (removedLines) parts.push(`${removedLines} removed source line${removedLines === 1 ? "" : "s"}`);
-    if (removedPieces) parts.push(`${removedPieces} removed source piece${removedPieces === 1 ? "" : "s"}`);
-    if (!parts.length && totalQty) parts.push(`${totalQty} total piece${totalQty === 1 ? "" : "s"}`);
-    if (!parts.length) parts.push("No stage changes detected");
-    return parts.join(" · ");
-  }
-
-  function renderStageSummaries(item = {}) {
-    const stages = Array.isArray(item.stageSummaries) ? item.stageSummaries : [];
-    if (!stages.length) {
-      return `<div class="automation-import-stage-empty">${escapeHtml(recentImportMessage(item))}</div>`;
-    }
-    return `
-      <div class="automation-import-stage-list">
-        ${stages.map((stage) => {
-          const status = stageSummaryStatus(stage);
-          return `
-            <div class="automation-import-stage-row ${status.className}">
-              <div class="automation-import-stage-copy">
-                <strong>${escapeHtml(stageSummaryLabel(stage))}</strong>
-                <small>${escapeHtml(stageSummaryMessage(stage))}</small>
-              </div>
-              <span class="automation-import-stage-pill">${escapeHtml(status.label)}</span>
-            </div>`;
-        }).join("")}
-      </div>`;
-  }
-
-  function updateAdminImportTimestamp(payload = {}) {
-    lastImportHistoryPayload = payload;
-    const adminLastUpdated = document.getElementById("adminLastUpdated");
-    if (adminLastUpdated && payload.lastCheckedAt) {
-      adminLastUpdated.textContent = `Last updated: ${formatTimestamp(payload.lastCheckedAt)}`;
-    }
-  }
-
-  // Import history is part of the main control center. It refreshes only when
-  // the History tab is opened, a history control changes, Refresh is selected,
-  // or the complete control center closes and performs a hidden catalog sync.
-  function wireImportHistoryPanel() {
-    importHistoryModal = modal;
-    if (!importHistoryModal || importHistoryModal.dataset.historyWired === "true") return;
-    importHistoryModal.dataset.historyWired = "true";
-
-    importHistoryModal.querySelector("#importHistoryRefreshBtn").addEventListener("click", () => refreshImportHistory(false));
-    importHistoryModal.querySelector("#importHistoryClearBtn").addEventListener("click", () => {
-      importHistoryState.page = 1;
-      importHistoryState.query = "";
-      importHistoryState.classification = "";
-      importHistoryState.dateFrom = "";
-      importHistoryState.dateTo = "";
-      importHistoryModal.querySelector("#importHistorySearch").value = "";
-      importHistoryModal.querySelector("#importHistoryStatusFilter").value = "";
-      importHistoryModal.querySelector("#importHistoryDateFrom").value = "";
-      importHistoryModal.querySelector("#importHistoryDateTo").value = "";
-      refreshImportHistory(false);
-    });
-
-    importHistoryModal.querySelector("#importHistorySearch").addEventListener("input", (event) => {
-      clearTimeout(importHistorySearchTimer);
-      importHistorySearchTimer = window.setTimeout(() => {
-        importHistoryState.page = 1;
-        importHistoryState.query = event.target.value.trim();
-        refreshImportHistory(false);
-      }, 300);
-    });
-    importHistoryModal.querySelector("#importHistoryStatusFilter").addEventListener("change", (event) => {
-      importHistoryState.page = 1;
-      importHistoryState.classification = event.target.value;
-      refreshImportHistory(false);
-    });
-    importHistoryModal.querySelector("#importHistoryDateFrom").addEventListener("change", (event) => {
-      importHistoryState.page = 1;
-      importHistoryState.dateFrom = event.target.value;
-      refreshImportHistory(false);
-    });
-    importHistoryModal.querySelector("#importHistoryDateTo").addEventListener("change", (event) => {
-      importHistoryState.page = 1;
-      importHistoryState.dateTo = event.target.value;
-      refreshImportHistory(false);
-    });
-    importHistoryModal.querySelector("#importHistoryPageSize").addEventListener("change", (event) => {
-      importHistoryState.page = 1;
-      importHistoryState.pageSize = Number(event.target.value || 20);
-      refreshImportHistory(false);
-    });
-    importHistoryModal.querySelector("#importHistoryPager").addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-history-page]");
-      if (!button || button.disabled) return;
-      importHistoryState.page = Number(button.dataset.historyPage || 1);
-      refreshImportHistory(false);
-    });
-  }
-
-  function importHistoryRequestPath() {
-    const params = new URLSearchParams({
-      page: String(importHistoryState.page),
-      pageSize: String(importHistoryState.pageSize),
-    });
-    if (importHistoryState.query) params.set("q", importHistoryState.query);
-    if (importHistoryState.classification) params.set("classification", importHistoryState.classification);
-    if (importHistoryState.dateFrom) params.set("dateFrom", importHistoryState.dateFrom);
-    if (importHistoryState.dateTo) params.set("dateTo", importHistoryState.dateTo);
-    return `/recent-imports?${params.toString()}`;
-  }
-
-  function historyPageNumbers(page, totalPages) {
-    const values = new Set([1, totalPages, page - 2, page - 1, page, page + 1, page + 2]);
-    return [...values].filter((value) => value >= 1 && value <= totalPages).sort((a, b) => a - b);
-  }
-
-  function renderImportHistoryPager(payload = {}) {
-    const pager = importHistoryModal?.querySelector("#importHistoryPager");
-    const pageSummary = importHistoryModal?.querySelector("#importHistoryPageSummary");
-    if (!pager || !pageSummary) return;
-    const page = Number(payload.page || 1);
-    const totalPages = Math.max(1, Number(payload.totalPages || 1));
-    pageSummary.textContent = `Page ${page} of ${totalPages}`;
-    const pageNumbers = historyPageNumbers(page, totalPages);
-    const buttons = [
-      `<button type="button" data-history-page="${Math.max(1, page - 1)}"${page <= 1 ? " disabled" : ""}>Previous</button>`,
-    ];
-    let previousNumber = 0;
-    pageNumbers.forEach((number) => {
-      if (previousNumber && number - previousNumber > 1) buttons.push('<span class="import-history-page-gap">…</span>');
-      buttons.push(`<button type="button" data-history-page="${number}" class="${number === page ? "is-active" : ""}"${number === page ? ' aria-current="page"' : ""}>${number}</button>`);
-      previousNumber = number;
-    });
-    buttons.push(`<button type="button" data-history-page="${Math.min(totalPages, page + 1)}"${page >= totalPages ? " disabled" : ""}>Next</button>`);
-    pager.innerHTML = buttons.join("");
-  }
-
-  function renderImportHistory(payload = {}) {
-    if (!importHistoryModal) return;
-    updateAdminImportTimestamp(payload);
-    const results = importHistoryModal.querySelector("#importHistoryResults");
-    const resultSummary = importHistoryModal.querySelector("#importHistoryResultSummary");
-    const lastChecked = importHistoryModal.querySelector("#importHistoryLastChecked");
-    const imports = Array.isArray(payload.imports)
-      ? payload.imports
-      : (Array.isArray(payload.recentImports) ? payload.recentImports : []);
-    const totalCount = Number(payload.totalCount ?? imports.length);
-    const page = Number(payload.page || 1);
-    const pageSize = Number(payload.pageSize || importHistoryState.pageSize);
-    const first = totalCount ? ((page - 1) * pageSize) + 1 : 0;
-    const last = totalCount ? Math.min(page * pageSize, totalCount) : 0;
-    resultSummary.textContent = totalCount
-      ? `Showing ${first}-${last} of ${totalCount} import result${totalCount === 1 ? "" : "s"}`
-      : "No import results match these filters";
-    lastChecked.textContent = payload.lastCheckedAt
-      ? `Last automation check ${formatTimestamp(payload.lastCheckedAt)}`
-      : "No automation check recorded";
-
-    if (!imports.length) {
-      results.innerHTML = `
-        <div class="import-history-empty">
-          <strong>No matching imports</strong>
-          <span>Adjust the search, status, or delivery-date filters.</span>
-        </div>`;
-      renderImportHistoryPager(payload);
-      return;
-    }
-
-    results.innerHTML = imports.map((item, index) => {
-      const status = classificationDetails(item.classification);
-      const sourceName = item.sourceName || `Delivery List ${item.deliveryDate || ""}`;
-      return `
-        <details class="import-history-entry automation-recent-import-row ${status.className}">
-          <summary class="import-history-entry-summary">
-            <span class="automation-recent-import-status">${escapeHtml(status.label)}</span>
-            <span class="import-history-entry-copy">
-              <strong>${escapeHtml(formatDeliveryDate(item.deliveryDate))}</strong>
-              <span>${escapeHtml(sourceName)}</span>
-              <small>${escapeHtml(recentImportMessage(item))}</small>
-            </span>
-            <span class="import-history-entry-meta">
-              <strong>${escapeHtml(formatTimestamp(item.importedAt))}</strong>
-              <span>${escapeHtml(item.importedBy || "system")}</span>
-              <i aria-hidden="true"></i>
-            </span>
-          </summary>
-          <div class="import-history-entry-details">
-            ${renderStageSummaries(item)}
-            <div class="import-history-entry-footnote">
-              <span><b>Source:</b> ${escapeHtml(item.importKind || "scanner import")}</span>
-              ${item.sourcePath ? `<span title="${escapeHtml(item.sourcePath)}"><b>Path:</b> ${escapeHtml(item.sourcePath)}</span>` : ""}
-            </div>
-          </div>
-        </details>`;
-    }).join("");
-    renderImportHistoryPager(payload);
-  }
-
-  async function refreshImportHistory(resetPage = false) {
-    createModal();
-    importHistoryModal = modal;
-    if (resetPage) importHistoryState.page = 1;
-    const results = importHistoryModal.querySelector("#importHistoryResults");
-    const previousScrollTop = results.scrollTop;
-    results.innerHTML = '<div class="import-history-loading"><span></span><strong>Loading import history...</strong></div>';
-    try {
-      const payload = await api(importHistoryRequestPath());
-      importHistoryState.page = Number(payload.page || importHistoryState.page);
-      importHistoryState.pageSize = Number(payload.pageSize || importHistoryState.pageSize);
-      renderImportHistory(payload);
-      results.scrollTop = resetPage ? 0 : previousScrollTop;
-      importHistoryHasNewResults = false;
-      const refreshButton = importHistoryModal.querySelector("#importHistoryRefreshBtn");
-      if (refreshButton) {
-        refreshButton.textContent = "Refresh";
-        refreshButton.classList.remove("has-new-results");
-      }
-      if (Array.isArray(payload.lists)) publishDeliveryCatalog(payload.lists, "import-history", true);
-    } catch (error) {
-      results.innerHTML = `<div class="import-history-empty is-error"><strong>Import history could not be loaded</strong><span>${escapeHtml(error.message)}</span></div>`;
-    }
-  }
-
-
-  async function refreshRecentImports(options = {}) {
-    clearTimeout(recentImportsRefreshTimer);
-    const refreshHistoryWindow = Boolean(options.refreshHistoryWindow);
-    await refreshLatestImportResult(true);
-    if (refreshHistoryWindow && importHistoryModal && !importHistoryModal.hidden) {
-      refreshImportHistory(false);
-    }
-  }
-
-  function scheduleRecentImportsRefresh(delay = 250, options = {}) {
-    clearTimeout(recentImportsRefreshTimer);
-    recentImportsRefreshTimer = setTimeout(() => refreshRecentImports(options), delay);
-  }
-
-  function adminPageIsVisible() {
-    const adminPage = document.getElementById("adminPage");
-    return Boolean(adminPage && !adminPage.hidden && document.visibilityState !== "hidden");
-  }
-
-  function observeAdminPage() {
-    const adminPage = document.getElementById("adminPage");
-    if (!adminPage) return;
-    const refreshAdminSources = () => {
-      if (adminPage.hidden) return;
-      refreshDeliveryListCatalog(true);
-      refreshLatestImportResult(true);
-    };
-    const observer = new MutationObserver(refreshAdminSources);
-    observer.observe(adminPage, { attributes: true, attributeFilter: ["hidden"] });
-    refreshAdminSources();
-  }
-
-  function actionCard(value, icon, title, description, tag, checked = false) {
-    return `
-      <label class="automation-action-card${checked ? " is-selected" : ""}" data-action-card="${value}">
-        <input type="radio" name="automationAction" value="${value}"${checked ? " checked" : ""}>
-        <span class="automation-card-icon ${icon}" aria-hidden="true"></span>
-        <span class="automation-card-copy">
-          <strong>${title}</strong>
-          <small>${description}</small>
-          <span class="automation-card-tag">${tag}</span>
-        </span>
-      </label>`;
-  }
-
-  function modeCard(value, icon, title, description, tag) {
-    return `
-      <label class="automation-mode-card" data-mode-card="${value}">
-        <input type="radio" name="automationMode" value="${value}">
-        <span class="automation-card-icon ${icon}" aria-hidden="true"></span>
-        <span class="automation-card-copy">
-          <strong>${title}</strong>
-          <small>${description}</small>
-          <span class="automation-card-tag">${tag}</span>
-        </span>
-      </label>`;
-  }
-
-  function createModal() {
-    if (modal) return;
-
-    backdrop = document.createElement("div");
-    backdrop.className = "delivery-automation-backdrop";
-    backdrop.hidden = true;
-
-    modal = document.createElement("section");
-    modal.className = "delivery-automation-modal";
-    modal.hidden = true;
-    modal.setAttribute("role", "dialog");
-    modal.setAttribute("aria-modal", "true");
-    modal.setAttribute("aria-labelledby", "deliveryAutomationTitle");
-    modal.innerHTML = `
-      <header class="delivery-automation-header">
-        <div class="delivery-automation-heading">
-          <span class="delivery-automation-eyebrow">Delivery List Management</span>
-          <h2 id="deliveryAutomationTitle">Automation Control Center</h2>
-          <p>Run a one-time update, choose what this computer does automatically, and review the latest result without leaving the scanner.</p>
-        </div>
-        <div class="delivery-automation-header-actions">
-          <span class="delivery-automation-health-pill" id="automationHeaderHealth"><i></i><span>Checking runtime</span></span>
-          <button class="delivery-automation-close" type="button" data-automation-close aria-label="Close automation window">×</button>
-        </div>
-      </header>
-
-      <nav class="delivery-automation-tabs" role="tablist" aria-label="Delivery list automation sections">
-        <button type="button" class="is-active" data-automation-tab="manual" role="tab" aria-selected="true"><span class="automation-tab-icon run" aria-hidden="true"></span>Run Manually</button>
-        <button type="button" data-automation-tab="settings" role="tab" aria-selected="false"><span class="automation-tab-icon schedule" aria-hidden="true"></span>Automatic Schedule</button>
-        <button type="button" data-automation-tab="status" role="tab" aria-selected="false"><span class="automation-tab-icon status" aria-hidden="true"></span>Status & Logs</button>
-        <button type="button" data-automation-tab="history" role="tab" aria-selected="false"><span class="automation-tab-icon history" aria-hidden="true"></span>Import History</button>
-      </nav>
-
-      <div class="delivery-automation-content">
-        <section class="delivery-automation-tab is-active" data-automation-panel="manual" role="tabpanel">
-          <div class="automation-section-heading">
-            <div><small>Step 1</small><h3>Choose what should happen</h3></div>
-            <span>Nothing runs until Start Update is selected.</span>
-          </div>
-
-          <div class="automation-action-grid">
-            ${actionCard("folder-import-only", "folder", "Import Temp Folder Only", "Reads existing delivery-list workbooks and imports changes into this scanner database. Does not contact A+W SQL.", "Floor computer", true)}
-            ${actionCard("sql-export-only", "database", "Query SQL & Export Only", "Queries A+W and publishes one workbook per delivery date without importing into this scanner database.", "Export only")}
-            ${actionCard("sql-export-and-import", "sync", "Query SQL, Export & Import", "Runs the complete central workflow: query A+W, publish dated workbooks, and immediately update the scanner.", "Central system")}
-          </div>
-
-          <div class="automation-section-heading">
-            <div><small>Step 2</small><h3>Choose the delivery-date window</h3></div>
-          </div>
-
-          <section class="automation-range-panel">
-            <div class="automation-range-intro">
-              <strong>Delivery dates to check</strong>
-              <p>Use one date for a targeted correction, a custom range for testing, or one of the saved automatic windows for a normal refresh.</p>
-              <div class="automation-run-summary" id="automationRunSummary">Import Temp Folder Only for one delivery date.</div>
-            </div>
-            <div class="automation-range-fields">
-              <label>
-                <span>Date window</span>
-                <select id="automationRangeMode">
-                  <option value="one-date">One delivery date</option>
-                  <option value="custom">Custom date range</option>
-                  <option value="incremental">Normal automatic window</option>
-                  <option value="full">Full safety refresh window</option>
-                </select>
-              </label>
-              <label data-automation-date-field="from"><span>Delivery date</span><input id="automationDateFrom" type="date"></label>
-              <label data-automation-date-field="to"><span>Through date</span><input id="automationDateTo" type="date"></label>
-            </div>
-          </section>
-
-          <footer class="automation-command-bar">
-            <div class="automation-command-state">
-              <strong id="automationManualHeading">Ready to run</strong>
-              <span id="automationManualMessage">Choose an operation and date window, then start the update.</span>
-            </div>
-            <button type="button" class="automation-primary-button" id="automationRunBtn">Start Update</button>
-          </footer>
-        </section>
-
-        <section class="delivery-automation-tab" data-automation-panel="settings" role="tabpanel">
-          <div class="automation-section-heading">
-            <div><small>Automatic behavior</small><h3>Choose this computer's role</h3></div>
-            <span id="automationScheduleBadge">Checking scheduled tasks...</span>
-          </div>
-
-          <div class="automation-mode-grid">
-            ${modeCard("disabled", "off", "Manual Only", "No scheduled delivery-list runs. All manual commands remain available.", "Disabled")}
-            ${modeCard("folder-import-only", "folder", "Import Folder", "Best for floor computers that can read the shared folder but cannot query A+W.", "Floor")}
-            ${modeCard("sql-export-only", "database", "Export SQL", "Queries A+W and keeps the Temp Delivery Lists folder current without importing locally.", "Publisher")}
-            ${modeCard("sql-export-and-import", "sync", "Full Workflow", "Queries, exports, and imports. Recommended for the authorized central host.", "Central")}
-          </div>
-
-          <section class="automation-settings-panel">
-            <div class="automation-settings-section">
-              <div class="automation-settings-section-heading">
-                <strong>Incremental schedule</strong>
-                <span>The frequent lightweight check used during the workday.</span>
-              </div>
-              <div class="automation-settings-grid">
-                <label><span>Run every</span><div class="automation-number-unit"><input id="automationInterval" type="number" min="5" max="1440" step="5"><b>minutes</b></div></label>
-                <label><span>Past delivery days</span><input id="automationPastDays" type="number" min="0" max="365"></label>
-                <label><span>Future delivery days</span><input id="automationFutureDays" type="number" min="0" max="365"></label>
-              </div>
-            </div>
-
-            <div class="automation-settings-section">
-              <div class="automation-settings-section-heading">
-                <strong>Daily full refresh</strong>
-                <span>The broader safety sweep that catches older and far-future changes.</span>
-              </div>
-              <div class="automation-settings-grid">
-                <label><span>Full refresh time</span><input id="automationFullTime" type="time"></label>
-                <label><span>Past delivery days</span><input id="automationFullPastDays" type="number" min="0" max="365"></label>
-                <label><span>Future delivery days</span><input id="automationFullFutureDays" type="number" min="0" max="365"></label>
-              </div>
-            </div>
-
-            <div class="automation-settings-section">
-              <div class="automation-settings-section-heading">
-                <strong>Files and notifications</strong>
-                <span>The bell keeps notification history even after a popup closes or scanning continues.</span>
-              </div>
-              <label class="automation-wide-field"><span>Temp Delivery Lists folder</span><input id="automationDestinationFolder" type="text" autocomplete="off"><small>Use the UNC path so scheduled tasks and floor computers do not depend on a mapped drive letter.</small></label>
-              <div class="automation-toggle-grid">
-                <label class="automation-toggle-card"><input id="automationNotifications" type="checkbox"><span><strong>Show brief popup alerts</strong><small>Display success and failure alerts while users are signed in. The bell history remains available separately.</small></span></label>
-                <label class="automation-toggle-card"><input id="automationNoChangeNotifications" type="checkbox"><span><strong>Notify when nothing changed</strong><small>Add an informational result after a successful check that found no workbook changes.</small></span></label>
-              </div>
-            </div>
-
-            <div class="automation-settings-actions">
-              <button type="button" class="automation-secondary-button" id="automationSaveBtn">Save Settings</button>
-              <button type="button" class="automation-primary-button" id="automationInstallScheduleBtn">Save & Install Schedule</button>
-              <button type="button" class="automation-danger-button" id="automationRemoveScheduleBtn">Disable Scheduled Tasks</button>
-            </div>
-            <p id="automationSettingsMessage" class="automation-inline-message">Settings have not been changed.</p>
-          </section>
-        </section>
-
-        <section class="delivery-automation-tab" data-automation-panel="status" role="tabpanel">
-          <div class="automation-section-heading">
-            <div><small>Runtime health</small><h3>Latest automation result</h3></div>
-            <button type="button" class="automation-text-button" id="automationRefreshStatusBtn">Refresh Status</button>
-          </div>
-
-          <section class="automation-status-hero" id="automationStatusHero">
-            <span class="automation-status-symbol" aria-hidden="true"></span>
-            <div class="automation-status-copy"><strong id="automationStatusTitle">Not run yet</strong><span id="automationStatusMessage">No automation result has been recorded.</span></div>
-            <span class="automation-status-time" id="automationStatusTime">No completed run yet</span>
-          </section>
-
-          <div id="automationStatusSummary" class="automation-status-summary"></div>
-          <details class="automation-log-details" id="automationLogDetails" open>
-            <summary>
-              <span>Live command log</span>
-              <small id="automationLogLineCount">0 lines</small>
-            </summary>
-            <div class="automation-log-toolbar">
-              <div class="automation-log-location">
-                <small>Log file</small>
-                <span id="automationLogPath">No log file recorded yet.</span>
-              </div>
-              <label class="automation-log-follow"><input id="automationLogFollow" type="checkbox" checked><span>Follow newest activity</span></label>
-              <button type="button" class="automation-text-button" id="automationCopyLogBtn">Copy Full Log</button>
-            </div>
-            <pre id="automationStatusLog" tabindex="0">No command output yet.</pre>
-          </details>
-        </section>
-
-        <section class="delivery-automation-tab import-history-workspace" data-automation-panel="history" role="tabpanel">
-          <div class="import-history-panel-heading">
-            <div>
-              <small>Delivery List Management</small>
-              <h3>Import Audit History</h3>
-              <p>Review the newest imports first, then search or filter older delivery-list results.</p>
-            </div>
-            <button class="automation-secondary-button" id="importHistoryRefreshBtn" type="button">Refresh</button>
-          </div>
-
-          <section class="import-history-toolbar" aria-label="Import history filters">
-            <label class="import-history-search search-box">
-              <span class="search-icon" aria-hidden="true"></span>
-              <input id="importHistorySearch" type="search" autocomplete="off" placeholder="Search date, filename, stage, user, status...">
-            </label>
-            <label>
-              <span>Status</span>
-              <select id="importHistoryStatusFilter">
-                <option value="">All statuses</option>
-                <option value="new">New</option>
-                <option value="updated">Updated</option>
-                <option value="new_updated">New + Updated</option>
-                <option value="no_changes">No Changes</option>
-                <option value="failed">Failed</option>
-              </select>
-            </label>
-            <label><span>Delivery date from</span><input id="importHistoryDateFrom" type="date"></label>
-            <label><span>Delivery date through</span><input id="importHistoryDateTo" type="date"></label>
-            <label>
-              <span>Rows per page</span>
-              <select id="importHistoryPageSize">
-                <option value="20">20</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-              </select>
-            </label>
-            <button class="automation-text-button import-history-clear" id="importHistoryClearBtn" type="button">Clear filters</button>
-          </section>
-
-          <section class="import-history-status-row">
-            <strong id="importHistoryResultSummary">Open Import History to load results.</strong>
-            <span id="importHistoryLastChecked">Waiting for current status</span>
-          </section>
-          <div class="import-history-results" id="importHistoryResults" aria-live="polite"></div>
-          <footer class="import-history-footer">
-            <span id="importHistoryPageSummary">Page 1 of 1</span>
-            <nav class="import-history-pager" id="importHistoryPager" aria-label="Import history pages"></nav>
-          </footer>
-        </section>
-      </div>`;
-
-    document.body.append(backdrop, modal);
-    wireImportHistoryPanel();
-
-    backdrop.addEventListener("click", closeModal);
-    modal.querySelector("[data-automation-close]").addEventListener("click", closeModal);
-    modal.querySelectorAll("[data-automation-tab]").forEach((button) => {
-      button.addEventListener("click", () => selectTab(button.dataset.automationTab));
-    });
-    modal.querySelectorAll('input[name="automationAction"]').forEach((input) => {
-      input.addEventListener("change", () => {
-        updateSelectedCards();
-        updateRunSummary();
-      });
-    });
-    modal.querySelectorAll('input[name="automationMode"]').forEach((input) => {
-      input.addEventListener("change", updateSelectedCards);
-    });
-    modal.querySelector("#automationRangeMode").addEventListener("change", () => {
-      updateDateVisibility();
-      updateRunSummary();
-    });
-    modal.querySelector("#automationDateFrom").addEventListener("change", updateRunSummary);
-    modal.querySelector("#automationDateTo").addEventListener("change", updateRunSummary);
-    modal.querySelector("#automationRunBtn").addEventListener("click", runManual);
-    modal.querySelector("#automationSaveBtn").addEventListener("click", () => saveSettings(false));
-    modal.querySelector("#automationInstallScheduleBtn").addEventListener("click", () => saveSettings(true));
-    modal.querySelector("#automationRemoveScheduleBtn").addEventListener("click", removeSchedule);
-    modal.querySelector("#automationRefreshStatusBtn").addEventListener("click", refreshDashboard);
-    modal.querySelector("#automationCopyLogBtn").addEventListener("click", copyFullLog);
-    modal.querySelector("#automationLogFollow").addEventListener("change", (event) => {
-      autoFollowLog = event.target.checked;
-      if (autoFollowLog) {
-        const log = modal.querySelector("#automationStatusLog");
-        log.scrollTop = log.scrollHeight;
-      }
-    });
-
-    modal.querySelector("#automationDateFrom").value = localDateIso();
-    modal.querySelector("#automationDateTo").value = localDateIso();
-    updateSelectedCards();
-    updateDateVisibility();
-    updateRunSummary();
-  }
-
-  function selectTab(name) {
-    modal.querySelectorAll("[data-automation-tab]").forEach((button) => {
-      const active = button.dataset.automationTab === name;
-      button.classList.toggle("is-active", active);
-      button.setAttribute("aria-selected", String(active));
-    });
-    modal.querySelectorAll("[data-automation-panel]").forEach((panel) => {
-      panel.classList.toggle("is-active", panel.dataset.automationPanel === name);
-    });
-    if (name === "history") {
-      refreshImportHistory(false);
-      window.setTimeout(() => modal.querySelector("#importHistorySearch")?.focus(), 30);
-    }
-  }
-
-  function updateSelectedCards() {
-    modal.querySelectorAll("[data-action-card]").forEach((card) => {
-      card.classList.toggle("is-selected", card.querySelector("input")?.checked === true);
-    });
-    modal.querySelectorAll("[data-mode-card]").forEach((card) => {
-      card.classList.toggle("is-selected", card.querySelector("input")?.checked === true);
-    });
-  }
-
-  function updateDateVisibility() {
-    const mode = modal.querySelector("#automationRangeMode").value;
-    const fromField = modal.querySelector('[data-automation-date-field="from"]');
-    const toField = modal.querySelector('[data-automation-date-field="to"]');
-    fromField.classList.toggle("automation-hidden", !["one-date", "custom"].includes(mode));
-    toField.classList.toggle("automation-hidden", mode !== "custom");
-    fromField.querySelector("span").textContent = mode === "one-date" ? "Delivery date" : "From date";
-  }
-
-  function updateRunSummary() {
-    const action = modal.querySelector('input[name="automationAction"]:checked')?.value || "folder-import-only";
-    const rangeMode = modal.querySelector("#automationRangeMode").value;
-    const dateFrom = modal.querySelector("#automationDateFrom").value;
-    const dateTo = modal.querySelector("#automationDateTo").value;
-    let suffix = RANGE_LABELS[rangeMode] || "the selected window";
-    if (rangeMode === "one-date" && dateFrom) suffix = `delivery date ${dateFrom}`;
-    if (rangeMode === "custom" && dateFrom && dateTo) suffix = `${dateFrom} through ${dateTo}`;
-    modal.querySelector("#automationRunSummary").textContent = `${ACTION_LABELS[action]} for ${suffix}.`;
-  }
-
-  function openModal() {
-    createModal();
-    backdrop.hidden = false;
-    modal.hidden = false;
-    document.body.classList.add("modal-open");
-    refreshDashboard();
-    scheduleRecentImportsRefresh(0);
-    const activeTab = modal.querySelector("[data-automation-tab].is-active")?.dataset.automationTab || "manual";
-    if (activeTab === "history") refreshImportHistory(false);
-    setTimeout(() => modal.querySelector("[data-automation-close]")?.focus(), 0);
-  }
-
-  function closeModal() {
-    if (!modal) return;
-    backdrop.hidden = true;
-    modal.hidden = true;
-    document.body.classList.remove("modal-open");
-    refreshRecentImports({ refreshHistoryWindow: false });
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = null;
-    }
-  }
-
-  function fillSettings(settings = {}) {
-    const mode = settings.automationMode || "sql-export-and-import";
-    const modeInput = modal.querySelector(`input[name="automationMode"][value="${CSS.escape(mode)}"]`);
-    if (modeInput) modeInput.checked = true;
-    modal.querySelector("#automationInterval").value = settings.intervalMinutes ?? 60;
-    modal.querySelector("#automationPastDays").value = settings.incrementalPastDays ?? 2;
-    modal.querySelector("#automationFutureDays").value = settings.incrementalFutureDays ?? 14;
-    modal.querySelector("#automationFullTime").value = settings.fullRefreshTime || "17:00";
-    modal.querySelector("#automationFullPastDays").value = settings.fullPastDays ?? 7;
-    modal.querySelector("#automationFullFutureDays").value = settings.fullFutureDays ?? 90;
-    modal.querySelector("#automationDestinationFolder").value = settings.destinationFolder || "";
-    modal.querySelector("#automationNotifications").checked = settings.notificationsEnabled !== false;
-    modal.querySelector("#automationNoChangeNotifications").checked = settings.notifyOnNoChanges !== false;
-    updateSelectedCards();
-  }
-
-  async function copyFullLog() {
-    const button = modal.querySelector("#automationCopyLogBtn");
-    const logText = modal.querySelector("#automationStatusLog").textContent || "";
-    const originalText = button.textContent;
-    try {
-      await navigator.clipboard.writeText(logText);
-      button.textContent = "Copied";
-    } catch {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(modal.querySelector("#automationStatusLog"));
-      selection.removeAllRanges();
-      selection.addRange(range);
-      button.textContent = "Log selected";
-    }
-    setTimeout(() => { button.textContent = originalText; }, 1600);
-  }
-
-  function renderStatus(dashboard) {
-    lastDashboard = dashboard;
-    const last = dashboard.lastRun || {};
-    const running = Boolean(dashboard.running || last.running);
-    const succeeded = last.succeeded;
-    const state = running ? "Automation is running" : succeeded === true ? "Update completed" : succeeded === false ? "Update failed" : "Not run yet";
-    const stateClass = running ? "is-running" : succeeded === true ? "is-success" : succeeded === false ? "is-error" : "";
-
-    const health = modal.querySelector("#automationHeaderHealth");
-    health.className = `delivery-automation-health-pill ${running ? "is-running" : dashboard.runtimeReady ? "is-ready" : ""}`;
-    health.querySelector("span").textContent = running ? "Update running" : dashboard.runtimeReady ? "Runtime ready" : "Runtime unavailable";
-
-    modal.querySelector("#automationScheduleBadge").textContent = dashboard.scheduleInstalled
-      ? "Scheduled tasks are installed"
-      : "Scheduled tasks are not installed";
-
-    const hero = modal.querySelector("#automationStatusHero");
-    hero.className = `automation-status-hero ${stateClass}`;
-    modal.querySelector("#automationStatusTitle").textContent = state;
-    modal.querySelector("#automationStatusMessage").textContent = running
-      ? last.currentStep || last.message || "Waiting for the next automation step..."
-      : last.message || "No automation result has been recorded.";
-    modal.querySelector("#automationStatusTime").textContent = running
-      ? `Started ${formatTimestamp(last.startedAt)}`
-      : formatTimestamp(last.completedAt);
-
-    const modeLabel = ACTION_LABELS[dashboard.settings?.automationMode] || (dashboard.settings?.automationMode === "disabled" ? "Manual Only" : "Not configured");
-    modal.querySelector("#automationStatusSummary").innerHTML = `
-      <article class="automation-status-card"><small>Runtime</small><strong>${dashboard.runtimeReady ? "Ready" : "Not installed"}</strong><span>${escapeHtml(dashboard.configPath || "Runtime configuration was not found.")}</span></article>
-      <article class="automation-status-card"><small>Automatic mode</small><strong>${escapeHtml(modeLabel)}</strong><span>${dashboard.scheduleInstalled ? "Windows scheduled tasks are active." : "Manual commands are still available."}</span></article>
-      <article class="automation-status-card"><small>Last command</small><strong>${escapeHtml(last.action ? ACTION_LABELS[last.action] || last.action : "No command")}</strong><span>Started by ${escapeHtml(last.startedBy || last.createdBy || "system")}</span></article>`;
-
-    const output = last.commandOutput || [last.stdout, last.stderr, last.error].filter(Boolean).join("\n\n");
-    const logElement = modal.querySelector("#automationStatusLog");
-    const wasNearBottom = logElement.scrollHeight - logElement.scrollTop - logElement.clientHeight < 48;
-    logElement.textContent = output || "No command output yet.";
-    const lineCount = Number(last.outputLineCount || (output ? output.split(/\r?\n/).length : 0));
-    modal.querySelector("#automationLogLineCount").textContent = `${lineCount} line${lineCount === 1 ? "" : "s"}${running ? " - live" : ""}`;
-    modal.querySelector("#automationLogPath").textContent = last.logPath || "No log file recorded yet.";
-    if (autoFollowLog || wasNearBottom) logElement.scrollTop = logElement.scrollHeight;
-    if (running || succeeded === false) modal.querySelector("#automationLogDetails").open = true;
-    modal.querySelector("#automationManualHeading").textContent = running ? "Update in progress" : succeeded === false ? "Last update failed" : "Ready to run";
-    modal.querySelector("#automationManualMessage").textContent = running
-      ? "The automation is running in the background. Status refreshes automatically."
-      : last.message || "Choose an operation and date window, then start the update.";
-
-    const completedRunKey = !running && last.completedAt
-      ? `${last.taskId || last.mode || "run"}|${last.completedAt}`
-      : "";
-    const importedResult = Array.isArray(last.importResults) && last.importResults.length > 0;
-    const importAction = ["folder-import-only", "sql-export-and-import"].includes(last.action)
-      || ["FolderImportOnly", "SqlExportAndImport"].includes(last.runAction);
-    if (completedRunKey && completedRunKey !== lastCompletedRunKey && (importedResult || importAction)) {
-      lastCompletedRunKey = completedRunKey;
-      scheduleRecentImportsRefresh(150);
-      window.setTimeout(() => refreshDeliveryListCatalog(true), 175);
-      window.setTimeout(() => refreshLatestImportResult(true), 200);
-    }
-
-    if (running) {
-      if (pollTimer) clearTimeout(pollTimer);
-      pollTimer = setTimeout(refreshDashboard, 1000);
-    }
-  }
-
-  async function refreshDashboard() {
-    if (!modal || modal.hidden) return;
-    try {
-      const dashboard = await api();
-      fillSettings(dashboard.settings);
-      renderStatus(dashboard);
-    } catch (error) {
-      modal.querySelector("#automationHeaderHealth").querySelector("span").textContent = "Status unavailable";
-      modal.querySelector("#automationManualMessage").textContent = error.message;
-      modal.querySelector("#automationSettingsMessage").textContent = error.message;
-    }
-  }
-
-  async function runManual() {
-    const button = modal.querySelector("#automationRunBtn");
-    const message = modal.querySelector("#automationManualMessage");
-    const heading = modal.querySelector("#automationManualHeading");
-    const action = modal.querySelector('input[name="automationAction"]:checked')?.value;
-    const rangeMode = modal.querySelector("#automationRangeMode").value;
-    button.disabled = true;
-    button.textContent = "Starting...";
-    heading.textContent = "Starting update";
-    message.textContent = "The command is being handed to the automation runtime.";
-    try {
-      await api("/run", {
-        method: "POST",
-        body: JSON.stringify({
-          action,
-          rangeMode,
-          dateFrom: modal.querySelector("#automationDateFrom").value,
-          dateTo: modal.querySelector("#automationDateTo").value,
-        }),
-      });
-      selectTab("status");
-      await refreshDashboard();
-    } catch (error) {
-      heading.textContent = "Could not start update";
-      message.textContent = error.message;
-    } finally {
-      button.disabled = false;
-      button.textContent = "Start Update";
-    }
-  }
-
-  function settingsPayload() {
-    return {
-      automationMode: modal.querySelector('input[name="automationMode"]:checked')?.value || "disabled",
-      intervalMinutes: modal.querySelector("#automationInterval").value,
-      incrementalPastDays: modal.querySelector("#automationPastDays").value,
-      incrementalFutureDays: modal.querySelector("#automationFutureDays").value,
-      fullRefreshTime: modal.querySelector("#automationFullTime").value,
-      fullPastDays: modal.querySelector("#automationFullPastDays").value,
-      fullFutureDays: modal.querySelector("#automationFullFutureDays").value,
-      destinationFolder: modal.querySelector("#automationDestinationFolder").value,
-      notificationsEnabled: modal.querySelector("#automationNotifications").checked,
-      notifyOnNoChanges: modal.querySelector("#automationNoChangeNotifications").checked,
-    };
-  }
-
-  async function saveSettings(installSchedule) {
-    const message = modal.querySelector("#automationSettingsMessage");
-    const saveButton = installSchedule ? modal.querySelector("#automationInstallScheduleBtn") : modal.querySelector("#automationSaveBtn");
-    saveButton.disabled = true;
-    message.textContent = installSchedule ? "Saving settings and updating Windows scheduled tasks..." : "Saving settings...";
-    try {
-      await api("/config", { method: "POST", body: JSON.stringify(settingsPayload()) });
-      if (installSchedule) {
-        await api("/schedule/install", { method: "POST", body: "{}" });
-      }
-      message.textContent = installSchedule
-        ? "Settings saved and scheduled tasks installed successfully."
-        : "Settings saved. Reinstall the schedule when you need trigger times changed.";
-      await refreshDashboard();
-    } catch (error) {
-      message.textContent = error.message;
-    } finally {
-      saveButton.disabled = false;
-    }
-  }
-
-  async function removeSchedule() {
-    const message = modal.querySelector("#automationSettingsMessage");
-    if (!window.confirm("Disable both delivery-list automation scheduled tasks on this computer? Manual commands will remain available.")) return;
-    message.textContent = "Disabling scheduled tasks...";
-    try {
-      await api("/schedule/remove", { method: "POST", body: "{}" });
-      message.textContent = "Scheduled tasks disabled. Manual commands remain available.";
-      await refreshDashboard();
-    } catch (error) {
-      message.textContent = error.message;
-    }
-  }
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    if (modal && !modal.hidden) closeModal();
-  });
-
-
-
-  document.addEventListener("dls:open-delivery-list-management-import", (event) => {
-    const item = event.detail?.notification;
-    if (item) openDeliveryListManagementFromNotification(item);
-  });
-
-  document.addEventListener("dls:delivery-list-import-history-changed", () => {
-    importHistoryHasNewResults = true;
-    const refreshButton = modal?.querySelector("#importHistoryRefreshBtn");
-    const historyPanel = modal?.querySelector('[data-automation-panel="history"]');
-    if (refreshButton && modal && !modal.hidden && historyPanel?.classList.contains("is-active")) {
-      refreshButton.textContent = "Refresh - new results";
-      refreshButton.classList.add("has-new-results");
-    }
-    scheduleRecentImportsRefresh(100, { refreshHistoryWindow: false });
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "hidden") {
-      refreshDeliveryListCatalog(true);
-      if (adminPageIsVisible()) refreshLatestImportResult(true);
-    }
-  });
-
-  document.addEventListener("click", (event) => {
-    const target = event.target.closest("#folderImportBtn");
-    if (!target) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    openModal();
-  }, true);
-
-  function initializeRecentImportHistory() {
-    observeAdminPage();
-    startDeliveryCatalogHeartbeat();
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initializeRecentImportHistory, { once: true });
-  } else {
-    initializeRecentImportHistory();
-  }
-})();
-
-/* ==========================================================================
-   NOTIFICATION CENTER AND LINE UPDATE REVIEW
-   ========================================================================== */
-(() => {
-  "use strict";
-
-  const HISTORY_ENDPOINT = "/api/notifications/history?limit=75";
-  const ACK_ENDPOINT = "/api/notifications/acknowledge";
-  const READ_ALL_ENDPOINT = "/api/notifications/read-all";
-  const SESSION_ENDPOINT = "/api/session";
-  const FLAGS_ENDPOINT = "/api/operations/line-flags";
-  const UPDATE_ACK_ENDPOINT = "/api/operations/line-flags/acknowledge";
-  const POLL_MS = 10000;
-
-  let host = null;
-  let button = null;
-  let badge = null;
-  let panel = null;
-  let list = null;
-  let summary = null;
-  let toast = null;
-  let toastTimer = 0;
-  let rejectToast = null;
-  let rejectToastTimer = 0;
-  let notifications = [];
-  let username = "anonymous";
-  let pollTimer = 0;
-  let newestAutomationId = 0;
-  let newestRejectId = 0;
-  let currentPromptListId = "";
-  let currentFlags = null;
-  const flagsByList = new Map();
-  const inflightByList = new Map();
-  const reviewedSignatureByList = new Map();
-
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  async function jsonFetch(url, options = {}) {
-    const response = await fetch(url, {
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-      ...options,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || payload.message || `Request failed (${response.status})`);
-    return payload;
-  }
-
-  function formatTime(value) {
-    const date = new Date(value || "");
-    if (Number.isNaN(date.getTime())) return String(value || "Unknown time");
-    const sameDay = date.toDateString() === new Date().toDateString();
-    return date.toLocaleString([], sameDay
-      ? { hour: "numeric", minute: "2-digit", second: "2-digit" }
-      : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  }
-
-  function typeSymbol(type) {
-    if (type === "success") return "✓";
-    if (type === "warning") return "!";
-    if (type === "error") return "×";
-    return "i";
-  }
-
-  function isAutomationNotification(item) {
-    return String(item?.details?.source || "").trim().toLowerCase() === "sql-delivery-automation";
-  }
-
-  function isInternalRejectNotification(item) {
-    return String(item?.details?.source || "").trim().toLowerCase() === "internal-reject";
-  }
-
-  function storageKey() {
-    return `dls.notification-center.last-seen.v138.${username.toLowerCase()}`;
-  }
-
-  function lastSeenId() {
-    const value = Number.parseInt(localStorage.getItem(storageKey()) || "0", 10);
-    return Number.isFinite(value) ? value : 0;
-  }
-
-  function setLastSeenId(value) {
-    localStorage.setItem(storageKey(), String(Math.max(0, Number(value || 0))));
-  }
-
-  function ensureUi() {
-    if (host) return;
-    const actions = document.querySelector(".header-quick-actions") || document.querySelector(".header-actions");
-    if (!actions) return;
-
-    host = document.createElement("span");
-    host.className = "notification-center-host";
-    host.innerHTML = `
-      <button class="tool-button header-utility-button notification-center-button" id="notificationCenterBtn" type="button" aria-label="Open notifications" aria-expanded="false" title="Notifications">
-        <span class="notification-center-bell" aria-hidden="true"></span>
-        <span class="notification-center-badge" id="notificationCenterBadge" hidden>0</span>
-      </button>`;
-    const languageButton = actions.querySelector("#languageToggleBtn");
-    if (languageButton) actions.insertBefore(host, languageButton);
-    else actions.prepend(host);
-
-    button = host.querySelector("#notificationCenterBtn");
-    badge = host.querySelector("#notificationCenterBadge");
-
-    panel = document.createElement("aside");
-    panel.className = "notification-center-panel";
-    panel.hidden = true;
-    panel.innerHTML = `
-      <header class="notification-center-header">
-        <div class="notification-center-header-copy"><small>System messages</small><strong>Notifications</strong></div>
-        <button class="notification-center-close" type="button" aria-label="Close notifications">×</button>
-      </header>
-      <div class="notification-center-toolbar"><span id="notificationCenterSummary">Checking notifications...</span></div>
-      <div class="notification-center-list" id="notificationCenterList"></div>
-      <footer class="notification-center-footer">Import notifications open their exact saved run. New and updated delivery-list lines remain personal to your account until you mark them reviewed.</footer>`;
-    document.body.append(panel);
-    list = panel.querySelector("#notificationCenterList");
-    summary = panel.querySelector("#notificationCenterSummary");
-
-    toast = document.createElement("aside");
-    toast.className = "automation-update-toast";
-    toast.hidden = true;
-    toast.setAttribute("role", "status");
-    toast.setAttribute("aria-live", "polite");
-    document.body.append(toast);
-
-    rejectToast = document.createElement("aside");
-    rejectToast.className = "internal-reject-notification-toast";
-    rejectToast.hidden = true;
-    rejectToast.setAttribute("role", "alert");
-    rejectToast.setAttribute("aria-live", "assertive");
-    document.body.append(rejectToast);
-
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (panel.hidden) openPanel();
-      else closePanel();
-    });
-    panel.querySelector(".notification-center-close")?.addEventListener("click", closePanel);
-    panel.addEventListener("click", (event) => event.stopPropagation());
-    document.addEventListener("click", closePanel);
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        closePanel();
-        closeUpdatePrompt();
-      }
-    });
-    window.addEventListener("resize", positionPanel);
-  }
-
-  function positionPanel() {
-    if (!panel || panel.hidden || !button) return;
-    const rect = button.getBoundingClientRect();
-    const width = Math.min(410, window.innerWidth - 24);
-    panel.style.left = `${Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width))}px`;
-    panel.style.top = `${Math.min(window.innerHeight - 80, rect.bottom + 9)}px`;
-  }
-
-  function openPanel() {
-    if (!panel) return;
-    panel.hidden = false;
-    button?.classList.add("is-open");
-    button?.setAttribute("aria-expanded", "true");
-    positionPanel();
-    renderNotifications();
-    refreshNotifications({ markRead: true });
-  }
-
-  function closePanel() {
-    if (!panel) return;
-    panel.hidden = true;
-    button?.classList.remove("is-open");
-    button?.setAttribute("aria-expanded", "false");
-  }
-
-  function renderBadge() {
-    if (!badge) return;
-    const unread = notifications.filter((item) => Number(item.id || 0) > lastSeenId()).length;
-    badge.hidden = unread === 0;
-    badge.textContent = unread > 99 ? "99+" : String(unread);
-    button?.setAttribute("aria-label", unread ? `Open notifications, ${unread} unread` : "Open notifications");
-  }
-
-  function renderNotifications() {
-    renderBadge();
-    if (!list || !summary) return;
-    const unread = notifications.filter((item) => Number(item.id || 0) > lastSeenId()).length;
-    summary.textContent = unread ? `${unread} unread notification${unread === 1 ? "" : "s"}` : "You're caught up";
-    if (!notifications.length) {
-      list.innerHTML = `<div class="notification-center-empty"><div><strong>No notifications yet</strong><span>Automation results and system messages will appear here.</span></div></div>`;
-      return;
-    }
-    list.innerHTML = notifications.map((item) => {
-      const id = Number(item.id || 0);
-      const type = String(item.type || "notice").toLowerCase();
-      const unreadClass = id > lastSeenId() ? " is-unread" : "";
-      const action = isAutomationNotification(item)
-        ? "Open saved import run"
-        : isInternalRejectNotification(item)
-          ? "Open reject tracking"
-          : "View details";
-      return `
-        <button class="notification-center-item${unreadClass}" type="button" data-notification-id="${id}" data-type="${escapeHtml(type)}">
-          <span class="notification-center-type-icon" aria-hidden="true">${typeSymbol(type)}</span>
-          <span class="notification-center-item-copy">
-            <strong>${escapeHtml(item.title || "Notification")}</strong>
-            <span>${escapeHtml(item.message || "")}</span>
-            <small>${escapeHtml(formatTime(item.createdAt))} · ${escapeHtml(action)}</small>
-          </span>
-        </button>`;
-    }).join("");
-    list.querySelectorAll("[data-notification-id]").forEach((itemButton) => {
-      itemButton.addEventListener("click", () => {
-        const id = Number(itemButton.dataset.notificationId || 0);
-        const item = notifications.find((entry) => Number(entry.id || 0) === id);
-        if (item) openNotification(item);
-      });
-    });
-  }
-
-  async function markNotification(notificationId) {
-    if (!notificationId) return;
-    setLastSeenId(Math.max(lastSeenId(), notificationId));
-    renderNotifications();
-    try {
-      await jsonFetch(ACK_ENDPOINT, { method: "POST", body: JSON.stringify({ notificationId }) });
-    } catch (error) {
-      console.warn("Notification acknowledgement failed", error);
-    }
-  }
-
-  async function markAllRead() {
-    const maxId = notifications.reduce((value, item) => Math.max(value, Number(item.id || 0)), 0);
-    setLastSeenId(maxId);
-    renderNotifications();
-    try {
-      await jsonFetch(READ_ALL_ENDPOINT, { method: "POST", body: "{}" });
-    } catch (error) {
-      console.warn("Notification read-all failed", error);
-    }
-  }
-
-  async function openNotification(item) {
-    await markNotification(Number(item.id || 0));
-    if (isInternalRejectNotification(item)) {
-      closePanel();
-      dismissRejectToast();
-      document.dispatchEvent(new CustomEvent("dls:open-internal-reject-notification", {
-        detail: { notification: item },
-      }));
-      return;
-    }
-    if (!isAutomationNotification(item)) return;
-    closePanel();
-    dismissToast();
-    document.dispatchEvent(new CustomEvent("dls:open-delivery-list-management-import", {
-      detail: { notification: item },
-    }));
-  }
-
-  function dismissToast() {
-    clearTimeout(toastTimer);
-    if (!toast) return;
-    toast.classList.remove("is-visible");
-    window.setTimeout(() => {
-      if (!toast.classList.contains("is-visible")) toast.hidden = true;
-    }, 180);
-  }
-
-  function dismissRejectToast() {
-    clearTimeout(rejectToastTimer);
-    if (!rejectToast) return;
-    rejectToast.classList.remove("is-visible");
-    window.setTimeout(() => {
-      if (!rejectToast.classList.contains("is-visible")) rejectToast.hidden = true;
-    }, 180);
-  }
-
-  function showInternalRejectToast(item) {
-    if (!rejectToast || !item) return;
-    const details = item.details || {};
-    rejectToast.innerHTML = `
-      <span class="internal-reject-toast-icon" aria-hidden="true">IR</span>
-      <span class="internal-reject-toast-copy">
-        <small>Internal reject reported</small>
-        <strong>${escapeHtml(item.title || "Internal reject logged")}</strong>
-        <span>${escapeHtml(item.message || "A piece was rejected and restarted.")}</span>
-        <b>Order ${escapeHtml(details.order || "-")} · Item ${escapeHtml(details.item || "-")} · ${escapeHtml(details.location || "Location not specified")}</b>
-      </span>
-      <button class="internal-reject-toast-open" type="button">View</button>
-      <button class="internal-reject-toast-ack" type="button">Acknowledge</button>`;
-    rejectToast.querySelector(".internal-reject-toast-open")?.addEventListener("click", () => openNotification(item));
-    rejectToast.querySelector(".internal-reject-toast-ack")?.addEventListener("click", async () => {
-      await markNotification(Number(item.id || 0));
-      dismissRejectToast();
-    });
-    rejectToast.hidden = false;
-    requestAnimationFrame(() => rejectToast.classList.add("is-visible"));
-    clearTimeout(rejectToastTimer);
-    rejectToastTimer = window.setTimeout(dismissRejectToast, 30000);
-    window.playAppSound?.("notification", { force: true });
-  }
-
-  function showAutomationToast(item) {
-    if (!toast || !item) return;
-    const type = String(item.type || "notice").toLowerCase();
-    toast.dataset.type = type;
-    toast.innerHTML = `
-      <span class="automation-update-toast-icon" aria-hidden="true">${typeSymbol(type)}</span>
-      <span class="automation-update-toast-copy">
-        <strong>${escapeHtml(item.title || "Delivery lists updated")}</strong>
-        <span>${escapeHtml(item.message || "The delivery-list catalog has been checked.")}</span>
-      </span>
-      <button class="automation-update-toast-view" type="button">View run</button>
-      <button class="automation-update-toast-close" type="button" aria-label="Dismiss notification">×</button>`;
-    toast.querySelector(".automation-update-toast-view")?.addEventListener("click", () => openNotification(item));
-    toast.querySelector(".automation-update-toast-close")?.addEventListener("click", dismissToast);
-    toast.hidden = false;
-    requestAnimationFrame(() => toast.classList.add("is-visible"));
-    clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(dismissToast, 20000);
-  }
-
-  async function refreshNotifications(options = {}) {
-    try {
-      const payload = await jsonFetch(HISTORY_ENDPOINT);
-      notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
-      const newest = notifications.filter(isAutomationNotification).reduce(
-        (candidate, item) => Number(item.id || 0) > Number(candidate?.id || 0) ? item : candidate,
-        null,
-      );
-      const nextId = Number(newest?.id || 0);
-      if (nextId > newestAutomationId) {
-        const shouldToast = newestAutomationId > 0;
-        newestAutomationId = nextId;
-        if (shouldToast) {
-          // A completed import can create new per-user line notices without changing
-          // the active list selection. Drop cached flags before the catalog refresh so
-          // the next render cannot reuse a stale "no updates" response.
-          flagsByList.clear();
-          reviewedSignatureByList.clear();
-          showAutomationToast(newest);
-          document.dispatchEvent(new CustomEvent("dls:delivery-list-import-history-changed", { detail: { notification: newest } }));
-          const activeListId = String(state?.activeListId || document.getElementById("deliveryStageSelect")?.value || "").trim();
-          if (activeListId) {
-            window.setTimeout(() => loadFlags(activeListId, { force: true, prompt: false }).catch(() => {}), 900);
-          }
-        }
-      }
-      const newestReject = notifications.filter(isInternalRejectNotification).reduce(
-        (candidate, item) => Number(item.id || 0) > Number(candidate?.id || 0) ? item : candidate,
-        null,
-      );
-      const nextRejectId = Number(newestReject?.id || 0);
-      if (nextRejectId > newestRejectId) {
-        const shouldToastReject = newestRejectId > 0;
-        newestRejectId = nextRejectId;
-        if (shouldToastReject && nextRejectId > lastSeenId()) showInternalRejectToast(newestReject);
-      }
-      if (options.markRead) await markAllRead();
-      else renderNotifications();
-    } catch (error) {
-      if (summary) summary.textContent = "Notifications unavailable";
-    } finally {
-      clearTimeout(pollTimer);
-      pollTimer = window.setTimeout(refreshNotifications, POLL_MS);
-    }
-  }
-
-  function normalizeFlags(payload, listId) {
-    const items = Array.isArray(payload?.items) ? payload.items : [];
-    const noticeIds = Array.isArray(payload?.noticeIds)
-      ? payload.noticeIds.map(Number).filter((id) => id > 0).sort((a, b) => a - b)
-      : items.flatMap((item) => item.userUpdateNoticeIds || []).map(Number).filter((id) => id > 0).sort((a, b) => a - b);
-    return {
-      listId,
-      pendingLineCount: Number(payload?.pendingLineCount || items.filter((item) => item.hasUnseenUpdate).length || 0),
-      newLineCount: Number(payload?.newLineCount || items.filter((item) => item.userUpdateState === "new").length || 0),
-      updatedLineCount: Number(payload?.updatedLineCount || items.filter((item) => item.userUpdateState === "updated").length || 0),
-      noticeIds: [...new Set(noticeIds)],
-      signature: [...new Set(noticeIds)].join(","),
-      items,
-    };
-  }
-
-  function applyFlagsToCurrentList(flags, options = {}) {
-    if (typeof state !== "object" || String(state.activeListId || "") !== String(flags?.listId || "")) return;
-    const byId = new Map((flags.items || []).map((item) => [String(item.lineItemId || item.id || ""), item]));
-    state.items = (state.items || []).map((item) => {
-      const current = byId.get(String(item.id || "")) || {};
-      return {
-        ...item,
-        manualOnly: Boolean(current.manualOnly),
-        manualSource: String(current.manualSource || ""),
-        internalRejectCount: Number(current.internalRejectCount || 0),
-        lastRejectReason: String(current.lastRejectReason || ""),
-        lastRejectLocation: String(current.lastRejectLocation || ""),
-        lastRejectedAt: String(current.lastRejectedAt || ""),
-        hasUnseenUpdate: Boolean(current.hasUnseenUpdate),
-        userUpdateState: String(current.userUpdateState || ""),
-        userUpdateNoticeIds: Array.isArray(current.userUpdateNoticeIds) ? current.userUpdateNoticeIds.slice() : [],
-      };
-    });
-    currentFlags = flags;
-    if (options.render !== false && typeof renderScanPage === "function") renderScanPage();
-    renderReviewControl(flags);
-    document.dispatchEvent(new CustomEvent("dls:line-update-flags-applied", { detail: flags }));
-  }
-
-  async function loadFlags(listId, options = {}) {
-    const cleanListId = String(listId || "").trim();
-    if (!cleanListId) return normalizeFlags({}, "");
-    if (!options.force && flagsByList.has(cleanListId)) {
-      const cached = flagsByList.get(cleanListId);
-      applyFlagsToCurrentList(cached, options);
-      if (options.prompt) maybeShowUpdatePrompt(cached);
-      return cached;
-    }
-    if (inflightByList.has(cleanListId)) return inflightByList.get(cleanListId);
-    const request = jsonFetch(`${FLAGS_ENDPOINT}?listId=${encodeURIComponent(cleanListId)}`)
-      .then((payload) => {
-        const flags = normalizeFlags(payload, cleanListId);
-        flagsByList.set(cleanListId, flags);
-        applyFlagsToCurrentList(flags, options);
-        if (options.prompt) maybeShowUpdatePrompt(flags);
-        return flags;
-      })
-      .finally(() => inflightByList.delete(cleanListId));
-    inflightByList.set(cleanListId, request);
-    return request;
-  }
-
-  function reviewControlElements() {
-    return {
-      control: document.getElementById("scanUpdateReviewControl"),
-      summary: document.getElementById("scanUpdateReviewSummary"),
-      review: document.getElementById("scanUpdateReviewBtn"),
-      acknowledge: document.getElementById("scanUpdateMarkReviewedBtn"),
-    };
-  }
-
-  function renderReviewControl(flags = currentFlags) {
-    const elements = reviewControlElements();
-    const activeListId = String(state?.activeListId || "");
-    if (!elements.control) return;
-    if (!flags || !flags.pendingLineCount || String(flags.listId) !== activeListId) {
-      elements.control.hidden = true;
-      return;
-    }
-
-    const updatedFilterActive = Boolean(state?.activeFilters?.has?.("updated"));
-    const reviewComplete = reviewedSignatureByList.get(flags.listId) === flags.signature && Boolean(flags.signature);
-    const parts = [];
-    if (flags.newLineCount) parts.push(`${flags.newLineCount} new`);
-    if (flags.updatedLineCount) parts.push(`${flags.updatedLineCount} updated`);
-    if (elements.summary) {
-      elements.summary.textContent = `${parts.join(" · ") || `${flags.pendingLineCount} changed`} line${flags.pendingLineCount === 1 ? "" : "s"} for your account`;
-    }
-    if (elements.review) {
-      elements.review.textContent = updatedFilterActive ? "Updates Shown" : "Review Updates";
-      elements.review.disabled = updatedFilterActive;
-      elements.review.onclick = () => reviewUpdates(flags);
-    }
-    if (elements.acknowledge) {
-      elements.acknowledge.hidden = !updatedFilterActive;
-      elements.acknowledge.disabled = !updatedFilterActive || !reviewComplete;
-      elements.acknowledge.textContent = "Mark Reviewed";
-      elements.acknowledge.title = reviewComplete
-        ? "Clear the displayed New/Updated status for your account"
-        : "Use Review Updates first so the changed lines are displayed";
-      elements.acknowledge.onclick = () => acknowledgeUpdates(flags);
-    }
-    elements.control.classList.toggle("is-reviewing", updatedFilterActive);
-    elements.control.hidden = false;
-  }
-
-  function closeUpdatePrompt() {
-    document.getElementById("lineUpdateReviewPromptV135")?.remove();
-    currentPromptListId = "";
-  }
-
-  function maybeShowUpdatePrompt(flags) {
-    if (!flags?.pendingLineCount || !flags.signature) return;
-    if (currentPromptListId === flags.listId && document.getElementById("lineUpdateReviewPromptV135")) return;
-    closeUpdatePrompt();
-    currentPromptListId = flags.listId;
-    const shell = document.createElement("div");
-    shell.id = "lineUpdateReviewPromptV135";
-    shell.className = "line-update-review-prompt-shell";
-    shell.innerHTML = `
-      <section class="line-update-review-prompt" role="dialog" aria-modal="false" aria-labelledby="lineUpdatePromptTitle">
-        <button class="line-update-review-close" type="button" aria-label="Close">×</button>
-        <span class="line-update-review-icon" aria-hidden="true">!</span>
-        <div>
-          <small>Delivery list updated</small>
-          <h2 id="lineUpdatePromptTitle">${flags.pendingLineCount} changed line${flags.pendingLineCount === 1 ? "" : "s"} need review</h2>
-          <p>${flags.newLineCount ? `${flags.newLineCount} new` : ""}${flags.newLineCount && flags.updatedLineCount ? " · " : ""}${flags.updatedLineCount ? `${flags.updatedLineCount} updated` : ""}. Review them now, then use Mark Reviewed beside Filters.</p>
-        </div>
-        <button class="line-update-review-primary" type="button">Review now</button>
-      </section>`;
-    document.body.append(shell);
-    shell.querySelector(".line-update-review-close")?.addEventListener("click", closeUpdatePrompt);
-    shell.querySelector(".line-update-review-primary")?.addEventListener("click", () => {
-      closeUpdatePrompt();
-      reviewUpdates(flags);
-    });
-  }
-
-  function reviewUpdates(flags = currentFlags) {
-    if (!flags?.signature) return;
-    if (typeof state === "object") {
-      state.activeFilters?.add?.("updated");
-      state.pageIndex = 1;
-    }
-    reviewedSignatureByList.set(flags.listId, flags.signature);
-    if (typeof renderScanPage === "function") renderScanPage();
-    renderReviewControl(flags);
-    document.getElementById("listPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  async function acknowledgeUpdates(flags = currentFlags) {
-    if (!flags?.listId || !flags?.signature) return;
-    if (reviewedSignatureByList.get(flags.listId) !== flags.signature) {
-      if (typeof showFloatingNotice === "function") showFloatingNotice("Review the updated lines before marking them reviewed.", "notice");
-      return;
-    }
-    const buttonElement = document.getElementById("scanUpdateMarkReviewedBtn");
-    if (buttonElement) {
-      buttonElement.disabled = true;
-      buttonElement.textContent = "Saving...";
-    }
-    try {
-      await jsonFetch(UPDATE_ACK_ENDPOINT, {
-        method: "POST",
-        body: JSON.stringify({ listId: flags.listId, noticeIds: flags.noticeIds }),
-      });
-      flagsByList.delete(flags.listId);
-      reviewedSignatureByList.delete(flags.listId);
-      const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
-      if (refreshed.pendingLineCount > 0) {
-        throw new Error("New updates arrived while you were reviewing. Review the latest changes before clearing them.");
-      }
-      if (typeof state === "object") {
-        state.activeFilters?.delete?.("updated");
-        state.pageIndex = 1;
-      }
-      if (typeof renderScanPage === "function") renderScanPage();
-      if (typeof showSaveConfirmation === "function") showSaveConfirmation("The new and updated status is cleared for your account on this list.");
-      renderReviewControl(refreshed);
-      document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", { detail: { listId: flags.listId } }));
-    } catch (error) {
-      if (buttonElement) {
-        buttonElement.disabled = false;
-        buttonElement.textContent = "Try again";
-      }
-      if (typeof showFloatingNotice === "function") showFloatingNotice(error.message, "error");
-    }
-  }
-
-  async function initialize() {
-    document.getElementById("userLineUpdateBannerV135")?.remove();
-    ensureUi();
-    if (!host) {
-      window.setTimeout(initialize, 500);
-      return;
-    }
-    try {
-      const session = await jsonFetch(SESSION_ENDPOINT);
-      if (!session.authenticated) {
-        host.hidden = true;
-        window.setTimeout(initialize, 3000);
-        return;
-      }
-      username = String(session.user?.username || session.user?.displayName || "user");
-      host.hidden = false;
-      await refreshNotifications();
-      const listId = String(document.getElementById("deliveryStageSelect")?.value || "");
-      if (listId) loadFlags(listId, { force: true, prompt: false }).catch(() => {});
-    } catch {
-      host.hidden = true;
-      window.setTimeout(initialize, 3000);
-    }
-  }
-
-  window.DLSLineUpdates = {
-    applyPayload: (payload, listId, options = {}) => {
-      const flags = normalizeFlags(payload, String(listId || ""));
-      flagsByList.set(flags.listId, flags);
-      applyFlagsToCurrentList(flags, options);
-      if (options.prompt) maybeShowUpdatePrompt(flags);
-      return flags;
-    },
-    loadAndApply: loadFlags,
-    refresh: (options = {}) => loadFlags(String(state?.activeListId || ""), { force: true, ...options }),
-    review: reviewUpdates,
-    acknowledge: acknowledgeUpdates,
-    getCurrent: () => currentFlags,
-    getCached: (listId) => flagsByList.get(String(listId || "")) || null,
-    clearCache: (listId = "") => listId ? flagsByList.delete(String(listId)) : flagsByList.clear(),
-  };
-
-  document.addEventListener("dls:scan-filters-changed", () => renderReviewControl(currentFlags));
-  document.addEventListener("dls:user-line-updates-reviewed", () => renderReviewControl(currentFlags));
-
-  document.addEventListener("dls:delivery-list-catalog-synced", () => {
-    flagsByList.clear();
-    const listId = String(state?.activeListId || "");
-    if (listId) loadFlags(listId, { force: true, prompt: false }).catch(() => {});
-  });
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-      refreshNotifications();
-      const listId = String(state?.activeListId || "");
-      if (listId) loadFlags(listId, { force: true, prompt: false }).catch(() => {});
-    }
-  });
-
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
-  else initialize();
-})();

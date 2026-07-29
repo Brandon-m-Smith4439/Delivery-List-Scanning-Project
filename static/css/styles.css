@@ -3569,18 +3569,6 @@ select:disabled,
 
 
 
-.desktop-footer {
-  min-height: 54px;
-  padding: 0 28px;
-  background: var(--navy);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 0;
-}
-
-
 
 /* --------------------------------------------------------------------------
    07B. Print / Export delivery lists
@@ -4571,20 +4559,10 @@ select:disabled,
 
 
 
-.scanner-select,
-.footer-actions button {
-  color: #fff;
-  border: 0;
-  background: transparent;
-  height: 34px;
-  padding: 0 10px;
-}
-
-
 
 .footer-actions {
   display: flex;
-  gap: 24px;
+  gap: 8px;
 }
 
 

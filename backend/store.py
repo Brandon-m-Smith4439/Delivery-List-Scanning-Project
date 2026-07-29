@@ -249,6 +249,8 @@ DEFAULT_BAY_AUTO_ASSIGN_SETTINGS = {
     "manualAssignTypes": ["Tall", "Oversize"],
 }
 SUPPORTED_IMPORT_EXTENSIONS = {".json", ".xlsx", ".xlsm", ".csv"}
+BAY_EVENT_RETENTION_DAYS = 7
+BAY_EVENT_CLEANUP_INTERVAL_SECONDS = 60 * 60
 XLSX_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 XLSX_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 XLSX_PACKAGE_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
@@ -3255,12 +3257,16 @@ class BaseDeliveryStore:
         """
         raise NotImplementedError
 
-    def get_bay_events(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Purpose: Read bay events for the delivery-list scanner workflow.
+    def get_bay_events(self, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+        """Read a bounded slice of retained physical Bay Map scan activity."""
+        raise NotImplementedError
 
-        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
-        """
+    def get_bay_events_page(self, page: int = 1, page_size: int = 25) -> dict[str, Any]:
+        """Read one server-paginated page of retained Bay Map scan activity."""
+        raise NotImplementedError
+
+    def cleanup_old_bay_events(self, retention_days: int = BAY_EVENT_RETENTION_DAYS, *, force: bool = False) -> int:
+        """Delete expired Bay Map activity without touching other operational histories."""
         raise NotImplementedError
 
     def indian_trail_summary(self, delivery_date: str = "") -> dict[str, Any]:
@@ -3388,6 +3394,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.config = config
         self.database_path = Path(config.database_path)
         self.sample_path = Path(config.sample_path)
+        self._last_bay_event_cleanup_monotonic = 0.0
 
     def connect(self) -> sqlite3.Connection:
         """Purpose: Run the connect workflow for the delivery-list scanner.
@@ -3447,6 +3454,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 self.seed_bay_auto_assign_settings(con)
                 self.seed_racks(con)
                 self.repair_route_stage_memberships_if_needed(con)
+            self.cleanup_old_bay_events(force=True)
         except Exception as exc:
             suffix = f" Verified backup preserved at {backup_path}." if backup_path else ""
             raise MigrationError(f"Database initialization failed.{suffix}") from exc
@@ -7951,6 +7959,96 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         matches = [row for row in rows if int(row["order_no"]) == order_no]
         return matches[0] if len(matches) == 1 else None
 
+    def recover_bay_external_scan(self, raw_scan: str, rows: list[Any]) -> tuple[Any | None, str, str]:
+        """Resolve alternate product labels used by Bay Map Add and Remove.
+
+        Effects: Performs a read-only comparison against the rows already loaded by
+        the caller. It accepts an exact stored barcode/source/job value and labels
+        such as ``43273429.30`` where the left side identifies the job/source and
+        the right side identifies the line item.
+        Flow: Scores exact matches ahead of contains-style recovery, returns only a
+        unique highest-confidence row, and reports ambiguity instead of guessing.
+        """
+        text = str(raw_scan or "").strip()
+        normalized = normalized_match_text(text)
+        clean = clean_barcode(text)
+        if not normalized:
+            return None, clean, "No unique delivery-list match"
+
+        separated = re.fullmatch(r"\s*(\d{4,12})\s*[./\\\-\s]+\s*(\d{1,4})\s*", text)
+        reference_base = normalized_match_text(separated.group(1)) if separated else ""
+        reference_item = int(separated.group(2)) if separated else None
+        scored: list[tuple[int, Any]] = []
+
+        for row in rows:
+            barcode_text = normalized_match_text(row_value(row, "barcode", ""))
+            source_text = normalized_match_text(row_value(row, "source_id", ""))
+            job_text = normalized_match_text(row_value(row, "job", ""))
+            order_text = normalized_match_text(row_value(row, "order_no", ""))
+            item_text = digits_only(row_value(row, "item_no", ""))
+            score = 0
+
+            if barcode_text and normalized == barcode_text:
+                score = max(score, 500)
+            if source_text and normalized == source_text:
+                score = max(score, 480)
+            if job_text and normalized == job_text:
+                score = max(score, 450)
+            if order_text and normalized == order_text:
+                score = max(score, 440)
+
+            if reference_base and reference_item is not None:
+                try:
+                    row_item = int(item_text or 0)
+                except ValueError:
+                    row_item = -1
+                if row_item == reference_item:
+                    if order_text and reference_base == order_text:
+                        score = max(score, 530)
+                    elif order_text and reference_base in order_text:
+                        score = max(score, 485)
+                    if job_text and reference_base == job_text:
+                        score = max(score, 510)
+                    elif job_text and reference_base in job_text:
+                        score = max(score, 470)
+                    if source_text and reference_base == source_text:
+                        score = max(score, 500)
+                    elif source_text and reference_base in source_text:
+                        score = max(score, 460)
+                    if barcode_text and reference_base in barcode_text:
+                        score = max(score, 455)
+
+            if len(normalized) >= 8:
+                if job_text and normalized in job_text:
+                    score = max(score, 410)
+                if source_text and normalized in source_text:
+                    score = max(score, 400)
+
+            if score:
+                scored.append((score, row))
+
+        if not scored:
+            return None, clean, "No unique delivery-list match"
+
+        best_score = max(score for score, _row in scored)
+        best_rows = [row for score, row in scored if score == best_score]
+        unique: dict[str, Any] = {}
+        for row in best_rows:
+            identity = str(row_value(row, "line_item_id", "") or row_value(row, "id", "") or id(row))
+            unique[identity] = row
+        if len(unique) != 1:
+            return None, clean, "Ambiguous external Bay barcode"
+
+        matched = next(iter(unique.values()))
+        order_text = digits_only(row_value(matched, "order_no", ""))
+        item_text = digits_only(row_value(matched, "item_no", ""))
+        canonical = (
+            canonical_barcode(order_text, item_text)
+            if order_text and item_text and len(order_text) <= 6
+            else clean
+        )
+        return matched, canonical, "Matched external Bay barcode"
+
     def recover_scan(self, raw_scan: str, rows: list[sqlite3.Row]) -> tuple[sqlite3.Row | None, str, str]:
         """Purpose: Run the recover scan workflow for the delivery-list scanner.
 
@@ -10630,46 +10728,75 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return json.loads(layout_path.read_text(encoding="utf-8"))
 
 
-    def get_bay_events(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Return item-linked physical Bay Map history with its current move target."""
-        # DLS_V148_BAY_SCAN_HISTORY_FILTER
-        safe_limit = max(1, min(int(limit or 20), 250))
-        with self.connect() as con:
-            rows = con.execute(
-                """
-                SELECT be.*,
-                       b.bay_code AS bay_code,
-                       b.display_name AS bay_display,
-                       old_bay.bay_code AS old_bay_code,
-                       old_bay.display_name AS old_bay_display,
-                       new_bay.bay_code AS new_bay_code,
-                       new_bay.display_name AS new_bay_display,
-                       li.order_no, li.item_no, li.customer, li.dimensions, li.product, li.job,
-                       current_ba.id AS current_assignment_id,
-                       current_bay.bay_code AS current_bay_code,
-                       current_bay.display_name AS current_bay_display
-                FROM bay_events be
-                LEFT JOIN bays b ON b.id = be.bay_id
-                LEFT JOIN bays old_bay ON old_bay.id = be.old_bay_id
-                LEFT JOIN bays new_bay ON new_bay.id = be.new_bay_id
-                LEFT JOIN line_items li ON li.id = be.line_item_id
-                LEFT JOIN bay_assignments current_ba ON current_ba.id = (
-                    SELECT ba2.id
-                    FROM bay_assignments ba2
-                    WHERE ba2.line_item_id = be.line_item_id
-                      AND ba2.status NOT IN ('Cleared', 'Cancelled')
-                    ORDER BY ba2.id DESC
-                    LIMIT 1
-                )
-                LEFT JOIN bays current_bay ON current_bay.id = current_ba.bay_id
-                WHERE COALESCE(be.line_item_id, '') <> ''
-                  AND be.event_type NOT IN ('UpdateBayLayout', 'CreateBay', 'DeleteBay', 'DeleteBayGroup')
-                ORDER BY be.id DESC
-                LIMIT ?
-                """,
-                (safe_limit,),
-            ).fetchall()
+    def _bay_event_retention_cutoff(self, retention_days: int = BAY_EVENT_RETENTION_DAYS) -> str:
+        """Return the UTC cutoff used by Bay Map history cleanup and reads."""
+        safe_days = max(int(retention_days or BAY_EVENT_RETENTION_DAYS), 1)
+        return (datetime.now(timezone.utc) - timedelta(days=safe_days)).isoformat(timespec="seconds")
 
+    def cleanup_old_bay_events(
+        self,
+        retention_days: int = BAY_EVENT_RETENTION_DAYS,
+        *,
+        force: bool = False,
+    ) -> int:
+        """Delete only expired Bay Map movement activity.
+
+        Scan events, audit events, rack history, reject history, and import history
+        are intentionally unaffected. Cleanup is throttled during normal requests
+        and forced once at application startup.
+        """
+        now_tick = time.monotonic()
+        last_cleanup = float(getattr(self, "_last_bay_event_cleanup_monotonic", 0.0) or 0.0)
+        if not force and now_tick - last_cleanup < BAY_EVENT_CLEANUP_INTERVAL_SECONDS:
+            return 0
+        cutoff = self._bay_event_retention_cutoff(retention_days)
+        with self.connect() as con:
+            cursor = con.execute("DELETE FROM bay_events WHERE created_at < ?", (cutoff,))
+            con.commit()
+            deleted = max(int(getattr(cursor, "rowcount", 0) or 0), 0)
+        self._last_bay_event_cleanup_monotonic = now_tick
+        return deleted
+
+    def _select_bay_event_rows(self, con: Any, cutoff: str, limit: int) -> list[Any]:
+        """Read the newest retained physical movement rows with current location data."""
+        return con.execute(
+            """
+            SELECT be.*,
+                   b.bay_code AS bay_code,
+                   b.display_name AS bay_display,
+                   old_bay.bay_code AS old_bay_code,
+                   old_bay.display_name AS old_bay_display,
+                   new_bay.bay_code AS new_bay_code,
+                   new_bay.display_name AS new_bay_display,
+                   li.order_no, li.item_no, li.customer, li.dimensions, li.product, li.job,
+                   current_ba.id AS current_assignment_id,
+                   current_bay.bay_code AS current_bay_code,
+                   current_bay.display_name AS current_bay_display
+            FROM bay_events be
+            LEFT JOIN bays b ON b.id = be.bay_id
+            LEFT JOIN bays old_bay ON old_bay.id = be.old_bay_id
+            LEFT JOIN bays new_bay ON new_bay.id = be.new_bay_id
+            LEFT JOIN line_items li ON li.id = be.line_item_id
+            LEFT JOIN bay_assignments current_ba ON current_ba.id = (
+                SELECT ba2.id
+                FROM bay_assignments ba2
+                WHERE ba2.line_item_id = be.line_item_id
+                  AND ba2.status NOT IN ('Cleared', 'Cancelled')
+                ORDER BY ba2.id DESC
+                LIMIT 1
+            )
+            LEFT JOIN bays current_bay ON current_bay.id = current_ba.bay_id
+            WHERE COALESCE(be.line_item_id, '') <> ''
+              AND be.event_type NOT IN ('UpdateBayLayout', 'CreateBay', 'DeleteBay', 'DeleteBayGroup')
+              AND be.created_at >= ?
+            ORDER BY be.id DESC
+            LIMIT ?
+            """,
+            (cutoff, max(int(limit or 1), 1)),
+        ).fetchall()
+
+    def _serialize_bay_event_rows(self, rows: list[Any]) -> list[dict[str, Any]]:
+        """Convert retained Bay Map rows into the existing browser payload shape."""
         return [
             {
                 "id": row["id"],
@@ -10696,6 +10823,54 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             }
             for row in rows
         ]
+
+    def get_bay_events(self, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+        """Return a bounded retained Bay Map history slice for compact scanner views."""
+        self.cleanup_old_bay_events()
+        safe_limit = max(1, min(int(limit or 20), 250))
+        safe_offset = max(int(offset or 0), 0)
+        cutoff = self._bay_event_retention_cutoff()
+        with self.connect() as con:
+            rows = self._select_bay_event_rows(con, cutoff, safe_offset + safe_limit)
+        return self._serialize_bay_event_rows(list(rows)[safe_offset:safe_offset + safe_limit])
+
+    def get_bay_events_page(self, page: int = 1, page_size: int = 25) -> dict[str, Any]:
+        """Return one fast server-side page of Bay Map activity.
+
+        The browser never receives more than 25 rows. Only the retained seven-day
+        window is counted or rendered, so opening All Scans remains predictable.
+        """
+        deleted = self.cleanup_old_bay_events()
+        safe_page_size = max(1, min(int(page_size or 25), 25))
+        safe_page = max(int(page or 1), 1)
+        cutoff = self._bay_event_retention_cutoff()
+        with self.connect() as con:
+            total_row = con.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM bay_events be
+                WHERE COALESCE(be.line_item_id, '') <> ''
+                  AND be.event_type NOT IN ('UpdateBayLayout', 'CreateBay', 'DeleteBay', 'DeleteBayGroup')
+                  AND be.created_at >= ?
+                """,
+                (cutoff,),
+            ).fetchone()
+            total = int(row_value(total_row, "total", 0) or 0)
+            total_pages = max((total + safe_page_size - 1) // safe_page_size, 1)
+            safe_page = min(safe_page, total_pages)
+            offset = (safe_page - 1) * safe_page_size
+            rows = self._select_bay_event_rows(con, cutoff, offset + safe_page_size)
+        events = self._serialize_bay_event_rows(list(rows)[offset:offset + safe_page_size])
+        return {
+            "events": events,
+            "page": safe_page,
+            "pageSize": safe_page_size,
+            "total": total,
+            "totalPages": total_pages,
+            "retentionDays": BAY_EVENT_RETENTION_DAYS,
+            "deletedExpired": deleted,
+        }
+
     def get_stale_bay_orders(self, include_snoozed: bool = False) -> list[dict[str, Any]]:
         """Purpose: Read stale bay orders for the delivery-list scanner workflow.
 
@@ -12662,31 +12837,62 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not barcode:
             raise ValueError("Scan barcode is required")
 
+        search_all_inbound_lists = not bool(list_id)
+
         with self.connect() as con:
-            if not list_id:
-                inbound = con.execute(
+            con.execute("BEGIN IMMEDIATE")
+
+            if search_all_inbound_lists:
+                inbound_lists = con.execute(
                     """
-                    SELECT id
+                    SELECT *
                     FROM delivery_lists
                     WHERE stage LIKE '%Indian Trail%' AND status = 'active'
                     ORDER BY delivery_date DESC, id DESC
-                    LIMIT 1
                     """
+                ).fetchall()
+                if not inbound_lists:
+                    raise ValueError("No active Indian Trail inbound list")
+                # Bay Map has no delivery-date selector. Search every active Indian
+                # Trail destination row, then bind the scan to the uniquely matched
+                # row's actual list instead of silently using only the newest date.
+                list_row = inbound_lists[0]
+                list_id = str(list_row["id"] or "")
+                rows = con.execute(
+                    """
+                    SELECT li.*, dl.delivery_date AS scan_delivery_date, dl.label AS scan_list_label
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE dl.status = 'active'
+                      AND dl.stage LIKE '%Indian Trail%'
+                    ORDER BY dl.delivery_date DESC, li.order_no, li.item_no, li.id
+                    """
+                ).fetchall()
+            else:
+                list_row = con.execute(
+                    "SELECT * FROM delivery_lists WHERE id = ?",
+                    (list_id,),
                 ).fetchone()
-                list_id = inbound["id"] if inbound else ""
-            if not list_id:
-                raise ValueError("No active Indian Trail inbound list")
+                if not list_row:
+                    raise ValueError("Indian Trail delivery list was not found")
+                rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall()
 
-            con.execute("BEGIN IMMEDIATE")
-            list_row = con.execute(
-                "SELECT * FROM delivery_lists WHERE id = ?",
-                (list_id,),
-            ).fetchone()
-            if not list_row:
-                raise ValueError("Indian Trail delivery list was not found")
-
-            rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall()
             row, canonical, reason = self.recover_scan(barcode, rows)
+            if row is None:
+                external_row, external_canonical, external_reason = self.recover_bay_external_scan(barcode, rows)
+                if external_row is not None:
+                    row, canonical, reason = external_row, external_canonical, external_reason
+                elif external_reason.startswith("Ambiguous"):
+                    canonical, reason = external_canonical, external_reason
+
+            if row is not None and search_all_inbound_lists:
+                list_id = str(row["list_id"] or "")
+                list_row = con.execute(
+                    "SELECT * FROM delivery_lists WHERE id = ?",
+                    (list_id,),
+                ).fetchone()
+                if not list_row:
+                    raise ValueError("The matched Indian Trail delivery list is no longer available")
             if row is None:
                 if requested_bay_code and self.bay_manual_text_is_known(con, barcode):
                     target_bay = self.get_bay_by_code(con, requested_bay_code)
@@ -12731,7 +12937,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "lastScan": last,
                     }
 
-                if reason == "No unique delivery-list match":
+                if reason.startswith("Ambiguous") and search_all_inbound_lists:
+                    reason = (
+                        "More than one active Indian Trail item matched that entry. "
+                        "Use the complete printed barcode or confirm the delivery date before scanning again."
+                    )
+                elif reason == "No unique delivery-list match":
                     canonical, reason = self.scan_other_list_hint(con, list_id, barcode)
                 last = self.insert_event(
                     con,
@@ -13223,11 +13434,38 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not assignment:
                 raise ValueError("Assignment not found")
             new_bay = self.get_bay_by_code(con, new_bay_code)
-            con.execute("UPDATE bay_assignments SET bay_id = ?, status = 'Moved', reason = ? WHERE id = ?", (new_bay["id"], reason, assignment_id))
+            previous_status = str(assignment["status"] or "Assigned")
+            # A PreAssigned row reserves a destination but does not prove that the
+            # glass was physically scanned into a bay. Preserve that distinction
+            # when its destination is corrected; converting it to Moved would make
+            # the Bay Map fulfillment view incorrectly mark a missing item present.
+            next_status = "PreAssigned" if previous_status == "PreAssigned" else "Moved"
+            con.execute(
+                "UPDATE bay_assignments SET bay_id = ?, status = ?, reason = ? WHERE id = ?",
+                (new_bay["id"], next_status, reason, assignment_id),
+            )
             self.insert_bay_event(con, new_bay["id"], assignment["line_item_id"], "MoveBay", user, reason, assignment["bay_id"], new_bay["id"])
-            self.insert_audit(con, "bay_assignment", str(assignment_id), "move_bay", user, "", reason, {"newBayCode": new_bay_code})
+            self.insert_audit(
+                con,
+                "bay_assignment",
+                str(assignment_id),
+                "move_bay",
+                user,
+                "",
+                reason,
+                {
+                    "newBayCode": new_bay_code,
+                    "previousStatus": previous_status,
+                    "status": next_status,
+                },
+            )
             con.commit()
-        return {"ok": True, "assignmentId": assignment_id, "bayCode": new_bay_code}
+        return {
+            "ok": True,
+            "assignmentId": assignment_id,
+            "bayCode": new_bay_code,
+            "status": next_status,
+        }
 
     def clear_bay(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Purpose: Remove bay for the delivery-list scanner workflow.
@@ -13351,8 +13589,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("BEGIN IMMEDIATE")
             assignments = con.execute(
                 """
-                SELECT ba.*, li.barcode, li.order_no, li.item_no, li.customer,
-                       b.bay_code, b.display_name
+                SELECT ba.*, li.barcode, li.source_id, li.order_no, li.item_no,
+                       li.job, li.product, li.customer, b.bay_code, b.display_name
                 FROM bay_assignments ba
                 JOIN line_items li ON li.id = ba.line_item_id
                 JOIN bays b ON b.id = ba.bay_id
@@ -13363,20 +13601,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (bay_code_filter, bay_code_filter, bay_code_filter),
             ).fetchall()
 
-            matched = None
+            matched, _canonical, external_reason = self.recover_bay_external_scan(barcode, assignments)
             clean = clean_barcode(barcode)
             digits = digits_only(clean)
-            for assignment in assignments:
-                if clean and clean == clean_barcode(assignment["barcode"]):
-                    matched = assignment
-                    break
-                order_text = str(assignment["order_no"] or "")
-                item_text = str(assignment["item_no"] or "").lstrip("0") or "0"
-                if order_text and order_text in barcode and item_text in digits:
-                    matched = assignment
-                    break
+            if matched is None:
+                for assignment in assignments:
+                    if clean and clean == clean_barcode(assignment["barcode"]):
+                        matched = assignment
+                        break
+                    order_text = str(assignment["order_no"] or "")
+                    item_text = str(assignment["item_no"] or "").lstrip("0") or "0"
+                    if order_text and order_text in barcode and item_text in digits:
+                        matched = assignment
+                        break
 
             if not matched:
+                if external_reason.startswith("Ambiguous"):
+                    raise ValueError("More than one item in a bay matched that barcode. Use the order and item reference instead.")
                 raise ValueError("No item currently in a bay matched that scan")
 
             timestamp = now_iso()
@@ -14435,6 +14676,7 @@ class AzureSqlDeliveryStore(SQLiteDeliveryStore):
         self.database_path = Path(config.database_path)
         self.sample_path = Path(config.sample_path)
         self.connection_string = str(config.database_connection_string or "").strip()
+        self._last_bay_event_cleanup_monotonic = 0.0
 
     def connect(self) -> AzureSqlConnection:
         """Purpose: Run the connect workflow for the delivery-list scanner.
@@ -14476,6 +14718,7 @@ class AzureSqlDeliveryStore(SQLiteDeliveryStore):
             self.seed_bay_auto_assign_settings(con)
             self.seed_racks(con)
             self.repair_route_stage_memberships_if_needed(con)
+        self.cleanup_old_bay_events(force=True)
 
     def health(self) -> dict[str, Any]:
         """Purpose: Run the health workflow for the delivery-list scanner.

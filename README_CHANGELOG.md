@@ -1,3 +1,254 @@
+## v0.163 - Footer Bug Reporting and Version Display
+
+### Global footer
+
+- Removed the Home and Settings actions from the desktop footer.
+- Added a right-aligned **Report Bugs** action that opens a pre-addressed email to the maintained project contact with a structured bug-report template.
+- Added a compact application-version badge showing **0.163** beside the bug-report action.
+- Standardized maintained release numbering to the `0.xxx` format; the previous release is therefore identified as **0.162**.
+- Preserved the application identity, active-scanner indicator, corrected footer grid placement, dark background, and responsive behavior.
+
+### Compatibility
+
+- No page-navigation, scanning, Bay Map, backend, database, permission, or API behavior changed.
+- No migration, installer, BAT file, JavaScript change, image, or database replacement is required.
+- Advanced only the shared shell stylesheet cache key to v0.163.
+
+## v162 - Footer Grid Placement Correction
+
+### Global footer
+
+- Fixed the polished desktop footer being auto-placed into the collapsed sidebar grid column, which squeezed its content vertically and allowed the sidebar to cover it.
+- Added an explicit third application-shell row and placed the footer in the main content column beneath the page.
+- Preserved the dark operations background, application identity, active-scanner indicator, Home and Settings actions, and mobile behavior.
+- Added responsive placement so the footer uses the single content column after the desktop sidebar becomes the mobile drawer.
+
+### Compatibility
+
+- No scanning, Bay Map, backend, database, permission, or API behavior changed.
+- No migration, installer, BAT file, image, or database replacement is required.
+- Advanced only the footer stylesheet cache key to v162.
+
+## v161 - Footer Ownership, Bay Barcode Recovery, and Timed Scan Errors
+
+### Global footer
+
+- Moved the desktop footer into a dedicated last-loaded shell stylesheet so page-specific CSS can no longer clear, fade, mask, or replace its dark operations background.
+- Preserved the application identity, active-scanner surface, Home and Settings actions, and mobile footer behavior.
+
+### Bay Scanner matching
+
+- Fixed Bay Map Add mode searching only the newest Indian Trail delivery list when no list was explicitly selected.
+- Bay Map now searches every active Indian Trail destination list and binds a successful scan to the uniquely matched delivery date and line item.
+- Expanded alternate labels such as `43273429.5` and `43273429.30` to match the stored order number as well as barcode, source identity, Job Nr., and item number.
+- Preserved ambiguity protection so the scanner reports a clear correction instead of moving the wrong piece.
+- Kept the combined manual Order + Item formats from v160 and routed them through the corrected cross-date Bay matching path.
+
+### Timed scan failures
+
+- Added one shared timed top-of-screen error card for Bay Scanner barcode entry, Bay manual entry, Scan-page barcode entry, and Scan-page manual entry.
+- The timed card shows the entered value and exact validation or backend error so operators can correct a scan without relying on a brief inline message.
+- Changed missing manual scan fields and missing Indian Trail bay selection into surfaced scanner errors instead of silent returns or short floating notices.
+
+### Compatibility
+
+- Preserved Bay Add/Remove behavior, outbound safety overrides, assignment history, recent scans, All Scans pagination, seven-day Bay activity retention, permissions, and database schema.
+- No migration, installer, BAT file, database replacement, or server-route change is required.
+- Added `static/css/shell.css` as the final shared-shell owner and advanced only changed asset cache keys to v161.
+
+## v160 - Global Footer, Flexible Bay Entry, External Barcode Support, and Selected Bay Polish
+
+### Global application footer
+
+- Rebuilt the non-page-specific desktop footer as a solid operations bar so the bottom of the web app no longer appears faded.
+- Added a compact application identity, active-scanner status surface, and polished Home and Settings actions while preserving the existing scanner name and navigation behavior.
+
+### Bay Scanner manual entry
+
+- Replaced the separate Order Number and Item Number controls with one aligned Order + Item field and Submit action.
+- Accepts compact and separated formats including `236505001`, `236505 1`, `236505.1`, and `236505/1`.
+- Added Enter-key submission and strict validation that rejects ambiguous values instead of guessing.
+
+### Alternate product barcodes
+
+- Added Bay Map Add and Remove matching for alternate product labels such as `43273429.30`.
+- Matches exact stored barcode, source identity, or Job Nr. values and can resolve a dotted job/item label against the item number.
+- Uses unique highest-confidence matching and reports ambiguous labels rather than moving the wrong piece.
+
+### Selected Bay GUI
+
+- Added a polished Indian Trail header, stronger modal framing, improved content spacing, and clearer card depth to the individual Selected Bay window.
+- Preserved all existing fulfillment details, scanner targeting, bay status actions, job expansion, item movement, and close behavior.
+
+### Compatibility
+
+- Preserved Add/Remove workflows, recent-scan limits, sticky scanner behavior, seven-day Bay activity retention, All Scans pagination, permissions, and database schema.
+- No migration, server-route change, installer, BAT file, image, or database replacement is required.
+- Advanced only the changed global stylesheet, Bay stylesheet, and application JavaScript cache keys to v160.
+
+## v159 - Bay Map Edit Header Cleanup and All Scans Visual Polish
+
+### Edit Physical Bay Map
+
+- Removed the unused Close button from the top-right of the Edit Physical Bay Map header.
+- Kept Cancel as the intentional way to leave edit mode without saving and Save Layout as the deliberate commit action.
+- Removed the obsolete JavaScript element binding, click listener, and button-specific stylesheet rule instead of leaving dead ownership behind.
+
+### All Bay Scans
+
+- Rebuilt the paginated All Bay Scans window with the same restrained operations-console polish used by the Bay Map action workflows.
+- Added a dark Indian Trail activity header, seven-day retention summary, total-scan and current-page metrics, and clearer location-correction guidance.
+- Improved sticky table headers, alternating rows, status accents, action/current-bay/user pills, hover readability, and the Change Location control.
+- Polished the 25-row pager, empty state, loading state, and retryable failure state without changing server-side pagination or retention behavior.
+- Prevented the All Scans custom modal style marker from leaking into subsequently opened Admin windows.
+
+### Compatibility
+
+- Preserved Bay Scanner follow behavior, recent-scan limits, seven-day Bay activity cleanup, 25-row server pagination, location correction permissions, APIs, and database schema.
+- No backend, migration, installer, BAT, image, or database change is required.
+- Advanced only the Bay Map stylesheet and application JavaScript cache keys to v159.
+
+## v158 - Expanded Fullscreen Bay History and Operations UI Polish
+
+### Bay Scanner history
+
+- Increased fullscreen Recent Bay Scans by two rows for both workflows.
+- Fullscreen Add to Bay now shows up to five recent movements, and fullscreen Remove from Bay shows up to six.
+- Preserved the normal-window limits of one Add movement and two Remove movements.
+- Increased the initial Bay Map event request to six retained movements so every fullscreen row is available without another request.
+
+### Bay Map workflow presentation
+
+- Reworked the Old Bays through Edit Map launcher into five consistent operational cards with distinct restrained accents, stronger icons, clearer depth, and improved hover/focus feedback.
+- Polished the Rush / Remake window with a priority-colored header, stronger step cards, clearer form hierarchy, and more deliberate primary/destructive actions.
+- Polished Manage Items with a clearer split workspace, stronger selected-item summary, improved assignment rows, focused fields, and semantic Move, Clear, Scanner, and Rush actions.
+- Polished Edit Bays with a stronger editor header, clearer group navigation, refined forms and bay cards, and improved focus/selection states.
+- Polished Edit Physical Bay Map with a dedicated map-edit header, organized tool strip, clearer Save/Cancel actions, and refined drag columns, group cards, and drop zones.
+
+### Compatibility
+
+- Preserved Bay Scanner follow behavior, Add/Remove logic, All Scans pagination, seven-day Bay activity retention, assignment rules, APIs, permissions, and database schema.
+- No backend, migration, installer, BAT, or database change is required.
+- Advanced only the Bay Map stylesheet and application JavaScript cache keys to v158.
+
+## v157 - Adaptive Bay History Loading and Preassignment Move Safety
+
+### Bay Map scanner
+
+- Fixed Recent Bay Scans remaining at one row because the normal Bay Map refresh requested only one retained event from the paged history endpoint.
+- The compact scanner now loads the newest four retained movements once, then applies the existing mode-aware limits locally: Remove shows two and Add shows one in a normal window; fullscreen Remove shows four and fullscreen Add shows three.
+- Preserved immediate recent-history rerendering when the scan mode or fullscreen state changes.
+
+### Bay assignment correctness
+
+- Fixed moving a PreAssigned item to another bay changing its assignment status to Moved.
+- A PreAssigned destination correction now remains PreAssigned, so a missing piece is not falsely counted as physically scanned into the destination bay.
+- Physical Assigned/Moved rows continue to become Moved and remain counted as present.
+- Added the previous and resulting assignment status to the maintained move audit payload.
+
+### Compatibility
+
+- Preserved the v155 seven-day Bay Map activity retention, 25-row All Scans pagination, read-only Latest Activity, scanner follow behavior, permissions, and database schema.
+- No migration, server-route change, CSS change, installer, or BAT file is required.
+- Advanced only the application JavaScript cache key to v157.
+
+## v156 - Bay Scanner Fixed-Width Follow and Adaptive Recent History
+
+### Bay Map scanner
+
+- Corrected the fixed-follow controller so the Bay Scanner keeps the exact measured right-rail width instead of inheriting a viewport-wide `width: 100%` rule after it becomes fixed.
+- Added explicit fixed left/width CSS variables, viewport-edge clamping, border-box sizing, and automatic width recalculation on resize and fullscreen changes.
+- Preserved the non-sticky Bay Map action toolbar, five-pixel viewport spacing, internal overflow, and normal-flow anchor height.
+- Made Recent Bay Scans adapt to the active workflow: Remove shows up to two rows normally and Add shows one.
+- In fullscreen, Remove shows up to four recent rows and Add shows up to three.
+- Refreshes recent history immediately when Add/Remove mode or fullscreen state changes.
+
+### Compatibility
+
+- Preserved the v155 seven-day Bay Map activity retention, 25-row All Scans pagination, Latest Activity summary, location correction, scan workflows, permissions, and database schema.
+- Advanced only the changed Bay Map CSS and application JavaScript cache keys to v156.
+
+## v155 - Bay Scanner Sticky Follow, Latest Activity, and Paged History
+
+### Bay Map scanner
+
+- Replaced the unreliable nested CSS sticky behavior with one measured Bay Scanner follow controller.
+- Keeps the Bay Map action toolbar in normal flow while fixing only the scanner after it reaches the usable viewport below the application header.
+- Preserves the scanner's rail width, a five-pixel viewport margin, fullscreen behavior, and internal scrolling when its content is taller than the available screen.
+- Rebuilt Latest Activity as a professional read-only summary with scan result, time, current bay, action, order, item, Job Nr., customer, user, and result details.
+- Removed bay-location editing from Latest Activity and Recent Bay Scans; location correction now exists only in All Bay Scans.
+- Kept Recent Bay Scans at one compact read-only physical movement.
+
+### All Bay Scans performance and retention
+
+- Changed All Bay Scans to open immediately with a loading state and request one server-side page at a time.
+- Limited every page to a maximum of 25 events and added Previous, Next, and numbered page controls with total-result information.
+- Added a seven-day Bay Map event retention window. Expired `bay_events` rows are deleted at startup and during throttled Bay Map history reads.
+- The cleanup affects only Bay Map movement activity; delivery-list scan history, audit history, rack history, reject history, packing history, and import history remain unchanged.
+- Kept active-item location correction in All Bay Scans through the maintained Bay Map move workflow.
+
+### Compatibility
+
+- Preserved Bay Scanner Add/Remove behavior, barcode and manual scanning, route progress, Undo/Redo, permissions, and existing Bay Map assignment APIs.
+- No database schema migration is required.
+- Advanced the changed Bay Map CSS and application JavaScript cache keys to v155.
+
+## v154 - Bay Scanner Sticky Containing Block and Manual Row Alignment
+
+### Bay Map scanner
+
+- Restored sticky scrolling by making the Bay Map right rail stretch to the full map-row height while keeping the action toolbar in normal, non-sticky flow.
+- Kept scanner stickiness active through compact workstation widths and disables it only for the true mobile layout.
+- Kept the scanner directly beneath Edit Map with the maintained four-pixel normal-flow gap and a five-pixel sticky viewport offset.
+- Added scoped overflow ownership to the Bay Map shell and right rail so an inherited overflow rule cannot disable sticky positioning.
+- Replaced the Manual Scan label wrappers with direct Order Number, Item Number, and Submit grid children.
+- Aligned all three Manual Scan controls on one 34-pixel row and reduced the section's vertical height.
+- Left-aligned Item Number content while retaining its three-digit limit.
+- Moved the Target Bay and Scan Barcode titles closer to their corresponding inputs.
+- Advanced the Bay Map stylesheet cache key to v154.
+
+### Compatibility
+
+- Preserved Bay Scanner IDs, Add/Remove behavior, target selection, manual submission, Undo/Redo, route progress, history, APIs, permissions, and database schema.
+- Changed only `index.html`, `static\css\bays.css`, and `README_CHANGELOG.md`.
+- No JavaScript, backend, database migration, installer, BAT file, or global stylesheet change is required.
+
+## v153 - Bay Scanner Sticky Ownership and Manual Row Correction
+
+### Bay Map scanner
+
+- Removed the extra Bay Scanner sticky wrapper and made the scanner panel itself the sticky element.
+- Kept Old Bays, Rush / Remake, Manage Items, Edit Bays, and Edit Map in normal non-sticky document flow.
+- Forced the scanner to follow Edit Map with only the maintained four-pixel right-rail gap in normal and sticky workflows.
+- Eliminated the wrapper height and inherited grid-row behavior that repeatedly left a large blank area above Bay Scanner.
+- Replaced the older v150/v151 Manual Scan layout selectors with an isolated v153 one-row owner.
+- Kept Order Number and Item Number as in-field placeholders with hidden accessible labels.
+- Aligned Order Number, Item Number, and Submit on one 36-pixel control row and reduced the Manual Scan section height.
+- Advanced the Bay Map stylesheet cache key to v153.
+
+### Compatibility
+
+- Preserved Bay Scanner control IDs, Add/Remove behavior, manual submission, route progress, history, APIs, permissions, and database schema.
+- Changed only `index.html`, `static\css\bays.css`, and `README_CHANGELOG.md`.
+- No JavaScript, backend, database migration, installer, BAT file, or global stylesheet change is required.
+
+## v152 - Bay Scanner Manual Alignment and Content Fit
+
+### Bay Map scanner
+
+- Moved the Manual Scan Order Number and Item Number labels into their respective input fields as placeholders while retaining accessible hidden labels.
+- Aligned Order Number, Item Number, and Submit on one consistent 42-pixel control row.
+- Increased the Item Number field and Submit button widths while preserving the wider flexible Order Number field.
+- Removed the forced full-viewport scanner height so the panel ends directly after Recent Bay Scans when its content fits.
+- Preserved the sticky viewport height limit and internal scrolling when the scanner content exceeds the available screen height.
+- Advanced the Bay Map stylesheet cache key to v152.
+
+### Compatibility
+
+- Preserved existing Bay Scanner IDs, manual submission behavior, Add/Remove workflow, target selection, recent activity, APIs, permissions, and database schema.
+- Limited the release package to the files changed for this correction.
+- No database migration, backend patch, installer, BAT file, or JavaScript change is required.
+
 ## v151 - Project Structure Organization
 
 - Consolidated maintained browser behavior into `static\js\app.js`.
