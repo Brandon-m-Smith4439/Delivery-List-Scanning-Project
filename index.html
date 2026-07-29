@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="static/css/racks.css?v=20260728-v150">
     <link rel="stylesheet" href="static/css/admin.css?v=20260728-v150">
     <link rel="stylesheet" href="static/css/print.css?v=20260728-v150">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260729-v160">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260729-v0164">
     <link rel="stylesheet" href="static/css/shell.css?v=20260729-v0163">
 </head>
 <body data-page="home" data-mobile-view="scan">
@@ -842,7 +842,7 @@
 
           <div class="bay-right-rail">
             <div class="bay-action-buttons bay-action-buttons-v2 bay-action-buttons-v150" id="bayActionButtons" aria-label="Indian Trail bay actions">
-              <button type="button" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon old"></span>Old Bays</button>
+              <button type="button" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon old"></span>Old Bays<span class="old-bay-attention-count" id="oldBayAttentionCount" hidden aria-label="0 old orders need review">0</span></button>
               <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi"><span class="bay-action-icon sdi"></span>Rush / Remake</button>
               <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay"><span class="bay-action-icon manage"></span>Manage Items</button>
               <button type="button" data-bay-action="bay-editor" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-edit"></span>Edit Bays</button>
@@ -1498,6 +1498,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260729-v161"></script>
+  <script src="static/js/app.js?v=20260729-v0164"></script>
 </body>
 </html>

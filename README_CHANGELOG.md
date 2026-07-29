@@ -1,3 +1,30 @@
+## v0.164 - Old Bay Attention and Priority Work Management
+
+### Old Bay attention
+
+- Replaced the automatic Old Bay modal opening with a timed orange notice shown when a user enters Bay Map.
+- The notice reports the number of unique old orders needing review and provides a Review action that opens the existing Old Bay Control Center.
+- Limited the notice to once every six hours per signed-in username using the existing server-side system metadata, so the timing follows the user across browser sessions and workstations.
+- Added an orange attention-count badge to the top-right of the Old Bays button.
+- Preserved existing search, age filters, selection, printing, and individual/bulk snoozing inside the Old Bay GUI.
+
+### Current priority work
+
+- Reorganized Current Priority Work into collapsible priority-date ribbons with nested job/order ribbons.
+- Added search and Rush/Remake type filters with a live visible-item count.
+- Added Edit and Remove actions for individual marked items.
+- Added Edit Order and Remove Order actions for each grouped job/order.
+- Added a guarded Clear All action for all current Rush/Remake work.
+- Editing reuses the maintained Rush/Remake form and loads the existing type, priority date, truck handling, bay, and available reason details.
+
+### Compatibility
+
+- Preserved Old Bay aging and snooze rules, Rush/Remake endpoints, permissions, bay assignments, delivery lists, scan history, and database schema.
+- Extended the existing stale-bay response with an atomic per-user six-hour alert claim; no new table or column is required.
+- Extended the existing SDI workspace payload with current priority handling details and removed the former 100-group display cap so Clear All covers every current priority group.
+- No migration, installer, BAT file, image, or database replacement is required.
+- Advanced the changed Bay Map CSS and application JavaScript cache keys to v0.164.
+
 ## v0.163 - Footer Bug Reporting and Version Display
 
 ### Global footer

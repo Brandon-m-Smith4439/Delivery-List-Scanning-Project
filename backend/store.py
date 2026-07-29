@@ -6862,6 +6862,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                    dl.stage AS delivery_stage, dl.scanner AS delivery_scanner,
                    ba.id AS assignment_id, ba.status AS assignment_status,
                    ba.assigned_qty AS assignment_qty, ba.bay_id AS assignment_bay_id,
+                   ba.reason AS assignment_reason,
                    b.bay_code AS assignment_bay_code,
                    b.display_name AS assignment_bay_display
             FROM line_items li
@@ -7016,6 +7017,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "remake": remake,
                 "marked": rush or remake,
                 "priorityDeliveryDate": str(row["priority_delivery_date"] or ""),
+                "priorityDirectToTruck": bool(row["priority_direct_to_truck"] or 0),
+                "priorityReason": str(row_value(row, "assignment_reason", "") or ""),
                 **presence,
                 "eligibleByDefault": presence["missingQty"] > 0,
             }
@@ -7096,7 +7099,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "bayCode": clean_bay,
             "suggestions": suggestions[:12],
             "items": selected_items,
-            "currentGroups": current_groups[:100],
+            "currentGroups": current_groups,
         }
 
     def expand_priority_line_items(self, con: Any, seed_rows: list[Any]) -> list[Any]:
@@ -10869,6 +10872,42 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "totalPages": total_pages,
             "retentionDays": BAY_EVENT_RETENTION_DAYS,
             "deletedExpired": deleted,
+        }
+
+    def claim_stale_bay_alert(self, username: str, order_count: int, interval_hours: int = 6) -> dict[str, Any]:
+        """Atomically claim the old-bay attention notice window for one signed-in user.
+
+        Effects: Stores only the last-shown UTC timestamp in existing system metadata.
+        Flow: Returns ``shouldNotify`` only when old orders exist and the user's prior
+        notice is absent or at least the requested interval old. No schema change is needed.
+        """
+        clean_username = re.sub(r"[^a-z0-9_.@-]+", "-", str(username or "user").strip().lower()).strip("-") or "user"
+        safe_count = max(int(order_count or 0), 0)
+        safe_hours = max(1, min(int(interval_hours or 6), 168))
+        now = datetime.now(timezone.utc)
+        metadata_key = f"stale_bay_alert_last_shown:{clean_username}"
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            previous_text = self.system_metadata_value(con, metadata_key)
+            previous = None
+            if previous_text:
+                try:
+                    previous = parse_utc_timestamp(previous_text)
+                except Exception:
+                    previous = None
+            should_notify = bool(safe_count) and (
+                previous is None or now - previous >= timedelta(hours=safe_hours)
+            )
+            shown_at = previous_text
+            if should_notify:
+                shown_at = now.isoformat(timespec="seconds")
+                self.set_system_metadata_value(con, metadata_key, shown_at)
+            con.commit()
+        return {
+            "shouldNotify": should_notify,
+            "orderCount": safe_count,
+            "intervalHours": safe_hours,
+            "lastShownAt": shown_at or "",
         }
 
     def get_stale_bay_orders(self, include_snoozed: bool = False) -> list[dict[str, Any]]:

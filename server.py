@@ -1397,10 +1397,23 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/indian-trail/stale-bays":
-            if not self.require_permission("view_bays"):
+            user = self.require_permission("view_bays")
+            if not user:
                 return
-            include_snoozed = parse_qs(parsed.query).get("includeSnoozed", ["0"])[0] in {"1", "true", "yes"}
-            self.send_json({"orders": STORE.get_stale_bay_orders(include_snoozed=include_snoozed)})
+            params = parse_qs(parsed.query)
+            include_snoozed = params.get("includeSnoozed", ["0"])[0] in {"1", "true", "yes"}
+            claim_alert = params.get("claimAlert", ["0"])[0] in {"1", "true", "yes"}
+            orders = STORE.get_stale_bay_orders(include_snoozed=include_snoozed)
+            unique_orders = {
+                (str(order.get("deliveryDate") or ""), str(order.get("order") or order.get("assignmentId") or ""))
+                for order in orders
+            }
+            alert = (
+                STORE.claim_stale_bay_alert(user.get("username", "user"), len(unique_orders), 6)
+                if claim_alert and not include_snoozed
+                else {"shouldNotify": False, "orderCount": len(unique_orders), "intervalHours": 6}
+            )
+            self.send_json({"orders": orders, "alert": alert})
             return
 
         if parsed.path == "/api/indian-trail/stale-bays/print":

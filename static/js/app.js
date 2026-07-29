@@ -80,6 +80,7 @@ const state = {
   bayGlassFilter: "all",
   baySpecialFilter: "all",
   staleBayOrders: [],
+  staleBayAlertShouldNotify: false,
   staleBayAlertDate: "",
   staleBayQuery: "",
   staleBayAgeFilter: "all",
@@ -200,6 +201,10 @@ const state = {
   sdiWorkspace: { suggestions: [], items: [], currentGroups: [] },
   sdiSelectedLineItemIds: new Set(),
   sdiExpandedCurrentGroups: new Set(),
+  sdiExpandedCurrentDates: new Set(),
+  sdiCurrentQuery: "",
+  sdiCurrentTypeFilter: "all",
+  sdiCurrentFilterTimer: null,
   sdiCurrentGroupsInitialized: false,
   sdiLookupTimer: null,
   lastRenderedProgressPercent: null,
@@ -811,6 +816,7 @@ const els = {
   bayFlowPanel: document.getElementById("bayFlowPanel"),
   indianTrailSummary: document.getElementById("indianTrailSummary"),
   bayActionButtons: document.getElementById("bayActionButtons"),
+  oldBayAttentionCount: document.getElementById("oldBayAttentionCount"),
   bayMapCanvas: document.getElementById("bayMapCanvas"),
   baySelectedText: document.getElementById("baySelectedText"),
   sdiPanel: document.getElementById("sdiPanel"),
@@ -12979,30 +12985,100 @@ function renderBaySidePanels() {
  * Effects: May call the backend api, may update shared client state.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
-async function loadStaleBayOrders(includeSnoozed = false) {
+function staleBayOrderCount(orders = state.staleBayOrders) {
+  const uniqueOrders = new Set();
+  for (const order of Array.isArray(orders) ? orders : []) {
+    const orderNumber = String(order?.order || "").trim();
+    const deliveryDate = String(order?.deliveryDate || "").trim();
+    const fallback = String(order?.assignmentId || "").trim();
+    uniqueOrders.add(`${deliveryDate}::${orderNumber || fallback}`);
+  }
+  return uniqueOrders.size;
+}
+
+function updateOldBayAttentionBadge(orders = state.staleBayOrders) {
+  const count = staleBayOrderCount(orders);
+  const badge = els.oldBayAttentionCount;
+  if (!badge) return count;
+  badge.textContent = count > 99 ? "99+" : String(count);
+  badge.hidden = count <= 0;
+  badge.setAttribute("aria-label", `${count} old order${count === 1 ? "" : "s"} need review`);
+  const button = badge.closest("button");
+  if (button) button.setAttribute("aria-label", count ? `Old Bays, ${count} orders need review` : "Old Bays");
+  return count;
+}
+
+function closeOldBayReviewNotice() {
+  const notice = document.getElementById("oldBayReviewNotice");
+  if (!notice) return;
+  window.clearTimeout(notice._hideTimer);
+  notice.classList.add("is-hiding");
+  window.setTimeout(() => notice.remove(), 220);
+}
+
+function showOldBayReviewNotice(count) {
+  closeOldBayReviewNotice();
+  const notice = document.createElement("section");
+  notice.id = "oldBayReviewNotice";
+  notice.className = "old-bay-review-notice";
+  notice.setAttribute("role", "status");
+  notice.setAttribute("aria-live", "polite");
+  notice.innerHTML = `
+    <span class="old-bay-review-notice-icon" aria-hidden="true"></span>
+    <div>
+      <strong>Old bay review needed</strong>
+      <span>You have ${escapeHtml(count)} old order${count === 1 ? "" : "s"} that need review.</span>
+    </div>
+    <button type="button" data-old-bay-review>Review</button>
+    <button type="button" class="old-bay-review-dismiss" data-old-bay-dismiss aria-label="Dismiss old bay notice">&times;</button>
+  `;
+  document.body.appendChild(notice);
+  notice.querySelector("[data-old-bay-review]")?.addEventListener("click", async () => {
+    closeOldBayReviewNotice();
+    try {
+      const orders = await loadStaleBayOrders(false);
+      openStaleBayPanel(orders);
+    } catch (error) {
+      showInlineError(error.message, true);
+    }
+  });
+  notice.querySelector("[data-old-bay-dismiss]")?.addEventListener("click", closeOldBayReviewNotice);
+  notice._hideTimer = window.setTimeout(closeOldBayReviewNotice, 11000);
+}
+
+async function loadStaleBayOrders(includeSnoozed = false, claimAlert = false) {
   if (!state.backend) {
     state.staleBayOrders = [];
+    state.staleBayAlertShouldNotify = false;
+    updateOldBayAttentionBadge([]);
     return [];
   }
-  const payload = await fetchJson(`/api/indian-trail/stale-bays${includeSnoozed ? "?includeSnoozed=1" : ""}`);
+  const params = new URLSearchParams();
+  if (includeSnoozed) params.set("includeSnoozed", "1");
+  if (claimAlert) params.set("claimAlert", "1");
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const payload = await fetchJson(`/api/indian-trail/stale-bays${suffix}`);
   state.staleBayOrders = payload.orders || [];
+  state.staleBayAlertShouldNotify = Boolean(payload.alert?.shouldNotify);
+  updateOldBayAttentionBadge(state.staleBayOrders);
   return state.staleBayOrders;
 }
 
 /**
- * Purpose: Run the maybe show stale bay alert workflow for the browser application.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Notify each signed-in user about unsnoozed old bay orders at most once every six hours.
+ * Effects: Refreshes the Old Bays count badge and may show one timed orange action notice.
+ * Flow: Claims the user's six-hour notification window on the server and exposes Review without auto-opening the modal.
  */
 async function maybeShowStaleBayAlert() {
   if (state.page !== "bays" || !hasPermission("view_bays")) return;
-  const today = new Date().toISOString().slice(0, 10);
-  const key = `staleBayAlertSeen:${state.user?.username || "user"}:${today}`;
-  if (sessionStorage.getItem(key) === "1") return;
-  const orders = await loadStaleBayOrders(false);
-  if (!orders.length) return;
-  sessionStorage.setItem(key, "1");
-  openStaleBayPanel(orders);
+  const orders = await loadStaleBayOrders(false, true);
+  const count = staleBayOrderCount(orders);
+  if (!count) {
+    closeOldBayReviewNotice();
+    return;
+  }
+  if (!state.staleBayAlertShouldNotify) return;
+  showOldBayReviewNotice(count);
 }
 
 /**
@@ -13203,6 +13279,7 @@ async function snoozeStaleBayOrders(assignmentIds, days) {
   });
   for (const assignmentId of assignmentIds || []) state.staleBaySelectedIds.delete(String(assignmentId));
   state.staleBayOrders = payload.orders || [];
+  updateOldBayAttentionBadge(state.staleBayOrders);
   renderStaleBayPanel(state.staleBayOrders);
   await refreshBayMapPage();
 }
@@ -14695,7 +14772,7 @@ function renderSdiItemSelection() {
   }
   els.sdiItemSelectionList.innerHTML = items.map((item) => {
     const complete = Boolean(item.complete);
-    const disabled = orderType === "Rush" && complete;
+    const disabled = orderType === "Rush" && complete && !item.marked;
     const checked = state.sdiSelectedLineItemIds.has(String(item.lineItemId)) && !disabled;
     const typeLabel = item.remake ? "Remake" : item.rush ? "Rush" : "";
     const location = item.bayDisplay || item.bayCode || "Not assigned to a bay";
@@ -14726,62 +14803,206 @@ function renderSdiItemSelection() {
 }
 
 /**
- * Purpose: Render current Rush/Remake marks grouped by job with item-level clearing controls.
- * Effects: Replaces the current-mark section while preserving which groups the user expanded.
- * Flow: Summarizes each job, renders exact marked items, and exposes one shared clear action per destination item.
+ * Purpose: Flatten current Rush/Remake groups into one deduplicated item collection.
+ * Effects: Performs an in-memory calculation without changing backend or visible state.
+ * Flow: Keeps the source group identity on each item so edit, remove, filter, and clear-all actions share exact IDs.
+ */
+function currentPriorityItems(groups = state.sdiWorkspace?.currentGroups || []) {
+  const items = [];
+  const seen = new Set();
+  for (const group of Array.isArray(groups) ? groups : []) {
+    for (const item of Array.isArray(group.items) ? group.items : []) {
+      const id = String(item.lineItemId || "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      items.push({ ...item, groupKey: String(group.key || ""), groupJob: group.job || item.job || item.order, groupCustomer: group.customer || item.customer, groupDeliveryDate: group.deliveryDate || item.priorityDeliveryDate || item.deliveryDate });
+    }
+  }
+  return items;
+}
+
+function filteredSdiCurrentGroups(groups = state.sdiWorkspace?.currentGroups || []) {
+  const query = String(state.sdiCurrentQuery || "").trim().toLowerCase();
+  const typeFilter = String(state.sdiCurrentTypeFilter || "all");
+  return (Array.isArray(groups) ? groups : []).map((group) => {
+    const groupHaystack = `${group.job || ""} ${group.customer || ""} ${group.deliveryDate || ""}`.toLowerCase();
+    const items = (group.items || []).filter((item) => {
+      if (typeFilter === "rush" && !item.rush) return false;
+      if (typeFilter === "remake" && !item.remake) return false;
+      if (!query) return true;
+      const itemHaystack = `${item.order || ""} ${item.item || ""} ${item.job || ""} ${item.customer || ""} ${item.product || ""} ${item.dimensions || ""} ${item.bayDisplay || item.bayCode || ""} ${item.priorityDeliveryDate || item.deliveryDate || ""}`.toLowerCase();
+      return groupHaystack.includes(query) || itemHaystack.includes(query);
+    });
+    return { ...group, items };
+  }).filter((group) => group.items.length);
+}
+
+function priorityIdsFromData(value) {
+  return String(value || "").split("|").map((id) => id.trim()).filter(Boolean);
+}
+
+async function beginPriorityWorkEdit(lineItemIds, lookup = "") {
+  const ids = [...new Set((lineItemIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  const allItems = currentPriorityItems();
+  const selected = allItems.filter((item) => ids.includes(String(item.lineItemId || "")));
+  if (!selected.length) {
+    showInlineError("The selected priority work is no longer available. Refresh the window and try again.", false);
+    return;
+  }
+  const first = selected[0];
+  const resolvedLookup = lookup || first.groupJob || first.job || `${first.order || ""}-${first.item || ""}`;
+  if (els.sdiOrderInput) els.sdiOrderInput.value = resolvedLookup;
+  if (els.sdiBayInput) {
+    els.sdiBayInput.value = selected.length === 1 ? (first.bayCode || "") : "";
+    syncCustomSelect(els.sdiBayInput);
+  }
+  await loadSdiWorkspace(resolvedLookup);
+  state.sdiSelectedLineItemIds = new Set(ids);
+  if (els.sdiTypeInput) {
+    els.sdiTypeInput.value = selected.every((item) => item.remake) ? "Remake" : "Rush";
+    syncCustomSelect(els.sdiTypeInput);
+  }
+  if (els.sdiDeliveryDateInput) els.sdiDeliveryDateInput.value = first.priorityDeliveryDate || first.groupDeliveryDate || first.deliveryDate || "";
+  if (els.sdiTruckExemptInput) els.sdiTruckExemptInput.checked = selected.some((item) => Boolean(item.priorityDirectToTruck));
+  if (els.sdiReasonInput) {
+    const reason = String(first.priorityReason || "").replace(/^\s*(?:Rush|Remake)\s*-\s*/i, "").trim();
+    els.sdiReasonInput.value = reason || "Priority work updated";
+  }
+  renderSdiItemSelection();
+  updateSdiSelectionSummary();
+  document.querySelector("#sdiPanel .sdi-action-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  showFloatingNotice(`${selected.length} priority item${selected.length === 1 ? " is" : "s are"} ready to edit.`, "notice");
+}
+
+async function clearPriorityWorkItems(lineItemIds, label = "selected priority work") {
+  const ids = [...new Set((lineItemIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!ids.length) return;
+  const confirmed = await confirmWebAppAction({
+    title: `Clear ${label}?`,
+    message: `This removes the Rush / Remake mark from ${ids.length} item${ids.length === 1 ? "" : "s"}.`,
+    details: "The glass remains on its delivery lists; only priority handling is cleared.",
+    confirmLabel: "Clear priority work",
+    danger: true,
+  });
+  if (!confirmed) return;
+  await submitSdi(false, {
+    lineItemIds: ids,
+    reason: `Cleared ${label}`,
+    keepOpen: true,
+  });
+}
+
+/**
+ * Purpose: Render current Rush/Remake work by priority date with search, type filtering, edit, remove, and clear-all controls.
+ * Effects: Replaces the Current Priority Work surface while preserving expanded date and job ribbons.
+ * Flow: Filters exact marked items, groups them by date, renders nested collapsible ribbons, and exposes safe item/order/all actions.
  */
 function renderSdiCurrentList() {
   if (!els.sdiCurrentList) return;
-  const groups = (state.sdiWorkspace?.currentGroups || []).filter((group) => Array.isArray(group.items) && group.items.length);
-  const validKeys = new Set(groups.map((group) => String(group.key || "")));
-  state.sdiExpandedCurrentGroups = new Set(
-    [...state.sdiExpandedCurrentGroups].filter((key) => validKeys.has(String(key))),
-  );
-  if (groups.length && !state.sdiCurrentGroupsInitialized) {
-    state.sdiExpandedCurrentGroups.add(String(groups[0].key || ""));
+  const allGroups = (state.sdiWorkspace?.currentGroups || []).filter((group) => Array.isArray(group.items) && group.items.length);
+  const groups = filteredSdiCurrentGroups(allGroups);
+  const validGroupKeys = new Set(allGroups.map((group) => String(group.key || "")));
+  state.sdiExpandedCurrentGroups = new Set([...state.sdiExpandedCurrentGroups].filter((key) => validGroupKeys.has(String(key))));
+
+  const dateMap = new Map();
+  for (const group of groups) {
+    const dateKey = String(group.deliveryDate || "").trim() || "undated";
+    if (!dateMap.has(dateKey)) dateMap.set(dateKey, []);
+    dateMap.get(dateKey).push(group);
+  }
+  const dateEntries = [...dateMap.entries()].sort(([left], [right]) => {
+    if (left === "undated") return 1;
+    if (right === "undated") return -1;
+    return left.localeCompare(right);
+  });
+  const validDates = new Set(dateEntries.map(([date]) => date));
+  state.sdiExpandedCurrentDates = new Set([...state.sdiExpandedCurrentDates].filter((date) => validDates.has(String(date))));
+
+  if (dateEntries.length && !state.sdiCurrentGroupsInitialized) {
+    const [firstDate, firstGroups] = dateEntries[0];
+    state.sdiExpandedCurrentDates.add(firstDate);
+    if (firstGroups[0]) state.sdiExpandedCurrentGroups.add(String(firstGroups[0].key || ""));
     state.sdiCurrentGroupsInitialized = true;
-  } else if (!groups.length) {
+  } else if (!allGroups.length) {
     state.sdiCurrentGroupsInitialized = false;
   }
 
-  const markedCount = groups.reduce((total, group) => total + group.items.length, 0);
+  const allItems = currentPriorityItems(allGroups);
+  const visibleItems = currentPriorityItems(groups);
+  const markedCount = allItems.length;
+  const visibleCount = visibleItems.length;
+  const renderJobGroup = (group, groupIndex, dateIndex) => {
+    const key = String(group.key || "");
+    const expanded = state.sdiExpandedCurrentGroups.has(key);
+    const rushCount = group.items.filter((item) => item.rush).length;
+    const remakeCount = group.items.filter((item) => item.remake).length;
+    const itemCount = group.items.length;
+    const groupPanelId = `sdi-current-group-${dateIndex}-${groupIndex}`;
+    const completeGroup = allGroups.find((candidate) => String(candidate.key || "") === key) || group;
+    const itemIds = (completeGroup.items || []).map((item) => String(item.lineItemId || "")).filter(Boolean).join("|");
+    return `
+      <article class="sdi-current-group ${expanded ? "is-expanded" : ""}">
+        <button type="button" class="sdi-current-group-toggle" data-sdi-current-group="${escapeHtml(key)}" aria-expanded="${expanded}" aria-controls="${groupPanelId}">
+          <span class="sdi-current-job"><strong>${escapeHtml(group.job || "Unknown job")}</strong><small>${escapeHtml(group.customer || "No customer")}</small></span>
+          <span class="sdi-current-summary"><b>${rushCount ? `${rushCount} Rush` : ""}${rushCount && remakeCount ? " · " : ""}${remakeCount ? `${remakeCount} Remake` : ""}</b><small>${itemCount} item${itemCount === 1 ? "" : "s"}</small></span>
+          <span class="sdi-current-chevron" aria-hidden="true">⌄</span>
+        </button>
+        <div class="sdi-current-group-items" id="${groupPanelId}" ${expanded ? "" : "hidden"}>
+          <div class="sdi-current-group-actions">
+            <button type="button" data-sdi-edit-group="${escapeHtml(itemIds)}" data-sdi-edit-lookup="${escapeHtml(group.job || group.items[0]?.order || "")}">Edit order</button>
+            <button type="button" class="is-danger" data-sdi-clear-group="${escapeHtml(itemIds)}" data-sdi-clear-label="${escapeHtml(group.job || group.items[0]?.order || "order")}">Remove order</button>
+          </div>
+          ${group.items.map((item) => {
+            const typeLabel = item.remake ? "Remake" : "Rush";
+            return `
+              <div class="sdi-current-item">
+                <span><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong><small>${escapeHtml(item.product || "Glass item")} ${item.bayDisplay ? `· ${escapeHtml(item.bayDisplay)}` : "· Not in bay"}</small></span>
+                <span class="sdi-current-item-type ${item.remake ? "is-remake" : "is-rush"}">${typeLabel}</span>
+                <span class="sdi-current-item-actions">
+                  <button type="button" data-sdi-edit-line-item="${escapeHtml(item.lineItemId)}" data-sdi-edit-lookup="${escapeHtml(group.job || `${item.order}-${item.item}`)}">Edit</button>
+                  <button type="button" class="is-danger" data-sdi-clear-line-item="${escapeHtml(item.lineItemId)}" data-sdi-clear-lookup="${escapeHtml(group.job || "")}">Remove</button>
+                </span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </article>
+    `;
+  };
+
   els.sdiCurrentList.innerHTML = `
     <div class="sdi-current-heading">
       <span><small>Current priority work</small><strong>Rush / Remake items</strong></span>
       <b>${markedCount} marked item${markedCount === 1 ? "" : "s"}</b>
     </div>
-    <p class="sdi-current-help">The earliest priority date appears first. Open a job to review or clear individual glass items without changing the rest of the job.</p>
-    <div class="sdi-current-groups">
-      ${groups.length ? groups.map((group, groupIndex) => {
-        const key = String(group.key || "");
-        const expanded = state.sdiExpandedCurrentGroups.has(key);
-        const rushCount = group.items.filter((item) => item.rush).length;
-        const remakeCount = group.items.filter((item) => item.remake).length;
-        const itemCount = group.items.length;
-        const groupPanelId = `sdi-current-group-${groupIndex}`;
-        const priorityDate = group.deliveryDate ? formatDisplayDate(group.deliveryDate) : "No priority date";
+    <p class="sdi-current-help">Priority work is organized by date. Open a date, then a job, to edit or remove exact items.</p>
+    <div class="sdi-current-toolbar">
+      <label class="sdi-current-search"><span>Filter priority work</span><input type="search" data-sdi-current-search value="${escapeHtml(state.sdiCurrentQuery)}" placeholder="Order, job, customer, product, or bay"></label>
+      <label class="sdi-current-type-filter"><span>Type</span><select data-sdi-current-type><option value="all" ${state.sdiCurrentTypeFilter === "all" ? "selected" : ""}>All priority work</option><option value="rush" ${state.sdiCurrentTypeFilter === "rush" ? "selected" : ""}>Rush only</option><option value="remake" ${state.sdiCurrentTypeFilter === "remake" ? "selected" : ""}>Remake only</option></select></label>
+      <span class="sdi-current-visible-count">${visibleCount} shown</span>
+      <button type="button" class="sdi-current-clear-all" data-sdi-clear-all ${markedCount ? "" : "disabled"}>Clear all</button>
+    </div>
+    <div class="sdi-current-date-groups">
+      ${dateEntries.length ? dateEntries.map(([dateKey, dateGroups], dateIndex) => {
+        const expanded = state.sdiExpandedCurrentDates.has(dateKey);
+        const datePanelId = `sdi-current-date-${dateIndex}`;
+        const dateItems = currentPriorityItems(dateGroups);
+        const rushCount = dateItems.filter((item) => item.rush).length;
+        const remakeCount = dateItems.filter((item) => item.remake).length;
+        const dateLabel = dateKey === "undated" ? "No priority date" : formatDisplayDate(dateKey);
         return `
-          <article class="sdi-current-group ${expanded ? "is-expanded" : ""}">
-            <button type="button" class="sdi-current-group-toggle" data-sdi-current-group="${escapeHtml(key)}" aria-expanded="${expanded}" aria-controls="${groupPanelId}">
-              <span class="sdi-current-job"><strong>${escapeHtml(group.job || "Unknown job")}</strong><small>${escapeHtml(group.customer || "No customer")}</small></span>
-              <span class="sdi-current-summary"><b>${rushCount ? `${rushCount} Rush` : ""}${rushCount && remakeCount ? " · " : ""}${remakeCount ? `${remakeCount} Remake` : ""}</b><small>${escapeHtml(priorityDate)} · ${itemCount} item${itemCount === 1 ? "" : "s"}</small></span>
-              <span class="sdi-current-chevron" aria-hidden="true">⌄</span>
+          <article class="sdi-current-date-group ${expanded ? "is-expanded" : ""}">
+            <button type="button" class="sdi-current-date-toggle" data-sdi-current-date="${escapeHtml(dateKey)}" aria-expanded="${expanded}" aria-controls="${datePanelId}">
+              <span><small>Priority date</small><strong>${escapeHtml(dateLabel)}</strong></span>
+              <span><b>${dateItems.length} item${dateItems.length === 1 ? "" : "s"}</b><small>${rushCount} Rush · ${remakeCount} Remake</small></span>
+              <i aria-hidden="true">⌄</i>
             </button>
-            <div class="sdi-current-group-items" id="${groupPanelId}" ${expanded ? "" : "hidden"}>
-              ${group.items.map((item) => {
-                const typeLabel = item.remake ? "Remake" : "Rush";
-                return `
-                  <div class="sdi-current-item">
-                    <span><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong><small>${escapeHtml(item.product || "Glass item")} ${item.bayDisplay ? `· ${escapeHtml(item.bayDisplay)}` : "· Not in bay"}</small></span>
-                    <span class="sdi-current-item-type ${item.remake ? "is-remake" : "is-rush"}">${typeLabel}</span>
-                    <button type="button" data-sdi-clear-line-item="${escapeHtml(item.lineItemId)}" data-sdi-clear-lookup="${escapeHtml(group.job || "")}">Clear item</button>
-                  </div>
-                `;
-              }).join("")}
+            <div class="sdi-current-date-body" id="${datePanelId}" ${expanded ? "" : "hidden"}>
+              ${dateGroups.map((group, groupIndex) => renderJobGroup(group, groupIndex, dateIndex)).join("")}
             </div>
           </article>
         `;
-      }).join("") : `<span class="admin-empty">No current Rush or Remake items.</span>`}
+      }).join("") : `<span class="admin-empty">${allGroups.length ? "No priority work matches the current filter." : "No current Rush or Remake items."}</span>`}
     </div>
   `;
 }
@@ -14850,6 +15071,7 @@ function openSdiPanel(assignmentId = "") {
   }
   state.sdiSelectedLineItemIds = new Set();
   state.sdiExpandedCurrentGroups = new Set();
+  state.sdiExpandedCurrentDates = new Set();
   state.sdiCurrentGroupsInitialized = false;
   updateSdiSelectionSummary();
   loadSdiWorkspace(assignmentLookup).catch((error) => showInlineError(error.message, true));
@@ -14866,6 +15088,7 @@ function closeSdiPanel() {
   if (els.sdiBackdrop) els.sdiBackdrop.hidden = true;
   if (els.sdiLookupResults) els.sdiLookupResults.hidden = true;
   state.sdiExpandedCurrentGroups = new Set();
+  state.sdiExpandedCurrentDates = new Set();
   state.sdiCurrentGroupsInitialized = false;
   updateModalScrollLock();
 }
@@ -24869,14 +25092,42 @@ function wireEvents() {
     updateSdiSelectionSummary();
   });
   els.sdiCurrentList?.addEventListener("click", (event) => {
+    const editItemButton = event.target.closest("[data-sdi-edit-line-item]");
+    if (editItemButton) {
+      beginPriorityWorkEdit([editItemButton.dataset.sdiEditLineItem || ""], editItemButton.dataset.sdiEditLookup || "")
+        .catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const editGroupButton = event.target.closest("[data-sdi-edit-group]");
+    if (editGroupButton) {
+      beginPriorityWorkEdit(priorityIdsFromData(editGroupButton.dataset.sdiEditGroup), editGroupButton.dataset.sdiEditLookup || "")
+        .catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const clearGroupButton = event.target.closest("[data-sdi-clear-group]");
+    if (clearGroupButton) {
+      clearPriorityWorkItems(priorityIdsFromData(clearGroupButton.dataset.sdiClearGroup), `order ${clearGroupButton.dataset.sdiClearLabel || "priority work"}`)
+        .catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const clearAllButton = event.target.closest("[data-sdi-clear-all]");
+    if (clearAllButton) {
+      clearPriorityWorkItems(currentPriorityItems().map((item) => item.lineItemId), "all current priority work")
+        .catch((error) => showInlineError(error.message, true));
+      return;
+    }
     const clearButton = event.target.closest("[data-sdi-clear-line-item]");
     if (clearButton) {
-      submitSdi(false, {
-        lineItemIds: [clearButton.dataset.sdiClearLineItem || ""],
-        lookup: clearButton.dataset.sdiClearLookup || "",
-        reason: "Cleared individual Rush / Remake item",
-        keepOpen: true,
-      }).catch((error) => showInlineError(error.message, true));
+      clearPriorityWorkItems([clearButton.dataset.sdiClearLineItem || ""], "this priority item")
+        .catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const dateButton = event.target.closest("[data-sdi-current-date]");
+    if (dateButton) {
+      const dateKey = dateButton.dataset.sdiCurrentDate || "undated";
+      if (state.sdiExpandedCurrentDates.has(dateKey)) state.sdiExpandedCurrentDates.delete(dateKey);
+      else state.sdiExpandedCurrentDates.add(dateKey);
+      renderSdiCurrentList();
       return;
     }
     const groupButton = event.target.closest("[data-sdi-current-group]");
@@ -24884,6 +25135,25 @@ function wireEvents() {
     const key = groupButton.dataset.sdiCurrentGroup || "";
     if (state.sdiExpandedCurrentGroups.has(key)) state.sdiExpandedCurrentGroups.delete(key);
     else state.sdiExpandedCurrentGroups.add(key);
+    renderSdiCurrentList();
+  });
+  els.sdiCurrentList?.addEventListener("input", (event) => {
+    const input = event.target.closest("[data-sdi-current-search]");
+    if (!input) return;
+    state.sdiCurrentQuery = input.value;
+    window.clearTimeout(state.sdiCurrentFilterTimer);
+    const cursor = input.selectionStart ?? input.value.length;
+    state.sdiCurrentFilterTimer = window.setTimeout(() => {
+      renderSdiCurrentList();
+      const replacement = els.sdiCurrentList?.querySelector("[data-sdi-current-search]");
+      replacement?.focus();
+      replacement?.setSelectionRange?.(cursor, cursor);
+    }, 140);
+  });
+  els.sdiCurrentList?.addEventListener("change", (event) => {
+    const select = event.target.closest("[data-sdi-current-type]");
+    if (!select) return;
+    state.sdiCurrentTypeFilter = select.value || "all";
     renderSdiCurrentList();
   });
   els.sdiClearBtn?.addEventListener("click", () => {
