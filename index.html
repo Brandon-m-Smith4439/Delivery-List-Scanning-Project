@@ -16,8 +16,8 @@
     <link rel="stylesheet" href="static/css/rejects.css?v=20260728-v154">
     <link rel="stylesheet" href="static/css/home.css?v=20260729-v159">
     <link rel="stylesheet" href="static/css/scan.css?v=20260729-v162">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260729-v163">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260729-v163">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260729-v165">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260729-v169">
     <link rel="stylesheet" href="static/css/print.css?v=20260728-v150">
     <link rel="stylesheet" href="static/css/bays.css?v=20260728-v151">
 </head>
@@ -1247,10 +1247,10 @@
           <section class="panel admin-import-panel admin-dashboard-card">
             <div class="section-heading">
               <h2>Delivery List Management</h2>
-              <button class="link-button" type="button" data-admin-modal="deliveryLists">Edit delivery lists</button>
-            </div>
-            <div class="admin-button-row admin-primary-actions">
-              <button id="folderImportBtn" type="button">Delivery Automation Control Center</button>
+              <div class="section-actions admin-delivery-list-actions">
+                <button id="folderImportBtn" class="link-button admin-automation-link" type="button">Edit automated DL import</button>
+                <button class="link-button" type="button" data-admin-modal="deliveryLists">Edit delivery lists</button>
+              </div>
             </div>
             <div id="importPreviewBox" class="admin-empty import-status-compact" hidden></div>
             <div id="adminDeliveryLists" class="admin-table admin-preview-table"></div>
@@ -1490,11 +1490,10 @@
           <button id="operationsModalClose" class="modal-close-x" type="button" aria-label="Close operations window">×</button>
         </div>
       </header>
-      <div class="operations-modal-context-strip" aria-label="Operations workspace context">
-        <span class="is-active"><i class="operations-context-icon workspace" aria-hidden="true"></i><b id="operationsModalContextLabel">Operations workspace</b></span>
-        <span><i class="operations-context-icon live" aria-hidden="true"></i>Live scanner data</span>
-        <span><i class="operations-context-icon audit" aria-hidden="true"></i>Changes are audited</span>
-      </div>
+      <details class="modal-action-history operations-action-history" id="operationsModalHistory">
+        <summary><span><strong>Action History</strong><small id="operationsModalHistorySummary">Loading recent changes...</small></span><b id="operationsModalHistoryCount">0</b></summary>
+        <div class="modal-action-history-list" id="operationsModalHistoryList"></div>
+      </details>
       <div id="operationsModalBody"></div>
     </section>
 
@@ -1512,16 +1511,29 @@
           <button id="adminModalClose" class="modal-close-x" type="button" aria-label="Close admin window">×</button>
         </div>
       </header>
-      <div class="admin-modal-context-strip" aria-label="Administration workspace context">
-        <span class="is-active"><i class="admin-context-icon workspace" aria-hidden="true"></i><b id="adminModalContextLabel">Management workspace</b></span>
-        <span><i class="admin-context-icon live" aria-hidden="true"></i>Live scanner data</span>
-        <span><i class="admin-context-icon audit" aria-hidden="true"></i>Changes are audited</span>
-      </div>
+      <nav class="admin-modal-section-tabs" id="adminModalSectionTabs" aria-label="Admin editor sections">
+        <button class="is-active" id="adminModalWorkspaceTab" type="button" data-admin-modal-section="workspace" aria-selected="true">
+          <span id="adminModalWorkspaceTabLabel">Workspace</span>
+        </button>
+        <button id="adminModalHistoryTab" type="button" data-admin-modal-section="history" aria-selected="false">
+          <span>Action History</span>
+          <b id="adminModalHistoryCount">0</b>
+        </button>
+      </nav>
+      <section class="modal-action-history admin-action-history" id="adminModalHistory" aria-label="Action History" hidden>
+        <header class="modal-action-history-heading">
+          <div>
+            <strong>Action History</strong>
+            <small id="adminModalHistorySummary">Loading recent changes...</small>
+          </div>
+        </header>
+        <div class="modal-action-history-list" id="adminModalHistoryList"></div>
+      </section>
       <div id="adminModalBody"></div>
     </section>
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260729-v163"></script>
+  <script src="static/js/app.js?v=20260729-v169"></script>
 </body>
 </html>

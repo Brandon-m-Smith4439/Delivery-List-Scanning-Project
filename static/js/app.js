@@ -127,7 +127,7 @@ const state = {
   bayEditorSelectedBay: "",
   adminCustomerRouteRules: [],
   customerEmailSettings: { contacts: [], cc: [], outbox: [] },
-  bayScannerSettings: { manualRules: [], barcodeRules: [] },
+  bayScannerSettings: { manualRules: [], barcodeRules: [], destinationOverrideMinutes: 15 },
   bayAutoAssignSettings: {
     standardMaxInches: 59.99,
     tallMinInches: 60,
@@ -159,6 +159,8 @@ const state = {
   manualEditResultRows: [],
   manualEditTotalRows: 0,
   manualEditVisibleCount: 20,
+  manualEditGlassTypes: [],
+  manualEditFilters: { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] },
   manualEditSearchTimer: null,
   manualEditSearchRequestId: 0,
   expandedRackGroups: new Set(),
@@ -902,7 +904,14 @@ const els = {
   adminModalEyebrow: document.getElementById("adminModalEyebrow"),
   adminModalDescription: document.getElementById("adminModalDescription"),
   adminModalStatusText: document.getElementById("adminModalStatusText"),
-  adminModalContextLabel: document.getElementById("adminModalContextLabel"),
+  adminModalSectionTabs: document.getElementById("adminModalSectionTabs"),
+  adminModalWorkspaceTab: document.getElementById("adminModalWorkspaceTab"),
+  adminModalWorkspaceTabLabel: document.getElementById("adminModalWorkspaceTabLabel"),
+  adminModalHistoryTab: document.getElementById("adminModalHistoryTab"),
+  adminModalHistory: document.getElementById("adminModalHistory"),
+  adminModalHistorySummary: document.getElementById("adminModalHistorySummary"),
+  adminModalHistoryCount: document.getElementById("adminModalHistoryCount"),
+  adminModalHistoryList: document.getElementById("adminModalHistoryList"),
   adminModalBody: document.getElementById("adminModalBody"),
   adminModalClose: document.getElementById("adminModalClose"),
   operationsModal: document.getElementById("operationsModal"),
@@ -911,7 +920,10 @@ const els = {
   operationsModalEyebrow: document.getElementById("operationsModalEyebrow"),
   operationsModalDescription: document.getElementById("operationsModalDescription"),
   operationsModalStatusText: document.getElementById("operationsModalStatusText"),
-  operationsModalContextLabel: document.getElementById("operationsModalContextLabel"),
+  operationsModalHistory: document.getElementById("operationsModalHistory"),
+  operationsModalHistorySummary: document.getElementById("operationsModalHistorySummary"),
+  operationsModalHistoryCount: document.getElementById("operationsModalHistoryCount"),
+  operationsModalHistoryList: document.getElementById("operationsModalHistoryList"),
   operationsModalBody: document.getElementById("operationsModalBody"),
   operationsModalClose: document.getElementById("operationsModalClose"),
   folderImportBtn: document.getElementById("folderImportBtn"),
@@ -1127,6 +1139,7 @@ const SPANISH_UI_TEXT = new Map([
   ["Edit Physical Bay Map", "Editar mapa físico de bahías"],
   ["Edit auto assigner", "Editar asignación automática"],
   ["Edit customer routes", "Editar rutas de clientes"],
+  ["Edit automated DL import", "Editar importación automática de listas"],
   ["Edit delivery lists", "Editar listas de entrega"],
   ["Edit emails", "Editar correos"],
   ["Edit lookups", "Editar catálogos"],
@@ -4028,7 +4041,12 @@ async function fetchJson(url, options = {}) {
     }
     throw new Error(message);
   }
-  return response.json();
+  const payload = await response.json();
+  const method = String(options.method || "GET").toUpperCase();
+  if (method !== "GET" && (url.startsWith("/api/admin/") || url.startsWith("/api/racks/") || url.startsWith("/api/operations/"))) {
+    window.setTimeout(() => refreshOpenModalActionHistory().catch(() => {}), 80);
+  }
+  return payload;
 }
 
 /**
@@ -16435,6 +16453,78 @@ function renderAdminDeliveryLists() {
   if (!state.adminTodayImportLoaded) void refreshAdminTodayImportRuns({ render: true });
 }
 
+function actionHistoryLabel(action = "") {
+  return String(action || "Change")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function actionHistoryDateTime(value = "") {
+  if (!value) return "Unknown time";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString([], {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function actionHistoryDetail(event = {}) {
+  const payload = event.payload || {};
+  if (Array.isArray(payload.changedFields) && payload.changedFields.length) {
+    return `Changed ${payload.changedFields.map((field) => actionHistoryLabel(field)).join(", ")}`;
+  }
+  if (payload.destinationOverrideMinutes) return `${payload.destinationOverrideMinutes}-minute override window`;
+  if (payload.rackCode) return `Rack ${payload.rackCode}`;
+  if (event.reason) return event.reason;
+  return `${actionHistoryLabel(event.entityType || "record")} ${event.entityId || ""}`.trim();
+}
+
+function renderModalActionHistory(events = [], target = "admin") {
+  const isOperations = target === "operations";
+  const details = isOperations ? els.operationsModalHistory : els.adminModalHistory;
+  const summary = isOperations ? els.operationsModalHistorySummary : els.adminModalHistorySummary;
+  const count = isOperations ? els.operationsModalHistoryCount : els.adminModalHistoryCount;
+  const list = isOperations ? els.operationsModalHistoryList : els.adminModalHistoryList;
+  if (!details || !summary || !count || !list) return;
+  const rows = Array.isArray(events) ? events : [];
+  count.textContent = String(rows.length);
+  summary.textContent = rows.length
+    ? `Last change ${actionHistoryDateTime(rows[0].createdAt)} by ${rows[0].user || "system"}`
+    : "No recorded changes for this workspace yet";
+  list.innerHTML = rows.length
+    ? rows.map((event) => `
+        <article class="modal-action-history-row">
+          <span class="modal-action-history-icon" aria-hidden="true"></span>
+          <div>
+            <strong>${escapeHtml(actionHistoryLabel(event.action))}</strong>
+            <span>${escapeHtml(actionHistoryDetail(event))}</span>
+          </div>
+          <time datetime="${escapeHtml(event.createdAt || "")}">${escapeHtml(actionHistoryDateTime(event.createdAt))}</time>
+          <small>${escapeHtml(event.user || "system")}</small>
+        </article>
+      `).join("")
+    : `<div class="admin-empty">No action history has been recorded for this GUI yet.</div>`;
+}
+
+async function loadModalActionHistory(context, target = "admin") {
+  if (!state.backend || !context) return;
+  const payload = await fetchJson(`/api/admin/action-history?context=${encodeURIComponent(context)}&limit=20`);
+  renderModalActionHistory(payload.events || [], target);
+}
+
+async function refreshOpenModalActionHistory() {
+  if (els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind) {
+    await loadModalActionHistory(els.adminModal.dataset.kind, "admin");
+  }
+  if (els.operationsModal && !els.operationsModal.hidden && els.operationsModal.dataset.kind) {
+    await loadModalActionHistory(els.operationsModal.dataset.kind, "operations");
+  }
+}
+
 const ADMIN_MODAL_PROFILES = {
   deliveryLists: {
     title: "All Delivery Lists",
@@ -16588,13 +16678,30 @@ function adminModalProfile(kind, options = null) {
   return profile;
 }
 
+function setAdminModalSection(section = "workspace") {
+  const historySelected = section === "history";
+  if (els.adminModalWorkspaceTab) {
+    els.adminModalWorkspaceTab.classList.toggle("is-active", !historySelected);
+    els.adminModalWorkspaceTab.setAttribute("aria-selected", String(!historySelected));
+  }
+  if (els.adminModalHistoryTab) {
+    els.adminModalHistoryTab.classList.toggle("is-active", historySelected);
+    els.adminModalHistoryTab.setAttribute("aria-selected", String(historySelected));
+  }
+  if (els.adminModalBody) els.adminModalBody.hidden = historySelected;
+  if (els.adminModalHistory) els.adminModalHistory.hidden = !historySelected;
+  if (historySelected && els.adminModal?.dataset.kind) {
+    loadModalActionHistory(els.adminModal.dataset.kind, "admin").catch(() => renderModalActionHistory([], "admin"));
+  }
+}
+
 function applyAdminModalProfile(kind, options = null) {
   const profile = adminModalProfile(kind, options);
   if (els.adminModalTitle) els.adminModalTitle.textContent = profile.title;
   if (els.adminModalEyebrow) els.adminModalEyebrow.textContent = profile.eyebrow;
   if (els.adminModalDescription) els.adminModalDescription.textContent = profile.description;
-  if (els.adminModalContextLabel) els.adminModalContextLabel.textContent = profile.context;
   if (els.adminModalStatusText) els.adminModalStatusText.textContent = profile.status;
+  if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = profile.title;
   if (els.adminModal) els.adminModal.dataset.group = profile.group;
   return profile;
 }
@@ -16612,6 +16719,9 @@ function openAdminModal(kind, options = null) {
   applyAdminModalProfile(kind, options);
   els.adminModal.dataset.kind = kind;
   els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
+  setAdminModalSection("workspace");
+  renderModalActionHistory([], "admin");
+  loadModalActionHistory(kind, "admin").catch(() => renderModalActionHistory([], "admin"));
   if (kind === "lookups") {
     syncLookupManagerFormGuidance();
     filterLookupManagerLibrary(state.lookupManagerSearch || "");
@@ -16669,7 +16779,13 @@ async function closeAdminModal() {
     els.adminModalBackdrop.hidden = true;
     els.adminModalBackdrop.setAttribute("aria-hidden", "true");
   }
-  if (els.adminModalBody) els.adminModalBody.replaceChildren();
+  if (els.adminModalBody) {
+    els.adminModalBody.hidden = false;
+    els.adminModalBody.replaceChildren();
+  }
+  if (els.adminModalHistory) els.adminModalHistory.hidden = true;
+  setAdminModalSection("workspace");
+  renderModalActionHistory([], "admin");
   updateModalScrollLock();
   return true;
 }
@@ -18096,6 +18212,107 @@ function manualEditStageSummary(listId) {
  * Effects: Updates visible dom state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function manualEditFilterIsActive(group, value) {
+  if (group === "attention") return (state.manualEditFilters.attention || []).includes(value);
+  if (group === "glassType") {
+    const selected = state.manualEditFilters.glassTypes || [];
+    return value === "all" ? selected.length === 0 : selected.includes(value);
+  }
+  return String(state.manualEditFilters[group] || "all") === value;
+}
+
+function manualEditActiveFilterCount() {
+  return ["progress", "route", "location"].filter((key) => String(state.manualEditFilters[key] || "all") !== "all").length
+    + (state.manualEditFilters.attention || []).length
+    + (state.manualEditFilters.glassTypes || []).length;
+}
+
+function manualEditFilterButton(group, value, label) {
+  return `<button type="button" class="tab ${manualEditFilterIsActive(group, value) ? "is-active" : ""}" data-manual-edit-filter-group="${escapeHtml(group)}" data-manual-edit-filter-value="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
+}
+
+function manualEditFilterDrawerHtml() {
+  const routeOptions = uniqueText(["IT", "CPU", "DTC", "GNV", ...(state.manualEditLookups.routes || []).map((item) => item.value || item.label || "")]).filter(Boolean);
+  const glassTypeOptions = Array.isArray(state.manualEditGlassTypes) ? state.manualEditGlassTypes : [];
+  const activeCount = manualEditActiveFilterCount();
+  return `
+    <details class="scan-filter-drawer manual-edit-filter-drawer">
+      <summary aria-label="Filter editable delivery-list rows">
+        <span class="scan-filter-panel-icon" aria-hidden="true"></span>
+        <span>Filters</span>
+        <b>${escapeHtml(activeCount)}</b>
+      </summary>
+      <div class="scan-filter-drawer-panel manual-edit-filter-panel">
+        <div class="scan-filter-panel-header">
+          <div class="scan-filter-panel-title"><span class="scan-filter-panel-icon" aria-hidden="true"></span><div><strong>Find the right order faster</strong><span>Combine progress, route, glass type, location, and attention filters.</span></div></div>
+          <button type="button" data-manual-edit-filter-clear>Clear filters</button>
+        </div>
+        <section class="scan-filter-section">
+          <div class="scan-filter-section-heading"><h3>Progress</h3><span>Filter by scanned quantity.</span></div>
+          <div class="scan-filter-options">
+            ${manualEditFilterButton("progress", "all", "All")}
+            ${manualEditFilterButton("progress", "not-scanned", "Not scanned")}
+            ${manualEditFilterButton("progress", "partial", "Partial")}
+            ${manualEditFilterButton("progress", "complete", "Complete")}
+          </div>
+        </section>
+        <section class="scan-filter-section">
+          <div class="scan-filter-section-heading"><h3>Route</h3><span>Show one destination route.</span></div>
+          <div class="scan-filter-options">
+            ${manualEditFilterButton("route", "all", "All routes")}
+            ${routeOptions.map((route) => manualEditFilterButton("route", route, route === "IT" ? "Indian Trail" : route)).join("")}
+          </div>
+        </section>
+        <section class="scan-filter-section">
+          <div class="scan-filter-section-heading"><h3>Location</h3><span>Find unassigned, rack, or bay pieces.</span></div>
+          <div class="scan-filter-options">
+            ${manualEditFilterButton("location", "all", "Anywhere")}
+            ${manualEditFilterButton("location", "unassigned", "Unassigned")}
+            ${manualEditFilterButton("location", "rack", "In a rack")}
+            ${manualEditFilterButton("location", "bay", "In a bay")}
+          </div>
+        </section>
+        <section class="scan-filter-section scan-filter-glass-section manual-edit-glass-filter-section">
+          <div class="scan-filter-section-heading"><h3>Glass Type</h3><span>Only glass types present in the selected delivery-list stage are shown.</span></div>
+          <div class="scan-filter-options manual-edit-glass-filter-options">
+            ${manualEditFilterButton("glassType", "all", "All glass types")}
+            ${glassTypeOptions.length
+              ? glassTypeOptions.map((option) => manualEditFilterButton(
+                  "glassType",
+                  option.label,
+                  `${option.label} (${option.pieceQty} pcs)`,
+                )).join("")
+              : '<span class="manual-edit-glass-filter-empty">Load a delivery-list stage to see its glass types.</span>'}
+          </div>
+        </section>
+        <section class="scan-filter-section manual-edit-attention-filter-section">
+          <div class="scan-filter-section-heading"><h3>Attention</h3><span>Select one or several special conditions.</span></div>
+          <div class="scan-filter-options">
+            ${manualEditFilterButton("attention", "remake", "Remakes")}
+            ${manualEditFilterButton("attention", "rush", "Rushes")}
+            ${manualEditFilterButton("attention", "updated", "Updated")}
+            ${manualEditFilterButton("attention", "reject", "Internal rejects")}
+            ${manualEditFilterButton("attention", "manual", "Manual entries")}
+          </div>
+        </section>
+        <div class="scan-filter-panel-footer"><span>${escapeHtml(activeCount)} active filter${activeCount === 1 ? "" : "s"}</span><button type="button" data-manual-edit-filter-apply>Apply filters</button></div>
+      </div>
+    </details>
+  `;
+}
+
+function refreshManualEditFilterDrawer(openState = null) {
+  const drawer = document.querySelector(".manual-edit-filter-drawer");
+  if (!drawer) return;
+  const shouldOpen = openState === null ? drawer.open : Boolean(openState);
+  const template = document.createElement("template");
+  template.innerHTML = manualEditFilterDrawerHtml().trim();
+  const nextDrawer = template.content.firstElementChild;
+  if (!nextDrawer) return;
+  nextDrawer.open = shouldOpen;
+  drawer.replaceWith(nextDrawer);
+}
+
 function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a delivery list to load editable rows.</div>`) {
   const selected = state.manualEditListId || state.activeListId || state.lists[0]?.id || "";
   const stageLists = manualEditStageListsForCurrentDelivery(selected);
@@ -18123,18 +18340,22 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
           </select>
         </label>
 
-        <label class="manual-edit-control search-control">
-          <span>Search within stage</span>
-          <input id="manualEditModalSearch" type="search" autocomplete="off" value="${escapeHtml(state.manualEditQuery || "")}" placeholder="Order number, Job Nr., customer, route...">
-        </label>
+        <div class="manual-edit-search-with-filter">
+          <label class="manual-edit-control search-control">
+            <span>Search within stage</span>
+            <input id="manualEditModalSearch" type="search" autocomplete="off" value="${escapeHtml(state.manualEditQuery || "")}" placeholder="Order number, Job Nr., customer, route...">
+          </label>
+          ${manualEditFilterDrawerHtml()}
+        </div>
 
         <div class="manual-edit-tool-actions">
           <button id="manualEditModalSearchBtn" type="button">Search</button>
           <button id="manualEditModalReloadBtn" class="secondary" type="button">Load All</button>
+          <button type="button" class="secondary manual-edit-create-order-button" data-manual-order-toggle>Create New Order</button>
         </div>
       </div>
 
-      <details class="manual-order-create-panel">
+      <details class="manual-order-create-panel" id="manualOrderCreatePanel">
         <summary><span>+ Add an order manually</span><small>Uses the selected delivery date and requires an explicit route.</small></summary>
         <form id="manualOrderCreateForm" class="manual-order-create-form">
           <div class="manual-order-form-grid">
@@ -18206,9 +18427,11 @@ async function openManualEditForList(listId) {
   state.manualEditDirty = false;
   state.manualEditListId = listId || state.activeListId || state.lists[0]?.id || "";
   state.manualEditQuery = "";
+  state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
   state.manualEditResultRows = [];
   state.manualEditTotalRows = 0;
   state.manualEditVisibleCount = 20;
+  state.manualEditGlassTypes = [];
 
   openAdminModal("manualEdit");
 
@@ -18221,16 +18444,24 @@ async function openManualEditForList(listId) {
  * Effects: May call the backend api.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
-async function fetchManualEditBatch(query, listId, limit = 20, offset = 0) {
+async function fetchManualEditBatch(query, listId, limit = 20, offset = 0, filters = state.manualEditFilters) {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   if (listId) params.set("listId", listId);
   params.set("limit", String(limit));
   params.set("offset", String(offset));
+  if (filters?.progress && filters.progress !== "all") params.set("progress", filters.progress);
+  if (filters?.route && filters.route !== "all") params.set("route", filters.route);
+  if (filters?.location && filters.location !== "all") params.set("location", filters.location);
+  if (Array.isArray(filters?.attention) && filters.attention.length) params.set("attention", filters.attention.join(","));
+  for (const glassType of filters?.glassTypes || []) {
+    if (String(glassType || "").trim()) params.append("glassType", String(glassType).trim());
+  }
   const payload = await fetchJson(`/api/admin/line-items/search?${params.toString()}`);
   return {
     results: payload.results || [],
     total: Math.max(Number(payload.total || 0), (payload.results || []).length),
+    filterOptions: payload.filterOptions || { glassTypes: [] },
   };
 }
 
@@ -18252,6 +18483,8 @@ async function runManualEditModalSearch(loadAll = false) {
   if (loadAll) {
     const searchInput = document.getElementById("manualEditModalSearch");
     if (searchInput) searchInput.value = "";
+    state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
+    refreshManualEditFilterDrawer(false);
   }
 
   state.manualEditListId = stage;
@@ -18280,6 +18513,12 @@ async function runManualEditModalSearch(loadAll = false) {
   state.manualEditResultRows = resultPage.results;
   state.manualEditTotalRows = resultPage.total;
   state.manualEditVisibleCount = 20;
+  state.manualEditGlassTypes = Array.isArray(resultPage.filterOptions?.glassTypes)
+    ? resultPage.filterOptions.glassTypes
+    : [];
+  const availableGlassTypes = new Set(state.manualEditGlassTypes.map((option) => String(option.label || "")));
+  state.manualEditFilters.glassTypes = (state.manualEditFilters.glassTypes || []).filter((label) => availableGlassTypes.has(label));
+  refreshManualEditFilterDrawer(false);
   const html = manualEditResultsHtml(state.manualEditResultRows, state.manualEditVisibleCount, state.manualEditTotalRows);
 
   if (target) {
@@ -18295,6 +18534,7 @@ async function runManualEditModalSearch(loadAll = false) {
 
 /** Reveal the next batch of editable rows without another server request. */
 async function loadMoreManualEditRows() {
+  state.manualEditResultRows = state.manualEditResultRows.filter((item) => !item._manualEditFilterMismatch);
   const button = document.querySelector("[data-manual-edit-load-more]");
   if (button) {
     button.disabled = true;
@@ -20590,6 +20830,15 @@ function bayScannerRulesModalHtml() {
         <span class="email-smtp-badge is-live">Bay Map only</span>
       </section>
 
+      <section class="bay-rule-card bay-override-window-card">
+        <header><strong>Mixed-destination rack override window</strong><span>How long one approved override keeps that rack open to other destinations.</span></header>
+        <form id="bayOverrideWindowForm" class="bay-rule-form bay-override-window-form">
+          <label><span>Override minutes</span><input id="bayDestinationOverrideMinutes" type="number" min="1" max="120" step="1" value="${escapeHtml(settings.destinationOverrideMinutes || 15)}"></label>
+          <div class="bay-override-window-copy"><strong>Current behavior</strong><span>After a user confirms one destination mismatch, that rack accepts mixed destinations for this many minutes without another walk back to the computer.</span></div>
+          <button type="submit">Save Override Time</button>
+        </form>
+      </section>
+
       <section class="bay-rule-card">
         <header><strong>Remembered manual inputs</strong><span>Accepted without asking for confirmation.</span></header>
         <form id="bayManualRuleForm" class="bay-rule-form">
@@ -20642,6 +20891,18 @@ async function refreshBayScannerRules(openModal = false) {
  * Effects: May call the backend api.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+async function saveBayOverrideWindow() {
+  const destinationOverrideMinutes = Number(document.getElementById("bayDestinationOverrideMinutes")?.value || 15);
+  const payload = await fetchJson("/api/admin/bay-scanner-rules/settings", {
+    method: "POST",
+    body: JSON.stringify({ destinationOverrideMinutes }),
+  });
+  state.bayScannerSettings = payload || state.bayScannerSettings;
+  renderBayScannerRuleOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  showSaveConfirmation(`Rack destination overrides will remain active for ${destinationOverrideMinutes} minutes.`);
+}
+
 async function saveBayManualRule() {
   const matchType = document.getElementById("bayManualRuleType")?.value || "exact";
   const pattern = document.getElementById("bayManualRulePattern")?.value.trim() || "";
@@ -21473,6 +21734,25 @@ function manualEditChoiceHiddenInput(control) {
   return control?.querySelector(`[data-edit-field="${CSS.escape(field)}"]`) || null;
 }
 
+
+/**
+ * Return the value currently shown by a manual-edit choice control.
+ * Reading the visible control prevents a stale hidden mirror from discarding
+ * a route, location, product, or process selection during save.
+ */
+function manualEditVisibleChoiceValue(row, field) {
+  const control = row?.querySelector(`[data-choice-control][data-choice-field="${CSS.escape(field)}"]`);
+  if (!control) return row?.querySelector(`[data-edit-field="${CSS.escape(field)}"]`)?.value ?? "";
+
+  if (control.classList.contains("is-custom")) {
+    return control.querySelector(".manual-edit-custom-input")?.value ?? "";
+  }
+
+  const select = control.querySelector(".manual-edit-choice-select");
+  if (select && select.value !== MANUAL_EDIT_CUSTOM_VALUE) return select.value;
+  return manualEditChoiceHiddenInput(control)?.value ?? "";
+}
+
 /**
  * Purpose: Run the manual edit set choice value workflow for the browser application.
  * Effects: May update shared client state.
@@ -21688,12 +21968,26 @@ function manualEditLocationOptions(item) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function manualEditRouteSelectionValue(value) {
+  const raw = String(value || "").trim();
+  const designation = canonicalRouteDesignation(raw);
+  if (designation.matched) return designation.route || "INDIAN TRAIL";
+  return raw || "INDIAN TRAIL";
+}
+
 function manualEditRouteOptions() {
+  const seen = new Set();
   const lookupRoutes = lookupOptions(state.manualEditLookups?.routes || [], "Indian Trail / Standard")
-    .map(([value, label]) => [String(value || "").trim() || "IT", label]);
+    .map(([value, label]) => [manualEditRouteSelectionValue(value), label])
+    .filter(([value]) => {
+      const key = String(value || "").trim().toUpperCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   if (lookupRoutes.length > 1) return lookupRoutes;
   return [
-    ["IT", "Indian Trail / Standard"],
+    ["INDIAN TRAIL", "Indian Trail / Standard"],
     ["CPU", "Customer Pickup"],
     ["GNV", "Greenville"],
     ["DTC", "Deliver to Customer"],
@@ -21813,20 +22107,93 @@ function manualEditValidateRow(row) {
 }
 
 /**
+ * Return the editable values currently displayed in one expanded Manual Edit card.
+ * The clicked card is passed directly so stale or duplicate modal markup can never
+ * substitute a different row during save.
+ */
+function manualEditCollectRowData(row, lineItemId) {
+  const value = (field) => row?.querySelector(`[data-edit-field="${CSS.escape(field)}"]`)?.value ?? "";
+  const data = {
+    lineItemId: String(lineItemId || row?.dataset?.editRow || ""),
+    order: value("order"),
+    item: value("item"),
+    customer: value("customer"),
+    qty: value("qty"),
+    scanned: value("scanned"),
+    dimensions: value("dimensions"),
+    job: value("job"),
+    queueState: value("queueState"),
+  };
+
+  for (const field of ["location", "route", "processState", "product"]) {
+    data[field] = manualEditVisibleChoiceValue(row, field);
+  }
+
+  data.route = manualEditRouteSelectionValue(data.route);
+  data.routeOverride = data.route;
+  return data;
+}
+
+function manualEditOriginalRowData(row) {
+  try {
+    return JSON.parse(row?.dataset?.manualEditOriginal || "{}");
+  } catch (_error) {
+    return {};
+  }
+}
+
+function manualEditComparableValue(field, value) {
+  if (["qty", "scanned"].includes(field)) return Number(value || 0);
+  if (field === "item") {
+    const text = String(value || "").trim();
+    return /^\d+$/.test(text) ? text.padStart(3, "0") : text;
+  }
+  if (field === "order") {
+    const text = String(value || "").trim();
+    return /^\d+$/.test(text) ? String(Number(text)) : text;
+  }
+  if (field === "route") return manualEditRouteSelectionValue(value);
+  if (field === "location") return String(value || "").trim().toUpperCase();
+  return String(value ?? "");
+}
+
+function manualEditChangedFields(row, data) {
+  const original = manualEditOriginalRowData(row);
+  return [
+    "order",
+    "item",
+    "customer",
+    "qty",
+    "scanned",
+    "location",
+    "route",
+    "processState",
+    "product",
+    "dimensions",
+    "job",
+    "queueState",
+  ].filter((field) => (
+    manualEditComparableValue(field, data[field]) !== manualEditComparableValue(field, original[field])
+  ));
+}
+
+/**
  * Purpose: Run the manual edit results HTML workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.length) {
   const visibleRows = results.slice(0, Math.max(Number(visibleCount || 20), 20));
-  const totalRows = Math.max(Number(totalCount || 0), results.length);
-  const remainingRows = Math.max(totalRows - visibleRows.length, 0);
+  const totalRows = Math.max(Number(totalCount || 0), results.filter((item) => !item._manualEditFilterMismatch).length);
+  const pinnedRows = visibleRows.filter((item) => item._manualEditFilterMismatch).length;
+  const matchingVisibleRows = Math.max(visibleRows.length - pinnedRows, 0);
+  const remainingRows = Math.max(totalRows - matchingVisibleRows, 0);
 
   return results.length
     ? `
       <div class="manual-edit-result-summary">
-        <span>Showing ${escapeHtml(visibleRows.length)} of ${escapeHtml(totalRows)} row${totalRows === 1 ? "" : "s"}</span>
-        <small>Rows start collapsed. Expand one to edit it.</small>
+        <span>Showing ${escapeHtml(matchingVisibleRows)} of ${escapeHtml(totalRows)} matching row${totalRows === 1 ? "" : "s"}${pinnedRows ? ` + ${escapeHtml(pinnedRows)} recently updated` : ""}</span>
+        <small>${pinnedRows ? "The saved row remains visible until the next search or filter change." : "Rows start collapsed. Expand one to edit it."}</small>
       </div>
 
       <div class="manual-edit-card-list">
@@ -21837,13 +22204,40 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
             const qtyValue = Math.max(Number(item.qty || 0), 0);
             const scannedValue = Math.min(Math.max(Number(item.scanned || 0), 0), qtyValue);
             const locationValue = manualEditCurrentLocationValue(item);
+            const scannedClass = scannedValue > 0 ? " is-scanned" : " is-unscanned";
+            const completeClass = qtyValue > 0 && scannedValue >= qtyValue ? " is-complete" : "";
+            const updatedClass = item._manualEditJustUpdated ? " is-just-updated" : "";
+            const mismatchClass = item._manualEditFilterMismatch ? " is-filter-mismatch" : "";
+            const originalValues = {
+              order: item.order || "",
+              item: item.item || "",
+              customer: item.customer || "",
+              qty: qtyValue,
+              scanned: scannedValue,
+              location: locationValue,
+              route: manualEditRouteSelectionValue(item.route),
+              processState: item.processState || "",
+              product: item.product || "",
+              dimensions: item.dimensions || "",
+              job: item.job || "",
+              queueState: item.queueState || "",
+            };
 
             return `
-              <details class="manual-edit-card" data-edit-row="${escapeHtml(item.lineItemId)}">
+              <details
+                class="manual-edit-card${scannedClass}${completeClass}${updatedClass}${mismatchClass}"
+                data-edit-row="${escapeHtml(item.lineItemId)}"
+                data-manual-edit-original="${escapeHtml(JSON.stringify(originalValues))}"
+                ${item._manualEditJustUpdated ? "open" : ""}
+              >
                 <summary class="manual-edit-card-header">
                   <div class="manual-edit-card-title">
-                    <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
+                    <div class="manual-edit-card-title-line">
+                      <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
+                      <span class="manual-edit-scan-status ${scannedValue > 0 ? "is-scanned" : "is-unscanned"}">${scannedValue > 0 ? "Scanned" : "Not scanned"}</span>
+                    </div>
                     <span>${escapeHtml(item.job || "No Job Nr.")} &bull; ${escapeHtml(item.customer || "No customer")}</span>
+                    ${item._manualEditFilterMismatch ? `<small class="manual-edit-saved-filter-note">Saved successfully — this item no longer matches the active filters.</small>` : ""}
                   </div>
 
                   <div class="manual-edit-card-stage" title="${escapeHtml(stageText)}">
@@ -21914,7 +22308,7 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
                   ${manualEditChoiceFieldHtml({
                     field: "route",
                     label: "Route",
-                    value: item.route || "IT",
+                    value: manualEditRouteSelectionValue(item.route),
                     options: manualEditRouteOptions(),
                     customLabel: "Custom route...",
                   })}
@@ -21971,22 +22365,33 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
  * Effects: May call the backend api.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-async function saveManualLineItem(lineItemId) {
-  const row = document.querySelector(`[data-edit-row="${CSS.escape(lineItemId)}"]`);
+async function saveManualLineItem(lineItemId, sourceButton = null) {
+  const row = sourceButton?.closest("[data-edit-row]")
+    || document.querySelector(`[data-edit-row="${CSS.escape(lineItemId)}"]`);
 
   if (!row) return;
+
+  closeCustomSelect(false);
+  if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLSelectElement) {
+    document.activeElement.blur();
+  }
 
   if (!manualEditValidateRow(row)) {
     row.querySelector(".is-invalid")?.focus();
     return;
   }
 
-  const data = { lineItemId };
-  const saveButton = row.querySelector("[data-save-line-item]");
+  const data = manualEditCollectRowData(row, lineItemId);
+  const clientChangedFields = manualEditChangedFields(row, data);
+  const saveButton = sourceButton || row.querySelector("[data-save-line-item]");
 
-  row.querySelectorAll("[data-edit-field]").forEach((input) => {
-    data[input.dataset.editField] = input.value;
-  });
+  if (!clientChangedFields.length) {
+    showFloatingNotice("No edited values were detected in this row.", "notice");
+    return;
+  }
+
+  data.clientChangedFields = clientChangedFields;
+  data.originalValues = manualEditOriginalRowData(row);
 
   row.classList.add("is-saving");
   if (saveButton) saveButton.disabled = true;
@@ -21995,6 +22400,13 @@ async function saveManualLineItem(lineItemId) {
       method: "POST",
       body: JSON.stringify(data),
     });
+
+    if (!Number(payload.logicalUpdatedCount || 0)) {
+      throw new Error(
+        `The server did not apply the edited ${clientChangedFields.join(", ")} value${clientChangedFields.length === 1 ? "" : "s"}. `
+        + "The row has been left open so the entered values are not lost.",
+      );
+    }
 
     const payloadListId = String(payload.meta?.id || "");
     const catalogList = state.lists.find((list) => String(list.id || "") === payloadListId);
@@ -22027,11 +22439,62 @@ async function saveManualLineItem(lineItemId) {
       });
     }
 
+    const preferredListId = payload.destinationListId || payloadListId || state.activeListId;
+    await loadDeliveryLists(preferredListId);
+    const refreshLimit = Math.max(state.manualEditResultRows.filter((item) => !item._manualEditFilterMismatch).length, 20);
+    const refreshed = await fetchManualEditBatch(state.manualEditQuery, state.manualEditListId, refreshLimit, 0, state.manualEditFilters);
+    const verifiedItem = payload.updatedItem && Object.keys(payload.updatedItem).length
+      ? { ...payload.updatedItem }
+      : {
+          ...(resultItem || {}),
+          lineItemId,
+          order: data.order,
+          item: data.item,
+          customer: data.customer,
+          qty: Number(data.qty || 0),
+          scanned: Number(data.scanned || 0),
+          route: data.route,
+          processState: data.processState,
+          product: data.product,
+          dimensions: data.dimensions,
+          job: data.job,
+          queueState: data.queueState,
+          location: data.location,
+          locationDisplay: data.location,
+        };
+    const verifiedKey = `${String(verifiedItem.order || "")}::${String(verifiedItem.item || "").padStart(3, "0")}`;
+    const matchingIndex = refreshed.results.findIndex((item) => (
+      `${String(item.order || "")}::${String(item.item || "").padStart(3, "0")}` === verifiedKey
+    ));
+    if (matchingIndex >= 0) {
+      refreshed.results[matchingIndex] = {
+        ...refreshed.results[matchingIndex],
+        ...verifiedItem,
+        _manualEditJustUpdated: true,
+        _manualEditFilterMismatch: false,
+      };
+    } else {
+      refreshed.results.unshift({
+        ...verifiedItem,
+        _manualEditJustUpdated: true,
+        _manualEditFilterMismatch: true,
+      });
+    }
+    state.manualEditGlassTypes = Array.isArray(refreshed.filterOptions?.glassTypes)
+      ? refreshed.filterOptions.glassTypes
+      : state.manualEditGlassTypes;
+    const refreshedGlassTypes = new Set(state.manualEditGlassTypes.map((option) => String(option.label || "")));
+    state.manualEditFilters.glassTypes = (state.manualEditFilters.glassTypes || []).filter((label) => refreshedGlassTypes.has(label));
+    refreshManualEditFilterDrawer(false);
+    state.manualEditResultRows = refreshed.results;
+    state.manualEditTotalRows = refreshed.total;
+    state.manualEditVisibleCount = state.manualEditResultRows.length;
+    const resultsTarget = document.getElementById("manualEditModalResults");
+    if (resultsTarget) resultsTarget.innerHTML = manualEditResultsHtml(state.manualEditResultRows, state.manualEditVisibleCount, state.manualEditTotalRows);
+
     state.manualEditDirty = false;
-    row.classList.remove("is-saving");
-    row.classList.add("is-saved");
-    window.setTimeout(() => row.classList.remove("is-saved"), 1200);
-    showSaveConfirmation(payload.message || "Line item updated across its delivery-list stages.");
+    await refreshOpenModalActionHistory().catch(() => {});
+    showSaveConfirmation(payload.message || "Line item updated and verified.");
   } finally {
     row.classList.remove("is-saving");
     if (saveButton) saveButton.disabled = false;
@@ -22122,7 +22585,6 @@ function applyOperationsModalProfile(kind, options = {}) {
   if (els.operationsModalTitle) els.operationsModalTitle.textContent = profile.title || "Operations";
   if (els.operationsModalDescription) els.operationsModalDescription.textContent = profile.description || "";
   if (els.operationsModalStatusText) els.operationsModalStatusText.textContent = profile.status || "Live operations";
-  if (els.operationsModalContextLabel) els.operationsModalContextLabel.textContent = profile.context || "Operations workspace";
   return profile;
 }
 
@@ -22147,6 +22609,9 @@ function openOperationsModal({
     ...(group ? { group } : {}),
   });
   els.operationsModalBody.innerHTML = body;
+  if (els.operationsModalHistory) els.operationsModalHistory.open = false;
+  renderModalActionHistory([], "operations");
+  loadModalActionHistory(kind, "operations").catch(() => renderModalActionHistory([], "operations"));
   els.operationsModal.hidden = false;
   els.operationsModal.setAttribute("aria-hidden", "false");
   if (els.operationsModalBackdrop) {
@@ -22172,6 +22637,8 @@ function closeOperationsModal() {
     els.operationsModalBackdrop.setAttribute("aria-hidden", "true");
   }
   if (els.operationsModalBody) els.operationsModalBody.replaceChildren();
+  if (els.operationsModalHistory) els.operationsModalHistory.open = false;
+  renderModalActionHistory([], "operations");
   updateModalScrollLock();
 }
 
@@ -23615,6 +24082,11 @@ function wireV135OperationsEvents() {
         const status = document.getElementById("rejectEditStatus");
         if (status) status.textContent = error.message;
       });
+      return;
+    }
+    if (event.target.matches("#bayOverrideWindowForm")) {
+      event.preventDefault();
+      saveBayOverrideWindow().catch((error) => showInlineError(error.message, true));
       return;
     }
     if (event.target.matches("#manualOrderCreateForm")) {
@@ -25420,6 +25892,13 @@ function wireEvents() {
         return;
       }
     }
+    const adminModalSectionButton = event.target.closest("[data-admin-modal-section]");
+    if (adminModalSectionButton && els.adminModal?.contains(adminModalSectionButton)) {
+      event.preventDefault();
+      setAdminModalSection(adminModalSectionButton.dataset.adminModalSection || "workspace");
+      return;
+    }
+
     const manualCustomClearButton = event.target.closest("[data-manual-custom-clear]");
     if (manualCustomClearButton) {
       event.preventDefault();
@@ -25445,6 +25924,55 @@ function wireEvents() {
       state.manualEditDirty = false;
       openAdminModal("deliveryLists");
 
+      return;
+    }
+    const manualFilterButton = event.target.closest("[data-manual-edit-filter-group]");
+    if (manualFilterButton) {
+      event.preventDefault();
+      const group = manualFilterButton.dataset.manualEditFilterGroup || "";
+      const value = manualFilterButton.dataset.manualEditFilterValue || "all";
+      if (group === "attention") {
+        const next = new Set(state.manualEditFilters.attention || []);
+        if (next.has(value)) next.delete(value); else next.add(value);
+        state.manualEditFilters.attention = [...next];
+      } else if (group === "glassType") {
+        if (value === "all") {
+          state.manualEditFilters.glassTypes = [];
+        } else {
+          const next = new Set(state.manualEditFilters.glassTypes || []);
+          if (next.has(value)) next.delete(value); else next.add(value);
+          state.manualEditFilters.glassTypes = [...next];
+        }
+      } else if (group) {
+        state.manualEditFilters[group] = value;
+      }
+      refreshManualEditFilterDrawer(true);
+      return;
+    }
+    if (event.target.closest("[data-manual-edit-filter-clear]")) {
+      event.preventDefault();
+      state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
+      refreshManualEditFilterDrawer(false);
+      runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("[data-manual-edit-filter-apply]")) {
+      event.preventDefault();
+      document.querySelector(".manual-edit-filter-drawer")?.removeAttribute("open");
+      runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("[data-manual-order-toggle]")) {
+      event.preventDefault();
+      const panel = document.getElementById("manualOrderCreatePanel");
+      if (panel) {
+        panel.open = true;
+        panel.classList.add("is-requested-open");
+        const results = document.getElementById("manualEditModalResults");
+        if (results) results.scrollTop = 0;
+        panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        window.setTimeout(() => panel.querySelector("input[name='order']")?.focus(), 180);
+      }
       return;
     }
     const manualModalSearchButton = event.target.closest("#manualEditModalSearchBtn");
@@ -25838,7 +26366,7 @@ function wireEvents() {
     if (saveLineItemButton) {
       event.preventDefault();
       event.stopPropagation();
-      saveManualLineItem(saveLineItemButton.dataset.saveLineItem).catch((error) => showInlineError(error.message));
+      saveManualLineItem(saveLineItemButton.dataset.saveLineItem, saveLineItemButton).catch((error) => showInlineError(error.message));
       return;
     }
     const deleteLineItemButton = event.target.closest("[data-delete-line-item]");

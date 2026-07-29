@@ -1,5 +1,72 @@
 # File: README_CHANGELOG.md
 
+## v169 - Manual Edit Glass Type Filters
+
+- Added a Glass Type section to the Manual Delivery List Edit filter drawer.
+- Populates glass choices from the product/glass types that actually exist in the selected delivery-list stage.
+- Displays the current piece quantity for each glass type.
+- Supports selecting multiple glass types with OR logic inside the group and AND logic with progress, route, location, attention, and text-search filters.
+- Keeps the stage's glass choices available when other filters return zero matching rows.
+- Refreshes glass choices whenever the selected delivery-list stage changes.
+- No database migration is required.
+
+## v168 - Manual Edit Exact Row Capture Repair
+
+- Changed Manual Edit Save to use the exact expanded card containing the clicked Save button instead of querying the entire document by line-item ID.
+- Added an original-value snapshot to every editable card and compares it with the current visible controls before saving.
+- Captures the current Route, Location, Process, Product, order, item, customer, quantity, dimensions, and job values synchronously before the request.
+- Sends the browser-detected changed fields with the save request for verification.
+- Prevents a server no-change response from rerendering the result list and erasing the operator's unsaved values.
+- Keeps the row open and reports a clear error when a detected edit is not confirmed by the server.
+
+## v167 - Manual Route Save and New Order Workspace Repair
+
+- Fixed manual-edit choice fields using a stale hidden mirror instead of the value currently displayed in the dropdown.
+- Route saves now send an explicit override and store Indian Trail as `INDIAN TRAIL`, preventing CPU inference from undoing the operator's choice.
+- Normalized route comparisons across sibling stage copies and exposed the applied route in the save response.
+- Rebuilt the Manual Edit layout so Create New Order has a dedicated non-shrinking row and loaded results scroll independently.
+- Added bounded scrolling to the expanded New Order card on shorter screens.
+
+## v166 - Manual Route Corrections and Functional Admin GUI Tabs
+
+- Fixed manual CPU-to-Indian Trail route changes being normalized back to the legacy inferred `IT` fallback.
+- Stores explicit Indian Trail manual routing, synchronizes workflow copies, moves the receiving record, and returns the verified updated row.
+- Keeps a just-saved row visible and expanded when it no longer matches active filters.
+- Added green scanned-row styling and clear Scanned / Not scanned status badges.
+- Moved the Manual Edit filter drawer to a viewport-level overlay so it remains fully visible with empty or short result sets.
+- Replaced the pink Administration palette with navy and blue surfaces.
+- Restored meaningful Workspace and Action History tabs to every Admin editor, including Edit Racks.
+
+## v165 - Verified Manual Editing, GUI Action History, and Timed Rack Overrides
+
+- Corrected Manual Delivery List Edit so one logical item is reported as one update even when its workflow-stage copies are synchronized.
+- Saves now reload and verify every affected delivery-list stage before showing success.
+- Added Scan-style filters for progress, route, location, remakes, rushes, updates, internal rejects, and manual entries.
+- Added a persistent Create New Order toolbar action that remains available after loading more rows.
+- Added real expandable Action History to each maintained Admin and Rack/Operations GUI.
+- Added a configurable 1-120 minute mixed-destination rack override window under Bay Scanner Rules, defaulting to 15 minutes.
+- Once one rack-destination mismatch is approved, additional destination combinations can be scanned into that rack until the window expires.
+
+## v164 - Simplified GUI Headers and Automation Action
+
+### Shared editor headers
+
+- Removed the decorative selected workspace tab, Live scanner data tab, and Changes are audited tab from regular Administration editors.
+- Removed the matching decorative context rail from Individual Rack and Packing List History Operations windows.
+- Converted both shared modal systems to a simpler two-row layout: polished hero header plus scrollable editor canvas.
+- Left the Delivery Automation Control Center's functional Run Manually, Automatic Schedule, Status & Logs, and Import History tabs unchanged.
+
+### Delivery List Management action
+
+- Moved the automation launcher into the Delivery List Management heading actions, immediately left of Edit delivery lists.
+- Renamed it to Edit automated DL import and changed it to the maintained blue text-button treatment.
+- Preserved the existing permission check and Automation Control Center open behavior.
+
+### Compatibility
+
+- Preserved all editor forms, event handlers, API requests, permissions, automation settings, and database behavior.
+- No database migration or backend update is required.
+
 ## v163 - Modal Hidden State and Close Repair
 
 ### Startup and close behavior

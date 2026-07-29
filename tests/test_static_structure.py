@@ -50,7 +50,7 @@ def test_version_numbers_are_not_embedded_in_asset_filenames() -> None:
 def test_single_javascript_bundle_is_loaded() -> None:
     index = (ROOT / "index.html").read_text(encoding="utf-8")
     scripts = re.findall(r'<script\s+src="([^"]+)"', index)
-    assert scripts == ["static/js/app.js?v=20260729-v161"]
+    assert scripts == ["static/js/app.js?v=20260729-v169"]
     app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
     assert "DELIVERY AUTOMATION CONTROL CENTER" in app
     assert "NOTIFICATION CENTER AND LINE UPDATE REVIEW" in app
@@ -155,7 +155,7 @@ def test_scan_time_pill_qty_headers_and_table_are_width_safe() -> None:
     assert "<th>Item Nr.</th>" not in index[index.index('<table class="delivery-table">'):index.index('</table>', index.index('<table class="delivery-table">'))]
     assert "<th>Process State</th>" not in index[index.index('<table class="delivery-table">'):index.index('</table>', index.index('<table class="delivery-table">'))]
     assert "static/css/scan.css?v=20260729-v162" in index
-    assert "static/js/app.js?v=20260729-v161" in index
+    assert "static/js/app.js?v=20260729-v169" in index
 
 
 def test_v158_core_page_polish_and_scan_geometry() -> None:
@@ -187,17 +187,16 @@ def test_v158_core_page_polish_and_scan_geometry() -> None:
     }
     for name, cache_key in expected_asset_keys.items():
         assert f"static/css/{name}.css?v={cache_key}" in index
-    assert "static/js/app.js?v=20260729-v161" in index
+    assert "static/js/app.js?v=20260729-v169" in index
 
 
 def test_admin_control_center_modal_structure() -> None:
     index = (ROOT / "index.html").read_text(encoding="utf-8")
-    assert 'static/css/admin.css?v=20260729-v162' in index
+    assert 'static/css/admin.css?v=20260729-v169' in index
     for element_id in (
         "adminModalEyebrow",
         "adminModalDescription",
         "adminModalStatusText",
-        "adminModalContextLabel",
     ):
         assert f'id="{element_id}"' in index
     app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
@@ -212,7 +211,7 @@ def test_admin_control_center_modal_structure() -> None:
         assert f"{kind}: {{" in app
     css = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
     assert "v160 Administration Control Center modal system" in css
-    assert ".admin-modal-context-strip" in css
+    assert ".admin-modal-context-strip" not in css
 
 
 def test_v161_scan_timestamp_rack_status_and_rack_control_centers() -> None:
@@ -222,12 +221,11 @@ def test_v161_scan_timestamp_rack_status_and_rack_control_centers() -> None:
     racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
 
     assert "static/css/scan.css?v=20260729-v162" in index
-    assert "static/css/racks.css?v=20260729-v162" in index
-    assert "static/js/app.js?v=20260729-v161" in index
+    assert "static/css/racks.css?v=20260729-v165" in index
+    assert "static/js/app.js?v=20260729-v169" in index
     for element_id in (
         "operationsModalDescription",
         "operationsModalStatusText",
-        "operationsModalContextLabel",
     ):
         assert f'id="{element_id}"' in index
 
@@ -258,18 +256,18 @@ def test_v162_scan_typography_and_control_center_layering_repair() -> None:
     admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
 
     assert "static/css/scan.css?v=20260729-v162" in index
-    assert "static/css/racks.css?v=20260729-v162" in index
-    assert "static/css/admin.css?v=20260729-v162" in index
-    assert "static/js/app.js?v=20260729-v161" in index
+    assert "static/css/racks.css?v=20260729-v165" in index
+    assert "static/css/admin.css?v=20260729-v169" in index
+    assert "static/js/app.js?v=20260729-v169" in index
 
     assert ".last-scan-pill-v157 > :is(span, b, em)" in scan
     assert "font-size: 11.5px" in scan
     assert "width: 8%;\n  min-width: 0;" in scan
-    assert "grid-template-rows: minmax(118px, auto) 54px minmax(0, 1fr) !important" in admin
+    assert "grid-template-rows: minmax(118px, auto) minmax(0, 1fr) !important" in admin
     assert "#adminModal > .admin-control-center-header" in admin
-    assert "grid-row: 3" in admin
+    assert "grid-row: 2" in admin
     assert "width: 42px !important" in admin
-    assert "grid-template-rows: minmax(126px, auto) 50px minmax(0, 1fr) !important" in racks
+    assert "grid-template-rows: minmax(126px, auto) minmax(0, 1fr) !important" in racks
     assert "#operationsModal.is-control-center > .operations-modal-heading" in racks
     assert "#operationsModal.is-control-center #operationsModalBody" in racks
     assert "color: #fff !important" in racks
@@ -281,9 +279,9 @@ def test_v163_modal_hidden_state_and_close_repair() -> None:
     racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
     admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
 
-    assert "static/css/racks.css?v=20260729-v163" in index
-    assert "static/css/admin.css?v=20260729-v163" in index
-    assert "static/js/app.js?v=20260729-v163" in index
+    assert "static/css/racks.css?v=20260729-v165" in index
+    assert "static/css/admin.css?v=20260729-v169" in index
+    assert "static/js/app.js?v=20260729-v169" in index
     assert 'id="adminModal" aria-hidden="true" hidden' in index
     assert 'id="operationsModal" aria-hidden="true" hidden' in index
 
@@ -297,6 +295,134 @@ def test_v163_modal_hidden_state_and_close_repair() -> None:
     assert "els.operationsModalBody.replaceChildren()" in app
 
 
+def test_v164_simplified_gui_headers_and_automation_action() -> None:
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
+    racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
+
+    assert "static/css/admin.css?v=20260729-v169" in index
+    assert "static/css/racks.css?v=20260729-v165" in index
+    assert "static/js/app.js?v=20260729-v169" in index
+    assert 'id="folderImportBtn" class="link-button admin-automation-link"' in index
+    assert "Edit automated DL import" in index
+    assert index.index("Edit automated DL import") < index.index("Edit delivery lists")
+    assert "Live scanner data" not in index
+    assert "Changes are audited" not in index
+    assert "adminModalContextLabel" not in index
+    assert "operationsModalContextLabel" not in index
+    assert ".admin-modal-context-strip" not in admin
+    assert ".operations-modal-context-strip" not in racks
+    assert "grid-template-rows: minmax(118px, auto) minmax(0, 1fr) !important" in admin
+    assert "grid-template-rows: minmax(126px, auto) minmax(0, 1fr) !important" in racks
+    assert "Edit automated DL import" in app
+    assert "delivery-automation-tabs" in app
+
+
+def test_v165_manual_edit_history_and_rack_override() -> None:
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    admin_css = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
+    racks_css = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    server = (ROOT / "server.py").read_text(encoding="utf-8")
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+
+    assert "manualEditFilterDrawerHtml" in app
+    assert "data-manual-order-toggle" in app
+    assert "/api/admin/action-history" in app
+    assert "destinationOverrideMinutes" in app
+    assert "logicalUpdatedCount" in store
+    assert "stageRecordCount" in store
+    assert "affectedListIds" in store
+    assert "start_rack_destination_override_window" in store
+    assert "apply_rack_destination_override_window" in store
+    assert "destination_override_until" in store
+    assert "ensure_rack_destination_override_columns" in store
+    assert "update_bay_scan_settings" in store
+    assert 'parsed.path == "/api/admin/action-history"' in server
+    assert 'parsed.path == "/api/admin/bay-scanner-rules/settings"' in server
+    assert 'id="adminModalHistory"' in html
+    assert 'id="operationsModalHistory"' in html
+    assert "manual-edit-modal-tools" in admin_css
+    assert "modal-action-history" in admin_css
+    assert "operations-action-history" in racks_css
+    assert "20260729-v167" in html
+
+
+def test_v166_manual_route_and_admin_gui_refinement() -> None:
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    admin_css = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+
+    assert 'value = canonical or "INDIAN TRAIL"' in store
+    assert 'payload["updatedItem"] = updated_item or {}' in store
+    assert 'route_aliases = {' in store
+    assert '_manualEditFilterMismatch: true' in app
+    assert 'manualEditRouteSelectionValue' in app
+    assert 'setAdminModalSection' in app
+    assert 'data-admin-modal-section="workspace"' in html
+    assert 'data-admin-modal-section="history"' in html
+    assert '.manual-edit-card.is-scanned' in admin_css
+    assert 'position: fixed !important;' in admin_css
+    assert '.admin-modal-section-tabs' in admin_css
+    assert '#7d58bd' not in admin_css[admin_css.find('v158 Administration workspace visual polish'):admin_css.find('v160 Administration Control Center modal system')]
+    assert '20260729-v167' in html
+
+
+
+def test_v167_manual_route_and_new_order_workspace() -> None:
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/admin.css").read_text(encoding="utf-8")
+    store = (ROOT / "backend/store.py").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+
+    assert 'return designation.route || "INDIAN TRAIL"' in app
+    assert 'data.routeOverride = data.route' in app
+    assert 'manualEditVisibleChoiceValue' in app
+    assert 'data["route"] = data.get("routeOverride")' in store
+    assert 'payload["routeApplied"]' in store
+    assert 'grid-template-rows: auto auto auto minmax(0, 1fr)' in css
+    assert '#adminModal[data-kind="manualEdit"] .manual-order-create-panel[open]' in css
+    assert '20260729-v167' in html
+
+
+def test_v168_manual_edit_exact_row_capture_repair() -> None:
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+
+    assert "manualEditCollectRowData" in app
+    assert "manualEditOriginalRowData" in app
+    assert "manualEditChangedFields" in app
+    assert "data-manual-edit-original" in app
+    assert 'sourceButton?.closest("[data-edit-row]")' in app
+    assert "data.clientChangedFields = clientChangedFields" in app
+    assert "The row has been left open so the entered values are not lost." in app
+    assert "saveManualLineItem(saveLineItemButton.dataset.saveLineItem, saveLineItemButton)" in app
+    assert "static/js/app.js?v=20260729-v169" in html
+
+
+def test_v169_manual_edit_glass_type_filters() -> None:
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/admin.css").read_text(encoding="utf-8")
+    server = (ROOT / "server.py").read_text(encoding="utf-8")
+    store = (ROOT / "backend/store.py").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+
+    assert 'manualEditGlassTypes: []' in app
+    assert 'glassTypes: []' in app
+    assert 'manualEditFilterButton("glassType"' in app
+    assert 'Only glass types present in the selected delivery-list stage are shown.' in app
+    assert 'params.append("glassType"' in app
+    assert 'filterOptions: payload.filterOptions' in app
+    assert '"glassTypes": [str(value).strip()' in server
+    assert 'glass_type_expression' in store
+    assert '"filterOptions": {' in store
+    assert '"pieceQty": int(row["piece_qty"] or 0)' in store
+    assert '.manual-edit-glass-filter-options' in css
+    assert 'static/css/admin.css?v=20260729-v169' in html
+    assert 'static/js/app.js?v=20260729-v169' in html
+
 if __name__ == "__main__":
     test_index_local_assets_exist()
     test_page_stylesheets_are_present_and_balanced()
@@ -308,6 +434,12 @@ if __name__ == "__main__":
     test_v161_scan_timestamp_rack_status_and_rack_control_centers()
     test_v162_scan_typography_and_control_center_layering_repair()
     test_v163_modal_hidden_state_and_close_repair()
+    test_v164_simplified_gui_headers_and_automation_action()
+    test_v165_manual_edit_history_and_rack_override()
+    test_v166_manual_route_and_admin_gui_refinement()
+    test_v167_manual_route_and_new_order_workspace()
+    test_v168_manual_edit_exact_row_capture_repair()
+    test_v169_manual_edit_glass_type_filters()
     test_scan_time_pill_qty_headers_and_table_are_width_safe()
     test_v158_core_page_polish_and_scan_geometry()
     test_v154_admin_reject_management_and_scan_ribbon()

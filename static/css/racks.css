@@ -3208,8 +3208,7 @@
 }
 
 .operations-modal-description,
-.operations-modal-health-pill,
-.operations-modal-context-strip {
+.operations-modal-health-pill {
   display: none;
 }
 
@@ -3230,7 +3229,7 @@
   height: min(900px, calc(100vh - 28px));
   max-height: calc(100vh - 28px);
   display: grid !important;
-  grid-template-rows: minmax(126px, auto) 50px minmax(0, 1fr) !important;
+  grid-template-rows: minmax(126px, auto) minmax(0, 1fr) !important;
   isolation: isolate;
   overflow: hidden;
   border: 1px solid #9fb4d0;
@@ -3374,106 +3373,11 @@
   outline: none;
 }
 
-#operationsModal.is-control-center .operations-modal-context-strip {
-  position: relative;
-  z-index: 2;
-  grid-row: 2;
-  width: 100%;
-  min-width: 0;
-  min-height: 50px;
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--rack-control-line);
-  background: #fff;
-}
-
-#operationsModal.is-control-center .operations-modal-context-strip > span {
-  position: relative;
-  min-height: 50px;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 0 16px;
-  color: #697991;
-  font-size: 12px;
-  font-weight: 850;
-  white-space: nowrap;
-}
-
-#operationsModal.is-control-center .operations-modal-context-strip > span.is-active {
-  color: var(--rack-control-teal);
-}
-
-#operationsModal.is-control-center .operations-modal-context-strip > span.is-active::after {
-  content: "";
-  position: absolute;
-  right: 16px;
-  bottom: -1px;
-  left: 16px;
-  height: 3px;
-  border-radius: 3px 3px 0 0;
-  background: var(--rack-control-teal);
-}
-
-.operations-context-icon {
-  position: relative;
-  width: 17px;
-  height: 17px;
-  flex: 0 0 17px;
-  color: currentColor;
-}
-
-.operations-context-icon.workspace::before {
-  content: "";
-  position: absolute;
-  inset: 2px;
-  border: 2px solid currentColor;
-  border-radius: 3px;
-  box-shadow: inset 0 4px 0 -2px currentColor;
-}
-
-.operations-context-icon.live::before {
-  content: "";
-  position: absolute;
-  inset: 3px;
-  border: 2px solid currentColor;
-  border-radius: 50%;
-}
-
-.operations-context-icon.live::after {
-  content: "";
-  position: absolute;
-  inset: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.operations-context-icon.audit::before {
-  content: "";
-  position: absolute;
-  inset: 1px 3px;
-  border: 2px solid currentColor;
-  border-radius: 3px;
-}
-
-.operations-context-icon.audit::after {
-  content: "";
-  position: absolute;
-  top: 5px;
-  left: 7px;
-  width: 4px;
-  height: 7px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(42deg);
-}
 
 #operationsModal.is-control-center #operationsModalBody {
   position: relative;
   z-index: 1;
-  grid-row: 3;
+  grid-row: 2;
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -3638,7 +3542,7 @@
     width: calc(100vw - 14px);
     height: calc(100vh - 14px);
     max-height: calc(100vh - 14px);
-    grid-template-rows: auto 50px minmax(0, 1fr) !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
     border-radius: 16px;
   }
 
@@ -3653,9 +3557,6 @@
     justify-content: space-between;
   }
 
-  #operationsModal.is-control-center .operations-modal-context-strip {
-    padding-inline: 4px;
-  }
 
   #operationsModal.is-control-center #operationsModalBody {
     padding: 14px;
@@ -3680,3 +3581,32 @@
   display: none !important;
 }
 
+
+
+/* ========================================================================== */
+/* v164 Simplified Operations Control Center headers                          */
+/* ========================================================================== */
+/* Individual Rack and Packing History keep the polished hero and content
+   canvas without the decorative workspace/audit rail. */
+
+
+/* v165 real Operations action history */
+#operationsModal.operations-modal-panel,
+#operationsModal[data-kind] {
+  grid-template-rows: auto auto minmax(0, 1fr) !important;
+}
+
+#operationsModal .operations-action-history {
+  border-bottom-color: #cde2e4;
+}
+
+#operationsModal .operations-action-history > summary > b {
+  border-color: #acd6d8;
+  background: #eaf9fa;
+  color: #087782;
+}
+
+#operationsModal .modal-action-history-icon {
+  background: #e8f8f8;
+  color: #0f8f96;
+}
