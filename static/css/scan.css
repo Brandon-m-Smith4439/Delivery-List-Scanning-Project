@@ -2051,3 +2051,389 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   content: none !important;
   display: none !important;
 }
+
+/* ========================================================================== */
+/* v0.193 guarded cross-delivery-date scanning                                */
+/* ========================================================================== */
+.cross-date-scan-backdrop {
+  z-index: 2300;
+  padding: 22px;
+}
+
+.cross-date-scan-dialog {
+  width: min(1040px, calc(100vw - 32px));
+  max-height: min(860px, calc(100vh - 32px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid #9db8d6;
+  border-radius: 18px;
+  background: #f6f9fd;
+  box-shadow: 0 30px 90px rgba(4, 30, 58, 0.32);
+  position: relative;
+}
+
+.cross-date-scan-heading {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 20px 58px 18px 20px;
+  border-bottom: 1px solid #d4e0ed;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(19, 92, 255, 0.09), transparent 34%),
+    #fff;
+}
+
+.cross-date-scan-heading small,
+.cross-date-scan-heading h2,
+.cross-date-scan-heading p {
+  display: block;
+  margin: 0;
+}
+
+.cross-date-scan-heading small {
+  color: #44719f;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.cross-date-scan-heading h2 {
+  margin-top: 3px;
+  color: #082a55;
+  font-size: 1.32rem;
+  line-height: 1.18;
+}
+
+.cross-date-scan-heading p {
+  margin-top: 5px;
+  color: #62758b;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.cross-date-scan-icon,
+.cross-date-switch-icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #1766b1, #072a63);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(7, 42, 99, 0.2);
+}
+
+.cross-date-scan-icon {
+  width: 50px;
+  height: 50px;
+}
+
+.cross-date-scan-icon::before,
+.cross-date-switch-icon::before {
+  content: "";
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 2h2v3h6V2h2v3h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V2Zm12 8H5v9h14v-9Zm-8 2h2v2h2v2h-2v2h-2v-2H9v-2h2v-2Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 2h2v3h6V2h2v3h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V2Zm12 8H5v9h14v-9Zm-8 2h2v2h2v2h-2v2h-2v-2H9v-2h2v-2Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.cross-date-scan-list {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 11px;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.cross-date-scan-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(210px, 1fr) minmax(260px, 1.2fr) minmax(190px, 0.8fr);
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #cbd9e7;
+  border-left: 5px solid #3c79b8;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(16, 49, 82, 0.06);
+}
+
+.cross-date-scan-card.is-ready {
+  border-left-color: #2fa84f;
+}
+
+.cross-date-scan-card.needs-review {
+  border-left-color: #d59612;
+  background: #fffdf7;
+}
+
+.cross-date-scan-card.is-complete {
+  border-left-color: #a8b2c1;
+  background: #f6f8fb;
+}
+
+.cross-date-scan-date,
+.cross-date-scan-order,
+.cross-date-scan-decision,
+.cross-date-scan-details span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.cross-date-scan-card small {
+  color: #718197;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.cross-date-scan-date strong,
+.cross-date-scan-order strong {
+  overflow: hidden;
+  color: #173d69;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cross-date-scan-date > span,
+.cross-date-scan-order > span {
+  overflow: hidden;
+  color: #64758a;
+  font-size: 0.75rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cross-date-scan-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.cross-date-scan-details span {
+  min-height: 54px;
+  align-content: center;
+  padding: 8px;
+  border: 1px solid #dce5ef;
+  border-radius: 9px;
+  background: #f7faff;
+}
+
+.cross-date-scan-details b {
+  overflow: hidden;
+  color: #254d76;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cross-date-scan-status {
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid #cbd7e4;
+  border-radius: 999px;
+  background: #f4f7fb;
+  color: #52667f;
+  font-size: 0.67rem;
+  font-weight: 900;
+}
+
+.cross-date-scan-status.is-ready {
+  border-color: #a9d9b7;
+  background: #eef9f1;
+  color: #1d7436;
+}
+
+.cross-date-scan-status.needs-review {
+  border-color: #e5c77d;
+  background: #fff7df;
+  color: #805900;
+}
+
+.cross-date-scan-decision p {
+  margin: 0;
+  color: #805900;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.cross-date-scan-decision button,
+.cross-date-scan-footer button {
+  min-height: 38px;
+  border: 1px solid #0b4b87;
+  border-radius: 9px;
+  background: #0b4b87;
+  color: #fff;
+  padding: 0 12px;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.cross-date-scan-decision button:disabled {
+  border-color: #c6cfdb;
+  background: #dce2ea;
+  color: #738196;
+}
+
+.cross-date-scan-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px;
+  border-top: 1px solid #d4e0ed;
+  background: #fff;
+}
+
+.cross-date-scan-footer span {
+  color: #66778c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.cross-date-scan-footer button {
+  flex: 0 0 auto;
+  border-color: #c1cede;
+  background: #fff;
+  color: #244e79;
+}
+
+.cross-date-switch-notice {
+  position: fixed;
+  z-index: 2400;
+  top: max(18px, env(safe-area-inset-top));
+  left: 50%;
+  width: min(760px, calc(100vw - 28px));
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  transform: translateX(-50%);
+  padding: 13px 13px 13px 15px;
+  border: 1px solid #7ca8d3;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(255, 255, 255, 0.16), transparent 30%),
+    linear-gradient(120deg, #0d5a9e, #073762 70%, #052a50);
+  color: #fff;
+  box-shadow: 0 20px 48px rgba(3, 28, 55, 0.32);
+  animation: cross-date-notice-enter 220ms ease-out both;
+}
+
+.cross-date-switch-icon {
+  width: 42px;
+  height: 42px;
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.cross-date-switch-icon::before {
+  width: 21px;
+  height: 21px;
+}
+
+.cross-date-switch-notice small,
+.cross-date-switch-notice strong,
+.cross-date-switch-notice p {
+  display: block;
+  margin: 0;
+}
+
+.cross-date-switch-notice small {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.cross-date-switch-notice strong {
+  margin-top: 2px;
+  color: #fff;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.cross-date-switch-notice p {
+  margin-top: 3px;
+  color: #ffe5a6;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.cross-date-switch-notice button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 1.2rem;
+}
+
+@keyframes cross-date-notice-enter {
+  from { opacity: 0; transform: translate(-50%, -14px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (max-width: 900px) {
+  .cross-date-scan-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cross-date-scan-decision {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  .cross-date-scan-backdrop {
+    padding: 8px;
+  }
+
+  .cross-date-scan-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+  }
+
+  .cross-date-scan-heading {
+    grid-template-columns: 42px minmax(0, 1fr);
+    padding: 15px 48px 14px 14px;
+  }
+
+  .cross-date-scan-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .cross-date-scan-card,
+  .cross-date-scan-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cross-date-scan-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cross-date-switch-notice {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
+
+  .cross-date-switch-icon {
+    width: 34px;
+    height: 34px;
+  }
+}

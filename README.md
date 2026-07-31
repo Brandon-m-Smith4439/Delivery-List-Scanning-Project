@@ -1,59 +1,39 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.180**. SQLite remains the active/default backend.
+Current maintained release: **v0.193**. SQLite remains the active/default backend.
 
-v0.180 integrates the Rejects feature branch into main while preserving the
-newest Bay Map work. It also adds data-driven Glass Type filters to Manual
-Delivery List Edit and keeps the production SQLite database in place.
+v0.193 adds guarded cross-delivery-date scanning to the maintained Scan and Indian Trail receiving workflows. When a barcode is not on the selected delivery list, the system can search accessible active lists in the same operational stage, switch a unique safe match automatically, or ask the operator to choose the correct date when review is required.
 
-## Install v0.180
+## Install v0.193
 
 1. Close the Delivery List Scanner server.
-2. Update the existing project folder from the merged `main` branch.
+2. Extract the v0.193 changed-files ZIP directly into the current project folder.
 3. Preserve the existing `data` folder and its SQLite database.
 4. Restart the scanner and hard-refresh the browser with `Ctrl+F5`.
 
-No database migration or separate setup script is required. Keep the existing `data` folder and database in place.
+No database migration or separate setup script is required. v0.193 stores its shared scan settings in the existing `system_metadata` table and keeps schema version 5.
 
-## v0.180 highlights
+## v0.193 highlights
 
-- Merged Rejects workflows and administration improvements into main.
-- Preserved main's Bay Scanner, Old Bay attention, Current Priority Work, and
-  timed scan feedback changes.
-- Added a Glass Type section to the Manual Delivery List Edit Filters window.
-- Shows only glass types present in the selected delivery-list stage.
-- Displays the current piece quantity beside each glass type.
-- Supports selecting one or multiple glass types at the same time.
-- Uses OR logic within Glass Type and AND logic with the other filter groups.
-- Keeps glass-type choices available even when another active filter returns no rows.
-- Refreshes the available glass types when the selected delivery-list stage changes.
-- Preserves the v0.179 exact-row Save repair and every existing manual-edit workflow.
-
-## v0.179 highlights
-
-- Saves the exact expanded Manual Edit card associated with the clicked Save button.
-- Captures all visible text, quantity, location, route, process, and product controls before asynchronous work begins.
-- Stores each card's original values so the browser can identify the precise fields the operator changed.
-- Sends the detected changed-field list with the update request for verification and diagnostics.
-- Prevents a false no-change response from rerendering the card and erasing the operator's entered values.
-- Keeps the edited card open and displays an error if the server does not confirm the update.
-- Preserves the v0.178 explicit route override and New Order workspace layout.
-
-## v0.178 highlights
-
-- Reads Route, Location, Process, and Product directly from the visible manual-edit controls during save.
-- Sends an explicit `routeOverride` so CPU-to-Indian Trail changes cannot be lost to legacy route inference.
-- Uses `INDIAN TRAIL` as the maintained edit value instead of the legacy `IT` fallback.
-- Keeps the Create New Order form in a dedicated non-shrinking row above the independently scrolling results.
-- Makes the expanded New Order form scroll within its own bounded card on shorter displays.
-- Returns the route actually applied by the backend for verification.
+- Checks the currently selected delivery date before searching anywhere else.
+- Searches only active, accessible delivery lists in the same operational scan stage.
+- Automatically switches and scans when one safe match exists and Auto mode is enabled.
+- Opens a delivery-date selection window when multiple matches exist, Ask mode is enabled, or a rack, bay, outbound, or destination safeguard requires review.
+- Shows delivery date, stage, order/item, progress, route, customer, location, and safety details for every candidate.
+- Keeps the matched delivery date selected after a successful switch and refreshes the list, progress, flags, racks, recent scans, and Indian Trail data.
+- Blocks completed candidates and respects existing stage access, duplicate, outbound, rack, destination, bay, and supervisor-override rules.
+- Preserves a selected rack only when it remains open and destination-compatible. An unavailable, closed, or incompatible rack is cleared with an explanation before the cross-date scan is applied.
+- Adds Admin settings for Disabled, Ask before switching, and Automatically switch unique matches.
+- Adds configurable search windows with defaults of 7 past days and 30 future days.
+- Records immutable audit events for cross-date matches, settings changes, and completed date switches.
+- Uses the existing `scan_warning.wav` asset as the distinct delivery-date-change cue; no new sound file is required.
 
 ## Start the local web app
 
 1. Keep `Start-DeliveryScannerWebApp.bat` and `Start-DeliveryScannerWebApp.ps1` beside `server.py`.
 2. Keep the existing `data`, `assets`, `sounds`, and `static` folders in the project folder.
 3. Double-click `Start-DeliveryScannerWebApp.bat`.
-4. Keep the single launcher window open while the local server is running. The scanner no longer starts a second Python console.
+4. Keep the launcher window open while the local server is running.
 
 SQLite remains the active/default database. The production database is:
 
@@ -63,10 +43,34 @@ Keep this file and its `-wal`/`-shm` companions together whenever the app is run
 
 ## Database preservation
 
-The `data` folder is production state, not application source. Never replace or
-delete it during a code-only update. Stop the server and copy the complete
-folder, including SQLite `-wal` and `-shm` companions, before transferring a
-floor database to another checkout.
+The `data` folder is production state, not application source. Never replace or delete it during a code-only update. Stop the server and copy the complete folder, including SQLite `-wal` and `-shm` companions, before transferring a floor database to another checkout.
+
+## Cross-delivery-date scanning
+
+The settings are available under **Admin > Cross-Date Scanning**:
+
+- **Disabled** — scans remain limited to the selected delivery list.
+- **Ask before switching** — every valid cross-date match requires operator confirmation.
+- **Automatically switch unique matches** — one safe match switches and scans automatically; ambiguous or guarded matches require confirmation.
+
+The default search window is:
+
+- Past delivery dates: **7 days**
+- Future delivery dates: **30 days**
+
+The backend always checks the selected list first. Cross-date searching begins only when the barcode cannot be uniquely resolved on that list. Candidate lists must be active, inside the configured date window, accessible to the signed-in user, and in the same operational stage category.
+
+The existing safety rules remain authoritative. Cross-date scanning does not bypass:
+
+- completed quantity checks;
+- duplicate handling;
+- user stage access;
+- outbound staging and transportation requirements;
+- Indian Trail outbound requirements;
+- rack status and destination compatibility;
+- manual bay selection;
+- supervisor override workflows; or
+- undo/redo and immutable scan history.
 
 ## Automated delivery-list imports
 
@@ -86,27 +90,25 @@ The floor setup copies the maintained runtime to `C:\DeliveryListAutomation\Scri
 
 Use the normal SQL automation setup and the Admin control center. Run `C:\DeliveryListAutomation\Verify-SQL-And-Import.cmd` with a known delivery date to verify the read-only SQL query, workbook generation, publication, maintained scanner import, and expected stage lists.
 
-See `automation\sql_delivery_export\README.md` for the installed runtime and
-troubleshooting steps.
+See `automation\sql_delivery_export\README.md` for the installed runtime and troubleshooting steps.
 
 ## Database operations
 
 - Azure migration dry run: `py -3 -m database.migrate_sqlite_to_azure_sql --sqlite-path data\delivery-scanner-pilot.db`
 - SQLite migrations are owned by `database\migrations.py`.
 - The logical cross-database contract is owned by `database\contract.py`.
+- v0.193 application contract: **193**.
+- Current SQLite schema contract: **5**.
 
 ## Optional container deployment
 
-Docker and Azure App Service support files are organized under `deployment`.
-They are not required for normal Windows floor operation.
+Docker and Azure App Service support files are organized under `deployment`. They are not required for normal Windows floor operation.
 
 - Container definition: `deployment\docker\Dockerfile`
 - Container-only dependencies: `deployment\docker\requirements.txt`
-- Azure App Service setting template:
-  `deployment\azure\app-service.env.example`
+- Azure App Service setting template: `deployment\azure\app-service.env.example`
 
-Run the Docker build from the project root so the root `.dockerignore` protects
-local databases, secrets, logs, backups, and verification output:
+Run the Docker build from the project root so the root `.dockerignore` protects local databases, secrets, logs, backups, and verification output:
 
 ```powershell
 docker build -f deployment/docker/Dockerfile -t delivery-list-scanner .
@@ -116,13 +118,13 @@ docker build -f deployment/docker/Dockerfile -t delivery-list-scanner .
 
 The maintained sound pack is stored under `sounds\` as 44.1 kHz, 16-bit PCM mono WAV files. Open `sounds\preview_audio_pack.html` in a browser to audition the packaged cues without installing audio software. The web app loads semantic cue names from `static\js\app.js`, uses the existing shared volume/compressor chain, and falls back to synthesized tones only if a WAV file cannot be loaded.
 
-The existing sound-volume slider remains available for floor testing. At 100%, the main operational files are mastered for production-floor use; the subtle expand/collapse and destructive-action cues are intentionally quieter and shorter so routine interface actions are less distracting.
+v0.193 maps the new `delivery_date_changed` semantic cue to the existing `sounds\scan_warning.wav` file, so no binary sound asset is included in the changed-files release.
 
 ## Microsoft Graph email
 
-Version 70 introduced Microsoft Graph delivery for customer manifests, ready notices, and Admin test messages; v132 retains that implementation unchanged. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
+Microsoft Graph delivery supports customer manifests, ready notices, and Admin test messages. The configured sender is `BarefootNC.Glass@bldr.com`, and the default controlled test recipient is `brandon.m.smith@bldr.com`.
 
-After BLDR IT provides the Entra tenant ID, application/client ID, and a client-secret value, run `Configure-MicrosoftGraphEmail.bat` once. The secret is encrypted for the current Windows account and loaded only in memory by the normal scanner launcher.
+After BLDR IT provides the Entra tenant ID, application/client ID, and client-secret value, run `Configure-MicrosoftGraphEmail.bat` once. The secret is encrypted for the current Windows account and loaded only in memory by the normal scanner launcher.
 
 ## Project documentation
 
@@ -132,19 +134,17 @@ After BLDR IT provides the Entra tenant ID, application/client ID, and a client-
 
 ## Important local folders
 
-- `static` - maintained browser CSS, JavaScript, and image source.
-- `assets` - favicon and print-page assets referenced by the server.
-- `sounds` - maintained browser audio cues.
-- `data` - required SQLite database and local scanner state. Keep it and back it up.
-- `automation` - scheduled delivery-list import/export source and setup scripts.
-- `scripts` - optional Windows setup and diagnostic utilities.
-- `resources` - source material retained for A+W integration work.
-- `logs` - generated diagnostics. Safe to clear while the app is stopped.
-- `backups` - retained recovery copies. Review dates before removing anything.
-- `C:\DeliveryListAutomation` - installed automation runtime, staging, logs, and task state.
+- `static` — maintained browser CSS, JavaScript, and image source.
+- `assets` — favicon and print-page assets referenced by the server.
+- `sounds` — maintained browser audio cues.
+- `data` — required SQLite database and local scanner state. Keep it and back it up.
+- `automation` — scheduled delivery-list import/export source and setup scripts.
+- `scripts` — optional Windows setup and diagnostic utilities.
+- `resources` — source material retained for A+W integration work.
+- `logs` — generated diagnostics. Safe to clear while the app is stopped.
+- `backups` — retained recovery copies. Review dates before removing anything.
+- `C:\DeliveryListAutomation` — installed automation runtime, staging, logs, and task state.
 
-A terminal whose prompt points to another project folder, such as `Showers Programmer`, is being opened by that project or its updater; the scanner launcher fixes its Python working directory to this project folder.
+The release ZIP contains no database, SQL credential, SAP runtime, demo delivery list, or new audio binary. When upgrading, keep the existing `data` folder. Production startup never seeds demo delivery lists; existing data is preserved and upgraded in place only after a verified backup succeeds.
 
-The release ZIP contains no database, SQL credential, SAP runtime, or demo delivery list. When upgrading, keep your existing `data` folder. Production startup never seeds demo delivery lists; existing data is preserved and upgraded in place only after a verified backup succeeds.
-
-Do not run the SQLite and Azure SQL versions as simultaneous writable production systems during the future cutover.
+Do not run the SQLite and Azure SQL versions as simultaneous writable production systems during a future cutover.

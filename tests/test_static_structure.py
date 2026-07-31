@@ -55,7 +55,7 @@ def test_version_numbers_are_not_embedded_in_asset_filenames() -> None:
 def test_single_javascript_bundle_is_loaded() -> None:
     index = (ROOT / "index.html").read_text(encoding="utf-8")
     scripts = re.findall(r'<script\s+src="([^"]+)"', index)
-    assert scripts == ["static/js/app.js?v=20260729-v0.180"]
+    assert scripts == ["static/js/app.js?v=20260731-v0.193"]
     app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
     assert "DELIVERY AUTOMATION CONTROL CENTER" in app
     assert "NOTIFICATION CENTER AND LINE UPDATE REVIEW" in app
@@ -159,8 +159,8 @@ def test_scan_time_pill_qty_headers_and_table_are_width_safe() -> None:
     assert "<th>Progress</th>" in index
     assert "<th>Item Nr.</th>" not in index[index.index('<table class="delivery-table">'):index.index('</table>', index.index('<table class="delivery-table">'))]
     assert "<th>Process State</th>" not in index[index.index('<table class="delivery-table">'):index.index('</table>', index.index('<table class="delivery-table">'))]
-    assert "static/css/scan.css?v=20260729-v0.180" in index
-    assert "static/js/app.js?v=20260729-v0.180" in index
+    assert "static/css/scan.css?v=20260731-v0.193" in index
+    assert "static/js/app.js?v=20260731-v0.193" in index
 
 
 def test_v158_core_page_polish_and_scan_geometry() -> None:
@@ -184,20 +184,20 @@ def test_v158_core_page_polish_and_scan_geometry() -> None:
     assert "width: calc(100% - 2px)" not in scan
     assert "padding-right: 2px" not in scan
     expected_asset_keys = {
-        "styles": "20260729-v0.180",
-        "home": "20260729-v0.180",
-        "scan": "20260729-v0.180",
+        "styles": "20260730-v0.189",
+        "home": "20260729-v0.181",
+        "scan": "20260731-v0.193",
         "racks": "20260729-v0.180",
-        "admin": "20260729-v0.180",
+        "admin": "20260731-v0.193",
     }
     for name, cache_key in expected_asset_keys.items():
         assert f"static/css/{name}.css?v={cache_key}" in index
-    assert "static/js/app.js?v=20260729-v0.180" in index
+    assert "static/js/app.js?v=20260731-v0.193" in index
 
 
 def test_admin_control_center_modal_structure() -> None:
     index = (ROOT / "index.html").read_text(encoding="utf-8")
-    assert 'static/css/admin.css?v=20260729-v0.180' in index
+    assert 'static/css/admin.css?v=20260731-v0.193' in index
     for element_id in (
         "adminModalEyebrow",
         "adminModalDescription",
@@ -210,7 +210,7 @@ def test_admin_control_center_modal_structure() -> None:
     for kind in (
         "deliveryLists", "deliveryActions", "manualEdit", "users", "roles",
         "sessions", "stations", "customerRoutes", "customerEmails", "lookups",
-        "rejectSettings", "bayScannerRules", "bayAutoAssigner", "racks",
+        "rejectSettings", "bayScannerRules", "bayAutoAssigner", "crossDateScanning", "racks",
         "rackForm", "rackSetForm", "recentScans",
     ):
         assert f"{kind}: {{" in app
@@ -225,9 +225,9 @@ def test_v161_scan_timestamp_rack_status_and_rack_control_centers() -> None:
     scan = (ROOT / "static" / "css" / "scan.css").read_text(encoding="utf-8")
     racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
 
-    assert "static/css/scan.css?v=20260729-v0.180" in index
+    assert "static/css/scan.css?v=20260731-v0.193" in index
     assert "static/css/racks.css?v=20260729-v0.180" in index
-    assert "static/js/app.js?v=20260729-v0.180" in index
+    assert "static/js/app.js?v=20260731-v0.193" in index
     for element_id in (
         "operationsModalDescription",
         "operationsModalStatusText",
@@ -260,10 +260,10 @@ def test_v162_scan_typography_and_control_center_layering_repair() -> None:
     racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
     admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
 
-    assert "static/css/scan.css?v=20260729-v0.180" in index
+    assert "static/css/scan.css?v=20260731-v0.193" in index
     assert "static/css/racks.css?v=20260729-v0.180" in index
-    assert "static/css/admin.css?v=20260729-v0.180" in index
-    assert "static/js/app.js?v=20260729-v0.180" in index
+    assert "static/css/admin.css?v=20260731-v0.193" in index
+    assert "static/js/app.js?v=20260731-v0.193" in index
 
     assert ".last-scan-pill-v157 > :is(span, b, em)" in scan
     assert "font-size: 11.5px" in scan
@@ -285,8 +285,8 @@ def test_v163_modal_hidden_state_and_close_repair() -> None:
     admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
 
     assert "static/css/racks.css?v=20260729-v0.180" in index
-    assert "static/css/admin.css?v=20260729-v0.180" in index
-    assert "static/js/app.js?v=20260729-v0.180" in index
+    assert "static/css/admin.css?v=20260731-v0.193" in index
+    assert "static/js/app.js?v=20260731-v0.193" in index
     assert 'id="adminModal" aria-hidden="true" hidden' in index
     assert 'id="operationsModal" aria-hidden="true" hidden' in index
 
@@ -306,9 +306,9 @@ def test_v164_simplified_gui_headers_and_automation_action() -> None:
     admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
     racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
 
-    assert "static/css/admin.css?v=20260729-v0.180" in index
+    assert "static/css/admin.css?v=20260731-v0.193" in index
     assert "static/css/racks.css?v=20260729-v0.180" in index
-    assert "static/js/app.js?v=20260729-v0.180" in index
+    assert "static/js/app.js?v=20260731-v0.193" in index
     assert 'id="folderImportBtn" class="link-button admin-automation-link"' in index
     assert "Edit automated DL import" in index
     assert index.index("Edit automated DL import") < index.index("Edit delivery lists")
@@ -351,7 +351,7 @@ def test_v165_manual_edit_history_and_rack_override() -> None:
     assert "manual-edit-modal-tools" in admin_css
     assert "modal-action-history" in admin_css
     assert "operations-action-history" in racks_css
-    assert "20260729-v0.180" in html
+    assert "20260731-v0.193" in html
 
 
 def test_v166_manual_route_and_admin_gui_refinement() -> None:
@@ -372,7 +372,7 @@ def test_v166_manual_route_and_admin_gui_refinement() -> None:
     assert 'position: fixed !important;' in admin_css
     assert '.admin-modal-section-tabs' in admin_css
     assert '#7d58bd' not in admin_css[admin_css.find('v158 Administration workspace visual polish'):admin_css.find('v160 Administration Control Center modal system')]
-    assert '20260729-v0.180' in html
+    assert '20260731-v0.193' in html
 
 
 
@@ -389,7 +389,7 @@ def test_v167_manual_route_and_new_order_workspace() -> None:
     assert 'payload["routeApplied"]' in store
     assert 'grid-template-rows: auto auto auto minmax(0, 1fr)' in css
     assert '#adminModal[data-kind="manualEdit"] .manual-order-create-panel[open]' in css
-    assert '20260729-v0.180' in html
+    assert '20260731-v0.193' in html
 
 
 def test_v168_manual_edit_exact_row_capture_repair() -> None:
@@ -404,7 +404,7 @@ def test_v168_manual_edit_exact_row_capture_repair() -> None:
     assert "data.clientChangedFields = clientChangedFields" in app
     assert "The row has been left open so the entered values are not lost." in app
     assert "saveManualLineItem(saveLineItemButton.dataset.saveLineItem, saveLineItemButton)" in app
-    assert "static/js/app.js?v=20260729-v0.180" in html
+    assert "static/js/app.js?v=20260731-v0.193" in html
 
 
 def test_v169_manual_edit_glass_type_filters() -> None:
@@ -425,8 +425,68 @@ def test_v169_manual_edit_glass_type_filters() -> None:
     assert '"filterOptions": {' in store
     assert '"pieceQty": int(row["piece_qty"] or 0)' in store
     assert '.manual-edit-glass-filter-options' in css
-    assert 'static/css/admin.css?v=20260729-v0.180' in html
-    assert 'static/js/app.js?v=20260729-v0.180' in html
+    assert 'static/css/admin.css?v=20260731-v0.193' in html
+    assert 'static/js/app.js?v=20260731-v0.193' in html
+
+
+def test_v193_guarded_cross_delivery_date_scanning() -> None:
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    server = (ROOT / "server.py").read_text(encoding="utf-8")
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    migrations = (ROOT / "database" / "migrations.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    scan_css = (ROOT / "static" / "css" / "scan.css").read_text(encoding="utf-8")
+    admin_css = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "193"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 5' in contract
+    assert '"v192_action_history_archive"' in migrations
+    assert 'v193_' not in migrations
+
+    assert 'parsed.path == "/api/admin/cross-date-scan-settings"' in server
+    assert 'STORE.get_cross_date_scan_settings()' in server
+    assert 'STORE.update_cross_date_scan_settings(data, user["username"])' in server
+    assert 'data["_userContext"] = user' in server
+
+    assert 'DEFAULT_CROSS_DATE_SCAN_MODE = "auto_unique"' in store
+    assert 'DEFAULT_CROSS_DATE_SCAN_PAST_DAYS = 7' in store
+    assert 'DEFAULT_CROSS_DATE_SCAN_FUTURE_DAYS = 30' in store
+    assert 'def resolve_cross_date_scan' in store
+    assert 'def cross_date_candidate_safety' in store
+    assert 'def cross_date_scan_candidates' in store
+    assert 'def _record_scan_for_list' in store
+    assert 'def _receive_indian_trail_scan_for_list' in store
+    assert 'cross_date_scan_match_found' in store
+    assert 'cross_date_scan_switch' in store
+    assert 'if resolved["candidate"].get("clearRack")' in store
+
+    assert 'delivery_date_changed: "sounds/scan_warning.wav"' in app
+    assert 'function showCrossDateScanSelection' in app
+    assert 'function applyCrossDateSwitchUi' in app
+    assert 'function crossDateScanSettingsModalHtml' in app
+    assert 'crossDateListId: options.crossDateListId || ""' in app
+    assert 'crossDateConfirmed: Boolean(options.crossDateConfirmed)' in app
+    assert 'crossDateScanning: {' in app
+    assert '["Cross-Date Scanning", "Escaneo entre fechas"]' in app
+
+    assert 'id="crossDateScanOverview"' in index
+    assert 'data-admin-modal="crossDateScanning"' in index
+    assert 'static/css/scan.css?v=20260731-v0.193' in index
+    assert 'static/css/admin.css?v=20260731-v0.193' in index
+    assert 'static/js/app.js?v=20260731-v0.193' in index
+
+    assert 'v0.193 guarded cross-delivery-date scanning' in scan_css
+    assert '.cross-date-scan-dialog' in scan_css
+    assert '.cross-date-switch-notice' in scan_css
+    assert 'v0.193 cross-delivery-date scan settings' in admin_css
+    assert '.cross-date-settings-shell' in admin_css
+
+    assert 'Current maintained release: **v0.193**' in readme
+    assert 'No database migration or separate setup script is required' in readme
+    assert changelog.startswith('## v0.193 - Guarded Cross-Delivery-Date Scanning')
 
 if __name__ == "__main__":
     test_index_local_assets_exist()
@@ -445,6 +505,7 @@ if __name__ == "__main__":
     test_v167_manual_route_and_new_order_workspace()
     test_v168_manual_edit_exact_row_capture_repair()
     test_v169_manual_edit_glass_type_filters()
+    test_v193_guarded_cross_delivery_date_scanning()
     test_scan_time_pill_qty_headers_and_table_are_width_safe()
     test_v158_core_page_polish_and_scan_geometry()
     test_v154_admin_reject_management_and_scan_ribbon()

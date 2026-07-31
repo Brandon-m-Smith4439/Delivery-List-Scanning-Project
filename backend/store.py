@@ -273,6 +273,13 @@ DEFAULT_BAY_AUTO_ASSIGN_SETTINGS = {
 }
 DEFAULT_RACK_DESTINATION_OVERRIDE_MINUTES = 15
 RACK_DESTINATION_OVERRIDE_METADATA_KEY = "rack_destination_override_minutes"
+DEFAULT_CROSS_DATE_SCAN_MODE = "auto_unique"
+DEFAULT_CROSS_DATE_SCAN_PAST_DAYS = 7
+DEFAULT_CROSS_DATE_SCAN_FUTURE_DAYS = 30
+CROSS_DATE_SCAN_MODE_METADATA_KEY = "cross_date_scan_mode"
+CROSS_DATE_SCAN_PAST_DAYS_METADATA_KEY = "cross_date_scan_past_days"
+CROSS_DATE_SCAN_FUTURE_DAYS_METADATA_KEY = "cross_date_scan_future_days"
+CROSS_DATE_SCAN_MODES = {"disabled", "ask", "auto_unique"}
 SUPPORTED_IMPORT_EXTENSIONS = {".json", ".xlsx", ".xlsm", ".csv"}
 BAY_EVENT_RETENTION_DAYS = 7
 BAY_EVENT_CLEANUP_INTERVAL_SECONDS = 60 * 60
@@ -794,6 +801,22 @@ def receiving_stage_destination(stage: Any, scanner: Any = "") -> str:
     if "deliver to customer" in text or re.search(r"\bdtc\b", text):
         return "DTC"
     return ""
+
+
+def scan_stage_category(stage: Any, scanner: Any = "") -> str:
+    """Return the operational scan-stage category used for cross-date matching."""
+    text = f"{stage or ''} {scanner or ''}".strip().lower()
+    if "outbound" in text:
+        return "outbound"
+    if "dtc" in text or "deliver to customer" in text:
+        return "dtc"
+    if "greenville" in text or re.search(r"\bgnv\b", text):
+        return "greenville"
+    if "indian trail" in text or "inbound" in text:
+        return "received"
+    if "customer pickup" in text or re.search(r"\bcpu\b", text):
+        return "pickup"
+    return "staged"
 
 
 def is_cpu_item(item: dict[str, Any]) -> bool:
@@ -6823,6 +6846,62 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "createdAt": row["created_at"],
         }
 
+    def cross_date_scan_settings_con(self, con: Any) -> dict[str, Any]:
+        """Read and normalize the shared cross-delivery-date scan settings."""
+        mode = self.system_metadata_value(con, CROSS_DATE_SCAN_MODE_METADATA_KEY).strip().lower()
+        if mode not in CROSS_DATE_SCAN_MODES:
+            mode = DEFAULT_CROSS_DATE_SCAN_MODE
+
+        def bounded_days(key: str, default: int) -> int:
+            raw_value = self.system_metadata_value(con, key)
+            try:
+                value = int(raw_value or default)
+            except (TypeError, ValueError):
+                value = default
+            return max(0, min(value, 365))
+
+        return {
+            "mode": mode,
+            "pastDays": bounded_days(CROSS_DATE_SCAN_PAST_DAYS_METADATA_KEY, DEFAULT_CROSS_DATE_SCAN_PAST_DAYS),
+            "futureDays": bounded_days(CROSS_DATE_SCAN_FUTURE_DAYS_METADATA_KEY, DEFAULT_CROSS_DATE_SCAN_FUTURE_DAYS),
+        }
+
+    def get_cross_date_scan_settings(self) -> dict[str, Any]:
+        """Return the current cross-delivery-date scan behavior for Admin and scanners."""
+        with self.connect() as con:
+            return self.cross_date_scan_settings_con(con)
+
+    def update_cross_date_scan_settings(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Validate and save cross-delivery-date scan behavior in system metadata."""
+        mode = str(data.get("mode") or DEFAULT_CROSS_DATE_SCAN_MODE).strip().lower()
+        if mode not in CROSS_DATE_SCAN_MODES:
+            raise ValueError("Cross-date scan mode must be disabled, ask, or auto_unique")
+        try:
+            past_days = int(data.get("pastDays", DEFAULT_CROSS_DATE_SCAN_PAST_DAYS))
+            future_days = int(data.get("futureDays", DEFAULT_CROSS_DATE_SCAN_FUTURE_DAYS))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Cross-date scan search limits must be whole numbers") from exc
+        if not 0 <= past_days <= 365 or not 0 <= future_days <= 365:
+            raise ValueError("Cross-date scan search limits must be between 0 and 365 days")
+
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            self.set_system_metadata_value(con, CROSS_DATE_SCAN_MODE_METADATA_KEY, mode)
+            self.set_system_metadata_value(con, CROSS_DATE_SCAN_PAST_DAYS_METADATA_KEY, str(past_days))
+            self.set_system_metadata_value(con, CROSS_DATE_SCAN_FUTURE_DAYS_METADATA_KEY, str(future_days))
+            self.insert_audit(
+                con,
+                "cross_date_scan_settings",
+                "global",
+                "update_cross_date_scan_settings",
+                user,
+                "",
+                "",
+                {"mode": mode, "pastDays": past_days, "futureDays": future_days},
+            )
+            con.commit()
+        return self.get_cross_date_scan_settings()
+
     def get_bay_scan_settings(self) -> dict[str, Any]:
         """Purpose: Read bay scan settings for the delivery-list scanner workflow.
 
@@ -8355,6 +8434,372 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         return None, clean_text, "No unique delivery-list match"
 
+    def cross_date_line_location(self, con: Any, line_item_id: str) -> str:
+        """Return the active Bay or Rack location for one cross-date candidate."""
+        bay_row = con.execute(
+            """
+            SELECT b.bay_code
+            FROM bay_assignments ba
+            JOIN bays b ON b.id = ba.bay_id
+            WHERE ba.line_item_id = ?
+              AND ba.status NOT IN ('Cleared', 'Cancelled')
+            ORDER BY ba.id DESC
+            LIMIT 1
+            """,
+            (line_item_id,),
+        ).fetchone()
+        if bay_row and str(bay_row["bay_code"] or "").strip():
+            return str(bay_row["bay_code"] or "").strip()
+
+        rack_row = con.execute(
+            """
+            SELECT r.rack_code
+            FROM rack_items ri
+            JOIN racks r ON r.id = ri.rack_id
+            WHERE ri.line_item_id = ?
+              AND ri.status = 'Active'
+              AND r.active = 1
+            ORDER BY ri.id DESC
+            LIMIT 1
+            """,
+            (line_item_id,),
+        ).fetchone()
+        return str(rack_row["rack_code"] or "").strip() if rack_row else ""
+
+    def cross_date_candidate_safety(
+        self,
+        con: Any,
+        list_row: Any,
+        row: Any,
+        scan_request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Preflight the safeguards that must prevent a silent date switch."""
+        reasons: list[str] = []
+        clear_rack = False
+        rack_code = normalize_rack_code(str(scan_request.get("rackCode") or ""))
+        bay_code = str(scan_request.get("bayCode") or "").strip()
+        destination_override = str(scan_request.get("destinationOverride") or "").lower() in {"1", "true", "yes"}
+        outbound_override = str(scan_request.get("outboundOverride") or "").lower() in {"1", "true", "yes"}
+        category = scan_stage_category(list_row["stage"], list_row["scanner"])
+        complete = int(row["scanned_qty"] or 0) >= int(row["qty"] or 0)
+        rack_preserved = not bool(rack_code)
+        bay_preserved = not bool(bay_code)
+
+        if complete:
+            reasons.append("This line is already fully scanned on that delivery date.")
+
+        if category == "staged" and rack_code:
+            rack = con.execute(
+                "SELECT * FROM racks WHERE UPPER(rack_code) = UPPER(?) AND active = 1 LIMIT 1",
+                (rack_code,),
+            ).fetchone()
+            if not rack:
+                reasons.append(f"Selected rack {rack_code} is no longer available.")
+                clear_rack = True
+            else:
+                rack_status = str(rack["status"] or "Open").strip().lower()
+                if rack_status != "open":
+                    reasons.append(f"Selected rack {rack_code} is {rack['status']} and cannot be preserved.")
+                    clear_rack = True
+                else:
+                    item_destination = self.destination_for_line_item(row)
+                    rack_destinations = self.rack_destinations_from_items(con, int(rack["id"]))
+                    mismatch = bool(rack_destinations and rack_destinations != [item_destination])
+                    override_active = bool(mismatch and self.rack_destination_override_active(rack))
+                    if mismatch and not destination_override and not override_active:
+                        reasons.append(
+                            f"Rack {rack_code} contains {', '.join(rack_destinations)} pieces and cannot be preserved for {item_destination}. The rack selection will be cleared."
+                        )
+                        clear_rack = True
+                    else:
+                        rack_preserved = True
+        elif rack_code:
+            rack_preserved = False
+
+        if category == "outbound":
+            staging_row = self.matching_staging_row_for_outbound(con, list_row, row)
+            staged = bool(staging_row and int(staging_row["scanned_qty"] or 0) > 0)
+            transportation = self.transportation_for_staging_row(con, staging_row["id"]) if staging_row else None
+            if (not staged or not transportation) and not outbound_override:
+                missing = []
+                if not staged:
+                    missing.append("staging scan")
+                if not transportation:
+                    missing.append("rack/truck transportation")
+                reasons.append(f"This outbound line still requires {' and '.join(missing)}.")
+
+        if category == "received":
+            outbound_row = con.execute(
+                """
+                SELECT COALESCE(MAX(out_li.scanned_qty), 0) AS scanned_qty
+                FROM delivery_lists out_dl
+                JOIN line_items out_li ON out_li.list_id = out_dl.id
+                WHERE out_dl.delivery_date = ?
+                  AND out_dl.status = 'active'
+                  AND LOWER(out_dl.stage) LIKE '%outbound%'
+                  AND out_li.order_no = ?
+                  AND out_li.item_no = ?
+                """,
+                (list_row["delivery_date"], row["order_no"], row["item_no"]),
+            ).fetchone()
+            if int(outbound_row["scanned_qty"] or 0) <= 0 and not outbound_override:
+                reasons.append("This Indian Trail receive still requires an Outbound scan or supervisor override.")
+
+        if bay_code:
+            bay_preserved = True
+            reasons.append(f"Manual Bay {bay_code} is selected and must be confirmed for the other delivery date.")
+
+        return {
+            "complete": complete,
+            "selectable": not complete,
+            "requiresConfirmation": bool(reasons),
+            "safetyReasons": reasons,
+            "safetyReason": " ".join(reasons),
+            "rackPreserved": rack_preserved,
+            "bayPreserved": bay_preserved,
+            "clearRack": clear_rack,
+            "originalRackCode": rack_code,
+            "originalBayCode": bay_code,
+        }
+
+    def cross_date_scan_candidates(
+        self,
+        con: Any,
+        current_list: Any,
+        raw_scan: str,
+        scan_request: dict[str, Any],
+        user_context: dict[str, Any] | None,
+        settings: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Find unique matches on active lists in the configured date window and same stage."""
+        try:
+            current_date = datetime.strptime(str(current_list["delivery_date"] or ""), "%Y-%m-%d")
+        except ValueError:
+            return []
+        start_date = (current_date - timedelta(days=int(settings["pastDays"]))).strftime("%Y-%m-%d")
+        end_date = (current_date + timedelta(days=int(settings["futureDays"]))).strftime("%Y-%m-%d")
+        category = scan_stage_category(current_list["stage"], current_list["scanner"])
+        list_rows = con.execute(
+            """
+            SELECT *
+            FROM delivery_lists
+            WHERE id <> ?
+              AND status = 'active'
+              AND delivery_date BETWEEN ? AND ?
+            ORDER BY delivery_date, stage, id
+            """,
+            (current_list["id"], start_date, end_date),
+        ).fetchall()
+        candidates: list[dict[str, Any]] = []
+        for list_row in list_rows:
+            if scan_stage_category(list_row["stage"], list_row["scanner"]) != category:
+                continue
+            if user_context and not user_can_access_stage(user_context, list_row["stage"], list_row["scanner"]):
+                continue
+            rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_row["id"],)).fetchall()
+            if not rows:
+                continue
+            matched_row, canonical, match_reason = self.recover_scan(raw_scan, rows)
+            if matched_row is None and category == "received":
+                external_row, external_canonical, external_reason = self.recover_bay_external_scan(raw_scan, rows)
+                if external_row is not None:
+                    matched_row, canonical, match_reason = external_row, external_canonical, external_reason
+            if matched_row is None:
+                continue
+            safety = self.cross_date_candidate_safety(con, list_row, matched_row, scan_request)
+            candidates.append(
+                {
+                    "listId": str(list_row["id"] or ""),
+                    "label": str(list_row["label"] or ""),
+                    "deliveryDate": str(list_row["delivery_date"] or ""),
+                    "stage": str(list_row["stage"] or ""),
+                    "scanner": str(list_row["scanner"] or ""),
+                    "lineItemId": str(matched_row["id"] or ""),
+                    "canonicalBarcode": canonical,
+                    "matchReason": match_reason,
+                    "order": str(matched_row["order_no"] or ""),
+                    "item": str(matched_row["item_no"] or ""),
+                    "qty": int(matched_row["qty"] or 0),
+                    "scannedQty": int(matched_row["scanned_qty"] or 0),
+                    "route": str(matched_row["route"] or ""),
+                    "customer": str(matched_row["customer"] or ""),
+                    "location": self.cross_date_line_location(con, str(matched_row["id"] or "")),
+                    **safety,
+                }
+            )
+
+        candidates.sort(
+            key=lambda candidate: (
+                abs((datetime.strptime(candidate["deliveryDate"], "%Y-%m-%d") - current_date).days),
+                candidate["deliveryDate"],
+                candidate["stage"],
+                candidate["listId"],
+            )
+        )
+        return candidates
+
+    def resolve_cross_date_scan(self, scan_request: dict[str, Any]) -> dict[str, Any] | None:
+        """Resolve a failed current-list match into a safe target or a user choice payload."""
+        current_list_id = str(scan_request.get("listId") or "").strip()
+        raw_scan = str(scan_request.get("barcode") or "").strip()
+        if not current_list_id or not raw_scan or scan_request.get("_crossDateResolved"):
+            return None
+        explicit_target_id = str(scan_request.get("crossDateListId") or "").strip()
+        confirmed = str(scan_request.get("crossDateConfirmed") or "").lower() in {"1", "true", "yes"}
+        user_context = scan_request.get("_userContext") if isinstance(scan_request.get("_userContext"), dict) else None
+        user_name = request_user_name(scan_request)
+        station = request_station(scan_request)
+
+        with self.connect() as con:
+            current_list = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (current_list_id,)).fetchone()
+            if not current_list or str(current_list["status"] or "").strip().lower() != "active":
+                return None
+            current_rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (current_list_id,)).fetchall()
+            current_row, _canonical, current_reason = self.recover_scan(raw_scan, current_rows)
+            if current_row is None and scan_stage_category(current_list["stage"], current_list["scanner"]) == "received":
+                external_row, _external_canonical, external_reason = self.recover_bay_external_scan(raw_scan, current_rows)
+                if external_row is not None:
+                    current_row = external_row
+                elif external_reason.startswith("Ambiguous"):
+                    current_reason = external_reason
+            if current_row is not None or current_reason.startswith("Ambiguous"):
+                return None
+
+            settings = self.cross_date_scan_settings_con(con)
+            if settings["mode"] == "disabled":
+                return None
+            candidates = self.cross_date_scan_candidates(
+                con,
+                current_list,
+                raw_scan,
+                scan_request,
+                user_context,
+                settings,
+            )
+            if not candidates:
+                return None
+
+            self.insert_audit(
+                con,
+                "scan",
+                current_list_id,
+                "cross_date_scan_match_found",
+                user_name,
+                station,
+                "",
+                {
+                    "barcode": raw_scan,
+                    "originalDeliveryDate": current_list["delivery_date"],
+                    "originalStage": current_list["stage"],
+                    "mode": settings["mode"],
+                    "candidateListIds": [candidate["listId"] for candidate in candidates],
+                    "candidateDates": [candidate["deliveryDate"] for candidate in candidates],
+                },
+            )
+            con.commit()
+
+        original = {
+            "listId": str(current_list["id"] or ""),
+            "deliveryDate": str(current_list["delivery_date"] or ""),
+            "stage": str(current_list["stage"] or ""),
+            "scanner": str(current_list["scanner"] or ""),
+        }
+        if confirmed and explicit_target_id:
+            selected = next((candidate for candidate in candidates if candidate["listId"] == explicit_target_id), None)
+            if not selected:
+                raise ValueError("The selected cross-date delivery list is no longer available")
+            if not selected["selectable"]:
+                raise ValueError(selected["safetyReason"] or "The selected line cannot be scanned")
+            return {"candidate": selected, "original": original, "automatic": False, "settings": settings}
+
+        automatic = settings["mode"] == "auto_unique"
+        if len(candidates) == 1 and automatic and not candidates[0]["requiresConfirmation"]:
+            return {"candidate": candidates[0], "original": original, "automatic": True, "settings": settings}
+
+        return {
+            "selection": {
+                "ok": False,
+                "crossDateSelectionRequired": True,
+                "message": (
+                    "This item was found on another delivery date. Confirm the correct list before scanning."
+                    if len(candidates) == 1
+                    else "This item was found on multiple delivery dates. Select the correct list before scanning."
+                ),
+                "originalListId": original["listId"],
+                "originalDeliveryDate": original["deliveryDate"],
+                "originalStage": original["stage"],
+                "mode": settings["mode"],
+                "pastDays": settings["pastDays"],
+                "futureDays": settings["futureDays"],
+                "candidates": candidates,
+            }
+        }
+
+    def attach_cross_date_result(
+        self,
+        payload: dict[str, Any],
+        resolved: dict[str, Any],
+        scan_request: dict[str, Any],
+        operation: str,
+    ) -> dict[str, Any]:
+        """Attach switch metadata and record the immutable cross-date audit event."""
+        candidate = resolved["candidate"]
+        original = resolved["original"]
+        user = request_user_name(scan_request)
+        station = request_station(scan_request)
+        last_scan = payload.get("lastScan") if isinstance(payload.get("lastScan"), dict) else {}
+        outcome = "accepted" if last_scan.get("ok") or payload.get("ok") else str(last_scan.get("eventType") or "review")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            self.insert_audit(
+                con,
+                "line_item",
+                candidate["lineItemId"],
+                "cross_date_scan_switch",
+                user,
+                station,
+                "",
+                {
+                    "operation": operation,
+                    "automatic": bool(resolved.get("automatic")),
+                    "originalListId": original["listId"],
+                    "originalDeliveryDate": original["deliveryDate"],
+                    "originalStage": original["stage"],
+                    "matchedListId": candidate["listId"],
+                    "matchedDeliveryDate": candidate["deliveryDate"],
+                    "matchedStage": candidate["stage"],
+                    "order": candidate["order"],
+                    "item": candidate["item"],
+                    "rackCode": candidate.get("originalRackCode", ""),
+                    "bayCode": candidate.get("originalBayCode", ""),
+                    "outcome": outcome,
+                },
+            )
+            con.commit()
+        payload.update(
+            {
+                "crossDateSwitched": True,
+                "crossDateAutomatic": bool(resolved.get("automatic")),
+                "originalListId": original["listId"],
+                "originalDeliveryDate": original["deliveryDate"],
+                "originalStage": original["stage"],
+                "matchedListId": candidate["listId"],
+                "matchedDeliveryDate": candidate["deliveryDate"],
+                "matchedStage": candidate["stage"],
+                "crossDateRackPreserved": bool(candidate.get("rackPreserved")),
+                "crossDateBayPreserved": bool(candidate.get("bayPreserved")),
+                "crossDateClearRack": bool(candidate.get("clearRack")),
+                "originalRackCode": candidate.get("originalRackCode", ""),
+                "originalBayCode": candidate.get("originalBayCode", ""),
+                "crossDateSafetyReason": candidate.get("safetyReason", ""),
+                "crossDateMessage": (
+                    f"Delivery date changed from {format_display_date(original['deliveryDate'])} "
+                    f"to {format_display_date(candidate['deliveryDate'])} for Order {candidate['order']} / Item {candidate['item']}."
+                ),
+            }
+        )
+        return payload
+
     def scan_other_list_hint(self, con: sqlite3.Connection, current_list_id: str, raw_scan: str) -> tuple[str, str]:
         """Purpose: Process other list hint for the delivery-list scanner workflow.
 
@@ -8493,6 +8938,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         )
 
     def record_scan(self, scan_request: dict[str, Any]) -> dict[str, Any]:
+        """Resolve cross-date matches before running the maintained scan workflow."""
+        resolved = self.resolve_cross_date_scan(scan_request)
+        if resolved and resolved.get("selection"):
+            return resolved["selection"]
+        effective_request = dict(scan_request)
+        if resolved and resolved.get("candidate"):
+            effective_request["listId"] = resolved["candidate"]["listId"]
+            effective_request["_crossDateResolved"] = True
+            if resolved["candidate"].get("clearRack"):
+                effective_request["rackCode"] = ""
+        payload = self._record_scan_for_list(effective_request)
+        if resolved and resolved.get("candidate"):
+            return self.attach_cross_date_result(payload, resolved, effective_request, "scan")
+        return payload
+
+    def _record_scan_for_list(self, scan_request: dict[str, Any]) -> dict[str, Any]:
         """Purpose: Process scan for the delivery-list scanner workflow.
 
         Effects: This function reads or changes database records.
@@ -10832,6 +11293,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "lookups": ({"admin_lookup_value"}, ("lookup",)),
             "rejectSettings": ({"reject_catalog"}, ("reject_catalog",)),
             "bayScannerRules": ({"bay_manual_input_rule", "bay_scan_barcode_rule", "bay_scanner_settings"}, ("bay_manual", "bay_scan_barcode", "rack_destination_override")),
+            "crossDateScanning": ({"cross_date_scan_settings", "scan", "line_item"}, ("cross_date_scan_", "update_cross_date_scan_settings")),
             "bayAutoAssigner": ({"bay_auto_assigner"}, ("bay_auto_assign",)),
             "racks": ({"rack", "rack_set"}, ("rack",)),
             "rackForm": ({"rack"}, ("rack",)),
@@ -13863,6 +14325,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
 
     def receive_indian_trail_scan(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Resolve a selected-date mismatch before the maintained Indian Trail receive."""
+        if not str(data.get("listId") or "").strip():
+            return self._receive_indian_trail_scan_for_list(data, user)
+        resolved = self.resolve_cross_date_scan(data)
+        if resolved and resolved.get("selection"):
+            return resolved["selection"]
+        effective_data = dict(data)
+        if resolved and resolved.get("candidate"):
+            effective_data["listId"] = resolved["candidate"]["listId"]
+            effective_data["_crossDateResolved"] = True
+        payload = self._receive_indian_trail_scan_for_list(effective_data, user)
+        if resolved and resolved.get("candidate"):
+            return self.attach_cross_date_result(payload, resolved, effective_data, "indian_trail_receive")
+        return payload
+
+    def _receive_indian_trail_scan_for_list(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Receive or return an item into an Indian Trail bay.
 
         Regular receiving requires an Outbound scan. Bay Map Add mode may return

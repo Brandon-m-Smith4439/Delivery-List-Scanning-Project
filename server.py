@@ -1350,6 +1350,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(STORE.get_bay_scan_settings())
             return
 
+        if parsed.path == "/api/admin/cross-date-scan-settings":
+            if not self.require_permission("edit_delivery_lists"):
+                return
+            self.send_json(STORE.get_cross_date_scan_settings())
+            return
+
         if parsed.path == "/api/admin/bay-auto-assigner":
             if not self.require_permission("manage_bay_layout"):
                 return
@@ -1852,6 +1858,7 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
                     return
                 data["user"] = user["username"]
+                data["_userContext"] = user
                 self.send_json(STORE.record_scan(data))
                 return
 
@@ -2114,6 +2121,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.update_bay_scan_settings(data, user["username"]))
                 return
 
+            if parsed.path == "/api/admin/cross-date-scan-settings":
+                user = self.require_permission("edit_delivery_lists")
+                if not user:
+                    return
+                self.send_json(STORE.update_cross_date_scan_settings(data, user["username"]))
+                return
+
             if parsed.path == "/api/admin/bay-scanner-rules/manual":
                 user = self.require_permission("manage_bay_layout")
                 if not user:
@@ -2181,6 +2195,8 @@ class Handler(SimpleHTTPRequestHandler):
                 if data.get("listId") and not STORE.user_can_access_list(user, str(data.get("listId") or "")):
                     self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
                     return
+                data["user"] = user["username"]
+                data["_userContext"] = user
                 self.send_json(STORE.receive_indian_trail_scan(data, user["username"]))
                 return
 

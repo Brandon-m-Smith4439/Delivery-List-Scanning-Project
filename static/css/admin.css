@@ -8232,3 +8232,190 @@ button.custom-select-trigger:hover:not(:disabled),
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
+
+/* ========================================================================== */
+/* v0.193 cross-delivery-date scan settings                                   */
+/* ========================================================================== */
+.cross-date-scan-overview > div {
+  border-left: 4px solid #3979b9;
+}
+
+.cross-date-settings-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.cross-date-settings-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid #bdd0e4;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(19, 92, 255, 0.08), transparent 34%),
+    linear-gradient(180deg, #fff, #f4f8fd);
+  box-shadow: 0 10px 24px rgba(5, 32, 76, 0.06);
+}
+
+.cross-date-settings-intro small,
+.cross-date-settings-intro strong,
+.cross-date-settings-intro p {
+  display: block;
+  margin: 0;
+}
+
+.cross-date-settings-intro small {
+  color: #1762a7;
+  font-size: 0.68rem;
+  font-weight: 950;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.cross-date-settings-intro strong {
+  margin-top: 3px;
+  color: #082a55;
+  font-size: 1.16rem;
+}
+
+.cross-date-settings-intro p {
+  max-width: 720px;
+  margin-top: 5px;
+  color: #60738a;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.cross-date-settings-intro > span {
+  flex: 0 0 auto;
+  padding: 7px 11px;
+  border: 1px solid #acd8b8;
+  border-radius: 999px;
+  background: #edf9f0;
+  color: #1e7437;
+  font-size: 0.7rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.cross-date-settings-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+}
+
+.cross-date-settings-card {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #d2deeb;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(13, 48, 84, 0.05);
+}
+
+.cross-date-settings-card header {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e3eaf3;
+}
+
+.cross-date-settings-card header strong {
+  color: #173f6d;
+  font-size: 0.9rem;
+}
+
+.cross-date-settings-card header span,
+.cross-date-settings-card p,
+.cross-date-settings-safeguards span {
+  color: #66788e;
+  font-size: 0.73rem;
+  line-height: 1.45;
+}
+
+.cross-date-settings-card p {
+  margin: 0;
+}
+
+.cross-date-settings-card label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: #4b6380;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.cross-date-settings-card :where(select, input) {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid #bdccdd;
+  border-radius: 10px;
+  background: #fbfdff;
+  color: #173b65;
+  padding: 0 11px;
+  font-weight: 800;
+}
+
+.cross-date-settings-card :where(select, input):focus {
+  outline: none;
+  border-color: #1762a7;
+  box-shadow: 0 0 0 3px rgba(23, 98, 167, 0.12);
+}
+
+.cross-date-settings-window {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cross-date-settings-safeguards {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #c8d8e8;
+  border-left: 5px solid #2f7ab8;
+  border-radius: 11px;
+  background: #f4f8fd;
+}
+
+.cross-date-settings-safeguards strong {
+  color: #244f7d;
+  font-size: 0.8rem;
+}
+
+.cross-date-settings-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cross-date-settings-actions button {
+  min-height: 42px;
+  border: 1px solid #0b4b87;
+  border-radius: 10px;
+  background: #0b4b87;
+  color: #fff;
+  padding: 0 18px;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+@media (max-width: 760px) {
+  .cross-date-settings-intro {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cross-date-settings-form,
+  .cross-date-settings-window {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

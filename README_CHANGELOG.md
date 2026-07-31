@@ -1,3 +1,36 @@
+## v0.193 - Guarded Cross-Delivery-Date Scanning
+
+- Added cross-delivery-date matching to the maintained main Scan and Indian Trail receiving workflows without creating a second scanner implementation.
+- Checks the selected list first, then searches only active, accessible lists in the same operational stage and configured date window.
+- Automatically switches and scans one unique safe match while retaining the matched delivery date as the active selection.
+- Added an operator selection window for multiple matches, Ask mode, completed lines, manual bay choices, and rack/outbound/destination safeguards.
+- Shows candidate delivery date, stage, order/item, quantity progress, route, customer, current location, and safety guidance before a manual choice.
+- Preserves existing duplicate, stage-access, outbound, transportation, Indian Trail, rack, bay, supervisor-override, undo/redo, and audit behavior.
+- Clears an unavailable, closed, or destination-incompatible selected rack before applying a confirmed cross-date scan and explains why it was not preserved.
+- Added Admin settings for Disabled, Ask before switching, and Automatically switch unique matches, plus configurable past/future search limits defaulting to 7 and 30 days.
+- Added immutable audit records for match discovery, settings changes, and cross-date switches.
+- Added a dedicated visual date-change notice and semantic `delivery_date_changed` cue using the existing `scan_warning.wav` asset.
+- Advanced the application contract and changed Scan/Admin/JavaScript cache keys to v0.193.
+
+### Changed files
+
+- `README.md`
+- `README_CHANGELOG.md`
+- `index.html`
+- `server.py`
+- `backend/store.py`
+- `database/contract.py`
+- `static/js/app.js`
+- `static/css/scan.css`
+- `static/css/admin.css`
+- `tests/test_static_structure.py`
+
+### Database
+
+- No database migration is required.
+- Existing schema version 5 remains current.
+- Shared settings use the existing `system_metadata` table.
+
 ## v0.192 - Unified Rack Transfers and Paged Action History
 
 - Replaced the native rack-transfer destination selector with a high-layer custom chooser so the destination list cannot open behind the Individual Rack GUI.

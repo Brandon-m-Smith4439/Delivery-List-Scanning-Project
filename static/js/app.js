@@ -135,6 +135,7 @@ const state = {
   adminCustomerRouteRules: [],
   customerEmailSettings: { contacts: [], cc: [], outbox: [] },
   bayScannerSettings: { manualRules: [], barcodeRules: [], destinationOverrideMinutes: 15 },
+  crossDateScanSettings: { mode: "auto_unique", pastDays: 7, futureDays: 30 },
   bayAutoAssignSettings: {
     standardMaxInches: 59.99,
     tallMinInches: 60,
@@ -495,6 +496,7 @@ const APP_SOUND_FILES = Object.freeze({
   destructive_action: "sounds/destructive_action.wav",
   scan_duplicate: "sounds/scan_duplicate.wav",
   scan_warning: "sounds/scan_warning.wav",
+  delivery_date_changed: "sounds/scan_warning.wav",
   scan_error: "sounds/scan_error.wav",
   scan_rush: "sounds/scan_rush.wav",
   scan_remake: "sounds/scan_remake.wav",
@@ -536,6 +538,7 @@ const APP_SOUND_ENABLED_KINDS = new Set([
   "destructive_action",
   "scan_duplicate",
   "scan_warning",
+  "delivery_date_changed",
   "scan_error",
   "scan_rush",
   "scan_remake",
@@ -571,6 +574,7 @@ const APP_SOUND_PRELOAD_KINDS = Object.freeze([
   "print_ready",
   "scan_duplicate",
   "scan_warning",
+  "delivery_date_changed",
   "scan_error",
   "rack_item_added",
   "bay_assigned",
@@ -1035,6 +1039,38 @@ function pad(value, length) {
 }
 
 const SPANISH_UI_TEXT = new Map([
+  ["Cross-Date Scanning", "Escaneo entre fechas"],
+  ["Edit scan behavior", "Editar comportamiento de escaneo"],
+  ["Automatically switch unique matches", "Cambiar automáticamente coincidencias únicas"],
+  ["Ask before switching", "Preguntar antes de cambiar"],
+  ["Disabled", "Desactivado"],
+  ["Scanner Safety", "Seguridad del escáner"],
+  ["Date-switch settings", "Configuración de cambio de fecha"],
+  ["Audited scanner behavior", "Comportamiento de escaneo auditado"],
+  ["Item found on another delivery date", "Artículo encontrado en otra fecha de entrega"],
+  ["Choose the correct delivery date", "Elija la fecha de entrega correcta"],
+  ["Confirm the delivery list before the scan is applied.", "Confirme la lista de entrega antes de aplicar el escaneo."],
+  ["Delivery date", "Fecha de entrega"],
+  ["Order / Item", "Orden / Artículo"],
+  ["Not assigned", "Sin asignar"],
+  ["Review required", "Revisión requerida"],
+  ["Ready to scan", "Listo para escanear"],
+  ["Select and review", "Seleccionar y revisar"],
+  ["Switch date and scan", "Cambiar fecha y escanear"],
+  ["Only the selected candidate will be scanned. Closing this window leaves the current delivery date unchanged.", "Solo se escaneará la opción seleccionada. Cerrar esta ventana mantiene la fecha de entrega actual."],
+  ["Cancel Scan", "Cancelar escaneo"],
+  ["Delivery date changed", "Fecha de entrega cambiada"],
+  ["The scan was applied to another delivery date.", "El escaneo se aplicó a otra fecha de entrega."],
+  ["Scanner safety", "Seguridad del escáner"],
+  ["Cross-delivery-date matching", "Coincidencia entre fechas de entrega"],
+  ["Every match and switch is audited", "Cada coincidencia y cambio queda auditado"],
+  ["Switch behavior", "Comportamiento de cambio"],
+  ["Cross-date handling", "Manejo entre fechas"],
+  ["Search window", "Ventana de búsqueda"],
+  ["Past delivery dates", "Fechas de entrega anteriores"],
+  ["Future delivery dates", "Fechas de entrega futuras"],
+  ["Preserved safeguards", "Protecciones conservadas"],
+  ["Save Cross-Date Settings", "Guardar configuración entre fechas"],
   ["Home", "Inicio"],
   ["Scan", "Escanear"],
   ["Racks", "Racks"],
@@ -2701,6 +2737,16 @@ function spanishBayCategoryLabel(category, plural = false) {
 }
 
 const SPANISH_DYNAMIC_PATTERNS = [
+  [/^Selected date:\s*(.+)$/i, (_, date) => `Fecha seleccionada: ${date}`],
+  [/^(\d+) days back \/ (\d+) days forward$/i, (_, past, future) => `${past} días atrás / ${future} días adelante`],
+  [/^Delivery date changed from (.+) to (.+) for Order (.+) \/ Item (.+)\.$/i, (_, fromDate, toDate, order, item) => `La fecha de entrega cambió de ${fromDate} a ${toDate} para la orden ${order} / artículo ${item}.`],
+  [/^This item was found on another delivery date\. Confirm the correct list before scanning\.$/i, () => "Este artículo se encontró en otra fecha de entrega. Confirme la lista correcta antes de escanear."],
+  [/^This item was found on multiple delivery dates\. Select the correct list before scanning\.$/i, () => "Este artículo se encontró en varias fechas de entrega. Seleccione la lista correcta antes de escanear."],
+  [/^This line is already fully scanned on that delivery date\.$/i, () => "Esta línea ya está completamente escaneada en esa fecha de entrega."],
+  [/^Selected rack (.+) is no longer available\.$/i, (_, rack) => `El rack seleccionado ${rack} ya no está disponible.`],
+  [/^Selected rack (.+) is (.+) and cannot be preserved\.$/i, (_, rack, status) => `El rack seleccionado ${rack} está ${status} y no se puede conservar.`],
+  [/^Rack (.+) contains (.+) pieces and cannot be preserved for (.+)\. The rack selection will be cleared\.$/i, (_, rack, existing, destination) => `El rack ${rack} contiene piezas de ${existing} y no se puede conservar para ${destination}. Se borrará la selección del rack.`],
+  [/^Manual Bay (.+) is selected and must be confirmed for the other delivery date\.$/i, (_, bay) => `La bahía manual ${bay} está seleccionada y debe confirmarse para la otra fecha de entrega.`],
   [/^(\d+) of (\d+) events shown$/i, (_, shown, total) => `${shown} de ${total} eventos mostrados`],
   [/^Delivery List for\s+(.+)$/i, (_, date) => `Lista de entrega para ${date}`],
   [/^(.+?)\s+-\s+(Staging - Airport Rd|Outbound - Airport Rd|Inbound - Indian Trail|BFS Greenville|Customer Pickup|DTC - Deliver to Customer)$/i, (_, prefix, stage) => `${prefix} - ${translatedUiValue(stage).trim()}`],
@@ -10516,6 +10562,145 @@ async function showIndianTrailPlacementPrompt(result) {
  * Effects: May call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
+function crossDateCandidateStatus(candidate) {
+  if (candidate.complete) return { label: "Complete", className: "is-complete" };
+  if (candidate.requiresConfirmation) return { label: "Review required", className: "needs-review" };
+  return { label: "Ready to scan", className: "is-ready" };
+}
+
+/** Ask the operator to choose a cross-date match without changing scanner state prematurely. */
+function showCrossDateScanSelection(payload) {
+  return new Promise((resolve) => {
+    document.querySelector(".cross-date-scan-backdrop")?.remove();
+    const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+    const dialog = document.createElement("div");
+    dialog.className = "action-confirm-backdrop cross-date-scan-backdrop";
+    dialog.innerHTML = `
+      <section class="cross-date-scan-dialog" role="dialog" aria-modal="true" aria-labelledby="crossDateScanTitle">
+        <button type="button" class="action-confirm-close" data-cross-date-cancel aria-label="Close cross-date selection">&times;</button>
+        <header class="cross-date-scan-heading">
+          <span class="cross-date-scan-icon" aria-hidden="true"></span>
+          <div>
+            <small>Selected date: ${escapeHtml(formatDisplayDate(payload.originalDeliveryDate || ""))}</small>
+            <h2 id="crossDateScanTitle">${escapeHtml(candidates.length === 1 ? "Item found on another delivery date" : "Choose the correct delivery date")}</h2>
+            <p>${escapeHtml(payload.message || "Confirm the delivery list before the scan is applied.")}</p>
+          </div>
+        </header>
+        <div class="cross-date-scan-list">
+          ${candidates.map((candidate) => {
+            const status = crossDateCandidateStatus(candidate);
+            const safetyReason = String(candidate.safetyReason || "").trim();
+            return `
+              <article class="cross-date-scan-card ${status.className}">
+                <div class="cross-date-scan-date">
+                  <small>Delivery date</small>
+                  <strong>${escapeHtml(formatDisplayDate(candidate.deliveryDate || ""))}</strong>
+                  <span>${escapeHtml(candidate.stage || "Stage")} &middot; ${escapeHtml(candidate.scanner || "Scanner")}</span>
+                </div>
+                <div class="cross-date-scan-order">
+                  <small>Order / Item</small>
+                  <strong>${escapeHtml(candidate.order || "-")} / ${escapeHtml(candidate.item || "-")}</strong>
+                  <span>${escapeHtml(candidate.customer || "No customer")}</span>
+                </div>
+                <div class="cross-date-scan-details">
+                  <span><small>Progress</small><b>${escapeHtml(candidate.scannedQty || 0)} / ${escapeHtml(candidate.qty || 0)}</b></span>
+                  <span><small>Route</small><b>${escapeHtml(candidate.route || "Indian Trail")}</b></span>
+                  <span><small>Location</small><b>${escapeHtml(candidate.location || "Not assigned")}</b></span>
+                </div>
+                <div class="cross-date-scan-decision">
+                  <span class="cross-date-scan-status ${status.className}">${escapeHtml(status.label)}</span>
+                  ${safetyReason ? `<p>${escapeHtml(safetyReason)}</p>` : ""}
+                  <button type="button" data-cross-date-list="${escapeHtml(candidate.listId || "")}" ${candidate.selectable ? "" : "disabled"}>
+                    ${candidate.requiresConfirmation ? "Select and review" : "Switch date and scan"}
+                  </button>
+                </div>
+              </article>
+            `;
+          }).join("") || `<div class="admin-empty">No accessible delivery-list match remains available.</div>`}
+        </div>
+        <footer class="cross-date-scan-footer">
+          <span>Only the selected candidate will be scanned. Closing this window leaves the current delivery date unchanged.</span>
+          <button type="button" data-cross-date-cancel>Cancel Scan</button>
+        </footer>
+      </section>
+    `;
+
+    const close = (candidate = null) => {
+      document.removeEventListener("keydown", keyHandler);
+      dialog.remove();
+      updateModalScrollLock();
+      resolve(candidate);
+    };
+    const keyHandler = (event) => {
+      if (event.key === "Escape") close(null);
+    };
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-cross-date-cancel]")) {
+        close(null);
+        return;
+      }
+      const button = event.target.closest("[data-cross-date-list]");
+      if (!button || button.disabled) return;
+      close(candidates.find((candidate) => String(candidate.listId) === String(button.dataset.crossDateList)) || null);
+    });
+    document.addEventListener("keydown", keyHandler);
+    document.body.appendChild(dialog);
+    applyLanguageToRoot(dialog);
+    updateModalScrollLock();
+    dialog.querySelector("[data-cross-date-list]:not(:disabled), [data-cross-date-cancel]")?.focus();
+  });
+}
+
+function syncCrossDateListSummary(payload) {
+  const matchedListId = String(payload.matchedListId || payload.meta?.id || "");
+  const index = state.lists.findIndex((list) => String(list.id || "") === matchedListId);
+  if (index < 0 || !Array.isArray(payload.items)) return;
+  const totalQty = payload.items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+  const scannedQty = payload.items.reduce((sum, item) => sum + Number(item.scanned || 0), 0);
+  state.lists[index] = { ...state.lists[index], totalQty, scannedQty };
+}
+
+function showCrossDateSwitchNotice(payload) {
+  document.querySelector(".cross-date-switch-notice")?.remove();
+  const notice = document.createElement("section");
+  notice.className = "cross-date-switch-notice";
+  notice.setAttribute("role", "status");
+  notice.setAttribute("aria-live", "assertive");
+  notice.innerHTML = `
+    <span class="cross-date-switch-icon" aria-hidden="true"></span>
+    <div><small>Delivery date changed</small><strong>${escapeHtml(payload.crossDateMessage || "The scan was applied to another delivery date.")}</strong>${payload.crossDateSafetyReason ? `<p>${escapeHtml(payload.crossDateSafetyReason)}</p>` : ""}</div>
+    <button type="button" aria-label="Close delivery-date notice">&times;</button>
+  `;
+  const close = () => notice.remove();
+  notice.querySelector("button")?.addEventListener("click", close);
+  document.body.appendChild(notice);
+  applyLanguageToRoot(notice);
+  window.setTimeout(close, 7000);
+}
+
+async function applyCrossDateSwitchUi(payload, { activateMatched = false } = {}) {
+  if (!payload?.crossDateSwitched) return;
+  const matchedListId = String(payload.matchedListId || payload.meta?.id || "");
+  if (activateMatched && matchedListId && matchedListId !== state.activeListId) {
+    await activateList(matchedListId, false);
+  }
+  if (payload.crossDateClearRack && !payload.destinationOverrideRequired) {
+    state.selectedScanRackCode = NO_RACK_SELECTION;
+  }
+  syncCrossDateListSummary(payload);
+  renderDeliveryListSelect();
+  syncAllCustomSelects();
+  if (matchedListId) {
+    const lineFlags = await fetchJson(`/api/operations/line-flags?listId=${encodeURIComponent(matchedListId)}`).catch(() => null);
+    if (lineFlags) applyOperationalLineFlags(lineFlags, matchedListId);
+  }
+  if ((isStagingScanContext() || isOutboundScanContext()) && state.racks.length) {
+    await ensureRacksLoaded(true).catch(() => {});
+  }
+  renderScanPage();
+  showCrossDateSwitchNotice(payload);
+}
+
 function processScan(rawScan, options = {}) {
   const operation = Promise.resolve().then(() => processScanInternal(rawScan, options));
   state.activeScanOperations.add(operation);
@@ -10558,12 +10743,28 @@ async function processScanInternal(rawScan, options = {}) {
           outboundOverride: Boolean(options.outboundOverride),
           allowReceivedOverride: Boolean(options.allowReceivedOverride),
           isManual: Boolean(options.isManual),
+          crossDateListId: options.crossDateListId || "",
+          crossDateConfirmed: Boolean(options.crossDateConfirmed),
           ...requestContext(),
         }),
       });
+      if (result.crossDateSelectionRequired) {
+        scanFlash("notice", "delivery_date_changed");
+        const candidate = await showCrossDateScanSelection(result);
+        if (candidate) {
+          await processScan(scanText, {
+            ...options,
+            crossDateListId: candidate.listId,
+            crossDateConfirmed: true,
+          });
+        }
+        return;
+      }
+
       state.lastScan = result.lastScan || state.lastScan;
 
       if (result.outboundOverrideRequired) {
+        if (result.crossDateSwitched) await applyCrossDateSwitchUi(result, { activateMatched: true });
         scanFlash("notice", "scan_warning");
         const decision = await showIndianTrailOutboundReceiveOverride(result, scanText, options);
         if (decision) {
@@ -10579,9 +10780,15 @@ async function processScanInternal(rawScan, options = {}) {
         return;
       }
 
-      await activateList(state.activeListId, false);
-      scanFlash(result.ok ? "success" : "error", result.ok ? "bay_assigned" : scanSoundKind(result.lastScan || result, "scan_error"));
+      await activateList(result.matchedListId || state.activeListId, false);
+      scanFlash(
+        result.ok ? "success" : "error",
+        result.crossDateSwitched
+          ? "delivery_date_changed"
+          : (result.ok ? "bay_assigned" : scanSoundKind(result.lastScan || result, "scan_error")),
+      );
       renderScanPage();
+      if (result.crossDateSwitched) await applyCrossDateSwitchUi(result);
       await refreshBayMapPage().catch(() => {});
       if (result.ok) {
         await showIndianTrailPlacementPrompt(result);
@@ -10602,9 +10809,23 @@ async function processScanInternal(rawScan, options = {}) {
         outboundOverride: Boolean(options.outboundOverride),
         destinationOverride: Boolean(options.destinationOverride),
         isManual: Boolean(options.isManual),
+        crossDateListId: options.crossDateListId || "",
+        crossDateConfirmed: Boolean(options.crossDateConfirmed),
         ...requestContext(),
       }),
     });
+    if (payload.crossDateSelectionRequired) {
+      scanFlash("notice", "delivery_date_changed");
+      const candidate = await showCrossDateScanSelection(payload);
+      if (candidate) {
+        await processScan(scanText, {
+          ...options,
+          crossDateListId: candidate.listId,
+          crossDateConfirmed: true,
+        });
+      }
+      return;
+    }
     applyBackendPayload(payload);
     const outboundRackDeparture = Boolean(
       isOutboundScanContext() &&
@@ -10617,6 +10838,7 @@ async function processScanInternal(rawScan, options = {}) {
     if (payload.destinationOverrideRequired) {
       scanFlash("notice", "scan_warning");
       renderScanPage();
+      if (payload.crossDateSwitched) await applyCrossDateSwitchUi(payload);
       const approved = await showRackDestinationOverrideDialog(payload);
       if (approved) {
         await processScan(scanText, { ...options, destinationOverride: true });
@@ -10626,6 +10848,7 @@ async function processScanInternal(rawScan, options = {}) {
     if (payload.outboundOverrideRequired) {
       scanFlash("error", "scan_warning");
       renderScanPage();
+      if (payload.crossDateSwitched) await applyCrossDateSwitchUi(payload);
       await showOutboundOverrideDialog(payload, scanText, options);
       return;
     }
@@ -10643,11 +10866,14 @@ async function processScanInternal(rawScan, options = {}) {
     );
     scanFlash(
       payload.lastScan?.ok ? "success" : payload.lastScan?.eventType === "duplicate" || payload.lastScan?.eventType === "notice" ? "notice" : "error",
-      acceptedRackBarcode
-        ? (outboundRackDeparture ? "rack_outbound" : "rack_barcode")
-        : scanSoundKind(payload.lastScan, payload.lastScan?.ok ? (payload.rackCode ? "rack_item_added" : "scan_success") : "scan_error"),
+      payload.crossDateSwitched
+        ? "delivery_date_changed"
+        : acceptedRackBarcode
+          ? (outboundRackDeparture ? "rack_outbound" : "rack_barcode")
+          : scanSoundKind(payload.lastScan, payload.lastScan?.ok ? (payload.rackCode ? "rack_item_added" : "scan_success") : "scan_error"),
     );
     renderScanPage();
+    if (payload.crossDateSwitched) await applyCrossDateSwitchUi(payload);
     if (outboundRackDeparture) {
       showOutboundRackTransitPrompt(payload);
     } else {
@@ -16711,8 +16937,9 @@ async function refreshAdminPage() {
   requests.push(hasPermission("manage_customer_route_rules") ? fetchJson("/api/admin/customer-emails") : Promise.resolve(null));
   requests.push(hasPermission("manage_bay_layout") ? fetchJson("/api/admin/bay-scanner-rules") : Promise.resolve(null));
   requests.push(hasPermission("manage_bay_layout") ? fetchJson("/api/admin/bay-auto-assigner") : Promise.resolve(null));
+  requests.push(hasPermission("edit_delivery_lists") ? fetchJson("/api/admin/cross-date-scan-settings") : Promise.resolve(null));
   requests.push(hasPermission("manage_roles") ? fetchJson("/api/admin/roles") : Promise.resolve(null));
-  const [summary, users, sessions, customerRules, customerEmails, bayScannerRules, bayAutoAssignSettings, roles] = await Promise.all(requests);
+  const [summary, users, sessions, customerRules, customerEmails, bayScannerRules, bayAutoAssignSettings, crossDateScanSettings, roles] = await Promise.all(requests);
   if (summary) state.adminSummary = summary;
   if (summary && els.adminSummary) {
     els.adminSummary.innerHTML = [
@@ -16742,6 +16969,7 @@ async function refreshAdminPage() {
   state.customerEmailSettings = customerEmails || state.customerEmailSettings || { contacts: [], cc: [], outbox: [] };
   state.bayScannerSettings = bayScannerRules || state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
   state.bayAutoAssignSettings = bayAutoAssignSettings || state.bayAutoAssignSettings;
+  state.crossDateScanSettings = crossDateScanSettings || state.crossDateScanSettings;
   state.adminRoles = roles?.roles || state.adminRoles || [];
   state.allPermissions = roles?.permissions || state.allPermissions || [];
   renderAdminUsers();
@@ -16751,6 +16979,7 @@ async function refreshAdminPage() {
   renderCustomerEmailOverview();
   renderBayScannerRuleOverview();
   renderBayAutoAssignOverview();
+  renderCrossDateScanOverview();
   renderActiveSessions();
 }
 
@@ -17720,6 +17949,14 @@ const ADMIN_MODAL_PROFILES = {
     status: "Indian Trail rules",
     group: "bay",
   },
+  crossDateScanning: {
+    title: "Cross-Date Scanning",
+    eyebrow: "Scanner Safety",
+    description: "Control how the scanner handles a unique order/item found on another active delivery date.",
+    context: "Date-switch settings",
+    status: "Audited scanner behavior",
+    group: "configuration",
+  },
   bayAutoAssigner: {
     title: "Bay Auto Assigner",
     eyebrow: "Bay Operations",
@@ -17952,6 +18189,9 @@ function adminModalContent(kind) {
   }
   if (kind === "bayScannerRules") {
     return bayScannerRulesModalHtml();
+  }
+  if (kind === "crossDateScanning") {
+    return crossDateScanSettingsModalHtml();
   }
   if (kind === "bayAutoAssigner") {
     return bayAutoAssignerModalHtml();
@@ -21853,6 +22093,86 @@ function renderBayAutoAssignOverview() {
  * Effects: Updates visible dom state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function crossDateScanModeLabel(mode) {
+  if (mode === "disabled") return "Disabled";
+  if (mode === "ask") return "Ask before switching";
+  return "Automatically switch unique matches";
+}
+
+/** Render the dashboard summary for cross-delivery-date scan behavior. */
+function renderCrossDateScanOverview() {
+  const target = document.getElementById("crossDateScanOverview");
+  if (!target) return;
+  const settings = state.crossDateScanSettings || { mode: "auto_unique", pastDays: 7, futureDays: 30 };
+  target.innerHTML = `
+    <div><strong>${escapeHtml(crossDateScanModeLabel(settings.mode))}</strong><span>Current handling when a scan is found on another active date.</span></div>
+    <div><strong>${escapeHtml(settings.pastDays)} days back / ${escapeHtml(settings.futureDays)} days forward</strong><span>Search remains limited to the same valid stage and accessible delivery lists.</span></div>
+  `;
+}
+
+/** Build the Admin editor for cross-delivery-date scanner settings. */
+function crossDateScanSettingsModalHtml() {
+  const settings = state.crossDateScanSettings || { mode: "auto_unique", pastDays: 7, futureDays: 30 };
+  return `
+    <div class="cross-date-settings-shell">
+      <section class="cross-date-settings-intro">
+        <div>
+          <small>Scanner safety</small>
+          <strong>Cross-delivery-date matching</strong>
+          <p>The selected delivery list is always checked first. Other active dates are searched only after the current list has no unique match.</p>
+        </div>
+        <span>Every match and switch is audited</span>
+      </section>
+
+      <form id="crossDateScanSettingsForm" class="cross-date-settings-form">
+        <section class="cross-date-settings-card">
+          <header><strong>Switch behavior</strong><span>Automatic switching is allowed only for one safe, incomplete match.</span></header>
+          <label>
+            <span>Cross-date handling</span>
+            <select id="crossDateScanMode">
+              <option value="disabled" ${settings.mode === "disabled" ? "selected" : ""}>Disabled</option>
+              <option value="ask" ${settings.mode === "ask" ? "selected" : ""}>Ask before switching</option>
+              <option value="auto_unique" ${settings.mode === "auto_unique" ? "selected" : ""}>Automatically switch unique matches</option>
+            </select>
+          </label>
+          <p>Multiple matches, completed lines, and scans requiring a rack, destination, bay, or outbound override always require operator review.</p>
+        </section>
+
+        <section class="cross-date-settings-card">
+          <header><strong>Search window</strong><span>Limits are measured from the currently selected delivery date.</span></header>
+          <div class="cross-date-settings-window">
+            <label><span>Past delivery dates</span><input id="crossDatePastDays" type="number" min="0" max="365" step="1" value="${escapeHtml(settings.pastDays)}"></label>
+            <label><span>Future delivery dates</span><input id="crossDateFutureDays" type="number" min="0" max="365" step="1" value="${escapeHtml(settings.futureDays)}"></label>
+          </div>
+        </section>
+
+        <section class="cross-date-settings-safeguards">
+          <strong>Preserved safeguards</strong>
+          <span>Stage permissions, duplicate prevention, outbound gates, rack destination checks, bay assignment rules, undo/redo, and audit history remain authoritative after a date switch.</span>
+        </section>
+
+        <div class="cross-date-settings-actions"><button type="submit">Save Cross-Date Settings</button></div>
+      </form>
+    </div>
+  `;
+}
+
+async function saveCrossDateScanSettings() {
+  const payload = {
+    mode: document.getElementById("crossDateScanMode")?.value || "auto_unique",
+    pastDays: Number(document.getElementById("crossDatePastDays")?.value || 0),
+    futureDays: Number(document.getElementById("crossDateFutureDays")?.value || 0),
+  };
+  const saved = await fetchJson("/api/admin/cross-date-scan-settings", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  state.crossDateScanSettings = saved || payload;
+  renderCrossDateScanOverview();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = crossDateScanSettingsModalHtml();
+  showSaveConfirmation("Cross-delivery-date scan settings were saved.");
+}
+
 function bayAutoAssignerModalHtml() {
   const settings = state.bayAutoAssignSettings || {};
   const manual = new Set(settings.manualAssignTypes || []);
@@ -26933,6 +27253,11 @@ function wireEvents() {
     if (event.target.closest("#bayAutoAssignerForm")) {
       event.preventDefault();
       saveBayAutoAssignerSettings().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#crossDateScanSettingsForm")) {
+      event.preventDefault();
+      saveCrossDateScanSettings().catch((error) => showInlineError(error.message, true));
       return;
     }
   });
