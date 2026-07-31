@@ -347,3 +347,1097 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ========================================================================== 
+   INDIVIDUAL RACK MODAL OWNERSHIP - v0.189
+   Loaded last so the shared Racks and Bay styles cannot place the rack tabs
+   and workspace in competing grid columns or suppress the workspace scrollbar.
+   ========================================================================== */
+.operations-action-history-tab-heading {
+  display: none;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] {
+  width: min(1320px, calc(100vw - 32px)) !important;
+  height: min(900px, calc(100vh - 32px)) !important;
+  max-height: calc(100vh - 32px) !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: auto 58px minmax(0, 1fr) !important;
+  overflow: hidden !important;
+  border-radius: 20px !important;
+  background: #eef4fa !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > .operations-modal-heading {
+  grid-column: 1 / -1 !important;
+  grid-row: 1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 112px !important;
+  height: auto !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 20px !important;
+  margin: 0 !important;
+  padding: 20px 24px !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-heading-copy {
+  min-width: 0 !important;
+  align-content: center !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-heading-copy h2 {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-heading-copy p {
+  max-width: 760px !important;
+  margin: 6px 0 0 !important;
+  overflow: visible !important;
+  line-height: 1.4 !important;
+  white-space: normal !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-heading-actions {
+  min-width: max-content !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  margin-left: auto !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > .operations-rack-tabs {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 58px !important;
+  height: 58px !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 6px !important;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+  padding: 8px 16px 0 !important;
+  border-bottom: 1px solid #d5e1ee !important;
+  background: #ffffff !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > .operations-rack-tabs[hidden] {
+  display: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-rack-tabs > button {
+  flex: 0 0 auto !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions {
+  width: auto !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex: 0 1 auto !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+  flex-wrap: nowrap !important;
+  margin: 0 0 7px auto !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions[hidden] {
+  display: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions button {
+  min-height: 38px !important;
+  height: 38px !important;
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid #174f93 !important;
+  border-radius: 9px !important;
+  background: linear-gradient(180deg, #1a5ca8 0%, #0d3f7a 100%) !important;
+  color: #ffffff !important;
+  padding: 0 14px !important;
+  box-shadow: 0 6px 14px rgba(14, 60, 117, 0.15) !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions button:hover:not(:disabled),
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions button:focus-visible:not(:disabled) {
+  outline: none !important;
+  border-color: #135cff !important;
+  background: linear-gradient(180deg, #1e68c4 0%, #104a8f 100%) !important;
+  box-shadow: 0 8px 18px rgba(19, 92, 255, 0.2) !important;
+  transform: translateY(-1px) !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions button.secondary {
+  border-color: #b8c8da !important;
+  background: #ffffff !important;
+  color: #234c77 !important;
+  box-shadow: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions button:disabled {
+  opacity: 0.46 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions .rack-move-all-icon {
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-color: #8aa8c9 !important;
+  background: #ffffff !important;
+  color: #174f93 !important;
+  box-shadow: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalBody,
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalHistory {
+  grid-column: 1 / -1 !important;
+  grid-row: 3 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalBody[hidden],
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalHistory[hidden] {
+  display: none !important;
+}
+
+/* The full Workspace canvas is the only rack-item scroll owner. These rules
+   intentionally override the later Bay stylesheet's overflow:hidden rules. */
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalBody {
+  height: auto !important;
+  overflow-x: hidden !important;
+  overflow-y: scroll !important;
+  scrollbar-gutter: stable !important;
+  scrollbar-width: auto !important;
+  overscroll-behavior: contain !important;
+  padding: 14px 12px 24px !important;
+  background: #eef4fa !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .rack-details-modal-v184 {
+  width: 100% !important;
+  height: auto !important;
+  min-height: 100% !important;
+  display: block !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .rack-details-modal-list {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  display: grid !important;
+  align-content: start !important;
+  gap: 10px !important;
+  overflow: visible !important;
+  padding: 0 2px 2px 0 !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] :is(
+  .rack-modal-date-group,
+  .rack-modal-date-lines,
+  .rack-modal-line
+) {
+  height: auto !important;
+  max-height: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .rack-modal-date-group {
+  overflow: hidden !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .rack-modal-date-group[open] > .rack-modal-date-lines {
+  display: grid !important;
+  overflow: visible !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalHistory {
+  overflow-x: hidden !important;
+  overflow-y: scroll !important;
+  scrollbar-gutter: stable !important;
+  overscroll-behavior: contain !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, #f7faff 0%, #eef4fa 100%) !important;
+  padding: 16px 18px 24px !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalHistory > summary {
+  display: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-action-history-tab-heading {
+  display: block !important;
+  margin-bottom: 12px !important;
+  border: 1px solid #d3dfed !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  padding: 13px 15px !important;
+  box-shadow: 0 6px 16px rgba(18, 53, 90, 0.05) !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-action-history-tab-heading strong,
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-action-history-tab-heading small {
+  display: block !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-action-history-tab-heading strong {
+  color: #0b2d5a !important;
+  font-size: 15px !important;
+  font-weight: 950 !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-action-history-tab-heading small {
+  margin-top: 4px !important;
+  color: #60738b !important;
+  font-size: 11px !important;
+  font-weight: 750 !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] #operationsModalHistory .modal-action-history-list {
+  max-height: none !important;
+  overflow: visible !important;
+  gap: 8px !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalBody::-webkit-scrollbar,
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalHistory::-webkit-scrollbar {
+  width: 12px !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalBody::-webkit-scrollbar-track,
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalHistory::-webkit-scrollbar-track {
+  background: #dfe8f2 !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalBody::-webkit-scrollbar-thumb,
+#operationsModal.operations-modal-panel[data-kind="rack-details"] > #operationsModalHistory::-webkit-scrollbar-thumb {
+  min-height: 48px !important;
+  border: 2px solid #dfe8f2 !important;
+  border-radius: 999px !important;
+  background: #6f8daa !important;
+}
+
+@media (max-width: 980px) {
+  #operationsModal.operations-modal-panel[data-kind="rack-details"] {
+    width: calc(100vw - 16px) !important;
+    height: calc(100vh - 16px) !important;
+    max-height: calc(100vh - 16px) !important;
+    grid-template-rows: auto auto minmax(0, 1fr) !important;
+  }
+
+  #operationsModal.operations-modal-panel[data-kind="rack-details"] > .operations-modal-heading {
+    min-height: 0 !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 12px !important;
+    padding: 17px 18px !important;
+  }
+
+  #operationsModal.operations-modal-panel[data-kind="rack-details"] > .operations-rack-tabs {
+    height: auto !important;
+    min-height: 58px !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    padding-bottom: 8px !important;
+  }
+
+  #operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions {
+    flex: 1 1 100% !important;
+    justify-content: flex-start !important;
+    flex-wrap: wrap !important;
+    margin: 0 !important;
+  }
+}
+
+@media (max-width: 620px) {
+  #operationsModal.operations-modal-panel[data-kind="rack-details"] > .operations-modal-heading {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-heading-actions {
+    justify-self: stretch !important;
+    justify-content: space-between !important;
+    margin-left: 0 !important;
+  }
+
+  #operationsModal.operations-modal-panel[data-kind="rack-details"] .operations-modal-rack-actions button:not(.icon-only) {
+    flex: 1 1 145px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.190 action-history investigation filters and move-icon hover ownership  */
+/* ========================================================================== */
+
+.modal-action-history-filters {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid #cbd9ea;
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(246, 250, 255, 0.98) 100%);
+  box-shadow: 0 8px 18px rgba(7, 42, 99, 0.07);
+  backdrop-filter: blur(8px);
+}
+
+.modal-action-history-filter-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1.55fr)
+    minmax(140px, 0.75fr)
+    minmax(175px, 0.95fr)
+    minmax(132px, 0.58fr)
+    minmax(132px, 0.58fr);
+  gap: 9px;
+  align-items: end;
+}
+
+.modal-action-history-filter-grid label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: #455a75;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.modal-action-history-filter-grid label > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-action-history-filter-grid input,
+.modal-action-history-filter-grid select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #bdcde1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0b2b58;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: inset 0 1px 2px rgba(7, 42, 99, 0.03);
+}
+
+.modal-action-history-filter-grid input:focus,
+.modal-action-history-filter-grid select:focus {
+  outline: none;
+  border-color: #135cff;
+  box-shadow: 0 0 0 3px rgba(19, 92, 255, 0.12);
+}
+
+.modal-action-history-filter-footer {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #dce6f2;
+  padding-top: 9px;
+}
+
+.modal-action-history-filter-footer > span {
+  min-width: 0;
+  color: #5b6e86;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.modal-action-history-filter-footer button {
+  min-height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid #b8c9dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #234c77;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.modal-action-history-filter-footer button:hover:not(:disabled),
+.modal-action-history-filter-footer button:focus-visible:not(:disabled) {
+  outline: none;
+  border-color: #135cff;
+  background: #edf5ff;
+  color: #0d4f96;
+}
+
+.modal-action-history-filter-footer button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.modal-action-history-list {
+  min-width: 0;
+}
+
+/* Keep move icons light on hover so the directional glyph remains visible. */
+.rack-scope-move-button:hover:not(:disabled),
+.rack-scope-move-button:focus-visible:not(:disabled) {
+  outline: none !important;
+  border-color: #3f7fbd !important;
+  background: #dcecff !important;
+  color: #0d4f96 !important;
+  box-shadow: 0 7px 15px rgba(18, 72, 129, 0.14) !important;
+  filter: none !important;
+  transform: translateY(-1px) !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-details"]
+  .operations-modal-rack-actions
+  .rack-move-all-icon:hover:not(:disabled),
+#operationsModal.operations-modal-panel[data-kind="rack-details"]
+  .operations-modal-rack-actions
+  .rack-move-all-icon:focus-visible:not(:disabled) {
+  border-color: #3f7fbd !important;
+  background: #dcecff !important;
+  color: #0d4f96 !important;
+  box-shadow: 0 7px 15px rgba(18, 72, 129, 0.14) !important;
+  filter: none !important;
+}
+
+@media (max-width: 1160px) {
+  .modal-action-history-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .modal-action-history-filter-search {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .modal-action-history-filters {
+    position: static;
+    padding: 10px;
+  }
+
+  .modal-action-history-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modal-action-history-filter-search {
+    grid-column: auto;
+  }
+
+  .modal-action-history-filter-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .modal-action-history-filter-footer button {
+    width: 100%;
+  }
+}
+
+/* ========================================================================== */
+/* v0.191 rack-scoped history and combined Racks History control center       */
+/* ========================================================================== */
+
+#operationsModal.operations-modal-panel[data-kind="rack-history"] {
+  width: min(1320px, calc(100vw - 32px)) !important;
+  height: min(900px, calc(100vh - 32px)) !important;
+  max-height: calc(100vh - 32px) !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: auto 58px minmax(0, 1fr) !important;
+  overflow: hidden !important;
+  border-radius: 20px !important;
+  background: #eef4fa !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-history"] > .operations-modal-heading {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  min-height: 108px !important;
+  padding: 19px 24px !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-history"] > .operations-rack-records-tabs {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 58px !important;
+  height: 58px !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 6px !important;
+  padding: 8px 16px 0 !important;
+  border-bottom: 1px solid #d5e1ee !important;
+  background: #ffffff !important;
+  overflow: hidden !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-history"] > .operations-rack-records-tabs[hidden] {
+  display: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-history"] > #operationsModalBody {
+  grid-column: 1 !important;
+  grid-row: 3 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  background: #eef4fa !important;
+}
+
+.rack-history-control-center {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: block;
+}
+
+.rack-history-control-center > [data-rack-history-panel] {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rack-history-control-center > [data-rack-history-panel][hidden] {
+  display: none !important;
+}
+
+#operationsModal.operations-modal-panel[data-kind="rack-history"] .packing-history-shell-v184 {
+  padding: 14px 16px 18px !important;
+}
+
+.all-racks-history-shell {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px 16px 18px;
+  overflow: hidden;
+  background: #eef4fa;
+}
+
+.all-racks-history-intro {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 15px;
+  border: 1px solid #c8d7e7;
+  border-radius: 13px;
+  background: linear-gradient(135deg, #ffffff 0%, #f2f7fd 100%);
+  box-shadow: 0 8px 20px rgba(18, 53, 90, 0.055);
+}
+
+.all-racks-history-intro > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.all-racks-history-intro strong {
+  color: #0f315b;
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.all-racks-history-intro span {
+  color: #61748b;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.all-racks-history-intro > b {
+  flex: 0 0 auto;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #bad0e7;
+  border-radius: 999px;
+  background: #eaf3fd;
+  color: #174f93;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.rack-history-filters {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid #cbd9ea;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f6faff 100%);
+  box-shadow: 0 7px 17px rgba(7, 42, 99, 0.055);
+}
+
+.rack-history-filter-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns:
+    minmax(210px, 1.35fr)
+    minmax(125px, 0.68fr)
+    minmax(155px, 0.86fr)
+    minmax(135px, 0.72fr)
+    minmax(130px, 0.68fr)
+    minmax(130px, 0.68fr)
+    minmax(128px, 0.62fr)
+    minmax(128px, 0.62fr);
+  gap: 8px;
+  align-items: end;
+}
+
+.rack-history-filter-grid label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  color: #455a75;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.rack-history-filter-grid label > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rack-history-filter-grid input,
+.rack-history-filter-grid select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  border: 1px solid #bdcde1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0b2b58;
+  padding: 0 9px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.rack-history-filter-grid input:focus,
+.rack-history-filter-grid select:focus {
+  outline: none;
+  border-color: #135cff;
+  box-shadow: 0 0 0 3px rgba(19, 92, 255, 0.12);
+}
+
+.rack-history-filter-footer {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #dce6f2;
+  padding-top: 8px;
+}
+
+.rack-history-filter-footer > span {
+  color: #5b6e86;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.rack-history-filter-footer button {
+  min-height: 32px;
+  border: 1px solid #b8c9dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #234c77;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.rack-history-filter-footer button:hover:not(:disabled),
+.rack-history-filter-footer button:focus-visible:not(:disabled) {
+  outline: none;
+  border-color: #135cff;
+  background: #edf5ff;
+  color: #0d4f96;
+}
+
+.rack-history-filter-footer button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.rack-history-event-list {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 1px 5px 2px 0;
+}
+
+.rack-history-event-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) minmax(150px, auto);
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid #d5e1ee;
+  border-left: 4px solid #2f6cab;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 5px 13px rgba(7, 42, 99, 0.04);
+}
+
+.rack-history-event-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.rack-history-event-copy > strong {
+  color: #0b2d5a;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.rack-history-event-copy > span {
+  min-width: 0;
+  color: #5b6e86;
+  font-size: 11px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.rack-history-event-tags {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.rack-history-event-tags b,
+.rack-history-event-tags i {
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.rack-history-event-tags b {
+  border: 1px solid #a9c4e2;
+  background: #eaf3fd;
+  color: #174f93;
+}
+
+.rack-history-event-tags i {
+  border: 1px solid #d4c1ea;
+  background: #f4edfc;
+  color: #6540a8;
+}
+
+.rack-history-event-meta {
+  min-width: 0;
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  text-align: right;
+}
+
+.rack-history-event-meta time {
+  color: #344f70;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.rack-history-event-meta small {
+  color: #718096;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+@media (max-width: 1180px) {
+  .rack-history-filter-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .rack-history-filter-search {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 760px) {
+  #operationsModal.operations-modal-panel[data-kind="rack-history"] {
+    width: calc(100vw - 16px) !important;
+    height: calc(100vh - 16px) !important;
+    max-height: calc(100vh - 16px) !important;
+  }
+
+  .rack-history-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rack-history-filter-search {
+    grid-column: auto;
+  }
+
+  .all-racks-history-intro,
+  .rack-history-filter-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rack-history-event-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .rack-history-event-meta {
+    grid-column: 2;
+    justify-items: start;
+    text-align: left;
+  }
+}
+
+/* ========================================================================== */
+/* v0.192 unified rack transfers, paged action history, and archive UX        */
+/* ========================================================================== */
+
+/* Keep the first line item visually below its delivery-date header. */
+#operationsModal.operations-modal-panel[data-kind="rack-details"]
+  .rack-modal-date-group[open] > .rack-modal-date-lines {
+  padding-top: 9px !important;
+}
+
+/* The transfer chooser must sit above every application modal and must not
+   depend on the browser's native select popup stacking behavior. */
+.rack-transfer-backdrop {
+  z-index: 40000 !important;
+}
+
+.rack-transfer-dialog {
+  z-index: 40001 !important;
+  overflow: visible !important;
+}
+
+.rack-transfer-combobox {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+}
+
+.rack-transfer-combobox-trigger {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #b8c9dc;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #17385f;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rack-transfer-combobox-trigger:hover,
+.rack-transfer-combobox-trigger:focus-visible,
+.rack-transfer-combobox-trigger[aria-expanded="true"] {
+  outline: none;
+  border-color: #1766d8;
+  box-shadow: 0 0 0 3px rgba(23, 102, 216, 0.12);
+}
+
+.rack-transfer-combobox-trigger i {
+  width: 9px;
+  height: 9px;
+  justify-self: end;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 140ms ease;
+}
+
+.rack-transfer-combobox-trigger[aria-expanded="true"] i {
+  transform: rotate(225deg) translate(-2px, -1px);
+}
+
+.rack-transfer-combobox-menu {
+  position: absolute;
+  z-index: 40005;
+  top: calc(100% + 7px);
+  right: 0;
+  left: 0;
+  max-height: min(310px, 44vh);
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border: 1px solid #9fb8d4;
+  border-radius: 11px;
+  background: #ffffff;
+  padding: 7px;
+  box-shadow: 0 18px 44px rgba(4, 27, 58, 0.28);
+}
+
+.rack-transfer-combobox-menu[hidden] {
+  display: none !important;
+}
+
+.rack-transfer-combobox-menu button {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17385f;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rack-transfer-combobox-menu button:hover,
+.rack-transfer-combobox-menu button:focus-visible,
+.rack-transfer-combobox-menu button[aria-selected="true"] {
+  outline: none;
+  border-color: #9fc0e6;
+  background: #eaf3ff;
+  color: #0d4f96;
+}
+
+/* Every Action History tab uses the same investigation-card presentation as
+   All Racks History. */
+.modal-action-history-list {
+  display: grid !important;
+  align-content: start !important;
+  gap: 8px !important;
+}
+
+.modal-action-history-row.rack-history-event-row {
+  grid-template-columns: 38px minmax(0, 1fr) minmax(150px, auto) !important;
+  min-height: 76px !important;
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  border: 1px solid #d5e1ee !important;
+  border-left: 4px solid #2f6cab !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  box-shadow: 0 5px 13px rgba(7, 42, 99, 0.04) !important;
+}
+
+.modal-action-history-row.rack-history-event-row > .modal-action-history-icon {
+  align-self: center !important;
+  justify-self: center !important;
+}
+
+.modal-action-history-filter-footer,
+.rack-history-filter-footer {
+  flex-wrap: wrap;
+}
+
+.modal-action-history-pager,
+.rack-history-pager {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.modal-action-history-pager strong,
+.rack-history-pager strong {
+  min-width: 92px;
+  color: #344f70;
+  font-size: 11px;
+  font-weight: 950;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.modal-action-history-pager button,
+.rack-history-pager button {
+  min-width: 78px;
+}
+
+@media (max-width: 760px) {
+  .rack-transfer-dialog {
+    width: min(520px, calc(100vw - 18px));
+    padding: 18px;
+  }
+
+  .modal-action-history-row.rack-history-event-row {
+    grid-template-columns: 34px minmax(0, 1fr) !important;
+  }
+
+  .modal-action-history-row.rack-history-event-row .rack-history-event-meta {
+    grid-column: 2;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .modal-action-history-pager,
+  .rack-history-pager {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

@@ -2717,3 +2717,163 @@
     padding-left: 10px;
   }
 }
+
+/* ========================================================================== */
+/* v0.181 Statistics dashboard visual hierarchy                              */
+/* ========================================================================== */
+.home-page .statistics-dashboard-v019 {
+  overflow: hidden;
+  border: 1px solid #aebfd2;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 92% 4%, rgba(19, 92, 255, 0.12), transparent 32%),
+    linear-gradient(180deg, #ffffff 0%, #f2f7fc 100%) !important;
+  box-shadow: 0 18px 44px rgba(16, 49, 88, 0.12);
+}
+
+.home-page .statistics-main-block {
+  position: relative;
+  padding: 20px;
+  border-bottom: 1px solid #cfdbe8;
+}
+
+.home-page .statistics-main-block::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  background: linear-gradient(90deg, #0a3f7d, #176fc0, #2fa84f);
+}
+
+.home-page .statistics-heading-v019 {
+  min-height: 78px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 13px 14px;
+  border: 1px solid #c6d6e6;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(255, 255, 255, 0.15), transparent 30%),
+    linear-gradient(135deg, #092f68 0%, #105d9b 100%);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(8, 47, 96, 0.16);
+}
+
+.home-page .statistics-heading-v019 :is(.statistics-eyebrow, h2, #homeStatisticsRangeText span) {
+  color: #fff !important;
+}
+
+.home-page .statistics-heading-v019 .statistics-eyebrow,
+.home-page .statistics-heading-v019 #homeStatisticsRangeText span {
+  opacity: 0.8;
+}
+
+.home-page .statistics-heading-v019 h2 {
+  font-size: 1.45rem;
+}
+
+.home-page .statistics-heading-tools .tool-button {
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.home-page .statistics-heading-tools .statistics-range-control > span {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.home-page .statistics-heading-tools select,
+.home-page .statistics-range-pill-control select {
+  border-color: rgba(255, 255, 255, 0.48);
+  background: #fff;
+}
+
+.home-page .statistics-primary-grid {
+  gap: 12px;
+}
+
+.home-page .statistics-overview-kpis .mini-stat,
+.home-page .statistics-remake-card {
+  position: relative;
+  min-height: 96px;
+  overflow: hidden;
+  border: 1px solid #c8d7e7;
+  border-left: 5px solid #176fc0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fff, #f5f9fe);
+  box-shadow: 0 10px 24px rgba(20, 48, 84, 0.075);
+}
+
+.home-page .statistics-overview-kpis .mini-stat:nth-child(2) {
+  border-left-color: #2fa84f;
+}
+
+.home-page .statistics-remake-card {
+  border-left-color: #b7791f;
+}
+
+.home-page .statistics-overview-kpis .mini-stat strong,
+.home-page .statistics-remake-card strong {
+  font-size: 1.75rem;
+}
+
+.home-page .statistics-chart {
+  border: 1px solid #bfd0e2;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 14% 18%, rgba(19, 92, 255, 0.08), transparent 34%),
+    linear-gradient(180deg, #ffffff, #f4f8fc);
+  box-shadow: 0 14px 30px rgba(20, 48, 84, 0.08);
+}
+
+.home-page .statistics-chart-heading {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #d8e3ee;
+}
+
+.home-page .statistics-pie {
+  box-shadow:
+    inset 0 0 0 1px rgba(7, 22, 51, 0.08),
+    0 18px 36px rgba(8, 38, 90, 0.16);
+}
+
+.home-page .statistics-secondary-block {
+  padding: 17px 20px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.home-page .statistics-section-title {
+  align-items: center;
+  margin-bottom: 11px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #d5e0eb;
+}
+
+.home-page .statistics-section-title h2 {
+  font-size: 1rem;
+}
+
+.home-page .statistics-stage-card,
+.home-page .statistics-health-card,
+.home-page .statistics-snapshot-grid .mini-stat {
+  border: 1px solid #d0dce9;
+  border-radius: 13px;
+  background: linear-gradient(180deg, #fff, #f8fbfe);
+  box-shadow: 0 8px 18px rgba(20, 48, 84, 0.055);
+  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.home-page .statistics-stage-card:hover,
+.home-page .statistics-health-card:hover,
+.home-page .statistics-snapshot-grid .mini-stat:hover {
+  transform: translateY(-2px);
+  border-color: #9db6d0;
+  box-shadow: 0 12px 24px rgba(20, 48, 84, 0.09);
+}
+
+@media (max-width: 720px) {
+  .home-page .statistics-heading-v019 {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

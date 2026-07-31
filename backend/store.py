@@ -38,7 +38,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO, StringIO
 from pathlib import Path
 from email.message import EmailMessage
-from typing import Any
+from typing import Any, Iterable
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 
@@ -90,118 +90,139 @@ PASSWORD_ITERATIONS = 260000
 SESSION_HOURS = 12
 PASSWORD_RESET_MINUTES = 30
 PERMISSIONS = [
-    "scan",
-    "view_lists",
-    "view_stations",
-    "view_own_scans",
-    "undo_scan",
-    "reset_lists",
-    "resolve_exceptions",
-    "manual_adjust",
-    "view_exceptions",
+    "view_delivery_lists",
+    "scan_delivery_lists",
+    "use_assigned_stations",
+    "view_scan_history",
+    "correct_scans",
+    "reset_delivery_lists",
+    "manage_scan_exceptions",
     "import_delivery_lists",
-    "preview_import",
-    "manage_users",
-    "manage_roles",
-    "manage_stations",
-    "remove_stations",
-    "deactivate_users",
-    "reactivate_users",
-    "update_user_passwords",
+    "preview_delivery_imports",
+    "preview_delivery_updates",
     "edit_delivery_lists",
-    "export_reports",
-    "view_admin",
-    "view_active_sessions",
+    "print_export",
     "global_search",
     "view_reports",
+    "view_admin",
+    "manage_users",
+    "manage_user_access",
+    "manage_roles",
+    "view_sessions",
+    "manage_stations",
+    "manage_route_rules",
+    "manage_lookup_values",
+    "manage_automation",
     "view_indian_trail",
-    "indian_trail_receive",
+    "receive_indian_trail",
     "view_bays",
-    "assign_bay",
-    "move_bay",
-    "clear_bay",
-    "mark_sdi",
-    "remove_sdi",
-    "bay_check",
-    "indian_trail_reports",
+    "assign_bay_items",
+    "move_bay_items",
+    "clear_bay_items",
+    "manage_rush_work",
+    "run_bay_checks",
+    "view_bay_reports",
     "manage_bay_layout",
-    "manage_customer_route_rules",
     "view_racks",
     "scan_racks",
     "manage_racks",
+    "transfer_rack_contents",
+    "view_rejects",
+    "log_rejects",
+    "manage_reject_settings",
+    "manage_reject_records",
 ]
+
+# Old route checks remain supported during the permissions cleanup. New role
+# records store only the maintained names above, while signed-in users receive
+# the matching legacy aliases until every historical call site is migrated.
+LEGACY_PERMISSION_ALIASES = {
+    "scan": "scan_delivery_lists",
+    "view_lists": "view_delivery_lists",
+    "view_stations": "use_assigned_stations",
+    "view_own_scans": "view_scan_history",
+    "undo_scan": "correct_scans",
+    "reset_lists": "reset_delivery_lists",
+    "resolve_exceptions": "manage_scan_exceptions",
+    "manual_adjust": "manage_scan_exceptions",
+    "view_exceptions": "manage_scan_exceptions",
+    "preview_import": "preview_delivery_imports",
+    "export_reports": "print_export",
+    "view_active_sessions": "view_sessions",
+    "remove_stations": "manage_stations",
+    "deactivate_users": "manage_user_access",
+    "reactivate_users": "manage_user_access",
+    "update_user_passwords": "manage_user_access",
+    "manage_customer_route_rules": "manage_route_rules",
+    "indian_trail_receive": "receive_indian_trail",
+    "assign_bay": "assign_bay_items",
+    "move_bay": "move_bay_items",
+    "clear_bay": "clear_bay_items",
+    "mark_sdi": "manage_rush_work",
+    "remove_sdi": "manage_rush_work",
+    "bay_check": "run_bay_checks",
+    "indian_trail_reports": "view_bay_reports",
+}
+
+
+def canonical_permission_name(value: Any) -> str:
+    """Return the maintained permission name for old or current values."""
+    clean = str(value or "").strip()
+    return LEGACY_PERMISSION_ALIASES.get(clean, clean)
+
+
+def canonical_permissions(values: Iterable[Any]) -> list[str]:
+    """Normalize and de-duplicate permissions while rejecting retired names."""
+    normalized = {canonical_permission_name(value) for value in (values or [])}
+    return sorted(permission for permission in normalized if permission in PERMISSIONS)
+
+
+def expanded_permissions(values: Iterable[Any]) -> list[str]:
+    """Expose current permissions plus temporary aliases used by older routes."""
+    current = set(canonical_permissions(values))
+    expanded = set(current)
+    for legacy, canonical in LEGACY_PERMISSION_ALIASES.items():
+        if canonical in current:
+            expanded.add(legacy)
+    return sorted(expanded)
+
+
 ROLE_PERMISSIONS = {
-    "Operator": ["scan", "view_lists", "view_stations", "view_own_scans", "export_reports", "global_search", "view_racks", "scan_racks"],
+    "Operator": [
+        "view_delivery_lists", "scan_delivery_lists", "use_assigned_stations",
+        "view_scan_history", "print_export", "global_search", "view_racks", "scan_racks",
+        "view_rejects", "log_rejects",
+    ],
     "Supervisor": [
-        "scan",
-        "view_lists",
-        "view_stations",
-        "view_own_scans",
-        "undo_scan",
-        "resolve_exceptions",
-        "manual_adjust",
-        "view_exceptions",
-        "export_reports",
-        "global_search",
-        "view_reports",
-        "view_active_sessions",
-        "view_racks",
-        "scan_racks",
+        "view_delivery_lists", "scan_delivery_lists", "use_assigned_stations",
+        "view_scan_history", "correct_scans", "manage_scan_exceptions",
+        "print_export", "global_search", "view_reports", "view_sessions",
+        "view_racks", "scan_racks", "manage_racks", "transfer_rack_contents",
+        "view_rejects", "log_rejects",
     ],
     "Admin": PERMISSIONS,
     "Indian Trail Operator": [
-        "view_lists",
-        "view_stations",
-        "view_indian_trail",
-        "indian_trail_receive",
-        "view_bays",
-        "global_search",
-        "export_reports",
-        "view_racks",
+        "view_delivery_lists", "use_assigned_stations", "view_indian_trail",
+        "receive_indian_trail", "view_bays", "global_search", "print_export", "view_racks",
+        "view_rejects",
     ],
     "Indian Trail Lead": [
-        "view_lists",
-        "view_stations",
-        "view_indian_trail",
-        "indian_trail_receive",
-        "view_bays",
-        "global_search",
-        "export_reports",
-        "undo_scan",
-        "resolve_exceptions",
-        "view_exceptions",
-        "assign_bay",
-        "move_bay",
-        "clear_bay",
-        "mark_sdi",
-        "remove_sdi",
-        "bay_check",
-        "view_racks",
+        "view_delivery_lists", "use_assigned_stations", "view_indian_trail",
+        "receive_indian_trail", "view_bays", "global_search", "print_export",
+        "correct_scans", "manage_scan_exceptions", "assign_bay_items",
+        "move_bay_items", "clear_bay_items", "manage_rush_work", "run_bay_checks",
+        "view_racks", "scan_racks", "view_rejects", "log_rejects",
     ],
     "Indian Trail Manager": [
-        "view_lists",
-        "view_stations",
-        "view_indian_trail",
-        "indian_trail_receive",
-        "view_bays",
-        "global_search",
-        "export_reports",
-        "undo_scan",
-        "resolve_exceptions",
-        "view_exceptions",
-        "assign_bay",
-        "move_bay",
-        "clear_bay",
-        "mark_sdi",
-        "remove_sdi",
-        "bay_check",
-        "indian_trail_reports",
-        "view_reports",
-        "view_active_sessions",
-        "view_racks",
-        "manage_racks",
+        "view_delivery_lists", "use_assigned_stations", "view_indian_trail",
+        "receive_indian_trail", "view_bays", "global_search", "print_export",
+        "correct_scans", "manage_scan_exceptions", "assign_bay_items",
+        "move_bay_items", "clear_bay_items", "manage_rush_work", "run_bay_checks",
+        "view_bay_reports", "view_reports", "view_sessions", "view_racks",
+        "scan_racks", "manage_racks", "transfer_rack_contents", "view_rejects", "log_rejects",
     ],
 }
+
 ROLE_STAGE_ACCESS = {
     "Admin": ["*"],
     "Supervisor": ["*"],
@@ -255,6 +276,9 @@ RACK_DESTINATION_OVERRIDE_METADATA_KEY = "rack_destination_override_minutes"
 SUPPORTED_IMPORT_EXTENSIONS = {".json", ".xlsx", ".xlsm", ".csv"}
 BAY_EVENT_RETENTION_DAYS = 7
 BAY_EVENT_CLEANUP_INTERVAL_SECONDS = 60 * 60
+ACTION_HISTORY_RETENTION_DAYS = 30
+ACTION_HISTORY_PAGE_SIZE = 50
+ACTION_HISTORY_ARCHIVE_BATCH_SIZE = 2000
 XLSX_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 XLSX_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 XLSX_PACKAGE_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
@@ -2067,6 +2091,37 @@ class BaseDeliveryStore:
         Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
         """
         raise NotImplementedError
+
+    def create_role(self, data: dict[str, Any], created_by: str = "system") -> dict[str, Any]:
+        """Create a custom role and its initial maintained permissions."""
+        name = " ".join(str(data.get("name") or "").split())[:60]
+        description = " ".join(str(data.get("description") or "").split())[:240]
+        requested = [str(value).strip() for value in (data.get("permissions") or []) if str(value).strip()]
+        permissions = canonical_permissions(requested)
+        unknown = [value for value in requested if canonical_permission_name(value) not in PERMISSIONS]
+        if not name:
+            raise ValueError("Role name is required")
+        if unknown:
+            raise ValueError(f"Unknown permission: {unknown[0]}")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            if con.execute("SELECT 1 FROM roles WHERE lower(name) = lower(?)", (name,)).fetchone():
+                raise ValueError("A role with that name already exists")
+            cur = con.execute(
+                "INSERT INTO roles (name, description) VALUES (?, ?)",
+                (name, description or f"{name} role"),
+            )
+            for permission in permissions:
+                con.execute(
+                    "INSERT OR IGNORE INTO role_permissions (role_id, permission_name) VALUES (?, ?)",
+                    (cur.lastrowid, permission),
+                )
+            self.insert_audit(
+                con, "role", name, "create_role", created_by, "", "",
+                {"description": description, "permissions": permissions},
+            )
+            con.commit()
+        return {"roles": self.list_roles(), "permissions": self.get_permissions()}
 
     def update_role_permissions(self, role_name: str, permissions: list[str], updated_by: str = "system") -> dict[str, Any]:
         """Purpose: Update role permissions for the delivery-list scanner workflow.
@@ -4986,6 +5041,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (permission, permission.replace("_", " ").title()),
             )
 
+        # Upgrade legacy role-permission rows in place. This keeps production
+        # users and custom roles intact while removing retired choices from the
+        # Role editor.
+        for legacy, canonical in LEGACY_PERMISSION_ALIASES.items():
+            con.execute(
+                """
+                INSERT OR IGNORE INTO role_permissions (role_id, permission_name)
+                SELECT role_id, ? FROM role_permissions WHERE permission_name = ?
+                """,
+                (canonical, legacy),
+            )
+        if LEGACY_PERMISSION_ALIASES:
+            placeholders = ",".join("?" for _ in LEGACY_PERMISSION_ALIASES)
+            con.execute(
+                f"DELETE FROM role_permissions WHERE permission_name IN ({placeholders})",
+                list(LEGACY_PERMISSION_ALIASES),
+            )
+            con.execute(
+                f"DELETE FROM permissions WHERE name IN ({placeholders})",
+                list(LEGACY_PERMISSION_ALIASES),
+            )
+
         for role_name, permissions in ROLE_PERMISSIONS.items():
             con.execute(
                 "INSERT OR IGNORE INTO roles (name, description) VALUES (?, ?)",
@@ -5319,6 +5396,37 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if glass_type:
                     glass_types_by_list.setdefault(str(glass_row["list_id"]), []).append(glass_type)
 
+            update_rows = con.execute(
+                """
+                WITH latest_notice AS (
+                    SELECT list_id, MAX(id) AS latest_id
+                    FROM line_update_notices
+                    GROUP BY list_id
+                ), latest_token AS (
+                    SELECT n.list_id, n.change_token
+                    FROM line_update_notices n
+                    JOIN latest_notice l ON l.latest_id = n.id
+                )
+                SELECT n.list_id,
+                       SUM(CASE WHEN lower(n.change_type) = 'new' THEN 1 ELSE 0 END) AS new_count,
+                       SUM(CASE WHEN lower(n.change_type) <> 'new' THEN 1 ELSE 0 END) AS updated_count,
+                       MAX(n.created_at) AS latest_update_at
+                FROM line_update_notices n
+                JOIN latest_token t
+                  ON t.list_id = n.list_id
+                 AND t.change_token = n.change_token
+                GROUP BY n.list_id
+                """
+            ).fetchall()
+            updates_by_list = {
+                str(update_row["list_id"]): {
+                    "newItemCount": int(update_row["new_count"] or 0),
+                    "updatedItemCount": int(update_row["updated_count"] or 0),
+                    "latestUpdateAt": str(update_row["latest_update_at"] or ""),
+                }
+                for update_row in update_rows
+            }
+
             result = []
             for row in rows:
                 meta = list_meta(row)
@@ -5331,12 +5439,93 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "itemCount": row["item_count"],
                         "glassTypes": sorted(set(glass_types_by_list.get(str(row["id"]), []))),
                         "deliveryPercent": (scanned_qty / total_qty * 100) if total_qty else 0,
+                        **updates_by_list.get(str(row["id"]), {
+                            "newItemCount": 0,
+                            "updatedItemCount": 0,
+                            "latestUpdateAt": "",
+                        }),
                     }
                 )
                 meta.update(self.list_timing_metrics(con, row["id"], row["delivery_date"]))
                 if user is None or user_can_access_stage(user, meta["stage"], meta["scanner"]):
                     result.append(meta)
         return result
+
+    def get_delivery_list_update_preview(self, list_id: str) -> dict[str, Any]:
+        """Return the newest imported new/updated rows for one delivery-list stage."""
+        clean_list_id = str(list_id or "").strip()
+        if not clean_list_id:
+            raise ValueError("listId is required")
+        with self.connect() as con:
+            delivery_list = con.execute(
+                "SELECT id, label, delivery_date, stage, scanner, status, revision FROM delivery_lists WHERE id = ?",
+                (clean_list_id,),
+            ).fetchone()
+            if not delivery_list:
+                raise ValueError("Delivery list was not found")
+            latest = con.execute(
+                """
+                SELECT change_token, created_at
+                FROM line_update_notices
+                WHERE list_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (clean_list_id,),
+            ).fetchone()
+            if not latest:
+                return {
+                    "list": list_meta(delivery_list),
+                    "changeToken": "",
+                    "updatedAt": "",
+                    "items": [],
+                    "newCount": 0,
+                    "updatedCount": 0,
+                }
+            rows = con.execute(
+                """
+                SELECT n.change_type, n.created_at AS notice_created_at,
+                       li.id AS line_item_id, li.order_no, li.item_no, li.qty,
+                       li.scanned_qty, li.dimensions, li.customer, li.job,
+                       li.product, li.route, li.process_state, li.queue_state,
+                       li.source_id, li.barcode
+                FROM line_update_notices n
+                JOIN line_items li ON li.id = n.line_item_id
+                WHERE n.list_id = ? AND n.change_token = ?
+                ORDER BY CASE WHEN lower(n.change_type) = 'new' THEN 0 ELSE 1 END,
+                         CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER), li.id
+                """,
+                (clean_list_id, latest["change_token"]),
+            ).fetchall()
+        items = [
+            {
+                "changeType": str(row["change_type"] or "updated").lower(),
+                "changedAt": str(row["notice_created_at"] or ""),
+                "lineItemId": str(row["line_item_id"] or ""),
+                "order": str(row["order_no"] or ""),
+                "item": str(row["item_no"] or ""),
+                "qty": int(row["qty"] or 0),
+                "scannedQty": int(row["scanned_qty"] or 0),
+                "dimensions": str(row["dimensions"] or ""),
+                "customer": str(row["customer"] or ""),
+                "job": str(row["job"] or ""),
+                "product": str(row["product"] or ""),
+                "route": str(row["route"] or ""),
+                "processState": str(row["process_state"] or ""),
+                "queueState": str(row["queue_state"] or ""),
+                "sourceId": str(row["source_id"] or ""),
+                "barcode": str(row["barcode"] or ""),
+            }
+            for row in rows
+        ]
+        return {
+            "list": list_meta(delivery_list),
+            "changeToken": str(latest["change_token"] or ""),
+            "updatedAt": str(latest["created_at"] or ""),
+            "items": items,
+            "newCount": sum(1 for item in items if item["changeType"] == "new"),
+            "updatedCount": sum(1 for item in items if item["changeType"] != "new"),
+        }
 
     def get_line_items(self, list_id: str) -> list[dict[str, Any]]:
         """Purpose: Read line items for the delivery-list scanner workflow.
@@ -5755,7 +5944,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     {
                         "name": row["name"],
                         "description": row["description"] or "",
-                        "permissions": [permission["permission_name"] for permission in permission_rows],
+                        "permissions": canonical_permissions(permission["permission_name"] for permission in permission_rows),
                     }
                 )
             return roles
@@ -5767,8 +5956,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
         """
         clean_role = str(role_name or "").strip()
-        clean_permissions = sorted({str(permission).strip() for permission in permissions if str(permission).strip()})
-        unknown = [permission for permission in clean_permissions if permission not in PERMISSIONS]
+        requested_permissions = [str(permission).strip() for permission in permissions if str(permission).strip()]
+        clean_permissions = canonical_permissions(requested_permissions)
+        unknown = [permission for permission in requested_permissions if canonical_permission_name(permission) not in PERMISSIONS]
         if not clean_role:
             raise ValueError("role is required")
         if unknown:
@@ -5832,7 +6022,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "assignedStations": assigned_stations,
             "active": bool(row["active"]),
             "roles": roles,
-            "permissions": [permission["permission_name"] for permission in permission_rows],
+            "permissions": expanded_permissions(permission["permission_name"] for permission in permission_rows),
             "stageAccess": stage_access_for_roles(roles),
         }
 
@@ -6220,11 +6410,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         display_name = " ".join(str(data.get("displayName") or username).split())[:120]
         station = " ".join(str(data.get("station") or "").split())[:240]
         password = str(data.get("password") or "")
-        roles = data.get("roles") or ["Operator"]
+        raw_roles = data.get("roles") or ["Operator"]
+        roles = [str(raw_roles)] if isinstance(raw_roles, str) else [str(role) for role in raw_roles]
+        roles = [role.strip() for role in roles if role.strip()]
         if email and not is_valid_email(email):
             raise ValueError("Enter a valid BFS email address")
         if not username or not password:
             raise ValueError("BFS email/username and password are required")
+        if len(password) < 8:
+            raise ValueError("Temporary password must be at least 8 characters")
+        if not roles:
+            raise ValueError("Choose at least one role for the new user")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             existing = self.get_user_by_username(con, username)
@@ -7029,7 +7225,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
     def get_sdi_workspace(self, query: str = "", bay_code: str = "") -> dict[str, Any]:
         """Build the predictive SDI modal workspace from live Indian Trail item state.
 
-        Missing items are flagged as the safe default selection. Current Rush/Remake
+        Missing items are flagged as the safe default selection. Current intentional Rush
         marks are grouped by job and include exact item IDs for individual clearing.
         """
         clean_query = str(query or "").strip()
@@ -7123,7 +7319,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         current_groups: list[dict[str, Any]] = []
         for (_, group_value), items in group_map.items():
-            marked_items = [item for item in items if item["marked"]]
+            # Current Priority Work is intentionally Rush-only. Imported RM /
+            # Remake markers remain available to the normal remake filters and
+            # print workflow, but they must not flood the operator-managed Rush
+            # workspace merely because they were present in an imported list.
+            marked_items = [item for item in items if item["rush"] and not item["remake"]]
             if not marked_items:
                 continue
             first = marked_items[0]
@@ -10531,47 +10731,94 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "actionCounts": {row["action"]: row["count"] for row in action_rows},
         }
 
-    def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
-        """Purpose: Read audit events for the delivery-list scanner workflow.
+    @staticmethod
+    def _audit_event_dict(row: Any) -> dict[str, Any]:
+        """Normalize one active or archived audit row for browser action-history views."""
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except Exception:
+            payload = {}
+        return {
+            "id": int(row["id"] if "id" in row.keys() else row["source_event_id"]),
+            "entityType": str(row["entity_type"] or ""),
+            "entityId": str(row["entity_id"] or ""),
+            "action": str(row["action"] or ""),
+            "user": str(row["user_name"] or ""),
+            "station": str(row["station"] or ""),
+            "reason": str(row["reason"] or ""),
+            "payload": payload if isinstance(payload, dict) else {},
+            "createdAt": str(row["created_at"] or ""),
+        }
 
-        Effects: This function reads or changes database records.
-        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+    def _archive_old_audit_events(self, con: Any, cutoff: str) -> int:
+        """Copy action history older than the active window into the immutable archive.
+
+        The primary audit table remains append-only. Active GUI queries are limited to
+        the last 30 days, while the archive preserves older records without weakening
+        the existing immutable audit triggers.
         """
-        clean_limit = max(1, min(int(limit or 100), 500))
+        database_type = str(getattr(self, "database_type", "sqlite") or "sqlite").lower()
+        if database_type != "sqlite":
+            return 0
+        table = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'audit_events_archive'"
+        ).fetchone()
+        if not table:
+            return 0
+        rows = con.execute(
+            """
+            SELECT ae.id, ae.entity_type, ae.entity_id, ae.action, ae.user_name,
+                   ae.station, ae.reason, ae.payload_json, ae.created_at
+            FROM audit_events ae
+            LEFT JOIN audit_events_archive aa ON aa.source_event_id = ae.id
+            WHERE ae.created_at < ? AND aa.source_event_id IS NULL
+            ORDER BY ae.id
+            LIMIT ?
+            """,
+            (cutoff, ACTION_HISTORY_ARCHIVE_BATCH_SIZE),
+        ).fetchall()
+        if not rows:
+            return 0
+        archived_at = utc_now_iso()
+        con.executemany(
+            """
+            INSERT OR IGNORE INTO audit_events_archive (
+                source_event_id, entity_type, entity_id, action, user_name,
+                station, reason, payload_json, created_at, archived_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["id"], row["entity_type"], row["entity_id"], row["action"],
+                    row["user_name"], row["station"], row["reason"], row["payload_json"],
+                    row["created_at"], archived_at,
+                )
+                for row in rows
+            ],
+        )
+        con.commit()
+        return len(rows)
+
+    def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Return the newest active audit events inside the 30-day investigation window."""
+        clean_limit = max(1, min(int(limit or 100), 5000))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=ACTION_HISTORY_RETENTION_DAYS)).isoformat(timespec="seconds")
         with self.connect() as con:
+            self._archive_old_audit_events(con, cutoff)
             rows = con.execute(
                 """
                 SELECT id, entity_type, entity_id, action, user_name, station, reason, payload_json, created_at
                 FROM audit_events
+                WHERE created_at >= ?
                 ORDER BY id DESC
                 LIMIT ?
                 """,
-                (clean_limit,),
+                (cutoff, clean_limit),
             ).fetchall()
-        events = []
-        for row in rows:
-            try:
-                payload = json.loads(row["payload_json"] or "{}")
-            except Exception:
-                payload = {}
-            events.append(
-                {
-                    "id": row["id"],
-                    "entityType": row["entity_type"],
-                    "entityId": row["entity_id"],
-                    "action": row["action"],
-                    "user": row["user_name"],
-                    "station": row["station"],
-                    "reason": row["reason"],
-                    "payload": payload,
-                    "createdAt": row["created_at"],
-                }
-            )
-        return events
+        return [self._audit_event_dict(row) for row in rows]
 
-    def list_gui_action_history(self, context: str, limit: int = 20) -> list[dict[str, Any]]:
-        """Return audit events relevant to one maintained Admin or Operations GUI."""
-        context_key = str(context or "").strip()
+    @staticmethod
+    def _gui_action_history_rules(context_key: str) -> tuple[set[str], tuple[str, ...], set[str] | None]:
         context_rules: dict[str, tuple[set[str], tuple[str, ...]]] = {
             "deliveryLists": ({"delivery_list", "delivery_date", "delivery_list_updates"}, ("delivery_list", "import", "reset", "delete_delivery")),
             "deliveryActions": ({"delivery_list", "delivery_date"}, ("delivery_list", "reset", "delete_delivery")),
@@ -10590,23 +10837,222 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "rackForm": ({"rack"}, ("rack",)),
             "rackSetForm": ({"rack_set", "rack"}, ("rack_set",)),
             "recentScans": ({"scan", "line_item", "rack", "bay"}, ("scan", "manual_location")),
-            "rack-details": ({"rack", "packing_list_print"}, ("rack", "packing_list")),
+            "rack-details": ({"rack", "rack_item", "packing_list_print"}, ("rack", "packing_list", "outbound_override_transportation")),
+            "racks-history": ({"rack", "rack_item", "rack_set", "packing_list_print"}, ("rack", "packing_list", "outbound_override_transportation")),
             "packing-history": ({"packing_list_print"}, ("packing_list",)),
+            "oldBays": ({"bay_assignment", "bay"}, ("snooze_stale_bay", "bay_check_")),
+            "rush": ({"line_item", "bay_assignment"}, ("mark_rush", "clear_rush_priority", "remove_rush_preassign", "remove_sdi")),
+            "manageBayItems": ({"bay_assignment", "bay"}, ("move_bay", "clear_bay_assignment", "restore_bay_assignment", "assign_bay")),
+            "editBays": ({"bay", "bay_group"}, ("create_bays", "delete_bay", "delete_bay_group", "move_bay_group", "set_bay_", "update_bay_layout")),
+        }
+        exact_action_contexts: dict[str, set[str]] = {
+            "oldBays": {"snooze_stale_bay", "bay_check_empty", "bay_check_needs_review", "bay_check_still_occupied"},
+            "manageBayItems": {"move_bay", "clear_bay_assignment", "restore_bay_assignment", "assign_bay"},
+            "racks": {"upsert_rack", "create_rack_set", "delete_rack"},
+            "rackForm": {"upsert_rack", "delete_rack"},
+            "rackSetForm": {"create_rack_set"},
         }
         entity_types, action_prefixes = context_rules.get(context_key, (set(), tuple()))
-        clean_limit = max(1, min(int(limit or 20), 50))
-        events = self.list_audit_events(500)
-        filtered = []
-        for event in events:
-            entity_type = str(event.get("entityType") or "")
-            action = str(event.get("action") or "")
-            action_matches = bool(action_prefixes and any(prefix in action for prefix in action_prefixes))
-            entity_matches = bool(not action_prefixes and entity_types and entity_type in entity_types)
-            if action_matches or entity_matches:
-                filtered.append(event)
-            if len(filtered) >= clean_limit:
-                break
-        return filtered
+        return entity_types, action_prefixes, exact_action_contexts.get(context_key)
+
+    @staticmethod
+    def _gui_history_event_rack_codes(event: dict[str, Any]) -> set[str]:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        values: list[Any] = []
+        if str(event.get("entityType") or "") == "rack":
+            values.extend(re.split(r"[;,|]+", str(event.get("entityId") or "")))
+        for key in ("rackCode", "sourceRackCode", "targetRackCode", "oldCode"):
+            if payload.get(key):
+                values.append(payload.get(key))
+        for key in ("rackCodes", "createdRackCodes", "affectedRackCodes"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                values.extend(value)
+        return {
+            normalize_rack_code(str(value or ""))
+            for value in values
+            if normalize_rack_code(str(value or ""))
+        }
+
+    def _gui_history_context_matches(
+        self,
+        event: dict[str, Any],
+        context_key: str,
+        requested_rack_code: str = "",
+        allowed_rack_codes: set[str] | None = None,
+    ) -> bool:
+        entity_types, action_prefixes, exact_actions = self._gui_action_history_rules(context_key)
+        entity_type = str(event.get("entityType") or "")
+        action = str(event.get("action") or "")
+        action_matches = action in exact_actions if exact_actions is not None else bool(
+            action_prefixes and any(prefix in action for prefix in action_prefixes)
+        )
+        entity_matches = bool(not action_prefixes and entity_types and entity_type in entity_types)
+        if not (action_matches or entity_matches):
+            return False
+        event_racks = self._gui_history_event_rack_codes(event)
+        if context_key == "rack-details" and requested_rack_code and requested_rack_code not in event_racks:
+            return False
+        if allowed_rack_codes is not None and not (event_racks & allowed_rack_codes):
+            return False
+        return True
+
+    @staticmethod
+    def _gui_history_filter_matches(
+        event: dict[str, Any],
+        query: str = "",
+        user: str = "",
+        action: str = "",
+        date_from: str = "",
+        date_to: str = "",
+    ) -> bool:
+        event_user = str(event.get("user") or "system")
+        event_action = str(event.get("action") or "")
+        event_date = str(event.get("createdAt") or "")[:10]
+        if user and event_user != user:
+            return False
+        if action and event_action != action:
+            return False
+        if date_from and (not event_date or event_date < date_from):
+            return False
+        if date_to and (not event_date or event_date > date_to):
+            return False
+        clean_query = str(query or "").strip().lower()
+        if not clean_query:
+            return True
+        searchable = " ".join(
+            [
+                event_action,
+                event_user,
+                str(event.get("entityType") or ""),
+                str(event.get("entityId") or ""),
+                str(event.get("station") or ""),
+                str(event.get("reason") or ""),
+                json.dumps(event.get("payload") or {}, sort_keys=True),
+                str(event.get("createdAt") or ""),
+            ]
+        ).lower()
+        return clean_query in searchable
+
+    def list_gui_action_history_page(
+        self,
+        context: str,
+        page: int = 1,
+        page_size: int = ACTION_HISTORY_PAGE_SIZE,
+        rack_code: str = "",
+        query: str = "",
+        user: str = "",
+        action: str = "",
+        date_from: str = "",
+        date_to: str = "",
+        rack_codes: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
+        """Return one filtered page of active action history for a maintained GUI."""
+        context_key = str(context or "").strip()
+        clean_page = max(1, int(page or 1))
+        clean_page_size = max(1, min(int(page_size or ACTION_HISTORY_PAGE_SIZE), ACTION_HISTORY_PAGE_SIZE))
+        requested_rack_code = normalize_rack_code(rack_code) if rack_code else ""
+        allowed_rack_codes = None
+        if rack_codes is not None:
+            allowed_rack_codes = {
+                normalize_rack_code(str(value or ""))
+                for value in rack_codes
+                if normalize_rack_code(str(value or ""))
+            }
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=ACTION_HISTORY_RETENTION_DAYS)).isoformat(timespec="seconds")
+        start_index = (clean_page - 1) * clean_page_size
+        stop_index = start_index + clean_page_size
+        matched_events: list[dict[str, Any]] = []
+        total_count = 0
+        users: set[str] = set()
+        actions: set[str] = set()
+        batch_size = 500
+        offset = 0
+
+        with self.connect() as con:
+            self._archive_old_audit_events(con, cutoff)
+            while True:
+                rows = con.execute(
+                    """
+                    SELECT id, entity_type, entity_id, action, user_name, station, reason, payload_json, created_at
+                    FROM audit_events
+                    WHERE created_at >= ?
+                    ORDER BY id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (cutoff, batch_size, offset),
+                ).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    event = self._audit_event_dict(row)
+                    if not self._gui_history_context_matches(
+                        event,
+                        context_key,
+                        requested_rack_code=requested_rack_code,
+                        allowed_rack_codes=allowed_rack_codes,
+                    ):
+                        continue
+                    users.add(str(event.get("user") or "system"))
+                    actions.add(str(event.get("action") or ""))
+                    if not self._gui_history_filter_matches(
+                        event,
+                        query=query,
+                        user=user,
+                        action=action,
+                        date_from=date_from,
+                        date_to=date_to,
+                    ):
+                        continue
+                    if start_index <= total_count < stop_index:
+                        matched_events.append(event)
+                    total_count += 1
+                if len(rows) < batch_size:
+                    break
+                offset += batch_size
+
+        total_pages = max(1, (total_count + clean_page_size - 1) // clean_page_size)
+        if clean_page > total_pages:
+            return self.list_gui_action_history_page(
+                context=context_key,
+                page=total_pages,
+                page_size=clean_page_size,
+                rack_code=requested_rack_code,
+                query=query,
+                user=user,
+                action=action,
+                date_from=date_from,
+                date_to=date_to,
+                rack_codes=allowed_rack_codes,
+            )
+        return {
+            "context": context_key,
+            "rackCode": requested_rack_code,
+            "events": matched_events,
+            "page": clean_page,
+            "pageSize": clean_page_size,
+            "totalCount": total_count,
+            "totalPages": total_pages,
+            "users": sorted(users, key=lambda value: value.lower()),
+            "actions": sorted((value for value in actions if value), key=lambda value: value.lower()),
+            "retentionDays": ACTION_HISTORY_RETENTION_DAYS,
+            "archivedBefore": cutoff[:10],
+        }
+
+    def list_gui_action_history(
+        self,
+        context: str,
+        limit: int = 20,
+        rack_code: str = "",
+    ) -> list[dict[str, Any]]:
+        """Backward-compatible first-page action-history reader."""
+        payload = self.list_gui_action_history_page(
+            context=context,
+            page=1,
+            page_size=min(max(int(limit or 20), 1), ACTION_HISTORY_PAGE_SIZE),
+            rack_code=rack_code,
+        )
+        return list(payload.get("events") or [])
 
     def get_email_outbox_item(self, email_id: int) -> dict[str, Any]:
         """Purpose: Read email outbox item for the delivery-list scanner workflow.
@@ -11573,12 +12019,180 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 raise ValueError("Rack line item not found")
             self.validate_rack_destination_for_item(con, target, line_item)
             old_rack_id = item["rack_id"]
+            source = con.execute("SELECT rack_code FROM racks WHERE id = ?", (old_rack_id,)).fetchone()
+            source_rack_code = str(source["rack_code"] or "") if source else ""
             con.execute("UPDATE rack_items SET rack_id = ?, reason = 'Moved between racks' WHERE id = ?", (target["id"], rack_item_id))
             self.refresh_rack_destination(con, old_rack_id)
             self.refresh_rack_destination(con, target["id"])
-            self.insert_audit(con, "rack_item", str(rack_item_id), "move_rack_item", user, "", "", {"targetRackCode": target["rack_code"]})
+            self.insert_audit(
+                con,
+                "rack_item",
+                str(rack_item_id),
+                "move_rack_item",
+                user,
+                "",
+                "Moved between racks",
+                {
+                    "sourceRackCode": source_rack_code,
+                    "targetRackCode": target["rack_code"],
+                    "order": line_item["order_no"],
+                    "item": line_item["item_no"],
+                    "pieceQty": int(item["qty"] or 0),
+                },
+            )
             con.commit()
         return self.get_racks()
+
+    def move_rack_contents(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Move every active item, or one complete delivery-date group, to another rack.
+
+        The complete transfer is validated before the first row changes. Existing
+        target rows for the same line item are merged safely instead of violating
+        the rack-item uniqueness rule or creating duplicate active quantities.
+        """
+        source_code = normalize_rack_code(str(data.get("sourceRackCode") or ""))
+        target_code = normalize_rack_code(str(data.get("targetRackCode") or ""))
+        delivery_date = str(data.get("deliveryDate") or "").strip()
+        if not source_code or not target_code:
+            raise ValueError("sourceRackCode and targetRackCode are required")
+        if source_code == target_code:
+            raise ValueError("Choose a different destination rack")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            source = self.get_rack_by_code(con, source_code)
+            target = self.get_rack_by_code(con, target_code)
+            if str(source["status"] or "").strip().lower() == "in transit":
+                raise ValueError("Return or mark the source rack Not On The Way before moving its contents")
+            target_status = str(target["status"] or "Open").strip().lower()
+            if target_status != "open":
+                raise ValueError("Choose an open destination rack before moving contents")
+
+            clauses = ["ri.rack_id = ?", "ri.status = 'Active'"]
+            params: list[Any] = [source["id"]]
+            if delivery_date:
+                clauses.append("dl.delivery_date = ?")
+                params.append(delivery_date)
+            rows = con.execute(
+                f"""
+                SELECT ri.id AS rack_item_id, ri.line_item_id, ri.qty AS rack_qty,
+                       ri.destination_override AS rack_destination_override,
+                       li.*, dl.delivery_date
+                FROM rack_items ri
+                JOIN line_items li ON li.id = ri.line_item_id
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY ri.id
+                """,
+                params,
+            ).fetchall()
+            if not rows:
+                scope = f" for {delivery_date}" if delivery_date else ""
+                raise ValueError(f"No active rack contents were found{scope}")
+
+            transfer_plan: list[tuple[Any, Any | None, int]] = []
+            for row in rows:
+                self.validate_rack_destination_for_item(con, target, row)
+                existing = con.execute(
+                    """
+                    SELECT id, qty, status
+                    FROM rack_items
+                    WHERE rack_id = ? AND line_item_id = ? AND id <> ?
+                    """,
+                    (target["id"], row["line_item_id"], row["rack_item_id"]),
+                ).fetchone()
+                source_qty = max(int(row["rack_qty"] or 0), 0)
+                target_qty = (
+                    max(int(existing["qty"] or 0), 0)
+                    if existing and str(existing["status"] or "").lower() == "active"
+                    else 0
+                )
+                combined_qty = source_qty + target_qty
+                line_qty = max(int(row["qty"] or 0), 0)
+                if line_qty and combined_qty > line_qty:
+                    raise ValueError(
+                        f"Order {row['order_no']} item {row['item_no']} would exceed its line quantity "
+                        f"({combined_qty} of {line_qty}) on rack {target_code}."
+                    )
+                transfer_plan.append((row, existing, combined_qty))
+
+            reason = f"Moved delivery date {delivery_date} between racks" if delivery_date else "Moved all contents between racks"
+            moved_at = now_iso()
+            merged_lines = 0
+            for row, existing, combined_qty in transfer_plan:
+                if existing:
+                    merged_lines += 1
+                    con.execute(
+                        """
+                        UPDATE rack_items
+                        SET qty = ?, status = 'Active', added_by = ?, added_at = ?,
+                            removed_by = '', removed_at = '', reason = ?, destination_override = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            combined_qty,
+                            user,
+                            moved_at,
+                            reason,
+                            str(row["rack_destination_override"] or ""),
+                            existing["id"],
+                        ),
+                    )
+                    con.execute(
+                        """
+                        UPDATE rack_items
+                        SET status = 'Removed', removed_by = ?, removed_at = ?, reason = ?
+                        WHERE id = ?
+                        """,
+                        (user, moved_at, reason, row["rack_item_id"]),
+                    )
+                else:
+                    con.execute(
+                        "UPDATE rack_items SET rack_id = ?, reason = ? WHERE id = ?",
+                        (target["id"], reason, row["rack_item_id"]),
+                    )
+
+            self.refresh_rack_destination(con, source["id"])
+            self.refresh_rack_destination(con, target["id"])
+            remaining = int(con.execute(
+                "SELECT COUNT(*) FROM rack_items WHERE rack_id = ? AND status = 'Active'",
+                (source["id"],),
+            ).fetchone()[0] or 0)
+            if remaining == 0:
+                con.execute(
+                    """
+                    UPDATE racks
+                    SET status = 'Open', completed_at = '', completed_by = '',
+                        departed_at = '', departed_by = '', returned_at = '', returned_by = '',
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (moved_at, source["id"]),
+                )
+            piece_qty = sum(int(row["rack_qty"] or 0) for row in rows)
+            self.insert_audit(
+                con, "rack", source_code, "move_rack_contents", user, "", reason,
+                {
+                    "sourceRackCode": source_code,
+                    "targetRackCode": target_code,
+                    "deliveryDate": delivery_date,
+                    "lineCount": len(rows),
+                    "pieceQty": piece_qty,
+                    "mergedLineCount": merged_lines,
+                },
+            )
+            con.commit()
+        payload = self.get_racks()
+        payload.update({
+            "ok": True,
+            "message": (
+                f"Moved {piece_qty} piece{'s' if piece_qty != 1 else ''} across "
+                f"{len(rows)} line{'s' if len(rows) != 1 else ''} from {source_code} to {target_code}."
+            ),
+            "movedCount": len(rows),
+            "movedPieceQty": piece_qty,
+            "mergedLineCount": merged_lines,
+        })
+        return payload
 
     def clear_rack_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Purpose: Remove rack item for the delivery-list scanner workflow.
@@ -13042,7 +13656,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if attention_filters:
             attention_clauses: list[str] = []
             if "remake" in attention_filters:
-                attention_clauses.append("UPPER(COALESCE(li.process_state, '') || ' ' || COALESCE(li.queue_state, '')) LIKE '%REMAKE%'")
+                attention_clauses.append(
+                    "(" 
+                    "UPPER(COALESCE(li.process_state, '') || ' ' || COALESCE(li.queue_state, '')) LIKE '%REMAKE%' "
+                    "OR (' ' || UPPER(COALESCE(li.process_state, '') || ' ' || COALESCE(li.queue_state, '')) || ' ') LIKE '% RM %'"
+                    ")"
+                )
             if "rush" in attention_filters:
                 attention_clauses.append("UPPER(COALESCE(li.process_state, '') || ' ' || COALESCE(li.queue_state, '')) LIKE '%RUSH%'")
             if "updated" in attention_filters:
@@ -14682,7 +15301,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if isinstance(raw_ids, (str, int)):
             raw_ids = [raw_ids]
         line_item_ids = [str(value or "").strip() for value in raw_ids if str(value or "").strip()]
-        reason = str(data.get("reason") or "Rush / Remake cleared").strip()
+        rush_only = bool(data.get("rushOnly"))
+        reason = str(data.get("reason") or ("Rush cleared" if rush_only else "Rush / Remake cleared")).strip()
         if not assignment_id and not lookup_text and not line_item_ids:
             raise ValueError("Select one or more marked items, or enter a Job Nr., SO number, or order number")
 
@@ -14760,7 +15380,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     self.insert_bay_event(con, assignment["bay_id"], row["id"], "RemoveSDI", user, reason)
                     self.insert_audit(con, "bay_assignment", str(assignment["id"]), "remove_sdi", user, "", reason)
 
-                next_state = re.sub(r"\b(?:Rush|SDI|Remake|RM)\b", "", str(row["process_state"] or ""), flags=re.IGNORECASE).strip(" -|,")
+                clear_pattern = r"\b(?:Rush|SDI)\b" if rush_only else r"\b(?:Rush|SDI|Remake|RM)\b"
+                next_state = re.sub(clear_pattern, "", str(row["process_state"] or ""), flags=re.IGNORECASE).strip(" -|,")
                 next_state = re.sub(r"\s{2,}", " ", next_state)
                 con.execute(
                     "UPDATE line_items SET process_state = ?, priority_delivery_date = '', priority_direct_to_truck = 0 WHERE id = ?",
@@ -14770,11 +15391,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     con,
                     "line_item",
                     row["id"],
-                    "clear_rush_remake_sdi",
+                    "clear_rush_priority" if rush_only else "clear_rush_remake_sdi",
                     user,
                     "",
                     reason,
-                    {"lookup": lookup_text, "lineItemIds": line_item_ids, "affectedListIds": [item["id"] for item in affected_lists]},
+                    {
+                        "lookup": lookup_text,
+                        "lineItemIds": line_item_ids,
+                        "affectedListIds": [item["id"] for item in affected_lists],
+                        "rushOnly": rush_only,
+                    },
                 )
             con.commit()
 
@@ -14794,7 +15420,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "matchedCustomer": matched_customer,
             "matchedOrder": matched_order,
             "lookup": lookup_text,
-            "message": "Rush / Remake mark cleared from the selected item(s) across every applicable stage.",
+            "message": (
+                "Rush mark cleared from the selected item(s) across every applicable stage."
+                if rush_only
+                else "Rush / Remake mark cleared from the selected item(s) across every applicable stage."
+            ),
         }
 
     def bay_check(self, data: dict[str, Any], user: str) -> dict[str, Any]:

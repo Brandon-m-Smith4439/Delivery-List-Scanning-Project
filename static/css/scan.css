@@ -2034,3 +2034,20 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   border-radius: 10px;
   background: #fff;
 }
+
+/* ========================================================================== */
+/* v0.184 Scan flag containment                                                */
+/* ========================================================================== */
+.scan-page .delivery-table td:nth-child(7) .row-marker {
+  animation: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+.scan-page .delivery-table td:nth-child(7)::before,
+.scan-page .delivery-table td:nth-child(7)::after,
+.scan-page .delivery-table td:nth-child(7) .row-marker::before,
+.scan-page .delivery-table td:nth-child(7) .row-marker::after {
+  content: none !important;
+  display: none !important;
+}

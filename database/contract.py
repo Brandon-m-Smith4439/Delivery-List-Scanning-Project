@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "135"
-CURRENT_SCHEMA_VERSION = 4
+APPLICATION_VERSION = "192"
+CURRENT_SCHEMA_VERSION = 5
 
 TABLE_DESCRIPTIONS = {
     "schema_migrations": "Installed numbered database migrations and checksums.",
@@ -18,6 +18,7 @@ TABLE_DESCRIPTIONS = {
     "imports": "Delivery-list import batches and source fingerprints.",
     "exceptions": "Resolvable scanning and workflow exceptions.",
     "audit_events": "Immutable append-only administrative history.",
+    "audit_events_archive": "Logical archive of user action history older than the active retention window.",
     "users": "Local application identities.",
     "roles": "Named authorization roles.",
     "permissions": "Named application permissions.",
@@ -61,6 +62,10 @@ REQUIRED_COLUMNS = {
     },
     "scan_events": {"id", "list_id", "line_item_id", "barcode", "event_type", "qty_delta", "created_at"},
     "audit_events": {"id", "entity_type", "entity_id", "action", "payload_json", "created_at"},
+    "audit_events_archive": {
+        "source_event_id", "entity_type", "entity_id", "action", "user_name", "station", "reason",
+        "payload_json", "created_at", "archived_at_utc",
+    },
     "racks": {"id", "rack_code", "status", "active", "is_deleted", "created_at_utc", "updated_at_utc"},
     "rack_items": {"id", "rack_id", "line_item_id", "qty", "status", "is_deleted", "created_at_utc", "updated_at_utc"},
     "bays": {"id", "bay_code", "capacity_qty", "active", "is_deleted", "created_at_utc", "updated_at_utc"},
@@ -110,6 +115,8 @@ INDEX_DESCRIPTIONS = {
     "idx_imports_date_time": "Recent import batches by delivery date.",
     "idx_exceptions_list_status": "Open exception filters for a list.",
     "idx_audit_events_entity_time": "Administrative history for one entity.",
+    "idx_audit_events_created_time": "Active user action history by timestamp.",
+    "idx_audit_events_archive_created_time": "Archived user action history by original timestamp.",
     "idx_sessions_user_expiry": "Active-session cleanup and user presence.",
     "idx_bay_assignments_line_status": "Current bay location for a line item.",
     "idx_bay_assignments_bay_status": "Current contents and capacity of a bay.",
@@ -129,6 +136,7 @@ INDEX_DESCRIPTIONS = {
 
 JSON_COLUMNS = {
     "audit_events": {"payload_json"},
+    "audit_events_archive": {"payload_json"},
     "app_notifications": {"payload_json"},
     "email_outbox": {"to_emails", "cc_emails", "payload_json"},
     "machines": {"metadata_json"},
@@ -145,6 +153,7 @@ TIMESTAMP_COLUMNS = {
     "line_items": {"last_rejected_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
     "scan_events": {"created_at"},
     "audit_events": {"created_at"},
+    "audit_events_archive": {"created_at", "archived_at_utc"},
     "sessions": {"created_at", "expires_at", "last_seen_at"},
     "racks": {"created_at", "updated_at", "completed_at", "departed_at", "returned_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},
     "rack_items": {"added_at", "removed_at", "created_at_utc", "updated_at_utc", "deleted_at_utc"},

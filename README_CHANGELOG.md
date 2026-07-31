@@ -1,4 +1,303 @@
+## v0.192 - Unified Rack Transfers and Paged Action History
+
+- Replaced the native rack-transfer destination selector with a high-layer custom chooser so the destination list cannot open behind the Individual Rack GUI.
+- Reused the same rack-transfer GUI for whole-rack, delivery-date, and individual-item moves on both the Racks page and Individual Rack modal.
+- Added a small visual gap between each delivery-date heading and its first order line in the Individual Rack workspace.
+- Changed every Action History tab to server-side pagination with a hard maximum of 50 events per page.
+- Added Previous and Next page controls while preserving search, user, action, and date filters.
+- Added paged All Racks History with server-side rack-group and rack-range filtering.
+- Applied the richer All Racks History event-card design to every GUI Action History tab.
+- Restricted Edit Racks Action History to rack creation, rack editing, rack-set creation, and rack deletion events. Operational rack scanning and transportation actions remain in Racks History.
+- Added SQLite migration 005 with immutable `audit_events_archive` storage and timestamp indexes. Events older than 30 days are copied into the logical archive and removed from active GUI history without weakening the append-only primary audit log.
+- Updated the database contract to schema version 5 and application contract version 192.
+- Advanced the application display and changed browser asset cache keys to v0.192.
+
+### Changed files
+
+- `index.html`
+- `README_CHANGELOG.md`
+- `server.py`
+- `backend/store.py`
+- `database/contract.py`
+- `database/migrations.py`
+- `static/js/app.js`
+- `static/css/shell.css`
+
+### Database
+
+- Migration required: **005 - v192_action_history_archive**.
+- The normal verified pre-upgrade backup process runs before applying the migration.
+
+## v0.191 - Rack-Scoped Action History and Combined Racks History
+
+### Individual Rack Action History
+
+- Limited the Individual Rack Action History tab to the currently opened rack instead of showing actions from every rack.
+- Rack-scoped matching now includes direct rack actions, item clears, scans, packing-list prints, rack transfers where the rack was the source or destination, and compatible outbound-override transportation events.
+- Added the source rack, destination rack, order, item, and moved quantity to new individual-item transfer audit records so future investigations remain accurate from both sides of a move.
+- Reloads the selected rack's history whenever its Action History tab is opened.
+- Preserved the shared user, action, date, and text investigation filters from v0.190 and labeled the tab clearly as history for the selected rack only.
+
+### Racks History control center
+
+- Renamed the Rack Overview action from `Packing List History` to `Racks History`.
+- Rebuilt that window with two maintained section tabs: `Packing List History` and `All Racks History`.
+- Preserved immutable packing-list snapshots and the existing Open Snapshot workflow in the Packing List History tab.
+- Added an All Racks History timeline covering rack scans, status changes, transfers, clears, recovery actions, rack setup changes, and packing-list print records.
+- Added All Racks History filters for text search, user, action, rack group, inclusive rack-from / rack-through range, and inclusive date range.
+- Rack-group options combine the live rack catalog with group names retained in historical audit records; rack ranges use natural rack-code order and include transfer events when either the source or destination rack matches.
+- Added result counts, rack and rack-group badges, a one-click Clear Filters action, and Spanish translations for the new history controls.
+
+### Compatibility
+
+- SQLite remains the active/default backend.
+- No database migration is required.
+- No images, installers, launchers, database files, or unrelated project files are included.
+
+## v0.190 - Action History Investigation Filters and Move Icon Hover
+
+### Action History filters
+
+- Added a shared investigation toolbar to every GUI that exposes an Action History tab, including Admin editors, Internal Rejects, Individual Racks, Old Bays, Rush Orders, Manage Bay Items, and Edit Bays.
+- Added free-text search across action names, event details, users, entity identifiers, reasons, and displayed timestamps.
+- Added exact User and Action dropdown filters populated from the loaded event history.
+- Added inclusive From Date and Through Date filters using the operator's local displayed date.
+- Added a live `shown / loaded` event count and one-click Clear Filters control.
+- Increased each Action History load from the small recent-event sample to as many as 500 relevant audit events so the filters are useful for investigations.
+- Preserved the latest-change summary and the full unfiltered count on each Action History tab.
+- Added Spanish translations for the new filter controls and empty-result messaging.
+
+### Individual Rack move control
+
+- Replaced the whole-rack move icon's solid-blue hover state with a light-blue hover surface and dark directional glyph so the icon remains clearly visible.
+- Applied the same readable hover treatment to delivery-date rack move controls.
+
+### Compatibility
+
+- SQLite remains the active/default backend.
+- No database migration is required.
+- No images, installers, launchers, database files, or unrelated project files are included.
+
+## v0.189 - Individual Rack Grid Ownership and Tab-Bar Actions
+
+### Individual Rack control center
+
+- Corrected a cross-stylesheet grid conflict that placed the Workspace tabs and rack contents into separate implicit columns.
+- Forced the Rack Overview header, tab/action bar, Workspace, and Action History into one full-width modal column.
+- Moved Complete / Uncomplete Rack, Print Packing Slip, return controls, and the whole-rack move icon onto the far-right side of the Workspace / Action History tab bar.
+- Restored the Rack Overview header to a clean full-width presentation with the status and close controls only.
+- Added final shell-level ownership so later Racks and Bay stylesheet rules can no longer reset the rack workspace to row 2 or suppress its vertical overflow.
+- Made the complete Workspace canvas the deliberate vertical scroll owner while allowing expanded delivery-date groups and order cards to grow naturally.
+- Preserved a separate full-height scrollbar for Action History when its event list exceeds the available height.
+
+### Compatibility
+
+- SQLite remains the active/default backend.
+- No database migration or backend replacement is required.
+- No images, installers, launchers, database files, or unrelated project files are included.
+
+## v0.188 - Individual Rack Tabs, Header Actions, and Scroll Restoration
+
+### Individual Rack control center
+
+- Moved Action History into a separate Workspace / Action History tab system matching the maintained administration GUIs.
+- Kept the rack contents and Action History as peer workspaces so history no longer consumes space above the assigned-piece list.
+- Restored one reliable full-height vertical scrollbar for the Individual Rack workspace, allowing every expanded delivery-date group and order to remain reachable.
+- Added the same full-height scrolling behavior to the Action History tab when the recorded event list exceeds the available screen height.
+- Moved Complete / Uncomplete, Print Packing Slip, return controls, and the whole-rack move icon into the right side of the shared Rack Overview header.
+- Increased and rebalanced the header height so the status and close controls remain on the top row while rack actions sit directly underneath.
+- Kept delivery-date move icons and individual-piece controls inside the rack contents workspace.
+
+### Compatibility
+
+- SQLite remains the active/default backend.
+- No database migration or backend replacement is required.
+- No images, installers, launchers, database files, or unrelated project files are included.
+
+## v0.187 - Individual Rack Scroll and Header Consolidation
+
+### Individual Rack details
+
+- Restored a visible vertical scrollbar for the complete Individual Rack workspace.
+- Delivery-date groups and every assigned order now expand to their full natural height inside that scrolling workspace.
+- Removed the nested order-list viewport that could prevent expanded rack contents from becoming visible.
+- Merged the duplicate inner rack/truck identity panel into the shared Rack Overview header so rack type, rack name, counts, status, and destination remain visible without consuming a second section.
+- Removed the visible `Orders on this truck` / `Orders on this rack` heading without removing any grouped date or order data.
+- Kept whole-rack and delivery-date move icons, packing actions, status controls, and Action History.
+
+### Compatibility
+
+- SQLite remains the active/default backend.
+- No database migration or backend replacement is required.
+- No images, installers, launchers, database files, or unrelated project files are included.
+
+## v0.186 - Rack Date Group Expansion and Header Cleanup
+
+### Individual Rack details
+
+- Repaired the delivery-date accordion layout after the v0.185 transfer-panel removal left the rack workspace with an obsolete extra grid row.
+- Expanded delivery-date groups now render every order and line item instead of clipping the group after the first visible order.
+- Kept the Orders list as the only scrolling region so long racks remain usable without hiding date-group contents.
+- Preserved the compact whole-rack and delivery-date move icons introduced in v0.185.
+
+### Rack Overview
+
+- Removed the Rack Pieces, Truck Pieces, and Active Racks statistic bubbles from the upper-right page heading.
+- Kept Packing List History and Edit Racks as the only Rack Overview heading actions.
+
+### Compatibility
+
+- SQLite remains the active/default backend.
+- No database migration or backend replacement is required.
+- No images, installers, launchers, database files, or unrelated project files are included.
+
+## v0.185 - Update Preview Placement, Permission Selection, User Layout, and Rack Move Icons
+
+### Delivery List Management and Manual Edit
+
+- Removed the New / Updated preview action from the Edit Delivery Lists window.
+- Added the preview action to each changed delivery-date row in the main Delivery List Management card, directly to the left of Print / Export.
+- The preview now combines every changed stage for that delivery date into one read-only review window.
+- Manual Edit now displays `Remake` as the effective Process value when imported `RM` or `REMAKE` markers identify the piece, even when the stored process text is blank, Normal, or Standard.
+
+### Roles and users
+
+- Replaced the broken Create Role permission dropdown categories with always-visible grouped permission cards and working checkboxes.
+- Kept Select All, Clear All, category counts, role validation, and existing-role permission editing intact.
+- Expanded Add New User across the full available modal width.
+- Removed the nested Existing Users scroll window so the complete User Access Management GUI uses one normal vertical scrollbar.
+
+### Racks and packing history
+
+- Removed the large whole-rack and delivery-date transfer sections from Individual Rack.
+- Added one move icon beside the rack identity for moving all contents and one move icon beside each delivery-date group.
+- Move icons open a compact destination selector and retain the guarded transactional transfer logic from v0.184.
+- Removed Action History from Packing List Print History while leaving Action History available for other operational GUIs.
+
+### Compatibility
+
+- SQLite remains the active/default backend.
+- No database migration or backend replacement is required.
+- No images, installers, launchers, database files, or unrelated project files are included.
+
+## v0.184 - Permissions, Rack Transfers, Update Preview, and GUI Repair Pass
+
+### Print / Export and operational GUIs
+
+- Corrected the Exact Glass Types accordion so category headers, selection controls, counts, and exact glass choices stay aligned without the large empty or malformed card layout.
+- Refined the Internal Reject Control Center header, tabs, piece summary, quantity entry, reject fields, and fixed submission footer so its title and subtitle remain fully visible.
+- Applied the maintained control-center polish to Individual Rack, Packing List Print History, and the Indian Trail In-Transit manifest.
+- Prevented white hover flashes on Sign In and Packing List History actions.
+- Centered the profile initials inside both sidebar profile circles.
+- Constrained Rush missing-item cards to consistent operational heights and centered the Rush launcher icon.
+- Removed the clipped Scan Flags marker animation that appeared as a tiny black dot at the right edge of the Flags column.
+
+### Delivery-list update review
+
+- Added a New / Updated preview action to Delivery List Management when the latest import batch contains changed lines.
+- The preview groups exact new and updated items and shows order, item, job, customer, size, quantity, glass type, route, and workflow state.
+- Added maintained backend lookup support for the newest delivery-list notice batch without changing the database schema.
+
+### Rack transfers
+
+- Added guarded whole-rack transfer from the Individual Rack Control Center.
+- Added delivery-date group transfer so every active piece for one grouped date can be moved together.
+- Validates every destination rule before any assignment moves, limits targets to open racks, safely merges an existing target line when necessary, and writes piece/line totals to audit history.
+
+### Roles, users, lookups, and permissions
+
+- Rebuilt the permission catalog around current delivery-list, Bay Map, rack, reject, reporting, automation, and administration responsibilities.
+- Migrates legacy permission names to canonical maintained permissions while preserving compatibility for older frontend checks.
+- Added functional role creation and repaired permission category expansion and selection.
+- Repaired and polished Add New User validation, save status, error handling, and refresh behavior; the server now enforces a valid role and an eight-character minimum temporary password.
+- Refined Lookup Manager icons and catalog cards and polished Reject Reasons and Break Locations content.
+
+### Automation, filters, and language
+
+- Corrected automation timestamps and delivery dates so two-digit or display-formatted values cannot be interpreted as year 2001.
+- Expanded the Automation Control Center to use the available desktop viewport; only Import History results scroll inside that window.
+- Repaired Manual Edit Remakes filtering to recognize both `REMAKE` and standalone imported `RM` markers while preserving the other maintained filters.
+- Expanded Spanish translations for the current Print / Export, rack, packing-history, reject, role, user, lookup, automation, update-preview, and Rush workflows.
+
+### Compatibility
+
+- SQLite remains the active/default backend.
+- Existing databases are preserved and no database migration is required.
+- No images, installers, launchers, database files, or unrelated project files are included in the changed-files package.
+
+## v0.183 - Compact Print, Rush Frame, and Reject Detail Refinement
+
+- Refit Print / Export into a shorter desktop workspace that stays inside the available screen without main-column vertical scrolling.
+- Reduced the header, command row, stage controls, glass-type categories, filters, summary rows, and final action area while preserving exact individual glass-type selection.
+- Changed Exact Glass Types to a single-open-category accordion so the full document workspace remains visible and operators can still select precise glass types.
+- Removed the inherited Rush panel padding that created the visible white outer frame around the colored header.
+- Removed main Rush workspace scrolling on normal desktop displays and confined overflow to the missing-item results only when a loaded order contains more rows than fit.
+- Shortened and rebalanced the Rush search, item-selection, and handling sections so the complete three-step workflow fits inside the modal.
+- Removed Internal Reject Step 4 and kept the irreversible-action warning in the compact submission footer.
+- Reused the maintained Administration-style section tabs for Add Reject and Action History.
+- Moved Quantity Rejected beside Order Number and Item Number in the Identify Piece row and constrains it to the verified available quantity.
+- Expanded Matched Piece Summary with piece dimensions, glass type, route, available quantity, scan progress, current/suggested bay, delivery date, customer, job, and active stages.
+- Enriched the existing reject-match response with display-only piece details from the verified active delivery-list rows; no schema or migration change is required.
+
+## v0.182 - Modal Geometry Repair and Internal Reject Control Center
+
+- Rebuilt the Print / Export window into a contained two-column document workspace with exact-stage controls, exact glass-type categories, optional customer/order filters, a live selection summary, and a useful output preview instead of a large empty region.
+- Corrected the Print / Export grid ownership that squeezed the configuration column and pushed the action area into an oversized blank panel.
+- Corrected Rush, Manage Bay Items, and Edit Bays modal row ownership so the hero header, section tabs, and workspace each receive their own grid row.
+- Removed the nested-frame appearance from Rush and kept all three Bay workflow windows inside one consistent rounded modal shell.
+- Increased usable modal height, protected headers and tabs from clipping, and confined scrolling to the intended list/workspace regions.
+- Refined Manage Bay Items into a wider job list plus a balanced selected-job workspace with contained actions and readable full job information.
+- Refined Edit Bays into a wider non-horizontal-scrolling group editor with a stable Add New Bay Group command and contained individual-bay rows.
+- Rebuilt Add Internal Reject as a four-step control center: Identify Piece, Matched Piece Summary, Reject Details, and Impact / Review.
+- Kept delivery-date resolution automatic and retained the existing verified match, catalog, submission, reset, audit, and permission behavior.
+- Added a live Print / Export selection summary without changing the existing print/export API contract.
+- No database migration or backend replacement is required.
+
 # File: README_CHANGELOG.md
+
+## v0.181 - Bay Workflow Control Centers, Rush Priority, Reject Entry, Print Selection, and Statistics Polish
+
+### Bay Map control centers
+
+- Rebuilt the Old Bay Control Center with a larger working canvas, larger typography, clearer review cards, and a more readable filter and snooze workflow.
+- Added Workspace and Action History tabs to Old Bays, Manage Items, and Edit Bays.
+- Added Add Rush, Current Priority Work, and Action History tabs to the Rush window.
+- Expanded Manage Items, added a status filter, increased the order-information area, and allowed the left results list to show complete order details without clipping.
+- Expanded Edit Bays, removed normal horizontal scrolling, and changed new-group creation to an explicit Add New Bay Group action that opens the creation workspace only when requested.
+- Polished the In-Transit Manifest with a stronger receiving header, clearer summary cards, refined rack and glass-type groups, and a larger contained table workspace.
+- Removed Bay Availability, Assigned / Occupied, and Needs Attention summary cards from the Bay Map heading and extended the Bay Map title treatment across the reclaimed width.
+
+### Rush-only priority management
+
+- Renamed the Bay Map Rush / Remake launcher and workflow to Rush.
+- Removed the Rush / Remake type selector; new work created from this window is always Rush work.
+- Changed Current Priority Work to include only intentionally marked Rush items.
+- Imported RM / Remake markers continue to work in remake filters and printing but no longer inflate the operator-managed priority-work count.
+- Rush clearing now removes only Rush / SDI state and preserves an existing RM / Remake marker on the same item.
+
+### Action history
+
+- Added Bay-workflow action-history contexts for Old Bay snoozes and review actions, Rush changes, managed bay-item moves and clears, and bay/group configuration changes.
+- Extended action-history access to the existing Bay Map operational permissions instead of requiring an Administration-only permission.
+
+### Internal rejects
+
+- Simplified Add Internal Reject to require Order Number and Item Number for lookup instead of manually entering a delivery date.
+- Resolves the active delivery date and affected stages automatically.
+- Shows a compact date choice only when the same order/item has more than one active delivery-date match.
+- Polished the identify, verify, incident-detail, impact, and submit sections while preserving reject rollback and audit behavior.
+
+### Print / Export and Home statistics
+
+- Rebuilt Print / Export as a larger document workspace with clearer stage, exact-glass, optional-filter, and output controls.
+- Glass categories now organize the list only; each exact glass type is selected independently, such as 1/4 Clear Annealed without automatically including 3/8 Clear Annealed.
+- Retained an explicit All Glass Types control for full-list output.
+- Applied a stronger visual hierarchy to the Home Statistics dashboard, including its header, range tools, KPI cards, remake summary, glass chart, stage breakdown, and scan-health cards.
+
+### Compatibility
+
+- Preserved normal remake flags and remake printing, Bay Scanner behavior, Old Bay timing, scan history, delivery-list data, reject history, permissions, and the production SQLite database.
+- No database migration is required.
 
 ## v0.180 - Main and Rejects Integration with Manual Edit Glass Type Filters
 

@@ -12,15 +12,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260729-v0.180">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260729-v0.180">
-    <link rel="stylesheet" href="static/css/home.css?v=20260729-v0.180">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260729-v0.180">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260730-v0.189">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260730-v0.184">
+    <link rel="stylesheet" href="static/css/home.css?v=20260729-v0.181">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260730-v0.184">
     <link rel="stylesheet" href="static/css/racks.css?v=20260729-v0.180">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260729-v0.180">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260730-v0.185">
     <link rel="stylesheet" href="static/css/print.css?v=20260729-v0.180">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260729-v0.180">
-    <link rel="stylesheet" href="static/css/shell.css?v=20260729-v0.180">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260730-v0.184">
+    <link rel="stylesheet" href="static/css/shell.css?v=20260731-v0.192">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <!-- SECTION: Authentication and password reset -->
@@ -667,9 +667,8 @@
             <p>Scan staging pieces into racks, close racks, and print rack packing lists.</p>
           </div>
           <div class="page-heading-actions rack-heading-actions">
-            <div class="rack-summary" id="rackSummary"></div>
             <div class="rack-create-actions" data-permission-any="manage_racks">
-              <button id="rackPackingHistoryBtn" type="button">Packing List History</button>
+              <button id="rackPackingHistoryBtn" type="button">Racks History</button>
               <button id="rackEditOpenBtn" type="button">Edit Racks</button>
             </div>
           </div>
@@ -766,13 +765,13 @@
       <section class="page-view bay-map-page bay-map-page-v2" id="bayMapPage" hidden>
         <!-- Bay Map v16: command-center layout keeps the scanner available while giving users faster search, filters, and bay actions. -->
         <section class="bay-command-center">
-          <div class="bay-title-card">
+          <div class="bay-title-card bay-title-card-wide-v181">
             <span class="bay-page-eyebrow">Indian Trail Inventory</span>
             <h1>Bay Map Command Center</h1>
             <p>Find bays, assign glass, review old orders, and manage the physical bay layout from one page.</p>
           </div>
 
-          <div id="indianTrailSummary" class="bay-summary bay-summary-command"></div>
+          <div id="indianTrailSummary" class="bay-summary bay-summary-command" hidden></div>
         </section>
 
         <section class="bay-workflow-row bay-workflow-row-full">
@@ -865,7 +864,7 @@
           <div class="bay-right-rail">
             <div class="bay-action-buttons bay-action-buttons-v2 bay-action-buttons-v150" id="bayActionButtons" aria-label="Indian Trail bay actions">
               <button type="button" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon old"></span>Old Bays<span class="old-bay-attention-count" id="oldBayAttentionCount" hidden aria-label="0 old orders need review">0</span></button>
-              <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi"><span class="bay-action-icon sdi"></span>Rush / Remake</button>
+              <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi"><span class="bay-action-icon sdi"></span>Rush</button>
               <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay"><span class="bay-action-icon manage"></span>Manage Items</button>
               <button type="button" data-bay-action="bay-editor" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-edit"></span>Edit Bays</button>
               <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout"><span class="bay-action-icon layout"></span>Edit Map</button>
@@ -1042,194 +1041,208 @@
           <div id="baySelectedPanel"></div>
         </section>
         <div class="modal-backdrop" id="staleBayBackdrop" hidden></div>
-        <section class="modal-panel stale-bay-panel stale-bay-panel-v105" id="staleBayPanel" hidden>
-          <header class="stale-bay-header-v105">
+        <section class="modal-panel stale-bay-panel stale-bay-panel-v181" id="staleBayPanel" hidden>
+          <header class="stale-bay-header-v105 stale-bay-header-v181">
             <span class="stale-bay-header-icon-v105" aria-hidden="true"></span>
             <div>
               <small>Indian Trail inventory control</small>
               <h2>Old Bay Control Center</h2>
-              <p>Review assignments older than 10 days, verify their physical location, and snooze only the rows that have been checked.</p>
+              <p>Review aged assignments, confirm their physical location, and snooze only work that has been checked.</p>
             </div>
             <button id="staleBayCloseBtn" class="modal-close-x" type="button" aria-label="Close old bay orders">×</button>
           </header>
 
-          <section class="stale-bay-toolbar-v105" aria-label="Old bay search and filters">
-            <label class="stale-bay-search-v105">
-              <span class="search-icon"></span>
-              <input id="staleBaySearchInput" type="search" autocomplete="off" placeholder="Search order, customer, bay, glass, or size...">
-            </label>
-            <label>
-              <span>Age</span>
-              <select id="staleBayAgeFilter">
-                <option value="all">All ages</option>
-                <option value="14">14+ days</option>
-                <option value="30">30+ days</option>
-              </select>
-            </label>
-            <label>
-              <span>Sort</span>
-              <select id="staleBaySortSelect">
-                <option value="age-desc">Oldest first</option>
-                <option value="age-asc">Newest first</option>
-                <option value="bay">Bay A-Z</option>
-              </select>
-            </label>
-            <button id="staleBayPrintBtn" class="stale-bay-print-v105" type="button">Print Investigation List</button>
-          </section>
+          <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Old Bay sections">
+            <button class="is-active" type="button" data-bay-modal="stale" data-bay-modal-section="workspace" aria-selected="true"><span>Workspace</span></button>
+            <button type="button" data-bay-modal="stale" data-bay-modal-section="history" aria-selected="false"><span>Action History</span><b id="staleBayHistoryCount">0</b></button>
+          </nav>
 
-          <div id="staleBayList" class="stale-bay-list stale-bay-list-v105"></div>
-
-          <footer class="stale-bay-actions stale-bay-actions-v105">
-            <div class="stale-bay-selection-v105">
-              <strong id="staleBaySelectionCount">0 selected</strong>
-              <span>Select verified rows before using the bulk snooze action.</span>
-            </div>
-            <button id="staleBaySelectVisibleBtn" class="stale-bay-select-visible-v105" type="button">Select visible</button>
-            <label class="stale-bay-bulk-days-v105"><span>Snooze days</span><input id="staleBaySnoozeAllDays" type="number" min="1" max="365" value="1"></label>
-            <button id="staleBaySnoozeAllBtn" class="stale-bay-bulk-snooze-v105" type="button" disabled>Snooze selected</button>
-            <button id="staleBayOkBtn" class="stale-bay-done-v105" type="button">Done</button>
-          </footer>
-        </section>
-        <div class="modal-backdrop" id="sdiBackdrop" hidden></div>
-        <section class="sdi-panel modal-panel" id="sdiPanel" hidden>
-          <div class="section-heading">
-            <div>
-              <h2>Rush / Remake Order</h2>
-              <span class="bay-scanner-subtitle">Mark rush, remake, or same-day install handling without mixing this workflow into Manage Items.</span>
-            </div>
-            <button id="sdiCloseBtn" class="modal-close-x" type="button" aria-label="Close SDI window">×</button>
-          </div>
-          <form id="sdiForm" class="sdi-form sdi-form-v069">
-            <section class="sdi-search-card">
-              <div class="sdi-card-heading">
-                <div><small>Step 1</small><strong>Find the job or exact piece</strong><span>Search by Job Nr., SO, Order Nr., or barcode. Then narrow by bay when needed.</span></div>
-              </div>
-              <div class="sdi-search-grid">
-                <label class="sdi-job-lookup">
-                  <span>Job Nr. / SO / Order Nr.</span>
-                  <input id="sdiOrderInput" type="text" autocomplete="off" placeholder="Start typing a Job Nr., SO, order, or barcode">
-                  <small>Choose a predictive result to load the exact job and item list.</small>
-                  <div id="sdiLookupResults" class="sdi-lookup-results" hidden></div>
-                </label>
-                <label class="sdi-bay-select-field">
-                  <span>Bay Code</span>
-                  <select id="sdiBayInput">
-                    <option value="">All bays / no bay filter</option>
-                  </select>
-                  <small>Optional. Use this to narrow the selected job to one bay.</small>
-                </label>
-              </div>
+          <section class="bay-operation-view stale-bay-workspace-v181" data-bay-modal-panel="stale" data-bay-modal-view="workspace">
+            <section class="stale-bay-toolbar-v105 stale-bay-toolbar-v181" aria-label="Old bay search and filters">
+              <label class="stale-bay-search-v105">
+                <span class="search-icon"></span>
+                <input id="staleBaySearchInput" type="search" autocomplete="off" placeholder="Search order, customer, bay, glass, or size...">
+              </label>
+              <label>
+                <span>Age</span>
+                <select id="staleBayAgeFilter">
+                  <option value="all">All ages</option>
+                  <option value="14">14+ days</option>
+                  <option value="30">30+ days</option>
+                </select>
+              </label>
+              <label>
+                <span>Sort</span>
+                <select id="staleBaySortSelect">
+                  <option value="age-desc">Oldest first</option>
+                  <option value="age-asc">Newest first</option>
+                  <option value="bay">Bay A-Z</option>
+                </select>
+              </label>
+              <button id="staleBayPrintBtn" class="stale-bay-print-v105" type="button">Print Investigation List</button>
             </section>
 
-            <section class="sdi-workspace-grid">
-              <section class="sdi-item-selection" id="sdiItemSelection">
-                <div class="sdi-item-selection-heading">
-                  <div>
-                    <small>Step 2</small>
-                    <strong>Choose the glass items</strong>
-                    <span>Missing pieces are selected automatically. A complete in-bay piece can be selected only for a Remake.</span>
-                  </div>
-                  <button id="sdiSelectMissingBtn" type="button">Select missing</button>
+            <div id="staleBayList" class="stale-bay-list stale-bay-list-v105"></div>
+
+            <footer class="stale-bay-actions stale-bay-actions-v105 stale-bay-actions-v181">
+              <div class="stale-bay-selection-v105">
+                <strong id="staleBaySelectionCount">0 selected</strong>
+                <span>Select verified rows before using the bulk snooze action.</span>
+              </div>
+              <button id="staleBaySelectVisibleBtn" class="stale-bay-select-visible-v105" type="button">Select visible</button>
+              <label class="stale-bay-bulk-days-v105"><span>Snooze days</span><input id="staleBaySnoozeAllDays" type="number" min="1" max="365" value="1"></label>
+              <button id="staleBaySnoozeAllBtn" class="stale-bay-bulk-snooze-v105" type="button" disabled>Snooze selected</button>
+              <button id="staleBayOkBtn" class="stale-bay-done-v105" type="button">Done</button>
+            </footer>
+          </section>
+
+          <section class="bay-operation-view bay-operation-history" data-bay-modal-panel="stale" data-bay-modal-view="history" hidden>
+            <header class="modal-action-history-heading"><div><strong>Old Bay Action History</strong><small id="staleBayHistorySummary">Loading recent changes...</small></div></header>
+            <div class="modal-action-history-list" id="staleBayHistoryList"></div>
+          </section>
+        </section>
+        <div class="modal-backdrop" id="sdiBackdrop" hidden></div>
+        <section class="sdi-panel modal-panel sdi-panel-v182" id="sdiPanel" hidden>
+          <div class="section-heading sdi-heading-v182">
+            <div>
+              <small>Priority handling</small>
+              <h2>Rush Order</h2>
+              <span class="bay-scanner-subtitle">Create and manage intentional Rush work without counting imported remake markers.</span>
+            </div>
+            <button id="sdiCloseBtn" class="modal-close-x" type="button" aria-label="Close Rush window">×</button>
+          </div>
+
+          <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Rush sections">
+            <button class="is-active" type="button" data-bay-modal="rush" data-bay-modal-section="workspace" aria-selected="true"><span>Add Rush</span></button>
+            <button type="button" data-bay-modal="rush" data-bay-modal-section="current" aria-selected="false"><span>Current Priority Work</span><b id="sdiCurrentTabCount">0</b></button>
+            <button type="button" data-bay-modal="rush" data-bay-modal-section="history" aria-selected="false"><span>Action History</span><b id="sdiHistoryCount">0</b></button>
+          </nav>
+
+          <section class="bay-operation-view sdi-rush-workspace-v182" data-bay-modal-panel="rush" data-bay-modal-view="workspace">
+            <form id="sdiForm" class="sdi-form sdi-form-v069 sdi-form-v182">
+              <input id="sdiTypeInput" type="hidden" value="Rush">
+              <section class="sdi-search-card">
+                <div class="sdi-card-heading">
+                  <div><small>Step 1</small><strong>Find the job or exact piece</strong><span>Search by Job Nr., SO, Order Nr., or barcode. Narrow by bay only when needed.</span></div>
                 </div>
-                <div id="sdiItemSelectionList" class="sdi-item-selection-list">
-                  <span class="admin-empty">Choose a job or order to review its items.</span>
+                <div class="sdi-search-grid">
+                  <label class="sdi-job-lookup">
+                    <span>Job Nr. / SO / Order Nr.</span>
+                    <input id="sdiOrderInput" type="text" autocomplete="off" placeholder="Start typing a Job Nr., SO, order, or barcode">
+                    <small>Choose a predictive result to load the exact job and item list.</small>
+                    <div id="sdiLookupResults" class="sdi-lookup-results" hidden></div>
+                  </label>
+                  <label class="sdi-bay-select-field">
+                    <span>Bay Code</span>
+                    <select id="sdiBayInput"><option value="">All bays / no bay filter</option></select>
+                    <small>Optional. Use this to narrow the selected job to one bay.</small>
+                  </label>
                 </div>
               </section>
 
-              <aside class="sdi-action-card">
-                <div class="sdi-card-heading">
-                  <div><small>Step 3</small><strong>Set the handling</strong><span id="sdiSelectionSummary">No items selected</span></div>
-                </div>
-                <label>
-                  <span>Order Type</span>
-                  <select id="sdiTypeInput" required>
-                    <option value="">Select Rush or Remake</option>
-                    <option value="Rush">Rush</option>
-                    <option value="Remake">Remake</option>
-                  </select>
-                </label>
-                <label class="sdi-delivery-date">
-                  <span>Priority Delivery Date</span>
-                  <input id="sdiDeliveryDateInput" type="date">
-                  <small>Leave unchanged to keep the existing delivery date.</small>
-                </label>
-                <label class="sdi-reason">
-                  <span>Reason</span>
-                  <input id="sdiReasonInput" type="text" autocomplete="off" value="Same-day install">
-                </label>
-                <label class="checkbox-row sdi-truck-option">
-                  <input id="sdiTruckExemptInput" type="checkbox">
-                  <span><strong>Send straight to installer truck</strong><small>Indian Trail Rush only. Skip bay placement.</small></span>
-                </label>
-                <div class="sdi-actions">
-                  <button type="submit" data-sdi-action="mark">Apply Rush / Remake</button>
-                  <button type="button" id="sdiClearBtn">Clear selected mark</button>
-                </div>
-              </aside>
-            </section>
+              <section class="sdi-workspace-grid">
+                <section class="sdi-item-selection" id="sdiItemSelection">
+                  <div class="sdi-item-selection-heading">
+                    <div><small>Step 2</small><strong>Choose the missing glass items</strong><span>Missing pieces are selected automatically. Already fulfilled pieces stay protected.</span></div>
+                    <button id="sdiSelectMissingBtn" type="button">Select missing</button>
+                  </div>
+                  <div id="sdiItemSelectionList" class="sdi-item-selection-list"><span class="admin-empty">Choose a job or order to review its items.</span></div>
+                </section>
 
+                <aside class="sdi-action-card">
+                  <div class="sdi-card-heading"><div><small>Step 3</small><strong>Set Rush handling</strong><span id="sdiSelectionSummary">No items selected</span></div></div>
+                  <label class="sdi-delivery-date">
+                    <span>Priority Delivery Date</span>
+                    <input id="sdiDeliveryDateInput" type="date">
+                    <small>Leave unchanged to keep the existing delivery date.</small>
+                  </label>
+                  <label class="sdi-reason"><span>Rush reason</span><input id="sdiReasonInput" type="text" autocomplete="off" value="Same-day install"></label>
+                  <label class="checkbox-row sdi-truck-option">
+                    <input id="sdiTruckExemptInput" type="checkbox">
+                    <span><strong>Send straight to installer truck</strong><small>Indian Trail Rush only. Skip bay placement.</small></span>
+                  </label>
+                  <div class="sdi-actions">
+                    <button type="submit" data-sdi-action="mark">Apply Rush</button>
+                    <button type="button" id="sdiClearBtn">Clear selected Rush</button>
+                  </div>
+                </aside>
+              </section>
+            </form>
+          </section>
+
+          <section class="bay-operation-view sdi-current-workspace-v182" data-bay-modal-panel="rush" data-bay-modal-view="current" hidden>
             <section class="sdi-current-list" id="sdiCurrentList"></section>
-          </form>
+          </section>
+
+          <section class="bay-operation-view bay-operation-history" data-bay-modal-panel="rush" data-bay-modal-view="history" hidden>
+            <header class="modal-action-history-heading"><div><strong>Rush Action History</strong><small id="sdiHistorySummary">Loading recent changes...</small></div></header>
+            <div class="modal-action-history-list" id="sdiHistoryList"></div>
+          </section>
         </section>
         <div class="modal-backdrop" id="manageItemsBackdrop" hidden></div>
-        <section class="modal-panel manage-items-panel" id="manageItemsPanel" hidden>
+        <section class="modal-panel manage-items-panel manage-items-panel-v182" id="manageItemsPanel" hidden>
           <div class="section-heading manage-items-heading">
-            <div>
-              <h2>Manage Bay Items</h2>
-              <span>Move, clear, target, or mark items without using the SDI window.</span>
-            </div>
+            <div><small>Indian Trail inventory</small><h2>Manage Bay Items</h2><span>Filter, review, move, clear, target, or mark Rush work from one larger workspace.</span></div>
             <button id="manageItemsCloseBtn" class="modal-close-x" type="button" aria-label="Close manage items window">×</button>
           </div>
-          <div class="manage-items-layout">
-            <aside class="manage-items-sidebar">
-              <label class="search-box manage-items-search">
-                <span class="search-icon"></span>
-                <input id="manageItemsSearch" type="search" autocomplete="off" placeholder="Search order, item, customer, bay...">
-              </label>
-              <div id="manageItemsList" class="manage-items-list"></div>
-            </aside>
-            <section class="manage-items-workflow">
-              <div id="manageItemsSelected" class="manage-items-selected"></div>
-              <div class="manage-items-target-card">
-                <label>
-                  <span>Move / target bay</span>
-                  <select id="manageItemsTargetBay"></select>
-                </label>
-                <label>
-                  <span>Reason / note</span>
-                  <input id="manageItemsReason" type="text" autocomplete="off" value="Managed from Bay Map">
-                </label>
-              </div>
-              <div class="manage-items-actions">
-                <button id="manageItemsMoveBtn" type="button">Move Item</button>
-                <button id="manageItemsClearBtn" type="button">Clear Item</button>
-                <button id="manageItemsScannerBtn" type="button">Use Bay For Scanner</button>
-                <button id="manageItemsSdiBtn" type="button">Mark SDI / Rush</button>
-              </div>
-              <p id="manageItemsStatus" class="manage-items-status">Select an item to begin.</p>
-            </section>
-          </div>
+          <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Manage Items sections">
+            <button class="is-active" type="button" data-bay-modal="manage" data-bay-modal-section="workspace" aria-selected="true"><span>Workspace</span></button>
+            <button type="button" data-bay-modal="manage" data-bay-modal-section="history" aria-selected="false"><span>Action History</span><b id="manageItemsHistoryCount">0</b></button>
+          </nav>
+          <section class="bay-operation-view" data-bay-modal-panel="manage" data-bay-modal-view="workspace">
+            <div class="manage-items-layout">
+              <aside class="manage-items-sidebar">
+                <div class="manage-items-filter-bar-v182">
+                  <label class="search-box manage-items-search"><span class="search-icon"></span><input id="manageItemsSearch" type="search" autocomplete="off" placeholder="Search order, item, customer, bay, job, or glass..."></label>
+                  <label class="manage-items-filter-v182"><span>Status</span><select id="manageItemsFilter"><option value="all">All bay items</option><option value="assigned">Physically in bay</option><option value="preassigned">Preassigned / missing</option><option value="rush">Rush work</option><option value="needs-review">Needs review</option></select></label>
+                </div>
+                <div id="manageItemsList" class="manage-items-list"></div>
+              </aside>
+              <section class="manage-items-workflow">
+                <div id="manageItemsSelected" class="manage-items-selected"></div>
+                <div class="manage-items-target-card">
+                  <label><span>Move / target bay</span><select id="manageItemsTargetBay"></select></label>
+                  <label><span>Reason / note</span><input id="manageItemsReason" type="text" autocomplete="off" value="Managed from Bay Map"></label>
+                </div>
+                <div class="manage-items-actions">
+                  <button id="manageItemsMoveBtn" type="button">Move Item</button>
+                  <button id="manageItemsClearBtn" type="button">Clear Item</button>
+                  <button id="manageItemsScannerBtn" type="button">Use Bay For Scanner</button>
+                  <button id="manageItemsSdiBtn" type="button">Mark Rush</button>
+                </div>
+                <p id="manageItemsStatus" class="manage-items-status">Select an item to begin.</p>
+              </section>
+            </div>
+          </section>
+          <section class="bay-operation-view bay-operation-history" data-bay-modal-panel="manage" data-bay-modal-view="history" hidden>
+            <header class="modal-action-history-heading"><div><strong>Manage Items Action History</strong><small id="manageItemsHistorySummary">Loading recent changes...</small></div></header>
+            <div class="modal-action-history-list" id="manageItemsHistoryList"></div>
+          </section>
         </section>
         <div class="modal-backdrop" id="bayEditorBackdrop" hidden></div>
-        <section class="modal-panel bay-editor-panel" id="bayEditorPanel" hidden>
+        <section class="modal-panel bay-editor-panel bay-editor-panel-v182" id="bayEditorPanel" hidden>
           <div class="section-heading bay-editor-heading">
-            <div>
-              <h2>Edit Bays</h2>
-              <span>Create, rename, delete, and set bay group behavior from one workflow.</span>
-            </div>
+            <div><small>Physical bay configuration</small><h2>Edit Bays</h2><span>Create, rename, delete, and set bay group behavior without horizontal scrolling.</span></div>
             <button id="bayEditorCloseBtn" class="modal-close-x" type="button" aria-label="Close edit bays window">×</button>
           </div>
-          <div class="bay-editor-layout">
-            <aside class="bay-editor-sidebar">
-              <button class="bay-editor-new-group" id="bayEditorNewGroupBtn" type="button">+ New Bay Group</button>
-              <div id="bayEditorGroupList" class="bay-editor-group-list"></div>
-              <p class="bay-editor-note"><strong>Unmapped bays</strong> are active bays without a confirmed map group/position. Assign them to a group here or in Edit Map.</p>
-            </aside>
-            <section class="bay-editor-workflow">
-              <div id="bayEditorGroupForm" class="bay-editor-group-form"></div>
-              <div id="bayEditorBayList" class="bay-editor-bay-list"></div>
-            </section>
-          </div>
+          <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Edit Bays sections">
+            <button class="is-active" type="button" data-bay-modal="editor" data-bay-modal-section="workspace" aria-selected="true"><span>Workspace</span></button>
+            <button type="button" data-bay-modal="editor" data-bay-modal-section="history" aria-selected="false"><span>Action History</span><b id="bayEditorHistoryCount">0</b></button>
+          </nav>
+          <section class="bay-operation-view" data-bay-modal-panel="editor" data-bay-modal-view="workspace">
+            <div class="bay-editor-layout">
+              <aside class="bay-editor-sidebar">
+                <button class="bay-editor-new-group" id="bayEditorNewGroupBtn" type="button">+ Add New Bay Group</button>
+                <div id="bayEditorGroupList" class="bay-editor-group-list"></div>
+                <p class="bay-editor-note"><strong>Unmapped bays</strong> are active bays without a confirmed map group/position. Assign them to a group here or in Edit Map.</p>
+              </aside>
+              <section class="bay-editor-workflow"><div id="bayEditorGroupForm" class="bay-editor-group-form"></div><div id="bayEditorBayList" class="bay-editor-bay-list"></div></section>
+            </div>
+          </section>
+          <section class="bay-operation-view bay-operation-history" data-bay-modal-panel="editor" data-bay-modal-view="history" hidden>
+            <header class="modal-action-history-heading"><div><strong>Edit Bays Action History</strong><small id="bayEditorHistorySummary">Loading recent changes...</small></div></header>
+            <div class="modal-action-history-list" id="bayEditorHistoryList"></div>
+          </section>
         </section>
       </section>
 
@@ -1356,13 +1369,13 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.180">
+        <span class="footer-version-v0163" aria-label="Application version 0.192">
           <small>Version</small>
-          <strong>0.180</strong>
+          <strong>0.192</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
-          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.180&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
+          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.192&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
           title="Report a Delivery List Scanner bug"
         >
           <span class="footer-bug-icon-v0163" aria-hidden="true"></span>
@@ -1381,41 +1394,72 @@
 
     <!-- SECTION: Global print and export modal -->
     <div class="print-options-backdrop" id="printOptionsBackdrop" hidden></div>
-    <section class="print-options-panel" id="printOptionsPanel" hidden>
-      <div class="section-heading">
-        <h2>Print / Export Delivery Lists</h2>
+    <section class="print-options-panel print-options-panel-v182" id="printOptionsPanel" hidden>
+      <header class="print-options-hero-v182">
+        <div>
+          <small>Delivery List Scanner</small>
+          <h2>Print / Export Delivery Lists</h2>
+          <p>Select exact stages, exact glass types, and optional customer or order filters before generating the document.</p>
+        </div>
         <button id="printOptionsClose" class="modal-close-x" type="button" aria-label="Close print/export">×</button>
+      </header>
+
+      <div class="print-options-command-v182">
+        <div class="mode-toggle print-output-mode-v182" role="radiogroup" aria-label="Output format">
+          <label><input type="radio" name="printExportMode" value="print" checked><span>Print</span></label>
+          <label><input type="radio" name="printExportMode" value="export"><span>Export XLSX</span></label>
+        </div>
+        <label class="print-date-field-v182"><span>Delivery Date</span><select id="printOptionsDate"></select></label>
       </div>
-      <div class="mode-toggle">
-        <label><input type="radio" name="printExportMode" value="print" checked> Print</label>
-        <label><input type="radio" name="printExportMode" value="export"> Export XLSX</label>
+
+      <div class="print-options-workspace-v182">
+        <div class="print-options-config-v182">
+          <div class="print-options-primary-grid-v182">
+            <fieldset class="print-stage-field-v182">
+              <legend>Stages</legend>
+              <div id="printOptionsStages" class="print-stage-options"></div>
+            </fieldset>
+
+            <section class="print-glass-field print-glass-field-v182">
+              <div class="print-card-heading-v182">
+                <div><strong>Exact Glass Types</strong><span>Open a category and select only the precise glass types needed.</span></div>
+              </div>
+              <div id="printOptionsGlassType" class="print-stage-options print-glass-options"></div>
+            </section>
+          </div>
+
+          <section class="print-specific-filters-v182">
+            <div class="print-card-heading-v182"><div><strong>Specific Customers / Orders</strong><span>Optional filters narrow the selected stages before output.</span></div></div>
+            <div class="print-specific-filter-grid-v182">
+              <label><span>Specific customers</span><input id="printCustomerFilter" type="text" autocomplete="off" placeholder="Optional, comma-separated"></label>
+              <label><span>Specific orders</span><input id="printOrderFilter" type="text" autocomplete="off" placeholder="Optional, comma-separated"></label>
+            </div>
+            <div class="print-filter-grid">
+              <label><input id="printUpdatedOnly" type="checkbox"> Updated items only</label>
+              <label><input id="printRushOnly" type="checkbox"> Rush orders</label>
+              <label><input id="printRemakeOnly" type="checkbox"> Remakes only</label>
+            </div>
+          </section>
+        </div>
+
+        <aside class="print-options-summary-v182" aria-label="Print selection summary">
+          <section class="print-summary-card-v182">
+            <div class="print-card-heading-v182"><div><strong>Selection Summary</strong><span>Review the active output choices.</span></div></div>
+            <div class="print-selection-chips-v182" id="printSelectionChips"></div>
+          </section>
+
+          <section class="print-summary-card-v182 print-summary-preview-v182">
+            <div class="print-card-heading-v182"><div><strong>Summary Preview</strong><span>Only the selected exact glass types are included.</span></div></div>
+            <dl id="printSummaryPreview" class="print-summary-list-v182"></dl>
+            <p class="print-summary-note-v182"><span aria-hidden="true">i</span> Counts are based on the currently loaded delivery-list data and may change after a new import.</p>
+          </section>
+
+          <footer class="print-options-footer-v182">
+            <button id="printOptionsSubmit" type="button">Run Print / Export</button>
+            <span>A preview opens before printing or exporting.</span>
+          </footer>
+        </aside>
       </div>
-      <label>
-        <span>Delivery Date</span>
-        <select id="printOptionsDate"></select>
-      </label>
-      <fieldset>
-        <legend>Stages</legend>
-        <div id="printOptionsStages" class="print-stage-options"></div>
-      </fieldset>
-      <label>
-        <span>Glass Type</span>
-        <div id="printOptionsGlassType" class="print-stage-options print-glass-options"></div>
-      </label>
-      <label>
-        <span>Specific customers</span>
-        <input id="printCustomerFilter" type="text" autocomplete="off" placeholder="Optional, comma-separated">
-      </label>
-      <label>
-        <span>Specific orders</span>
-        <input id="printOrderFilter" type="text" autocomplete="off" placeholder="Optional, comma-separated">
-      </label>
-      <div class="print-filter-grid">
-        <label><input id="printUpdatedOnly" type="checkbox"> Updated items only</label>
-        <label><input id="printRushOnly" type="checkbox"> Rush orders</label>
-        <label><input id="printRemakeOnly" type="checkbox"> Remakes</label>
-      </div>
-      <button id="printOptionsSubmit" type="button">Run Print/Export</button>
     </section>
 
     <!-- SECTION: Interactive statistics chart modal -->
@@ -1509,8 +1553,25 @@
           <button id="operationsModalClose" class="modal-close-x" type="button" aria-label="Close operations window">×</button>
         </div>
       </header>
+      <nav class="admin-modal-section-tabs reject-operations-tabs-v183" id="rejectOperationsTabs" aria-label="Internal reject sections" hidden>
+        <button class="is-active" type="button" data-reject-modal-view="entry" aria-selected="true"><span>Add Reject</span></button>
+        <button type="button" data-reject-modal-view="history" aria-selected="false"><span>Action History</span><b id="rejectOperationsHistoryCount">0</b></button>
+      </nav>
+      <nav class="admin-modal-section-tabs operations-rack-tabs" id="operationsRackTabs" aria-label="Individual rack sections" hidden>
+        <button class="is-active" type="button" data-rack-modal-view="workspace" aria-selected="true"><span>Workspace</span></button>
+        <button type="button" data-rack-modal-view="history" aria-selected="false"><span>Action History</span><b id="operationsRackHistoryCount">0</b></button>
+        <div class="operations-modal-rack-actions" id="operationsModalRackActions" hidden></div>
+      </nav>
+      <nav class="admin-modal-section-tabs operations-rack-records-tabs" id="operationsRackRecordsTabs" aria-label="Rack history sections" hidden>
+        <button class="is-active" type="button" data-rack-records-view="packing" aria-selected="true"><span>Packing List History</span></button>
+        <button type="button" data-rack-records-view="all" aria-selected="false"><span>All Racks History</span><b id="operationsAllRacksHistoryCount">0</b></button>
+      </nav>
       <details class="modal-action-history operations-action-history" id="operationsModalHistory">
         <summary><span><strong>Action History</strong><small id="operationsModalHistorySummary">Loading recent changes...</small></span><b id="operationsModalHistoryCount">0</b></summary>
+        <div class="operations-action-history-tab-heading">
+          <strong>Selected Rack Action History</strong>
+          <small>Only status, packing, transfer, and recovery actions tied to this rack are shown.</small>
+        </div>
         <div class="modal-action-history-list" id="operationsModalHistoryList"></div>
       </details>
       <div id="operationsModalBody"></div>
@@ -1553,6 +1614,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260729-v0.180"></script>
+  <script src="static/js/app.js?v=20260731-v0.192"></script>
 </body>
 </html>

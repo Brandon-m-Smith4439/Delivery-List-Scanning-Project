@@ -17584,3 +17584,1149 @@ body.bay-move-mode .bay-layout-drop-zone {
     justify-self: end;
   }
 }
+
+/* ========================================================================== */
+/* v0.182 Bay workflow modal geometry and control-center polish */
+/* ========================================================================== */
+
+/* The three retired availability cards are no longer part of the Bay Map
+   command header. The title owns the full row and keeps the same responsive
+   geometry as the rest of the page. */
+.bay-command-center {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.bay-title-card-wide-v181 {
+  min-height: 142px;
+  display: grid;
+  align-content: center;
+  padding: 26px 30px;
+}
+
+.bay-title-card-wide-v181 h1 {
+  font-size: clamp(2.15rem, 3.8vw, 3.15rem);
+}
+
+.bay-title-card-wide-v181 p {
+  max-width: 940px;
+  font-size: 1rem;
+}
+
+#indianTrailSummary[hidden] {
+  display: none !important;
+}
+
+/* Standalone Bay Map control centers share the maintained Admin tab language
+   while retaining their own operational colors and page ownership. */
+.stale-bay-panel-v181,
+.sdi-panel-v182,
+.manage-items-panel-v182,
+.bay-editor-panel-v182 {
+  width: min(1480px, calc(100vw - 28px));
+  height: min(920px, calc(100vh - 28px));
+  max-height: calc(100vh - 28px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #9fb3ca;
+  border-radius: 20px;
+  background: #f2f6fa;
+  box-shadow: 0 30px 90px rgba(8, 30, 61, 0.28);
+}
+
+.stale-bay-panel-v181[hidden],
+.sdi-panel-v182[hidden],
+.manage-items-panel-v182[hidden],
+.bay-editor-panel-v182[hidden] {
+  display: none !important;
+}
+
+.bay-operation-tabs {
+  min-height: 50px;
+  padding: 7px 14px 0;
+  border-bottom: 1px solid #cbd8e6;
+  background: #fff;
+}
+
+.bay-operation-tabs button {
+  min-height: 42px;
+  font-size: 0.82rem;
+}
+
+.bay-operation-tabs button b {
+  min-width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  padding: 0 6px;
+  font-size: 0.68rem;
+}
+
+.bay-operation-tabs button:not(.is-active) b {
+  background: #e7edf5;
+  color: #526981;
+}
+
+.bay-operation-view {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+}
+
+.bay-operation-view[hidden] {
+  display: none !important;
+}
+
+.bay-operation-history {
+  background: linear-gradient(180deg, #f7faff 0%, #eef3f8 100%);
+}
+
+.bay-operation-history .modal-action-history-heading {
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid #c8d6e5;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.bay-operation-history .modal-action-history-heading strong {
+  font-size: 1rem;
+}
+
+.bay-operation-history .modal-action-history-heading small {
+  font-size: 0.76rem;
+}
+
+.bay-operation-history .modal-action-history-list {
+  max-height: none;
+}
+
+/* Old Bay Control Center: larger typography and a clearer review rhythm. */
+.stale-bay-header-v181 {
+  min-height: 116px;
+  padding: 20px 24px;
+  background:
+    radial-gradient(circle at 90% 10%, rgba(245, 158, 11, 0.2), transparent 29%),
+    linear-gradient(135deg, #6f3d00 0%, #9a5a00 48%, #6c3a00 100%);
+  color: #fff;
+}
+
+.stale-bay-header-v181 small,
+.stale-bay-header-v181 h2,
+.stale-bay-header-v181 p {
+  color: #fff;
+}
+
+.stale-bay-header-v181 h2 {
+  margin: 2px 0 5px;
+  font-size: clamp(1.7rem, 2.4vw, 2.25rem);
+}
+
+.stale-bay-header-v181 p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  opacity: 0.88;
+}
+
+.stale-bay-header-v181 .modal-close-x {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.stale-bay-workspace-v181 {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.stale-bay-toolbar-v181 {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #cbd7e5;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(20, 48, 84, 0.06);
+}
+
+.stale-bay-toolbar-v181 label > span,
+.stale-bay-toolbar-v181 button {
+  font-size: 0.8rem;
+}
+
+.stale-bay-toolbar-v181 :is(input, select, button) {
+  min-height: 42px;
+}
+
+.stale-bay-list-v105 {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.stale-bay-summary-cards-v105 article {
+  min-height: 92px;
+  border-radius: 12px;
+}
+
+.stale-bay-summary-cards-v105 small,
+.stale-bay-summary-cards-v105 span {
+  font-size: 0.76rem;
+}
+
+.stale-bay-summary-cards-v105 strong {
+  font-size: 1.65rem;
+}
+
+.stale-bay-order-v105 {
+  min-height: 132px;
+  border-radius: 13px;
+  padding: 13px;
+}
+
+.stale-bay-title-row-v105 strong {
+  font-size: 1.03rem;
+}
+
+.stale-bay-customer,
+.stale-bay-meta-grid-v105 small,
+.stale-snooze-row-v105 label > span,
+.stale-bay-selection-v105 span {
+  font-size: 0.78rem;
+}
+
+.stale-bay-meta-grid-v105 small b {
+  font-size: 0.67rem;
+}
+
+.stale-age-pill,
+.stale-bay-bay-pill {
+  font-size: 0.75rem;
+}
+
+.stale-snooze-row-v105 :is(select, button) {
+  min-height: 38px;
+  font-size: 0.76rem;
+}
+
+.stale-bay-actions-v181 {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #c6d4e3;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 -6px 18px rgba(20, 48, 84, 0.05);
+}
+
+.stale-bay-actions-v181 button,
+.stale-bay-actions-v181 input {
+  min-height: 40px;
+}
+
+/* Rush is now one focused workflow: Add Rush, current Rush work, history. */
+.sdi-heading-v182,
+.manage-items-heading,
+.bay-editor-heading {
+  min-height: 118px;
+  margin: 0;
+  padding: 20px 26px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    radial-gradient(circle at 91% 9%, rgba(255, 255, 255, 0.12), transparent 30%),
+    linear-gradient(135deg, #6d4900 0%, #a46c00 58%, #704900 100%);
+  color: #fff;
+}
+
+.manage-items-heading {
+  background:
+    radial-gradient(circle at 91% 9%, rgba(255, 255, 255, 0.1), transparent 30%),
+    linear-gradient(135deg, #082d63 0%, #0d5593 58%, #062a57 100%);
+}
+
+.bay-editor-heading {
+  background:
+    radial-gradient(circle at 91% 9%, rgba(255, 255, 255, 0.1), transparent 30%),
+    linear-gradient(135deg, #20394f 0%, #35617f 58%, #1c3448 100%);
+}
+
+.sdi-heading-v182 :is(small, h2, span),
+.manage-items-heading :is(small, h2, span),
+.bay-editor-heading :is(small, h2, span) {
+  color: #fff;
+}
+
+.sdi-heading-v182 small,
+.manage-items-heading small,
+.bay-editor-heading small {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.sdi-heading-v182 h2,
+.manage-items-heading h2,
+.bay-editor-heading h2 {
+  margin: 4px 0 5px;
+  font-size: clamp(1.85rem, 2.6vw, 2.35rem);
+}
+
+.sdi-heading-v182 > div > span,
+.manage-items-heading > div > span,
+.bay-editor-heading > div > span {
+  max-width: 780px;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  opacity: 0.86;
+}
+
+.sdi-heading-v182 .modal-close-x,
+.manage-items-heading .modal-close-x,
+.bay-editor-heading .modal-close-x {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.sdi-rush-workspace-v182,
+.sdi-current-workspace-v182 {
+  background: linear-gradient(180deg, #f9fbfd 0%, #eef3f8 100%);
+}
+
+.sdi-form-v182 {
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+.sdi-current-toolbar-rush-v181 {
+  grid-template-columns: minmax(300px, 1fr) auto auto !important;
+}
+
+/* Manage Items gets a larger, filterable left workspace with full line text. */
+.manage-items-panel-v182 .bay-operation-view[data-bay-modal-view="workspace"] {
+  overflow: hidden;
+}
+
+.manage-items-panel-v182 .manage-items-layout {
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(420px, 0.82fr) minmax(560px, 1.18fr);
+  gap: 14px;
+}
+
+.manage-items-panel-v182 .manage-items-sidebar,
+.manage-items-panel-v182 .manage-items-workflow {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #cbd8e6;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(20, 48, 84, 0.06);
+}
+
+.manage-items-panel-v182 .manage-items-sidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 12px;
+  overflow: hidden;
+}
+
+.manage-items-filter-bar-v182 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.38fr);
+  gap: 9px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+.manage-items-filter-v182 {
+  display: grid;
+  gap: 5px;
+  color: #526981;
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.manage-items-filter-v182 select,
+.manage-items-panel-v182 .manage-items-search {
+  min-height: 43px;
+}
+
+.manage-items-panel-v182 .manage-items-list {
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 3px;
+}
+
+.manage-items-panel-v182 .manage-item-row {
+  min-height: 88px;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+  align-items: center;
+  padding: 11px 12px;
+}
+
+.manage-items-panel-v182 .manage-item-row span,
+.manage-items-panel-v182 .manage-item-row strong,
+.manage-items-panel-v182 .manage-item-row small {
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.manage-items-panel-v182 .manage-item-row strong {
+  font-size: 0.91rem;
+}
+
+.manage-items-panel-v182 .manage-item-row small {
+  margin-top: 3px;
+  font-size: 0.73rem;
+  line-height: 1.32;
+}
+
+.manage-items-panel-v182 .manage-items-workflow {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px;
+}
+
+/* Edit Bays uses a wide contained grid. Fields wrap; nothing creates a
+   horizontal scrollbar in the normal editor. */
+.bay-editor-panel-v182 .bay-operation-view[data-bay-modal-view="workspace"] {
+  overflow: hidden;
+}
+
+.bay-editor-panel-v182 .bay-editor-layout {
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
+  gap: 14px;
+  overflow: hidden;
+}
+
+.bay-editor-panel-v182 .bay-editor-sidebar,
+.bay-editor-panel-v182 .bay-editor-workflow {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #cbd8e6;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.bay-editor-panel-v182 .bay-editor-sidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.bay-editor-panel-v182 .bay-editor-group-list {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.bay-editor-panel-v182 .bay-editor-workflow {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px;
+}
+
+.bay-editor-panel-v182 .bay-editor-form-grid {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.bay-editor-panel-v182 .bay-editor-form-grid.compact {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.bay-editor-panel-v182 .bay-editor-bay-row {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(190px, 1.1fr) repeat(3, minmax(150px, 0.82fr)) auto;
+  overflow: hidden;
+}
+
+.bay-editor-panel-v182 .bay-editor-bay-row > * {
+  min-width: 0;
+}
+
+.bay-editor-panel-v182 .bay-editor-bay-row input,
+.bay-editor-panel-v182 .bay-editor-bay-row select {
+  width: 100%;
+  min-width: 0;
+}
+
+.bay-editor-panel-v182 .bay-editor-new-group {
+  min-height: 42px;
+  margin-bottom: 10px;
+  border: 1px solid #174f86;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #1766a7, #0c4c82);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.bay-editor-panel-v182 .bay-editor-new-card.standalone {
+  max-width: none;
+  margin: 0;
+  border: 1px solid #afc3d7;
+  background: linear-gradient(180deg, #fff, #f4f8fc);
+}
+
+
+/* v0.183 modal finishing: flush Rush frame and no main-workspace scrolling. */
+#sdiPanel.sdi-panel-v182,
+#manageItemsPanel.manage-items-panel-v182,
+#bayEditorPanel.bay-editor-panel-v182 {
+  z-index: 10020 !important;
+  width: min(1480px, calc(100vw - 30px)) !important;
+  height: min(940px, calc(100vh - 30px)) !important;
+  max-height: calc(100vh - 30px) !important;
+  grid-template-rows: auto auto minmax(0, 1fr) !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid #94aac2 !important;
+  border-radius: 20px !important;
+  background: #f3f6fa !important;
+  box-shadow: 0 30px 88px rgba(4, 26, 61, 0.31) !important;
+}
+
+#sdiPanel.sdi-panel-v182 {
+  width: min(1380px, calc(100vw - 20px)) !important;
+  height: min(860px, calc(100vh - 20px)) !important;
+  max-height: calc(100vh - 20px) !important;
+  grid-template-rows: 104px 52px minmax(0, 1fr) !important;
+  border-color: #9eaabe !important;
+  border-radius: 18px !important;
+}
+
+#sdiPanel.sdi-panel-v182 > .section-heading,
+#manageItemsPanel.manage-items-panel-v182 > .manage-items-heading,
+#bayEditorPanel.bay-editor-panel-v182 > .bay-editor-heading {
+  margin: 0 !important;
+  padding: 20px 26px !important;
+  flex: 0 0 auto !important;
+}
+
+#sdiPanel.sdi-panel-v182 > .section-heading {
+  min-height: 0 !important;
+  height: 104px !important;
+  padding: 14px 24px !important;
+  border-radius: 17px 17px 0 0 !important;
+  background:
+    radial-gradient(circle at 91% 10%, rgba(255,255,255,.11), transparent 31%),
+    linear-gradient(135deg, #8e263b 0%, #b9433f 55%, #d4772f 100%) !important;
+}
+
+#manageItemsPanel.manage-items-panel-v182 > .manage-items-heading {
+  min-height: 118px !important;
+  background:
+    radial-gradient(circle at 91% 10%, rgba(255,255,255,.10), transparent 31%),
+    linear-gradient(135deg, #061d43 0%, #0b4d91 62%, #0f8294 100%) !important;
+}
+
+#bayEditorPanel.bay-editor-panel-v182 > .bay-editor-heading {
+  min-height: 118px !important;
+  background:
+    radial-gradient(circle at 91% 10%, rgba(255,255,255,.10), transparent 31%),
+    linear-gradient(135deg, #071d45 0%, #263f89 62%, #6b3db7 100%) !important;
+}
+
+#sdiPanel.sdi-panel-v182 .bay-operation-tabs,
+#manageItemsPanel.manage-items-panel-v182 .bay-operation-tabs,
+#bayEditorPanel.bay-editor-panel-v182 .bay-operation-tabs {
+  position: relative;
+  z-index: 4;
+  min-height: 58px;
+  padding: 8px 20px 0;
+  background: #fff;
+}
+
+#sdiPanel.sdi-panel-v182 .bay-operation-tabs {
+  min-height: 52px;
+  height: 52px;
+  padding: 4px 18px 0;
+}
+
+#sdiPanel.sdi-panel-v182 .bay-operation-tabs button {
+  min-height: 47px;
+}
+
+#sdiPanel.sdi-panel-v182 .bay-operation-view,
+#manageItemsPanel.manage-items-panel-v182 .bay-operation-view,
+#bayEditorPanel.bay-editor-panel-v182 .bay-operation-view {
+  padding: 16px 18px 18px;
+}
+
+#sdiPanel.sdi-panel-v182 .bay-operation-view[data-bay-modal-view="workspace"] {
+  min-height: 0;
+  overflow: hidden !important;
+  padding: 12px 16px 14px !important;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-form-v182 {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: stretch !important;
+  gap: 10px;
+  margin: 0;
+  padding: 0 !important;
+  overflow: hidden;
+  background: transparent !important;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-search-card,
+#sdiPanel.sdi-panel-v182 .sdi-item-selection,
+#sdiPanel.sdi-panel-v182 .sdi-action-card {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #c7d4e3 !important;
+  border-radius: 12px !important;
+  background: #fff !important;
+  box-shadow: 0 7px 18px rgba(7, 42, 99, 0.05) !important;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-search-card {
+  gap: 7px;
+  padding: 10px 12px !important;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-card-heading strong,
+#sdiPanel.sdi-panel-v182 .sdi-item-selection-heading strong {
+  font-size: 0.92rem;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-card-heading span,
+#sdiPanel.sdi-panel-v182 .sdi-item-selection-heading span {
+  font-size: 0.62rem;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-search-grid {
+  grid-template-columns: minmax(0, 1.55fr) minmax(270px, .65fr) !important;
+  gap: 10px !important;
+  align-items: end;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-form-v069 input,
+#sdiPanel.sdi-panel-v182 .sdi-form-v069 select {
+  min-height: 38px !important;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-workspace-grid {
+  height: 100%;
+  min-height: 0;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.55fr) minmax(330px, .72fr) !important;
+  gap: 10px !important;
+  align-items: stretch !important;
+  overflow: hidden;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-item-selection {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  padding: 10px !important;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-item-selection-list {
+  min-height: 0;
+  max-height: none !important;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 3px;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-action-card {
+  align-self: stretch;
+  align-content: start;
+  gap: 8px;
+  overflow: hidden;
+  padding: 10px !important;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-action-card .sdi-card-heading {
+  padding-bottom: 6px;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-form-v069 .sdi-truck-option {
+  min-height: 50px;
+  padding: 6px 8px !important;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-actions button {
+  min-height: 38px !important;
+}
+
+#manageItemsPanel.manage-items-panel-v182 .manage-items-layout {
+  height: 100%;
+  grid-template-columns: minmax(430px, .82fr) minmax(570px, 1.18fr) !important;
+  gap: 14px !important;
+  background: transparent !important;
+}
+
+#manageItemsPanel.manage-items-panel-v182 .manage-items-sidebar,
+#manageItemsPanel.manage-items-panel-v182 .manage-items-workflow {
+  border-radius: 14px !important;
+  background: #fff !important;
+}
+
+#manageItemsPanel.manage-items-panel-v182 .manage-items-sidebar { padding: 14px !important; }
+#manageItemsPanel.manage-items-panel-v182 .manage-items-list { margin-top: 0 !important; }
+#manageItemsPanel.manage-items-panel-v182 .manage-item-row { min-height: 92px; }
+#manageItemsPanel.manage-items-panel-v182 .manage-items-workflow { display: grid; align-content: start; gap: 14px; padding: 16px !important; }
+#manageItemsPanel.manage-items-panel-v182 .manage-selected-card h3 { font-size: clamp(1.45rem, 2.2vw, 2rem); }
+#manageItemsPanel.manage-items-panel-v182 .manage-items-actions { display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+#bayEditorPanel.bay-editor-panel-v182 .bay-editor-layout {
+  height: 100%;
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) !important;
+  gap: 14px !important;
+  background: transparent !important;
+}
+
+#bayEditorPanel.bay-editor-panel-v182 .bay-editor-sidebar { padding: 14px !important; }
+#bayEditorPanel.bay-editor-panel-v182 .bay-editor-new-group { width: 100%; margin: 0 0 12px; }
+#bayEditorPanel.bay-editor-panel-v182 .bay-editor-workflow { display: grid; align-content: start; gap: 14px; padding: 16px !important; }
+#bayEditorPanel.bay-editor-panel-v182 .bay-editor-card,
+#bayEditorPanel.bay-editor-panel-v182 .bay-editor-bay-list { margin: 0; }
+#bayEditorPanel.bay-editor-panel-v182 .bay-editor-form-grid,
+#bayEditorPanel.bay-editor-panel-v182 .bay-editor-form-grid.compact { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+#bayEditorPanel.bay-editor-panel-v182 .bay-editor-bay-row { grid-template-columns: minmax(210px, 1.25fr) minmax(130px, .7fr) minmax(130px, .7fr) minmax(105px, .55fr) minmax(160px, .85fr) auto !important; overflow: visible; }
+
+@media (max-height: 790px) and (min-width: 1081px) {
+  #sdiPanel.sdi-panel-v182 { grid-template-rows: 90px 48px minmax(0, 1fr) !important; }
+  #sdiPanel.sdi-panel-v182 > .section-heading { height: 90px !important; padding: 10px 20px !important; }
+  #sdiPanel.sdi-panel-v182 .bay-operation-tabs { height: 48px; min-height: 48px; }
+  #sdiPanel.sdi-panel-v182 .bay-operation-tabs button { min-height: 43px; }
+  #sdiPanel.sdi-panel-v182 .bay-operation-view[data-bay-modal-view="workspace"] { padding: 8px 12px 10px !important; }
+  #sdiPanel.sdi-panel-v182 .sdi-form-v182 { gap: 7px; }
+  #sdiPanel.sdi-panel-v182 .sdi-search-card,
+  #sdiPanel.sdi-panel-v182 .sdi-item-selection,
+  #sdiPanel.sdi-panel-v182 .sdi-action-card { padding: 8px !important; }
+}
+
+@media (max-width: 1080px) {
+  #sdiPanel.sdi-panel-v182 .sdi-workspace-grid,
+  #manageItemsPanel.manage-items-panel-v182 .manage-items-layout,
+  #bayEditorPanel.bay-editor-panel-v182 .bay-editor-layout { grid-template-columns: minmax(0, 1fr) !important; }
+
+  #sdiPanel.sdi-panel-v182 .bay-operation-view[data-bay-modal-view="workspace"] { overflow-y: auto !important; }
+  #sdiPanel.sdi-panel-v182 .sdi-form-v182 { height: auto; overflow: visible; }
+  #sdiPanel.sdi-panel-v182 .sdi-workspace-grid { height: auto; overflow: visible; }
+  #manageItemsPanel.manage-items-panel-v182 .manage-items-sidebar,
+  #bayEditorPanel.bay-editor-panel-v182 .bay-editor-sidebar { max-height: 390px; }
+  #manageItemsPanel.manage-items-panel-v182 .manage-items-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  #manageItemsPanel.manage-items-panel-v182 .manage-items-actions,
+  #bayEditorPanel.bay-editor-panel-v182 .bay-editor-form-grid,
+  #bayEditorPanel.bay-editor-panel-v182 .bay-editor-form-grid.compact,
+  #bayEditorPanel.bay-editor-panel-v182 .bay-editor-bay-row { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+/* In-Transit manifest: clearer receiving hierarchy and rack/glass grouping. */
+.transit-manifest-panel {
+  width: min(1500px, calc(100vw - 28px));
+  height: min(920px, calc(100vh - 28px));
+  max-height: calc(100vh - 28px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #97adc5;
+  border-radius: 18px;
+  background: #eef3f8;
+  box-shadow: 0 30px 90px rgba(8, 30, 61, 0.3);
+}
+
+.transit-manifest-header {
+  min-height: 112px;
+  padding: 20px 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  background:
+    radial-gradient(circle at 90% 8%, rgba(255, 255, 255, 0.12), transparent 30%),
+    linear-gradient(135deg, #07316d 0%, #0e5b92 56%, #052c5e 100%);
+  color: #fff;
+}
+
+.transit-manifest-header :is(small, h2, span) {
+  color: #fff;
+}
+
+.transit-manifest-header h2 {
+  margin: 3px 0 4px;
+  font-size: clamp(1.7rem, 2.5vw, 2.25rem);
+}
+
+.transit-manifest-header span {
+  font-size: 0.82rem;
+  opacity: 0.82;
+}
+
+.transit-manifest-header-actions button,
+.transit-manifest-header > button {
+  border-color: rgba(255, 255, 255, 0.38);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.transit-summary-row-v31 {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 9px;
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid #ccd9e6;
+  background: #fff;
+}
+
+.transit-summary-row-v31 article {
+  min-height: 72px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  border: 1px solid #d0dce9;
+  border-left: 4px solid #1971b6;
+  border-radius: 11px;
+  background: linear-gradient(180deg, #fff, #f6faff);
+  padding: 10px 12px;
+}
+
+.transit-summary-row-v31 small {
+  color: #5b6e84;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.transit-summary-row-v31 strong {
+  color: #11365f;
+  font-size: 1.45rem;
+}
+
+.transit-manifest-body-v31 {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 16px 18px;
+}
+
+.transit-rack-group-card {
+  margin-bottom: 12px;
+  border: 1px solid #bfcfe0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(20, 48, 84, 0.06);
+  overflow: hidden;
+}
+
+.transit-rack-group-head {
+  min-height: 82px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #fff, #f2f7fc);
+}
+
+.transit-rack-group-head strong {
+  font-size: 0.98rem;
+}
+
+.transit-rack-glass-stack {
+  padding: 10px;
+  background: #edf3f8;
+}
+
+.transit-glass-details {
+  border-radius: 11px;
+  overflow: hidden;
+}
+
+.transit-glass-ribbon {
+  min-height: 56px;
+  padding: 9px 12px;
+}
+
+.transit-glass-table {
+  width: 100%;
+  table-layout: fixed;
+  font-size: 0.74rem;
+}
+
+.transit-glass-table th {
+  background: #e9f0f7;
+  color: #204468;
+  font-size: 0.67rem;
+  text-transform: uppercase;
+}
+
+@media (max-width: 1100px) {
+  .manage-items-panel-v182 .manage-items-layout,
+  .bay-editor-panel-v182 .bay-editor-layout {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .manage-items-panel-v182 .manage-items-sidebar,
+  .manage-items-panel-v182 .manage-items-workflow,
+  .bay-editor-panel-v182 .bay-editor-sidebar,
+  .bay-editor-panel-v182 .bay-editor-workflow {
+    min-height: 360px;
+  }
+
+  .bay-editor-panel-v182 .bay-editor-form-grid,
+  .bay-editor-panel-v182 .bay-editor-form-grid.compact {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+
+  .bay-editor-panel-v182 .bay-editor-bay-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .transit-summary-row-v31 {
+    grid-template-columns: repeat(3, minmax(130px, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .stale-bay-panel-v181,
+  .sdi-panel-v182,
+  .manage-items-panel-v182,
+  .bay-editor-panel-v182,
+  .transit-manifest-panel {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+    max-height: calc(100vh - 16px);
+    border-radius: 14px;
+  }
+
+  .bay-operation-tabs {
+    overflow-x: auto;
+    justify-content: flex-start;
+  }
+
+  .stale-bay-workspace-v181 {
+    overflow-y: auto;
+  }
+
+  .manage-items-filter-bar-v182,
+  .bay-editor-panel-v182 .bay-editor-form-grid,
+  .bay-editor-panel-v182 .bay-editor-form-grid.compact,
+  .transit-summary-row-v31 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .manage-items-panel-v182 .manage-item-row,
+  .bay-editor-panel-v182 .bay-editor-bay-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ========================================================================== */
+/* v0.184 In-Transit manifest and Rush selection containment                  */
+/* ========================================================================== */
+.transit-manifest-panel {
+  width: min(1320px, calc(100vw - 30px));
+  height: min(880px, calc(100vh - 30px));
+  max-height: calc(100vh - 30px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden !important;
+  border: 1px solid #9fb7d1;
+  border-radius: 18px;
+  background: #f2f6fb;
+  box-shadow: 0 28px 82px rgba(5, 24, 54, .34);
+}
+
+.transit-manifest-panel .modal-heading,
+.transit-manifest-panel > header:first-child {
+  min-height: 104px;
+  padding: 17px 22px;
+  background:
+    radial-gradient(circle at 90% 12%, rgba(79, 179, 211, .22), transparent 34%),
+    linear-gradient(135deg, #0b315f 0%, #12618a 68%, #14869a 100%);
+  color: #fff;
+}
+
+.transit-manifest-panel .transit-summary-row-v31 {
+  margin: 10px 12px 0;
+  padding: 0;
+}
+
+.transit-manifest-panel .transit-manifest-body,
+.transit-manifest-panel .transit-rack-list,
+.transit-manifest-panel .transit-manifest-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px 12px;
+}
+
+.transit-manifest-panel .transit-rack-card,
+.transit-manifest-panel .transit-glass-group {
+  overflow: hidden;
+  border: 1px solid #c8d8e7;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(16, 54, 92, .05);
+}
+
+.transit-manifest-panel .transit-glass-ribbon {
+  background: linear-gradient(180deg, #f4f8fc 0%, #e9f1f8 100%);
+}
+
+.transit-manifest-panel .transit-glass-table th,
+.transit-manifest-panel .transit-glass-table td {
+  padding: 8px 9px;
+  border-bottom: 1px solid #e0e8f1;
+}
+
+/* Rush item cards stay a consistent operational size instead of stretching. */
+#sdiPanel.sdi-panel-v182 .sdi-item-selection-list,
+.sdi-panel-v182 .sdi-item-selection-list {
+  min-height: 0;
+  max-height: 290px;
+  display: grid;
+  grid-auto-rows: minmax(58px, max-content);
+  align-content: start;
+  gap: 7px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 7px;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-item-row,
+.sdi-panel-v182 .sdi-item-row {
+  width: 100%;
+  min-height: 58px;
+  height: auto;
+  max-height: 86px;
+  align-self: start;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: hidden;
+  border-radius: 9px;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-item-row > div,
+.sdi-panel-v182 .sdi-item-row > div {
+  min-width: 0;
+  overflow: hidden;
+}
+
+#sdiPanel.sdi-panel-v182 .sdi-item-row :is(strong, span, small),
+.sdi-panel-v182 .sdi-item-row :is(strong, span, small) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Center the Rush launcher icon inside its outlined icon box. */
+#bayRushBtn .bay-action-icon,
+#baySdiBtn .bay-action-icon,
+[data-bay-action="rush"] .bay-action-icon,
+.bay-action-button.is-rush .bay-action-icon,
+.bay-rush-action .button-icon {
+  display: inline-grid !important;
+  place-items: center !important;
+  align-content: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  background-position: center !important;
+  transform: none !important;
+}
+
+#bayRushBtn .bay-action-icon::before,
+#baySdiBtn .bay-action-icon::before,
+[data-bay-action="rush"] .bay-action-icon::before,
+.bay-action-button.is-rush .bay-action-icon::before {
+  position: static !important;
+  inset: auto !important;
+  margin: 0 !important;
+  transform: none !important;
+}
+
+/* v0.184 final cross-modal ownership (bays.css is the last page stylesheet). */
+.operations-modal-panel[data-kind="reject-log"] {
+  width: min(1180px, calc(100vw - 28px)) !important;
+  height: min(850px, calc(100vh - 28px)) !important;
+  max-height: calc(100vh - 28px) !important;
+  grid-template-rows: 116px 52px minmax(0, 1fr) !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  border-radius: 18px !important;
+}
+
+.operations-modal-panel[data-kind="reject-log"] > .operations-modal-heading {
+  min-height: 116px !important;
+  height: 116px !important;
+  padding: 17px 24px 16px !important;
+  overflow: hidden !important;
+}
+
+.operations-modal-panel[data-kind="reject-log"] .operations-modal-heading-copy p {
+  display: block !important;
+  margin: 4px 0 0 !important;
+  overflow: visible !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+}
+
+.operations-modal-panel[data-kind="reject-log"] #operationsModalBody {
+  min-height: 0 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+}
+
+.operations-modal-panel[data-kind="rack-details"],
+.operations-modal-panel[data-kind="packing-history"] {
+  width: min(1320px, calc(100vw - 32px)) !important;
+  height: min(880px, calc(100vh - 32px)) !important;
+  max-height: calc(100vh - 32px) !important;
+  overflow: hidden !important;
+}
+
+.operations-modal-panel[data-kind="rack-details"] #operationsModalBody,
+.operations-modal-panel[data-kind="packing-history"] #operationsModalBody {
+  min-height: 0 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+}
+
+.operations-modal-panel[data-kind="rack-details"] .rack-details-modal-v184,
+.operations-modal-panel[data-kind="packing-history"] .packing-history-shell-v184 {
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+@media (max-height: 760px) and (min-width: 901px) {
+  .operations-modal-panel[data-kind="reject-log"] {
+    grid-template-rows: 96px 48px minmax(0, 1fr) !important;
+  }
+  .operations-modal-panel[data-kind="reject-log"] > .operations-modal-heading {
+    min-height: 96px !important;
+    height: 96px !important;
+  }
+}

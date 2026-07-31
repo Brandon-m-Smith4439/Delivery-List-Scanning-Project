@@ -34,6 +34,7 @@ from backend.import_safety import install_safe_delivery_import
 from backend.operations import OperationsFeatureService
 from backend.store import (
     SESSION_COOKIE_NAME,
+    canonical_permission_name,
     create_store,
     public_route_label,
     request_station,
@@ -101,6 +102,67 @@ def print_display_date(value: object) -> str:
         year_text = str(int(year) + 2000) if len(year) == 2 else str(int(year))
         return f"{int(month)}/{int(day)}/{year_text}"
     return text
+
+
+def enrich_reject_match_details(payload: dict) -> dict:
+    """Add display-safe piece details to the maintained reject match response.
+
+    The operations service continues to own match identity and delivery-date
+    grouping. This helper only enriches those verified matches with fields the
+    reject review GUI needs, avoiding a second client-side lookup or guess.
+    """
+    matches = payload.get("matches") if isinstance(payload, dict) else None
+    if not isinstance(matches, list) or not matches:
+        return payload
+
+    with STORE.connect() as con:
+        for match in matches:
+            if not isinstance(match, dict):
+                continue
+            delivery_date = str(match.get("delivery_date") or "").strip()
+            order_no = str(match.get("order_no") or "").strip()
+            item_no = str(match.get("item_no") or "").strip()
+            if not delivery_date or not order_no or not item_no:
+                continue
+            row = con.execute(
+                """
+                SELECT
+                    MAX(li.dimensions) AS dimensions,
+                    MAX(li.product) AS product,
+                    MAX(li.route) AS route,
+                    MAX(li.scanned_qty) AS scanned_qty,
+                    MAX(li.process_state) AS process_state,
+                    MAX(li.queue_state) AS queue_state,
+                    MAX(li.suggested_bay) AS suggested_bay,
+                    MAX(
+                        CASE
+                            WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN COALESCE(b.bay_code, '')
+                            ELSE ''
+                        END
+                    ) AS current_bay
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                LEFT JOIN bay_assignments ba ON ba.line_item_id = li.id
+                LEFT JOIN bays b ON b.id = ba.bay_id
+                WHERE dl.status = 'active'
+                  AND dl.delivery_date = ?
+                  AND li.order_no = ?
+                  AND li.item_no = ?
+                """,
+                (delivery_date, order_no, item_no),
+            ).fetchone()
+            if row:
+                match.update({
+                    "dimensions": str(row["dimensions"] or ""),
+                    "product": str(row["product"] or match.get("product") or ""),
+                    "route": str(row["route"] or ""),
+                    "scanned_qty": int(row["scanned_qty"] or 0),
+                    "process_state": str(row["process_state"] or ""),
+                    "queue_state": str(row["queue_state"] or ""),
+                    "suggested_bay": str(row["suggested_bay"] or ""),
+                    "current_bay": str(row["current_bay"] or ""),
+                })
+    return payload
 
 
 CODE39 = {
@@ -993,8 +1055,10 @@ class Handler(SimpleHTTPRequestHandler):
         if not user:
             self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
             return None
-        if permission not in user.get("permissions", []):
-            self.send_json({"error": "Permission denied", "permission": permission}, HTTPStatus.FORBIDDEN)
+        requested = canonical_permission_name(permission)
+        granted = {canonical_permission_name(value) for value in user.get("permissions", [])}
+        if requested not in granted:
+            self.send_json({"error": "Permission denied", "permission": requested}, HTTPStatus.FORBIDDEN)
             return None
         return user
 
@@ -1008,9 +1072,10 @@ class Handler(SimpleHTTPRequestHandler):
         if not user:
             self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
             return None
-        granted = set(user.get("permissions", []))
-        if not any(permission in granted for permission in permissions):
-            self.send_json({"error": "Permission denied", "permissions": list(permissions)}, HTTPStatus.FORBIDDEN)
+        granted = {canonical_permission_name(value) for value in user.get("permissions", [])}
+        requested = [canonical_permission_name(permission) for permission in permissions]
+        if not any(permission in granted for permission in requested):
+            self.send_json({"error": "Permission denied", "permissions": requested}, HTTPStatus.FORBIDDEN)
             return None
         return user
 
@@ -1139,7 +1204,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/rejects":
-            if not self.require_permission("view_lists"):
+            if not self.require_any_permission("view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records"):
                 return
             params = parse_qs(parsed.query)
             self.send_json(
@@ -1153,19 +1218,21 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/rejects/catalog":
-            if not self.require_permission("view_lists"):
+            if not self.require_any_permission("view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records"):
                 return
             self.send_json(OPERATIONS.reject_catalog())
             return
 
         if parsed.path == "/api/rejects/matches":
-            if not self.require_permission("view_lists"):
+            if not self.require_any_permission("view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records"):
                 return
             params = parse_qs(parsed.query)
             self.send_json(
-                OPERATIONS.reject_matches(
-                    params.get("order", [""])[0],
-                    params.get("item", [""])[0],
+                enrich_reject_match_details(
+                    OPERATIONS.reject_matches(
+                        params.get("order", [""])[0],
+                        params.get("item", [""])[0],
+                    )
                 )
             )
             return
@@ -1185,14 +1252,14 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/delivery-automation":
-            user = self.require_permission("import_delivery_lists")
+            user = self.require_any_permission("manage_automation", "import_delivery_lists")
             if not user:
                 return
             self.send_json(DELIVERY_AUTOMATION.get_dashboard())
             return
 
         if parsed.path == "/api/admin/delivery-automation/recent-imports":
-            user = self.require_permission("import_delivery_lists")
+            user = self.require_any_permission("manage_automation", "import_delivery_lists")
             if not user:
                 return
             params = parse_qs(parsed.query)
@@ -1208,7 +1275,7 @@ class Handler(SimpleHTTPRequestHandler):
             )
             return
         if parsed.path == "/api/admin/delivery-automation/latest-import":
-            user = self.require_permission("import_delivery_lists")
+            user = self.require_any_permission("manage_automation", "import_delivery_lists")
             if not user:
                 return
             self.send_json(DELIVERY_AUTOMATION.get_latest_import_result())
@@ -1290,7 +1357,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/manual-edit-lookups":
-            if not self.require_permission("edit_delivery_lists"):
+            if not self.require_any_permission("manage_lookup_values", "edit_delivery_lists"):
                 return
             self.send_json(STORE.get_manual_edit_lookups())
             return
@@ -1305,6 +1372,20 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_permission("manage_roles"):
                 return
             self.send_json({"roles": STORE.list_roles(), "permissions": STORE.get_permissions()})
+            return
+
+        if parsed.path == "/api/admin/delivery-list-update-preview":
+            user = self.require_any_permission("preview_delivery_updates", "edit_delivery_lists", "preview_import")
+            if not user:
+                return
+            list_id = str(parse_qs(parsed.query).get("listId", [""])[0] or "").strip()
+            if not list_id:
+                self.send_json({"error": "listId is required"}, HTTPStatus.BAD_REQUEST)
+                return
+            if not STORE.user_can_access_list(user, list_id):
+                self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
+                return
+            self.send_json(STORE.get_delivery_list_update_preview(list_id))
             return
 
         if parsed.path == "/api/admin/line-items/search":
@@ -1340,13 +1421,41 @@ class Handler(SimpleHTTPRequestHandler):
                 "scan_racks",
                 "view_active_sessions",
                 "view_own_scans",
+                "view_bays",
+                "assign_bay",
+                "move_bay",
+                "clear_bay",
+                "mark_sdi",
+                "remove_sdi",
+                "bay_check",
             )
             if not user:
                 return
             query_values = parse_qs(parsed.query)
             context = query_values.get("context", [""])[0]
-            limit = int(query_values.get("limit", ["20"])[0] or 20)
-            self.send_json({"context": context, "events": STORE.list_gui_action_history(context, limit)})
+            rack_code = query_values.get("rackCode", [""])[0]
+            rack_codes = [
+                value
+                for raw in query_values.get("rackCodes", [])
+                for value in str(raw).split(",")
+                if str(value).strip()
+            ]
+            page = int(query_values.get("page", ["1"])[0] or 1)
+            page_size = int(query_values.get("pageSize", ["50"])[0] or 50)
+            self.send_json(
+                STORE.list_gui_action_history_page(
+                    context=context,
+                    page=page,
+                    page_size=page_size,
+                    rack_code=rack_code,
+                    query=query_values.get("query", [""])[0],
+                    user=query_values.get("user", [""])[0],
+                    action=query_values.get("action", [""])[0],
+                    date_from=query_values.get("dateFrom", [""])[0],
+                    date_to=query_values.get("dateTo", [""])[0],
+                    rack_codes=rack_codes if "rackCodes" in query_values else None,
+                )
+            )
             return
 
         if parsed.path == "/api/admin/sessions":
@@ -1675,28 +1784,28 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/rejects":
-                user = self.require_any_permission("scan", "manual_adjust", "resolve_exceptions")
+                user = self.require_permission("log_rejects")
                 if not user:
                     return
                 self.send_json(OPERATIONS.create_reject(data, user["username"]))
                 return
 
             if parsed.path == "/api/rejects/update":
-                user = self.require_admin_role()
+                user = self.require_permission("manage_reject_records")
                 if not user:
                     return
                 self.send_json(OPERATIONS.update_reject(data, user["username"]))
                 return
 
             if parsed.path == "/api/rejects/delete":
-                user = self.require_admin_role()
+                user = self.require_permission("manage_reject_records")
                 if not user:
                     return
                 self.send_json(OPERATIONS.delete_reject(data, user["username"]))
                 return
 
             if parsed.path == "/api/rejects/catalog":
-                user = self.require_permission("view_admin")
+                user = self.require_permission("manage_reject_settings")
                 if not user:
                     return
                 self.send_json(
@@ -1709,7 +1818,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/rejects/catalog/remove":
-                user = self.require_permission("view_admin")
+                user = self.require_permission("manage_reject_settings")
                 if not user:
                     return
                 self.send_json(
@@ -1830,7 +1939,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.import_delivery_folder(data))
                 return
             if parsed.path == "/api/admin/delivery-automation/run":
-                user = self.require_permission("import_delivery_lists")
+                user = self.require_any_permission("manage_automation", "import_delivery_lists")
                 if not user:
                     return
                 self.send_json(
@@ -1840,20 +1949,20 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/admin/delivery-automation/config":
-                user = self.require_permission("import_delivery_lists")
+                user = self.require_any_permission("manage_automation", "import_delivery_lists")
                 if not user:
                     return
                 self.send_json(DELIVERY_AUTOMATION.save_settings(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/delivery-automation/schedule/install":
-                if not self.require_permission("import_delivery_lists"):
+                if not self.require_any_permission("manage_automation", "import_delivery_lists"):
                     return
                 self.send_json(DELIVERY_AUTOMATION.install_schedule())
                 return
 
             if parsed.path == "/api/admin/delivery-automation/schedule/remove":
-                if not self.require_permission("import_delivery_lists"):
+                if not self.require_any_permission("manage_automation", "import_delivery_lists"):
                     return
                 self.send_json(DELIVERY_AUTOMATION.remove_schedule())
                 return
@@ -1919,6 +2028,13 @@ class Handler(SimpleHTTPRequestHandler):
                         updated_by=user["username"],
                     )
                 )
+                return
+
+            if parsed.path == "/api/admin/roles":
+                user = self.require_permission("manage_roles")
+                if not user:
+                    return
+                self.send_json(STORE.create_role(data, created_by=user["username"]), HTTPStatus.CREATED)
                 return
 
             if parsed.path == "/api/admin/roles/permissions":
@@ -2034,7 +2150,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/admin/manual-edit-lookups":
-                user = self.require_permission("edit_delivery_lists")
+                user = self.require_any_permission("manage_lookup_values", "edit_delivery_lists")
                 if not user:
                     return
                 self.send_json(STORE.add_manual_edit_lookup(data, user["username"]))
@@ -2237,6 +2353,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.move_rack_item(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/move-contents":
+                user = self.require_any_permission("transfer_rack_contents", "manage_racks")
+                if not user:
+                    return
+                self.send_json(STORE.move_rack_contents(data, user["username"]))
                 return
 
             if parsed.path == "/api/racks/clear-item":

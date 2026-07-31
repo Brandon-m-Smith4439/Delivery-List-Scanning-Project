@@ -52,6 +52,12 @@ MIGRATIONS = (
         "Internal reject tracking, manual delivery entries, per-line operational flags, and immutable packing-list print snapshots; v135-r1",
         "_migration_004_v135_operations_workflows",
     ),
+    Migration(
+        5,
+        "v192_action_history_archive",
+        "Thirty-day active action-history retention with immutable logical archive storage and timestamp indexes; v192-r1",
+        "_migration_005_v192_action_history_archive",
+    ),
 )
 
 
@@ -273,6 +279,36 @@ def _migration_004_v135_operations_workflows(connection: Any) -> None:
             "INSERT OR IGNORE INTO reject_locations (label, active, sort_order, created_by, created_at, updated_at) VALUES (?, 1, ?, 'system', ?, ?)",
             (label, sort_order, created, created),
         )
+
+
+def _migration_005_v192_action_history_archive(connection: Any) -> None:
+    """Add immutable logical archive storage for action history older than 30 days."""
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS audit_events_archive (
+            source_event_id INTEGER PRIMARY KEY,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            user_name TEXT NOT NULL DEFAULT '',
+            station TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(payload_json)),
+            created_at TEXT NOT NULL,
+            archived_at_utc TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_events_created_time
+            ON audit_events(created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_events_archive_created_time
+            ON audit_events_archive(created_at DESC, source_event_id DESC);
+        CREATE TRIGGER IF NOT EXISTS trg_audit_events_archive_immutable_update
+            BEFORE UPDATE ON audit_events_archive
+            BEGIN SELECT RAISE(ABORT, 'audit_events_archive is append-only'); END;
+        CREATE TRIGGER IF NOT EXISTS trg_audit_events_archive_immutable_delete
+            BEFORE DELETE ON audit_events_archive
+            BEGIN SELECT RAISE(ABORT, 'audit_events_archive is append-only'); END;
+        """
+    )
 
 
 def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:

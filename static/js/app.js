@@ -128,6 +128,7 @@ const state = {
   bayAllScansRequestId: 0,
   bayScannerStickyResizeObserver: null,
   manageItemsQuery: "",
+  manageItemsFilter: "all",
   manageItemsSelectedId: "",
   bayEditorSelectedGroup: "",
   bayEditorSelectedBay: "",
@@ -233,10 +234,33 @@ const state = {
   rejectHistory: [],
   rejectHistoryRequestId: 0,
   rejectMatches: [],
+  rejectSelectedDeliveryDate: "",
   rejectLogOpening: false,
   rejectMatchRequestId: 0,
   packingListHistory: [],
+  rackHistoryEvents: [],
+  rackHistoryPage: 1,
+  rackHistoryPageSize: 50,
+  rackHistoryTotalCount: 0,
+  rackHistoryTotalPages: 1,
+  rackHistoryUsers: [],
+  rackHistoryActions: [],
+  rackHistoryView: "packing",
+  rackHistoryFilters: {
+    query: "",
+    user: "",
+    action: "",
+    rackGroup: "",
+    rackFrom: "",
+    rackTo: "",
+    dateFrom: "",
+    dateTo: "",
+  },
   operationsModalKind: "",
+};
+
+const actionHistoryUi = {
+  scopes: new Map(),
 };
 
 // DLS_AUTOMATION_LIST_REFRESH_BRIDGE_V121
@@ -254,9 +278,9 @@ function dlsAutomationImportResultTime(entry = {}) {
     || entry.createdAt
     || "",
   ).trim();
-  const parsed = Date.parse(text);
+  const parsed = parseAutomationDateValue(text);
 
-  return Number.isFinite(parsed) ? parsed : 0;
+  return parsed ? parsed.getTime() : 0;
 }
 
 function dlsAutomationImportResultKey(entry = {}, index = 0) {
@@ -293,8 +317,8 @@ function dlsAutomationMergeRecentImports(currentImports = [], incomingImports = 
 }
 
 function dlsAutomationDateLabel(value) {
-  const parsed = new Date(`${value}T12:00:00`);
-  return Number.isNaN(parsed.getTime())
+  const parsed = parseAutomationDateValue(value, { dateOnlyAtNoon: true });
+  return !parsed
     ? value
     : parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }
@@ -747,7 +771,6 @@ const els = {
   redoBtn: document.getElementById("redoBtn"),
 
   racksPage: document.getElementById("racksPage"),
-  rackSummary: document.getElementById("rackSummary"),
   rackListSelect: document.getElementById("rackListSelect"),
   rackSelect: document.getElementById("rackSelect"),
   rackScanForm: document.getElementById("rackScanForm"),
@@ -849,6 +872,7 @@ const els = {
   manageItemsBackdrop: document.getElementById("manageItemsBackdrop"),
   manageItemsCloseBtn: document.getElementById("manageItemsCloseBtn"),
   manageItemsSearch: document.getElementById("manageItemsSearch"),
+  manageItemsFilter: document.getElementById("manageItemsFilter"),
   manageItemsList: document.getElementById("manageItemsList"),
   manageItemsSelected: document.getElementById("manageItemsSelected"),
   manageItemsTargetBay: document.getElementById("manageItemsTargetBay"),
@@ -909,6 +933,8 @@ const els = {
   printRemakeOnly: document.getElementById("printRemakeOnly"),
   printOptionsClose: document.getElementById("printOptionsClose"),
   printOptionsSubmit: document.getElementById("printOptionsSubmit"),
+  printSelectionChips: document.getElementById("printSelectionChips"),
+  printSummaryPreview: document.getElementById("printSummaryPreview"),
 
   adminPage: document.getElementById("adminPage"),
   adminSummary: document.getElementById("adminSummary"),
@@ -936,6 +962,12 @@ const els = {
   operationsModalEyebrow: document.getElementById("operationsModalEyebrow"),
   operationsModalDescription: document.getElementById("operationsModalDescription"),
   operationsModalStatusText: document.getElementById("operationsModalStatusText"),
+  rejectOperationsTabs: document.getElementById("rejectOperationsTabs"),
+  operationsRackTabs: document.getElementById("operationsRackTabs"),
+  operationsRackHistoryCount: document.getElementById("operationsRackHistoryCount"),
+  operationsRackRecordsTabs: document.getElementById("operationsRackRecordsTabs"),
+  operationsAllRacksHistoryCount: document.getElementById("operationsAllRacksHistoryCount"),
+  operationsModalRackActions: document.getElementById("operationsModalRackActions"),
   operationsModalHistory: document.getElementById("operationsModalHistory"),
   operationsModalHistorySummary: document.getElementById("operationsModalHistorySummary"),
   operationsModalHistoryCount: document.getElementById("operationsModalHistoryCount"),
@@ -1086,6 +1118,74 @@ const SPANISH_UI_TEXT = new Map([
   ["Delete", "Eliminar"],
   ["Add", "Agregar"],
   ["Edit", "Editar"],
+  ["Delivery List Update Preview", "Vista previa de cambios de la lista"],
+  ["Latest import changes", "Cambios de la importación más reciente"],
+  ["New Items", "Artículos nuevos"],
+  ["Updated Items", "Artículos actualizados"],
+  ["Preview Updates", "Vista previa de cambios"],
+  ["Move All Contents", "Mover todo el contenido"],
+  ["Move Date Group", "Mover grupo de fecha"],
+  ["Destination rack", "Rack de destino"],
+  ["Move this delivery date", "Mover esta fecha de entrega"],
+  ["Rack transfer", "Transferencia de rack"],
+  ["Move every active piece", "Mover todas las piezas activas"],
+  ["Add Internal Reject", "Agregar rechazo interno"],
+  ["Identify Piece", "Identificar pieza"],
+  ["Matched Piece Summary", "Resumen de la pieza encontrada"],
+  ["Reject Details", "Detalles del rechazo"],
+  ["Quantity Rejected", "Cantidad rechazada"],
+  ["Find Piece", "Buscar pieza"],
+  ["Submit Reject", "Registrar rechazo"],
+  ["Action History", "Historial de acciones"],
+  ["Workspace", "Espacio de trabajo"],
+  ["Rack Action History", "Historial de acciones del rack"],
+  ["Review recent rack status, packing, transfer, and recovery actions.", "Revise acciones recientes de estado, empaque, transferencia y recuperación del rack."],
+  ["Packing List History", "Historial de listas de empaque"],
+  ["Racks History", "Historial de racks"],
+  ["All Racks History", "Historial de todos los racks"],
+  ["Rack Group", "Grupo de racks"],
+  ["All rack groups", "Todos los grupos de racks"],
+  ["Rack from", "Rack desde"],
+  ["Through rack", "Hasta el rack"],
+  ["All racks", "Todos los racks"],
+  ["First rack", "Primer rack"],
+  ["Last rack", "Último rack"],
+  ["All rack activity", "Toda la actividad de racks"],
+  ["Rack history workspace", "Espacio de historial de racks"],
+  ["Audited rack records", "Registros auditados de racks"],
+  ["Selected Rack Action History", "Historial de acciones del rack seleccionado"],
+  ["Only status, packing, transfer, and recovery actions tied to this rack are shown.", "Solo se muestran las acciones de estado, empaque, transferencia y recuperación vinculadas a este rack."],
+  ["Investigate status, scanning, transfer, recovery, setup, and packing actions across every rack.", "Investigue acciones de estado, escaneo, transferencia, recuperación, configuración y empaque en todos los racks."],
+  ["Search racks, actions, users, or details...", "Buscar racks, acciones, usuarios o detalles..."],
+  ["No rack-history events match the selected filters.", "Ningún evento del historial de racks coincide con los filtros seleccionados."],
+  ["No rack history has been recorded yet.", "Todavía no se ha registrado historial de racks."],
+  ["Previous", "Anterior"],
+  ["Next", "Siguiente"],
+  ["Page", "Página"],
+  ["Loading action history...", "Cargando historial de acciones..."],
+  ["Move All Contents", "Mover todo el contenido"],
+  ["Permissions", "Permisos"],
+  ["Available permissions", "Permisos disponibles"],
+  ["Create a new role", "Crear un rol nuevo"],
+  ["Create Role", "Crear rol"],
+  ["Add a new user", "Agregar un usuario nuevo"],
+  ["Create user", "Crear usuario"],
+  ["Import Audit History", "Historial de auditoría de importaciones"],
+  ["Reject Reasons", "Motivos de rechazo"],
+  ["Break Locations", "Ubicaciones de rotura"],
+  ["All Glass Types", "Todos los tipos de vidrio"],
+  ["Exact Glass Types", "Tipos exactos de vidrio"],
+  ["Search log", "Buscar en el historial"],
+  ["Search actions, users, or details...", "Buscar acciones, usuarios o detalles..."],
+  ["User", "Usuario"],
+  ["Action", "Acción"],
+  ["All users", "Todos los usuarios"],
+  ["All actions", "Todas las acciones"],
+  ["From date", "Desde la fecha"],
+  ["Through date", "Hasta la fecha"],
+  ["Action history filters", "Filtros del historial de acciones"],
+  ["No action-history events match the selected filters.", "Ningún evento del historial coincide con los filtros seleccionados."],
+
 ]);
 
 [
@@ -1198,6 +1298,8 @@ const SPANISH_UI_TEXT = new Map([
   ["Manual Assign", "Asignación manual"],
   ["Manual Bay Assign", "Asignación manual de bahía"],
   ["Move Item", "Mover artículo"],
+  ["Move rack item?", "¿Mover artículo del rack?"],
+  ["The destination is validated before the item moves.", "El destino se valida antes de mover el artículo."],
   ["Occupied", "Ocupado"],
   ["Old Bay Review", "Revisión de bahías antiguas"],
   ["Order", "Orden"],
@@ -1206,6 +1308,8 @@ const SPANISH_UI_TEXT = new Map([
   ["Print", "Imprimir"],
   ["Print / Export Delivery Lists", "Imprimir / Exportar listas de entrega"],
   ["Print Packing Slip", "Imprimir lista de empaque"],
+  ["Print Truck Packing Slip", "Imprimir lista de empaque del camión"],
+  ["Uncomplete Rack", "Reabrir rack"],
   ["Products, routes, and process options.", "Productos, rutas y opciones de proceso."],
   ["Progress by route/stage", "Progreso por ruta/etapa"],
   ["Rack recovery", "Recuperación de racks"],
@@ -2370,6 +2474,170 @@ const SPANISH_UI_V105 = new Map([
 
 SPANISH_UI_V105.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
+const SPANISH_UI_V184 = new Map([
+  ["Add Internal Reject", "Agregar rechazo interno"],
+  ["Add Reject", "Agregar rechazo"],
+  ["Action History", "Historial de acciones"],
+  ["Identify Piece", "Identificar pieza"],
+  ["Matched Piece Summary", "Resumen de la pieza encontrada"],
+  ["Reject Details", "Detalles del rechazo"],
+  ["Order Number", "Número de orden"],
+  ["Item Number (Piece)", "Número de artículo (pieza)"],
+  ["Quantity Rejected", "Cantidad rechazada"],
+  ["Find Piece", "Buscar pieza"],
+  ["Waiting for piece", "Esperando la pieza"],
+  ["Waiting for an order and item", "Esperando una orden y un artículo"],
+  ["Reject Reason", "Motivo del rechazo"],
+  ["Source / Location", "Origen / ubicación"],
+  ["Notes / Comments", "Notas / comentarios"],
+  ["Submit Reject", "Enviar rechazo"],
+  ["This action cannot be undone.", "Esta acción no se puede deshacer."],
+  ["Print / Export Delivery Lists", "Imprimir / exportar listas de entrega"],
+  ["Exact Glass Types", "Tipos exactos de vidrio"],
+  ["All Glass Types", "Todos los tipos de vidrio"],
+  ["Selection Summary", "Resumen de selección"],
+  ["Summary Preview", "Vista previa del resumen"],
+  ["Estimated Pieces", "Piezas estimadas"],
+  ["Run Print / Export", "Ejecutar impresión / exportación"],
+  ["Individual Rack", "Rack individual"],
+  ["Rack Overview", "Resumen del rack"],
+  ["Transport loading", "Carga de transporte"],
+  ["Line Items", "Elementos de línea"],
+  ["Move All Contents", "Mover todo el contenido"],
+  ["Move Date Group", "Mover grupo de fecha"],
+  ["Destination rack", "Rack de destino"],
+  ["Packing List Print History", "Historial de impresión de listas de empaque"],
+  ["Racks History", "Historial de racks"],
+  ["All Racks History", "Historial de todos los racks"],
+  ["Rack Group", "Grupo de racks"],
+  ["All rack groups", "Todos los grupos de racks"],
+  ["Rack from", "Rack desde"],
+  ["Through rack", "Hasta el rack"],
+  ["All racks", "Todos los racks"],
+  ["First rack", "Primer rack"],
+  ["Last rack", "Último rack"],
+  ["All rack activity", "Toda la actividad de racks"],
+  ["Rack history workspace", "Espacio de historial de racks"],
+  ["Audited rack records", "Registros auditados de racks"],
+  ["Selected Rack Action History", "Historial de acciones del rack seleccionado"],
+  ["Only status, packing, transfer, and recovery actions tied to this rack are shown.", "Solo se muestran las acciones de estado, empaque, transferencia y recuperación vinculadas a este rack."],
+  ["Investigate status, scanning, transfer, recovery, setup, and packing actions across every rack.", "Investigue acciones de estado, escaneo, transferencia, recuperación, configuración y empaque en todos los racks."],
+  ["Search racks, actions, users, or details...", "Buscar racks, acciones, usuarios o detalles..."],
+  ["No rack-history events match the selected filters.", "Ningún evento del historial de racks coincide con los filtros seleccionados."],
+  ["No rack history has been recorded yet.", "Todavía no se ha registrado historial de racks."],
+  ["Previously printed packing lists", "Listas de empaque impresas anteriormente"],
+  ["Open Snapshot", "Abrir instantánea"],
+  ["In-Transit Manifest", "Manifiesto en tránsito"],
+  ["Delivery List Update Preview", "Vista previa de actualización de lista de entrega"],
+  ["New Items", "Artículos nuevos"],
+  ["Updated Items", "Artículos actualizados"],
+  ["Create New Role", "Crear nuevo rol"],
+  ["Role name", "Nombre del rol"],
+  ["Select all", "Seleccionar todo"],
+  ["Clear all", "Quitar todo"],
+  ["Create Role", "Crear rol"],
+  ["Create New User", "Crear nuevo usuario"],
+  ["Save User", "Guardar usuario"],
+  ["Lookup Manager", "Administrador de catálogos"],
+  ["Reject Reasons", "Motivos de rechazo"],
+  ["Break Locations", "Ubicaciones de rotura"],
+  ["Delivery Automation Control Center", "Centro de control de automatización de entregas"],
+  ["Import History", "Historial de importaciones"],
+  ["Current Priority Work", "Trabajo prioritario actual"],
+  ["Select missing", "Seleccionar faltantes"],
+  ["Choose the missing glass items", "Elija los artículos de vidrio faltantes"],
+  ["Set Rush handling", "Configurar manejo urgente"],
+  ["Apply Rush", "Aplicar urgente"],
+  ["Clear selected Rush", "Quitar urgente seleccionado"],
+  ["Rack Operations", "Operaciones de racks"],
+  ["Review assigned pieces, current rack status, packing actions, and controlled rack recovery from one live workspace.", "Revise las piezas asignadas, el estado actual del rack, las acciones de empaque y la recuperación controlada del rack desde un solo espacio de trabajo."],
+  ["Individual rack workspace", "Espacio de trabajo del rack individual"],
+  ["Live rack data", "Datos del rack en vivo"],
+  ["Rack Records", "Registros de racks"],
+  ["Search immutable packing-list snapshots and reopen the exact rack contents captured at print time.", "Busque instantáneas inmutables de listas de empaque y vuelva a abrir el contenido exacto del rack capturado al imprimir."],
+  ["Packing history workspace", "Espacio de historial de empaque"],
+  ["Audited snapshots", "Instantáneas auditadas"],
+  ["Move to another rack", "Mover a otro rack"],
+  ["Rack not found.", "No se encontró el rack."],
+  ["Select destination...", "Seleccione el destino..."],
+  ["Select destination rack...", "Seleccione el rack de destino..."],
+  ["Confirm Move", "Confirmar movimiento"],
+  ["Moves the complete rack after validating every destination rule.", "Mueve todo el contenido después de validar cada regla de destino."],
+  ["Each record is an immutable snapshot of what was on the rack at print time.", "Cada registro es una instantánea inmutable de lo que había en el rack al momento de imprimir."],
+  ["Search rack, date, or user...", "Buscar rack, fecha o usuario..."],
+  ["Printed", "Impreso"],
+  ["Contents", "Contenido"],
+  ["Printed by", "Impreso por"],
+  ["No packing lists have been printed since v135 history tracking was installed.", "No se han impreso listas de empaque desde que se instaló el historial de v135."],
+  ["Review the exact new and updated items from the newest import batch.", "Revise los artículos exactos nuevos y actualizados del lote de importación más reciente."],
+  ["Loading changes", "Cargando cambios"],
+  ["Loading the newest changed items...", "Cargando los artículos modificados más recientes..."],
+  ["Role name *", "Nombre del rol *"],
+  ["Description", "Descripción"],
+  ["Starting permissions", "Permisos iniciales"],
+  ["Unchecked permissions will not be granted.", "Los permisos no seleccionados no se otorgarán."],
+  ["Permissions in use", "Permisos en uso"],
+  ["Available permissions", "Permisos disponibles"],
+  ["Accounts & access", "Cuentas y acceso"],
+  ["User directory", "Directorio de usuarios"],
+  ["Internal Reject Configuration", "Configuración de rechazos internos"],
+  ["Reasons & Break Locations", "Motivos y ubicaciones de rotura"],
+  ["Why the piece was rejected.", "Por qué se rechazó la pieza."],
+  ["Where the defect or break occurred.", "Dónde ocurrió el defecto o la rotura."],
+  ["Keep choices concise and floor-friendly. Changes appear immediately in the Add Internal Reject form.", "Mantenga las opciones breves y fáciles de usar en planta. Los cambios aparecen de inmediato en el formulario Agregar rechazo interno."],
+  ["No optional filters", "Sin filtros opcionales"],
+  ["All Orders", "Todas las órdenes"],
+  ["All Customers", "Todos los clientes"],
+  ["Rush Order", "Orden urgente"],
+  ["Add Rush", "Agregar urgente"],
+  ["Delivery Lists & Scanning", "Listas de entrega y escaneo"],
+  ["Imports, Editing & Output", "Importaciones, edición y salida"],
+  ["Administration & Access", "Administración y acceso"],
+  ["Indian Trail & Bays", "Indian Trail y bahías"],
+  ["Racks & Transportation", "Racks y transporte"],
+  ["View Delivery Lists", "Ver listas de entrega"],
+  ["Scan Delivery Lists", "Escanear listas de entrega"],
+  ["Use Assigned Stations", "Usar estaciones asignadas"],
+  ["View Scan History", "Ver historial de escaneos"],
+  ["Correct Scans", "Corregir escaneos"],
+  ["Reset Delivery Lists", "Restablecer listas de entrega"],
+  ["Manage Scan Exceptions", "Administrar excepciones de escaneo"],
+  ["Import Delivery Lists", "Importar listas de entrega"],
+  ["Preview Delivery Imports", "Vista previa de importaciones"],
+  ["Preview Delivery Updates", "Vista previa de actualizaciones"],
+  ["Edit Delivery Lists", "Editar listas de entrega"],
+  ["Print Export", "Imprimir y exportar"],
+  ["View Reports", "Ver informes"],
+  ["View Admin", "Ver administración"],
+  ["Manage Users", "Administrar usuarios"],
+  ["Manage User Access", "Administrar acceso de usuarios"],
+  ["Manage Roles", "Administrar roles"],
+  ["View Sessions", "Ver sesiones"],
+  ["Manage Stations", "Administrar estaciones"],
+  ["Manage Route Rules", "Administrar reglas de ruta"],
+  ["Manage Lookup Values", "Administrar valores de catálogo"],
+  ["Manage Automation", "Administrar automatización"],
+  ["View Indian Trail", "Ver Indian Trail"],
+  ["Receive Indian Trail", "Recibir en Indian Trail"],
+  ["View Bays", "Ver bahías"],
+  ["Assign Bay Items", "Asignar artículos a bahías"],
+  ["Move Bay Items", "Mover artículos entre bahías"],
+  ["Clear Bay Items", "Quitar artículos de bahías"],
+  ["Manage Rush Work", "Administrar trabajo urgente"],
+  ["Run Bay Checks", "Ejecutar revisiones de bahías"],
+  ["View Bay Reports", "Ver informes de bahías"],
+  ["Manage Bay Layout", "Administrar diseño de bahías"],
+  ["View Racks", "Ver racks"],
+  ["Scan Racks", "Escanear racks"],
+  ["Manage Racks", "Administrar racks"],
+  ["Transfer Rack Contents", "Transferir contenido de racks"],
+  ["View Rejects", "Ver rechazos"],
+  ["Log Rejects", "Registrar rechazos"],
+  ["Manage Reject Settings", "Administrar configuración de rechazos"],
+  ["Manage Reject Records", "Administrar registros de rechazo"],
+]);
+SPANISH_UI_V184.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
 const SPANISH_PLACEHOLDERS = new Map([
   ["Global search...", "Búsqueda global..."],
   ["Search date, stage, route...", "Buscar fecha, etapa o ruta..."],
@@ -2433,6 +2701,7 @@ function spanishBayCategoryLabel(category, plural = false) {
 }
 
 const SPANISH_DYNAMIC_PATTERNS = [
+  [/^(\d+) of (\d+) events shown$/i, (_, shown, total) => `${shown} de ${total} eventos mostrados`],
   [/^Delivery List for\s+(.+)$/i, (_, date) => `Lista de entrega para ${date}`],
   [/^(.+?)\s+-\s+(Staging - Airport Rd|Outbound - Airport Rd|Inbound - Indian Trail|BFS Greenville|Customer Pickup|DTC - Deliver to Customer)$/i, (_, prefix, stage) => `${prefix} - ${translatedUiValue(stage).trim()}`],
   [/^(Staged|Outbound|Received|Delivered|Greenville|CPU):\s*(.*)$/i, (_, stage, value) => `${translatedUiValue(stage).trim()}: ${value}`],
@@ -6325,22 +6594,12 @@ function filteredSortedRacks(racks = []) {
 function renderRacksPage() {
   renderRackSelects();
 
-  const summary = state.rackSummary || {};
-
-  if (els.rackSummary) {
-    els.rackSummary.innerHTML = [
-      miniStat("Rack Pieces", summary.rackQty || 0),
-      miniStat("Truck Pieces", summary.truckQty || 0),
-      miniStat("Active Racks", summary.rackCount || 0),
-    ].join("");
-  }
-
   if (!els.rackGrid) return;
 
   const rackGroups = new Map();
 
   for (const rack of state.racks) {
-    const label = rack.code === "T" || /truck/i.test(rack.type) ? "Truck" : rack.type || "Racks";
+    const label = rackGroupLabel(rack);
 
     if (!rackGroups.has(label)) {
       rackGroups.set(label, []);
@@ -6364,69 +6623,36 @@ function renderRacksPage() {
    */
   const renderRackItem = (item, currentRackCode = "") => {
     const rackItemId = String(item.rackItemId || "");
-    const moveOpen = state.rackMoveItemId === rackItemId;
-
-    const destinationOptions = state.racks
-      .filter((target) => target.code !== currentRackCode)
-      .map((target) => `<option value="${escapeHtml(target.code)}">${rackOptionLabel(target)}</option>`)
-      .join("");
-
+    const itemLabel = `${item.order}-${item.item}`;
     return `
-      <article class="rack-item ${moveOpen ? "is-moving" : ""}">
+      <article class="rack-item">
         <div>
-          <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} <span>${escapeHtml(item.customer || "")}</span></strong>
+          <strong>${escapeHtml(itemLabel)} <span>${escapeHtml(item.customer || "")}</span></strong>
           <small>${escapeHtml(item.job || item.product || "")}</small>
           <small>${escapeHtml(item.product || item.job || "")} | ${escapeHtml(item.dimensions || "")} | Qty ${escapeHtml(item.rackQty || 1)}</small>
           <small class="rack-scan-time">${escapeHtml(item.deliveryLabel || "")}${item.rackAddedAt ? ` | Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}` : ""}</small>
         </div>
-
-        ${
-          hasPermission("manage_racks")
-            ? `<div class="rack-item-actions">
-                <button
-                  type="button"
-                  class="icon-only icon-move"
-                  data-rack-move-open="${escapeHtml(rackItemId)}"
-                  title="Move piece"
-                  aria-label="Move ${escapeHtml(item.order)}-${escapeHtml(item.item)}"
-                ></button>
-                <button
-                  type="button"
-                  class="icon-only icon-trash danger"
-                  data-rack-clear-item="${escapeHtml(rackItemId)}"
-                  data-rack-clear-label="${escapeHtml(`${item.order}-${item.item}`)}"
-                  title="Clear piece"
-                  aria-label="Clear ${escapeHtml(item.order)}-${escapeHtml(item.item)}"
-                ></button>
-              </div>
-
-              ${
-                moveOpen
-                  ? `<div class="rack-move-popover">
-                      <div class="rack-move-title">
-                        <strong>Move Piece</strong>
-                        <span>${escapeHtml(item.order)}-${escapeHtml(item.item)}</span>
-                      </div>
-
-                      <label>
-                        <span>Move to</span>
-                        <select data-rack-target="${escapeHtml(rackItemId)}">
-                          <option value="">Select destination...</option>
-                          ${destinationOptions}
-                        </select>
-                      </label>
-
-                      <div class="rack-move-actions">
-                        <button type="button" class="rack-move-cancel" data-rack-move-cancel="${escapeHtml(rackItemId)}">Cancel</button>
-                        <button type="button" class="rack-move-confirm" data-rack-move="${escapeHtml(rackItemId)}" ${destinationOptions ? "" : "disabled"}>Confirm Move</button>
-                      </div>
-                    </div>`
-                  : ""
-              }`
-            : ""
-        }
-      </article>
-    `;
+        ${hasPermission("manage_racks") ? `
+          <div class="rack-item-actions">
+            <button
+              type="button"
+              class="icon-only icon-move rack-scope-move-button"
+              data-rack-move-item="${escapeHtml(rackItemId)}"
+              data-source-rack="${escapeHtml(currentRackCode)}"
+              data-rack-item-label="${escapeHtml(itemLabel)}"
+              title="Move piece"
+              aria-label="Move ${escapeHtml(itemLabel)}"
+            ></button>
+            <button
+              type="button"
+              class="icon-only icon-trash danger"
+              data-rack-clear-item="${escapeHtml(rackItemId)}"
+              data-rack-clear-label="${escapeHtml(itemLabel)}"
+              title="Clear piece"
+              aria-label="Clear ${escapeHtml(itemLabel)}"
+            ></button>
+          </div>` : ""}
+      </article>`;
   };
 
   /**
@@ -7106,14 +7332,19 @@ async function clearRackSet(label) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-async function moveRackItem(rackItemId) {
-  const select = document.querySelector(`[data-rack-target="${CSS.escape(String(rackItemId))}"]`);
-  const targetRackCode = select?.value || "";
-
+async function moveRackItem(rackItemId, targetRackCode, sourceRackCode = "", itemLabel = "this item") {
   if (!targetRackCode) {
     showFloatingNotice("Choose a destination rack before confirming the move.", "notice");
     return;
   }
+  const confirmed = await confirmWebAppAction({
+    title: "Move rack item?",
+    message: `Move <strong>${escapeHtml(itemLabel)}</strong>${sourceRackCode ? ` from <strong>${escapeHtml(sourceRackCode)}</strong>` : ""} to <strong>${escapeHtml(targetRackCode)}</strong>?`,
+    details: "The destination is validated before the item moves.",
+    confirmLabel: "Move Item",
+    danger: false,
+  });
+  if (!confirmed) return;
 
   const payload = await fetchJson("/api/racks/move-item", {
     method: "POST",
@@ -7123,8 +7354,9 @@ async function moveRackItem(rackItemId) {
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   state.rackMoveItemId = "";
-
   renderRacksPage();
+  playAppSound("rack_item_added");
+  showSaveConfirmation(payload.message || `${itemLabel} was moved to ${targetRackCode}.`);
 }
 
 /**
@@ -9605,7 +9837,7 @@ function showPage(page) {
   if (page === "admin" && !hasAnyPermission(["view_admin", "manage_users", "manage_stations", "edit_delivery_lists"])) page = "home";
   if (page === "bays" && !hasAnyPermission(["view_bays", "view_indian_trail"])) page = "home";
   if (page === "racks" && !hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) page = "home";
-  if (page === "rejects" && !hasPermission("view_lists")) page = "home";
+  if (page === "rejects" && !hasAnyPermission(["view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records", "view_lists"])) page = "home";
   const pageChanged = state.page !== page;
   if (page === "home") state.expandedDeliveryDate = "";
   state.page = page;
@@ -11749,27 +11981,8 @@ function closeInTransitManifest(updateLock = true) {
  */
 function renderIndianTrailSummary(summary) {
   if (!els.indianTrailSummary) return;
-  const overview = bayOverview();
-  const assigned = overview.occupied + overview.preassigned + overview.sdi;
-  const openPct = overview.total ? Math.round((overview.available / overview.total) * 100) : 0;
-
-  els.indianTrailSummary.innerHTML = `
-    <div class="bay-command-stat primary">
-      <small>Bay availability</small>
-      <strong>${escapeHtml(overview.available)} open</strong>
-      <span>${escapeHtml(openPct)}% of ${escapeHtml(overview.total)} physical bays ready</span>
-    </div>
-    <div class="bay-command-stat">
-      <small>Assigned / occupied</small>
-      <strong>${escapeHtml(assigned)}</strong>
-      <span>${escapeHtml(overview.occupied)} occupied | ${escapeHtml(overview.preassigned)} preassigned</span>
-    </div>
-    <div class="bay-command-stat warning">
-      <small>Needs attention</small>
-      <strong>${escapeHtml(Number(summary?.needsCheck ?? 0) + overview.sdi + overview.blocked)}</strong>
-      <span>${escapeHtml(overview.sdi)} SDI | ${escapeHtml(overview.manual || 0)} manual assign | ${escapeHtml(overview.blocked)} blocked</span>
-    </div>
-  `;
+  els.indianTrailSummary.innerHTML = "";
+  els.indianTrailSummary.hidden = true;
 }
 
 /**
@@ -13014,7 +13227,7 @@ function renderBaySidePanels() {
                             <button type="button" title="Open manage workflow" data-assignment-action="manage" data-assignment-id="${escapeHtml(first.id)}">Manage</button>
                             <button type="button" title="Move this job" data-assignment-action="move" data-assignment-id="${escapeHtml(first.id)}">Move</button>
                             <button type="button" title="Clear this job from bay" data-assignment-action="clear" data-assignment-id="${escapeHtml(first.id)}">Clear</button>
-                            <button type="button" title="Mark or clear Rush / Remake" data-assignment-action="sdi" data-assignment-id="${escapeHtml(first.id)}" data-order-no="${escapeHtml(first.order)}">Rush / Remake</button>
+                            <button type="button" title="Mark or clear Rush" data-assignment-action="sdi" data-assignment-id="${escapeHtml(first.id)}" data-order-no="${escapeHtml(first.order)}">Rush</button>
                           </div>
                         </div>
                       </details>
@@ -13182,6 +13395,8 @@ function openStaleBayPanel(orders = state.staleBayOrders) {
   if (els.staleBaySortSelect) els.staleBaySortSelect.value = "age-desc";
   renderStaleBayPanel(state.staleBayOrders);
   els.staleBayPanel.hidden = false;
+  setBayModalSection("stale", "workspace");
+  void loadBayModalActionHistory("stale");
   els.staleBayBackdrop.hidden = false;
   updateModalScrollLock();
   window.setTimeout(() => els.staleBaySearchInput?.focus(), 0);
@@ -13366,6 +13581,7 @@ async function snoozeStaleBayOrders(assignmentIds, days) {
   updateOldBayAttentionBadge(state.staleBayOrders);
   renderStaleBayPanel(state.staleBayOrders);
   await refreshBayMapPage();
+  void loadBayModalActionHistory("stale");
 }
 
 /**
@@ -13996,8 +14212,31 @@ function bayAssignmentRows() {
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function manageItemMatchesFilter(row) {
+  const filter = String(state.manageItemsFilter || "all");
+  if (filter === "all") return true;
+  const assignment = row?.assignment || {};
+  const status = String(assignment.status || "").toLowerCase();
+  if (filter === "preassigned") return status === "preassigned";
+  if (filter === "assigned") return !["preassigned", "cleared", "cancelled"].includes(status);
+  if (filter === "rush") return isRushItem(assignment) && !isRemakeItem(assignment);
+  if (filter === "needs-review") return /blocked|hold|needs|error|review/.test(`${status} ${assignment.reason || ""}`.toLowerCase());
+  return true;
+}
+
+function filteredManageItemRows() {
+  const query = String(state.manageItemsQuery || "").trim().toLowerCase();
+  return bayAssignmentRows().filter((row) => {
+    if (!manageItemMatchesFilter(row)) return false;
+    if (!query) return true;
+    const { bay, assignment } = row;
+    return [bay.bayCode, bay.displayName, bay.mapSection, assignment.order, assignment.item, assignment.customer, assignment.product, assignment.job, assignment.dimensions, assignment.status]
+      .join(" ").toLowerCase().includes(query);
+  });
+}
+
 function selectedManageItem() {
-  const rows = bayAssignmentRows();
+  const rows = filteredManageItemRows();
   if (!state.manageItemsSelectedId && rows.length) state.manageItemsSelectedId = String(rows[0].assignment.id || "");
   return rows.find(({ assignment }) => String(assignment.id) === String(state.manageItemsSelectedId)) || rows[0] || null;
 }
@@ -14027,28 +14266,14 @@ function bayOptionGroups(selectedValue = "") {
  */
 function renderManageItemsPanel() {
   if (!els.manageItemsPanel) return;
-  const query = String(state.manageItemsQuery || "").trim().toLowerCase();
-  const rows = bayAssignmentRows().filter(({ bay, assignment }) => {
-    if (!query) return true;
-    return [
-      bay.bayCode,
-      bay.displayName,
-      bay.mapSection,
-      assignment.order,
-      assignment.item,
-      assignment.customer,
-      assignment.product,
-      assignment.job,
-      assignment.dimensions,
-      assignment.status,
-    ].join(" ").toLowerCase().includes(query);
-  });
+  const rows = filteredManageItemRows();
   if (!rows.some(({ assignment }) => String(assignment.id) === String(state.manageItemsSelectedId))) {
     state.manageItemsSelectedId = rows[0]?.assignment.id ? String(rows[0].assignment.id) : "";
   }
   const selected = selectedManageItem();
 
   if (els.manageItemsSearch && els.manageItemsSearch.value !== state.manageItemsQuery) els.manageItemsSearch.value = state.manageItemsQuery;
+  if (els.manageItemsFilter) els.manageItemsFilter.value = state.manageItemsFilter || "all";
   if (els.manageItemsList) {
     els.manageItemsList.innerHTML = rows.length
       ? rows.map(({ bay, assignment, jobLabel, itemCount, totalQty, orderLine }) => `
@@ -14105,6 +14330,8 @@ function openManageItemsPanel(assignmentId = "") {
   else if (selectedBayAssignment()?.id) state.manageItemsSelectedId = String(selectedBayAssignment().id);
   renderManageItemsPanel();
   els.manageItemsPanel.hidden = false;
+  setBayModalSection("manage", "workspace");
+  void loadBayModalActionHistory("manage");
   els.manageItemsBackdrop.hidden = false;
   updateModalScrollLock();
   els.manageItemsSearch?.focus();
@@ -14142,6 +14369,7 @@ async function moveManagedItem() {
   await refreshBayMapPage();
   if (els.manageItemsStatus) els.manageItemsStatus.textContent = `Moved ${selected.jobLabel || `${selected.assignment.order}-${selected.assignment.item}`} to ${targetBay}.`;
   renderManageItemsPanel();
+  void loadBayModalActionHistory("manage");
 }
 
 /**
@@ -14171,6 +14399,7 @@ async function clearManagedItem() {
   await refreshBayMapPage();
   if (els.manageItemsStatus) els.manageItemsStatus.textContent = `Cleared ${label}.`;
   renderManageItemsPanel();
+  void loadBayModalActionHistory("manage");
   playAppSound("destructive_action", { force: true });
 }
 
@@ -14212,6 +14441,7 @@ function bayEditorGroups() {
  */
 function bayEditorSelectedGroupObject() {
   const groups = bayEditorGroups();
+  if (state.bayEditorSelectedGroup === "__new__") return null;
   if (!state.bayEditorSelectedGroup && groups.length) state.bayEditorSelectedGroup = groups[0].label;
   return groups.find((group) => group.label === state.bayEditorSelectedGroup) || groups[0] || null;
 }
@@ -14305,7 +14535,6 @@ function renderBayEditorPanel() {
           <button type="button" class="danger" data-bay-editor-action="delete-group">Delete Group</button>
         </div>
       </div>
-      ${bayEditorNewGroupFormMarkup(false)}
     `;
   }
 
@@ -14390,6 +14619,8 @@ function openBayEditorPanel(groupLabel = "") {
   state.bayEditorSelectedGroup = groupLabel || state.bayEditorSelectedGroup || bayPhysicalSections()[0]?.label || "";
   renderBayEditorPanel();
   els.bayEditorPanel.hidden = false;
+  setBayModalSection("editor", "workspace");
+  void loadBayModalActionHistory("editor");
   els.bayEditorBackdrop.hidden = false;
   updateModalScrollLock();
 }
@@ -14414,6 +14645,7 @@ async function refreshBayEditorAfter(payload) {
   if (payload?.bays) state.bays = payload.bays;
   await refreshBayMapPage();
   renderBayEditorPanel();
+  void loadBayModalActionHistory("editor");
 }
 
 /**
@@ -14786,7 +15018,7 @@ function renderSdiLookupResults() {
  * Flow: Returns the existing select value or an empty string when the control is unavailable.
  */
 function sdiSelectionType() {
-  return els.sdiTypeInput?.value || "";
+  return "Rush";
 }
 
 /**
@@ -14819,24 +15051,22 @@ function selectedSdiItems() {
  */
 function updateSdiSelectionSummary() {
   const selected = selectedSdiItems();
-  const markedSelected = selected.filter((item) => item.marked);
+  const rushSelected = selected.filter((item) => item.rush && !item.remake);
   const missingSelected = selected.filter((item) => Number(item.missingQty || 0) > 0);
-  const orderType = sdiSelectionType();
   if (els.sdiSelectionSummary) {
     els.sdiSelectionSummary.textContent = selected.length
-      ? `${selected.length} item${selected.length === 1 ? "" : "s"} selected · ${missingSelected.length} missing${orderType ? ` · ${orderType}` : ""}`
+      ? `${selected.length} item${selected.length === 1 ? "" : "s"} selected · ${missingSelected.length} missing · Rush`
       : "No items selected";
   }
   const markButton = els.sdiForm?.querySelector('[data-sdi-action="mark"]');
-  if (markButton) markButton.disabled = !selected.length || !orderType;
+  if (markButton) markButton.disabled = !selected.length;
   if (els.sdiClearBtn) {
-    els.sdiClearBtn.disabled = !markedSelected.length;
-    els.sdiClearBtn.title = markedSelected.length ? "Clear Rush or Remake from the selected marked items" : "Select a currently marked item to clear it";
+    els.sdiClearBtn.disabled = !rushSelected.length;
+    els.sdiClearBtn.title = rushSelected.length ? "Clear Rush from the selected marked items" : "Select a currently marked Rush item to clear it";
   }
   if (els.sdiTruckExemptInput) {
-    const enabled = orderType === "Rush" && selected.length > 0;
-    els.sdiTruckExemptInput.disabled = !enabled;
-    if (!enabled) els.sdiTruckExemptInput.checked = false;
+    els.sdiTruckExemptInput.disabled = selected.length === 0;
+    if (!selected.length) els.sdiTruckExemptInput.checked = false;
   }
 }
 
@@ -14848,7 +15078,6 @@ function updateSdiSelectionSummary() {
 function renderSdiItemSelection() {
   if (!els.sdiItemSelectionList) return;
   const items = state.sdiWorkspace?.items || [];
-  const orderType = sdiSelectionType();
   if (!items.length) {
     els.sdiItemSelectionList.innerHTML = `<span class="admin-empty">Choose a predictive job or order result to review exact items.</span>`;
     updateSdiSelectionSummary();
@@ -14856,30 +15085,24 @@ function renderSdiItemSelection() {
   }
   els.sdiItemSelectionList.innerHTML = items.map((item) => {
     const complete = Boolean(item.complete);
-    const disabled = orderType === "Rush" && complete && !item.marked;
+    const disabled = complete && !item.rush;
     const checked = state.sdiSelectedLineItemIds.has(String(item.lineItemId)) && !disabled;
-    const typeLabel = item.remake ? "Remake" : item.rush ? "Rush" : "";
     const location = item.bayDisplay || item.bayCode || "Not assigned to a bay";
-    const fulfillment = complete
-      ? `In bay ${item.inBayQty}/${item.qty}`
-      : `${item.missingQty} missing · In bay ${item.inBayQty}/${item.qty}`;
-    const note = complete
-      ? orderType === "Remake"
-        ? "Select this exact item if the glass in the bay broke; it will be removed from the bay and made missing."
-        : "Already fulfilled in a bay; skipped for a job-level Rush."
-      : "Selected by default because this item is still missing from the bay.";
+    const fulfillment = complete ? `In bay ${item.inBayQty}/${item.qty}` : `${item.missingQty} missing · In bay ${item.inBayQty}/${item.qty}`;
+    const note = item.rush
+      ? "This item is already marked Rush and can be updated or cleared."
+      : complete
+        ? "Already fulfilled in a bay; protected from a new Rush mark."
+        : "Selected by default because this item is still missing from the bay.";
     return `
       <label class="sdi-item-row ${complete ? "is-complete" : "is-missing"} ${disabled ? "is-disabled" : ""}">
         <input type="checkbox" data-sdi-line-item-id="${escapeHtml(item.lineItemId)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
         <span class="sdi-item-main">
-          <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} ${typeLabel ? `<b>${escapeHtml(typeLabel)}</b>` : ""}</strong>
+          <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} ${item.rush ? `<b>Rush</b>` : ""}</strong>
           <small>${escapeHtml(item.product || "Glass item")} ${item.dimensions ? `· ${escapeHtml(item.dimensions)}` : ""}</small>
           <em>${escapeHtml(note)}</em>
         </span>
-        <span class="sdi-item-status">
-          <strong>${escapeHtml(fulfillment)}</strong>
-          <small>${escapeHtml(location)}</small>
-        </span>
+        <span class="sdi-item-status"><strong>${escapeHtml(fulfillment)}</strong><small>${escapeHtml(location)}</small></span>
       </label>
     `;
   }).join("");
@@ -14897,7 +15120,7 @@ function currentPriorityItems(groups = state.sdiWorkspace?.currentGroups || []) 
   for (const group of Array.isArray(groups) ? groups : []) {
     for (const item of Array.isArray(group.items) ? group.items : []) {
       const id = String(item.lineItemId || "");
-      if (!id || seen.has(id)) continue;
+      if (!id || seen.has(id) || !item.rush || item.remake) continue;
       seen.add(id);
       items.push({ ...item, groupKey: String(group.key || ""), groupJob: group.job || item.job || item.order, groupCustomer: group.customer || item.customer, groupDeliveryDate: group.deliveryDate || item.priorityDeliveryDate || item.deliveryDate });
     }
@@ -14907,12 +15130,10 @@ function currentPriorityItems(groups = state.sdiWorkspace?.currentGroups || []) 
 
 function filteredSdiCurrentGroups(groups = state.sdiWorkspace?.currentGroups || []) {
   const query = String(state.sdiCurrentQuery || "").trim().toLowerCase();
-  const typeFilter = String(state.sdiCurrentTypeFilter || "all");
   return (Array.isArray(groups) ? groups : []).map((group) => {
     const groupHaystack = `${group.job || ""} ${group.customer || ""} ${group.deliveryDate || ""}`.toLowerCase();
     const items = (group.items || []).filter((item) => {
-      if (typeFilter === "rush" && !item.rush) return false;
-      if (typeFilter === "remake" && !item.remake) return false;
+      if (!item.rush || item.remake) return false;
       if (!query) return true;
       const itemHaystack = `${item.order || ""} ${item.item || ""} ${item.job || ""} ${item.customer || ""} ${item.product || ""} ${item.dimensions || ""} ${item.bayDisplay || item.bayCode || ""} ${item.priorityDeliveryDate || item.deliveryDate || ""}`.toLowerCase();
       return groupHaystack.includes(query) || itemHaystack.includes(query);
@@ -14942,20 +15163,17 @@ async function beginPriorityWorkEdit(lineItemIds, lookup = "") {
   }
   await loadSdiWorkspace(resolvedLookup);
   state.sdiSelectedLineItemIds = new Set(ids);
-  if (els.sdiTypeInput) {
-    els.sdiTypeInput.value = selected.every((item) => item.remake) ? "Remake" : "Rush";
-    syncCustomSelect(els.sdiTypeInput);
-  }
+  if (els.sdiTypeInput) els.sdiTypeInput.value = "Rush";
   if (els.sdiDeliveryDateInput) els.sdiDeliveryDateInput.value = first.priorityDeliveryDate || first.groupDeliveryDate || first.deliveryDate || "";
   if (els.sdiTruckExemptInput) els.sdiTruckExemptInput.checked = selected.some((item) => Boolean(item.priorityDirectToTruck));
   if (els.sdiReasonInput) {
-    const reason = String(first.priorityReason || "").replace(/^\s*(?:Rush|Remake)\s*-\s*/i, "").trim();
-    els.sdiReasonInput.value = reason || "Priority work updated";
+    const reason = String(first.priorityReason || "").replace(/^\s*(?:Rush|SDI)\s*-\s*/i, "").trim();
+    els.sdiReasonInput.value = reason || "Rush work updated";
   }
   renderSdiItemSelection();
   updateSdiSelectionSummary();
   document.querySelector("#sdiPanel .sdi-action-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
-  showFloatingNotice(`${selected.length} priority item${selected.length === 1 ? " is" : "s are"} ready to edit.`, "notice");
+  showFloatingNotice(`${selected.length} Rush item${selected.length === 1 ? " is" : "s are"} ready to edit.`, "notice");
 }
 
 async function clearPriorityWorkItems(lineItemIds, label = "selected priority work") {
@@ -14963,9 +15181,9 @@ async function clearPriorityWorkItems(lineItemIds, label = "selected priority wo
   if (!ids.length) return;
   const confirmed = await confirmWebAppAction({
     title: `Clear ${label}?`,
-    message: `This removes the Rush / Remake mark from ${ids.length} item${ids.length === 1 ? "" : "s"}.`,
+    message: `This removes the Rush mark from ${ids.length} item${ids.length === 1 ? "" : "s"}.`,
     details: "The glass remains on its delivery lists; only priority handling is cleared.",
-    confirmLabel: "Clear priority work",
+    confirmLabel: "Clear Rush work",
     danger: true,
   });
   if (!confirmed) return;
@@ -14983,7 +15201,9 @@ async function clearPriorityWorkItems(lineItemIds, label = "selected priority wo
  */
 function renderSdiCurrentList() {
   if (!els.sdiCurrentList) return;
-  const allGroups = (state.sdiWorkspace?.currentGroups || []).filter((group) => Array.isArray(group.items) && group.items.length);
+  const allGroups = (state.sdiWorkspace?.currentGroups || [])
+    .map((group) => ({ ...group, items: (group.items || []).filter((item) => item.rush && !item.remake) }))
+    .filter((group) => group.items.length);
   const groups = filteredSdiCurrentGroups(allGroups);
   const validGroupKeys = new Set(allGroups.map((group) => String(group.key || "")));
   state.sdiExpandedCurrentGroups = new Set([...state.sdiExpandedCurrentGroups].filter((key) => validGroupKeys.has(String(key))));
@@ -14994,14 +15214,9 @@ function renderSdiCurrentList() {
     if (!dateMap.has(dateKey)) dateMap.set(dateKey, []);
     dateMap.get(dateKey).push(group);
   }
-  const dateEntries = [...dateMap.entries()].sort(([left], [right]) => {
-    if (left === "undated") return 1;
-    if (right === "undated") return -1;
-    return left.localeCompare(right);
-  });
+  const dateEntries = [...dateMap.entries()].sort(([left], [right]) => left === "undated" ? 1 : right === "undated" ? -1 : left.localeCompare(right));
   const validDates = new Set(dateEntries.map(([date]) => date));
   state.sdiExpandedCurrentDates = new Set([...state.sdiExpandedCurrentDates].filter((date) => validDates.has(String(date))));
-
   if (dateEntries.length && !state.sdiCurrentGroupsInitialized) {
     const [firstDate, firstGroups] = dateEntries[0];
     state.sdiExpandedCurrentDates.add(firstDate);
@@ -15014,56 +15229,43 @@ function renderSdiCurrentList() {
   const allItems = currentPriorityItems(allGroups);
   const visibleItems = currentPriorityItems(groups);
   const markedCount = allItems.length;
-  const visibleCount = visibleItems.length;
+  const currentTabCount = document.getElementById("sdiCurrentTabCount");
+  if (currentTabCount) currentTabCount.textContent = String(markedCount);
+
   const renderJobGroup = (group, groupIndex, dateIndex) => {
     const key = String(group.key || "");
     const expanded = state.sdiExpandedCurrentGroups.has(key);
-    const rushCount = group.items.filter((item) => item.rush).length;
-    const remakeCount = group.items.filter((item) => item.remake).length;
-    const itemCount = group.items.length;
-    const groupPanelId = `sdi-current-group-${dateIndex}-${groupIndex}`;
+    const panelId = `sdi-current-group-${dateIndex}-${groupIndex}`;
     const completeGroup = allGroups.find((candidate) => String(candidate.key || "") === key) || group;
     const itemIds = (completeGroup.items || []).map((item) => String(item.lineItemId || "")).filter(Boolean).join("|");
     return `
       <article class="sdi-current-group ${expanded ? "is-expanded" : ""}">
-        <button type="button" class="sdi-current-group-toggle" data-sdi-current-group="${escapeHtml(key)}" aria-expanded="${expanded}" aria-controls="${groupPanelId}">
+        <button type="button" class="sdi-current-group-toggle" data-sdi-current-group="${escapeHtml(key)}" aria-expanded="${expanded}" aria-controls="${panelId}">
           <span class="sdi-current-job"><strong>${escapeHtml(group.job || "Unknown job")}</strong><small>${escapeHtml(group.customer || "No customer")}</small></span>
-          <span class="sdi-current-summary"><b>${rushCount ? `${rushCount} Rush` : ""}${rushCount && remakeCount ? " · " : ""}${remakeCount ? `${remakeCount} Remake` : ""}</b><small>${itemCount} item${itemCount === 1 ? "" : "s"}</small></span>
+          <span class="sdi-current-summary"><b>${group.items.length} Rush item${group.items.length === 1 ? "" : "s"}</b><small>Priority handling</small></span>
           <span class="sdi-current-chevron" aria-hidden="true">⌄</span>
         </button>
-        <div class="sdi-current-group-items" id="${groupPanelId}" ${expanded ? "" : "hidden"}>
+        <div class="sdi-current-group-items" id="${panelId}" ${expanded ? "" : "hidden"}>
           <div class="sdi-current-group-actions">
             <button type="button" data-sdi-edit-group="${escapeHtml(itemIds)}" data-sdi-edit-lookup="${escapeHtml(group.job || group.items[0]?.order || "")}">Edit order</button>
             <button type="button" class="is-danger" data-sdi-clear-group="${escapeHtml(itemIds)}" data-sdi-clear-label="${escapeHtml(group.job || group.items[0]?.order || "order")}">Remove order</button>
           </div>
-          ${group.items.map((item) => {
-            const typeLabel = item.remake ? "Remake" : "Rush";
-            return `
-              <div class="sdi-current-item">
-                <span><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong><small>${escapeHtml(item.product || "Glass item")} ${item.bayDisplay ? `· ${escapeHtml(item.bayDisplay)}` : "· Not in bay"}</small></span>
-                <span class="sdi-current-item-type ${item.remake ? "is-remake" : "is-rush"}">${typeLabel}</span>
-                <span class="sdi-current-item-actions">
-                  <button type="button" data-sdi-edit-line-item="${escapeHtml(item.lineItemId)}" data-sdi-edit-lookup="${escapeHtml(group.job || `${item.order}-${item.item}`)}">Edit</button>
-                  <button type="button" class="is-danger" data-sdi-clear-line-item="${escapeHtml(item.lineItemId)}" data-sdi-clear-lookup="${escapeHtml(group.job || "")}">Remove</button>
-                </span>
-              </div>
-            `;
-          }).join("")}
+          ${group.items.map((item) => `
+            <div class="sdi-current-item">
+              <span><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong><small>${escapeHtml(item.product || "Glass item")} ${item.bayDisplay ? `· ${escapeHtml(item.bayDisplay)}` : "· Not in bay"}</small></span>
+              <span class="sdi-current-item-type is-rush">Rush</span>
+              <span class="sdi-current-item-actions"><button type="button" data-sdi-edit-line-item="${escapeHtml(item.lineItemId)}" data-sdi-edit-lookup="${escapeHtml(group.job || `${item.order}-${item.item}`)}">Edit</button><button type="button" class="is-danger" data-sdi-clear-line-item="${escapeHtml(item.lineItemId)}">Remove</button></span>
+            </div>`).join("")}
         </div>
-      </article>
-    `;
+      </article>`;
   };
 
   els.sdiCurrentList.innerHTML = `
-    <div class="sdi-current-heading">
-      <span><small>Current priority work</small><strong>Rush / Remake items</strong></span>
-      <b>${markedCount} marked item${markedCount === 1 ? "" : "s"}</b>
-    </div>
-    <p class="sdi-current-help">Priority work is organized by date. Open a date, then a job, to edit or remove exact items.</p>
-    <div class="sdi-current-toolbar">
-      <label class="sdi-current-search"><span>Filter priority work</span><input type="search" data-sdi-current-search value="${escapeHtml(state.sdiCurrentQuery)}" placeholder="Order, job, customer, product, or bay"></label>
-      <label class="sdi-current-type-filter"><span>Type</span><select data-sdi-current-type><option value="all" ${state.sdiCurrentTypeFilter === "all" ? "selected" : ""}>All priority work</option><option value="rush" ${state.sdiCurrentTypeFilter === "rush" ? "selected" : ""}>Rush only</option><option value="remake" ${state.sdiCurrentTypeFilter === "remake" ? "selected" : ""}>Remake only</option></select></label>
-      <span class="sdi-current-visible-count">${visibleCount} shown</span>
+    <div class="sdi-current-heading"><span><small>Current priority work</small><strong>Rush items</strong></span><b>${markedCount} marked item${markedCount === 1 ? "" : "s"}</b></div>
+    <p class="sdi-current-help">Only intentionally marked Rush work appears here. Imported RM remake markers are not counted.</p>
+    <div class="sdi-current-toolbar sdi-current-toolbar-rush-v181">
+      <label class="sdi-current-search"><span>Filter Rush work</span><input type="search" data-sdi-current-search value="${escapeHtml(state.sdiCurrentQuery)}" placeholder="Order, job, customer, product, or bay"></label>
+      <span class="sdi-current-visible-count">${visibleItems.length} shown</span>
       <button type="button" class="sdi-current-clear-all" data-sdi-clear-all ${markedCount ? "" : "disabled"}>Clear all</button>
     </div>
     <div class="sdi-current-date-groups">
@@ -15071,24 +15273,10 @@ function renderSdiCurrentList() {
         const expanded = state.sdiExpandedCurrentDates.has(dateKey);
         const datePanelId = `sdi-current-date-${dateIndex}`;
         const dateItems = currentPriorityItems(dateGroups);
-        const rushCount = dateItems.filter((item) => item.rush).length;
-        const remakeCount = dateItems.filter((item) => item.remake).length;
         const dateLabel = dateKey === "undated" ? "No priority date" : formatDisplayDate(dateKey);
-        return `
-          <article class="sdi-current-date-group ${expanded ? "is-expanded" : ""}">
-            <button type="button" class="sdi-current-date-toggle" data-sdi-current-date="${escapeHtml(dateKey)}" aria-expanded="${expanded}" aria-controls="${datePanelId}">
-              <span><small>Priority date</small><strong>${escapeHtml(dateLabel)}</strong></span>
-              <span><b>${dateItems.length} item${dateItems.length === 1 ? "" : "s"}</b><small>${rushCount} Rush · ${remakeCount} Remake</small></span>
-              <i aria-hidden="true">⌄</i>
-            </button>
-            <div class="sdi-current-date-body" id="${datePanelId}" ${expanded ? "" : "hidden"}>
-              ${dateGroups.map((group, groupIndex) => renderJobGroup(group, groupIndex, dateIndex)).join("")}
-            </div>
-          </article>
-        `;
-      }).join("") : `<span class="admin-empty">${allGroups.length ? "No priority work matches the current filter." : "No current Rush or Remake items."}</span>`}
-    </div>
-  `;
+        return `<article class="sdi-current-date-group ${expanded ? "is-expanded" : ""}"><button type="button" class="sdi-current-date-toggle" data-sdi-current-date="${escapeHtml(dateKey)}" aria-expanded="${expanded}" aria-controls="${datePanelId}"><span><small>Priority date</small><strong>${escapeHtml(dateLabel)}</strong></span><span><b>${dateItems.length} Rush item${dateItems.length === 1 ? "" : "s"}</b><small>Needs priority handling</small></span><i aria-hidden="true">⌄</i></button><div class="sdi-current-date-body" id="${datePanelId}" ${expanded ? "" : "hidden"}>${dateGroups.map((group, groupIndex) => renderJobGroup(group, groupIndex, dateIndex)).join("")}</div></article>`;
+      }).join("") : `<span class="admin-empty">${allGroups.length ? "No Rush work matches the current filter." : "No current Rush items."}</span>`}
+    </div>`;
 }
 
 
@@ -15146,18 +15334,20 @@ function openSdiPanel(assignmentId = "") {
   updateModalScrollLock();
   populateSdiBayOptions(found.bay?.bayCode || bay?.bayCode || "");
   if (els.sdiOrderInput) els.sdiOrderInput.value = assignmentLookup;
-  if (els.sdiReasonInput) els.sdiReasonInput.value = assignment?.reason || "Same-day install";
+  if (els.sdiReasonInput) {
+    const rushReason = assignment && isRushItem(assignment) && !isRemakeItem(assignment) ? assignment.reason : "";
+    els.sdiReasonInput.value = String(rushReason || "Same-day install").replace(/^\s*(?:Rush|SDI)\s*-\s*/i, "");
+  }
   if (els.sdiDeliveryDateInput) els.sdiDeliveryDateInput.value = assignment?.deliveryDate || assignment?.originalDeliveryDate || "";
   if (els.sdiTruckExemptInput) els.sdiTruckExemptInput.checked = Boolean(assignment?.priorityDirectToTruck);
-  if (els.sdiTypeInput) {
-    els.sdiTypeInput.value = assignment && isRemakeItem(assignment) ? "Remake" : assignment && isRushItem(assignment) ? "Rush" : "";
-    syncCustomSelect(els.sdiTypeInput);
-  }
+  if (els.sdiTypeInput) els.sdiTypeInput.value = "Rush";
   state.sdiSelectedLineItemIds = new Set();
   state.sdiExpandedCurrentGroups = new Set();
   state.sdiExpandedCurrentDates = new Set();
   state.sdiCurrentGroupsInitialized = false;
   updateSdiSelectionSummary();
+  setBayModalSection("rush", "workspace");
+  void loadBayModalActionHistory("rush");
   loadSdiWorkspace(assignmentLookup).catch((error) => showInlineError(error.message, true));
   els.sdiOrderInput?.focus();
 }
@@ -15183,7 +15373,7 @@ function closeSdiPanel() {
  * Flow: Builds exact destination IDs plus priority options, calls the single mark/remove endpoint, then routes the result to refresh or confirmation UI.
  */
 async function submitSdi(mark = true, options = {}) {
-  const orderType = els.sdiTypeInput?.value || "";
+  const orderType = "Rush";
   const lookupText = options.lookup || els.sdiOrderInput?.value.trim() || "";
   const lineItemIds = options.lineItemIds || [...state.sdiSelectedLineItemIds];
   const payload = {
@@ -15194,12 +15384,9 @@ async function submitSdi(mark = true, options = {}) {
     truckExempt: Boolean(els.sdiTruckExemptInput?.checked),
     orderType,
     deliveryDate: els.sdiDeliveryDateInput?.value || "",
-    reason: options.reason || els.sdiReasonInput?.value || (mark ? "Same-day install" : "Rush / Remake cleared"),
+    reason: options.reason || els.sdiReasonInput?.value || (mark ? "Same-day install" : "Rush cleared"),
+    rushOnly: !mark,
   };
-  if (mark && !orderType) {
-    showInlineError("Select Rush or Remake before marking items.", false);
-    return;
-  }
   if (!lineItemIds.length) {
     showInlineError(mark ? "Select at least one item to mark." : "Select at least one currently marked item to clear.", false);
     return;
@@ -15207,19 +15394,20 @@ async function submitSdi(mark = true, options = {}) {
 
   const result = await postBayAction(mark ? "/api/indian-trail/mark-sdi" : "/api/indian-trail/remove-sdi", payload);
   if (!mark) playAppSound("destructive_action", { force: true });
+  void loadBayModalActionHistory("rush");
   const affectedItems = Number(result?.affectedItems || 0);
   const jobLabel = result?.matchedJob || lookupText;
   const affectedListIds = [...new Set((result?.affectedListIds || []).filter(Boolean))];
   const printParams = new URLSearchParams();
   affectedListIds.forEach((listId) => printParams.append("listId", listId));
-  if (mark) printParams.set(result?.remake ? "remakeOnly" : "rushOnly", "1");
+  if (mark) printParams.set("rushOnly", "1");
   if (result?.affectedSourceIds?.length) printParams.set("sourceIds", result.affectedSourceIds.join(","));
   const printUrl = mark && affectedListIds.length ? `/api/print/package?${printParams.toString()}` : "";
   const affectsIndianTrail = priorityListsIncludeIndianTrail(result?.affectedLists || []);
 
   if (options.keepOpen) {
     await loadSdiWorkspace(els.sdiOrderInput?.value.trim() || "", { preserveSelection: false });
-    showFloatingNotice(result?.message || "Rush / Remake item cleared.", "success");
+    showFloatingNotice(result?.message || "Rush item cleared.", "success");
     return result;
   }
 
@@ -15227,8 +15415,8 @@ async function submitSdi(mark = true, options = {}) {
   showActionFeedback({
     kind: "success",
     eyebrow: mark ? "Bay Map update complete" : "Bay Map update cleared",
-    title: mark ? `${result?.orderType || orderType} marked` : "Rush / Remake cleared",
-    message: result?.message || (mark ? `${orderType} was marked successfully.` : "The Rush / Remake mark was removed."),
+    title: mark ? "Rush marked" : "Rush cleared",
+    message: result?.message || (mark ? "Rush was marked successfully." : "The Rush mark was removed."),
     details: [
       { label: "Job Nr. / Order", value: jobLabel },
       { label: "Customer", value: result?.matchedCustomer || "" },
@@ -15237,9 +15425,9 @@ async function submitSdi(mark = true, options = {}) {
       { label: "Items updated", value: affectedItems ? String(affectedItems) : "1" },
       { label: "Removed from bay", value: Number(result?.removedFromBay || 0) ? String(result.removedFromBay) : "" },
       { label: "Applicable stages", value: (result?.affectedLists || []).map((list) => stageLabel(list)).join(" → ") },
-      { label: "Indian Trail handling", value: affectsIndianTrail ? (result?.directToTruck ? "Straight to installer truck / skip bay" : result?.rush ? "Expedite into priority bay" : result?.remake ? "Broken item removed from bay and made missing" : "") : "" },
+      { label: "Indian Trail handling", value: affectsIndianTrail ? (result?.directToTruck ? "Straight to installer truck / skip bay" : "Expedite into priority bay") : "" },
     ],
-    primaryLabel: printUrl ? (result?.remake ? "Print remake sheet" : "Print Rush sheet") : "",
+    primaryLabel: printUrl ? "Print Rush sheet" : "",
     secondaryLabel: "Done",
     onPrimary: printUrl ? () => launchManagedPrint(printUrl) : null,
   });
@@ -15823,6 +16011,66 @@ function updatePrintStageSelectState() {
     allInput.checked = stageInputs.length > 0 && checkedInputs.length === stageInputs.length;
     allInput.indeterminate = checkedInputs.length > 0 && checkedInputs.length < stageInputs.length;
   }
+
+  updatePrintSelectionSummary();
+}
+
+
+/**
+ * Purpose: Refresh the Print / Export selection summary without changing output behavior.
+ * Effects: Updates the live summary cards inside the Print / Export modal.
+ * Flow: Reads the selected stages, exact glass types, optional filters, and date, then renders a concise preview.
+ */
+function updatePrintSelectionSummary() {
+  if (!els.printSelectionChips || !els.printSummaryPreview) return;
+
+  const stageInputs = selectedPrintStageInputs();
+  const selectedStages = stageInputs.filter((input) => input.checked);
+  const glassInputs = selectedPrintGlassInputs();
+  const selectedGlass = glassInputs.filter((input) => input.checked);
+  const selectedLabels = new Set(selectedGlass.map((input) => input.value));
+  const listIds = selectedPrintListIds();
+  const glassEntries = printGlassEntriesForLists(listIds);
+  const estimatedPieces = glassEntries
+    .filter((entry) => selectedLabels.has(entry.label))
+    .reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
+  const customerText = String(els.printCustomerFilter?.value || "").trim();
+  const orderText = String(els.printOrderFilter?.value || "").trim();
+  const filters = [];
+  if (els.printUpdatedOnly?.checked) filters.push("Updated items only");
+  if (els.printRushOnly?.checked) filters.push("Rush orders");
+  if (els.printRemakeOnly?.checked) filters.push("Remakes only");
+
+  const stageLabel = selectedStages.length === stageInputs.length && stageInputs.length
+    ? "All Stages"
+    : `${selectedStages.length} Stage${selectedStages.length === 1 ? "" : "s"}`;
+  const customerLabel = customerText ? "Filtered Customers" : "All Customers";
+  const orderLabel = orderText ? "Filtered Orders" : "All Orders";
+  const dateLabel = formatDisplayDate(els.printOptionsDate?.value || "") || "Not selected";
+
+  const chips = [
+    stageLabel,
+    `${selectedGlass.length} Exact Glass Type${selectedGlass.length === 1 ? "" : "s"}`,
+    customerLabel,
+    orderLabel,
+    ...filters,
+  ];
+  els.printSelectionChips.innerHTML = chips
+    .map((label) => `<span>${escapeHtml(label)}</span>`)
+    .join("");
+
+  const rows = [
+    ["Stages", stageInputs.length ? `${selectedStages.length} of ${stageInputs.length} selected` : "No stages available"],
+    ["Exact Glass Types", `${selectedGlass.length} selected`],
+    ["Estimated Pieces", `${estimatedPieces} pcs`],
+    ["Customers", customerText || "All customers"],
+    ["Orders", orderText || "All orders"],
+    ["Filters", filters.join(", ") || "No optional filters"],
+    ["Delivery Date", dateLabel],
+  ];
+  els.printSummaryPreview.innerHTML = rows
+    .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`)
+    .join("");
 }
 
 /**
@@ -15875,14 +16123,15 @@ function updatePrintGlassSelectState() {
     allInput.indeterminate = checkedInputs.length > 0 && checkedInputs.length < glassInputs.length;
   }
 
-  els.printOptionsGlassType.querySelectorAll("[data-print-glass-category]").forEach((categoryInput) => {
-    const category = categoryInput.dataset.printGlassCategory || "";
-    const categoryInputs = glassInputs.filter((input) => input.dataset.printGlassCategory === category);
-    const checkedCategoryInputs = categoryInputs.filter((input) => input.checked);
-
-    categoryInput.checked = categoryInputs.length > 0 && checkedCategoryInputs.length === categoryInputs.length;
-    categoryInput.indeterminate = checkedCategoryInputs.length > 0 && checkedCategoryInputs.length < categoryInputs.length;
+  els.printOptionsGlassType.querySelectorAll(".print-glass-group[data-print-glass-group]").forEach((group) => {
+    const inputs = [...group.querySelectorAll('.print-glass-choice input[type="checkbox"]')];
+    const selected = inputs.filter((input) => input.checked).length;
+    const totalQty = Number(group.dataset.printGlassGroupQty || 0);
+    const summary = group.querySelector(".print-glass-group-main small");
+    if (summary) summary.textContent = `${selected} / ${inputs.length} exact types selected | ${totalQty} pcs`;
   });
+
+  updatePrintSelectionSummary();
 }
 
 /**
@@ -16092,7 +16341,7 @@ async function renderPrintGlassTypes() {
   }
 
   const previousGroups = [...els.printOptionsGlassType.querySelectorAll(".print-glass-group[data-print-glass-group]")];
-  const previousOpenCategories = new Set(previousGroups.filter((group) => group.open).map((group) => group.dataset.printGlassGroup));
+  const previousOpenCategory = previousGroups.find((group) => group.open)?.dataset.printGlassGroup || "";
   const hadPreviousGroups = previousGroups.length > 0;
   const currentInputs = selectedPrintGlassInputs();
   const current = new Set(currentInputs.filter((input) => input.checked).map((input) => input.value).filter(Boolean));
@@ -16116,6 +16365,9 @@ async function renderPrintGlassTypes() {
 
   const selectedCount = entries.filter(checkedForEntry).length;
   const totalQty = entries.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
+  const defaultOpenCategory = [...groups.entries()].find(([, groupEntries]) => groupEntries.some(checkedForEntry))?.[0]
+    || [...groups.keys()][0]
+    || "";
 
   els.printOptionsGlassType.innerHTML = entries.length
     ? `
@@ -16131,24 +16383,22 @@ async function renderPrintGlassTypes() {
           .map(([category, groupEntries]) => {
             const groupQty = groupEntries.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
             const checkedGroupEntries = groupEntries.filter(checkedForEntry);
-            const groupOpen = hadPreviousGroups ? previousOpenCategories.has(category) : true;
+            const groupOpen = hadPreviousGroups
+              ? category === previousOpenCategory
+              : category === defaultOpenCategory;
 
             return `
               <details
                 class="print-glass-group print-glass-group-${escapeHtml(slugify(category))}"
                 data-print-glass-group="${escapeHtml(category)}"
+                data-print-glass-group-qty="${escapeHtml(groupQty)}"
                 ${groupOpen ? "open" : ""}
               >
                 <summary>
                   <span class="print-glass-group-main">
-                    <input
-                      type="checkbox"
-                      data-print-glass-category="${escapeHtml(category)}"
-                      aria-label="Select all ${escapeHtml(category)} glass types"
-                      ${checkedGroupEntries.length === groupEntries.length ? "checked" : ""}
-                    >
+                    <i class="print-glass-category-icon" aria-hidden="true"></i>
                     <strong>${escapeHtml(category)}</strong>
-                    <small>${escapeHtml(checkedGroupEntries.length)} / ${escapeHtml(groupEntries.length)} selected | ${escapeHtml(groupQty)} pcs</small>
+                    <small>${escapeHtml(checkedGroupEntries.length)} / ${escapeHtml(groupEntries.length)} exact types selected | ${escapeHtml(groupQty)} pcs</small>
                   </span>
                   <span class="print-glass-collapse-label">Expand / collapse</span>
                 </summary>
@@ -16183,6 +16433,16 @@ async function renderPrintGlassTypes() {
 
   updatePrintGlassSelectState();
 
+  const renderedGlassGroups = [...els.printOptionsGlassType.querySelectorAll(".print-glass-group[data-print-glass-group]")];
+  renderedGlassGroups.forEach((group) => {
+    group.addEventListener("toggle", () => {
+      if (!group.open) return;
+      renderedGlassGroups.forEach((otherGroup) => {
+        if (otherGroup !== group) otherGroup.open = false;
+      });
+    });
+  });
+
   els.printOptionsGlassType.onclick = (event) => {
     const targetInput = event.target.closest('input[type="checkbox"]');
 
@@ -16196,15 +16456,6 @@ async function renderPrintGlassTypes() {
           });
         }
 
-        if (targetInput.matches("[data-print-glass-category]")) {
-          const category = targetInput.dataset.printGlassCategory || "";
-
-          selectedPrintGlassInputs()
-            .filter((input) => input.dataset.printGlassCategory === category)
-            .forEach((input) => {
-              input.checked = targetInput.checked;
-            });
-        }
 
         updatePrintGlassSelectState();
       }, 0);
@@ -16327,6 +16578,7 @@ function openPrintOptions(context = {}) {
   if (els.printCustomerFilter) els.printCustomerFilter.value = "";
   if (els.printOrderFilter) els.printOrderFilter.value = "";
   renderPrintOptionStages();
+  updatePrintSelectionSummary();
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = false;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = false;
   updateModalScrollLock();
@@ -16756,6 +17008,70 @@ function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false,
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function deliveryListUpdatePreviewHtml(payload = {}) {
+  const lists = Array.isArray(payload.lists) && payload.lists.length
+    ? payload.lists
+    : payload.list
+      ? [payload.list]
+      : [];
+  const primaryList = lists[0] || payload.list || {};
+  const items = payload.items || [];
+  const groups = [
+    ["new", "New Items", items.filter((item) => item.changeType === "new")],
+    ["updated", "Updated Items", items.filter((item) => item.changeType !== "new")],
+  ];
+  const stageNames = [...new Set(lists.map((list) => list.stage || list.label).filter(Boolean))];
+  const heading = stageNames.length > 1
+    ? `${stageNames.length} changed stages`
+    : stageNames[0] || primaryList.stage || primaryList.label || "Delivery List";
+  const deliveryDate = primaryList.deliveryDate || primaryList.delivery_date || "";
+
+  return `<section class="delivery-update-preview-v184">
+    <header><div><span>Latest import changes</span><h3>${escapeHtml(heading)}</h3><p>${escapeHtml(formatDisplayDate(deliveryDate))} · ${escapeHtml(items.length)} changed line${items.length === 1 ? "" : "s"}</p></div><div><b>${escapeHtml(payload.newCount || 0)}</b><small>New</small><b>${escapeHtml(payload.updatedCount || 0)}</b><small>Updated</small></div></header>
+    ${groups.map(([type, title, rows]) => `<details class="delivery-update-preview-group is-${type}" ${rows.length ? "open" : ""}><summary><span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(rows.length)} line${rows.length === 1 ? "" : "s"}</small></span><b>${escapeHtml(rows.reduce((sum, row) => sum + Number(row.qty || 0), 0))} pcs</b></summary><div class="delivery-update-preview-list">${rows.map((item) => `<article><span class="delivery-update-type">${type === "new" ? "NEW" : "UPDATED"}</span><div><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} · ${escapeHtml(item.job || item.product || "Glass item")}</strong><span>${escapeHtml(item.customer || "No customer")} · ${escapeHtml(item.dimensions || "No dimensions")} · Qty ${escapeHtml(item.qty || 0)}</span><small>${item.stage ? `${escapeHtml(item.stage)} · ` : ""}${escapeHtml(item.product || "No glass type")} · ${escapeHtml(routeLabel({ route: item.route }) || item.route || "No route")} · ${escapeHtml(manualEditProcessDisplayValue(item) || item.queueState || "Standard")}</small></div></article>`).join("") || `<div class="admin-empty">No ${escapeHtml(title.toLowerCase())} in the latest import.</div>`}</div></details>`).join("")}
+  </section>`;
+}
+
+async function openDeliveryListUpdatePreview(listIds) {
+  const ids = [...new Set(String(listIds || "").split(",").map((value) => value.trim()).filter(Boolean))];
+  if (!ids.length) throw new Error("No changed delivery-list stages were supplied for preview.");
+
+  openAdminModal("deliveryUpdatePreview", {
+    title: "Delivery List Update Preview",
+    eyebrow: "Delivery List Management",
+    description: "Review the exact new and updated items from the selected recent import before printing.",
+    status: "Loading changes",
+    body: `<div class="admin-empty loading">Loading the newest changed items...</div>`,
+  });
+
+  try {
+    const payloads = await Promise.all(ids.map((listId) => (
+      fetchJson(`/api/admin/delivery-list-update-preview?listId=${encodeURIComponent(listId)}`)
+    )));
+    const lists = payloads.map((payload) => payload.list).filter(Boolean);
+    const items = payloads.flatMap((payload) => (
+      (payload.items || []).map((item) => ({
+        ...item,
+        stage: payload.list?.stage || payload.list?.label || "",
+        scanner: payload.list?.scanner || "",
+      }))
+    ));
+    const combined = {
+      lists,
+      list: lists[0] || {},
+      items,
+      newCount: payloads.reduce((sum, payload) => sum + Number(payload.newCount || 0), 0),
+      updatedCount: payloads.reduce((sum, payload) => sum + Number(payload.updatedCount || 0), 0),
+    };
+    if (els.adminModalBody) els.adminModalBody.innerHTML = deliveryListUpdatePreviewHtml(combined);
+    if (els.adminModalStatusText) els.adminModalStatusText.textContent = `${items.length} changed items across ${lists.length} stage${lists.length === 1 ? "" : "s"}`;
+    applyLanguageToRoot(els.adminModalBody);
+  } catch (error) {
+    if (els.adminModalBody) els.adminModalBody.innerHTML = `<div class="admin-empty review">${escapeHtml(error.message)}</div>`;
+    throw error;
+  }
+}
+
 async function searchAdminDeliveryLists(query) {
   const clean = String(query || "").trim();
   const local = state.lists.filter((list) =>
@@ -16922,43 +17238,320 @@ function actionHistoryDetail(event = {}) {
   if (Array.isArray(payload.changedFields) && payload.changedFields.length) {
     return `Changed ${payload.changedFields.map((field) => actionHistoryLabel(field)).join(", ")}`;
   }
+  if (payload.sourceRackCode && payload.targetRackCode) {
+    const scope = payload.deliveryDate ? ` for ${formatDisplayDate(payload.deliveryDate)}` : "";
+    const pieces = Number(payload.pieceQty || 0);
+    const quantity = pieces ? ` · ${pieces} piece${pieces === 1 ? "" : "s"}` : "";
+    return `Rack ${payload.sourceRackCode} → ${payload.targetRackCode}${scope}${quantity}`;
+  }
   if (payload.destinationOverrideMinutes) return `${payload.destinationOverrideMinutes}-minute override window`;
   if (payload.rackCode) return `Rack ${payload.rackCode}`;
+  if (payload.targetRackCode) return `Destination rack ${payload.targetRackCode}`;
   if (event.reason) return event.reason;
   return `${actionHistoryLabel(event.entityType || "record")} ${event.entityId || ""}`.trim();
 }
 
-function renderModalActionHistory(events = [], target = "admin") {
+function actionHistoryDefaultFilters() {
+  return { query: "", user: "", action: "", dateFrom: "", dateTo: "" };
+}
+
+function actionHistoryLocalDateKey(value = "") {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function actionHistoryScope(scope, context = "") {
+  let entry = actionHistoryUi.scopes.get(scope);
+  if (!entry) {
+    entry = {
+      context: "",
+      rackCode: "",
+      events: [],
+      filters: actionHistoryDefaultFilters(),
+      page: 1,
+      pageSize: 50,
+      totalCount: 0,
+      totalPages: 1,
+      users: [],
+      actions: [],
+      refs: null,
+      toolbar: null,
+      loading: false,
+      requestId: 0,
+      filterTimer: null,
+    };
+    actionHistoryUi.scopes.set(scope, entry);
+  }
+  if (entry.context !== context) {
+    entry.context = context;
+    entry.rackCode = "";
+    entry.events = [];
+    entry.filters = actionHistoryDefaultFilters();
+    entry.page = 1;
+    entry.totalCount = 0;
+    entry.totalPages = 1;
+    entry.users = [];
+    entry.actions = [];
+  }
+  return entry;
+}
+
+function actionHistoryFiltersActive(filters = {}) {
+  return Boolean(filters.query || filters.user || filters.action || filters.dateFrom || filters.dateTo);
+}
+
+function actionHistoryToolbarMarkup(entry) {
+  const filters = entry.filters;
+  const users = Array.isArray(entry.users) ? entry.users : [];
+  const actions = Array.isArray(entry.actions) ? entry.actions : [];
+  const page = Math.max(Number(entry.page || 1), 1);
+  const totalPages = Math.max(Number(entry.totalPages || 1), 1);
+  return `
+    <div class="modal-action-history-filter-grid">
+      <label class="modal-action-history-filter-search">
+        <span>Search log</span>
+        <input type="search" autocomplete="off" data-action-history-filter="query" value="${escapeHtml(filters.query)}" placeholder="Search actions, users, or details...">
+      </label>
+      <label>
+        <span>User</span>
+        <select data-action-history-filter="user">
+          <option value="">All users</option>
+          ${users.map((value) => `<option value="${escapeHtml(value)}" ${filters.user === value ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        <span>Action</span>
+        <select data-action-history-filter="action">
+          <option value="">All actions</option>
+          ${actions.map((value) => `<option value="${escapeHtml(value)}" ${filters.action === value ? "selected" : ""}>${escapeHtml(actionHistoryLabel(value))}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        <span>From date</span>
+        <input type="date" data-action-history-filter="dateFrom" value="${escapeHtml(filters.dateFrom)}">
+      </label>
+      <label>
+        <span>Through date</span>
+        <input type="date" data-action-history-filter="dateTo" value="${escapeHtml(filters.dateTo)}">
+      </label>
+    </div>
+    <div class="modal-action-history-filter-footer">
+      <span data-action-history-filter-result></span>
+      <div class="modal-action-history-pager" aria-label="Action history pages">
+        <button type="button" class="secondary" data-action-history-page="${page - 1}" ${page <= 1 || entry.loading ? "disabled" : ""}>Previous</button>
+        <strong>Page ${page} of ${totalPages}</strong>
+        <button type="button" class="secondary" data-action-history-page="${page + 1}" ${page >= totalPages || entry.loading ? "disabled" : ""}>Next</button>
+      </div>
+      <button type="button" class="secondary" data-action-history-clear ${actionHistoryFiltersActive(filters) ? "" : "disabled"}>Clear filters</button>
+    </div>`;
+}
+
+function ensureActionHistoryToolbar(scope, entry) {
+  const list = entry.refs?.list;
+  if (!list) return null;
+  let toolbar = list.parentElement?.querySelector(`.modal-action-history-filters[data-action-history-scope="${CSS.escape(scope)}"]`);
+  if (!toolbar) {
+    toolbar = document.createElement("section");
+    toolbar.className = "modal-action-history-filters";
+    toolbar.dataset.actionHistoryScope = scope;
+    toolbar.setAttribute("aria-label", "Action history filters");
+    toolbar.addEventListener("input", (event) => {
+      const control = event.target.closest?.("[data-action-history-filter]");
+      if (!control) return;
+      const current = actionHistoryUi.scopes.get(scope);
+      if (!current) return;
+      current.filters[control.dataset.actionHistoryFilter] = control.value;
+      current.page = 1;
+      if (control.dataset.actionHistoryFilter === "query") {
+        window.clearTimeout(current.filterTimer);
+        current.filterTimer = window.setTimeout(() => {
+          loadActionHistoryScope(scope).catch((error) => showInlineError(error.message, true));
+        }, 260);
+      }
+    });
+    toolbar.addEventListener("change", (event) => {
+      const control = event.target.closest?.("[data-action-history-filter]");
+      if (!control) return;
+      const current = actionHistoryUi.scopes.get(scope);
+      if (!current) return;
+      current.filters[control.dataset.actionHistoryFilter] = control.value;
+      current.page = 1;
+      loadActionHistoryScope(scope).catch((error) => showInlineError(error.message, true));
+    });
+    toolbar.addEventListener("click", (event) => {
+      const current = actionHistoryUi.scopes.get(scope);
+      if (!current) return;
+      const clear = event.target.closest?.("[data-action-history-clear]");
+      if (clear) {
+        current.filters = actionHistoryDefaultFilters();
+        current.page = 1;
+        loadActionHistoryScope(scope).catch((error) => showInlineError(error.message, true));
+        return;
+      }
+      const pageButton = event.target.closest?.("[data-action-history-page]");
+      if (!pageButton || pageButton.disabled) return;
+      current.page = Math.max(Number(pageButton.dataset.actionHistoryPage || 1), 1);
+      loadActionHistoryScope(scope).catch((error) => showInlineError(error.message, true));
+    });
+    list.before(toolbar);
+  }
+  entry.toolbar = toolbar;
+  return toolbar;
+}
+
+function actionHistoryRowsMarkup(rows = [], hasEvents = false, loading = false) {
+  if (loading) {
+    return `<div class="admin-empty loading">Loading action history...</div>`;
+  }
+  if (!rows.length) {
+    return `<div class="admin-empty">${hasEvents ? "No action-history events match the selected filters." : "No action history has been recorded for this GUI yet."}</div>`;
+  }
+  return rows.map((event) => {
+    const tags = [
+      event.entityType ? `<b>${escapeHtml(String(event.entityType).replaceAll("_", " "))}</b>` : "",
+      event.station ? `<i>${escapeHtml(event.station)}</i>` : "",
+    ].filter(Boolean).join("");
+    return `
+      <article class="modal-action-history-row rack-history-event-row">
+        <span class="modal-action-history-icon" aria-hidden="true"></span>
+        <div class="rack-history-event-copy">
+          <strong>${escapeHtml(actionHistoryLabel(event.action))}</strong>
+          <span>${escapeHtml(actionHistoryDetail(event))}</span>
+          ${tags ? `<div class="rack-history-event-tags">${tags}</div>` : ""}
+        </div>
+        <div class="rack-history-event-meta">
+          <time datetime="${escapeHtml(event.createdAt || "")}">${escapeHtml(actionHistoryDateTime(event.createdAt))}</time>
+          <small>${escapeHtml(event.user || "system")}</small>
+        </div>
+      </article>`;
+  }).join("");
+}
+
+function renderActionHistoryScopeRows(scope) {
+  const entry = actionHistoryUi.scopes.get(scope);
+  if (!entry?.refs) return;
+  const { summary, count, list } = entry.refs;
+  const total = Number(entry.totalCount || 0);
+  const pageStart = total ? ((Number(entry.page || 1) - 1) * Number(entry.pageSize || 50)) + 1 : 0;
+  const pageEnd = total ? Math.min(pageStart + entry.events.length - 1, total) : 0;
+  count.textContent = String(total);
+  summary.textContent = entry.events.length
+    ? `Last change ${actionHistoryDateTime(entry.events[0].createdAt)} by ${entry.events[0].user || "system"}`
+    : (entry.loading ? "Loading recorded changes..." : "No recorded changes for this workspace yet");
+  list.innerHTML = actionHistoryRowsMarkup(entry.events, total > 0, entry.loading);
+  if (entry.toolbar) {
+    const result = entry.toolbar.querySelector("[data-action-history-filter-result]");
+    const clear = entry.toolbar.querySelector("[data-action-history-clear]");
+    if (result) result.textContent = total ? `${pageStart}-${pageEnd} of ${total} events` : "0 events";
+    if (clear) clear.disabled = !actionHistoryFiltersActive(entry.filters) || entry.loading;
+  }
+  applyLanguageToRoot(entry.refs.root || list.parentElement);
+}
+
+function renderActionHistoryScope(scope) {
+  const entry = actionHistoryUi.scopes.get(scope);
+  if (!entry?.refs) return;
+  const toolbar = ensureActionHistoryToolbar(scope, entry);
+  if (toolbar) toolbar.innerHTML = actionHistoryToolbarMarkup(entry);
+  renderActionHistoryScopeRows(scope);
+}
+
+function setActionHistoryScope(scope, context, payload, refs, rackCode = "") {
+  const entry = actionHistoryScope(scope, context);
+  const data = Array.isArray(payload) ? { events: payload, totalCount: payload.length } : (payload || {});
+  entry.rackCode = rackCode || entry.rackCode || "";
+  entry.events = Array.isArray(data.events) ? data.events : [];
+  entry.page = Math.max(Number(data.page || entry.page || 1), 1);
+  entry.pageSize = Math.min(Math.max(Number(data.pageSize || entry.pageSize || 50), 1), 50);
+  entry.totalCount = Math.max(Number(data.totalCount ?? entry.events.length), 0);
+  entry.totalPages = Math.max(Number(data.totalPages || Math.ceil(entry.totalCount / entry.pageSize) || 1), 1);
+  entry.users = Array.isArray(data.users) ? data.users : entry.users;
+  entry.actions = Array.isArray(data.actions) ? data.actions : entry.actions;
+  entry.refs = refs;
+  entry.loading = false;
+  renderActionHistoryScope(scope);
+  return entry.totalCount;
+}
+
+async function loadActionHistoryScope(scope) {
+  const entry = actionHistoryUi.scopes.get(scope);
+  if (!state.backend || !entry?.context) return;
+  const requestId = ++entry.requestId;
+  entry.loading = true;
+  renderActionHistoryScope(scope);
+  const params = new URLSearchParams({
+    context: entry.context,
+    page: String(entry.page || 1),
+    pageSize: String(Math.min(Number(entry.pageSize || 50), 50)),
+  });
+  if (entry.rackCode) params.set("rackCode", entry.rackCode);
+  for (const [key, value] of Object.entries(entry.filters || {})) {
+    if (String(value || "").trim()) params.set(key, String(value));
+  }
+  try {
+    const payload = await fetchJson(`/api/admin/action-history?${params.toString()}`);
+    if (requestId !== entry.requestId) return;
+    setActionHistoryScope(scope, entry.context, payload, entry.refs, entry.rackCode);
+  } catch (error) {
+    if (requestId !== entry.requestId) return;
+    entry.loading = false;
+    renderActionHistoryScope(scope);
+    throw error;
+  }
+}
+
+function renderModalActionHistory(payload = [], target = "admin", context = "", rackCode = "") {
   const isOperations = target === "operations";
   const details = isOperations ? els.operationsModalHistory : els.adminModalHistory;
   const summary = isOperations ? els.operationsModalHistorySummary : els.adminModalHistorySummary;
   const count = isOperations ? els.operationsModalHistoryCount : els.adminModalHistoryCount;
   const list = isOperations ? els.operationsModalHistoryList : els.adminModalHistoryList;
   if (!details || !summary || !count || !list) return;
-  const rows = Array.isArray(events) ? events : [];
-  count.textContent = String(rows.length);
-  summary.textContent = rows.length
-    ? `Last change ${actionHistoryDateTime(rows[0].createdAt)} by ${rows[0].user || "system"}`
-    : "No recorded changes for this workspace yet";
-  list.innerHTML = rows.length
-    ? rows.map((event) => `
-        <article class="modal-action-history-row">
-          <span class="modal-action-history-icon" aria-hidden="true"></span>
-          <div>
-            <strong>${escapeHtml(actionHistoryLabel(event.action))}</strong>
-            <span>${escapeHtml(actionHistoryDetail(event))}</span>
-          </div>
-          <time datetime="${escapeHtml(event.createdAt || "")}">${escapeHtml(actionHistoryDateTime(event.createdAt))}</time>
-          <small>${escapeHtml(event.user || "system")}</small>
-        </article>
-      `).join("")
-    : `<div class="admin-empty">No action history has been recorded for this GUI yet.</div>`;
+  const resolvedContext = context || (isOperations ? state.operationsModalKind : els.adminModal?.dataset.kind || "");
+  const total = setActionHistoryScope(target, resolvedContext, payload, { root: details, summary, count, list }, rackCode);
+  if (isOperations && state.operationsModalKind === "reject-log") {
+    const rejectTabCount = document.getElementById("rejectOperationsHistoryCount");
+    if (rejectTabCount) rejectTabCount.textContent = String(total);
+  }
+  if (isOperations && state.operationsModalKind === "rack-details" && els.operationsRackHistoryCount) {
+    els.operationsRackHistoryCount.textContent = String(total);
+  }
 }
 
 async function loadModalActionHistory(context, target = "admin") {
   if (!state.backend || !context) return;
-  const payload = await fetchJson(`/api/admin/action-history?context=${encodeURIComponent(context)}&limit=20`);
-  renderModalActionHistory(payload.events || [], target);
+  const rackCode = context === "rack-details" ? String(state.selectedRackOverviewCode || "").trim() : "";
+  const isOperations = target === "operations";
+  const details = isOperations ? els.operationsModalHistory : els.adminModalHistory;
+  const summary = isOperations ? els.operationsModalHistorySummary : els.adminModalHistorySummary;
+  const count = isOperations ? els.operationsModalHistoryCount : els.adminModalHistoryCount;
+  const list = isOperations ? els.operationsModalHistoryList : els.adminModalHistoryList;
+  if (!details || !summary || !count || !list) return;
+  const entry = actionHistoryScope(target, context);
+  if (entry.rackCode !== rackCode) {
+    entry.rackCode = rackCode;
+    entry.events = [];
+    entry.page = 1;
+    entry.totalCount = 0;
+    entry.totalPages = 1;
+    entry.users = [];
+    entry.actions = [];
+  }
+  entry.refs = { root: details, summary, count, list };
+  entry.page = Math.max(Number(entry.page || 1), 1);
+  await loadActionHistoryScope(target);
+  const total = entry.totalCount;
+  if (isOperations && state.operationsModalKind === "reject-log") {
+    const rejectTabCount = document.getElementById("rejectOperationsHistoryCount");
+    if (rejectTabCount) rejectTabCount.textContent = String(total);
+  }
+  if (isOperations && state.operationsModalKind === "rack-details" && els.operationsRackHistoryCount) {
+    els.operationsRackHistoryCount.textContent = String(total);
+  }
 }
 
 async function refreshOpenModalActionHistory() {
@@ -16968,6 +17561,58 @@ async function refreshOpenModalActionHistory() {
   if (els.operationsModal && !els.operationsModal.hidden && els.operationsModal.dataset.kind) {
     await loadModalActionHistory(els.operationsModal.dataset.kind, "operations");
   }
+}
+
+
+const BAY_MODAL_HISTORY_CONFIG = Object.freeze({
+  stale: { context: "oldBays", scope: "bay-stale", countId: "staleBayHistoryCount", summaryId: "staleBayHistorySummary", listId: "staleBayHistoryList" },
+  rush: { context: "rush", scope: "bay-rush", countId: "sdiHistoryCount", summaryId: "sdiHistorySummary", listId: "sdiHistoryList" },
+  manage: { context: "manageBayItems", scope: "bay-manage", countId: "manageItemsHistoryCount", summaryId: "manageItemsHistorySummary", listId: "manageItemsHistoryList" },
+  editor: { context: "editBays", scope: "bay-editor", countId: "bayEditorHistoryCount", summaryId: "bayEditorHistorySummary", listId: "bayEditorHistoryList" },
+});
+
+function renderBayModalActionHistory(kind, payload = []) {
+  const config = BAY_MODAL_HISTORY_CONFIG[kind];
+  if (!config) return;
+  const count = document.getElementById(config.countId);
+  const summary = document.getElementById(config.summaryId);
+  const list = document.getElementById(config.listId);
+  if (!count || !summary || !list) return;
+  const root = list.closest(".bay-operation-history") || list.parentElement;
+  setActionHistoryScope(config.scope, config.context, payload, { root, summary, count, list });
+}
+
+async function loadBayModalActionHistory(kind) {
+  const config = BAY_MODAL_HISTORY_CONFIG[kind];
+  if (!state.backend || !config) return;
+  const count = document.getElementById(config.countId);
+  const summary = document.getElementById(config.summaryId);
+  const list = document.getElementById(config.listId);
+  if (!count || !summary || !list) return;
+  const root = list.closest(".bay-operation-history") || list.parentElement;
+  const entry = actionHistoryScope(config.scope, config.context);
+  entry.refs = { root, summary, count, list };
+  try {
+    await loadActionHistoryScope(config.scope);
+  } catch (error) {
+    list.innerHTML = `<div class="admin-empty review">Action history could not be loaded. ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function setBayModalSection(kind, section = "workspace") {
+  const firstView = document.querySelector(`[data-bay-modal-panel="${CSS.escape(kind)}"]`);
+  const modal = firstView?.closest(".modal-panel");
+  if (!modal) return;
+  modal.querySelectorAll(`[data-bay-modal="${CSS.escape(kind)}"]`).forEach((button) => {
+    const active = button.dataset.bayModalSection === section;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  modal.querySelectorAll(`[data-bay-modal-panel="${CSS.escape(kind)}"]`).forEach((view) => {
+    view.hidden = view.dataset.bayModalView !== section;
+  });
+  if (kind === "rush" && section === "current") renderSdiCurrentList();
+  if (section === "history") void loadBayModalActionHistory(kind);
 }
 
 const ADMIN_MODAL_PROFILES = {
@@ -16985,6 +17630,14 @@ const ADMIN_MODAL_PROFILES = {
     description: "Review delivery-list records and perform controlled list-level maintenance from one guided workspace.",
     context: "List maintenance",
     status: "Admin controlled",
+    group: "records",
+  },
+  deliveryUpdatePreview: {
+    title: "Delivery List Update Preview",
+    eyebrow: "Delivery List Management",
+    description: "Review the exact new and updated items from a recent import before printing or exporting changed work.",
+    context: "Update preview",
+    status: "Recent import changes",
     group: "records",
   },
   manualEdit: {
@@ -17164,7 +17817,9 @@ function openAdminModal(kind, options = null) {
   delete els.adminModal.dataset.customView;
   applyAdminModalProfile(kind, options);
   els.adminModal.dataset.kind = kind;
+  if (els.adminModalSectionTabs) els.adminModalSectionTabs.hidden = kind === "deliveryUpdatePreview";
   els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
+  applyLanguageToRoot(els.adminModal);
   setAdminModalSection("workspace");
   renderModalActionHistory([], "admin");
   loadModalActionHistory(kind, "admin").catch(() => renderModalActionHistory([], "admin"));
@@ -17174,6 +17829,9 @@ function openAdminModal(kind, options = null) {
   }
   if (kind === "users") {
     wireUserManagerControls();
+  }
+  if (kind === "roles") {
+    wireRolePermissionControls();
   }
   els.adminModal.hidden = false;
   els.adminModal.setAttribute("aria-hidden", "false");
@@ -17187,7 +17845,10 @@ function openAdminModal(kind, options = null) {
       .then((payload) => {
         state.adminRoles = payload.roles || [];
         state.allPermissions = payload.permissions || [];
-        if (!els.adminModal.hidden) els.adminModalBody.innerHTML = adminModalContent("roles");
+        if (!els.adminModal.hidden) {
+          els.adminModalBody.innerHTML = adminModalContent("roles");
+          wireRolePermissionControls();
+        }
       })
       .catch((error) => showInlineError(error.message, true));
   }
@@ -18107,45 +18768,47 @@ function permissionLabel(permission) {
 }
 
 const PERMISSION_DESCRIPTIONS = {
-  scan: "Scan barcodes and record piece activity on delivery lists.",
-  view_lists: "Open delivery lists and view their line-item details.",
-  view_stations: "View and select the scanning stations available to the user.",
-  view_own_scans: "View the user's own recent scan history.",
-  undo_scan: "Undo or redo recent scans when a correction is needed.",
-  reset_lists: "Reset scanned quantities for an entire delivery list.",
-  resolve_exceptions: "Resolve blocked, failed, or review-required scan exceptions.",
-  manual_adjust: "Manually increase or decrease scanned piece quantities.",
-  view_exceptions: "Open the exception queue and review scan problems.",
-  import_delivery_lists: "Import new delivery-list files and apply file updates.",
-  preview_import: "Preview delivery-list changes before importing them.",
-  manage_users: "Create, edit, and delete user accounts and assignments.",
-  manage_roles: "Change the permissions assigned to each role.",
-  manage_stations: "Add or rename scanning stations.",
-  remove_stations: "Remove scanning stations from the application.",
-  deactivate_users: "Disable a user account without deleting its history.",
-  reactivate_users: "Restore access for a deactivated user account.",
-  update_user_passwords: "Set or reset passwords for other users.",
-  edit_delivery_lists: "Manually edit delivery-list rows and maintain lookup values.",
-  export_reports: "Print or export delivery lists, packing lists, and reports.",
-  view_admin: "Open the Admin dashboard and its permitted tools.",
-  view_active_sessions: "View users who are currently signed in.",
-  global_search: "Search across all delivery lists and line items.",
+  view_delivery_lists: "Open delivery lists and view line-item details.",
+  scan_delivery_lists: "Scan barcodes and record piece activity on delivery lists.",
+  use_assigned_stations: "Use the scanning stations assigned to the signed-in account.",
+  view_scan_history: "View recent scan history and operator activity.",
+  correct_scans: "Undo or redo recent scans when a correction is needed.",
+  reset_delivery_lists: "Reset scanned quantities for an entire delivery list.",
+  manage_scan_exceptions: "Review, resolve, and manually correct scan exceptions.",
+  import_delivery_lists: "Import delivery-list files and apply updates.",
+  preview_delivery_imports: "Preview delivery-list changes before importing them.",
+  preview_delivery_updates: "Open the newest new/updated item preview for a delivery-list stage.",
+  edit_delivery_lists: "Create and manually edit delivery-list rows.",
+  print_export: "Print or export delivery lists, packing lists, and reports.",
+  global_search: "Search across active delivery lists and operational records.",
   view_reports: "View statistics, charts, and operational reports.",
+  view_admin: "Open the Administration dashboard and permitted tools.",
+  manage_users: "Create and edit user accounts and assignments.",
+  manage_user_access: "Activate accounts, reset passwords, and maintain user access.",
+  manage_roles: "Create roles and change their permissions.",
+  view_sessions: "View users who are currently signed in.",
+  manage_stations: "Add, rename, and remove scanning stations.",
+  manage_route_rules: "Add, edit, and remove customer route rules.",
+  manage_lookup_values: "Maintain product, route, and process lookup values.",
+  manage_automation: "Configure and run automated delivery-list imports.",
   view_indian_trail: "Open Indian Trail receiving and in-transit tools.",
-  indian_trail_receive: "Scan and receive glass at Indian Trail.",
+  receive_indian_trail: "Scan and receive glass at Indian Trail.",
   view_bays: "Open the Bay Map and view bay contents and history.",
-  assign_bay: "Assign missing or unassigned glass to a bay.",
-  move_bay: "Move active glass assignments between bays.",
-  clear_bay: "Remove glass from bays and control bay availability.",
-  mark_sdi: "Mark specific glass as Rush or Remake in the SDI workspace.",
-  remove_sdi: "Clear Rush or Remake marks from individual items.",
-  bay_check: "Run bay checks and verify physical bay contents.",
-  indian_trail_reports: "View and export Indian Trail receiving and bay reports.",
+  assign_bay_items: "Assign missing or unassigned glass to a bay.",
+  move_bay_items: "Move active glass assignments between bays.",
+  clear_bay_items: "Remove glass from bays and control bay availability.",
+  manage_rush_work: "Create, edit, and remove intentional Rush work.",
+  run_bay_checks: "Run bay checks and verify physical bay contents.",
+  view_bay_reports: "View and export Indian Trail receiving and bay reports.",
   manage_bay_layout: "Create, edit, delete, and reorder bay groups and bays.",
-  manage_customer_route_rules: "Add, edit, and remove customer route rules.",
   view_racks: "Open the rack overview and view rack contents.",
   scan_racks: "Scan rack barcodes for Staging and Outbound workflows.",
-  manage_racks: "Create, edit, delete, and recover racks and rack sets.",
+  manage_racks: "Create, edit, delete, complete, and recover racks and rack sets.",
+  transfer_rack_contents: "Move all rack contents or a complete delivery-date group to another rack.",
+  view_rejects: "Open Reject Tracking and review reject history.",
+  log_rejects: "Record a new internal reject for a verified order and item.",
+  manage_reject_settings: "Maintain reject reasons and break locations.",
+  manage_reject_records: "Edit or delete existing reject records.",
 };
 
 /**
@@ -18159,59 +18822,34 @@ function permissionDescription(permission) {
 
 const PERMISSION_CATEGORIES = [
   {
-    title: "Scanning",
-    description: "Main scanner access, scan visibility, undo, and reset controls.",
-    permissions: ["scan", "view_lists", "view_stations", "view_own_scans", "undo_scan", "reset_lists"],
+    title: "Delivery Lists & Scanning",
+    description: "List visibility, scanner use, stations, history, corrections, resets, and exceptions.",
+    permissions: ["view_delivery_lists", "scan_delivery_lists", "use_assigned_stations", "view_scan_history", "correct_scans", "reset_delivery_lists", "manage_scan_exceptions"],
   },
   {
-    title: "Delivery Lists",
-    description: "Importing, previewing, editing, printing, reports, and global search.",
-    permissions: ["import_delivery_lists", "preview_import", "edit_delivery_lists", "export_reports", "view_reports", "global_search"],
+    title: "Imports, Editing & Output",
+    description: "Imports, update previews, manual editing, printing, reports, search, and automation.",
+    permissions: ["import_delivery_lists", "preview_delivery_imports", "preview_delivery_updates", "edit_delivery_lists", "print_export", "global_search", "view_reports", "manage_automation"],
   },
   {
-    title: "Exceptions & Manual Fixes",
-    description: "Manual adjustments and exception review/resolution.",
-    permissions: ["manual_adjust", "view_exceptions", "resolve_exceptions"],
+    title: "Administration & Access",
+    description: "Administration, users, access, roles, active sessions, stations, routes, and lookup values.",
+    permissions: ["view_admin", "manage_users", "manage_user_access", "manage_roles", "view_sessions", "manage_stations", "manage_route_rules", "manage_lookup_values"],
   },
   {
-    title: "Admin & Users",
-    description: "Admin dashboard, users, roles, active sessions, passwords, and updates.",
-    permissions: [
-      "view_admin",
-      "manage_users",
-      "manage_roles",
-      "deactivate_users",
-      "reactivate_users",
-      "update_user_passwords",
-      "view_active_sessions",
-    ],
+    title: "Indian Trail & Bays",
+    description: "Receiving, Bay Map operations, Rush work, checks, reports, and physical layout.",
+    permissions: ["view_indian_trail", "receive_indian_trail", "view_bays", "assign_bay_items", "move_bay_items", "clear_bay_items", "manage_rush_work", "run_bay_checks", "view_bay_reports", "manage_bay_layout"],
   },
   {
-    title: "Stations & Rules",
-    description: "Station setup and customer route rule management.",
-    permissions: ["manage_stations", "remove_stations", "manage_customer_route_rules"],
+    title: "Racks & Transportation",
+    description: "Rack visibility, scanning, management, and whole-rack/date-group transfers.",
+    permissions: ["view_racks", "scan_racks", "manage_racks", "transfer_rack_contents"],
   },
   {
-    title: "Indian Trail / Bays",
-    description: "Indian Trail receiving, bay map, bay actions, SDI, reports, and layout.",
-    permissions: [
-      "view_indian_trail",
-      "indian_trail_receive",
-      "view_bays",
-      "assign_bay",
-      "move_bay",
-      "clear_bay",
-      "mark_sdi",
-      "remove_sdi",
-      "bay_check",
-      "indian_trail_reports",
-      "manage_bay_layout",
-    ],
-  },
-  {
-    title: "Racks",
-    description: "Rack overview, rack scanning, and rack management.",
-    permissions: ["view_racks", "scan_racks", "manage_racks"],
+    title: "Internal Rejects",
+    description: "Reject visibility, incident entry, settings, and record administration.",
+    permissions: ["view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records"],
   },
 ];
 
@@ -18373,11 +19011,11 @@ function rolePermissionCountText(role, permissions) {
  */
 function roleCreatePermissionCategoryHtml(category) {
   return `
-    <details class="permission-category role-create-permission-category" open>
-      <summary>
+    <section class="permission-category role-create-permission-category is-static" data-role-create-category="${escapeHtml(category.title)}">
+      <header>
         <span><strong>${escapeHtml(category.title)}</strong><small>${escapeHtml(category.description)}</small></span>
-        <b>${escapeHtml(category.permissions.length)} options</b>
-      </summary>
+        <b data-permission-category-count>0 / ${escapeHtml(category.permissions.length)}</b>
+      </header>
       <div class="role-permission-grid">
         ${category.permissions.map((permission) => `
           <label>
@@ -18388,7 +19026,7 @@ function roleCreatePermissionCategoryHtml(category) {
             </span>
           </label>`).join("")}
       </div>
-    </details>`;
+    </section>`;
 }
 
 function rolePermissionsModalHtml() {
@@ -18417,12 +19055,11 @@ function rolePermissionsModalHtml() {
         </div>
       </section>
 
-      <details class="role-create-card">
-        <summary>
+      <section class="role-create-card is-open">
+        <header class="role-create-heading">
           <span class="role-create-summary-icon" aria-hidden="true"></span>
           <span><strong>Create a new role</strong><small>Name the role, describe its purpose, and choose only the permissions it needs.</small></span>
-          <i aria-hidden="true"></i>
-        </summary>
+        </header>
         <form id="createRoleForm" class="role-create-form">
           <div class="role-create-fields">
             <label><span>Role name *</span><input id="newRoleName" name="name" type="text" maxlength="60" autocomplete="off" placeholder="Example: Shipping Lead" required></label>
@@ -18443,7 +19080,7 @@ function rolePermissionsModalHtml() {
             <button type="submit" class="primary">Create Role</button>
           </footer>
         </form>
-      </details>
+      </section>
 
       <section class="role-library">
         <header><div><strong>Existing roles</strong><span>Open a role, change permission selections, then save that role.</span></div><b>${escapeHtml(roles.length)} total</b></header>
@@ -18470,6 +19107,33 @@ function rolePermissionsModalHtml() {
         </div>
       </section>
     </div>`;
+}
+
+function wireRolePermissionControls(root = els.adminModalBody) {
+  if (!root) return;
+  root.querySelectorAll(".permission-category").forEach((category) => {
+    if (category.dataset.permissionWired === "true") return;
+    category.dataset.permissionWired = "true";
+    const summary = category.matches("details") ? category.querySelector(":scope > summary") : null;
+    summary?.addEventListener("click", (event) => {
+      if (event.target.closest("button, input, label")) return;
+      event.preventDefault();
+      category.open = !category.open;
+    });
+    const updateCount = () => {
+      const inputs = [...category.querySelectorAll('input[type="checkbox"]')];
+      const count = inputs.filter((item) => item.checked).length;
+      const badge = category.querySelector("[data-permission-category-count]") || summary?.querySelector("b");
+      if (badge) badge.textContent = `${count} / ${inputs.length}`;
+    };
+    category.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+      input.addEventListener("change", () => {
+        input.closest("label")?.classList.toggle("is-checked", input.checked);
+        updateCount();
+      });
+    });
+    updateCount();
+  });
 }
 
 async function createRoleFromForm(form) {
@@ -18509,7 +19173,10 @@ async function createRoleFromForm(form) {
     state.adminRoles = payload.roles || [];
     state.allPermissions = payload.permissions || state.allPermissions;
     state.rolePermissionOpenRoles.add(name);
-    if (els.adminModalBody) els.adminModalBody.innerHTML = adminModalContent("roles");
+    if (els.adminModalBody) {
+      els.adminModalBody.innerHTML = adminModalContent("roles");
+      wireRolePermissionControls();
+    }
     await refreshAdminPage();
     showSaveConfirmation(`${name} was created and is ready to assign to users.`);
   } catch (error) {
@@ -18528,6 +19195,11 @@ function setCreateRolePermissionSelection(mode) {
     input.checked = checked;
     input.closest("label")?.classList.toggle("is-checked", checked);
   });
+  form.querySelectorAll("[data-role-create-category]").forEach((category) => {
+    const inputs = [...category.querySelectorAll('input[type="checkbox"]')];
+    const badge = category.querySelector("[data-permission-category-count]");
+    if (badge) badge.textContent = `${inputs.filter((input) => input.checked).length} / ${inputs.length}`;
+  });
   const status = form.querySelector("#createRoleStatus");
   if (status) status.textContent = checked ? "All available permissions selected." : "All permissions cleared.";
 }
@@ -18539,11 +19211,11 @@ function setCreateRolePermissionSelection(mode) {
  */
 function permissionSummaryFromPermissions(permissions) {
   const list = permissions || [];
-  if (list.includes("view_admin")) return "Full admin access";
+  if (list.includes("view_admin")) return "Administration access";
   if (list.includes("manage_users")) return "User and system management";
-  if (list.includes("manage_racks")) return "Rack and scan management";
-  if (list.includes("view_bays")) return "Indian Trail bay access";
-  if (list.includes("scan")) return "Scanning and list access";
+  if (list.includes("manage_racks") || list.includes("transfer_rack_contents")) return "Rack and transportation management";
+  if (list.includes("view_bays")) return "Indian Trail and Bay Map access";
+  if (list.includes("scan_delivery_lists") || list.includes("scan")) return "Scanning and delivery-list access";
   return "Custom access";
 }
 
@@ -18605,6 +19277,7 @@ async function saveRolePermissions(roleName) {
 
   if (els.adminModalBody) {
     els.adminModalBody.innerHTML = adminModalContent("roles");
+    wireRolePermissionControls();
     restoreRolePermissionUiScroll();
   }
 
@@ -19398,6 +20071,11 @@ function importHistoryRows(imports = []) {
           const newPrintableIds = [...new Set(newStageRows.map((row) => row.listId).filter(Boolean))];
           const updatedPrintableIds = [...new Set(updatedStageRows.map((row) => row.listId).filter(Boolean))];
           const printableIds = [...new Set([...updatedPrintableIds, ...newPrintableIds])];
+          const previewListIds = [...new Set(changedStageRows.map((row) => row.listId).filter(Boolean))];
+          const previewItemCount = previewListIds.reduce((sum, listId) => {
+            const list = state.lists.find((item) => item.id === listId);
+            return sum + Number(list?.newItemCount || 0) + Number(list?.updatedItemCount || 0);
+          }, 0) || changedStageRows.reduce((sum, row) => sum + Number(row.changedLineCount || 0), 0);
           const printButtonLabel = isBrandNewDeliveryList
             ? "Print / Export New Delivery List"
             : hasNewStages && hasUpdatedStages
@@ -19495,19 +20173,32 @@ function importHistoryRows(imports = []) {
     </span>
   </span>
 
-  ${
-    printableIds.length
-      ? `<button
-          type="button"
-          class="admin-import-icon-button"
-          data-print-lists="${escapeHtml(printableIds.join(","))}"
-          data-print-date="${escapeHtml(group.deliveryDate)}"
-          data-print-updated-only="${hasUpdatedStages && !isBrandNewDeliveryList ? "1" : ""}"
-          aria-label="${escapeHtml(printButtonLabel)}"
-          title="${escapeHtml(printButtonLabel)}"
-        ><span class="admin-import-print-icon" aria-hidden="true"></span></button>`
-      : ""
-  }
+  <span class="admin-import-summary-actions">
+    ${
+      previewListIds.length
+        ? `<button
+            type="button"
+            class="admin-import-icon-button admin-update-preview-button"
+            data-admin-list-update-preview="${escapeHtml(previewListIds.join(","))}"
+            aria-label="Preview ${escapeHtml(previewItemCount)} new or updated item${previewItemCount === 1 ? "" : "s"}"
+            title="Preview ${escapeHtml(previewItemCount)} new or updated item${previewItemCount === 1 ? "" : "s"}"
+          ><span class="admin-update-preview-icon" aria-hidden="true"></span><b>${escapeHtml(previewItemCount)}</b></button>`
+        : ""
+    }
+    ${
+      printableIds.length
+        ? `<button
+            type="button"
+            class="admin-import-icon-button"
+            data-print-lists="${escapeHtml(printableIds.join(","))}"
+            data-print-date="${escapeHtml(group.deliveryDate)}"
+            data-print-updated-only="${hasUpdatedStages && !isBrandNewDeliveryList ? "1" : ""}"
+            aria-label="${escapeHtml(printButtonLabel)}"
+            title="${escapeHtml(printButtonLabel)}"
+          ><span class="admin-import-print-icon" aria-hidden="true"></span></button>`
+        : ""
+    }
+  </span>
 </summary>
 
               <div class="admin-import-stage-wrap">
@@ -20043,7 +20734,7 @@ function userManagerModalHtml() {
           </div>
 
           <footer class="user-manager-create-actions">
-            <span>Required: username or BFS email, plus a password.</span>
+            <span id="createUserModalStatus">Required: username or BFS email, plus a password.</span>
             <button type="submit" class="users-add-button">
               <span class="user-action-icon icon-user-add" aria-hidden="true"></span>
               <strong>Create user</strong>
@@ -21994,35 +22685,59 @@ function renderActiveSessions() {
  * Effects: May call the backend api.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-async function createUserFromForm() {
-  const usernameInput = document.getElementById("newUserNameModal") || els.newUserName;
-  const displayInput = document.getElementById("newUserDisplayModal") || els.newUserDisplay;
-  const emailInput = document.getElementById("newUserEmailModal") || els.newUserEmail;
-  const passwordInput = document.getElementById("newUserPasswordModal") || els.newUserPassword;
-  const roleInput = document.getElementById("newUserRoleModal") || els.newUserRole;
-  const stationInput = document.getElementById("newUserStationModal");
+async function createUserFromForm(form = document.getElementById("createUserFormModal")) {
+  const root = form || document;
+  const usernameInput = root.querySelector?.("#newUserNameModal") || els.newUserName;
+  const displayInput = root.querySelector?.("#newUserDisplayModal") || els.newUserDisplay;
+  const emailInput = root.querySelector?.("#newUserEmailModal") || els.newUserEmail;
+  const passwordInput = root.querySelector?.("#newUserPasswordModal") || els.newUserPassword;
+  const roleInput = root.querySelector?.("#newUserRoleModal") || els.newUserRole;
+  const stationInput = root.querySelector?.("#newUserStationModal");
+  const status = root.querySelector?.("#createUserModalStatus");
+  const submit = root.querySelector?.('button[type="submit"]');
   const email = emailInput?.value.trim() || "";
   const username = usernameInput?.value.trim() || email;
   const displayName = displayInput?.value.trim() || username;
   const password = passwordInput?.value || "";
   const role = roleInput?.value || "Operator";
   const station = stationInput?.value || "";
-  if (!username || !password) throw new Error("BFS email/username and password are required");
-  await fetchJson("/api/admin/users", {
-    method: "POST",
-    body: JSON.stringify({ username, email, displayName, password, roles: [role], station }),
-  });
-  if (usernameInput) usernameInput.value = "";
-  if (displayInput) displayInput.value = "";
-  if (emailInput) emailInput.value = "";
-  if (passwordInput) passwordInput.value = "";
-  if (stationInput) stationInput.value = "";
-  await refreshAdminPage();
-  if (!els.adminModal?.hidden) openAdminModal("users");
-  showSaveConfirmation(`User ${displayName} was created.`);
+  if (!username) {
+    if (status) status.textContent = "Enter a BFS email or username.";
+    (emailInput || usernameInput)?.focus();
+    return;
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (status) status.textContent = "Enter a valid BFS email address.";
+    emailInput?.focus();
+    return;
+  }
+  if (password.length < 8) {
+    if (status) status.textContent = "Temporary password must be at least 8 characters.";
+    passwordInput?.focus();
+    return;
+  }
+  if (submit) submit.disabled = true;
+  if (status) status.textContent = "Creating user...";
+  try {
+    await fetchJson("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify({ username, email, displayName, password, roles: [role], station }),
+    });
+    await refreshAdminUsersUi();
+    showSaveConfirmation(`User ${displayName} was created.`);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+    throw error;
+  } finally {
+    if (submit?.isConnected) submit.disabled = false;
+  }
 }
 
-
+/**
+ * Purpose: Run the run manual edit search workflow for the browser application.
+ * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
+ * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ */
 /**
  * Purpose: Run the run manual edit search workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -22447,7 +23162,10 @@ function manualEditRouteOptions() {
  */
 function manualEditProcessOptions() {
   const lookupProcesses = lookupOptions(state.manualEditLookups?.processes || [], "Normal / blank");
-  if (lookupProcesses.length > 1) return lookupProcesses;
+  const hasRemake = lookupProcesses.some(([value]) => /^remake$/i.test(String(value || "").trim()));
+  if (lookupProcesses.length > 1) {
+    return hasRemake ? lookupProcesses : [...lookupProcesses, ["Remake", "Remake"]];
+  }
   return [
     ["", "Normal / blank"],
     ["New", "New"],
@@ -22457,6 +23175,12 @@ function manualEditProcessOptions() {
     ["SDI", "SDI"],
     ["Review", "Needs Review"],
   ];
+}
+
+function manualEditProcessDisplayValue(item = {}) {
+  const process = String(item.processState || "").trim();
+  if (isRemakeItem(item) && (!process || /^(standard|normal|blank)$/i.test(process))) return "Remake";
+  return process;
 }
 
 /**
@@ -22662,7 +23386,7 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
               scanned: scannedValue,
               location: locationValue,
               route: manualEditRouteSelectionValue(item.route),
-              processState: item.processState || "",
+              processState: manualEditProcessDisplayValue(item),
               product: item.product || "",
               dimensions: item.dimensions || "",
               job: item.job || "",
@@ -22762,7 +23486,7 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
                   ${manualEditChoiceFieldHtml({
                     field: "processState",
                     label: "Process",
-                    value: item.processState || "",
+                    value: manualEditProcessDisplayValue(item),
                     options: manualEditProcessOptions(),
                     customLabel: "Custom process...",
                   })}
@@ -23009,12 +23733,12 @@ const OPERATIONS_MODAL_PROFILES = {
     status: "Live rack data",
     group: "racks",
   },
-  "packing-history": {
+  "rack-history": {
     controlCenter: true,
     eyebrow: "Rack Records",
-    description: "Search immutable packing-list snapshots and reopen the exact rack contents captured at print time.",
-    context: "Packing history workspace",
-    status: "Audited snapshots",
+    description: "Review packing-list snapshots or investigate actions across every rack from one searchable history workspace.",
+    context: "Rack history workspace",
+    status: "Audited rack records",
     group: "racks",
   },
 };
@@ -23031,6 +23755,16 @@ function applyOperationsModalProfile(kind, options = {}) {
   if (els.operationsModalTitle) els.operationsModalTitle.textContent = profile.title || "Operations";
   if (els.operationsModalDescription) els.operationsModalDescription.textContent = profile.description || "";
   if (els.operationsModalStatusText) els.operationsModalStatusText.textContent = profile.status || "Live operations";
+  if (els.rejectOperationsTabs) els.rejectOperationsTabs.hidden = kind !== "reject-log";
+  if (els.operationsRackTabs) els.operationsRackTabs.hidden = kind !== "rack-details";
+  if (els.operationsRackRecordsTabs) els.operationsRackRecordsTabs.hidden = kind !== "rack-history";
+  if (els.operationsModalRackActions) els.operationsModalRackActions.hidden = kind !== "rack-details";
+  if (els.operationsModal) els.operationsModal.classList.remove("show-reject-history");
+  els.rejectOperationsTabs?.querySelectorAll("[data-reject-modal-view]").forEach((button) => {
+    const active = button.dataset.rejectModalView === "entry";
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
   return profile;
 }
 
@@ -23055,9 +23789,34 @@ function openOperationsModal({
     ...(group ? { group } : {}),
   });
   els.operationsModalBody.innerHTML = body;
-  if (els.operationsModalHistory) els.operationsModalHistory.open = false;
+  els.operationsModalBody.hidden = false;
+  applyLanguageToRoot(els.operationsModal);
+  const isRackDetails = kind === "rack-details";
+  const isRackHistory = kind === "rack-history";
+  const showActionHistory = !isRackHistory;
+  els.operationsModal?.classList.remove("show-rack-history");
+  els.operationsRackTabs?.querySelectorAll("[data-rack-modal-view]").forEach((button) => {
+    const active = button.dataset.rackModalView === "workspace";
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  els.operationsRackRecordsTabs?.querySelectorAll("[data-rack-records-view]").forEach((button) => {
+    const active = button.dataset.rackRecordsView === "packing";
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  if (els.operationsModalHistory) {
+    els.operationsModalHistory.hidden = isRackDetails || !showActionHistory;
+    els.operationsModalHistory.open = isRackDetails;
+  }
+  if (!isRackDetails && els.operationsModalRackActions) {
+    els.operationsModalRackActions.hidden = true;
+    els.operationsModalRackActions.replaceChildren();
+  }
   renderModalActionHistory([], "operations");
-  loadModalActionHistory(kind, "operations").catch(() => renderModalActionHistory([], "operations"));
+  if (showActionHistory) {
+    loadModalActionHistory(kind, "operations").catch(() => renderModalActionHistory([], "operations"));
+  }
   els.operationsModal.hidden = false;
   els.operationsModal.setAttribute("aria-hidden", "false");
   if (els.operationsModalBackdrop) {
@@ -23073,32 +23832,39 @@ function closeOperationsModal() {
   if (els.operationsModal) {
     delete els.operationsModal.dataset.kind;
     delete els.operationsModal.dataset.group;
-    els.operationsModal.classList.remove("is-control-center");
+    els.operationsModal.classList.remove("is-control-center", "show-reject-history", "show-rack-history");
     els.operationsModal.hidden = true;
     els.operationsModal.setAttribute("aria-hidden", "true");
   }
   state.rejectLogOpening = false;
+  if (els.rejectOperationsTabs) els.rejectOperationsTabs.hidden = true;
+  if (els.operationsRackTabs) els.operationsRackTabs.hidden = true;
+  if (els.operationsRackRecordsTabs) els.operationsRackRecordsTabs.hidden = true;
+  if (els.operationsModalRackActions) {
+    els.operationsModalRackActions.hidden = true;
+    els.operationsModalRackActions.replaceChildren();
+  }
+  if (els.operationsModalBody) els.operationsModalBody.hidden = false;
   if (els.operationsModalBackdrop) {
     els.operationsModalBackdrop.hidden = true;
     els.operationsModalBackdrop.setAttribute("aria-hidden", "true");
   }
   if (els.operationsModalBody) els.operationsModalBody.replaceChildren();
-  if (els.operationsModalHistory) els.operationsModalHistory.open = false;
+  if (els.operationsModalHistory) {
+    els.operationsModalHistory.hidden = false;
+    els.operationsModalHistory.open = false;
+  }
   renderModalActionHistory([], "operations");
   updateModalScrollLock();
 }
 
 function compactRackItemHtml(item, currentRackCode = state.selectedRackOverviewCode) {
   const rackItemId = String(item.rackItemId || "");
-  const moveOpen = state.rackMoveItemId === rackItemId;
-  const destinationOptions = state.racks
-    .filter((target) => String(target.code) !== String(currentRackCode))
-    .map((target) => `<option value="${escapeHtml(target.code)}">${rackOptionLabel(target)}</option>`)
-    .join("");
+  const itemLabel = `${item.order}-${item.item}`;
   return `
-    <article class="rack-modal-line ${moveOpen ? "is-moving" : ""}">
+    <article class="rack-modal-line">
       <div class="rack-modal-line-primary">
-        <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
+        <strong>${escapeHtml(itemLabel)}</strong>
         <span>Qty ${escapeHtml(item.rackQty || 1)}</span>
       </div>
       <div class="rack-modal-line-details">
@@ -23110,70 +23876,198 @@ function compactRackItemHtml(item, currentRackCode = state.selectedRackOverviewC
       ${item.rackAddedAt ? `<small class="rack-modal-line-time">Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}</small>` : ""}
       ${hasPermission("manage_racks") ? `
         <div class="rack-modal-line-actions">
-          <button class="icon-only icon-move" type="button" data-rack-modal-move-open="${escapeHtml(rackItemId)}" title="Move item" aria-label="Move ${escapeHtml(item.order)}-${escapeHtml(item.item)}"></button>
-          <button class="icon-only icon-trash danger" type="button" data-rack-modal-clear-item="${escapeHtml(rackItemId)}" data-rack-modal-clear-label="${escapeHtml(`${item.order}-${item.item}`)}" title="Clear item" aria-label="Clear ${escapeHtml(item.order)}-${escapeHtml(item.item)}"></button>
-        </div>
-        ${moveOpen ? `
-          <div class="rack-modal-move-editor">
-            <label>
-              <span>Move to another rack</span>
-              <select data-rack-target="${escapeHtml(rackItemId)}">
-                <option value="">Select destination...</option>
-                ${destinationOptions}
-              </select>
-            </label>
-            <div class="rack-modal-move-actions">
-              <button type="button" class="secondary" data-rack-modal-move-cancel="${escapeHtml(rackItemId)}">Cancel</button>
-              <button type="button" data-rack-modal-move-confirm="${escapeHtml(rackItemId)}" ${destinationOptions ? "" : "disabled"}>Confirm Move</button>
-            </div>
-          </div>` : ""}` : ""}
+          <button class="icon-only icon-move rack-scope-move-button" type="button"
+            data-rack-modal-move-item="${escapeHtml(rackItemId)}"
+            data-source-rack="${escapeHtml(currentRackCode)}"
+            data-rack-item-label="${escapeHtml(itemLabel)}"
+            title="Move item" aria-label="Move ${escapeHtml(itemLabel)}"></button>
+          <button class="icon-only icon-trash danger" type="button" data-rack-modal-clear-item="${escapeHtml(rackItemId)}" data-rack-modal-clear-label="${escapeHtml(itemLabel)}" title="Clear item" aria-label="Clear ${escapeHtml(itemLabel)}"></button>
+        </div>` : ""}
     </article>`;
+}
+
+function rackTransferOptions(currentRackCode) {
+  return state.racks
+    .filter((rack) => (
+      String(rack.code) !== String(currentRackCode)
+      && String(rack.status || "Open").trim().toLowerCase() === "open"
+    ))
+    .map((rack) => `<option value="${escapeHtml(rack.code)}">${escapeHtml(rackOptionLabel(rack))}</option>`)
+    .join("");
+}
+
+function rackModalHeaderActionsHtml(rack) {
+  if (!rack) return "";
+  const isTruck = isTruckRack(rack);
+  const statusLower = String(rack.status || "Open").trim().toLowerCase();
+  const hasItems = Number(rack.qty || 0) > 0;
+  const canTransfer = hasPermission("transfer_rack_contents") || hasPermission("manage_racks");
+  const transferOptions = rackTransferOptions(rack.code);
+  const printLabel = isTruck ? "Print Truck Packing Slip" : "Print Packing Slip";
+  return `
+    ${hasItems && statusLower === "open" ? `<button type="button" data-rack-modal-complete="${escapeHtml(rack.code)}">Complete Rack</button>` : ""}
+    ${hasItems && statusLower === "closed" ? `<button type="button" data-rack-modal-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : ""}
+    ${statusLower === "in transit" ? `<button type="button" data-rack-modal-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" class="secondary" data-rack-modal-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>` : ""}
+    <button type="button" data-rack-modal-print="${escapeHtml(rack.code)}" ${hasItems && ["closed", "in transit"].includes(statusLower) ? "" : "disabled"}>${printLabel}</button>
+    ${canTransfer && hasItems ? `<button class="icon-only icon-move rack-scope-move-button rack-move-all-icon" type="button" data-rack-modal-move-all="${escapeHtml(rack.code)}" ${transferOptions ? "" : "disabled"} title="Move all rack contents" aria-label="Move all contents from rack ${escapeHtml(rack.code)}"></button>` : ""}`;
+}
+
+function updateRackModalHeaderActions(rack) {
+  if (!els.operationsModalRackActions) return;
+  const html = rackModalHeaderActionsHtml(rack);
+  els.operationsModalRackActions.innerHTML = html;
+  els.operationsModalRackActions.hidden = !html;
+  applyLanguageToRoot(els.operationsModalRackActions);
 }
 
 function rackDetailsModalHtml(rack) {
   if (!rack) return `<div class="admin-empty">Rack not found.</div>`;
-  const isTruck = isTruckRack(rack);
-  const status = String(rack.status || "Open");
-  const statusLower = status.toLowerCase();
-  const hasItems = Number(rack.qty || 0) > 0;
   const items = rack.items || [];
+  const canTransfer = hasPermission("transfer_rack_contents") || hasPermission("manage_racks");
+  const transferOptions = rackTransferOptions(rack.code);
   const dateGroups = new Map();
   for (const item of items) {
     const key = String(item.deliveryDate || "No delivery date");
     if (!dateGroups.has(key)) dateGroups.set(key, []);
     dateGroups.get(key).push(item);
   }
-  const itemHtml = isTruck
-    ? [...dateGroups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([deliveryDate, rows]) => `
+  const itemHtml = [...dateGroups.entries()]
+    .sort(([aDate], [bDate]) => aDate.localeCompare(bDate))
+    .map(([deliveryDate, rows]) => {
+      const pieceQty = rows.reduce((sum, row) => sum + Number(row.rackQty || 1), 0);
+      return `
         <details class="rack-modal-date-group" open>
-          <summary><strong>${escapeHtml(deliveryDate === "No delivery date" ? deliveryDate : formatDisplayDate(deliveryDate))}</strong><span>${escapeHtml(rows.reduce((sum, row) => sum + Number(row.rackQty || 1), 0))} pcs</span></summary>
-          <div>${rows.map((item) => compactRackItemHtml(item, rack.code)).join("")}</div>
-        </details>`).join("")
-    : items.map((item) => compactRackItemHtml(item, rack.code)).join("");
+          <summary>
+            <strong>${escapeHtml(deliveryDate === "No delivery date" ? deliveryDate : formatDisplayDate(deliveryDate))}</strong>
+            <span>${escapeHtml(rows.length)} lines · ${escapeHtml(pieceQty)} pcs</span>
+            ${canTransfer && deliveryDate !== "No delivery date" ? `<button class="icon-only icon-move rack-scope-move-button" type="button" data-rack-modal-move-date="${escapeHtml(deliveryDate)}" data-source-rack="${escapeHtml(rack.code)}" ${transferOptions ? "" : "disabled"} title="Move this delivery date" aria-label="Move all items for ${escapeHtml(formatDisplayDate(deliveryDate))}"></button>` : ""}
+          </summary>
+          <div class="rack-modal-date-lines">${rows.map((item) => compactRackItemHtml(item, rack.code)).join("")}</div>
+        </details>`;
+    }).join("");
 
   return `
-    <section class="rack-details-modal-shell ${escapeHtml(rackStatusClassName(rack))}">
-      <header class="rack-details-modal-hero">
-        <div>
-          <span>${isTruck ? "Transport loading" : escapeHtml(rack.type || "Rack")}</span>
-          <h3>${escapeHtml(isTruck ? "Truck / No Rack" : rack.code)}</h3>
-          <p>${escapeHtml(rack.name || "")}</p>
-        </div>
-        <div class="rack-details-modal-kpis">
-          <span><small>Pieces</small><strong>${escapeHtml(rack.qty || 0)}</strong></span>
-          <span><small>Status</small><strong>${escapeHtml(rackStatusLabel(rack))}</strong></span>
-          ${rack.departedAt ? `<span><small>Outbound</small><strong>${escapeHtml(formatDateTime(rack.departedAt))}</strong></span>` : ""}
-        </div>
-      </header>
-      <div class="rack-details-modal-actions">
-        ${hasItems && statusLower === "open" ? `<button type="button" data-rack-modal-complete="${escapeHtml(rack.code)}">Complete Rack</button>` : ""}
-        ${hasItems && statusLower === "closed" ? `<button type="button" data-rack-modal-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : ""}
-        ${statusLower === "in transit" ? `<button type="button" data-rack-modal-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" class="secondary" data-rack-modal-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>` : ""}
-        <button type="button" data-rack-modal-print="${escapeHtml(rack.code)}" ${hasItems && ["closed", "in transit"].includes(statusLower) ? "" : "disabled"}>Print Packing List</button>
-      </div>
-      <div class="rack-details-modal-list-heading"><strong>Orders on this ${isTruck ? "truck" : "rack"}</strong><span>${escapeHtml(items.length)} lines</span></div>
-      <div class="rack-details-modal-list">${itemHtml || `<div class="admin-empty">No pieces are assigned.</div>`}</div>
+    <section class="rack-details-modal-shell rack-details-modal-v184 ${escapeHtml(rackStatusClassName(rack))}">
+      <div class="rack-details-modal-list" aria-label="Assigned rack pieces">${itemHtml || `<div class="admin-empty">No pieces are assigned.</div>`}</div>
     </section>`;
+}
+
+function chooseRackTransferDestination(sourceRackCode, options = {}) {
+  const settings = typeof options === "string" ? { deliveryDate: options } : (options || {});
+  const deliveryDate = String(settings.deliveryDate || "");
+  const rackItemId = String(settings.rackItemId || "");
+  const itemLabel = String(settings.itemLabel || "");
+  const sourceRack = state.racks.find((rack) => String(rack.code) === String(sourceRackCode));
+  const destinations = state.racks.filter((rack) => (
+    String(rack.code) !== String(sourceRackCode)
+    && String(rack.status || "Open").trim().toLowerCase() === "open"
+  ));
+  if (!sourceRack || !destinations.length) {
+    return Promise.reject(new Error("No open destination racks are available."));
+  }
+
+  return new Promise((resolve) => {
+    document.querySelector(".rack-transfer-backdrop")?.remove();
+    const shell = document.createElement("div");
+    shell.className = "rack-transfer-backdrop";
+    const scopeText = rackItemId
+      ? (itemLabel || "this rack item")
+      : deliveryDate
+        ? `all items dated ${formatDisplayDate(deliveryDate)}`
+        : "every active item on this rack";
+    shell.innerHTML = `
+      <section class="rack-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="rackTransferTitle">
+        <button class="modal-close-x rack-transfer-close" type="button" data-rack-transfer-cancel aria-label="Close">&times;</button>
+        <div class="rack-transfer-dialog-copy">
+          <small>Rack transfer</small>
+          <h2 id="rackTransferTitle">Move ${escapeHtml(scopeText)}</h2>
+          <p>Choose an open destination rack. The destination is validated before anything moves.</p>
+        </div>
+        <div class="rack-transfer-dialog-field">
+          <span>Destination rack</span>
+          <div class="rack-transfer-combobox" data-rack-transfer-combobox>
+            <button type="button" class="rack-transfer-combobox-trigger" data-rack-transfer-trigger aria-haspopup="listbox" aria-expanded="false">
+              <span data-rack-transfer-selection>Select destination rack...</span>
+              <i aria-hidden="true"></i>
+            </button>
+            <div class="rack-transfer-combobox-menu" data-rack-transfer-menu role="listbox" hidden>
+              ${destinations.map((rack) => `<button type="button" role="option" data-rack-transfer-option="${escapeHtml(rack.code)}">${escapeHtml(rackOptionLabel(rack))}</button>`).join("")}
+            </div>
+          </div>
+        </div>
+        <div class="rack-transfer-dialog-actions">
+          <button type="button" class="secondary" data-rack-transfer-cancel>Cancel</button>
+          <button type="button" data-rack-transfer-confirm disabled>Continue</button>
+        </div>
+      </section>`;
+
+    const trigger = shell.querySelector("[data-rack-transfer-trigger]");
+    const menu = shell.querySelector("[data-rack-transfer-menu]");
+    const selection = shell.querySelector("[data-rack-transfer-selection]");
+    const confirm = shell.querySelector("[data-rack-transfer-confirm]");
+    let selectedCode = "";
+    const setMenuOpen = (open) => {
+      if (!menu || !trigger) return;
+      menu.hidden = !open;
+      trigger.setAttribute("aria-expanded", String(open));
+      shell.classList.toggle("is-dropdown-open", open);
+      if (open) menu.querySelector("[data-rack-transfer-option]")?.focus();
+    };
+    const close = (value = "") => {
+      shell.remove();
+      document.body.classList.remove("modal-scroll-locked");
+      resolve(value);
+    };
+    trigger?.addEventListener("click", () => setMenuOpen(menu?.hidden !== false));
+    shell.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-rack-transfer-option]");
+      if (option) {
+        selectedCode = option.dataset.rackTransferOption || "";
+        if (selection) selection.textContent = option.textContent?.trim() || selectedCode;
+        if (confirm) confirm.disabled = !selectedCode;
+        menu?.querySelectorAll("[data-rack-transfer-option]").forEach((row) => row.setAttribute("aria-selected", String(row === option)));
+        setMenuOpen(false);
+        trigger?.focus();
+        return;
+      }
+      if (event.target === shell || event.target.closest("[data-rack-transfer-cancel]")) {
+        close("");
+        return;
+      }
+      if (event.target.closest("[data-rack-transfer-confirm]")) close(selectedCode);
+    });
+    shell.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        if (menu && !menu.hidden) setMenuOpen(false);
+        else close("");
+      }
+    });
+    document.body.appendChild(shell);
+    document.body.classList.add("modal-scroll-locked");
+    trigger?.focus();
+  });
+}
+
+async function moveRackContents(sourceRackCode, targetRackCode, deliveryDate = "") {
+  if (!targetRackCode) throw new Error("Select a destination rack.");
+  const scopeLabel = deliveryDate ? `all items for ${formatDisplayDate(deliveryDate)}` : "all rack contents";
+  const confirmed = await confirmWebAppAction({
+    title: deliveryDate ? "Move delivery-date group?" : "Move all rack contents?",
+    message: `Move <strong>${escapeHtml(scopeLabel)}</strong> from <strong>${escapeHtml(sourceRackCode)}</strong> to <strong>${escapeHtml(targetRackCode)}</strong>?`,
+    details: "Every item is validated before anything moves. The transfer is cancelled if any item is incompatible.",
+    confirmLabel: deliveryDate ? "Move Date Group" : "Move All Contents",
+    danger: false,
+  });
+  if (!confirmed) return;
+  const payload = await fetchJson("/api/racks/move-contents", {
+    method: "POST",
+    body: JSON.stringify({ sourceRackCode, targetRackCode, deliveryDate }),
+  });
+  state.racks = payload.racks || state.racks;
+  state.rackSummary = payload.summary || state.rackSummary;
+  playAppSound("rack_item_added");
+  showSaveConfirmation(payload.message || "Rack contents were moved.");
+  await refreshOpenRackDetails(sourceRackCode);
 }
 
 function openRackDetailsModal(rackCode) {
@@ -23188,6 +24082,7 @@ function openRackDetailsModal(rackCode) {
     status: rackStatusLabel(rack),
     body: rackDetailsModalHtml(rack),
   });
+  updateRackModalHeaderActions(rack);
 }
 
 async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode) {
@@ -23201,6 +24096,7 @@ async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode)
       status: rackStatusLabel(rack),
     });
     els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
+    updateRackModalHeaderActions(rack);
   } else if (!rack) {
     closeOperationsModal();
   }
@@ -23219,12 +24115,12 @@ function packingHistoryGroups(history = []) {
 function packingHistoryModalHtml(history = state.packingListHistory) {
   const groups = packingHistoryGroups(history);
   return `
-    <section class="packing-history-shell">
+    <section class="packing-history-shell packing-history-shell-v184" data-rack-history-panel="packing">
       <div class="packing-history-intro">
         <div><strong>Previously printed packing lists</strong><span>Each record is an immutable snapshot of what was on the rack at print time.</span></div>
         <label class="search-box"><span class="search-icon"></span><input id="packingHistorySearch" type="search" autocomplete="off" placeholder="Search rack, date, or user..."></label>
       </div>
-      <div class="packing-history-groups" id="packingHistoryGroups">
+      <div class="packing-history-groups packing-history-groups-v184" id="packingHistoryGroups">
         ${groups.length ? groups.map(([day, rows]) => `
           <details class="packing-history-day" open>
             <summary><strong>${escapeHtml(day === "Unknown date" ? day : formatDisplayDate(day))}</strong><span>${escapeHtml(rows.length)} print${rows.length === 1 ? "" : "s"}</span></summary>
@@ -23244,15 +24140,284 @@ function packingHistoryModalHtml(history = state.packingListHistory) {
     </section>`;
 }
 
-async function openPackingHistoryModal() {
-  const payload = await fetchJson("/api/racks/packing-history?limit=500");
-  state.packingListHistory = payload.history || [];
-  openOperationsModal({
-    kind: "packing-history",
-    eyebrow: "Rack records",
-    title: "Packing List Print History",
-    body: packingHistoryModalHtml(),
+function rackHistoryDefaultFilters() {
+  return {
+    query: "",
+    user: "",
+    action: "",
+    rackGroup: "",
+    rackFrom: "",
+    rackTo: "",
+    dateFrom: "",
+    dateTo: "",
+  };
+}
+
+function rackHistoryNormalizeCode(value = "") {
+  return String(value || "")
+    .trim()
+    .replace(/^RACK[-_ ]*/i, "")
+    .toUpperCase();
+}
+
+function rackHistoryEventCodes(event = {}) {
+  const payload = event.payload || {};
+  const values = [];
+  if (String(event.entityType || "") === "rack") {
+    values.push(...String(event.entityId || "").split(/[;,|]+/));
+  }
+  for (const key of ["rackCode", "sourceRackCode", "targetRackCode", "oldCode"]) {
+    if (payload[key]) values.push(payload[key]);
+  }
+  for (const key of ["rackCodes", "createdRackCodes", "affectedRackCodes"]) {
+    if (Array.isArray(payload[key])) values.push(...payload[key]);
+  }
+  return [...new Set(values.map(rackHistoryNormalizeCode).filter(Boolean))];
+}
+
+function rackHistoryRackByCode(code = "") {
+  const normalized = rackHistoryNormalizeCode(code);
+  return state.racks.find((rack) => rackHistoryNormalizeCode(rack.code) === normalized) || null;
+}
+
+function rackHistoryEventGroups(event = {}) {
+  const payload = event.payload || {};
+  const groups = new Set();
+  for (const code of rackHistoryEventCodes(event)) {
+    const rack = rackHistoryRackByCode(code);
+    if (rack) groups.add(rackGroupLabel(rack));
+  }
+  for (const value of [payload.rackGroup, payload.rackType, payload.type]) {
+    if (String(value || "").trim()) groups.add(String(value).trim());
+  }
+  if (String(event.entityType || "") === "rack_set" && String(event.entityId || "").trim()) {
+    groups.add(String(event.entityId).trim());
+  }
+  return [...groups];
+}
+
+function rackHistorySortedRacks(group = "") {
+  return state.racks
+    .filter((rack) => !group || rackGroupLabel(rack) === group)
+    .slice()
+    .sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function rackHistoryOptionValues(events = [], field = "") {
+  return [...new Set(events.map((event) => String(event[field] || (field === "user" ? "system" : "")).trim()).filter(Boolean))]
+    .sort((a, b) => actionHistoryLabel(a).localeCompare(actionHistoryLabel(b), undefined, { sensitivity: "base" }));
+}
+
+function rackHistoryAllowedCodes() {
+  const filters = state.rackHistoryFilters || rackHistoryDefaultFilters();
+  const rackChoices = rackHistorySortedRacks(filters.rackGroup);
+  const rackIndexes = new Map(rackChoices.map((rack, index) => [rackHistoryNormalizeCode(rack.code), index]));
+  let rangeStart = filters.rackFrom && rackIndexes.has(rackHistoryNormalizeCode(filters.rackFrom))
+    ? rackIndexes.get(rackHistoryNormalizeCode(filters.rackFrom))
+    : 0;
+  let rangeEnd = filters.rackTo && rackIndexes.has(rackHistoryNormalizeCode(filters.rackTo))
+    ? rackIndexes.get(rackHistoryNormalizeCode(filters.rackTo))
+    : Math.max(rackChoices.length - 1, 0);
+  if (rangeStart > rangeEnd) [rangeStart, rangeEnd] = [rangeEnd, rangeStart];
+  const scopeActive = Boolean(filters.rackGroup || filters.rackFrom || filters.rackTo);
+  if (!scopeActive) return null;
+  return rackChoices
+    .filter((_rack, index) => index >= rangeStart && index <= rangeEnd)
+    .map((rack) => rackHistoryNormalizeCode(rack.code))
+    .filter(Boolean);
+}
+
+function rackHistoryFilteredEvents() {
+  return Array.isArray(state.rackHistoryEvents) ? state.rackHistoryEvents : [];
+}
+
+function rackHistoryFiltersActive(filters = state.rackHistoryFilters || {}) {
+  return Object.values(filters).some((value) => Boolean(String(value || "").trim()));
+}
+
+function rackHistoryFilterMarkup() {
+  const filters = state.rackHistoryFilters || rackHistoryDefaultFilters();
+  const users = Array.isArray(state.rackHistoryUsers) ? state.rackHistoryUsers : [];
+  const actions = Array.isArray(state.rackHistoryActions) ? state.rackHistoryActions : [];
+  const groups = [...new Set([
+    ...state.racks.map((rack) => rackGroupLabel(rack)),
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const racks = rackHistorySortedRacks(filters.rackGroup);
+  const rackOptions = (selectedCode = "") => racks
+    .map((rack) => `<option value="${escapeHtml(rack.code)}" ${String(selectedCode) === String(rack.code) ? "selected" : ""}>${escapeHtml(rack.code)} · ${escapeHtml(rack.name || rack.type || rackGroupLabel(rack))}</option>`)
+    .join("");
+  return `
+    <section class="rack-history-filters" aria-label="Rack history filters">
+      <div class="rack-history-filter-grid">
+        <label class="rack-history-filter-search"><span>Search log</span><input type="search" autocomplete="off" data-rack-history-filter="query" value="${escapeHtml(filters.query)}" placeholder="Search racks, actions, users, or details..."></label>
+        <label><span>User</span><select data-rack-history-filter="user"><option value="">All users</option>${users.map((value) => `<option value="${escapeHtml(value)}" ${filters.user === value ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
+        <label><span>Action</span><select data-rack-history-filter="action"><option value="">All actions</option>${actions.map((value) => `<option value="${escapeHtml(value)}" ${filters.action === value ? "selected" : ""}>${escapeHtml(actionHistoryLabel(value))}</option>`).join("")}</select></label>
+        <label><span>Rack Group</span><select data-rack-history-filter="rackGroup"><option value="">All rack groups</option>${groups.map((value) => `<option value="${escapeHtml(value)}" ${filters.rackGroup === value ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
+        <label><span>Rack from</span><select data-rack-history-filter="rackFrom"><option value="">First rack</option>${rackOptions(filters.rackFrom)}</select></label>
+        <label><span>Through rack</span><select data-rack-history-filter="rackTo"><option value="">Last rack</option>${rackOptions(filters.rackTo)}</select></label>
+        <label><span>From date</span><input type="date" data-rack-history-filter="dateFrom" value="${escapeHtml(filters.dateFrom)}"></label>
+        <label><span>Through date</span><input type="date" data-rack-history-filter="dateTo" value="${escapeHtml(filters.dateTo)}"></label>
+      </div>
+      <div class="rack-history-filter-footer">
+        <span id="rackHistoryResultCount"></span>
+        <div class="rack-history-pager" aria-label="Rack history pages">
+          <button type="button" class="secondary" data-rack-history-page="${Math.max(Number(state.rackHistoryPage || 1) - 1, 1)}" ${Number(state.rackHistoryPage || 1) <= 1 ? "disabled" : ""}>Previous</button>
+          <strong>Page ${escapeHtml(state.rackHistoryPage || 1)} of ${escapeHtml(state.rackHistoryTotalPages || 1)}</strong>
+          <button type="button" class="secondary" data-rack-history-page="${Number(state.rackHistoryPage || 1) + 1}" ${Number(state.rackHistoryPage || 1) >= Number(state.rackHistoryTotalPages || 1) ? "disabled" : ""}>Next</button>
+        </div>
+        <button type="button" class="secondary" data-rack-history-clear ${rackHistoryFiltersActive(filters) ? "" : "disabled"}>Clear filters</button>
+      </div>
+    </section>`;
+}
+
+function rackHistoryRowsMarkup(events = []) {
+  if (!events.length) {
+    return `<div class="admin-empty">${state.rackHistoryTotalCount ? "No rack-history events match the selected filters." : "No rack history has been recorded yet."}</div>`;
+  }
+  return events.map((event) => {
+    const codes = rackHistoryEventCodes(event);
+    const groups = rackHistoryEventGroups(event);
+    return `
+      <article class="rack-history-event-row">
+        <span class="modal-action-history-icon" aria-hidden="true"></span>
+        <div class="rack-history-event-copy">
+          <strong>${escapeHtml(actionHistoryLabel(event.action))}</strong>
+          <span>${escapeHtml(actionHistoryDetail(event))}</span>
+          <div class="rack-history-event-tags">
+            ${codes.map((code) => `<b>${escapeHtml(code)}</b>`).join("")}
+            ${groups.map((group) => `<i>${escapeHtml(group)}</i>`).join("")}
+          </div>
+        </div>
+        <div class="rack-history-event-meta">
+          <time datetime="${escapeHtml(event.createdAt || "")}">${escapeHtml(actionHistoryDateTime(event.createdAt))}</time>
+          <small>${escapeHtml(event.user || "system")}</small>
+        </div>
+      </article>`;
+  }).join("");
+}
+
+function allRacksHistoryModalHtml() {
+  const rows = rackHistoryFilteredEvents();
+  return `
+    <section class="all-racks-history-shell" id="allRacksHistoryPanel" data-rack-history-panel="all" hidden>
+      <header class="all-racks-history-intro">
+        <div><strong>All rack activity</strong><span>Investigate status, scanning, transfer, recovery, setup, and packing actions across every rack.</span></div>
+        <b>${escapeHtml(state.rackHistoryTotalCount)} events</b>
+      </header>
+      ${rackHistoryFilterMarkup()}
+      <div class="rack-history-event-list" id="allRacksHistoryList">${rackHistoryRowsMarkup(rows)}</div>
+    </section>`;
+}
+
+function rackHistoryModalHtml() {
+  return `
+    <div class="rack-history-control-center">
+      ${packingHistoryModalHtml()}
+      ${allRacksHistoryModalHtml()}
+    </div>`;
+}
+
+function syncRackHistoryRangeControls() {
+  const filters = state.rackHistoryFilters || rackHistoryDefaultFilters();
+  const racks = rackHistorySortedRacks(filters.rackGroup);
+  const validCodes = new Set(racks.map((rack) => String(rack.code)));
+  if (filters.rackFrom && !validCodes.has(filters.rackFrom)) filters.rackFrom = "";
+  if (filters.rackTo && !validCodes.has(filters.rackTo)) filters.rackTo = "";
+  const optionHtml = racks.map((rack) => `<option value="${escapeHtml(rack.code)}">${escapeHtml(rack.code)} · ${escapeHtml(rack.name || rack.type || rackGroupLabel(rack))}</option>`).join("");
+  const from = document.querySelector('[data-rack-history-filter="rackFrom"]');
+  const to = document.querySelector('[data-rack-history-filter="rackTo"]');
+  if (from) {
+    from.innerHTML = `<option value="">First rack</option>${optionHtml}`;
+    from.value = filters.rackFrom;
+  }
+  if (to) {
+    to.innerHTML = `<option value="">Last rack</option>${optionHtml}`;
+    to.value = filters.rackTo;
+  }
+}
+
+function renderAllRacksHistoryResults() {
+  const rows = rackHistoryFilteredEvents();
+  const page = Math.max(Number(state.rackHistoryPage || 1), 1);
+  const pageSize = Math.max(Number(state.rackHistoryPageSize || 50), 1);
+  const total = Math.max(Number(state.rackHistoryTotalCount || 0), 0);
+  const pageStart = total ? ((page - 1) * pageSize) + 1 : 0;
+  const pageEnd = total ? Math.min(pageStart + rows.length - 1, total) : 0;
+  const panel = document.getElementById("allRacksHistoryPanel");
+  if (panel) {
+    const existingFilters = panel.querySelector(".rack-history-filters");
+    if (existingFilters) existingFilters.outerHTML = rackHistoryFilterMarkup();
+    const headerCount = panel.querySelector(".all-racks-history-intro > b");
+    if (headerCount) headerCount.textContent = `${total} events`;
+  }
+  const list = document.getElementById("allRacksHistoryList");
+  const result = document.getElementById("rackHistoryResultCount");
+  const clear = document.querySelector("[data-rack-history-clear]");
+  if (list) list.innerHTML = rackHistoryRowsMarkup(rows);
+  if (result) result.textContent = total ? `${pageStart}-${pageEnd} of ${total} events` : "0 events";
+  if (clear) clear.disabled = !rackHistoryFiltersActive();
+  if (els.operationsAllRacksHistoryCount) els.operationsAllRacksHistoryCount.textContent = String(total);
+  applyLanguageToRoot(panel);
+}
+
+async function loadRackHistoryPage() {
+  const filters = state.rackHistoryFilters || rackHistoryDefaultFilters();
+  const params = new URLSearchParams({
+    context: "racks-history",
+    page: String(Math.max(Number(state.rackHistoryPage || 1), 1)),
+    pageSize: String(Math.min(Math.max(Number(state.rackHistoryPageSize || 50), 1), 50)),
   });
+  for (const [key, value] of Object.entries(filters)) {
+    if (["rackGroup", "rackFrom", "rackTo"].includes(key)) continue;
+    if (String(value || "").trim()) params.set(key, String(value));
+  }
+  const rackCodes = rackHistoryAllowedCodes();
+  if (rackCodes !== null) params.set("rackCodes", rackCodes.length ? rackCodes.join(",") : "__NO_RACKS__");
+  const payload = await fetchJson(`/api/admin/action-history?${params.toString()}`);
+  state.rackHistoryEvents = Array.isArray(payload.events) ? payload.events : [];
+  state.rackHistoryPage = Math.max(Number(payload.page || 1), 1);
+  state.rackHistoryPageSize = Math.min(Math.max(Number(payload.pageSize || 50), 1), 50);
+  state.rackHistoryTotalCount = Math.max(Number(payload.totalCount || 0), 0);
+  state.rackHistoryTotalPages = Math.max(Number(payload.totalPages || 1), 1);
+  state.rackHistoryUsers = Array.isArray(payload.users) ? payload.users : [];
+  state.rackHistoryActions = Array.isArray(payload.actions) ? payload.actions : [];
+  renderAllRacksHistoryResults();
+}
+
+function setRackHistoryView(view = "packing") {
+  state.rackHistoryView = view === "all" ? "all" : "packing";
+  els.operationsRackRecordsTabs?.querySelectorAll("[data-rack-records-view]").forEach((button) => {
+    const active = button.dataset.rackRecordsView === state.rackHistoryView;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  els.operationsModalBody?.querySelectorAll("[data-rack-history-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.rackHistoryPanel !== state.rackHistoryView;
+  });
+  if (state.rackHistoryView === "all") renderAllRacksHistoryResults();
+}
+
+async function openRacksHistoryModal() {
+  await ensureRacksLoaded();
+  const packingPayload = await fetchJson("/api/racks/packing-history?limit=500");
+  state.packingListHistory = packingPayload.history || [];
+  state.rackHistoryEvents = [];
+  state.rackHistoryFilters = rackHistoryDefaultFilters();
+  state.rackHistoryPage = 1;
+  state.rackHistoryPageSize = 50;
+  state.rackHistoryTotalCount = 0;
+  state.rackHistoryTotalPages = 1;
+  state.rackHistoryUsers = [];
+  state.rackHistoryActions = [];
+  state.rackHistoryView = "packing";
+  openOperationsModal({
+    kind: "rack-history",
+    eyebrow: "Rack Records",
+    title: "Racks History",
+    body: rackHistoryModalHtml(),
+  });
+  setRackHistoryView("packing");
+  await loadRackHistoryPage();
 }
 
 function rejectDateKey(offsetDays = 0) {
@@ -23376,66 +24541,40 @@ function rejectLogModalHtml({ catalogLoading = false, catalogError = "" } = {}) 
     : catalogError
       ? catalogError
       : catalogReady
-        ? "Enter an order and item, then verify the piece before recording the reject."
+        ? "Enter the order and item, verify the exact piece, then record the reject."
         : "An Admin must add at least one reject reason and break location before a reject can be recorded.";
   return `
-    <form id="rejectLogForm" class="reject-log-form reject-log-form-v138">
-      <section class="reject-log-hero-v138">
-        <span class="reject-log-hero-icon-v138" aria-hidden="true"></span>
-        <div>
-          <small>Internal quality incident</small>
-          <strong>Log one broken piece and restart its production workflow</strong>
-          <p>Nothing changes until the order and item are verified and the reject is submitted.</p>
+    <form id="rejectLogForm" class="reject-log-form reject-log-form-v182">
+
+      <section class="reject-log-step-v182 reject-identify-step-v182">
+        <header><span>1</span><div><strong>Identify Piece</strong><small>Enter the order number and item number to find the exact piece.</small></div></header>
+        <div class="reject-log-identify-grid-v182">
+          <label><span>Order Number *</span><input id="rejectOrderInput" name="order" autocomplete="off" required></label>
+          <label><span>Item Number (Piece) *</span><input id="rejectItemInput" name="item" autocomplete="off" required></label>
+          <label><span>Quantity Rejected *</span><input id="rejectQtyInput" name="qty" type="number" min="1" value="1" required></label>
+          <button id="rejectVerifyBtn" class="primary reject-verify-button" type="button"><span class="reject-verify-icon" aria-hidden="true"></span><span>Find Piece</span></button>
+        </div>
+        <small class="reject-identify-help-v182">Use the exact order and item number. The delivery date is resolved automatically.</small>
+      </section>
+
+      <section class="reject-log-step-v182 reject-match-step-v182">
+        <header><span>2</span><div><strong>Matched Piece Summary</strong><small>The verified piece and active workflow details appear below.</small></div><b id="rejectMatchStatusPill">Waiting for piece</b></header>
+        <div id="rejectMatchPreview" class="reject-match-preview reject-match-preview-v182" aria-live="polite"><span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Waiting for an order and item</strong><span>Find Piece will locate the active delivery date and affected stages automatically.</span></div></div>
+      </section>
+
+      <section class="reject-log-step-v182 reject-details-step-v182">
+        <header><span>3</span><div><strong>Reject Details</strong><small>Provide the standard reason, rejected quantity, source/location, and useful notes.</small></div></header>
+        <div class="reject-log-incident-grid-v182">
+          <label><span>Reject Reason *</span><select id="rejectReasonSelect" name="reason" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading reasons..." : "Choose reason..."}</option>${rejectCatalogOptions(reasons)}</select></label>
+          <label><span>Source / Location *</span><select id="rejectLocationSelect" name="location" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading locations..." : "Choose location..."}</option>${rejectCatalogOptions(locations)}</select></label>
+          <label class="reject-notes"><span>Notes / Comments</span><textarea name="notes" rows="3" maxlength="500" placeholder="Optional details about the defect, handling issue, or equipment condition..."></textarea></label>
         </div>
       </section>
 
-      <section class="reject-log-step-v138">
-        <header>
-          <span>1</span>
-          <div><strong>Find the affected piece</strong><small>Use the exact order and item shown on the delivery list.</small></div>
-        </header>
-        <div class="reject-log-identify-grid-v138">
-          <label><span>Order number *</span><input id="rejectOrderInput" name="order" inputmode="numeric" autocomplete="off" required></label>
-          <label><span>Item number *</span><input id="rejectItemInput" name="item" inputmode="numeric" autocomplete="off" required></label>
-          <label><span>Delivery date</span><input id="rejectDeliveryDateInput" name="deliveryDate" type="date"><small>Filled automatically after verification.</small></label>
-          <label><span>Rejected quantity *</span><input name="qty" type="number" min="1" value="1" required><small>Usually one broken piece.</small></label>
-          <button id="rejectVerifyBtn" class="secondary reject-verify-button" type="button">
-            <span class="reject-verify-icon" aria-hidden="true"></span>
-            <span>Verify Item</span>
-          </button>
-        </div>
-        <div id="rejectMatchPreview" class="reject-match-preview" aria-live="polite">
-          <span class="reject-match-state-icon" aria-hidden="true"></span>
-          <div><strong>Waiting for an order and item</strong><span>Verification confirms the active delivery date and stages that will be restarted.</span></div>
-        </div>
-      </section>
-
-      <section class="reject-log-step-v138">
-        <header>
-          <span>2</span>
-          <div><strong>Describe what happened</strong><small>Choose a standardized reason and the process location where the glass broke.</small></div>
-        </header>
-        <div class="reject-log-incident-grid-v138">
-          <label><span>Reject reason *</span><select id="rejectReasonSelect" name="reason" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading reasons..." : "Choose reason..."}</option>${rejectCatalogOptions(reasons)}</select></label>
-          <label><span>Break location *</span><select id="rejectLocationSelect" name="location" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading locations..." : "Choose location..."}</option>${rejectCatalogOptions(locations)}</select></label>
-          <label class="reject-notes"><span>Investigation notes</span><textarea name="notes" rows="3" placeholder="Optional details such as the defect, handling issue, or equipment condition..."></textarea></label>
-        </div>
-      </section>
-
-      <section class="reject-impact-note">
-        <span class="reject-impact-icon" aria-hidden="true"></span>
-        <div><strong>What happens after submission</strong><span>The rejected quantity is removed from current rack/bay assignments and its affected process scans are reset. Existing audit history remains intact.</span></div>
-      </section>
-
-      <footer class="reject-log-actions reject-log-actions-v138">
-        <div><strong>Ready to record the reject?</strong><span id="rejectLogStatus" class="${catalogError || (!catalogReady && !catalogLoading) ? "is-warning" : catalogLoading ? "is-loading" : ""}">${escapeHtml(catalogMessage)}</span></div>
-        <div class="reject-log-action-buttons">
-          <button class="secondary" type="button" data-operations-close>Cancel</button>
-          <button class="primary reject-log-submit-v138" type="submit" ${submitDisabled ? "disabled" : ""}>
-            <span aria-hidden="true"></span>
-            <span>Record Reject &amp; Restart Piece</span>
-          </button>
-        </div>
+      <footer class="reject-log-actions reject-log-actions-v182">
+        <span id="rejectLogStatus" class="${catalogError || (!catalogReady && !catalogLoading) ? "is-warning" : catalogLoading ? "is-loading" : ""}">${escapeHtml(catalogMessage)}</span>
+        <div class="reject-log-action-buttons"><button class="secondary" type="button" data-operations-close>Cancel</button><button class="primary reject-log-submit-v182" type="submit" ${submitDisabled ? "disabled" : ""}><span aria-hidden="true"></span><span>Submit Reject</span></button></div>
+        <small>This action cannot be undone.</small>
       </footer>
     </form>`;
 }
@@ -23646,7 +24785,7 @@ function rejectEditModalHtml(row) {
 }
 
 async function openRejectEditModal(rejectId) {
-  if (!isAdminUser()) throw new Error("Admin role required to edit rejects.");
+  if (!hasPermission("manage_reject_records") && !isAdminUser()) throw new Error("Reject record management permission is required.");
   const row = rejectRecordById(rejectId);
   if (!row) throw new Error("Reject record was not found. Refresh the page and try again.");
   if (!(state.rejectCatalog.reasons || []).length || !(state.rejectCatalog.locations || []).length) {
@@ -23673,7 +24812,7 @@ async function refreshRejectMutationViews(payload) {
 }
 
 async function submitRejectEditForm(form) {
-  if (!isAdminUser()) throw new Error("Admin role required to edit rejects.");
+  if (!hasPermission("manage_reject_records") && !isAdminUser()) throw new Error("Reject record management permission is required.");
   const status = document.getElementById("rejectEditStatus");
   const submitButton = form.querySelector('button[type="submit"]');
   const data = Object.fromEntries(new FormData(form).entries());
@@ -23701,7 +24840,7 @@ async function submitRejectEditForm(form) {
 }
 
 async function deleteRejectRecord(rejectId) {
-  if (!isAdminUser()) throw new Error("Admin role required to delete rejects.");
+  if (!hasPermission("manage_reject_records") && !isAdminUser()) throw new Error("Reject record management permission is required.");
   const row = rejectRecordById(rejectId);
   if (!row) throw new Error("Reject record was not found. Refresh the page and try again.");
   const confirmed = await confirmWebAppAction({
@@ -23830,11 +24969,14 @@ async function openRejectLogModal() {
   const trigger = els.rejectLogOpenBtn;
   trigger?.setAttribute("aria-busy", "true");
   state.rejectMatches = [];
+  state.rejectSelectedDeliveryDate = "";
   const catalogReady = state.rejectCatalog.reasons.length > 0 && state.rejectCatalog.locations.length > 0;
   openOperationsModal({
     kind: "reject-log",
-    eyebrow: "Quality recovery",
-    title: "Log Internal Reject",
+    eyebrow: "Internal Rejects",
+    title: "Add Internal Reject",
+    description: "Capture internal reject incidents for an exact order and item (piece).",
+    status: "Quality workflow",
     body: rejectLogModalHtml({ catalogLoading: !catalogReady && state.backend }),
   });
   window.requestAnimationFrame(() => document.getElementById("rejectOrderInput")?.focus());
@@ -23864,41 +25006,70 @@ async function previewRejectMatch() {
   const item = document.getElementById("rejectItemInput")?.value.trim() || "";
   const target = document.getElementById("rejectMatchPreview");
   const verifyButton = document.getElementById("rejectVerifyBtn");
+  const statusPill = document.getElementById("rejectMatchStatusPill");
   const requestId = ++state.rejectMatchRequestId;
   if (!target) return;
   if (!order || !item) {
     state.rejectMatches = [];
-    target.className = "reject-match-preview";
+    target.className = "reject-match-preview reject-match-preview-v182";
     target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Waiting for an order and item</strong><span>Enter both values before verification.</span></div>`;
+    if (statusPill) { statusPill.textContent = "Waiting for piece"; statusPill.className = ""; }
     return;
   }
   if (verifyButton) {
     verifyButton.disabled = true;
     verifyButton.classList.add("is-loading");
   }
-  target.className = "reject-match-preview is-loading";
+  target.className = "reject-match-preview reject-match-preview-v182 is-loading";
   target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Checking active delivery lists</strong><span>Verifying the order, item, delivery date, and affected stages...</span></div>`;
+  if (statusPill) { statusPill.textContent = "Searching"; statusPill.className = "is-loading"; }
   try {
     const payload = await fetchJson(`/api/rejects/matches?order=${encodeURIComponent(order)}&item=${encodeURIComponent(item)}`);
     if (requestId !== state.rejectMatchRequestId) return;
     state.rejectMatches = payload.matches || [];
     if (!state.rejectMatches.length) {
       target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>No active match found</strong><span>Check the order and item, or confirm the delivery list is active.</span></div>`;
-      target.className = "reject-match-preview is-error";
+      target.className = "reject-match-preview reject-match-preview-v182 is-error";
+      if (statusPill) { statusPill.textContent = "Not Found"; statusPill.className = "is-error"; }
       return;
     }
-    const requestedDate = document.getElementById("rejectDeliveryDateInput")?.value || "";
-    const match = state.rejectMatches.find((row) => String(row.delivery_date || "") === requestedDate) || state.rejectMatches[0];
-    const dateInput = document.getElementById("rejectDeliveryDateInput");
-    if (dateInput) dateInput.value = match.delivery_date || "";
-    const stageList = String(match.stages || "").split(",").map((value) => value.trim()).filter(Boolean);
-    target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>${escapeHtml(match.order_no)}-${escapeHtml(match.item_no)} verified for ${escapeHtml(formatDisplayDate(match.delivery_date))}</strong><span>${escapeHtml(match.customer || match.job || match.product || "Active delivery-list item")} · Qty ${escapeHtml(match.qty || 0)}</span><div class="reject-match-stage-list">${stageList.map((stage) => `<b>${escapeHtml(stage)}</b>`).join("")}</div></div>`;
-    target.className = "reject-match-preview is-valid";
+    const selectedMatch = state.rejectMatches.find((row) => String(row.delivery_date || "") === String(state.rejectSelectedDeliveryDate || "")) || state.rejectMatches[0];
+    state.rejectSelectedDeliveryDate = String(selectedMatch.delivery_date || "");
+    const rejectQtyInput = document.getElementById("rejectQtyInput");
+    const availableQty = Math.max(Number(selectedMatch.qty || 1), 1);
+    if (rejectQtyInput) {
+      rejectQtyInput.max = String(availableQty);
+      const currentQty = Math.max(Number(rejectQtyInput.value || 1), 1);
+      rejectQtyInput.value = String(Math.min(currentQty, availableQty));
+    }
+    const stageList = String(selectedMatch.stages || "").split(",").map((value) => value.trim()).filter(Boolean);
+    const dateChoice = state.rejectMatches.length > 1
+      ? `<label class="reject-match-date-choice-v181"><span>Multiple active dates found</span><select data-reject-match-choice>${state.rejectMatches.map((row) => `<option value="${escapeHtml(row.delivery_date || "")}" ${String(row.delivery_date || "") === state.rejectSelectedDeliveryDate ? "selected" : ""}>${escapeHtml(formatDisplayDate(row.delivery_date))} · ${escapeHtml(row.customer || row.job || row.product || "Active item")}</option>`).join("")}</select></label>`
+      : "";
+    target.innerHTML = `
+      <span class="reject-match-state-icon" aria-hidden="true"></span>
+      <div class="reject-match-summary-v182">
+        <div><small>Customer</small><strong>${escapeHtml(selectedMatch.customer || "Not listed")}</strong></div>
+        <div><small>Job / Project</small><strong>${escapeHtml(selectedMatch.job || "Not listed")}</strong></div>
+        <div><small>Glass Type</small><strong>${escapeHtml(selectedMatch.product || "Not listed")}</strong></div>
+        <div><small>Piece Size</small><strong>${escapeHtml(selectedMatch.dimensions || "Not listed")}</strong></div>
+        <div><small>Route</small><strong>${escapeHtml(routeLabel({ route: selectedMatch.route }) || selectedMatch.route || "Not listed")}</strong></div>
+        <div><small>Order / Item</small><strong>${escapeHtml(selectedMatch.order_no)} / ${escapeHtml(selectedMatch.item_no)}</strong></div>
+        <div><small>Available Quantity</small><strong>${escapeHtml(selectedMatch.qty || 0)} pcs</strong></div>
+        <div><small>Scan Progress</small><strong>${escapeHtml(selectedMatch.scanned_qty || 0)} / ${escapeHtml(selectedMatch.qty || 0)} pcs</strong></div>
+        <div><small>Current Bay</small><strong>${escapeHtml(selectedMatch.current_bay || selectedMatch.suggested_bay || "Not assigned")}</strong></div>
+        <div><small>Delivery Date</small><strong>${escapeHtml(formatDisplayDate(selectedMatch.delivery_date))}</strong></div>
+        <div class="reject-match-stages-v182"><small>Active Stages</small><span class="reject-match-stage-list">${stageList.map((stage) => `<b>${escapeHtml(stage)}</b>`).join("")}</span></div>
+        ${dateChoice}
+      </div>`;
+    target.className = "reject-match-preview reject-match-preview-v182 is-valid";
+    if (statusPill) { statusPill.textContent = "Piece Found"; statusPill.className = "is-valid"; }
   } catch (error) {
     if (requestId !== state.rejectMatchRequestId) return;
     state.rejectMatches = [];
     target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Verification failed</strong><span>${escapeHtml(error.message)}</span></div>`;
-    target.className = "reject-match-preview is-error";
+    target.className = "reject-match-preview reject-match-preview-v182 is-error";
+    if (statusPill) { statusPill.textContent = "Check Entry"; statusPill.className = "is-error"; }
   } finally {
     if (requestId === state.rejectMatchRequestId && verifyButton) {
       verifyButton.disabled = false;
@@ -23914,8 +25085,8 @@ async function submitRejectLog(form) {
   data.qty = Number(data.qty || 1);
   if (!state.rejectMatches.length) await previewRejectMatch();
   if (!state.rejectMatches.length) throw new Error("Verify a matching active order and item before recording the reject.");
-  const verified = state.rejectMatches.find((match) => String(match.delivery_date || "") === String(data.deliveryDate || "")) || state.rejectMatches[0];
-  if (!data.deliveryDate && verified?.delivery_date) data.deliveryDate = verified.delivery_date;
+  const verified = state.rejectMatches.find((match) => String(match.delivery_date || "") === String(state.rejectSelectedDeliveryDate || "")) || state.rejectMatches[0];
+  if (verified?.delivery_date) data.deliveryDate = verified.delivery_date;
   if (submitButton) {
     submitButton.disabled = true;
     submitButton.innerHTML = `<span aria-hidden="true"></span><span>Recording Reject...</span>`;
@@ -23941,7 +25112,7 @@ async function submitRejectLog(form) {
   } finally {
     if (submitButton?.isConnected) {
       submitButton.disabled = false;
-      submitButton.innerHTML = `<span aria-hidden="true"></span><span>Record Reject &amp; Restart Piece</span>`;
+      submitButton.innerHTML = `<span aria-hidden="true"></span><span>Submit Reject</span>`;
     }
   }
 }
@@ -23949,15 +25120,15 @@ async function submitRejectLog(form) {
 function rejectSettingsModalHtml() {
   const reasons = state.rejectCatalog.reasons || [];
   const locations = state.rejectCatalog.locations || [];
-  const section = (kind, title, rows) => `
-    <section class="reject-settings-column">
-      <header><strong>${escapeHtml(title)}</strong><span>${escapeHtml(rows.length)} active</span></header>
-      <form class="reject-catalog-add" data-reject-catalog-form="${escapeHtml(kind)}"><input name="label" required placeholder="Add ${escapeHtml(kind)}..."><button type="submit">Add</button></form>
+  const section = (kind, title, description, rows) => `
+    <section class="reject-settings-column reject-settings-${escapeHtml(kind)}">
+      <header><span class="reject-settings-type-icon" aria-hidden="true"></span><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(description)}</small></div><b>${escapeHtml(rows.length)} active</b></header>
+      <form class="reject-catalog-add" data-reject-catalog-form="${escapeHtml(kind)}"><label><span>New ${escapeHtml(kind)}</span><input name="label" required autocomplete="off" placeholder="Enter a clear ${escapeHtml(kind)} label..."></label><button type="submit">Add ${escapeHtml(kind)}</button></form>
       <div class="reject-catalog-list">
-        ${rows.map((row) => `<article><span>${escapeHtml(row.label)}</span><button class="icon-only icon-trash danger" type="button" data-reject-catalog-remove="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.label)}"></button></article>`).join("") || `<div class="admin-empty">No active values.</div>`}
+        ${rows.map((row) => `<article><span class="reject-catalog-row-icon" aria-hidden="true"></span><div><strong>${escapeHtml(row.label)}</strong><small>Available in the Add Internal Reject form</small></div><button class="icon-only icon-trash danger" type="button" data-reject-catalog-remove="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.label)}"></button></article>`).join("") || `<div class="admin-empty">No active ${escapeHtml(kind)} values.</div>`}
       </div>
     </section>`;
-  return `<div class="reject-settings-shell">${section("reason", "Reject reasons", reasons)}${section("location", "Break locations", locations)}</div>`;
+  return `<div class="reject-settings-shell reject-settings-shell-v184"><section class="reject-settings-intro"><div><span>Internal Reject Configuration</span><strong>Reasons &amp; Break Locations</strong><p>Keep choices concise and floor-friendly. Changes appear immediately in the Add Internal Reject form.</p></div><div><b>${escapeHtml(reasons.length)}</b><small>Reasons</small><b>${escapeHtml(locations.length)}</b><small>Locations</small></div></section>${section("reason", "Reject Reasons", "Why the piece was rejected.", reasons)}${section("location", "Break Locations", "Where the defect or break occurred.", locations)}</div>`;
 }
 
 async function loadRejectSettingsModal() {
@@ -24003,8 +25174,8 @@ function importRunClassification(entries = []) {
 
 function importRunLocalDate(entry = {}) {
   const timestamp = importRunTime(entry);
-  const parsed = new Date(timestamp);
-  if (Number.isNaN(parsed.getTime())) return "";
+  const parsed = parseAutomationDateValue(timestamp);
+  if (!parsed) return "";
   return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
 }
 
@@ -24248,10 +25419,48 @@ function filterPackingHistoryRows(query = "") {
 }
 
 
+function parseAutomationDateValue(value, { dateOnlyAtNoon = false } = {}) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  // Automation history may contain ISO values, Windows PowerShell values, or
+  // display-formatted dates. Normalize the unambiguous forms first so a
+  // two-digit year cannot silently become 2001 instead of 2026.
+  const dateOnly = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    const parsed = new Date(`${year}-${month}-${day}T${dateOnlyAtNoon ? "12:00:00" : "00:00:00"}`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const localStamp = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/);
+  if (localStamp) {
+    const [, year, month, day, hour, minute, second = "00"] = localStamp;
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const usStamp = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})(?:[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
+  if (usStamp) {
+    let [, month, day, year, hour = "12", minute = "00", second = "00", meridiem = ""] = usStamp;
+    const numericYear = Number(year.length === 2 ? `20${year}` : year);
+    let numericHour = Number(hour);
+    if (meridiem) {
+      if (numericHour === 12) numericHour = 0;
+      if (meridiem.toUpperCase() === "PM") numericHour += 12;
+    }
+    const parsed = new Date(numericYear, Number(month) - 1, Number(day), numericHour, Number(minute), Number(second));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function automationHistoryDayLabel(timestampText) {
   const text = String(timestampText || "").trim();
-  const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) {
+  const parsed = parseAutomationDateValue(text);
+  if (parsed) {
     return parsed.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
   }
   return text.split(",").slice(0, 1).join(",") || "Unknown date";
@@ -24327,7 +25536,7 @@ function initializeAutomationHistoryGrouping() {
 function wireV135OperationsEvents() {
   els.operationsModalClose?.addEventListener("click", closeOperationsModal);
   els.operationsModalBackdrop?.addEventListener("click", closeOperationsModal);
-  els.rackPackingHistoryBtn?.addEventListener("click", () => openPackingHistoryModal().catch((error) => showInlineError(error.message, true)));
+  els.rackPackingHistoryBtn?.addEventListener("click", () => openRacksHistoryModal().catch((error) => showInlineError(error.message, true)));
   els.rejectLogOpenBtn?.addEventListener("click", (event) => {
     event.preventDefault();
     openRejectLogModal().catch((error) => showInlineError(error.message, true));
@@ -24413,6 +25622,52 @@ function wireV135OperationsEvents() {
       renderAdminDeliveryLists();
       return;
     }
+    const updatePreview = event.target.closest("[data-admin-list-update-preview]");
+    if (updatePreview) {
+      event.preventDefault();
+      openDeliveryListUpdatePreview(updatePreview.dataset.adminListUpdatePreview).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const rackHistoryClear = event.target.closest("[data-rack-history-clear]");
+    if (rackHistoryClear) {
+      event.preventDefault();
+      state.rackHistoryFilters = rackHistoryDefaultFilters();
+      state.rackHistoryPage = 1;
+      document.querySelectorAll("[data-rack-history-filter]").forEach((control) => {
+        control.value = "";
+      });
+      syncRackHistoryRangeControls();
+      loadRackHistoryPage().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const rackHistoryPage = event.target.closest("[data-rack-history-page]");
+    if (rackHistoryPage && !rackHistoryPage.disabled) {
+      event.preventDefault();
+      state.rackHistoryPage = Math.max(Number(rackHistoryPage.dataset.rackHistoryPage || 1), 1);
+      loadRackHistoryPage().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const rackMoveAll = event.target.closest("[data-rack-modal-move-all]");
+    if (rackMoveAll) {
+      event.preventDefault();
+      event.stopPropagation();
+      const sourceRackCode = rackMoveAll.dataset.rackModalMoveAll || "";
+      chooseRackTransferDestination(sourceRackCode)
+        .then((target) => target ? moveRackContents(sourceRackCode, target) : null)
+        .catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const rackMoveDate = event.target.closest("[data-rack-modal-move-date]");
+    if (rackMoveDate) {
+      event.preventDefault();
+      event.stopPropagation();
+      const deliveryDate = rackMoveDate.dataset.rackModalMoveDate || "";
+      const sourceRackCode = rackMoveDate.dataset.sourceRack || "";
+      chooseRackTransferDestination(sourceRackCode, { deliveryDate })
+        .then((target) => target ? moveRackContents(sourceRackCode, target, deliveryDate) : null)
+        .catch((error) => showInlineError(error.message, true));
+      return;
+    }
     const historyPrint = event.target.closest("[data-packing-history-print]");
     if (historyPrint) {
       launchManagedPrint(`/api/racks/packing-history/${encodeURIComponent(historyPrint.dataset.packingHistoryPrint)}/print`);
@@ -24443,29 +25698,16 @@ function wireV135OperationsEvents() {
       markRackNotOnTheWay(notOnWay.dataset.rackModalNotOnWay).then(() => refreshOpenRackDetails(notOnWay.dataset.rackModalNotOnWay)).catch((error) => showInlineError(error.message, true));
       return;
     }
-    const moveOpen = event.target.closest("[data-rack-modal-move-open]");
-    if (moveOpen) {
+    const moveItem = event.target.closest("[data-rack-modal-move-item]");
+    if (moveItem) {
       event.preventDefault();
-      const rackItemId = String(moveOpen.dataset.rackModalMoveOpen || "");
-      state.rackMoveItemId = state.rackMoveItemId === rackItemId ? "" : rackItemId;
-      const rack = state.racks.find((item) => String(item.code) === String(state.selectedRackOverviewCode));
-      if (rack && els.operationsModalBody) els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
-      return;
-    }
-    const moveCancel = event.target.closest("[data-rack-modal-move-cancel]");
-    if (moveCancel) {
-      event.preventDefault();
-      state.rackMoveItemId = "";
-      const rack = state.racks.find((item) => String(item.code) === String(state.selectedRackOverviewCode));
-      if (rack && els.operationsModalBody) els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
-      return;
-    }
-    const moveConfirm = event.target.closest("[data-rack-modal-move-confirm]");
-    if (moveConfirm) {
-      event.preventDefault();
-      const currentRackCode = state.selectedRackOverviewCode;
-      moveRackItem(moveConfirm.dataset.rackModalMoveConfirm)
-        .then(() => refreshOpenRackDetails(currentRackCode))
+      event.stopPropagation();
+      const rackItemId = String(moveItem.dataset.rackModalMoveItem || "");
+      const sourceRackCode = String(moveItem.dataset.sourceRack || state.selectedRackOverviewCode || "");
+      const itemLabel = String(moveItem.dataset.rackItemLabel || "this item");
+      chooseRackTransferDestination(sourceRackCode, { rackItemId, itemLabel })
+        .then((target) => target ? moveRackItem(rackItemId, target, sourceRackCode, itemLabel) : null)
+        .then(() => refreshOpenRackDetails(sourceRackCode))
         .catch((error) => showInlineError(error.message, true));
       return;
     }
@@ -24488,6 +25730,15 @@ function wireV135OperationsEvents() {
 
   document.addEventListener("input", (event) => {
     if (event.target.matches("#packingHistorySearch")) filterPackingHistoryRows(event.target.value);
+    const rackHistoryFilter = event.target.closest?.("[data-rack-history-filter]");
+    if (rackHistoryFilter && rackHistoryFilter.dataset.rackHistoryFilter === "query") {
+      state.rackHistoryFilters.query = rackHistoryFilter.value;
+      state.rackHistoryPage = 1;
+      window.clearTimeout(state.rackHistoryFilterTimer);
+      state.rackHistoryFilterTimer = window.setTimeout(() => {
+        loadRackHistoryPage().catch((error) => showInlineError(error.message, true));
+      }, 260);
+    }
     if (event.target.matches("#rejectOrderInput, #rejectItemInput")) {
       state.rejectMatches = [];
       const preview = document.getElementById("rejectMatchPreview");
@@ -24496,6 +25747,17 @@ function wireV135OperationsEvents() {
         preview.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Item details changed</strong><span>Select Verify Item to confirm the active delivery list.</span></div>`;
       }
     }
+  });
+
+  document.addEventListener("change", (event) => {
+    const rackHistoryFilter = event.target.closest?.("[data-rack-history-filter]");
+    if (!rackHistoryFilter) return;
+    const key = rackHistoryFilter.dataset.rackHistoryFilter;
+    if (!key || !(key in state.rackHistoryFilters)) return;
+    state.rackHistoryFilters[key] = rackHistoryFilter.value;
+    state.rackHistoryPage = 1;
+    if (key === "rackGroup") syncRackHistoryRangeControls();
+    loadRackHistoryPage().catch((error) => showInlineError(error.message, true));
   });
 
   document.addEventListener("keydown", (event) => {
@@ -24690,6 +25952,45 @@ function wireEvents() {
   });
 
   document.addEventListener("click", async (event) => {
+    const rackRecordsView = event.target.closest("[data-rack-records-view]");
+    if (rackRecordsView) {
+      event.preventDefault();
+      setRackHistoryView(rackRecordsView.dataset.rackRecordsView || "packing");
+      return;
+    }
+    const rackModalView = event.target.closest("[data-rack-modal-view]");
+    if (rackModalView) {
+      event.preventDefault();
+      const showHistory = rackModalView.dataset.rackModalView === "history";
+      els.operationsModal?.classList.toggle("show-rack-history", showHistory);
+      els.operationsRackTabs?.querySelectorAll("[data-rack-modal-view]").forEach((button) => {
+        const active = button === rackModalView;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-selected", String(active));
+      });
+      if (els.operationsModalBody) els.operationsModalBody.hidden = showHistory;
+      if (els.operationsModalHistory) {
+        els.operationsModalHistory.hidden = !showHistory;
+        els.operationsModalHistory.open = showHistory;
+      }
+      if (showHistory && state.operationsModalKind === "rack-details") {
+        loadModalActionHistory("rack-details", "operations").catch(() => renderModalActionHistory([], "operations"));
+      }
+      return;
+    }
+    const rejectModalView = event.target.closest("[data-reject-modal-view]");
+    if (rejectModalView) {
+      event.preventDefault();
+      const showHistory = rejectModalView.dataset.rejectModalView === "history";
+      els.operationsModal?.classList.toggle("show-reject-history", showHistory);
+      els.rejectOperationsTabs?.querySelectorAll("[data-reject-modal-view]").forEach((button) => {
+        const active = button === rejectModalView;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-selected", String(active));
+      });
+      if (showHistory && els.operationsModalHistory) els.operationsModalHistory.open = true;
+      return;
+    }
     const soundTestButton = event.target.closest?.("[data-scan-sound-test]");
     if (soundTestButton) {
       event.preventDefault();
@@ -24711,6 +26012,14 @@ function wireEvents() {
     const progressTestButton = event.target.closest?.("[data-progress-sound-test]");
     if (progressTestButton) {
       replayProgressSoundTest(progressTestButton.dataset.progressSoundTest || "scan");
+      return;
+    }
+
+    const bayModalTab = event.target.closest?.("[data-bay-modal][data-bay-modal-section]");
+    if (bayModalTab) {
+      event.preventDefault();
+      setBayModalSection(bayModalTab.dataset.bayModal || "", bayModalTab.dataset.bayModalSection || "workspace");
+      return;
     }
   });
   state.eventsWired = true;
@@ -24836,6 +26145,13 @@ function wireEvents() {
   }, true);
 
   document.addEventListener("change", async (event) => {
+    const rejectMatchChoice = event.target.closest?.("[data-reject-match-choice]");
+    if (rejectMatchChoice) {
+      state.rejectSelectedDeliveryDate = rejectMatchChoice.value || "";
+      await previewRejectMatch();
+      return;
+    }
+
     const scanRackSelect = event.target.closest?.("[data-scan-event-rack]");
     if (scanRackSelect) {
       const lineItemId = scanRackSelect.dataset.scanEventRack || "";
@@ -25175,6 +26491,10 @@ function wireEvents() {
     updatePrintStageSelectState();
     void renderPrintGlassTypes();
   });
+  for (const input of [els.printCustomerFilter, els.printOrderFilter, els.printUpdatedOnly, els.printRushOnly, els.printRemakeOnly]) {
+    input?.addEventListener(input?.type === "text" ? "input" : "change", updatePrintSelectionSummary);
+  }
+  document.querySelectorAll('input[name="printExportMode"]').forEach((input) => input.addEventListener("change", updatePrintSelectionSummary));
   els.printOptionsClose?.addEventListener("click", () => closePrintOptions());
   els.printOptionsBackdrop?.addEventListener("click", () => closePrintOptions());
   els.printOptionsSubmit?.addEventListener("click", () => submitPrintOptions());
@@ -25439,38 +26759,16 @@ function wireEvents() {
       return;
     }
 
-    const moveOpenButton = event.target.closest("[data-rack-move-open]");
-    if (moveOpenButton) {
+    const moveItemButton = event.target.closest("[data-rack-move-item]");
+    if (moveItemButton) {
       event.preventDefault();
       event.stopPropagation();
-
-      const rackItemId = moveOpenButton.dataset.rackMoveOpen || "";
-      state.rackMoveItemId = state.rackMoveItemId === rackItemId ? "" : rackItemId;
-
-      renderRacksPage();
-
-      return;
-    }
-
-    const moveCancelButton = event.target.closest("[data-rack-move-cancel]");
-    if (moveCancelButton) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      state.rackMoveItemId = "";
-
-      renderRacksPage();
-
-      return;
-    }
-
-    const moveButton = event.target.closest("[data-rack-move]");
-    if (moveButton) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      moveRackItem(moveButton.dataset.rackMove).catch((error) => showInlineError(error.message, true));
-
+      const rackItemId = String(moveItemButton.dataset.rackMoveItem || "");
+      const sourceRackCode = String(moveItemButton.dataset.sourceRack || "");
+      const itemLabel = String(moveItemButton.dataset.rackItemLabel || "this item");
+      chooseRackTransferDestination(sourceRackCode, { rackItemId, itemLabel })
+        .then((target) => target ? moveRackItem(rackItemId, target, sourceRackCode, itemLabel) : null)
+        .catch((error) => showInlineError(error.message, true));
       return;
     }
 
@@ -25956,7 +27254,7 @@ function wireEvents() {
   els.bayEditorCloseBtn?.addEventListener("click", () => closeBayEditorPanel());
   els.bayEditorBackdrop?.addEventListener("click", () => closeBayEditorPanel());
   els.bayEditorNewGroupBtn?.addEventListener("click", () => {
-    state.bayEditorSelectedGroup = "";
+    state.bayEditorSelectedGroup = "__new__";
     renderBayEditorPanel();
     setTimeout(() => document.getElementById("bayEditorNewGroupNameInput")?.focus(), 0);
   });
@@ -25986,6 +27284,10 @@ function wireEvents() {
     state.manageItemsQuery = els.manageItemsSearch.value;
     renderManageItemsPanel();
   });
+  els.manageItemsFilter?.addEventListener("change", () => {
+    state.manageItemsFilter = els.manageItemsFilter.value || "all";
+    renderManageItemsPanel();
+  });
   els.manageItemsList?.addEventListener("click", (event) => {
     const row = event.target.closest("[data-manage-assignment-id]");
     if (!row) return;
@@ -25998,7 +27300,7 @@ function wireEvents() {
   els.manageItemsSdiBtn?.addEventListener("click", () => {
     const selected = selectedManageItem();
     if (!selected?.assignment?.id) {
-      showInlineError("Select an item before opening SDI.", false);
+      showInlineError("Select an item before opening Rush.", false);
       return;
     }
     closeManageItemsPanel();
@@ -26147,14 +27449,8 @@ function wireEvents() {
       replacement?.setSelectionRange?.(cursor, cursor);
     }, 140);
   });
-  els.sdiCurrentList?.addEventListener("change", (event) => {
-    const select = event.target.closest("[data-sdi-current-type]");
-    if (!select) return;
-    state.sdiCurrentTypeFilter = select.value || "all";
-    renderSdiCurrentList();
-  });
   els.sdiClearBtn?.addEventListener("click", () => {
-    const markedIds = selectedSdiItems().filter((item) => item.marked).map((item) => String(item.lineItemId));
+    const markedIds = selectedSdiItems().filter((item) => item.rush && !item.remake).map((item) => String(item.lineItemId));
     submitSdi(false, { lineItemIds: markedIds }).catch((error) => showInlineError(error.message, true));
   });
   els.sdiForm?.addEventListener("submit", (event) => {
@@ -27121,8 +28417,8 @@ init().catch((error) => {
 
   function formatTimestamp(value) {
     if (!value) return "No completed run yet";
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return String(value);
+    const parsed = parseAutomationDateValue(value);
+    if (!parsed) return String(value);
     return parsed.toLocaleString([], {
       month: "short",
       day: "numeric",
@@ -27135,8 +28431,8 @@ init().catch((error) => {
   function formatDeliveryDate(value) {
     const text = String(value || "").trim();
     if (!text) return "Unknown date";
-    const parsed = new Date(`${text.slice(0, 10)}T12:00:00`);
-    if (Number.isNaN(parsed.getTime())) return text;
+    const parsed = parseAutomationDateValue(text, { dateOnlyAtNoon: true });
+    if (!parsed) return text;
     return parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
   }
 
