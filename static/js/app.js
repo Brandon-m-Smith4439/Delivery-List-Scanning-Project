@@ -119,6 +119,18 @@ const state = {
   rackStatusFilter: "all",
   rackSort: "code-asc",
   printContext: null,
+  printPreviewTimer: null,
+  printPreviewRequestId: 0,
+  printPreviewResult: null,
+  printPreviewPage: 1,
+  printPreviewZoom: 1,
+  printSelectedOrders: [],
+  printSelectedItems: [],
+  printEntityRenderId: 0,
+  printCalendarMonth: "",
+  printCalendarDraftStart: "",
+  printCalendarDraftEnd: "",
+  printKnownGlassTypes: [],
   bayLayout: null,
   bays: [],
   bayEvents: [],
@@ -325,9 +337,7 @@ function dlsAutomationDateLabel(value) {
 }
 
 function dlsAutomationStageLabel(item) {
-  const base = String(item.label || item.stage || item.scanner || item.id || "Delivery-list stage");
-  const unseen = Number(item.unseenUpdateCount || 0);
-  return unseen > 0 ? `${base} - ${unseen} update${unseen === 1 ? "" : "s"}` : base;
+  return String(item.stage || item.label || item.scanner || item.id || "Delivery-list stage").trim();
 }
 
 function dlsAutomationTryRenderer(renderer, name) {
@@ -488,15 +498,15 @@ document.addEventListener("dls:open-internal-reject-notification", () => {
 const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v3";
 const APP_SOUND_CACHE_VERSION = "20260722-v105";
 const APP_SOUND_FILES = Object.freeze({
-  // Normal accepted item scans use the restrained confirmation cue. Keep
-  // sounds/scan_success.wav packaged but intentionally unused for future work.
+  // Normal accepted item scans use the restrained confirmation cue. The
+  // fuller scan_success cue is reserved for a successful cross-date switch.
   scan_success: "sounds/notification.wav",
   rack_barcode: "sounds/rack_barcode.wav",
   rack_outbound: "sounds/rack_outbound.wav",
   destructive_action: "sounds/destructive_action.wav",
   scan_duplicate: "sounds/scan_duplicate.wav",
   scan_warning: "sounds/scan_warning.wav",
-  delivery_date_changed: "sounds/scan_warning.wav",
+  delivery_date_changed: "sounds/scan_success.wav",
   scan_error: "sounds/scan_error.wav",
   scan_rush: "sounds/scan_rush.wav",
   scan_remake: "sounds/scan_remake.wav",
@@ -683,7 +693,6 @@ const els = {
   scanPage: document.getElementById("scanPage"),
   pageTitle: document.getElementById("pageTitle"),
   stageSubtitle: document.getElementById("stageSubtitle"),
-  stageHeading: document.getElementById("stageHeading"),
   scannerName: document.getElementById("scannerName"),
   deliveryListSelect: document.getElementById("deliveryListSelect"),
   deliveryDateSelect: document.getElementById("deliveryDateSelect"),
@@ -927,18 +936,63 @@ const els = {
 
   printOptionsPanel: document.getElementById("printOptionsPanel"),
   printOptionsBackdrop: document.getElementById("printOptionsBackdrop"),
-  printOptionsDate: document.getElementById("printOptionsDate"),
-  printOptionsStages: document.getElementById("printOptionsStages"),
+  printOptionsClose: document.getElementById("printOptionsClose"),
+  printClearAllBtn: document.getElementById("printClearAllBtn"),
+  printSearchInput: document.getElementById("printSearchInput"),
+  printSearchSuggestions: document.getElementById("printSearchSuggestions"),
+  printDateQuickSelect: document.getElementById("printDateQuickSelect"),
+  printDateCalendar: document.getElementById("printDateCalendar"),
+  printCalendarPrev: document.getElementById("printCalendarPrev"),
+  printCalendarNext: document.getElementById("printCalendarNext"),
+  printCalendarLeftMonthLabel: document.getElementById("printCalendarLeftMonthLabel"),
+  printCalendarRightMonthLabel: document.getElementById("printCalendarRightMonthLabel"),
+  printCalendarLeftGrid: document.getElementById("printCalendarLeftGrid"),
+  printCalendarRightGrid: document.getElementById("printCalendarRightGrid"),
+  printCalendarFromValue: document.getElementById("printCalendarFromValue"),
+  printCalendarToValue: document.getElementById("printCalendarToValue"),
+  printCalendarSelectionText: document.getElementById("printCalendarSelectionText"),
+  printCalendarReset: document.getElementById("printCalendarReset"),
+  printCalendarCancel: document.getElementById("printCalendarCancel"),
+  printCalendarApply: document.getElementById("printCalendarApply"),
+  printDateFrom: document.getElementById("printDateFrom"),
+  printDateTo: document.getElementById("printDateTo"),
+  printStatusOptions: document.getElementById("printStatusOptions"),
+  printAttentionOptions: document.getElementById("printAttentionOptions"),
+  printRouteOptions: document.getElementById("printRouteOptions"),
   printOptionsGlassType: document.getElementById("printOptionsGlassType"),
+  printGlassSearch: document.getElementById("printGlassSearch"),
   printCustomerFilter: document.getElementById("printCustomerFilter"),
   printOrderFilter: document.getElementById("printOrderFilter"),
-  printUpdatedOnly: document.getElementById("printUpdatedOnly"),
-  printRushOnly: document.getElementById("printRushOnly"),
-  printRemakeOnly: document.getElementById("printRemakeOnly"),
-  printOptionsClose: document.getElementById("printOptionsClose"),
+  printSelectedOrdersList: document.getElementById("printSelectedOrdersList"),
+  printSelectedOrdersCount: document.getElementById("printSelectedOrdersCount"),
+  printSelectedOrdersClear: document.getElementById("printSelectedOrdersClear"),
+  printPreviewState: document.getElementById("printPreviewState"),
+  printPreviewPageCount: document.getElementById("printPreviewPageCount"),
+  printPreviewZoomOut: document.getElementById("printPreviewZoomOut"),
+  printPreviewZoomIn: document.getElementById("printPreviewZoomIn"),
+  printPreviewZoomLabel: document.getElementById("printPreviewZoomLabel"),
+  printPreviewFullscreen: document.getElementById("printPreviewFullscreen"),
+  printDocumentViewport: document.getElementById("printDocumentViewport"),
+  printDocumentPaper: document.getElementById("printDocumentPaper"),
+  printPreviewZeroMessage: document.getElementById("printPreviewZeroMessage"),
+  printSavePresetBtn: document.getElementById("printSavePresetBtn"),
+  printPresetSelect: document.getElementById("printPresetSelect"),
+  printCopies: document.getElementById("printCopies"),
+  printCopiesDecrease: document.getElementById("printCopiesDecrease"),
+  printCopiesIncrease: document.getElementById("printCopiesIncrease"),
+  printOrientation: document.getElementById("printOrientation"),
+  printExportType: document.getElementById("printExportType"),
   printOptionsSubmit: document.getElementById("printOptionsSubmit"),
-  printSelectionChips: document.getElementById("printSelectionChips"),
-  printSummaryPreview: document.getElementById("printSummaryPreview"),
+  printOutputActionIcon: document.getElementById("printOutputActionIcon"),
+  printOutputActionLabel: document.getElementById("printOutputActionLabel"),
+  printPresetModalBackdrop: document.getElementById("printPresetModalBackdrop"),
+  printPresetModal: document.getElementById("printPresetModal"),
+  printPresetModalClose: document.getElementById("printPresetModalClose"),
+  printPresetNameInput: document.getElementById("printPresetNameInput"),
+  printPresetSummary: document.getElementById("printPresetSummary"),
+  printPresetStatus: document.getElementById("printPresetStatus"),
+  printPresetCancelBtn: document.getElementById("printPresetCancelBtn"),
+  printPresetConfirmBtn: document.getElementById("printPresetConfirmBtn"),
 
   adminPage: document.getElementById("adminPage"),
   adminSummary: document.getElementById("adminSummary"),
@@ -1515,6 +1569,9 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Search bay, order, item, customer, glass type, size...", "Buscar bahía, orden, artículo, cliente, tipo de vidrio o tamaño..."],
   ["Search first, then click a bay to manage its orders, target it for scanning, or start a move.", "Busque primero y luego haga clic en una bahía para administrar sus órdenes, enviarla al escáner o iniciar un movimiento."],
   ["Search glass types, stages, users...", "Buscar tipos de vidrio, etapas o usuarios..."],
+  ["Search glass types...", "Buscar tipos de vidrio..."],
+  ["Search customers...", "Buscar clientes..."],
+  ["Search order numbers...", "Buscar números de orden..."],
   ["Search order or customer", "Buscar orden o cliente"],
   ["Search order, item, customer, bay...", "Buscar orden, artículo, cliente o bahía..."],
   ["Select a bay on the map to view orders, send the bay to the scanner, hold/block it, or move assigned glass.", "Seleccione una bahía en el mapa para ver órdenes, enviarla al escáner, ponerla en espera/bloquearla o mover el vidrio asignado."],
@@ -2531,7 +2588,6 @@ const SPANISH_UI_V184 = new Map([
   ["Print / Export Delivery Lists", "Imprimir / exportar listas de entrega"],
   ["Exact Glass Types", "Tipos exactos de vidrio"],
   ["All Glass Types", "Todos los tipos de vidrio"],
-  ["Selection Summary", "Resumen de selección"],
   ["Summary Preview", "Vista previa del resumen"],
   ["Estimated Pieces", "Piezas estimadas"],
   ["Run Print / Export", "Ejecutar impresión / exportación"],
@@ -2673,6 +2729,41 @@ const SPANISH_UI_V184 = new Map([
   ["Manage Reject Records", "Administrar registros de rechazo"],
 ]);
 SPANISH_UI_V184.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
+const SPANISH_UI_V195 = new Map([
+  ["Selection Preview", "Vista previa de selección"],
+  ["This preview uses the same filters as the generated print or XLSX file.", "Esta vista previa usa los mismos filtros que la impresión o el archivo XLSX generado."],
+  ["Select every stage that should appear in the output.", "Seleccione cada etapa que debe aparecer en la salida."],
+  ["Search, select whole groups, or choose exact glass types.", "Busque, seleccione grupos completos o elija tipos exactos de vidrio."],
+  ["Customers, Orders, and Content", "Clientes, órdenes y contenido"],
+  ["Leave a list empty to include every available customer or order.", "Deje una lista sin seleccionar para incluir todos los clientes u órdenes disponibles."],
+  ["Select all", "Seleccionar todo"],
+  ["All glass", "Todo el vidrio"],
+  ["No mirrors", "Sin espejos"],
+  ["Mirrors only", "Solo espejos"],
+  ["Content filters", "Filtros de contenido"],
+  ["Updated items only", "Solo artículos actualizados"],
+  ["Rush orders only", "Solo órdenes urgentes"],
+  ["Remakes only", "Solo rehechos"],
+  ["Estimated Glass Pieces", "Piezas de vidrio estimadas"],
+  ["Printable Rows", "Filas imprimibles"],
+  ["Selected filters yield 0 results.", "Los filtros seleccionados producen 0 resultados."],
+  ["Stage Results", "Resultados por etapa"],
+  ["Glass Mix", "Combinación de vidrio"],
+  ["Customer Mix", "Combinación de clientes"],
+  ["Orders Included", "Órdenes incluidas"],
+  ["Result Mix", "Combinación de resultados"],
+  ["Unique Glass Types", "Tipos únicos de vidrio"],
+  ["All customers", "Todos los clientes"],
+  ["All orders", "Todas las órdenes"],
+  ["Select group", "Seleccionar grupo"],
+  ["Clear group", "Quitar grupo"],
+  ["Ready", "Listo"],
+  ["Calculating...", "Calculando..."],
+  ["0 results", "0 resultados"],
+  ["Preview unavailable", "Vista previa no disponible"],
+]);
+SPANISH_UI_V195.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
 const SPANISH_PLACEHOLDERS = new Map([
   ["Global search...", "Búsqueda global..."],
@@ -8036,7 +8127,6 @@ function renderMeta() {
   const dateText = formatDisplayDate(state.meta.deliveryDate);
   if (els.pageTitle) els.pageTitle.textContent = `Delivery List for ${dateText}`;
   if (els.stageSubtitle) els.stageSubtitle.textContent = state.meta.stage;
-  if (els.stageHeading) els.stageHeading.textContent = dateText ? `${state.meta.stage} • ${dateText}` : state.meta.stage;
   if (els.scannerName) els.scannerName.textContent = state.meta.scanner;
   if (els.backendStatus) {
     els.backendStatus.textContent = state.backend ? "SQLite live" : "Local demo";
@@ -8070,7 +8160,7 @@ function renderDeliveryListSelect() {
      */
     const stageLists = (groups.find((group) => group.date === activeDate)?.lists || state.lists).filter((list) => list.deliveryDate === activeDate);
     els.deliveryStageSelect.innerHTML = stageLists
-      .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(list.stage)} - ${escapeHtml(list.scanner)}</option>`)
+      .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(list.stage)}</option>`)
       .join("");
     els.deliveryStageSelect.value = state.activeListId;
   }
@@ -10749,7 +10839,7 @@ async function processScanInternal(rawScan, options = {}) {
         }),
       });
       if (result.crossDateSelectionRequired) {
-        scanFlash("notice", "delivery_date_changed");
+        scanFlash("notice", "scan_warning");
         const candidate = await showCrossDateScanSelection(result);
         if (candidate) {
           await processScan(scanText, {
@@ -10783,7 +10873,7 @@ async function processScanInternal(rawScan, options = {}) {
       await activateList(result.matchedListId || state.activeListId, false);
       scanFlash(
         result.ok ? "success" : "error",
-        result.crossDateSwitched
+        result.crossDateSwitched && result.ok
           ? "delivery_date_changed"
           : (result.ok ? "bay_assigned" : scanSoundKind(result.lastScan || result, "scan_error")),
       );
@@ -10815,7 +10905,7 @@ async function processScanInternal(rawScan, options = {}) {
       }),
     });
     if (payload.crossDateSelectionRequired) {
-      scanFlash("notice", "delivery_date_changed");
+      scanFlash("notice", "scan_warning");
       const candidate = await showCrossDateScanSelection(payload);
       if (candidate) {
         await processScan(scanText, {
@@ -10866,7 +10956,7 @@ async function processScanInternal(rawScan, options = {}) {
     );
     scanFlash(
       payload.lastScan?.ok ? "success" : payload.lastScan?.eventType === "duplicate" || payload.lastScan?.eventType === "notice" ? "notice" : "error",
-      payload.crossDateSwitched
+      payload.crossDateSwitched && payload.lastScan?.ok
         ? "delivery_date_changed"
         : acceptedRackBarcode
           ? (outboundRackDeparture ? "rack_outbound" : "rack_barcode")
@@ -10895,6 +10985,12 @@ async function submitManualScan() {
   if (!order || !item) {
     throw new Error("Manual scan needs an order number and item number.");
   }
+  if (!/^\d{6}$/.test(order)) {
+    throw new Error("Manual scan order numbers must contain exactly six digits.");
+  }
+  if (!/^\d{1,3}$/.test(item)) {
+    throw new Error("Manual scan item numbers must contain one to three digits.");
+  }
   await processScan(canonicalBarcode(order, item), { isManual: true });
   if (els.manualOrderInput) els.manualOrderInput.value = "";
   if (els.manualItemInput) els.manualItemInput.value = "";
@@ -10907,10 +11003,10 @@ async function submitManualScan() {
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
 function processLocalScan(scanText, options = {}) {
-  const recovered = recoverScan(scanText);
+  const recovered = recoverScan(scanText, { strictOrderItem: Boolean(options.isManual) });
   const timestamp = new Date().toISOString();
   if (!recovered.ok) {
-    const noListMatch = recovered.reason === "No unique delivery-list match";
+    const noListMatch = ["No unique delivery-list match", "No exact order/item match"].includes(recovered.reason);
     const entry = {
       ok: false,
       eventType: "error",
@@ -10977,16 +11073,18 @@ function buildIndexes() {
  * Effects: May call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
-function recoverScan(rawScan) {
+function recoverScan(rawScan, { strictOrderItem = false } = {}) {
   const cleanText = cleanBarcode(rawScan);
   const { byOrderItem, bySuffixItem } = buildIndexes();
   if (/^T200\d{12}$/.test(cleanText)) {
     const order = Number(cleanText.slice(4, 10));
     const item = Number(cleanText.slice(10, 13));
     const matches = byOrderItem.get(`${order}-${item}`) || [];
-    if (matches.length === 1) return { ok: true, item: matches[0], barcode: cleanText, reason: "Exact label" };
+    if (matches.length === 1) return { ok: true, item: matches[0], barcode: cleanText, reason: strictOrderItem ? "Exact manual order/item" : "Exact label" };
     if (matches.length > 1) return { ok: false, barcode: cleanText, reason: "Ambiguous delivery-list match" };
+    if (strictOrderItem) return { ok: false, barcode: cleanText, reason: "No exact order/item match" };
   }
+  if (strictOrderItem) return { ok: false, barcode: cleanText, reason: "Manual scans require an exact six-digit order and one-to-three-digit item" };
   const numbers = digitsOnly(cleanText);
   for (let start = 0; start <= numbers.length - 12; start += 1) {
     const windowText = numbers.slice(start, start + 12);
@@ -16208,665 +16306,1527 @@ async function runAssignmentAction(action, assignmentId) {
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function selectedPrintStageInputs() {
-  return [...(els.printOptionsStages?.querySelectorAll('.print-stage-choice:not(.print-stage-all-choice) input[type="checkbox"]') || [])];
-}
+const PRINT_PREVIEW_PAGE_SIZE = 18;
+const PRINT_PRESET_STORAGE_KEY = "deliveryScannerPrintPresetsV205";
+const PRINT_PRESET_LEGACY_STORAGE_KEY = "deliveryScannerPrintPresetsV197";
+const PRINT_ACTIVE_PRESET_STORAGE_KEY = "deliveryScannerActivePrintPresetV205";
+const PRINT_ROUTE_GROUPS = [
+  { value: "airport", label: "Airport" },
+  { value: "indian_trail", label: "Indian Trail" },
+  { value: "greenville", label: "Greenville" },
+  { value: "cpu", label: "CPU" },
+  { value: "dtc", label: "DTC" },
+];
 
-/**
- * Purpose: Run the selected print list IDs workflow for the browser application.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function selectedPrintListIds() {
-  return selectedPrintStageInputs().filter((input) => input.checked).map((input) => input.value);
-}
-
-/**
- * Purpose: Update the update print stage select state workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may call the backend api, may update shared client state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function updatePrintStageSelectState() {
-  if (!els.printOptionsStages) return;
-
-  const stageInputs = selectedPrintStageInputs();
-  const checkedInputs = stageInputs.filter((input) => input.checked);
-  const allInput = els.printOptionsStages.querySelector("[data-print-stage-select-all]");
-
-  if (allInput) {
-    allInput.checked = stageInputs.length > 0 && checkedInputs.length === stageInputs.length;
-    allInput.indeterminate = checkedInputs.length > 0 && checkedInputs.length < stageInputs.length;
-  }
-
-  updatePrintSelectionSummary();
-}
-
-
-/**
- * Purpose: Refresh the Print / Export selection summary without changing output behavior.
- * Effects: Updates the live summary cards inside the Print / Export modal.
- * Flow: Reads the selected stages, exact glass types, optional filters, and date, then renders a concise preview.
- */
-function updatePrintSelectionSummary() {
-  if (!els.printSelectionChips || !els.printSummaryPreview) return;
-
-  const stageInputs = selectedPrintStageInputs();
-  const selectedStages = stageInputs.filter((input) => input.checked);
-  const glassInputs = selectedPrintGlassInputs();
-  const selectedGlass = glassInputs.filter((input) => input.checked);
-  const selectedLabels = new Set(selectedGlass.map((input) => input.value));
-  const listIds = selectedPrintListIds();
-  const glassEntries = printGlassEntriesForLists(listIds);
-  const estimatedPieces = glassEntries
-    .filter((entry) => selectedLabels.has(entry.label))
-    .reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
-  const customerText = String(els.printCustomerFilter?.value || "").trim();
-  const orderText = String(els.printOrderFilter?.value || "").trim();
-  const filters = [];
-  if (els.printUpdatedOnly?.checked) filters.push("Updated items only");
-  if (els.printRushOnly?.checked) filters.push("Rush orders");
-  if (els.printRemakeOnly?.checked) filters.push("Remakes only");
-
-  const stageLabel = selectedStages.length === stageInputs.length && stageInputs.length
-    ? "All Stages"
-    : `${selectedStages.length} Stage${selectedStages.length === 1 ? "" : "s"}`;
-  const customerLabel = customerText ? "Filtered Customers" : "All Customers";
-  const orderLabel = orderText ? "Filtered Orders" : "All Orders";
-  const dateLabel = formatDisplayDate(els.printOptionsDate?.value || "") || "Not selected";
-
-  const chips = [
-    stageLabel,
-    `${selectedGlass.length} Exact Glass Type${selectedGlass.length === 1 ? "" : "s"}`,
-    customerLabel,
-    orderLabel,
-    ...filters,
-  ];
-  els.printSelectionChips.innerHTML = chips
-    .map((label) => `<span>${escapeHtml(label)}</span>`)
-    .join("");
-
-  const rows = [
-    ["Stages", stageInputs.length ? `${selectedStages.length} of ${stageInputs.length} selected` : "No stages available"],
-    ["Exact Glass Types", `${selectedGlass.length} selected`],
-    ["Estimated Pieces", `${estimatedPieces} pcs`],
-    ["Customers", customerText || "All customers"],
-    ["Orders", orderText || "All orders"],
-    ["Filters", filters.join(", ") || "No optional filters"],
-    ["Delivery Date", dateLabel],
-  ];
-  els.printSummaryPreview.innerHTML = rows
-    .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`)
-    .join("");
-}
-
-/**
- * Purpose: Run the print glass category workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function printGlassCategory(label) {
-  const text = String(label || "").toLowerCase();
-
-  if (/mirror|mirr|\bmir\b/.test(text)) return "Mirror";
-  if (/tempered|temp\b|shower/.test(text)) return "Tempered";
-  if (/annealed|anneal|\bann\b|plate|float/.test(text)) return "Annealed";
-
-  return "Other";
-}
-
-/**
- * Purpose: Run the print glass category sort workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function printGlassCategorySort(category) {
-  return { Mirror: 1, Annealed: 2, Tempered: 3, Other: 4 }[category] || 9;
-}
-
-/**
- * Purpose: Run the selected print glass inputs workflow for the browser application.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
+/** Return the visible exact glass-type checkboxes, excluding the All Glass control. */
 function selectedPrintGlassInputs() {
-  return [...(els.printOptionsGlassType?.querySelectorAll('.print-glass-choice:not(.print-glass-all-choice) input[type="checkbox"]') || [])];
+  return [...(els.printOptionsGlassType?.querySelectorAll('input[data-print-glass-type]') || [])];
 }
 
-/**
- * Purpose: Update the update print glass select state workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may call the backend api, may update shared client state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function updatePrintGlassSelectState() {
-  if (!els.printOptionsGlassType) return;
+/** Return checked values from one maintained filter container. */
+function selectedPrintFilterValues(container, selector) {
+  return [...(container?.querySelectorAll(selector) || [])]
+    .filter((input) => input.checked)
+    .map((input) => String(input.value || "").trim())
+    .filter(Boolean);
+}
 
-  const glassInputs = selectedPrintGlassInputs();
-  const checkedInputs = glassInputs.filter((input) => input.checked);
-  const allInput = els.printOptionsGlassType.querySelector("[data-print-glass-select-all]");
+/** Return selected status values; All Status means no status restriction. */
+function selectedPrintStatusValues() {
+  if (els.printStatusOptions?.querySelector('input[data-print-status-all]')?.checked) return [];
+  return selectedPrintFilterValues(els.printStatusOptions, 'input[data-print-status]:not([data-print-status-all])');
+}
 
-  if (allInput) {
-    allInput.checked = glassInputs.length > 0 && checkedInputs.length === glassInputs.length;
-    allInput.indeterminate = checkedInputs.length > 0 && checkedInputs.length < glassInputs.length;
+/** Return selected attention values; All Attention includes rows with no attention flags. */
+function selectedPrintAttentionValues() {
+  if (els.printAttentionOptions?.querySelector('input[data-print-attention-all]')?.checked) return [];
+  return selectedPrintFilterValues(els.printAttentionOptions, 'input[data-print-attention]:not([data-print-attention-all])');
+}
+
+/** Return true when the unrestricted All Glass choice is selected. */
+function allPrintGlassTypesSelected() {
+  return Boolean(els.printOptionsGlassType?.querySelector('input[data-print-all-glass]')?.checked);
+}
+
+/** Return exact glass types from the visible controls or the active user preset. */
+function selectedPrintGlassTypeValues() {
+  const visible = selectedPrintGlassInputs().filter((input) => input.checked).map((input) => input.value);
+  if (visible.length || allPrintGlassTypesSelected()) return visible;
+  return [...(activePrintPreset()?.glassTypes || [])];
+}
+
+/** Keep All Glass mutually exclusive with exact glass-type choices. */
+function syncPrintAllGlassChoice(changed) {
+  const allInput = els.printOptionsGlassType?.querySelector('input[data-print-all-glass]');
+  const detailInputs = selectedPrintGlassInputs();
+  if (!allInput || !changed) return;
+  if (changed === allInput) {
+    if (allInput.checked) detailInputs.forEach((input) => { input.checked = false; });
+    else if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
+    return;
   }
-
-  els.printOptionsGlassType.querySelectorAll(".print-glass-group[data-print-glass-group]").forEach((group) => {
-    const inputs = [...group.querySelectorAll('.print-glass-choice input[type="checkbox"]')];
-    const selected = inputs.filter((input) => input.checked).length;
-    const totalQty = Number(group.dataset.printGlassGroupQty || 0);
-    const summary = group.querySelector(".print-glass-group-main small");
-    if (summary) summary.textContent = `${selected} / ${inputs.length} exact types selected | ${totalQty} pcs`;
-  });
-
-  updatePrintSelectionSummary();
+  if (changed.checked) allInput.checked = false;
+  if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
 }
 
-/**
- * Purpose: Run the ensure print list details workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
+/** Keep one All choice mutually exclusive with its detailed choices. */
+function syncPrintAllFilterChoice(container, changed, allSelector, detailSelector) {
+  if (!container || !changed) return;
+  const allInput = container.querySelector(allSelector);
+  const detailInputs = [...container.querySelectorAll(detailSelector)];
+  if (!allInput) return;
+  if (changed === allInput) {
+    if (allInput.checked) detailInputs.forEach((input) => { input.checked = false; });
+    else if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
+    return;
+  }
+  if (changed.checked) allInput.checked = false;
+  if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
+}
+
+/** Return the selected destination groups from the Route section. */
+function selectedPrintRouteGroups() {
+  return selectedPrintFilterValues(els.printRouteOptions, 'input[data-print-route-group]');
+}
+
+/** Return active delivery lists inside the selected date range. */
+function printDateRangeLists() {
+  const dates = state.lists.map((list) => String(list.deliveryDate || "")).filter(Boolean).sort();
+  const fallback = selectedDeliveryDate() || dashboardDateKey() || dates[0] || "";
+  let startDate = String(els.printDateFrom?.value || fallback);
+  let endDate = String(els.printDateTo?.value || startDate);
+  if (startDate && endDate && startDate > endDate) [startDate, endDate] = [endDate, startDate];
+  return state.lists.filter((list) => {
+    const date = String(list.deliveryDate || "");
+    return date && (!startDate || date >= startDate) && (!endDate || date <= endDate);
+  });
+}
+
+/** Return the exact source lists represented by the Route workspace. */
+function selectedPrintListIds() {
+  if (state.printContext?.fixedListIds) return [...new Set((state.printContext.listIds || []).map(String))];
+  return [...new Set(
+    printDateRangeLists()
+      .filter((list) => stageCategory(list) === "outbound")
+      .map((list) => String(list.id || ""))
+      .filter(Boolean),
+  )];
+}
+
+/** Load missing item detail for selected lists before building exact choices. */
 async function ensurePrintListDetails(listIds) {
   if (!state.backend) return;
-
   const wanted = new Set(listIds);
   const listsToLoad = state.lists.filter((list) => {
-    if (!wanted.has(list.id)) return false;
-    if (list._printItemsLoaded) return false;
+    if (!wanted.has(list.id) || list._printItemsLoaded) return false;
     return !Array.isArray(list.items) || !list.items.length;
   });
-
   if (!listsToLoad.length) return;
 
-  await Promise.all(
-    listsToLoad.map(async (list) => {
-      const payload = await fetchJson(`/api/delivery-lists/${encodeURIComponent(list.id)}`);
-      const items = cloneItems(payload.items || []);
-
-      Object.assign(list, {
-        items,
-        itemCount: items.length || list.itemCount || 0,
-        totalQty: items.length ? pieceCount(items) : list.totalQty,
-        scannedQty: items.length ? items.reduce((sum, item) => sum + itemScannedPieceQty(item), 0) : list.scannedQty,
-        _printItemsLoaded: true,
-      });
-    }),
-  );
-}
-
-/**
- * Purpose: Run the print list is full coverage workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function printListIsFullCoverage(list) {
-  const category = stageCategory(list);
-  return category === "staged" || category === "outbound";
-}
-
-/**
- * Purpose: Run the print count source lists workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function printCountSourceLists(listIds) {
-  const wanted = new Set(listIds);
-  const selectedLists = state.lists.filter((list) => wanted.has(list.id));
-  const fullCoverageLists = selectedLists
-    .filter(printListIsFullCoverage)
-    .sort((a, b) => stageSort(a) - stageSort(b));
-
-  if (fullCoverageLists.length) {
-    return [fullCoverageLists[0]];
-  }
-
-  return selectedLists;
-}
-
-/**
- * Purpose: Run the print items for count list workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function printItemsForCountList(list) {
-  if (Array.isArray(list?.items) && list.items.length) {
-    return list.items;
-  }
-
-  if (list?.id && list.id === state.activeListId) {
-    return state.items;
-  }
-
-  return [];
-}
-
-/**
- * Purpose: Run the print glass entries for lists workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function printGlassEntriesForLists(listIds) {
-  const entries = new Map();
-  const sourceLists = printCountSourceLists(listIds);
-
-  /**
-   * Purpose: Create the add entry workflow using the existing shared UI state.
-   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-   */
-  const addEntry = (label, qty = 0) => {
-    const cleanLabel = String(label || "").trim();
-
-    if (!cleanLabel) return;
-
-    const key = cleanLabel.toLowerCase();
-    const existing = entries.get(key) || {
-      label: cleanLabel,
-      qty: 0,
-      category: printGlassCategory(cleanLabel),
-    };
-
-    existing.qty += Math.max(Number(qty || 0), 0);
-    entries.set(key, existing);
-  };
-
-  for (const list of sourceLists) {
-    const items = printItemsForCountList(list);
-
-    if (items.length) {
-      for (const item of items) {
-        addEntry(glassTypeLabel(item), itemPieceQty(item));
-      }
-    } else {
-      for (const label of list.glassTypes || []) {
-        addEntry(label, 0);
-      }
-    }
-  }
-
-  return [...entries.values()].sort((a, b) => {
-    const categoryDiff = printGlassCategorySort(a.category) - printGlassCategorySort(b.category);
-    if (categoryDiff) return categoryDiff;
-
-    const qtyDiff = Number(b.qty || 0) - Number(a.qty || 0);
-    if (qtyDiff) return qtyDiff;
-
-    return a.label.localeCompare(b.label);
-  });
-}
-
-/**
- * Purpose: Run the available glass types for lists workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function availableGlassTypesForLists(listIds) {
-  return printGlassEntriesForLists(listIds).map((entry) => entry.label);
-}
-
-/**
- * Purpose: Run the ensure print glass field wrapper workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function ensurePrintGlassFieldWrapper() {
-  if (!els.printOptionsGlassType) return null;
-
-  const glassField = els.printOptionsGlassType.closest("label");
-
-  if (!glassField) {
-    return els.printOptionsGlassType.closest(".print-glass-field");
-  }
-
-  const wrapper = document.createElement("div");
-  wrapper.className = `${glassField.className} print-glass-field`.trim();
-
-  while (glassField.firstChild) {
-    wrapper.appendChild(glassField.firstChild);
-  }
-
-  glassField.replaceWith(wrapper);
-  return wrapper;
-}
-
-/**
- * Purpose: Render the render print glass types workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
- */
-async function renderPrintGlassTypes() {
-  if (!els.printOptionsGlassType) return;
-
-  ensurePrintGlassFieldWrapper();
-
-  const listIds = selectedPrintListIds();
-  const renderToken = Symbol("print-glass-render");
-  state.printGlassRenderToken = renderToken;
-
-  const countSourceListIds = printCountSourceLists(listIds).map((list) => list.id);
-  const detailIds = [...new Set([...listIds, ...countSourceListIds])];
-  const needsDetails = state.backend && detailIds.some((listId) => {
-    const list = state.lists.find((item) => item.id === listId);
-    return list && !list._printItemsLoaded && (!Array.isArray(list.items) || !list.items.length);
-  });
-
-  if (needsDetails) {
-    els.printOptionsGlassType.innerHTML = `<div class="admin-empty">Loading glass types...</div>`;
-
-    try {
-      await ensurePrintListDetails(detailIds);
-    } catch (error) {
-      els.printOptionsGlassType.innerHTML = `<div class="admin-empty review">Could not load glass type quantities. ${escapeHtml(error.message)}</div>`;
-      return;
-    }
-
-    if (state.printGlassRenderToken === renderToken) {
-      await renderPrintGlassTypes();
-    }
-
-    return;
-  }
-
-  const previousGroups = [...els.printOptionsGlassType.querySelectorAll(".print-glass-group[data-print-glass-group]")];
-  const previousOpenCategory = previousGroups.find((group) => group.open)?.dataset.printGlassGroup || "";
-  const hadPreviousGroups = previousGroups.length > 0;
-  const currentInputs = selectedPrintGlassInputs();
-  const current = new Set(currentInputs.filter((input) => input.checked).map((input) => input.value).filter(Boolean));
-  const hadPrevious = currentInputs.length > 0;
-  const entries = printGlassEntriesForLists(listIds);
-  const groups = new Map();
-  /**
-   * Purpose: Run the checked for entry workflow for the browser application.
-   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-   */
-  const checkedForEntry = (entry) => (hadPrevious ? current.has(entry.label) : !/mirror/i.test(entry.label));
-
-  for (const entry of entries) {
-    if (!groups.has(entry.category)) {
-      groups.set(entry.category, []);
-    }
-
-    groups.get(entry.category).push(entry);
-  }
-
-  const selectedCount = entries.filter(checkedForEntry).length;
-  const totalQty = entries.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
-  const defaultOpenCategory = [...groups.entries()].find(([, groupEntries]) => groupEntries.some(checkedForEntry))?.[0]
-    || [...groups.keys()][0]
-    || "";
-
-  els.printOptionsGlassType.innerHTML = entries.length
-    ? `
-        <div class="print-glass-toolbar">
-          <span class="print-glass-choice print-glass-all-choice" data-print-glass-all-toggle>
-            <input type="checkbox" data-print-glass-select-all ${selectedCount === entries.length ? "checked" : ""}>
-            <span>All Glass Types</span>
-            <small>${escapeHtml(selectedCount)} / ${escapeHtml(entries.length)} selected | ${escapeHtml(totalQty)} pcs</small>
-          </span>
-        </div>
-
-        ${[...groups.entries()]
-          .map(([category, groupEntries]) => {
-            const groupQty = groupEntries.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
-            const checkedGroupEntries = groupEntries.filter(checkedForEntry);
-            const groupOpen = hadPreviousGroups
-              ? category === previousOpenCategory
-              : category === defaultOpenCategory;
-
-            return `
-              <details
-                class="print-glass-group print-glass-group-${escapeHtml(slugify(category))}"
-                data-print-glass-group="${escapeHtml(category)}"
-                data-print-glass-group-qty="${escapeHtml(groupQty)}"
-                ${groupOpen ? "open" : ""}
-              >
-                <summary>
-                  <span class="print-glass-group-main">
-                    <i class="print-glass-category-icon" aria-hidden="true"></i>
-                    <strong>${escapeHtml(category)}</strong>
-                    <small>${escapeHtml(checkedGroupEntries.length)} / ${escapeHtml(groupEntries.length)} exact types selected | ${escapeHtml(groupQty)} pcs</small>
-                  </span>
-                  <span class="print-glass-collapse-label">Expand / collapse</span>
-                </summary>
-
-                <div class="print-glass-group-options">
-                  ${groupEntries
-                    .map((entry) => {
-                      const checked = checkedForEntry(entry);
-
-                      return `
-                        <span class="print-glass-choice">
-                          <input
-                            type="checkbox"
-                            value="${escapeHtml(entry.label)}"
-                            data-print-glass-category="${escapeHtml(category)}"
-                            aria-label="Select ${escapeHtml(entry.label)}"
-                            ${checked ? "checked" : ""}
-                          >
-                          <span title="${escapeHtml(entry.label)}">${escapeHtml(entry.label)}</span>
-                          <small>${escapeHtml(entry.qty || 0)}</small>
-                        </span>
-                      `;
-                    })
-                    .join("")}
-                </div>
-              </details>
-            `;
-          })
-          .join("")}
-      `
-    : `<div class="admin-empty">No glass types found for the selected stages.</div>`;
-
-  updatePrintGlassSelectState();
-
-  const renderedGlassGroups = [...els.printOptionsGlassType.querySelectorAll(".print-glass-group[data-print-glass-group]")];
-  renderedGlassGroups.forEach((group) => {
-    group.addEventListener("toggle", () => {
-      if (!group.open) return;
-      renderedGlassGroups.forEach((otherGroup) => {
-        if (otherGroup !== group) otherGroup.open = false;
-      });
+  await Promise.all(listsToLoad.map(async (list) => {
+    const payload = await fetchJson(`/api/delivery-lists/${encodeURIComponent(list.id)}`);
+    const items = cloneItems(payload.items || []);
+    Object.assign(list, {
+      items,
+      itemCount: items.length || list.itemCount || 0,
+      totalQty: items.length ? pieceCount(items) : list.totalQty,
+      scannedQty: items.length ? items.reduce((sum, item) => sum + itemScannedPieceQty(item), 0) : list.scannedQty,
+      _printItemsLoaded: true,
     });
+  }));
+}
+
+/** Return selected list records in deterministic date and stage order. */
+function printSelectedLists(listIds) {
+  const wanted = new Set(listIds || []);
+  return state.lists
+    .filter((list) => wanted.has(list.id))
+    .sort((a, b) => String(a.deliveryDate || "").localeCompare(String(b.deliveryDate || "")) || stageSort(a) - stageSort(b));
+}
+
+/** Flatten selected list rows while retaining their delivery-list context. */
+function printBaseRows(listIds) {
+  const rows = [];
+  for (const list of printSelectedLists(listIds)) {
+    for (const item of Array.isArray(list.items) ? list.items : []) rows.push({ list, item });
+  }
+  return rows;
+}
+
+/** Return one row's maintained scan-state key. */
+function printItemStatusKey(item) {
+  const qty = Math.max(Number(item?.qty || 0), 0);
+  const scanned = Math.max(Number(item?.scanned || 0), 0);
+  if (qty > 0 && scanned >= qty) return "complete";
+  if (scanned > 0) return "partial";
+  return "not-scanned";
+}
+
+/** Return all maintained attention keys present on one row. */
+function printItemAttentionKeys(item) {
+  const keys = [];
+  const signal = `${item?.processState || ""} ${item?.queueState || ""}`;
+  if (/\b(?:remake|rm)\b/i.test(signal)) keys.push("remake");
+  if (/\b(?:rush|sdi)\b/i.test(signal)) keys.push("rush");
+  if (Number(item?.internalRejectCount || 0) > 0) keys.push("reject");
+  if (/\b(?:update|updated|new|change|changed|added|add)\b/i.test(signal)) keys.push("updated");
+  if (item?.errorType || item?.errorReason) keys.push("error");
+  return keys;
+}
+
+/** Return the fixed Print / Export destination group for one item. */
+function printRouteGroupForItem(item) {
+  const category = routeCategory(item);
+  return ["indian_trail", "greenville", "cpu", "dtc"].includes(category) ? category : "indian_trail";
+}
+
+/** Limit outbound rows to the selected destinations; Airport means every outbound row. */
+function printRowsForSelectedRoutes(rows, routeGroups = selectedPrintRouteGroups()) {
+  const selected = new Set(routeGroups || []);
+  if (!selected.size) return [];
+  if (selected.has("airport")) return rows.slice();
+  return rows.filter(({ item }) => selected.has(printRouteGroupForItem(item)));
+}
+
+/** Render a compact selectable chip used by the filter pane. */
+function printFilterChipMarkup({ value, label, count, checked = false, type = "standard", data = "" }) {
+  return `
+    <label class="print-filter-chip-v197 is-${escapeHtml(type)}">
+      <input type="checkbox" value="${escapeHtml(value)}" ${data} ${checked ? "checked" : ""}>
+      <span>${escapeHtml(label)}</span>
+      <b>${escapeHtml(count)}</b>
+    </label>
+  `;
+}
+
+/** Convert a local Date into the scanner's YYYY-MM-DD date key. */
+function printCalendarDateKey(date) {
+  const value = date instanceof Date ? date : new Date();
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/** Parse a scanner date key without UTC date shifting. */
+function printCalendarDateFromKey(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
+}
+
+/** Return the first day of the month represented by a date or date key. */
+function printCalendarMonthDate(value) {
+  const parsed = value instanceof Date ? value : printCalendarDateFromKey(value);
+  const fallback = parsed || new Date();
+  return new Date(fallback.getFullYear(), fallback.getMonth(), 1);
+}
+
+/** Populate the header date selector with Custom Range first and every available outbound date after it. */
+function renderPrintQuickDateOptions() {
+  if (!els.printDateQuickSelect) return;
+  const start = String(els.printDateFrom?.value || "");
+  const end = String(els.printDateTo?.value || start);
+  const dates = [...new Set(
+    state.lists
+      .filter((list) => stageCategory(list) === "outbound")
+      .map((list) => String(list.deliveryDate || ""))
+      .filter(Boolean),
+  )].sort((a, b) => b.localeCompare(a));
+  const selectedValue = start && start === end ? start : "__range__";
+  const rangeOption = start && end && start !== end
+    ? `<option value="__range__">Date Range: ${escapeHtml(formatDisplayDate(start))} – ${escapeHtml(formatDisplayDate(end))}</option>`
+    : "";
+  els.printDateQuickSelect.innerHTML = `<option value="__custom__">Custom date range…</option>${rangeOption}${dates.map((date) => `<option value="${escapeHtml(date)}">Delivery Date: ${escapeHtml(formatDisplayDate(date))}</option>`).join("")}`;
+  if (selectedValue !== "__range__" && selectedValue && !dates.includes(selectedValue)) {
+    els.printDateQuickSelect.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(selectedValue)}">Delivery Date: ${escapeHtml(formatDisplayDate(selectedValue))}</option>`);
+  }
+  els.printDateQuickSelect.value = selectedValue === "__range__" && !rangeOption ? "__custom__" : selectedValue;
+  syncCustomSelect(els.printDateQuickSelect);
+}
+
+/** Open the maintained custom-range calendar. */
+function openPrintDateCalendar() {
+  const currentStart = String(els.printDateFrom?.value || dashboardDateKey() || printCalendarDateKey(new Date()));
+  const currentEnd = String(els.printDateTo?.value || currentStart);
+  state.printCalendarDraftStart = currentStart;
+  state.printCalendarDraftEnd = currentEnd && currentEnd !== currentStart ? currentEnd : "";
+  state.printCalendarMonth = printCalendarDateKey(printCalendarMonthDate(currentStart));
+  if (els.printDateCalendar) els.printDateCalendar.hidden = false;
+  renderPrintDateCalendar();
+}
+
+/** Close the date calendar without applying its draft. */
+function closePrintDateCalendar() {
+  if (els.printDateCalendar) els.printDateCalendar.hidden = true;
+  renderPrintQuickDateOptions();
+}
+
+/** Return one calendar month's six-week button grid. */
+function printCalendarMonthButtons(month, today, availableDates, start, end) {
+  const firstCell = new Date(month.getFullYear(), month.getMonth(), 1 - month.getDay());
+  return Array.from({ length: 42 }, (_, offset) => {
+    const date = new Date(firstCell.getFullYear(), firstCell.getMonth(), firstCell.getDate() + offset);
+    const key = printCalendarDateKey(date);
+    const classes = ["print-calendar-day-v201"];
+    if (date.getMonth() !== month.getMonth()) classes.push("is-other-month");
+    if (key === today) classes.push("is-today");
+    if (key === start) classes.push("is-range-start", "is-selected");
+    if (key === end) classes.push("is-range-end", "is-selected");
+    if (start && end && key > start && key < end) classes.push("is-in-range");
+    if (availableDates.has(key)) classes.push("has-delivery-list");
+    return `<button class="${classes.join(" ")}" type="button" data-print-calendar-date="${escapeHtml(key)}" aria-label="${escapeHtml(date.toLocaleDateString())}"><span>${date.getDate()}</span></button>`;
+  }).join("");
+}
+
+/** Render a two-month Date From / Date To range picker with today highlighted. */
+function renderPrintDateCalendar() {
+  if (!els.printCalendarLeftGrid || !els.printCalendarRightGrid) return;
+  const leftMonth = printCalendarMonthDate(state.printCalendarMonth || state.printCalendarDraftStart);
+  const rightMonth = new Date(leftMonth.getFullYear(), leftMonth.getMonth() + 1, 1);
+  const today = todayKey() || printCalendarDateKey(new Date());
+  const availableDates = new Set(
+    state.lists
+      .filter((list) => stageCategory(list) === "outbound")
+      .map((list) => String(list.deliveryDate || ""))
+      .filter(Boolean),
+  );
+  const start = String(state.printCalendarDraftStart || "");
+  const end = String(state.printCalendarDraftEnd || "");
+  const monthLabel = (month) => month.toLocaleDateString([], { month: "long", year: "numeric" });
+  if (els.printCalendarLeftMonthLabel) els.printCalendarLeftMonthLabel.textContent = monthLabel(leftMonth);
+  if (els.printCalendarRightMonthLabel) els.printCalendarRightMonthLabel.textContent = monthLabel(rightMonth);
+  els.printCalendarLeftGrid.innerHTML = printCalendarMonthButtons(leftMonth, today, availableDates, start, end);
+  els.printCalendarRightGrid.innerHTML = printCalendarMonthButtons(rightMonth, today, availableDates, start, end);
+  if (els.printCalendarFromValue) els.printCalendarFromValue.textContent = start ? formatDisplayDate(start) : "Select start date";
+  if (els.printCalendarToValue) els.printCalendarToValue.textContent = end ? formatDisplayDate(end) : "Select end date";
+  els.printDateCalendar?.querySelector('[data-print-range-role="from"]')?.classList.toggle("is-active", !start || Boolean(end));
+  els.printDateCalendar?.querySelector('[data-print-range-role="to"]')?.classList.toggle("is-active", Boolean(start) && !end);
+  if (els.printCalendarSelectionText) {
+    if (!start) els.printCalendarSelectionText.textContent = "Choose the Date From.";
+    else if (!end) els.printCalendarSelectionText.textContent = `Date From: ${formatDisplayDate(start)}. Now choose the Date To.`;
+    else els.printCalendarSelectionText.textContent = `${formatDisplayDate(start)} – ${formatDisplayDate(end)}`;
+  }
+  if (els.printCalendarApply) els.printCalendarApply.disabled = !(start && end);
+}
+
+/** Select one calendar day into the Date From / Date To range draft. */
+function choosePrintCalendarDate(dateKey) {
+  const key = String(dateKey || "");
+  if (!printCalendarDateFromKey(key)) return;
+  if (!state.printCalendarDraftStart || state.printCalendarDraftEnd) {
+    state.printCalendarDraftStart = key;
+    state.printCalendarDraftEnd = "";
+  } else if (key < state.printCalendarDraftStart) {
+    state.printCalendarDraftEnd = state.printCalendarDraftStart;
+    state.printCalendarDraftStart = key;
+  } else {
+    state.printCalendarDraftEnd = key;
+  }
+  renderPrintDateCalendar();
+}
+
+/** Clear the calendar draft so a new Date From and Date To can be selected. */
+function resetPrintCalendarRange() {
+  state.printCalendarDraftStart = "";
+  state.printCalendarDraftEnd = "";
+  renderPrintDateCalendar();
+}
+
+/** Move the visible two-month calendar by one month. */
+function movePrintCalendarMonth(offset) {
+  const month = printCalendarMonthDate(state.printCalendarMonth || state.printCalendarDraftStart);
+  month.setMonth(month.getMonth() + Number(offset || 0));
+  state.printCalendarMonth = printCalendarDateKey(month);
+  renderPrintDateCalendar();
+}
+
+/** Apply the complete Date From / Date To range and rebuild all dependent choices. */
+function applyPrintCalendarSelection() {
+  const start = String(state.printCalendarDraftStart || "");
+  const end = String(state.printCalendarDraftEnd || "");
+  if (!start || !end) return;
+  if (els.printDateFrom) els.printDateFrom.value = start <= end ? start : end;
+  if (els.printDateTo) els.printDateTo.value = start <= end ? end : start;
+  renderPrintQuickDateOptions();
+  closePrintDateCalendar();
+  state.printPreviewPage = 1;
+  renderPrintFilterChoices({ preserveSelections: true }).catch((error) => showInlineError(error.message, false));
+}
+
+/** Show explicit loading content so filter failures never look like empty sections. */
+function setPrintFilterLoadingState() {
+  const loading = '<div class="print-filter-empty-v197 is-loading">Loading current delivery-list choices…</div>';
+  for (const container of [els.printRouteOptions, els.printStatusOptions, els.printAttentionOptions, els.printOptionsGlassType]) {
+    if (container) container.innerHTML = loading;
+  }
+}
+
+/** Render destination routes and all date/route-dependent filter choices. */
+async function renderPrintFilterChoices({ preserveSelections = true } = {}) {
+  window.clearTimeout(state.printPreviewTimer);
+  state.printPreviewRequestId += 1;
+  const listIds = selectedPrintListIds();
+  const renderId = ++state.printEntityRenderId;
+  const previousRoutes = new Set(selectedPrintRouteGroups());
+  const previousStatuses = new Set(selectedPrintFilterValues(els.printStatusOptions, 'input[data-print-status]'));
+  const previousAttention = new Set(selectedPrintFilterValues(els.printAttentionOptions, 'input[data-print-attention]'));
+  const presetGlassTypes = activePrintPreset()?.glassTypes || null;
+  const previousGlass = new Set(presetGlassTypes || selectedPrintGlassInputs().filter((input) => input.checked).map((input) => input.value));
+  const previousAllGlass = presetGlassTypes ? presetGlassTypes.length === 0 : Boolean(els.printOptionsGlassType?.querySelector('input[data-print-all-glass]')?.checked);
+  const hadGlassChoices = presetGlassTypes ? true : selectedPrintGlassInputs().length > 0;
+
+  setPrintFilterLoadingState();
+  hidePrintSearchSuggestions();
+
+  if (!listIds.length) {
+    const message = state.printContext?.fixedListIds
+      ? "The requested delivery lists are unavailable."
+      : "No Airport Outbound delivery list is available in this date selection.";
+    for (const container of [els.printRouteOptions, els.printStatusOptions, els.printAttentionOptions, els.printOptionsGlassType]) {
+      if (container) container.innerHTML = `<div class="print-filter-empty-v197">${escapeHtml(message)}</div>`;
+    }
+    renderEmptyPrintSelectionPreview();
+    return;
+  }
+
+  try {
+    await ensurePrintListDetails(listIds);
+  } catch (error) {
+    if (renderId !== state.printEntityRenderId) return;
+    const message = `<div class="print-filter-empty-v197 is-error">Could not load filter choices. ${escapeHtml(error.message)}</div>`;
+    for (const container of [els.printRouteOptions, els.printStatusOptions, els.printAttentionOptions, els.printOptionsGlassType]) {
+      if (container) container.innerHTML = message;
+    }
+    renderEmptyPrintSelectionPreview();
+    return;
+  }
+  if (renderId !== state.printEntityRenderId) return;
+
+  const baseRows = printBaseRows(listIds);
+  const routeCounts = new Map(PRINT_ROUTE_GROUPS.map(({ value }) => [value, 0]));
+  routeCounts.set("airport", baseRows.reduce((sum, { item }) => sum + itemPieceQty(item), 0));
+  for (const { item } of baseRows) {
+    const group = printRouteGroupForItem(item);
+    routeCounts.set(group, (routeCounts.get(group) || 0) + itemPieceQty(item));
+  }
+
+  const validRouteValues = new Set(PRINT_ROUTE_GROUPS.map(({ value }) => value));
+  let selectedRoutes = preserveSelections
+    ? [...previousRoutes].filter((value) => validRouteValues.has(value))
+    : [];
+  if (!selectedRoutes.length) selectedRoutes = ["airport"];
+
+  if (els.printRouteOptions) {
+    els.printRouteOptions.innerHTML = PRINT_ROUTE_GROUPS.map(({ value, label }) => printFilterChipMarkup({
+      value,
+      label,
+      count: routeCounts.get(value) || 0,
+      checked: selectedRoutes.includes(value),
+      type: `route-${value.replaceAll("_", "-")}`,
+      data: 'data-print-route-group="1"',
+    })).join("");
+  }
+
+  const scopedRows = printRowsForSelectedRoutes(baseRows, selectedRoutes);
+  const glassCounts = new Map();
+  const statusCounts = new Map([["not-scanned", 0], ["partial", 0], ["complete", 0]]);
+  const attentionCounts = new Map([["remake", 0], ["rush", 0], ["reject", 0], ["updated", 0], ["error", 0]]);
+
+  for (const { item } of scopedRows) {
+    const qty = itemPieceQty(item);
+    const glass = glassTypeLabel(item) || "Other Glass";
+    glassCounts.set(glass, (glassCounts.get(glass) || 0) + qty);
+    const status = printItemStatusKey(item);
+    statusCounts.set(status, (statusCounts.get(status) || 0) + qty);
+    for (const key of printItemAttentionKeys(item)) attentionCounts.set(key, (attentionCounts.get(key) || 0) + qty);
+  }
+
+  const scopedPieceCount = scopedRows.reduce((sum, { item }) => sum + itemPieceQty(item), 0);
+  const statusDefinitions = [
+    ["not-scanned", "Not Scanned"],
+    ["partial", "Partial"],
+    ["complete", "Complete"],
+  ];
+  const statusAllSelected = !preserveSelections || previousStatuses.has("__all__") || !previousStatuses.size;
+  if (els.printStatusOptions) {
+    els.printStatusOptions.innerHTML = `${printFilterChipMarkup({
+      value: "__all__",
+      label: "All Status",
+      count: scopedPieceCount,
+      checked: statusAllSelected,
+      type: "status-all",
+      data: 'data-print-status="1" data-print-status-all="1"',
+    })}${statusDefinitions.map(([value, label]) => printFilterChipMarkup({
+      value,
+      label,
+      count: statusCounts.get(value) || 0,
+      checked: !statusAllSelected && previousStatuses.has(value),
+      type: `status-${value}`,
+      data: 'data-print-status="1"',
+    })).join("")}`;
+  }
+
+  const attentionDefinitions = [
+    ["remake", "Remakes"],
+    ["rush", "Rushes"],
+    ["reject", "Internal Rejects"],
+    ["updated", "New/Updated"],
+    ["error", "Errors"],
+  ];
+  const attentionAllSelected = !preserveSelections || previousAttention.has("__all__") || !previousAttention.size;
+  if (els.printAttentionOptions) {
+    els.printAttentionOptions.innerHTML = `${printFilterChipMarkup({
+      value: "__all__",
+      label: "All Attention",
+      count: scopedPieceCount,
+      checked: attentionAllSelected,
+      type: "attention-all",
+      data: 'data-print-attention="1" data-print-attention-all="1"',
+    })}${attentionDefinitions.map(([value, label]) => printFilterChipMarkup({
+      value,
+      label,
+      count: attentionCounts.get(value) || 0,
+      checked: !attentionAllSelected && previousAttention.has(value),
+      type: `attention-${value}`,
+      data: 'data-print-attention="1"',
+    })).join("")}`;
+  }
+
+  const glassEntries = [...glassCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (els.printOptionsGlassType) {
+    const totalPieces = glassEntries.reduce((sum, entry) => sum + Number(entry[1] || 0), 0);
+    const selectAllCurrent = !preserveSelections || !hadGlassChoices || previousAllGlass;
+    const glassMarkup = glassEntries.map(([label, count]) => printFilterChipMarkup({
+      value: label,
+      label,
+      count,
+      checked: !selectAllCurrent && previousGlass.has(label),
+      type: "glass",
+      data: `data-print-glass-type="1" data-print-glass-search="${escapeHtml(label.toLowerCase())}"`,
+    })).join("");
+    els.printOptionsGlassType.innerHTML = glassEntries.length
+      ? `${printFilterChipMarkup({ value: "__all__", label: "All Glass", count: totalPieces, checked: selectAllCurrent, type: "glass-all", data: 'data-print-all-glass="1"' })}${glassMarkup}<div class="print-glass-search-empty-v197" hidden>No glass types match this search.</div>`
+      : '<div class="print-filter-empty-v197">No glass types exist for the selected date and route.</div>';
+    updatePrintAllGlassState();
+    applyPrintGlassSearch();
+  }
+
+  renderPrintSelectedOrders();
+  renderPrintSearchSuggestions();
+  schedulePrintSelectionPreview(0);
+}
+
+/** Keep All Glass selected only when no exact glass types are selected. */
+function updatePrintAllGlassState() {
+  const allInput = els.printOptionsGlassType?.querySelector('input[data-print-all-glass]');
+  const inputs = selectedPrintGlassInputs();
+  if (!allInput) return;
+  if (allInput.checked) inputs.forEach((input) => { input.checked = false; });
+  if (!inputs.some((input) => input.checked)) {
+    allInput.checked = !(activePrintPreset()?.glassTypes || []).length;
+  }
+  allInput.indeterminate = false;
+}
+
+/** Filter glass chips without discarding their selected state. */
+function applyPrintGlassSearch() {
+  const query = String(els.printGlassSearch?.value || "").trim().toLowerCase();
+  let visible = 0;
+  els.printOptionsGlassType?.querySelectorAll('.print-filter-chip-v197:has(input[data-print-glass-type])').forEach((choice) => {
+    const input = choice.querySelector('input[data-print-glass-type]');
+    const matches = !query || String(input?.dataset.printGlassSearch || input?.value || "").includes(query);
+    choice.hidden = !matches;
+    if (matches) visible += 1;
   });
+  const empty = els.printOptionsGlassType?.querySelector('.print-glass-search-empty-v197');
+  if (empty) empty.hidden = visible > 0;
+}
 
-  els.printOptionsGlassType.onclick = (event) => {
-    const targetInput = event.target.closest('input[type="checkbox"]');
+/** Return exact order numbers selected for the current package. */
+function selectedPrintOrderValues() {
+  return [...new Set((state.printSelectedOrders || []).map((entry) => String(entry.order || "").replace(/\D/g, "")).filter(Boolean))];
+}
 
-    if (targetInput && els.printOptionsGlassType.contains(targetInput)) {
-      event.stopPropagation();
+/** Return exact line-item selection keys selected for the current package. */
+function selectedPrintItemValues() {
+  return [...new Set((state.printSelectedItems || []).map((entry) => String(entry.selectionKey || "").trim()).filter(Boolean))];
+}
 
-      window.setTimeout(() => {
-        if (targetInput.matches("[data-print-glass-select-all]")) {
-          selectedPrintGlassInputs().forEach((glassInput) => {
-            glassInput.checked = targetInput.checked;
-          });
-        }
+/** Return a stable row key even when an older imported row has no line-item ID. */
+function printRowSelectionKey(list, item) {
+  const lineItemId = String(item?.id || item?.lineItemId || "").trim();
+  if (lineItemId) return lineItemId;
+  const order = String(item?.order || "").replace(/\D/g, "");
+  const itemNo = String(item?.item || "").replace(/\D/g, "");
+  return `${String(list?.id || "").trim()}|${order}|${itemNo}`;
+}
 
+/** Return the portable list/order/item key used as a backend fallback. */
+function printPortableRowKey(list, item) {
+  const order = String(item?.order || "").replace(/\D/g, "");
+  const itemNo = String(item?.item || "").replace(/\D/g, "");
+  return `${String(list?.id || "").trim()}|${order}|${itemNo}`;
+}
 
-        updatePrintGlassSelectState();
-      }, 0);
-
-      return;
-    }
-
-    const allToggle = event.target.closest("[data-print-glass-all-toggle]");
-
-    if (allToggle && els.printOptionsGlassType.contains(allToggle)) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const glassInputs = selectedPrintGlassInputs();
-      const nextChecked = !glassInputs.length || glassInputs.some((input) => !input.checked);
-
-      glassInputs.forEach((glassInput) => {
-        glassInput.checked = nextChecked;
+/** Build order-level and exact-item catalogs from the selected dates and routes. */
+function printSelectionCatalog() {
+  const orders = new Map();
+  const items = new Map();
+  const rows = printRowsForSelectedRoutes(printBaseRows(selectedPrintListIds()));
+  for (const { list, item } of rows) {
+    const order = String(item.order || "").replace(/\D/g, "");
+    const itemNo = String(item.item || "").replace(/\D/g, "");
+    if (!order) continue;
+    if (!orders.has(order)) {
+      orders.set(order, {
+        order,
+        customers: new Set(),
+        jobs: new Set(),
+        dates: new Set(),
+        pieces: 0,
+        rowCount: 0,
       });
-
-      updatePrintGlassSelectState();
-      return;
     }
+    const orderEntry = orders.get(order);
+    const customer = String(item.customer || "").trim();
+    const job = String(item.job || item.product || "").trim();
+    if (customer) orderEntry.customers.add(customer);
+    if (job) orderEntry.jobs.add(job);
+    if (list?.deliveryDate) orderEntry.dates.add(String(list.deliveryDate));
+    orderEntry.pieces += itemPieceQty(item);
+    orderEntry.rowCount += 1;
 
-    const choice = event.target.closest(".print-glass-choice:not(.print-glass-all-choice)");
+    const selectionKey = printRowSelectionKey(list, item);
+    items.set(selectionKey, {
+      selectionKey,
+      lineItemId: String(item.id || item.lineItemId || "").trim(),
+      rowKey: printPortableRowKey(list, item),
+      listId: String(list?.id || ""),
+      deliveryDate: String(list?.deliveryDate || ""),
+      order,
+      item: itemNo,
+      customer: customer || "Unassigned customer",
+      job: job || "No Job Nr.",
+      glassType: glassTypeLabel(item),
+      pieces: itemPieceQty(item),
+      available: true,
+    });
+  }
+  return { orders, items };
+}
 
-    if (choice && els.printOptionsGlassType.contains(choice)) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const input = choice.querySelector('input[type="checkbox"]');
-
-      if (!input) return;
-
-      input.checked = !input.checked;
-      updatePrintGlassSelectState();
-    }
+/** Convert one order into stored selected-order metadata. */
+function printSelectedOrderRecord(order, catalog = printSelectionCatalog().orders) {
+  const normalized = String(order || "").replace(/\D/g, "");
+  const source = catalog.get(normalized);
+  const existing = (state.printSelectedOrders || []).find((entry) => String(entry.order || "") === normalized);
+  if (!source) return existing ? { ...existing, available: false, pieces: 0 } : { order: normalized, customer: "", job: "", pieces: 0, available: false };
+  return {
+    order: normalized,
+    customer: [...source.customers].join(", ") || "Unassigned customer",
+    job: [...source.jobs].slice(0, 3).join(", ") || "No Job Nr.",
+    pieces: source.pieces,
+    rowCount: source.rowCount,
+    available: true,
   };
 }
 
-/**
- * Purpose: Run the print stage option label workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function printStageOptionLabel(list) {
-  const category = stageCategory(list);
-
-  if (category === "outbound") return "Outbound Airport";
-  if (category === "received") return "Inbound IT";
-  if (category === "greenville") return "BFS Greenville";
-  if (category === "pickup") return "CPU";
-  if (category === "dtc") return "DTC";
-
-  return "Staging Airport";
+/** Convert one exact line item into stored selected-item metadata. */
+function printSelectedItemRecord(selectionKey, catalog = printSelectionCatalog().items) {
+  const cleanKey = String(selectionKey || "").trim();
+  const source = catalog.get(cleanKey);
+  const existing = (state.printSelectedItems || []).find((entry) => String(entry.selectionKey || "") === cleanKey);
+  if (!source) return existing ? { ...existing, available: false, pieces: 0 } : { selectionKey: cleanKey, order: "", item: "", customer: "", job: "", pieces: 0, available: false };
+  return { ...source };
 }
 
-/**
- * Purpose: Render the render print option stages workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
- */
-function renderPrintOptionStages() {
-  if (!els.printOptionsStages || !els.printOptionsDate) return;
+/** Render removable whole-order and exact-item selections. */
+function renderPrintSelectedOrders() {
+  const catalog = printSelectionCatalog();
+  state.printSelectedOrders = selectedPrintOrderValues().map((order) => printSelectedOrderRecord(order, catalog.orders));
+  state.printSelectedItems = selectedPrintItemValues().map((key) => printSelectedItemRecord(key, catalog.items));
+  const selectionCount = state.printSelectedOrders.length + state.printSelectedItems.length;
+  if (els.printSelectedOrdersCount) els.printSelectedOrdersCount.textContent = String(selectionCount);
+  if (els.printSelectedOrdersClear) els.printSelectedOrdersClear.disabled = !selectionCount;
+  if (els.printOrderFilter) els.printOrderFilter.value = selectedPrintOrderValues().join(",");
+  if (!els.printSelectedOrdersList) return;
 
-  const date = els.printOptionsDate.value || selectedDeliveryDate() || dashboardDateKey();
-  const lists = state.lists.filter((list) => list.deliveryDate === date).sort((a, b) => stageSort(a) - stageSort(b));
-  const contextIds = new Set(state.printContext?.listIds || []);
-  const hasContextIds = contextIds.size > 0;
-  const checkedCount = lists.filter((list) => (hasContextIds ? contextIds.has(list.id) : false)).length;
-  const fullCoverageList = lists.find(printListIsFullCoverage);
-  const listQty = fullCoverageList?.totalQty || lists.reduce((maxQty, list) => Math.max(maxQty, Number(list.totalQty || 0)), 0);
-
-  els.printOptionsStages.innerHTML = `
-    <label class="print-stage-choice print-stage-all-choice">
-      <input type="checkbox" data-print-stage-select-all ${lists.length && checkedCount === lists.length ? "checked" : ""}>
-      <span>All Stages <small>${escapeHtml(lists.length)} stage${lists.length === 1 ? "" : "s"}${listQty ? ` | ${escapeHtml(listQty)} pcs` : ""}</small></span>
-    </label>
-    ${lists
-      .map((list) => {
-        const checked = hasContextIds ? contextIds.has(list.id) : false;
-
-        return `
-          <label class="print-stage-choice print-stage-${escapeHtml(stageCategory(list))}">
-            <input type="checkbox" value="${escapeHtml(list.id)}" ${checked ? "checked" : ""}>
-            <span>${escapeHtml(printStageOptionLabel(list))} <small>${escapeHtml(list.scannedQty || 0)} / ${escapeHtml(list.totalQty || 0)}</small></span>
-          </label>
-        `;
-      })
-      .join("")}
-  `;
-
-  updatePrintStageSelectState();
-  void renderPrintGlassTypes();
+  const orderCards = state.printSelectedOrders.map((entry) => `
+    <article class="print-selected-order-v199 ${entry.available ? "" : "is-unavailable"}">
+      <div>
+        <strong>Complete Order ${escapeHtml(entry.order)}</strong>
+        <span>${escapeHtml(entry.customer || "Unassigned customer")}</span>
+        <small>${escapeHtml(entry.job || "No Job Nr.")} · ${escapeHtml(entry.available ? `${entry.pieces} pieces` : "Not in the current date/route selection")}</small>
+      </div>
+      <button type="button" data-print-remove-order="${escapeHtml(entry.order)}" aria-label="Remove order ${escapeHtml(entry.order)}">×</button>
+    </article>
+  `);
+  const itemCards = state.printSelectedItems.map((entry) => `
+    <article class="print-selected-order-v199 print-selected-item-v202 ${entry.available ? "" : "is-unavailable"}">
+      <div>
+        <strong>Order ${escapeHtml(entry.order || "—")} · Item ${escapeHtml(entry.item || "—")}</strong>
+        <span>${escapeHtml(entry.customer || "Unassigned customer")}</span>
+        <small>${escapeHtml(entry.job || "No Job Nr.")} · ${escapeHtml(entry.available ? `${entry.pieces} pieces · ${entry.glassType || "Glass"}` : "Not in the current date/route selection")}</small>
+      </div>
+      <button type="button" data-print-remove-item="${escapeHtml(entry.selectionKey)}" aria-label="Remove selected item">×</button>
+    </article>
+  `);
+  els.printSelectedOrdersList.innerHTML = selectionCount
+    ? [...orderCards, ...itemCards].join("")
+    : '<div class="print-selected-orders-empty-v199">No specific orders or items selected. Every row matching the other filters is included.</div>';
 }
 
-/**
- * Purpose: Open the open print options workflow using the existing shared UI state.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function openPrintOptions(context = {}) {
-  state.printContext = context;
-  const groups = listsByDeliveryDate();
-  if (!groups.length) {
-    showInlineError("No delivery lists are available to print.", false);
+/** Add one complete order and remove redundant exact items from that order. */
+function addPrintSelectedOrder(order) {
+  const normalized = String(order || "").replace(/\D/g, "");
+  if (!normalized || selectedPrintOrderValues().includes(normalized)) return;
+  state.printSelectedOrders.push(printSelectedOrderRecord(normalized));
+  state.printSelectedItems = (state.printSelectedItems || []).filter((entry) => String(entry.order || "") !== normalized);
+  if (els.printSearchInput) els.printSearchInput.value = "";
+  hidePrintSearchSuggestions();
+  renderPrintSelectedOrders();
+  schedulePrintSelectionPreview(0);
+}
+
+/** Add one exact order/item row without expanding to the whole order. */
+function addPrintSelectedItem(selectionKey) {
+  const cleanKey = String(selectionKey || "").trim();
+  const catalog = printSelectionCatalog();
+  const entry = catalog.items.get(cleanKey);
+  if (!entry || selectedPrintItemValues().includes(cleanKey) || selectedPrintOrderValues().includes(entry.order)) return;
+  state.printSelectedItems.push({ ...entry });
+  if (els.printSearchInput) els.printSearchInput.value = "";
+  hidePrintSearchSuggestions();
+  renderPrintSelectedOrders();
+  schedulePrintSelectionPreview(0);
+}
+
+/** Remove one exact order from the current selection. */
+function removePrintSelectedOrder(order) {
+  const normalized = String(order || "").replace(/\D/g, "");
+  state.printSelectedOrders = (state.printSelectedOrders || []).filter((entry) => String(entry.order || "") !== normalized);
+  renderPrintSelectedOrders();
+  renderPrintSearchSuggestions();
+  schedulePrintSelectionPreview(0);
+}
+
+/** Remove one exact line-item selection. */
+function removePrintSelectedItem(selectionKey) {
+  const cleanKey = String(selectionKey || "").trim();
+  state.printSelectedItems = (state.printSelectedItems || []).filter((entry) => String(entry.selectionKey || "") !== cleanKey);
+  renderPrintSelectedOrders();
+  renderPrintSearchSuggestions();
+  schedulePrintSelectionPreview(0);
+}
+
+/** Clear every exact order and item selection without changing other filters. */
+function clearPrintSelectedOrders() {
+  state.printSelectedOrders = [];
+  state.printSelectedItems = [];
+  renderPrintSelectedOrders();
+  renderPrintSearchSuggestions();
+  schedulePrintSelectionPreview(0);
+}
+
+/** Hide the smart order/item search panel. */
+function hidePrintSearchSuggestions() {
+  if (!els.printSearchSuggestions) return;
+  els.printSearchSuggestions.hidden = true;
+  els.printSearchSuggestions.replaceChildren();
+}
+
+/** Render smart order/item suggestions from the selected dates and routes. */
+function renderPrintSearchSuggestions() {
+  if (!els.printSearchSuggestions || !els.printSearchInput) return;
+  const query = String(els.printSearchInput.value || "").trim().toLowerCase();
+  if (!query) {
+    hidePrintSearchSuggestions();
     return;
   }
-  const requestedDate = context.date || state.meta?.deliveryDate || selectedDeliveryDate() || groups[0].date;
-  if (els.printOptionsDate) {
-    els.printOptionsDate.innerHTML = groups.map((group) => `<option value="${escapeHtml(group.date)}">${escapeHtml(formatDisplayDate(group.date))}</option>`).join("");
-    els.printOptionsDate.value = groups.some((group) => group.date === requestedDate) ? requestedDate : groups[0].date;
+  const digits = query.replace(/\D/g, "");
+  const selectedOrders = new Set(selectedPrintOrderValues());
+  const selectedItems = new Set(selectedPrintItemValues());
+  const catalog = printSelectionCatalog();
+  const suggestions = [];
+  for (const entry of catalog.items.values()) {
+    const haystack = `${entry.order} ${entry.item} ${entry.customer} ${entry.job} ${entry.glassType}`.toLowerCase();
+    const matches = haystack.includes(query) || Boolean(digits && (`${entry.order}${entry.item}`.includes(digits) || entry.order.includes(digits) || entry.item === digits));
+    if (!matches) continue;
+    const starts = entry.order.startsWith(digits) || entry.item.startsWith(digits) || entry.customer.toLowerCase().startsWith(query) || entry.job.toLowerCase().startsWith(query);
+    suggestions.push({ ...entry, starts });
   }
-  for (const input of [els.printUpdatedOnly, els.printRushOnly, els.printRemakeOnly]) {
-    if (input) input.checked = false;
+  suggestions.sort((a, b) => Number(b.starts) - Number(a.starts) || a.order.localeCompare(b.order) || Number(a.item || 0) - Number(b.item || 0));
+  const visible = suggestions.slice(0, 18);
+  els.printSearchSuggestions.innerHTML = visible.length
+    ? visible.map((entry) => {
+      const orderSelected = selectedOrders.has(entry.order);
+      const itemSelected = selectedItems.has(entry.selectionKey) || orderSelected;
+      return `
+        <article class="print-search-result-v202">
+          <span><strong>Order ${escapeHtml(entry.order)} · Item ${escapeHtml(entry.item || "—")}</strong><small>${escapeHtml(entry.customer)}</small></span>
+          <span><b>${escapeHtml(entry.job)}</b><small>${escapeHtml(entry.pieces)} pieces · ${escapeHtml(entry.glassType || "Glass")}</small></span>
+          <div class="print-search-result-actions-v202">
+            <button type="button" data-print-add-item="${escapeHtml(entry.selectionKey)}" ${itemSelected ? "disabled" : ""}>${itemSelected ? "Selected" : "Add Item"}</button>
+            <button type="button" data-print-add-order="${escapeHtml(entry.order)}" ${orderSelected ? "disabled" : ""}>${orderSelected ? "Order Added" : "Add Order"}</button>
+          </div>
+        </article>`;
+    }).join("")
+    : '<div class="print-search-empty-v198">No additional matching orders or items exist in the selected dates and routes.</div>';
+  els.printSearchSuggestions.hidden = false;
+}
+
+/** Ensure current list rows are loaded before producing smart order/item suggestions. */
+async function refreshPrintSearchSuggestions() {
+  const query = String(els.printSearchInput?.value || "").trim();
+  if (!query) { hidePrintSearchSuggestions(); return; }
+  try {
+    await ensurePrintListDetails(selectedPrintListIds());
+    renderPrintSearchSuggestions();
+  } catch (error) {
+    if (els.printSearchSuggestions) {
+      els.printSearchSuggestions.innerHTML = `<div class="print-search-empty-v198">Could not search current delivery lists. ${escapeHtml(error.message)}</div>`;
+      els.printSearchSuggestions.hidden = false;
+    }
   }
-  if (els.printUpdatedOnly) {
-    els.printUpdatedOnly.checked = Boolean(context.updatedOnly);
+}
+
+/** Return true when one row is included by the exact order/item picker. */
+function printRowMatchesExactSelection(list, item) {
+  const selectedOrders = new Set(selectedPrintOrderValues());
+  const selectedItems = new Set(selectedPrintItemValues());
+  if (!selectedOrders.size && !selectedItems.size) return true;
+  const order = String(item?.order || "").replace(/\D/g, "");
+  return selectedOrders.has(order) || selectedItems.has(printRowSelectionKey(list, item));
+}
+
+/** Return the exact loaded rows represented by every visible Print / Export filter. */
+function printFilteredRows() {
+  const selectedRoutes = selectedPrintRouteGroups();
+  const allGlass = allPrintGlassTypesSelected();
+  const selectedGlass = new Set(selectedPrintGlassTypeValues());
+  const selectedStatuses = new Set(selectedPrintStatusValues());
+  const selectedAttention = new Set(selectedPrintAttentionValues());
+  return printRowsForSelectedRoutes(printBaseRows(selectedPrintListIds()), selectedRoutes).filter(({ list, item }) => {
+    if (!allGlass && selectedGlass.size && !selectedGlass.has(glassTypeLabel(item))) return false;
+    if (!allGlass && !selectedGlass.size) return false;
+    if (selectedStatuses.size && !selectedStatuses.has(printItemStatusKey(item))) return false;
+    if (selectedAttention.size && !printItemAttentionKeys(item).some((key) => selectedAttention.has(key))) return false;
+    if (!printRowMatchesExactSelection(list, item)) return false;
+    if (state.printContext?.updatedOnly && !/\b(update|updated|new|change|changed|added|add)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`)) return false;
+    return true;
+  });
+}
+
+/** Build the exact backend filter contract shared by preview, print, and exports. */
+function printSelectionFilters(filteredRows = printFilteredRows()) {
+  const glassTypes = selectedPrintGlassTypeValues();
+  const statuses = selectedPrintStatusValues();
+  const attention = selectedPrintAttentionValues();
+  const orders = selectedPrintOrderValues();
+  const selectedItems = (state.printSelectedItems || []).filter((entry) => entry.order && entry.item);
+  const filters = {
+    glassTypesExact: allPrintGlassTypesSelected() ? "" : JSON.stringify(glassTypes),
+    routeGroupsExact: JSON.stringify(selectedPrintRouteGroups()),
+    statusesExact: statuses.length ? JSON.stringify(statuses) : "",
+    attentionExact: attention.length ? JSON.stringify(attention) : "",
+    ordersExact: orders.length ? JSON.stringify(orders) : "",
+    orderItemsExact: selectedItems.length ? JSON.stringify(selectedItems.map((entry) => `${entry.order}|${entry.item}`)) : "",
+    mirrorMode: "include",
+  };
+  if (state.printContext?.updatedOnly) filters.updatedOnly = "true";
+  return filters;
+}
+
+/** Build the POST payload that locks preview and output to the same exact rows. */
+function printBackendSelectionPayload() {
+  const rows = printFilteredRows();
+  return {
+    listIds: selectedPrintListIds(),
+    filters: printSelectionFilters(rows),
+    lineItemIds: [...new Set(rows.map(({ item }) => String(item?.id || item?.lineItemId || "").trim()).filter(Boolean))],
+    rowKeys: [...new Set(rows.map(({ list, item }) => printPortableRowKey(list, item)).filter(Boolean))],
+    copies: Math.max(Number(els.printCopies?.value || 1), 1),
+    orientation: String(els.printOrientation?.value || "portrait"),
+  };
+}
+
+/** Return the short stage title used by the maintained printed delivery list. */
+function printSheetStageName(list) {
+  const category = stageCategory(list);
+  return { outbound: "Outbound", staging: "Staging", received: "Indian Trail", pickup: "CPU", greenville: "BFS Greenville", dtc: "DTC" }[category]
+    || String(list?.stage || list?.label || "Delivery List").split(" - ")[0].trim();
+}
+
+/** Convert one loaded row into the common preview/print row contract. */
+function printPreviewRow(list, item) {
+  const statusKey = printItemStatusKey(item);
+  return {
+    listId: String(list.id || ""),
+    lineItemId: String(item.id || item.lineItemId || ""),
+    rowKey: printPortableRowKey(list, item),
+    order: String(item.order || ""),
+    item: String(item.item || ""),
+    job: String(item.job || item.product || ""),
+    customer: String(item.customer || ""),
+    deliveryDate: String(list.deliveryDate || ""),
+    pieces: itemPieceQty(item),
+    glassType: glassTypeLabel(item),
+    dimensions: String(item.dimensions || ""),
+    statusKey,
+    statusLabel: { "not-scanned": "Not Scanned", partial: "Partial", complete: "Complete" }[statusKey],
+    attention: printItemAttentionKeys(item).map((key) => ({ key, label: { remake: "Remakes", rush: "Rushes", reject: "Internal Rejects", updated: "New/Updated", error: "Errors" }[key] || key })),
+    route: String(item.route || "Indian Trail"),
+  };
+}
+
+/** Build sheet groups that follow the maintained normal, Rush, and remake print order. */
+function buildLocalPrintSheets(filteredRows) {
+  const rowsByList = new Map();
+  for (const row of filteredRows) {
+    if (!rowsByList.has(row.list.id)) rowsByList.set(row.list.id, []);
+    rowsByList.get(row.list.id).push(row);
   }
-  if (els.printCustomerFilter) els.printCustomerFilter.value = "";
-  if (els.printOrderFilter) els.printOrderFilter.value = "";
-  renderPrintOptionStages();
-  updatePrintSelectionSummary();
-  if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = false;
-  if (els.printOptionsPanel) els.printOptionsPanel.hidden = false;
+  const sheets = [];
+  for (const list of printSelectedLists(selectedPrintListIds())) {
+    const source = rowsByList.get(list.id) || [];
+    const normal = [];
+    const rush = [];
+    const remake = [];
+    for (const { item } of source) {
+      const keys = printItemAttentionKeys(item);
+      if (keys.includes("remake")) remake.push(printPreviewRow(list, item));
+      else if (keys.includes("rush")) rush.push(printPreviewRow(list, item));
+      else normal.push(printPreviewRow(list, item));
+    }
+    const stageName = printSheetStageName(list);
+    const dateText = formatDisplayDate(list.deliveryDate || "");
+    const addSheet = (mode, rows) => {
+      if (!rows.length) return;
+      const updated = Boolean(state.printContext?.updatedOnly);
+      const title = mode === "rush"
+        ? `${stageName} Rush Sheet for ${dateText}`
+        : mode === "remake"
+          ? `${stageName} Remake Sheet for ${dateText}`
+          : updated
+            ? `${stageName} Updated Delivery List for ${dateText}`
+            : `${stageName} Delivery List for ${dateText}`;
+      sheets.push({
+        listId: String(list.id || ""),
+        stageName,
+        deliveryDate: String(list.deliveryDate || ""),
+        mode,
+        title,
+        badge: mode === "rush" ? "RUSH" : mode === "remake" ? "REMAKE" : updated ? "UPDATED" : "",
+        rows: rows.sort((a, b) => String(a.glassType).localeCompare(String(b.glassType)) || Number(a.order || 0) - Number(b.order || 0) || Number(a.item || 0) - Number(b.item || 0)),
+      });
+    };
+    addSheet("normal", normal);
+    addSheet("rush", rush);
+    addSheet("remake", remake);
+  }
+  return sheets;
+}
+
+/** Build an immediate preview from the exact loaded rows that the browser will print. */
+function buildLocalPrintSelectionPreview() {
+  const filteredRows = printFilteredRows();
+  const previewRows = filteredRows.map(({ list, item }) => printPreviewRow(list, item));
+  const previewSheets = buildLocalPrintSheets(filteredRows);
+  const pageCount = previewSheets.reduce((sum, sheet) => sum + paginatePrintSheetRows(sheet.rows).length, 0);
+  return {
+    generatedAt: new Date().toISOString(),
+    totalPieces: previewRows.reduce((sum, row) => sum + Number(row.pieces || 0), 0),
+    rowCount: previewRows.length,
+    orderCount: new Set(previewRows.map((row) => row.order).filter(Boolean)).size,
+    customerCount: new Set(previewRows.map((row) => row.customer).filter(Boolean)).size,
+    pageCount: Math.max(pageCount, 1),
+    previewRows,
+    previewSheets,
+    noResults: previewRows.length === 0,
+    localPreview: true,
+  };
+}
+
+/** Format the preview's generated timestamp. */
+function printPreviewTimestamp(value) {
+  const parsed = new Date(value || Date.now());
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/** Return a readable label for selected chips. */
+function printSelectedChipLabels(container, selector, fallback) {
+  const labels = [...(container?.querySelectorAll(selector) || [])]
+    .filter((input) => input.checked)
+    .map((input) => input.closest("label")?.querySelector("span")?.textContent?.trim() || input.value)
+    .filter(Boolean);
+  return labels.length ? labels.join(", ") : fallback;
+}
+
+/** Paginate rows with the same 21-row first page and 23-row continuation limits as the server printout. */
+function paginatePrintSheetRows(rows) {
+  const pages = [];
+  let current = [];
+  let count = 0;
+  let currentGlass = "";
+  const limit = () => pages.length ? 23 : 21;
+  const flush = () => { if (current.length) pages.push(current); current = []; count = 0; currentGlass = ""; };
+  for (const row of rows || []) {
+    const glass = String(row.glassType || "Unspecified Glass");
+    let groupNeeded = glass !== currentGlass;
+    if (current.length && count + 1 + (groupNeeded ? 1 : 0) > limit()) { flush(); groupNeeded = true; }
+    if (groupNeeded) { current.push({ type: "group", glassType: glass }); count += 1; currentGlass = glass; }
+    if (current.length && count >= limit()) { flush(); current.push({ type: "group", glassType: glass }); count += 1; currentGlass = glass; }
+    current.push({ type: "row", row });
+    count += 1;
+  }
+  flush();
+  return pages.length ? pages : [[]];
+}
+
+function printSheetBodyMarkup(pageRows) {
+  return (pageRows || []).map((entry) => {
+    if (entry.type === "group") return `<tr class="glass-group"><td colspan="8">${escapeHtml(entry.glassType)}</td></tr>`;
+    const row = entry.row || {};
+    return `<tr><td class="print-truncate">${escapeHtml(row.job || row.glassType || "")}</td><td>${escapeHtml(row.order || "")}</td><td>${escapeHtml(row.item || "")}</td><td>${escapeHtml(row.pieces || 0)}</td><td class="print-truncate">${escapeHtml(row.dimensions || "")}</td><td class="print-truncate">${escapeHtml(row.customer || "")}</td><td>${escapeHtml(row.route || "Indian Trail")}</td><td class="check-cell">☐</td></tr>`;
+  }).join("");
+}
+
+/** Return the exact visual sheet markup shared by the screen preview and the print popup. */
+function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientation, generatedAt, previewClass = "") {
+  const continuation = pageNumber > 1;
+  const badge = sheet.badge ? `<span class="sheet-badge">${escapeHtml(sheet.badge)}</span>` : "";
+  return `<section class="delivery-print-sheet-v203 ${escapeHtml(sheet.mode || "normal")} is-${escapeHtml(orientation)} ${previewClass}">
+    <div class="sheet-page-top">List page ${pageNumber} of ${pageTotal}</div>
+    <header class="sheet-header ${continuation ? "sheet-header-compact" : ""}">
+      <div>${badge}<${continuation ? "h2" : "h1"}>${escapeHtml(sheet.title || "Delivery List")}</${continuation ? "h2" : "h1"}>${continuation ? `<p>Continuation sheet - List page ${pageNumber} of ${pageTotal}</p>` : ""}<p class="printed-at">Printed at: ${escapeHtml(printPreviewTimestamp(generatedAt))}</p></div>
+      <div class="copy-box"><span>Checked By: <i class="write-line checked-line"></i></span><span>Date: <i class="write-line date-line"></i></span></div>
+    </header>
+    <table class="delivery-print-table"><colgroup><col class="job-col"><col class="order-col"><col class="item-col"><col class="qty-col"><col class="dimensions-col"><col class="customer-col"><col class="route-col"><col class="check-col"></colgroup><thead><tr><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty.</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Check</th></tr></thead><tbody>${printSheetBodyMarkup(pageRows)}</tbody></table>
+    <div class="notes"><strong>Notes:</strong><span></span></div>
+  </section>`;
+}
+
+/** Render every actual print sheet and continuation page in one scrollable preview. */
+function renderPrintDocumentPreview(preview = {}) {
+  if (!els.printDocumentPaper) return;
+  const orientation = String(els.printOrientation?.value || "portrait") === "landscape" ? "landscape" : "portrait";
+  const copies = Math.max(Number(els.printCopies?.value || 1), 1);
+  const sheets = Array.isArray(preview.previewSheets) && preview.previewSheets.length
+    ? preview.previewSheets
+    : buildLocalPrintSheets(printFilteredRows());
+  const pages = [];
+  for (const sheet of sheets) {
+    const chunks = paginatePrintSheetRows(sheet.rows || []);
+    chunks.forEach((chunk, index) => pages.push(printSheetPageMarkup(sheet, chunk, index + 1, chunks.length, orientation, preview.generatedAt, "is-preview")));
+  }
+  if (els.printPreviewPageCount) els.printPreviewPageCount.textContent = `${Math.max(pages.length, 1)} page${pages.length === 1 ? "" : "s"} · ${copies} cop${copies === 1 ? "y" : "ies"}`;
+  els.printDocumentPaper.classList.toggle("is-landscape", orientation === "landscape");
+  els.printDocumentPaper.classList.toggle("is-portrait", orientation !== "landscape");
+  els.printDocumentPaper.innerHTML = pages.length ? pages.join("") : `<section class="delivery-print-sheet-v203 is-${orientation} is-preview"><div class="print-paper-empty-v197"><strong>0</strong><h3>No printable rows</h3><p>Selected filters yield 0 results.</p></div></section>`;
+}
+
+/** Apply the current preview zoom without changing the document data. */
+function applyPrintPreviewZoom() {
+  state.printPreviewZoom = Math.min(Math.max(Number(state.printPreviewZoom || 1), 0.65), 1.45);
+  els.printDocumentPaper?.style.setProperty("--print-preview-zoom", String(state.printPreviewZoom));
+  if (els.printPreviewZoomLabel) els.printPreviewZoomLabel.textContent = `${Math.round(state.printPreviewZoom * 100)}%`;
+}
+
+/** Render a completed exact package preview. */
+function renderPrintSelectionPreview(preview = {}, options = {}) {
+  state.printPreviewResult = preview;
+  const noResults = Boolean(preview.noResults) || Number(preview.totalPieces || 0) === 0;
+  if (els.printPreviewState) {
+    els.printPreviewState.textContent = options.pending
+      ? `Updating · ${Number(preview.totalPieces || 0)} pieces`
+      : noResults
+        ? "0 results"
+        : `${Number(preview.totalPieces || 0)} pieces`;
+    els.printPreviewState.className = `print-preview-state-v197 ${options.pending ? "is-loading" : noResults ? "is-zero" : "is-ready"}`;
+  }
+  if (els.printPreviewZeroMessage) els.printPreviewZeroMessage.hidden = !noResults;
+  if (els.printOptionsSubmit) els.printOptionsSubmit.disabled = noResults;
+  renderPrintDocumentPreview(preview);
+  applyPrintPreviewZoom();
+}
+
+/** Render the required red-zero state without a backend request. */
+function renderEmptyPrintSelectionPreview() {
+  renderPrintSelectionPreview({
+    generatedAt: new Date().toISOString(),
+    totalPieces: 0,
+    rowCount: 0,
+    orderCount: 0,
+    customerCount: 0,
+    pageCount: 1,
+    previewRows: [],
+    noResults: true,
+  });
+}
+
+/** Refresh the preview from the exact loaded rows used by the client print document. */
+async function refreshPrintSelectionPreview() {
+  const listIds = selectedPrintListIds();
+  const selectedRoutes = selectedPrintRouteGroups();
+  const allGlass = allPrintGlassTypesSelected();
+  const selectedGlass = selectedPrintGlassInputs().filter((input) => input.checked);
+  state.printPreviewRequestId += 1;
+  if (!listIds.length || !selectedRoutes.length || (!allGlass && !selectedGlass.length)) {
+    state.printPreviewResult = null;
+    renderEmptyPrintSelectionPreview();
+    return;
+  }
+  renderPrintSelectionPreview(buildLocalPrintSelectionPreview());
+  if (els.printPreviewZeroMessage) els.printPreviewZeroMessage.hidden = true;
+}
+
+function schedulePrintSelectionPreview(delay = 160) {
+  window.clearTimeout(state.printPreviewTimer);
+  try {
+    const localPreview = buildLocalPrintSelectionPreview();
+    renderPrintSelectionPreview(localPreview);
+  } catch (_error) {
+    state.printPreviewResult = null;
+  }
+  state.printPreviewTimer = window.setTimeout(() => {
+    refreshPrintSelectionPreview().catch((error) => showInlineError(error.message, false));
+  }, Math.max(Number(delay || 0), 0));
+}
+
+/** Compatibility name retained for existing event wiring. */
+function updatePrintSelectionSummary() {
+  schedulePrintSelectionPreview();
+}
+
+/** Rebuild all choices after a date or route change. */
+async function refreshPrintWorkspaceChoices(options = {}) {
+  renderPrintQuickDateOptions();
+  await renderPrintFilterChoices({ preserveSelections: options.preserveSelections !== false });
+}
+
+/** Restore the route-based workspace's default filter state. */
+async function resetPrintFilters({ clearActivePreset = true } = {}) {
+  const groups = listsByDeliveryDate();
+  const requestedDate = state.printContext?.date || selectedDeliveryDate() || dashboardDateKey() || groups[0]?.date || "";
+  if (els.printSearchInput) els.printSearchInput.value = "";
+  if (els.printGlassSearch) els.printGlassSearch.value = "";
+  state.printSelectedOrders = [];
+  state.printSelectedItems = [];
+  if (els.printDateFrom) els.printDateFrom.value = requestedDate;
+  if (els.printDateTo) els.printDateTo.value = requestedDate;
+  setPrintCopies(1, false);
+  setPrintOrientation("portrait", false);
+  if (els.printExportType) els.printExportType.value = "pdf";
+  if (clearActivePreset) setActivePrintPresetName("");
+  renderPrintPresetOptions(clearActivePreset ? "" : null);
+  renderPrintQuickDateOptions(requestedDate);
+  state.printPreviewZoom = 1;
+  updatePrintOutputAction();
+  await refreshPrintWorkspaceChoices({ preserveSelections: false });
+}
+
+function printPresetUserToken() {
+  return String(state.user?.username || state.user?.email || state.user?.id || "local-demo")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._@-]+/g, "-") || "local-demo";
+}
+
+function printPresetStorageKey() {
+  return `${PRINT_PRESET_STORAGE_KEY}:${printPresetUserToken()}`;
+}
+
+function printActivePresetStorageKey() {
+  return `${PRINT_ACTIVE_PRESET_STORAGE_KEY}:${printPresetUserToken()}`;
+}
+
+function readPrintPresets() {
+  try {
+    const userKey = printPresetStorageKey();
+    let raw = localStorage.getItem(userKey);
+    if (!raw) {
+      raw = localStorage.getItem(PRINT_PRESET_LEGACY_STORAGE_KEY);
+      if (raw) localStorage.setItem(userKey, raw);
+    }
+    const parsed = JSON.parse(raw || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function writePrintPresets(presets) {
+  localStorage.setItem(printPresetStorageKey(), JSON.stringify(presets || {}));
+}
+
+function activePrintPresetName() {
+  const name = String(localStorage.getItem(printActivePresetStorageKey()) || "");
+  return name && readPrintPresets()[name] ? name : "";
+}
+
+function activePrintPreset() {
+  const name = activePrintPresetName();
+  return name ? readPrintPresets()[name] || null : null;
+}
+
+function setActivePrintPresetName(name) {
+  const clean = String(name || "");
+  if (clean && readPrintPresets()[clean]) localStorage.setItem(printActivePresetStorageKey(), clean);
+  else localStorage.removeItem(printActivePresetStorageKey());
+}
+
+/** Refresh the user-specific preset selector and preserve its active choice. */
+function renderPrintPresetOptions(selectedName = null) {
+  if (!els.printPresetSelect) return;
+  const presets = readPrintPresets();
+  const requested = selectedName === null ? activePrintPresetName() : String(selectedName || "");
+  els.printPresetSelect.innerHTML = `<option value="">Saved Presets</option>${Object.keys(presets).sort().map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")}`;
+  els.printPresetSelect.value = requested && presets[requested] ? requested : "";
+  syncCustomSelect(els.printPresetSelect);
+}
+
+/** Capture the visible filter state for a local preset. */
+function currentPrintPreset() {
+  return {
+    routeGroups: selectedPrintRouteGroups(),
+    statuses: selectedPrintStatusValues(),
+    attention: selectedPrintAttentionValues(),
+    glassTypes: allPrintGlassTypesSelected() ? [] : selectedPrintGlassTypeValues(),
+    outputType: String(els.printExportType?.value || "pdf"),
+    copies: Math.max(Number(els.printCopies?.value || 1), 1),
+    orientation: String(els.printOrientation?.value || "portrait"),
+  };
+}
+
+function printPresetBuilderGroup(title, name, options, selectedValues, allLabel = "") {
+  const selected = new Set(selectedValues || []);
+  const allSelected = selected.size === 0;
+  const allChoice = allLabel
+    ? `<label class="print-preset-choice-v200 is-all"><input type="checkbox" data-preset-all="${escapeHtml(name)}" ${allSelected ? "checked" : ""}><span>${escapeHtml(allLabel)}</span></label>`
+    : "";
+  return `
+    <section class="print-preset-builder-section-v200" data-preset-group="${escapeHtml(name)}">
+      <header><strong>${escapeHtml(title)}</strong><span>${escapeHtml(allSelected && allLabel ? allLabel : `${selected.size} selected`)}</span></header>
+      <div class="print-preset-choice-grid-v200">
+        ${allChoice}
+        ${options.map(({ value, label, count = "" }) => `<label class="print-preset-choice-v200"><input type="checkbox" data-preset-value="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span>${count !== "" ? `<b>${escapeHtml(count)}</b>` : ""}</label>`).join("")}
+      </div>
+    </section>`;
+}
+
+/** Load every glass type currently known by the active delivery-list catalog. */
+async function loadKnownPrintGlassTypes() {
+  const listIds = [...new Set(state.lists.map((list) => String(list.id || "")).filter(Boolean))];
+  try {
+    await ensurePrintListDetails(listIds);
+  } catch (_error) {
+    // Preserve already-loaded rows if one older list cannot be refreshed.
+  }
+  const counts = new Map();
+  for (const list of state.lists) {
+    for (const item of Array.isArray(list.items) ? list.items : []) {
+      const label = glassTypeLabel(item) || "Other Glass";
+      counts.set(label, (counts.get(label) || 0) + itemPieceQty(item));
+    }
+  }
+  const preset = currentPrintPreset();
+  for (const label of preset.glassTypes || []) if (!counts.has(label)) counts.set(label, 0);
+  state.printKnownGlassTypes = [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([value, count]) => ({ value, label: value, count }));
+  return state.printKnownGlassTypes;
+}
+
+/** Build an editable preset using the filters currently available in the workspace. */
+function renderPrintPresetSaveSummary(knownGlassOptions = state.printKnownGlassTypes) {
+  if (!els.printPresetSummary) return;
+  const preset = currentPrintPreset();
+  const routeOptions = PRINT_ROUTE_GROUPS.map(({ value, label }) => ({ value, label }));
+  const statusOptions = [
+    { value: "not-scanned", label: "Not Scanned" },
+    { value: "partial", label: "Partial" },
+    { value: "complete", label: "Complete" },
+  ];
+  const attentionOptions = [
+    { value: "remake", label: "Remakes" },
+    { value: "rush", label: "Rushes" },
+    { value: "reject", label: "Internal Rejects" },
+    { value: "updated", label: "New/Updated" },
+    { value: "error", label: "Errors" },
+  ];
+  const knownGlass = new Map((knownGlassOptions || []).map((option) => [String(option.value || ""), option]));
+  for (const value of preset.glassTypes || []) {
+    if (!knownGlass.has(value)) knownGlass.set(value, { value, label: value, count: 0 });
+  }
+  const glassOptions = [...knownGlass.values()].sort((a, b) => String(a.label || a.value).localeCompare(String(b.label || b.value)));
+  els.printPresetSummary.innerHTML = `
+    ${printPresetBuilderGroup("Routes", "routes", routeOptions, preset.routeGroups)}
+    ${printPresetBuilderGroup("Status", "statuses", statusOptions, preset.statuses, "All Status")}
+    ${printPresetBuilderGroup("Attention", "attention", attentionOptions, preset.attention, "All Attention")}
+    ${printPresetBuilderGroup("Glass Types", "glass", glassOptions, preset.glassTypes, "All Glass")}
+    <section class="print-preset-builder-section-v200 print-preset-output-section-v202">
+      <header><strong>Output Settings</strong><span>Restored when this preset is applied</span></header>
+      <div class="print-preset-output-grid-v202">
+        <label><span>File Type</span><select data-preset-output-type><option value="pdf" ${preset.outputType === "pdf" ? "selected" : ""}>PDF</option><option value="xlsx" ${preset.outputType === "xlsx" ? "selected" : ""}>Excel Workbook (.xlsx)</option><option value="csv" ${preset.outputType === "csv" ? "selected" : ""}>Comma-Separated Values (.csv)</option></select></label>
+        <label><span>Copies</span><input data-preset-copies type="number" min="1" max="10" step="1" value="${Math.max(1, Math.min(Number(preset.copies || 1), 10))}"></label>
+        <div class="print-preset-orientation-v203"><span>Layout</span><input data-preset-orientation type="hidden" value="${preset.orientation === "landscape" ? "landscape" : "portrait"}"><div><button type="button" class="${preset.orientation === "landscape" ? "" : "is-active"}" data-preset-orientation-choice="portrait">Portrait</button><button type="button" class="${preset.orientation === "landscape" ? "is-active" : ""}" data-preset-orientation-choice="landscape">Landscape</button></div></div>
+      </div>
+    </section>`;
+  enhanceCustomSelects(els.printPresetSummary);
+}
+
+function printPresetFromBuilder() {
+  const values = (name) => [...(els.printPresetSummary?.querySelectorAll(`input[data-preset-value="${name}"]:checked`) || [])].map((input) => input.value);
+  const allChecked = (name) => Boolean(els.printPresetSummary?.querySelector(`input[data-preset-all="${name}"]`)?.checked);
+  return {
+    routeGroups: values("routes").length ? values("routes") : ["airport"],
+    statuses: allChecked("statuses") ? [] : values("statuses"),
+    attention: allChecked("attention") ? [] : values("attention"),
+    glassTypes: allChecked("glass") ? [] : values("glass"),
+    outputType: String(els.printPresetSummary?.querySelector("[data-preset-output-type]")?.value || "pdf"),
+    copies: Math.max(Number(els.printPresetSummary?.querySelector("[data-preset-copies]")?.value || 1), 1),
+    orientation: String(els.printPresetSummary?.querySelector("[data-preset-orientation]")?.value || "portrait"),
+  };
+}
+
+async function savePrintPreset() {
+  if (els.printPresetNameInput) els.printPresetNameInput.value = "";
+  if (els.printPresetStatus) els.printPresetStatus.textContent = "Loading the complete known glass-type catalog…";
+  if (els.printPresetConfirmBtn) els.printPresetConfirmBtn.textContent = "Create & Apply Preset";
+  if (els.printPresetSummary) els.printPresetSummary.innerHTML = '<div class="print-preset-loading-v205">Loading all known glass types and current filter choices…</div>';
+  if (els.printPresetModalBackdrop) els.printPresetModalBackdrop.hidden = false;
+  if (els.printPresetModal) els.printPresetModal.hidden = false;
+  updateModalScrollLock();
+  const knownGlass = await loadKnownPrintGlassTypes();
+  renderPrintPresetSaveSummary(knownGlass);
+  if (els.printPresetStatus) els.printPresetStatus.textContent = `${knownGlass.length} known glass type${knownGlass.length === 1 ? "" : "s"} available.`;
+  window.setTimeout(() => els.printPresetNameInput?.focus(), 0);
+}
+
+/** Close the dedicated preset builder. */
+function closePrintPresetModal() {
+  if (els.printPresetModalBackdrop) els.printPresetModalBackdrop.hidden = true;
+  if (els.printPresetModal) els.printPresetModal.hidden = true;
   updateModalScrollLock();
 }
 
-/**
- * Purpose: Close the close print options workflow using the existing shared UI state.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
+/** Update overwrite guidance while the preset name is entered. */
+function updatePrintPresetNameStatus() {
+  const name = String(els.printPresetNameInput?.value || "").trim();
+  const exists = Boolean(name && readPrintPresets()[name]);
+  if (els.printPresetStatus) els.printPresetStatus.textContent = exists ? "A preset with this name already exists and will be replaced." : "";
+  if (els.printPresetConfirmBtn) els.printPresetConfirmBtn.textContent = exists ? "Replace & Apply Preset" : "Create & Apply Preset";
+}
+
+/** Keep All selections exclusive inside the preset builder. */
+function handlePrintPresetBuilderChange(event) {
+  const changed = event.target.closest("input");
+  if (!changed || !els.printPresetSummary?.contains(changed)) return;
+  const allName = changed.dataset.presetAll;
+  const valueName = changed.dataset.presetValue;
+  const groupName = allName || valueName;
+  if (!groupName) return;
+  const allInput = els.printPresetSummary.querySelector(`input[data-preset-all="${groupName}"]`);
+  const detailInputs = [...els.printPresetSummary.querySelectorAll(`input[data-preset-value="${groupName}"]`)];
+  if (changed === allInput) {
+    if (allInput.checked) detailInputs.forEach((input) => { input.checked = false; });
+    else if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
+  } else {
+    if (changed.checked && allInput) allInput.checked = false;
+    if (allInput && !detailInputs.some((input) => input.checked)) allInput.checked = true;
+  }
+  if (groupName === "routes") {
+    const airport = detailInputs.find((input) => input.value === "airport");
+    if (changed.value === "airport" && changed.checked) detailInputs.forEach((input) => { if (input !== changed) input.checked = false; });
+    else if (changed.checked && airport) airport.checked = false;
+    if (!detailInputs.some((input) => input.checked) && airport) airport.checked = true;
+  }
+}
+
+/** Commit and immediately apply the preset created in the builder. */
+async function confirmPrintPresetSave() {
+  const cleanName = String(els.printPresetNameInput?.value || "").trim().slice(0, 50);
+  if (!cleanName) {
+    if (els.printPresetStatus) els.printPresetStatus.textContent = "Enter a preset name before creating the preset.";
+    els.printPresetNameInput?.focus();
+    return;
+  }
+  const presets = readPrintPresets();
+  presets[cleanName] = printPresetFromBuilder();
+  writePrintPresets(presets);
+  setActivePrintPresetName(cleanName);
+  renderPrintPresetOptions(cleanName);
+  closePrintPresetModal();
+  await applyPrintPreset(cleanName);
+  showFloatingNotice(`Created and applied print preset: ${cleanName}`, "success");
+}
+
+/** Apply one saved preset after rebuilding the date-dependent choices. */
+async function applyPrintPreset(name, { persist = true } = {}) {
+  const preset = readPrintPresets()[name];
+  if (!preset) return;
+  if (persist) setActivePrintPresetName(name);
+  if (els.printSearchInput) els.printSearchInput.value = "";
+  state.printSelectedOrders = [];
+  state.printSelectedItems = [];
+  await renderPrintFilterChoices({ preserveSelections: false });
+  const applyValues = (container, selector, values) => {
+    const wanted = new Set(values || []);
+    container?.querySelectorAll(selector).forEach((input) => { input.checked = wanted.has(input.value); });
+  };
+  applyValues(els.printRouteOptions, 'input[data-print-route-group]', preset.routeGroups?.length ? preset.routeGroups : ["airport"]);
+  await renderPrintFilterChoices({ preserveSelections: true });
+  const applyAllAwareValues = (container, allSelector, detailSelector, values) => {
+    const wanted = new Set(values || []);
+    const allInput = container?.querySelector(allSelector);
+    const details = [...(container?.querySelectorAll(detailSelector) || [])];
+    const allSelected = wanted.size === 0;
+    if (allInput) allInput.checked = allSelected;
+    details.forEach((input) => { input.checked = !allSelected && wanted.has(input.value); });
+  };
+  applyAllAwareValues(els.printStatusOptions, 'input[data-print-status-all]', 'input[data-print-status]:not([data-print-status-all])', preset.statuses);
+  applyAllAwareValues(els.printAttentionOptions, 'input[data-print-attention-all]', 'input[data-print-attention]:not([data-print-attention-all])', preset.attention);
+  const glassWanted = new Set(preset.glassTypes || []);
+  const selectAllGlass = glassWanted.size === 0;
+  const allGlassInput = els.printOptionsGlassType?.querySelector('input[data-print-all-glass]');
+  if (allGlassInput) allGlassInput.checked = selectAllGlass;
+  selectedPrintGlassInputs().forEach((input) => { input.checked = !selectAllGlass && glassWanted.has(input.value); });
+  if (els.printExportType) els.printExportType.value = ["pdf", "xlsx", "csv"].includes(String(preset.outputType || "")) ? String(preset.outputType) : "pdf";
+  setPrintCopies(preset.copies || 1, false);
+  setPrintOrientation(preset.orientation || "portrait", false);
+  updatePrintAllGlassState();
+  renderPrintSelectedOrders();
+  renderPrintSearchSuggestions();
+  updatePrintOutputAction();
+  renderPrintPresetOptions(name);
+  schedulePrintSelectionPreview(0);
+}
+
+function openPrintOptions(context = {}) {
+  state.printContext = context;
+  state.printPreviewResult = null;
+  state.printPreviewRequestId += 1;
+  window.clearTimeout(state.printPreviewTimer);
+  if (!listsByDeliveryDate().length) {
+    showInlineError("No delivery lists are available to print.", false);
+    return;
+  }
+  if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = false;
+  if (els.printOptionsPanel) els.printOptionsPanel.hidden = false;
+  updateModalScrollLock();
+  const activePreset = activePrintPresetName();
+  renderPrintPresetOptions(activePreset);
+  resetPrintFilters({ clearActivePreset: false })
+    .then(() => activePreset ? applyPrintPreset(activePreset, { persist: false }) : null)
+    .catch((error) => showInlineError(error.message, false));
+}
+
+/** Close the Print / Export control center. */
 function closePrintOptions() {
+  closePrintPresetModal();
+  closePrintDateCalendar();
+  hidePrintSearchSuggestions();
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = true;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = true;
   updateModalScrollLock();
 }
 
-/**
- * Purpose: Process the submit print options workflow using the existing shared UI state.
- * Effects: May call the backend api.
- * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
- */
-function submitPrintOptions() {
-  let listIds = state.printContext?.fixedListIds ? [...(state.printContext.listIds || [])] : selectedPrintListIds();
-  if (!listIds.length) {
-    showInlineError("Select at least one stage to print or export.", false);
-    return;
-  }
-  if (!state.backend) {
-    closePrintOptions();
-    printCurrentPageManaged();
-    return;
-  }
-  const checkedGlassInputs = [...(els.printOptionsGlassType?.querySelectorAll('.print-glass-choice:not(.print-glass-all-choice) input[type="checkbox"]:checked') || [])];
-  const selectedMirrorGlass = checkedGlassInputs.some((input) => (input.dataset.printGlassCategory || "") === "Mirror");
-  const filters = {
-    updatedOnly: els.printUpdatedOnly?.checked ? "1" : "",
-    rushOnly: els.printRushOnly?.checked ? "1" : "",
-    remakeOnly: els.printRemakeOnly?.checked ? "1" : "",
-    glassType: checkedGlassInputs.map((input) => input.value.trim()).filter(Boolean).join(","),
-    mirrorMode: selectedMirrorGlass ? "include" : "exclude",
-    includeMirrorRemakes: selectedMirrorGlass ? "" : "1",
-    customers: els.printCustomerFilter?.value.trim() || "",
-    orders: els.printOrderFilter?.value.trim() || "",
-  };
-  const params = new URLSearchParams({ listId: listIds.join(",") });
-  for (const [key, value] of Object.entries(filters)) {
-    if (value) params.set(key, value);
-  }
-  const mode = document.querySelector('input[name="printExportMode"]:checked')?.value || "print";
-  if (mode === "export") {
-    window.open(`/api/export/package.xlsx?${params.toString()}`, "_blank", "noopener");
-  } else {
-    launchManagedPrint(`/api/print/package?${params.toString()}`);
-  }
-  closePrintOptions();
+/** Clamp and render the copies increment box. */
+function setPrintCopies(value, refresh = true) {
+  const copies = Math.max(1, Math.min(Number(value || 1), 10));
+  if (els.printCopies) els.printCopies.value = String(copies);
+  if (refresh) schedulePrintSelectionPreview(0);
+  return copies;
 }
 
-/**
- * Purpose: Run the import temp delivery folder workflow for the browser application.
- * Effects: May call the backend api.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
+/** Keep the two orientation buttons exclusive and synchronize the hidden value. */
+function setPrintOrientation(value, refresh = true) {
+  const orientation = String(value || "portrait") === "landscape" ? "landscape" : "portrait";
+  if (els.printOrientation) els.printOrientation.value = orientation;
+  document.querySelectorAll('[data-print-orientation]').forEach((button) => {
+    const selected = button.dataset.printOrientation === orientation;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+  if (refresh) schedulePrintSelectionPreview(0);
+  return orientation;
+}
+
+/** Build and synchronously open the exact local delivery-list print document. */
+function launchLocalPrintPackage(preview) {
+  const orientation = setPrintOrientation(els.printOrientation?.value || "portrait", false);
+  const copies = setPrintCopies(els.printCopies?.value || 1, false);
+  const printWindow = window.open("", "deliveryListPdfExportWindow", "popup=yes,width=1180,height=860,resizable=yes,scrollbars=yes");
+  if (!printWindow) {
+    showInlineError("Allow popups to open the print preview.", false);
+    return null;
+  }
+  const sheets = Array.isArray(preview.previewSheets) ? preview.previewSheets : [];
+  const basePages = [];
+  for (const sheet of sheets) {
+    const chunks = paginatePrintSheetRows(sheet.rows || []);
+    chunks.forEach((chunk, index) => basePages.push(printSheetPageMarkup(sheet, chunk, index + 1, chunks.length, orientation, preview.generatedAt)));
+  }
+  const pages = Array.from({ length: copies }, () => basePages).flat();
+  const pageSize = orientation === "landscape" ? "letter landscape" : "letter portrait";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Delivery List Print Package</title><style>
+    *{box-sizing:border-box}body{margin:0;color:#07122f;font-family:"Segoe UI",Arial,sans-serif;background:#f6f8fb}.delivery-print-sheet-v203{width:${orientation === "landscape" ? "min(1460px,calc(100% - 32px))" : "min(1120px,calc(100% - 32px))"};margin:16px auto;padding:18px 20px 14px;background:#fff;border:1px solid #444;break-inside:avoid;page-break-inside:avoid}.sheet-page-top{color:#526078;font-size:12px;font-weight:900;text-align:right;margin-bottom:5px}.sheet-header{display:flex;justify-content:space-between;gap:18px;align-items:end;border-bottom:3px solid #072a63;padding-bottom:10px;margin-bottom:10px}.sheet-header-compact{align-items:center;padding-bottom:8px;margin-bottom:9px;border-bottom-width:2px}h1{margin:4px 0 0;color:#041a3d;font-size:26px;line-height:1.12;text-transform:uppercase}h2{margin:3px 0 0;color:#041a3d;font-size:18px;line-height:1.15;text-transform:uppercase}p{margin:3px 0 0;font-weight:750;color:#41506c}.printed-at{color:#263550;font-size:12px;font-weight:850}.sheet-badge{display:inline-flex;min-height:24px;align-items:center;border:1px solid #072a63;border-radius:999px;background:#eaf2ff;color:#041a3d;padding:0 11px;font-size:11px;font-weight:900;letter-spacing:.08em}.delivery-print-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12.25px;line-height:1.22}.job-col{width:26%}.order-col{width:9%}.item-col{width:8%}.qty-col{width:5%}.dimensions-col{width:17%}.customer-col{width:24%}.route-col{width:6%}.check-col{width:5%}th,td{border:1px solid #d9e1ee;padding:6px 7px;text-align:left;vertical-align:top}th{background:#f1f1f1;color:#041a3d;font-size:11.5px}.print-truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.glass-group td{background:#e9e9e9;font-size:12px;font-weight:900;text-transform:uppercase}.check-cell{text-align:center;font-size:16px}.copy-box{border:1px solid #333;padding:8px 10px;font-size:16px;font-weight:850;white-space:nowrap;display:flex;align-items:center;gap:16px}.write-line{display:inline-block;height:1em;border-bottom:1px solid #333;vertical-align:-2px}.checked-line{width:82px}.date-line{width:112px}.notes{margin-top:10px;min-height:72px;border:1px solid #333;display:grid;grid-template-columns:auto 1fr;gap:8px;padding:9px;font-size:14px}.rush{border:4px double #000}.rush .sheet-header{border-bottom:6px double #000}.remake{border:3px dashed #000}.remake .sheet-header{border-bottom:3px dashed #000}@page{size:${pageSize};margin:.25in}@media print{body{background:#fff}.delivery-print-sheet-v203{width:auto;margin:0;padding:.04in .06in .03in;border:0;page-break-after:always;break-after:page}.delivery-print-sheet-v203:last-child{page-break-after:auto;break-after:auto}}
+  </style></head><body>${pages.join("")}<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),120));window.addEventListener("afterprint",()=>window.close());<\/script></body></html>`;
+  state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
+  watchManagedPrintWindow(printWindow);
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
+  return printWindow;
+}
+
+/** Keep the single output button aligned with the selected file type. */
+function updatePrintOutputAction() {
+  const format = String(els.printExportType?.value || "pdf").toLowerCase();
+  const printing = format === "pdf";
+  if (els.printOutputActionLabel) els.printOutputActionLabel.textContent = printing ? "Print List" : "Export List";
+  if (els.printOutputActionIcon) els.printOutputActionIcon.className = printing ? "print-printer-icon-v197" : "print-export-doc-icon-v197";
+  els.printOptionsSubmit?.classList.toggle("is-print", printing);
+  els.printOptionsSubmit?.classList.toggle("is-export", !printing);
+  if (els.printCopies) els.printCopies.disabled = !printing;
+  if (els.printCopiesDecrease) els.printCopiesDecrease.disabled = !printing;
+  if (els.printCopiesIncrease) els.printCopiesIncrease.disabled = !printing;
+  document.querySelectorAll('[data-print-orientation]').forEach((button) => { button.disabled = !printing; });
+  syncCustomSelect(els.printExportType);
+}
+
+async function submitPrintOptions(mode = "pdf") {
+  const listIds = selectedPrintListIds();
+  if (!listIds.length) { showInlineError("No Airport Outbound delivery list is available for the selected date range.", false); return; }
+  if (!selectedPrintRouteGroups().length) { showInlineError("Select at least one route to print or export.", false); return; }
+  if (!allPrintGlassTypesSelected() && !selectedPrintGlassTypeValues().length) { showInlineError("Select All Glass or at least one exact glass type.", false); return; }
+  const localPreview = buildLocalPrintSelectionPreview();
+  if (localPreview.noResults) { showInlineError("Selected filters yield 0 results. Adjust the Print / Export filters before continuing.", false); return; }
+  const selectedMode = ["pdf", "xlsx", "csv"].includes(String(mode || "").toLowerCase()) ? String(mode).toLowerCase() : "pdf";
+  if (selectedMode === "pdf") {
+    launchLocalPrintPackage(localPreview);
+    return;
+  }
+  if (!state.backend) { showInlineError("Spreadsheet exports require the scanner server.", false); return; }
+  const originalLabel = els.printOutputActionLabel?.textContent || "Export List";
+  if (els.printOptionsSubmit) els.printOptionsSubmit.disabled = true;
+  if (els.printOutputActionLabel) els.printOutputActionLabel.textContent = "Preparing Export…";
+  try {
+    const session = await fetchJson("/api/print/package-session", { method: "POST", body: JSON.stringify(printBackendSelectionPayload()) });
+    const token = encodeURIComponent(String(session?.token || ""));
+    if (!token) throw new Error("The server did not create an export selection token.");
+    window.open(selectedMode === "xlsx" ? `/api/export/package.xlsx?token=${token}` : `/api/export/package.csv?token=${token}`, "_blank", "noopener");
+  } catch (error) {
+    showInlineError(error.message || "Could not prepare the selected delivery-list export.", false);
+  } finally {
+    if (els.printOptionsSubmit) els.printOptionsSubmit.disabled = Boolean(state.printPreviewResult?.noResults);
+    if (els.printOutputActionLabel) els.printOutputActionLabel.textContent = originalLabel;
+    updatePrintOutputAction();
+  }
+}
+
 async function importTempDeliveryFolder() {
   const sourceFolder = els.tempFolderInput?.value.trim() || "";
   const { dateFrom, dateTo } = currentImportDateWindow();
@@ -18054,12 +19014,17 @@ function openAdminModal(kind, options = null) {
   delete els.adminModal.dataset.customView;
   applyAdminModalProfile(kind, options);
   els.adminModal.dataset.kind = kind;
-  if (els.adminModalSectionTabs) els.adminModalSectionTabs.hidden = kind === "deliveryUpdatePreview";
+  const actionHistoryEnabled = !["deliveryUpdatePreview", "recentScans"].includes(kind);
+  if (els.adminModalSectionTabs) els.adminModalSectionTabs.hidden = !actionHistoryEnabled;
   els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
   applyLanguageToRoot(els.adminModal);
   setAdminModalSection("workspace");
-  renderModalActionHistory([], "admin");
-  loadModalActionHistory(kind, "admin").catch(() => renderModalActionHistory([], "admin"));
+  if (actionHistoryEnabled) {
+    renderModalActionHistory([], "admin");
+    loadModalActionHistory(kind, "admin").catch(() => renderModalActionHistory([], "admin"));
+  } else if (els.adminModalHistory) {
+    els.adminModalHistory.hidden = true;
+  }
   if (kind === "lookups") {
     syncLookupManagerFormGuidance();
     filterLookupManagerLibrary(state.lookupManagerSearch || "");
@@ -26795,29 +27760,145 @@ function wireEvents() {
       showInlineError(error.message, true);
     }
   });
-  els.printOptionsDate?.addEventListener("change", () => {
-    state.printContext = { ...(state.printContext || {}), listIds: [] };
-    renderPrintOptionStages();
+  els.printDateQuickSelect?.addEventListener("change", () => {
+    const value = String(els.printDateQuickSelect.value || "");
+    if (value === "__custom__") { window.setTimeout(openPrintDateCalendar, 0); return; }
+    if (value === "__range__") return;
+    if (!printCalendarDateFromKey(value)) return;
+    if (els.printDateFrom) els.printDateFrom.value = value;
+    if (els.printDateTo) els.printDateTo.value = value;
+    closePrintDateCalendar();
+    renderPrintFilterChoices({ preserveSelections: true }).catch((error) => showInlineError(error.message, false));
   });
-  els.printOptionsStages?.addEventListener("change", (event) => {
-    const allInput = event.target.closest("[data-print-stage-select-all]");
-
-    if (allInput && els.printOptionsStages.contains(allInput)) {
-      selectedPrintStageInputs().forEach((stageInput) => {
-        stageInput.checked = allInput.checked;
-      });
+  els.printCalendarPrev?.addEventListener("click", () => movePrintCalendarMonth(-1));
+  els.printCalendarNext?.addEventListener("click", () => movePrintCalendarMonth(1));
+  els.printDateCalendar?.addEventListener("click", (event) => {
+    const day = event.target.closest("[data-print-calendar-date]");
+    if (day) choosePrintCalendarDate(day.dataset.printCalendarDate || "");
+  });
+  els.printCalendarReset?.addEventListener("click", resetPrintCalendarRange);
+  els.printCalendarCancel?.addEventListener("click", closePrintDateCalendar);
+  els.printCalendarApply?.addEventListener("click", applyPrintCalendarSelection);
+  els.printSearchInput?.addEventListener("input", () => refreshPrintSearchSuggestions());
+  els.printSearchInput?.addEventListener("focus", () => refreshPrintSearchSuggestions());
+  els.printSearchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") hidePrintSearchSuggestions();
+  });
+  els.printSearchSuggestions?.addEventListener("mousedown", (event) => event.preventDefault());
+  els.printSearchSuggestions?.addEventListener("click", (event) => {
+    const itemChoice = event.target.closest("[data-print-add-item]");
+    if (itemChoice) {
+      addPrintSelectedItem(itemChoice.dataset.printAddItem || "");
+      return;
     }
-
-    updatePrintStageSelectState();
-    void renderPrintGlassTypes();
+    const orderChoice = event.target.closest("[data-print-add-order]");
+    if (orderChoice) addPrintSelectedOrder(orderChoice.dataset.printAddOrder || "");
   });
-  for (const input of [els.printCustomerFilter, els.printOrderFilter, els.printUpdatedOnly, els.printRushOnly, els.printRemakeOnly]) {
-    input?.addEventListener(input?.type === "text" ? "input" : "change", updatePrintSelectionSummary);
-  }
-  document.querySelectorAll('input[name="printExportMode"]').forEach((input) => input.addEventListener("change", updatePrintSelectionSummary));
-  els.printOptionsClose?.addEventListener("click", () => closePrintOptions());
-  els.printOptionsBackdrop?.addEventListener("click", () => closePrintOptions());
-  els.printOptionsSubmit?.addEventListener("click", () => submitPrintOptions());
+  els.printSelectedOrdersList?.addEventListener("click", (event) => {
+    const removeItem = event.target.closest("[data-print-remove-item]");
+    if (removeItem) {
+      removePrintSelectedItem(removeItem.dataset.printRemoveItem || "");
+      return;
+    }
+    const removeOrder = event.target.closest("[data-print-remove-order]");
+    if (removeOrder) removePrintSelectedOrder(removeOrder.dataset.printRemoveOrder || "");
+  });
+  els.printSelectedOrdersClear?.addEventListener("click", clearPrintSelectedOrders);
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".print-search-shell-v198")) hidePrintSearchSuggestions();
+    if (!event.target.closest(".print-header-date-control-v203")) closePrintDateCalendar();
+  });
+  els.printGlassSearch?.addEventListener("input", applyPrintGlassSearch);
+
+  els.printRouteOptions?.addEventListener("change", (event) => {
+    const changed = event.target.closest('input[data-print-route-group]');
+    if (!changed) return;
+    const routes = [...els.printRouteOptions.querySelectorAll('input[data-print-route-group]')];
+    if (changed.value === "airport" && changed.checked) {
+      routes.forEach((input) => { if (input !== changed) input.checked = false; });
+    } else if (changed.checked) {
+      const airport = routes.find((input) => input.value === "airport");
+      if (airport) airport.checked = false;
+    }
+    renderPrintFilterChoices({ preserveSelections: true }).catch((error) => showInlineError(error.message, false));
+  });
+  els.printStatusOptions?.addEventListener("change", (event) => {
+    const changed = event.target.closest('input[data-print-status]');
+    if (!changed) return;
+    syncPrintAllFilterChoice(els.printStatusOptions, changed, 'input[data-print-status-all]', 'input[data-print-status]:not([data-print-status-all])');
+    schedulePrintSelectionPreview();
+  });
+  els.printAttentionOptions?.addEventListener("change", (event) => {
+    const changed = event.target.closest('input[data-print-attention]');
+    if (!changed) return;
+    syncPrintAllFilterChoice(els.printAttentionOptions, changed, 'input[data-print-attention-all]', 'input[data-print-attention]:not([data-print-attention-all])');
+    schedulePrintSelectionPreview();
+  });
+  els.printOptionsGlassType?.addEventListener("change", (event) => {
+    const changed = event.target.closest('input[data-print-all-glass], input[data-print-glass-type]');
+    if (!changed) return;
+    syncPrintAllGlassChoice(changed);
+    updatePrintAllGlassState();
+    schedulePrintSelectionPreview();
+  });
+
+  els.printPreviewZoomOut?.addEventListener("click", () => {
+    state.printPreviewZoom -= 0.1;
+    applyPrintPreviewZoom();
+  });
+  els.printPreviewZoomIn?.addEventListener("click", () => {
+    state.printPreviewZoom += 0.1;
+    applyPrintPreviewZoom();
+  });
+  els.printPreviewFullscreen?.addEventListener("click", async () => {
+    try {
+      if (document.fullscreenElement === els.printDocumentViewport) await document.exitFullscreen();
+      else await els.printDocumentViewport?.requestFullscreen();
+    } catch (error) {
+      showInlineError(`Could not open the preview full screen. ${error.message}`, false);
+    }
+  });
+
+  els.printClearAllBtn?.addEventListener("click", () => resetPrintFilters({ clearActivePreset: true }).catch((error) => showInlineError(error.message, false)));
+  els.printSavePresetBtn?.addEventListener("click", () => savePrintPreset().catch((error) => showInlineError(error.message, false)));
+  els.printPresetModalClose?.addEventListener("click", closePrintPresetModal);
+  els.printPresetCancelBtn?.addEventListener("click", closePrintPresetModal);
+  els.printPresetModalBackdrop?.addEventListener("click", closePrintPresetModal);
+  els.printPresetNameInput?.addEventListener("input", updatePrintPresetNameStatus);
+  els.printPresetSummary?.addEventListener("change", handlePrintPresetBuilderChange);
+  els.printPresetSummary?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-preset-orientation-choice]");
+    if (!button) return;
+    const value = button.dataset.presetOrientationChoice === "landscape" ? "landscape" : "portrait";
+    const input = els.printPresetSummary.querySelector("[data-preset-orientation]");
+    if (input) input.value = value;
+    els.printPresetSummary.querySelectorAll("[data-preset-orientation-choice]").forEach((choice) => choice.classList.toggle("is-active", choice === button));
+  });
+  els.printPresetNameInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") confirmPrintPresetSave();
+    if (event.key === "Escape") closePrintPresetModal();
+  });
+  els.printPresetConfirmBtn?.addEventListener("click", confirmPrintPresetSave);
+  els.printPresetSelect?.addEventListener("change", () => {
+    const name = els.printPresetSelect.value;
+    if (name) applyPrintPreset(name).catch((error) => showInlineError(error.message, false));
+    else setActivePrintPresetName("");
+  });
+  els.printOptionsClose?.addEventListener("click", closePrintOptions);
+  els.printOptionsBackdrop?.addEventListener("click", closePrintOptions);
+  els.printExportType?.addEventListener("change", () => {
+    updatePrintOutputAction();
+    schedulePrintSelectionPreview(0);
+  });
+  els.printCopiesDecrease?.addEventListener("click", () => setPrintCopies(Number(els.printCopies?.value || 1) - 1));
+  els.printCopiesIncrease?.addEventListener("click", () => setPrintCopies(Number(els.printCopies?.value || 1) + 1));
+  els.printCopies?.addEventListener("input", () => setPrintCopies(els.printCopies.value));
+  els.printCopies?.addEventListener("change", () => setPrintCopies(els.printCopies.value));
+  document.querySelectorAll('[data-print-orientation]').forEach((button) => button.addEventListener("click", () => setPrintOrientation(button.dataset.printOrientation)));
+  els.printOptionsSubmit?.addEventListener("click", () => {
+    submitPrintOptions(els.printExportType?.value || "pdf").catch((error) => showInlineError(error.message, false));
+  });
+  updatePrintOutputAction();
   els.undoBtn?.addEventListener("click", async () => {
     try {
       const payload = await fetchJson("/api/undo", {
@@ -28609,7 +29690,7 @@ function wireEvents() {
       const updatedOnly = printListsButton.dataset.printUpdatedOnly === "1";
 
       if (listIds.length) {
-        openPrintOptions({ date, listIds, updatedOnly });
+        openPrintOptions({ date, listIds, updatedOnly, fixedListIds: true });
       }
 
       return;

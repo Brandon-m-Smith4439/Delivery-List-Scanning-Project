@@ -1338,6 +1338,8 @@ def item_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "bayCode": row["bay_code"] if "bay_code" in row.keys() else "",
         "lastScannedAt": row["last_scanned_at"] if "last_scanned_at" in row.keys() else "",
         "lastScannedStation": row["last_scanned_station"] if "last_scanned_station" in row.keys() else "",
+        "internalRejectCount": int(row_value(row, "internal_reject_count", 0) or 0),
+        "lastRejectReason": str(row_value(row, "last_reject_reason", "") or ""),
     }
 
 
@@ -2009,6 +2011,10 @@ class BaseDeliveryStore:
         Effects: Performs an in-memory calculation and returns data without intentional external side effects.
         Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
         """
+        raise NotImplementedError
+
+    def export_package_csv(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> str:
+        """Export the same filtered multi-list package as CSV."""
         raise NotImplementedError
 
     def authenticate_user(self, username: str, password: str) -> dict[str, Any]:
@@ -8092,13 +8098,53 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         glass_types = [term.strip().lower() for term in re.split(r"[,;\n]+", str(filters.get("glassType") or "")) if term.strip()]
         mirror_mode = str(filters.get("mirrorMode") or "exclude").strip().lower()
         include_mirror_remakes = str(filters.get("includeMirrorRemakes") or "").lower() in {"1", "true", "yes"}
-        selected_mirror_glass = any(re.search(r"mirror|mirr|\bmir\b", glass_type) for glass_type in glass_types)
         customer_filter = str(filters.get("customers") or "").strip().lower()
         order_filter = str(filters.get("orders") or "").strip()
         source_id_filter = str(filters.get("sourceIds") or "").strip()
+        search_query = str(filters.get("searchQuery") or "").strip().lower()
+        search_digits = digits_only(search_query)
         customer_terms = [term.strip() for term in re.split(r"[,;\n]+", customer_filter) if term.strip()]
         order_terms = [digits_only(term) for term in re.split(r"[,;\s\n]+", order_filter) if digits_only(term)]
         source_id_terms = {term.strip() for term in re.split(r"[,;\n]+", source_id_filter) if term.strip()}
+
+        def exact_filter_values(key: str) -> list[str]:
+            raw_value = filters.get(key)
+            if not raw_value:
+                return []
+            try:
+                parsed_value = json.loads(str(raw_value))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return []
+            if not isinstance(parsed_value, list):
+                return []
+            return [str(value).strip() for value in parsed_value if str(value).strip()]
+
+        exact_glass_types = {value.lower() for value in exact_filter_values("glassTypesExact")}
+        exact_customers = {value.lower() for value in exact_filter_values("customersExact")}
+        exact_orders = {digits_only(value) for value in exact_filter_values("ordersExact") if digits_only(value)}
+        exact_order_items = {
+            str(value).strip()
+            for value in exact_filter_values("orderItemsExact")
+            if str(value).strip()
+        }
+        exact_line_item_ids = {
+            str(value).strip()
+            for value in exact_filter_values("lineItemIdsExact")
+            if str(value).strip()
+        }
+        exact_row_keys = {
+            str(value).strip()
+            for value in exact_filter_values("rowKeysExact")
+            if str(value).strip()
+        }
+        exact_routes = {value.lower() for value in exact_filter_values("routesExact")}
+        exact_route_groups = {value.lower() for value in exact_filter_values("routeGroupsExact")}
+        exact_statuses = {value.lower() for value in exact_filter_values("statusesExact")}
+        exact_attention = {value.lower() for value in exact_filter_values("attentionExact")}
+        selected_mirror_glass = any(
+            re.search(r"mirror|mirr|\bmir\b", glass_type)
+            for glass_type in [*glass_types, *exact_glass_types]
+        )
 
         def has_update_marker(item: dict[str, Any]) -> bool:
             """Purpose: Validate update marker for the delivery-list scanner workflow.
@@ -8127,6 +8173,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             Effects: Performs an in-memory calculation and returns data without intentional external side effects.
             Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
             """
+            if exact_glass_types:
+                glass_value = str(
+                    item.get("product")
+                    or item.get("job")
+                    or item.get("suggestedBay")
+                    or "Other Glass"
+                ).strip().lower()
+                if glass_value in exact_glass_types:
+                    return True
+                return include_mirror_remakes and not selected_mirror_glass and is_mirror_item(item) and is_remake_item(item)
             if not glass_types:
                 return True
             glass_signal = f"{item.get('product', '')} {item.get('job', '')}".lower()
@@ -8134,17 +8190,81 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return True
             return include_mirror_remakes and not selected_mirror_glass and is_mirror_item(item) and is_remake_item(item)
 
-        def search_filters_match(item: dict[str, Any]) -> bool:
+        def item_status_key(item: dict[str, Any]) -> str:
+            qty = max(int(item.get("qty") or 0), 0)
+            scanned = max(int(item.get("scanned") or 0), 0)
+            if qty > 0 and scanned >= qty:
+                return "complete"
+            if scanned > 0:
+                return "partial"
+            return "not-scanned"
+
+        def item_attention_keys(item: dict[str, Any]) -> set[str]:
+            keys: set[str] = set()
+            if is_remake_item(item):
+                keys.add("remake")
+            if is_rush_item(item):
+                keys.add("rush")
+            if int(item.get("internalRejectCount") or 0) > 0:
+                keys.add("reject")
+            if has_update_marker(item):
+                keys.add("updated")
+            if str(item.get("errorType") or "").strip() or str(item.get("errorReason") or "").strip():
+                keys.add("error")
+            return keys
+
+        def search_filters_match(item: dict[str, Any], list_id: str = "") -> bool:
             """Purpose: Run the search filters match workflow for the delivery-list scanner.
 
             Effects: Performs an in-memory calculation and returns data without intentional external side effects.
             Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
             """
+            order_value = digits_only(str(item.get("order", "")))
+            item_value = digits_only(str(item.get("item", "")))
+            line_item_id = str(item.get("id") or "").strip()
+            row_key = f"{str(list_id or '').strip()}|{order_value}|{item_value}"
+            order_item_key = f"{order_value}|{item_value}"
+
+            # The browser's live preview sends exact authoritative line-item IDs
+            # after applying every visible filter. When present, use those IDs as
+            # the source of truth so preview, print, PDF, XLSX, and CSV cannot
+            # disagree because two implementations interpreted a label differently.
+            if exact_line_item_ids or exact_row_keys:
+                return (
+                    bool(line_item_id and line_item_id in exact_line_item_ids)
+                    or row_key in exact_row_keys
+                )
+
             if not glass_filter_matches(item):
                 return False
-            if customer_terms and not any(term in str(item.get("customer", "")).lower() for term in customer_terms):
+            customer_value = str(item.get("customer", "")).strip().lower()
+            job_value = f"{item.get('job', '')} {item.get('product', '')} {item.get('sourceId', '')}".strip().lower()
+            route_value = str(item.get("route") or "Unassigned").strip().lower() or "unassigned"
+            route_group_value = route_category(item)
+            if route_group_value.startswith("custom:"):
+                route_group_value = "indian_trail"
+            if search_query:
+                search_matches_customer = search_query in customer_value
+                search_matches_order = bool(search_digits and search_digits in order_value)
+                search_matches_job = search_query in job_value
+                if not search_matches_customer and not search_matches_order and not search_matches_job:
+                    return False
+            if exact_route_groups and "airport" not in exact_route_groups and route_group_value not in exact_route_groups:
                 return False
-            if order_terms and digits_only(str(item.get("order", ""))) not in order_terms:
+            if exact_routes and route_value not in exact_routes:
+                return False
+            if exact_statuses and item_status_key(item) not in exact_statuses:
+                return False
+            if exact_attention and not (item_attention_keys(item) & exact_attention):
+                return False
+            if exact_customers and customer_value not in exact_customers:
+                return False
+            if not exact_customers and customer_terms and not any(term in customer_value for term in customer_terms):
+                return False
+            if exact_orders or exact_order_items:
+                if order_value not in exact_orders and order_item_key not in exact_order_items:
+                    return False
+            elif order_terms and order_value not in order_terms:
                 return False
             if source_id_terms and str(item.get("sourceId") or "").strip() not in source_id_terms:
                 return False
@@ -8199,7 +8319,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             meta = payload["meta"]
             source_items = list(payload.get("items") or [])
-            filtered_source = [item for item in source_items if route_matches(item) and search_filters_match(item)]
+            filtered_source = [
+                item
+                for item in source_items
+                if route_matches(item) and search_filters_match(item, list_id)
+            ]
             remakes = [item for item in filtered_source if is_remake_item(item)]
             rushes = [item for item in filtered_source if is_rush_item(item) and not is_remake_item(item)]
             updated_remakes = [item for item in remakes if has_update_marker(item)]
@@ -8237,7 +8361,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             excluded_regular_mirrors = [] if mirror_mode == "include" else [
                 item
                 for item in source_items
-                if is_mirror_item(item) and not is_remake_item(item) and route_matches(item) and search_filters_match(item)
+                if is_mirror_item(item) and not is_remake_item(item) and route_matches(item) and search_filters_match(item, list_id)
             ]
 
             stage_kind = stage_sheet_kind(meta)
@@ -8381,25 +8505,45 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         )
         return matched, canonical, "Matched external Bay barcode"
 
-    def recover_scan(self, raw_scan: str, rows: list[sqlite3.Row]) -> tuple[sqlite3.Row | None, str, str]:
-        """Purpose: Run the recover scan workflow for the delivery-list scanner.
+    def recover_scan(
+        self,
+        raw_scan: str,
+        rows: list[sqlite3.Row],
+        *,
+        strict_order_item: bool = False,
+    ) -> tuple[sqlite3.Row | None, str, str]:
+        """Resolve one scan without allowing manual entries to degrade into suffix matches.
 
-        Effects: This function reads or updates shared application state.
-        Flow: Validates the operation, applies scanner safety rules, updates quantities/history, and returns UI-ready feedback.
+        Physical labels retain the maintained recovery behavior for damaged or
+        alternate barcode formats. Manual scans are exact six-digit order and
+        item lookups so an entry such as 235804 can never resolve to 236804 just
+        because both orders end in 804.
         """
         clean_text = clean_barcode(raw_scan)
         by_order_item: dict[tuple[int, int], list[sqlite3.Row]] = {}
         for row in rows:
             by_order_item.setdefault((int(row["order_no"]), int(row["item_no"])), []).append(row)
 
+        exact_order_item: tuple[int, int] | None = None
+        exact_canonical = clean_text
         if re.fullmatch(r"T200\d{12}", clean_text):
-            order_no = int(clean_text[4:10])
-            item_no = int(clean_text[10:13])
-            matches = by_order_item.get((order_no, item_no), [])
+            exact_order_item = (int(clean_text[4:10]), int(clean_text[10:13]))
+        elif strict_order_item:
+            manual_digits = digits_only(raw_scan)
+            if 7 <= len(manual_digits) <= 9:
+                exact_order_item = (int(manual_digits[:6]), int(manual_digits[6:]))
+                exact_canonical = canonical_barcode(*exact_order_item)
+
+        if exact_order_item is not None:
+            matches = by_order_item.get(exact_order_item, [])
             if len(matches) == 1:
-                return matches[0], clean_text, "Exact label"
+                return matches[0], exact_canonical, "Exact manual order/item" if strict_order_item else "Exact label"
             if len(matches) > 1:
-                return None, clean_text, "Ambiguous delivery-list match"
+                return None, exact_canonical, "Ambiguous delivery-list match"
+            if strict_order_item:
+                return None, exact_canonical, "No exact order/item match"
+        elif strict_order_item:
+            return None, clean_text, "Manual scans require an exact six-digit order and one-to-three-digit item"
 
         if clean_text.startswith("T200"):
             order_text = digits_only(clean_text[4:])
@@ -8599,8 +8743,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_row["id"],)).fetchall()
             if not rows:
                 continue
-            matched_row, canonical, match_reason = self.recover_scan(raw_scan, rows)
-            if matched_row is None and category == "received":
+            is_manual = str(scan_request.get("isManual") or "").lower() in {"1", "true", "yes"}
+            matched_row, canonical, match_reason = self.recover_scan(
+                raw_scan,
+                rows,
+                strict_order_item=is_manual,
+            )
+            if matched_row is None and category == "received" and not is_manual:
                 external_row, external_canonical, external_reason = self.recover_bay_external_scan(raw_scan, rows)
                 if external_row is not None:
                     matched_row, canonical, match_reason = external_row, external_canonical, external_reason
@@ -8655,8 +8804,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not current_list or str(current_list["status"] or "").strip().lower() != "active":
                 return None
             current_rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (current_list_id,)).fetchall()
-            current_row, _canonical, current_reason = self.recover_scan(raw_scan, current_rows)
-            if current_row is None and scan_stage_category(current_list["stage"], current_list["scanner"]) == "received":
+            is_manual = str(scan_request.get("isManual") or "").lower() in {"1", "true", "yes"}
+            current_row, _canonical, current_reason = self.recover_scan(
+                raw_scan,
+                current_rows,
+                strict_order_item=is_manual,
+            )
+            if current_row is None and scan_stage_category(current_list["stage"], current_list["scanner"]) == "received" and not is_manual:
                 external_row, _external_canonical, external_reason = self.recover_bay_external_scan(raw_scan, current_rows)
                 if external_row is not None:
                     current_row = external_row
@@ -8800,7 +8954,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         )
         return payload
 
-    def scan_other_list_hint(self, con: sqlite3.Connection, current_list_id: str, raw_scan: str) -> tuple[str, str]:
+    def scan_other_list_hint(
+        self,
+        con: sqlite3.Connection,
+        current_list_id: str,
+        raw_scan: str,
+        *,
+        strict_order_item: bool = False,
+    ) -> tuple[str, str]:
         """Purpose: Process other list hint for the delivery-list scanner workflow.
 
         Effects: This function reads or changes database records.
@@ -8820,7 +8981,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_row["id"],)).fetchall()
             if not rows:
                 continue
-            matched_row, canonical, _reason = self.recover_scan(raw_scan, rows)
+            matched_row, canonical, _reason = self.recover_scan(
+                raw_scan,
+                rows,
+                strict_order_item=strict_order_item,
+            )
             if matched_row is not None:
                 matches.append((list_row, matched_row, canonical))
                 if len(matches) >= 12:
@@ -8973,10 +9138,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall()
-            row, canonical, reason = self.recover_scan(barcode, rows)
+            row, canonical, reason = self.recover_scan(
+                barcode,
+                rows,
+                strict_order_item=is_manual,
+            )
             if row is None:
-                if reason == "No unique delivery-list match":
-                    canonical, reason = self.scan_other_list_hint(con, list_id, barcode)
+                if reason in {"No unique delivery-list match", "No exact order/item match"}:
+                    canonical, reason = self.scan_other_list_hint(
+                        con,
+                        list_id,
+                        barcode,
+                        strict_order_item=is_manual,
+                    )
                     message = "Item is not on this delivery list"
                 elif reason == "Ambiguous delivery-list match":
                     message = "Multiple items match this scan"
@@ -14397,8 +14571,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     raise ValueError("Indian Trail delivery list was not found")
                 rows = con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall()
 
-            row, canonical, reason = self.recover_scan(barcode, rows)
-            if row is None:
+            row, canonical, reason = self.recover_scan(
+                barcode,
+                rows,
+                strict_order_item=is_manual,
+            )
+            if row is None and not is_manual:
                 external_row, external_canonical, external_reason = self.recover_bay_external_scan(barcode, rows)
                 if external_row is not None:
                     row, canonical, reason = external_row, external_canonical, external_reason
@@ -14462,8 +14640,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "More than one active Indian Trail item matched that entry. "
                         "Use the complete printed barcode or confirm the delivery date before scanning again."
                     )
-                elif reason == "No unique delivery-list match":
-                    canonical, reason = self.scan_other_list_hint(con, list_id, barcode)
+                elif reason in {"No unique delivery-list match", "No exact order/item match"}:
+                    canonical, reason = self.scan_other_list_hint(
+                        con,
+                        list_id,
+                        barcode,
+                        strict_order_item=is_manual,
+                    )
                 last = self.insert_event(
                     con,
                     list_id,
@@ -15966,6 +16149,40 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "suggestedBay": row["suggestedBay"],
                 }
             )
+        return output.getvalue()
+
+    def export_package_csv(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> str:
+        """Export the exact filtered print package as a portable CSV file."""
+        package = self.get_print_package(list_ids, user=user, filters=filters)
+        output = StringIO()
+        fieldnames = [
+            "Delivery Date", "Stage", "Scanner", "Barcode", "Order Nr.", "Item Nr.",
+            "Qty.", "Scanned", "Remaining", "Dimensions", "Customer", "Route",
+            "Job Nr.", "Product", "Suggested Bay",
+        ]
+        writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        for package_list in package.get("lists", []):
+            for item in package_list.get("items") or []:
+                qty = max(int(item.get("qty") or 0), 0)
+                scanned = max(int(item.get("scanned") or 0), 0)
+                writer.writerow({
+                    "Delivery Date": package_list.get("deliveryDate", ""),
+                    "Stage": package_list.get("stage", ""),
+                    "Scanner": package_list.get("scanner", ""),
+                    "Barcode": item.get("barcode", ""),
+                    "Order Nr.": item.get("order", ""),
+                    "Item Nr.": item.get("item", ""),
+                    "Qty.": qty,
+                    "Scanned": scanned,
+                    "Remaining": max(qty - scanned, 0),
+                    "Dimensions": item.get("dimensions", ""),
+                    "Customer": item.get("customer", ""),
+                    "Route": public_route_label(item.get("route", "")),
+                    "Job Nr.": item.get("job", ""),
+                    "Product": item.get("product", ""),
+                    "Suggested Bay": item.get("suggestedBay", ""),
+                })
         return output.getvalue()
 
     def export_package_xlsx(self, list_ids: list[str], user: dict[str, Any] | None = None, filters: dict[str, Any] | None = None) -> bytes:

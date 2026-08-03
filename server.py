@@ -16,6 +16,7 @@ import json
 import html
 import os
 import re
+import secrets
 import threading
 import time
 import traceback
@@ -48,6 +49,87 @@ STORE = create_store(CONFIG)
 install_safe_delivery_import(STORE)
 OPERATIONS = OperationsFeatureService(STORE, CONFIG, ROOT)
 DELIVERY_AUTOMATION = DeliveryAutomationController(ROOT, CONFIG, STORE)
+
+
+PRINT_PACKAGE_SESSION_TTL_SECONDS = 15 * 60
+PRINT_PACKAGE_SESSIONS: dict[str, dict] = {}
+PRINT_PACKAGE_SESSION_LOCK = threading.Lock()
+
+
+def print_package_user_key(user: dict | None) -> str:
+    """Return a stable identity key for one authenticated print-session owner."""
+    user = user or {}
+    return str(user.get("id") or user.get("username") or user.get("name") or "").strip().lower()
+
+
+def normalize_print_package_request(payload: dict) -> tuple[list[str], dict, int, str]:
+    """Normalize the browser's exact preview/output selection contract."""
+    raw_ids = payload.get("listIds") or payload.get("listId") or []
+    if isinstance(raw_ids, str):
+        raw_ids = [part for part in raw_ids.split(",") if part]
+    list_ids = list(dict.fromkeys(str(value).strip() for value in raw_ids if str(value).strip()))
+
+    raw_filters = payload.get("filters") or {}
+    filters = {str(key): str(value) for key, value in raw_filters.items() if value not in (None, "", [], {})}
+
+    line_item_ids = [str(value).strip() for value in payload.get("lineItemIds") or [] if str(value).strip()]
+    row_keys = [str(value).strip() for value in payload.get("rowKeys") or [] if str(value).strip()]
+    if line_item_ids:
+        filters["lineItemIdsExact"] = json.dumps(list(dict.fromkeys(line_item_ids)))
+    if row_keys:
+        filters["rowKeysExact"] = json.dumps(list(dict.fromkeys(row_keys)))
+
+    try:
+        copies = max(1, min(int(payload.get("copies") or 1), 10))
+    except (TypeError, ValueError):
+        copies = 1
+    orientation = str(payload.get("orientation") or "portrait").strip().lower()
+    if orientation not in {"portrait", "landscape"}:
+        orientation = "portrait"
+    filters["copies"] = str(copies)
+    filters["orientation"] = orientation
+    return list_ids, filters, copies, orientation
+
+
+def create_print_package_session(user: dict, list_ids: list[str], filters: dict) -> str:
+    """Create a short-lived same-user token for print/export GET windows."""
+    now = time.time()
+    token = secrets.token_urlsafe(24)
+    owner = print_package_user_key(user)
+    with PRINT_PACKAGE_SESSION_LOCK:
+        expired = [
+            key
+            for key, value in PRINT_PACKAGE_SESSIONS.items()
+            if now - float(value.get("createdAt") or 0) > PRINT_PACKAGE_SESSION_TTL_SECONDS
+        ]
+        for key in expired:
+            PRINT_PACKAGE_SESSIONS.pop(key, None)
+        PRINT_PACKAGE_SESSIONS[token] = {
+            "createdAt": now,
+            "owner": owner,
+            "listIds": list(list_ids),
+            "filters": dict(filters),
+        }
+    return token
+
+
+def read_print_package_session(token: str, user: dict) -> dict | None:
+    """Return one unexpired print/export session only to its creating user."""
+    clean_token = str(token or "").strip()
+    if not clean_token:
+        return None
+    now = time.time()
+    owner = print_package_user_key(user)
+    with PRINT_PACKAGE_SESSION_LOCK:
+        record = PRINT_PACKAGE_SESSIONS.get(clean_token)
+        if not record:
+            return None
+        if now - float(record.get("createdAt") or 0) > PRINT_PACKAGE_SESSION_TTL_SECONDS:
+            PRINT_PACKAGE_SESSIONS.pop(clean_token, None)
+            return None
+        if not owner or str(record.get("owner") or "") != owner:
+            return None
+        return {"listIds": list(record.get("listIds") or []), "filters": dict(record.get("filters") or {})}
 
 
 def esc(value: object) -> str:
@@ -780,6 +862,13 @@ def render_print_package(package: dict) -> str:
     sections = []
     printed_at = datetime.now().strftime("%m/%d/%Y %I:%M %p")
     filters = package.get("filters", {}) or {}
+    try:
+        copies = max(1, min(int(filters.get("copies") or 1), 10))
+    except (TypeError, ValueError):
+        copies = 1
+    orientation = str(filters.get("orientation") or "portrait").strip().lower()
+    if orientation not in {"portrait", "landscape"}:
+        orientation = "portrait"
     rush_only = str(filters.get("rushOnly") or "").lower() in {"1", "true", "yes"}
     remake_only = str(filters.get("remakeOnly") or "").lower() in {"1", "true", "yes"}
     updated_only = str(filters.get("updatedOnly") or "").lower() in {"1", "true", "yes"}
@@ -888,7 +977,12 @@ def render_print_package(package: dict) -> str:
             title = sheet_title(delivery_list, "remake")
             # Remake sheets also print one physical copy by default.
             sections.append(render_sheet(title, "", remakes, "remake", sheet_badge(delivery_list, "remake"), printed_at))
+    base_sections = list(sections)
+    if copies > 1 and base_sections:
+        sections = [section for _copy_number in range(copies) for section in base_sections]
     body = "".join(sections) or '<section class="sheet"><h1>No printable rows found</h1></section>'
+    page_size = "letter landscape" if orientation == "landscape" else "letter portrait"
+    sheet_width = "min(1460px, calc(100% - 32px))" if orientation == "landscape" else "min(1120px, calc(100% - 32px))"
     return f"""<!doctype html>
 <html>
 <head>
@@ -897,7 +991,7 @@ def render_print_package(package: dict) -> str:
   <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
   <style>
     body {{ margin: 0; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #f6f8fb; }}
-    .sheet {{ width: min(1120px, calc(100% - 32px)); margin: 16px auto; padding: 18px 20px 14px; background: #fff; border: 1px solid #444; border-radius: 0; break-inside: avoid; page-break-inside: avoid; }}
+    .sheet {{ width: {sheet_width}; margin: 16px auto; padding: 18px 20px 14px; background: #fff; border: 1px solid #444; border-radius: 0; break-inside: avoid; page-break-inside: avoid; }}
     .sheet-header {{ display: flex; justify-content: space-between; gap: 18px; align-items: end; border-bottom: 3px solid #072a63; padding-bottom: 10px; margin-bottom: 10px; }}
     .sheet-header-compact {{ align-items: center; padding-bottom: 8px; margin-bottom: 9px; border-bottom-width: 2px; }}
     h1 {{ margin: 4px 0 0; color: #041a3d; font-size: 26px; line-height: 1.12; text-transform: uppercase; }}
@@ -939,7 +1033,7 @@ def render_print_package(package: dict) -> str:
     .remake {{ border: 3px dashed #000; }}
     .remake .sheet-badge {{ border-color: #c92f42; background: #fff0f1; color: #9f1f31; }}
     .remake .sheet-header {{ border-bottom: 3px dashed #000; }}
-    @page {{ size: letter portrait; margin: 0.25in; }}
+    @page {{ size: {page_size}; margin: 0.25in; }}
     @media print {{
       body {{ background: #fff; }}
       .sheet {{
@@ -963,6 +1057,172 @@ def render_print_package(package: dict) -> str:
   {print_lifecycle_script(250)}
 </body>
 </html>"""
+
+
+def summarize_print_package(package: dict, requested_stage_count: int = 0) -> dict:
+    """Build the live Print / Export preview from the exact package output.
+
+    The preview deliberately consumes ``STORE.get_print_package`` instead of
+    reimplementing its filters in JavaScript. This keeps the displayed piece
+    count aligned with the rows that the print and XLSX endpoints will emit.
+    """
+    lists = list(package.get("lists") or [])
+    glass_totals: dict[str, int] = {}
+    customer_totals: dict[str, int] = {}
+    order_totals: dict[str, int] = {}
+    unique_customers: set[str] = set()
+    unique_orders: set[str] = set()
+    unique_glass_types: set[str] = set()
+    stage_breakdown: list[dict] = []
+    preview_rows: list[dict] = []
+    total_pieces = 0
+    total_rows = 0
+    normal_pieces = 0
+    remake_pieces = 0
+    rush_pieces = 0
+
+    def piece_qty(item: dict) -> int:
+        try:
+            return max(int(item.get("qty") or 0), 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def item_glass_type(item: dict) -> str:
+        return str(item.get("product") or item.get("job") or item.get("suggestedBay") or "Other Glass").strip() or "Other Glass"
+
+    for delivery_list in lists:
+        items = list(delivery_list.get("items") or [])
+        normal_items = list(delivery_list.get("normalItems") or [])
+        remake_items = list(delivery_list.get("remakes") or [])
+        rush_items = list(delivery_list.get("rushes") or [])
+        stage_pieces = sum(piece_qty(item) for item in items)
+        stage_rows = len(items)
+        total_pieces += stage_pieces
+        total_rows += stage_rows
+        normal_pieces += sum(piece_qty(item) for item in normal_items)
+        remake_pieces += sum(piece_qty(item) for item in remake_items)
+        rush_pieces += sum(piece_qty(item) for item in rush_items)
+
+        stage_customers: set[str] = set()
+        stage_orders: set[str] = set()
+        stage_glass: set[str] = set()
+        for item in items:
+            qty = piece_qty(item)
+            glass_type = item_glass_type(item)
+            customer = str(item.get("customer") or "Unassigned customer").strip() or "Unassigned customer"
+            order = str(item.get("order") or "").strip()
+            item_no = str(item.get("item") or "").strip()
+            scanned = max(int(item.get("scanned") or 0), 0)
+            if qty > 0 and scanned >= qty:
+                status_key, status_label = "complete", "Complete"
+            elif scanned > 0:
+                status_key, status_label = "partial", "Partial"
+            else:
+                status_key, status_label = "not-scanned", "Not Scanned"
+
+            attention: list[dict[str, str]] = []
+            signal = f"{item.get('processState', '')} {item.get('queueState', '')}"
+            if re.search(r"\b(?:remake|rm)\b", signal, flags=re.IGNORECASE):
+                attention.append({"key": "remake", "label": "Remakes"})
+            if re.search(r"\b(?:rush|sdi)\b", signal, flags=re.IGNORECASE):
+                attention.append({"key": "rush", "label": "Rushes"})
+            if int(item.get("internalRejectCount") or 0) > 0:
+                attention.append({"key": "reject", "label": "Internal Rejects"})
+            if re.search(r"\b(?:update|updated|new|change|changed|added|add)\b", signal, flags=re.IGNORECASE):
+                attention.append({"key": "updated", "label": "New/Updated"})
+            if str(item.get("errorType") or "").strip() or str(item.get("errorReason") or "").strip():
+                attention.append({"key": "error", "label": "Errors"})
+
+            preview_rows.append(
+                {
+                    "listId": delivery_list.get("id", ""),
+                    "stage": delivery_list.get("stage") or delivery_list.get("label") or "Delivery List",
+                    "scanner": delivery_list.get("scanner") or "",
+                    "deliveryDate": delivery_list.get("deliveryDate") or "",
+                    "order": order,
+                    "item": item_no,
+                    "job": str(item.get("job") or item.get("product") or ""),
+                    "customer": customer,
+                    "pieces": qty,
+                    "glassType": glass_type,
+                    "dimensions": str(item.get("dimensions") or ""),
+                    "statusKey": status_key,
+                    "statusLabel": status_label,
+                    "attention": attention,
+                    "route": public_route_label(item.get("route")) or "Indian Trail",
+                }
+            )
+
+            unique_glass_types.add(glass_type)
+            stage_glass.add(glass_type)
+            glass_totals[glass_type] = glass_totals.get(glass_type, 0) + qty
+
+            unique_customers.add(customer)
+            stage_customers.add(customer)
+            customer_totals[customer] = customer_totals.get(customer, 0) + qty
+
+            if order:
+                unique_orders.add(order)
+                stage_orders.add(order)
+                order_totals[order] = order_totals.get(order, 0) + qty
+
+        stage_breakdown.append(
+            {
+                "listId": delivery_list.get("id", ""),
+                "stage": delivery_list.get("stage") or delivery_list.get("label") or "Delivery List",
+                "scanner": delivery_list.get("scanner") or "",
+                "deliveryDate": delivery_list.get("deliveryDate") or "",
+                "pieceCount": stage_pieces,
+                "rowCount": stage_rows,
+                "normalPieces": sum(piece_qty(item) for item in normal_items),
+                "remakePieces": sum(piece_qty(item) for item in remake_items),
+                "rushPieces": sum(piece_qty(item) for item in rush_items),
+                "customerCount": len(stage_customers),
+                "orderCount": len(stage_orders),
+                "glassTypeCount": len(stage_glass),
+            }
+        )
+
+    def sorted_breakdown(values: dict[str, int]) -> list[dict]:
+        return [
+            {"label": label, "pieceCount": qty}
+            for label, qty in sorted(values.items(), key=lambda entry: (-entry[1], entry[0].lower()))
+        ]
+
+    preview_rows.sort(
+        key=lambda row: (
+            str(row.get("deliveryDate") or ""),
+            str(row.get("stage") or ""),
+            str(row.get("glassType") or ""),
+            int(row.get("order") or 0) if str(row.get("order") or "").isdigit() else 0,
+            int(row.get("item") or 0) if str(row.get("item") or "").isdigit() else 0,
+        )
+    )
+    preview_page_size = 18
+
+    return {
+        "ok": True,
+        "generatedAt": package.get("generatedAt"),
+        "requestedStageCount": max(int(requested_stage_count or 0), 0),
+        "matchedStageCount": len(lists),
+        "totalPieces": total_pieces,
+        "rowCount": total_rows,
+        "normalPieces": normal_pieces,
+        "remakePieces": remake_pieces,
+        "rushPieces": rush_pieces,
+        "customerCount": len(unique_customers),
+        "orderCount": len(unique_orders),
+        "glassTypeCount": len(unique_glass_types),
+        "noResults": total_rows == 0 or total_pieces == 0,
+        "previewPageSize": preview_page_size,
+        "pageCount": max((len(preview_rows) + preview_page_size - 1) // preview_page_size, 1),
+        "previewRows": preview_rows,
+        "stageBreakdown": stage_breakdown,
+        "glassTypeBreakdown": sorted_breakdown(glass_totals),
+        "customerBreakdown": sorted_breakdown(customer_totals),
+        "orderBreakdown": sorted_breakdown(order_totals),
+        "filters": package.get("filters") or {},
+    }
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -1654,7 +1914,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if parsed.path == "/api/export/package.xlsx":
+        if parsed.path == "/api/print/package-preview":
             user = self.require_permission("export_reports")
             if not user:
                 return
@@ -1663,10 +1923,66 @@ class Handler(SimpleHTTPRequestHandler):
             list_ids = []
             for value in raw_ids:
                 list_ids.extend(part for part in value.split(",") if part)
-            body = STORE.export_package_xlsx(list_ids, user=user, filters={key: values[0] for key, values in params.items()})
+            unique_list_ids = list(dict.fromkeys(list_ids))
+            package = STORE.get_print_package(
+                unique_list_ids,
+                user=user,
+                filters={key: values[0] for key, values in params.items()},
+            )
+            self.send_json(summarize_print_package(package, requested_stage_count=len(unique_list_ids)))
+            return
+
+        if parsed.path == "/api/export/package.xlsx":
+            user = self.require_permission("export_reports")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            token = params.get("token", [""])[0]
+            session = read_print_package_session(token, user) if token else None
+            if token and not session:
+                self.send_json({"error": "This print/export selection has expired. Reopen Print / Export and try again."}, HTTPStatus.GONE)
+                return
+            if session:
+                list_ids = session["listIds"]
+                filters = session["filters"]
+            else:
+                raw_ids = params.get("listId", [])
+                list_ids = []
+                for value in raw_ids:
+                    list_ids.extend(part for part in value.split(",") if part)
+                filters = {key: values[0] for key, values in params.items()}
+            body = STORE.export_package_xlsx(list_ids, user=user, filters=filters)
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             self.send_header("Content-Disposition", "attachment; filename=delivery-list-export.xlsx")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if parsed.path == "/api/export/package.csv":
+            user = self.require_permission("export_reports")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            token = params.get("token", [""])[0]
+            session = read_print_package_session(token, user) if token else None
+            if token and not session:
+                self.send_json({"error": "This print/export selection has expired. Reopen Print / Export and try again."}, HTTPStatus.GONE)
+                return
+            if session:
+                list_ids = session["listIds"]
+                filters = session["filters"]
+            else:
+                raw_ids = params.get("listId", [])
+                list_ids = []
+                for value in raw_ids:
+                    list_ids.extend(part for part in value.split(",") if part)
+                filters = {key: values[0] for key, values in params.items()}
+            body = STORE.export_package_csv(list_ids, user=user, filters=filters).encode("utf-8-sig")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", "attachment; filename=delivery-list-export.csv")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1677,11 +1993,21 @@ class Handler(SimpleHTTPRequestHandler):
             if not user:
                 return
             params = parse_qs(parsed.query)
-            raw_ids = params.get("listId", [])
-            list_ids = []
-            for value in raw_ids:
-                list_ids.extend(part for part in value.split(",") if part)
-            package = STORE.get_print_package(list_ids, user=user, filters={key: values[0] for key, values in params.items()})
+            token = params.get("token", [""])[0]
+            session = read_print_package_session(token, user) if token else None
+            if token and not session:
+                self.send_html("<h1>This print selection has expired.</h1><p>Close this window and run Print / Export again.</p>", HTTPStatus.GONE)
+                return
+            if session:
+                list_ids = session["listIds"]
+                filters = session["filters"]
+            else:
+                raw_ids = params.get("listId", [])
+                list_ids = []
+                for value in raw_ids:
+                    list_ids.extend(part for part in value.split(",") if part)
+                filters = {key: values[0] for key, values in params.items()}
+            package = STORE.get_print_package(list_ids, user=user, filters=filters)
             self.send_html(render_print_package(package))
             return
 
@@ -1696,6 +2022,32 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             data = self.read_json()
+
+            if parsed.path == "/api/print/package-preview":
+                user = self.require_permission("export_reports")
+                if not user:
+                    return
+                list_ids, filters, _copies, _orientation = normalize_print_package_request(data)
+                package = STORE.get_print_package(list_ids, user=user, filters=filters)
+                self.send_json(summarize_print_package(package, requested_stage_count=len(list_ids)))
+                return
+
+            if parsed.path == "/api/print/package-session":
+                user = self.require_permission("export_reports")
+                if not user:
+                    return
+                list_ids, filters, copies, orientation = normalize_print_package_request(data)
+                package = STORE.get_print_package(list_ids, user=user, filters=filters)
+                preview = summarize_print_package(package, requested_stage_count=len(list_ids))
+                if preview.get("noResults"):
+                    self.send_json(
+                        {"error": "The selected filters produced no printable rows.", "preview": preview},
+                        HTTPStatus.UNPROCESSABLE_ENTITY,
+                    )
+                    return
+                token = create_print_package_session(user, list_ids, filters)
+                self.send_json({"ok": True, "token": token, "copies": copies, "orientation": orientation, "preview": preview})
+                return
 
             if parsed.path == "/api/login":
                 try:

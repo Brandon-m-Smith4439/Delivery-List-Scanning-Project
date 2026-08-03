@@ -349,24 +349,6 @@
 
 
 
-.scan-page .scanner-summary-header #stageHeading {
-  grid-column: auto;
-  width: 100%;
-  min-width: 0;
-  margin: 0 !important;
-  overflow: hidden;
-  color: #fff;
-  font-size: 20px;
-  font-weight: 950;
-  line-height: 1.25;
-  padding: 1px 0 2px;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-
 .scan-page .scanner-summary-header .progress-title {
   min-width: 0;
   min-height: 0 !important;
@@ -1988,7 +1970,6 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   pointer-events: none;
 }
 
-.scan-page .scanner-summary-header .scanner-panel-title-row,
 .scan-page .scanner-summary-header .scanner-progress-row {
   position: relative;
   z-index: 1;
@@ -2435,5 +2416,151 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   .cross-date-switch-icon {
     width: 34px;
     height: 34px;
+  }
+}
+
+/* ========================================================================== */
+/* v0.194 exact manual scans and last-result status ownership                 */
+/* ========================================================================== */
+
+/* The page-specific neutral card rule appears after the shared status rules.
+   Reassert the same success/failure language here so Last Scan visibly agrees
+   with the green/red rows in Recent Scans. */
+.scan-page .scanner-panel .last-card.ok {
+  border-color: #2fa84f;
+  background: linear-gradient(90deg, #ecf8ef 0%, #f7fcf8 58%, #ffffff 100%);
+  box-shadow: inset 4px 0 0 #2fa84f, 0 8px 18px rgba(47, 168, 79, 0.1);
+}
+
+.scan-page .scanner-panel .last-card.error {
+  border-color: #c92f42;
+  background: linear-gradient(90deg, #fff0f1 0%, #fff7f7 58%, #ffffff 100%);
+  box-shadow: inset 4px 0 0 #c92f42, 0 8px 18px rgba(201, 47, 66, 0.1);
+}
+
+/* ========================================================================== */
+/* v0.196 scanner-panel context selectors                                     */
+/* ========================================================================== */
+
+/* Date and stage now live inside the scanner header. The center station value
+   remains display-only and continues to be populated by the assigned-station
+   workflow used by scan requests and audit records. */
+.scan-page > .scan-heading {
+  display: block;
+}
+
+.scan-page .scanner-summary-header .scanner-panel-context-row-v196 {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.scan-page .scanner-panel-context-select-v196 {
+  width: min(100%, 170px);
+  min-width: 0;
+  margin: 0;
+}
+
+.scan-page .scanner-panel-stage-select-v196 {
+  justify-self: start;
+}
+
+.scan-page .scanner-panel-date-select-v196 {
+  justify-self: end;
+}
+
+.scan-page .scanner-panel-context-select-v196 select,
+.scan-page .scanner-panel-context-select-v196 .custom-select-shell {
+  width: 100%;
+  min-width: 0;
+}
+
+.scan-page .scanner-panel-context-select-v196 button.custom-select-trigger {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.32) !important;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: #ffffff !important;
+  padding: 0 10px 0 12px;
+  box-shadow: none !important;
+}
+
+.scan-page .scanner-panel-context-select-v196 .custom-select-value {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 950;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-page .scanner-panel-context-select-v196 .custom-select-arrow {
+  border-color: rgba(255, 255, 255, 0.92);
+}
+
+.scan-page .scanner-panel-context-select-v196 button.custom-select-trigger:hover:not(:disabled),
+.scan-page .scanner-panel-context-select-v196 button.custom-select-trigger:focus-visible,
+.scan-page .scanner-panel-context-select-v196 .custom-select-shell.is-open button.custom-select-trigger {
+  border-color: rgba(255, 255, 255, 0.72) !important;
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1) !important;
+}
+
+.scan-page .scanner-panel-station-v196 {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.scan-page .scanner-panel-station-v196 > span {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.scan-page .scanner-panel-station-v196 > strong {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-page .scanner-panel-station-v196 > strong.is-unassigned {
+  color: #ffe0a3;
+}
+
+@media (max-width: 620px) {
+  .scan-page .scanner-summary-header .scanner-panel-context-row-v196 {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .scan-page .scanner-panel-context-select-v196 {
+    width: 100%;
+  }
+
+  .scan-page .scanner-panel-station-v196 {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding-top: 2px;
   }
 }

@@ -1,3 +1,192 @@
+## v0.205 - Consistent Header Controls, Range Calendar, and User Presets
+
+- Standardized Delivery Date, Create Preset, Saved Presets, and Clear Filters to the same height, border, radius, typography, and hover treatment.
+- Rebuilt Custom Date Range as a dedicated two-month Date From / Date To picker; removed the unused single-date calendar mode.
+- Added working range restart, previous/next month navigation, today highlighting, outbound-date markers, and guarded Apply Range behavior.
+- Kept one-click individual delivery dates in the header dropdown with Custom Date Range as its first option.
+- Expanded preset creation to preload every glass type currently known across the active delivery-list catalog.
+- Namespaced saved presets and active-preset state by signed-in user, with migration from the earlier browser-wide preset store.
+- Reapplies the active user preset whenever Print / Export opens and keeps it selected until the user chooses another preset or clears filters.
+- Preserved the v0.204 live preview repair, visual polish, exact item/order selection, direct PDF printing, copies, orientation, XLSX, and CSV behavior.
+- Preserved schema version 5 and advanced the application contract and cache keys to v0.205.
+
+## v0.204 - Print / Export Visual Polish and Preview Geometry Repair
+
+- Fixed the delivery-list preview container expanding to an extreme off-screen width because a shrink-to-fit page stack contained percentage-width sheets.
+- Replaced the competing parent-and-sheet preview transforms with one layout-aware zoom owner.
+- Keeps portrait and landscape sheets centered, visible, and vertically scrollable inside the preview pane.
+- Preserved the same sheet markup, grouping, pagination, and data used by the working Print List popup.
+- Rebalanced the desktop Print / Export workspace to provide useful width to both filters and the document preview.
+- Standardized filter cards, headings, helper text, chip sizes, selected colors, and long-label wrapping.
+- Refined Delivery Date, preset, and Clear Filters controls to avoid overlap and cut-off labels.
+- Polished the preview toolbar, document canvas, sheet framing, table readability, and output footer.
+- Added safe wrapping for Copies, Layout, File Type, and the primary output action on narrower displays.
+- Updated the visible footer version, application contract, cache keys, documentation, and structure tests to v0.204.
+- Preserved SQLite schema version 5; no database migration is required.
+
+## v0.203 - Print Layout Completion and Direct Preview Printing
+
+- Moved Delivery Date into the Filters header with one-date choices and Custom date range as the first dropdown option.
+- Kept the calendar GUI for custom ranges, including highlighted today, month navigation, and date-range selection.
+- Rebuilt filter order as Route / Glass Type, Status / Attention, then exact order and item search at the bottom.
+- Replaced Copies with a bounded increment control and Layout with exclusive Portrait and Landscape buttons.
+- Added the same output controls to Create Preset and kept preset application synchronized with the main output controls.
+- Removed asynchronous PDF preparation from the print click path so the print popup opens reliably under browser popup rules.
+- Generates the PDF/print window directly from the exact loaded rows shown in the live preview.
+- Added shared sheet pagination and markup for preview and printing: 21-row first pages, 23-row continuation pages, glass group headers, normal/Rush/remake sheets, notes, and checked-by fields.
+- Applies `@page` portrait or landscape sizing to the real browser print dialog.
+- Removed the Not found preview-reconciliation message while retaining exact authenticated sessions for XLSX and CSV exports.
+- Improved exact search readiness by ensuring selected delivery-list detail is loaded before suggestions are generated.
+- Preserved schema version 5 and advanced the application contract and cache keys to v0.203.
+
+## v0.202 - Exact Print Sessions, Item Selection, and Output Presets
+
+- Replaced the Print / Export preview reconciliation request with an authenticated POST contract that carries exact line-item IDs and list/order/item fallback keys.
+- Added short-lived, same-user print sessions so Print, PDF, XLSX, and CSV consume the exact package validated by the live preview.
+- Fixed valid browser previews failing to print because the older query-string reconciliation returned zero rows.
+- Added smart item-level search results with separate Add Item and Add Order actions for order, item, customer, and Job Nr. matches.
+- Added exact selected-item cards with individual removal while retaining whole-order selection and Clear All.
+- Removed Date Range and exact order/customer choices from the Create Preset builder.
+- Added file type, copy count, and portrait/landscape output settings to presets.
+- Moved the compact preset controls into the Filters header immediately before Clear Filters.
+- Added maintained copies and orientation selectors beside File Type.
+- Replaced the page-number selector with a vertically scrollable stack containing every preview page.
+- Added portrait and landscape page geometry to both the browser preview and the generated print document.
+- Preserved schema version 5; no database migration is required.
+- Advanced the application contract and global Styles/JavaScript cache keys to v0.202.
+
+## v0.201 - Print Calendar, All Glass Semantics, and Preview Stability
+
+- Reworked All Glass into a true unrestricted choice that deselects every exact glass type.
+- Exact glass-type selections now clear All Glass, while clearing all exact choices restores All Glass.
+- Fixed the live-preview gate that treated All Glass as zero selected glass types.
+- Preserved a valid browser-built preview whenever backend reconciliation returns an empty or zero-piece package.
+- Resized All Status and All Attention to match their neighboring filter buttons and kept them in the first grid position.
+- Replaced the visible quick-date and start/end fields with a top-of-workspace calendar selector.
+- Added Single Date and Custom Range calendar modes, month navigation, highlighted today, range highlighting, and outbound-list date markers.
+- Kept the selected dates connected to presets, preview, print, PDF, XLSX, and CSV output.
+- Advanced the application contract and Styles/JavaScript cache keys to v0.201 without changing schema version 5.
+
+## v0.200 - Live Preview Repair, Preset Builder, and Unified Output Selector
+
+- Fixed the Print / Export paper preview flashing valid rows and then reverting to zero printable rows.
+- Preserved a valid local preview when a stale or mismatched backend reconciliation response returns no rows.
+- Stopped sending exact Glass Type filters when every available glass type is selected.
+- Added All Status and All Attention controls and selected them by default.
+- Defined All Attention as unrestricted so ordinary rows without attention flags remain included.
+- Removed the footer Reset Filters action and enlarged the top-right Clear Filters button.
+- Replaced Save Preset with Create Preset.
+- Added an editable preset builder for dates, routes, status, attention, glass types, and exact selected orders.
+- Automatically applies a newly created preset after saving it.
+- Replaced the split Export PDF control with the maintained custom output selector.
+- Added PDF, Excel Workbook, and CSV options.
+- Kept PDF paired with Print List and changed the primary action to Export List for XLSX and CSV.
+- Added filtered package CSV export using the same backend package contract as print and XLSX.
+- Advanced the application contract and Styles/JavaScript cache keys to v0.200 without changing schema version 5.
+
+## v0.199 - Multi-Order Selection, Preset GUI, and Live Paper Preview
+
+- Made selected Print / Export chips use white labels and counts for readable contrast.
+- Replaced single free-text output filtering with a smart multi-order picker that searches order numbers, customer names, and Job Nr. values.
+- Added a Selected Orders workspace with exact order metadata, individual removal, Clear All, and unavailable-order guidance after date or route changes.
+- Added exact `ordersExact` filtering to live preview, print, PDF, and XLSX requests.
+- Added a dedicated Save Current Filters GUI with preset summary, validation, and overwrite guidance.
+- Moved Route choices into a vertical right-side rail inside the filter pane.
+- Narrowed the preview panel and changed the paper preview to mirror the maintained printed delivery-list structure: glass group rows, Job Nr., Order Nr., Item Nr., Qty., Dimensions, Customer, Route, Check, and Notes.
+- Added an immediate local live preview on every filter change, followed by exact backend reconciliation through `/api/print/package-preview`.
+- Preserved the live paper if backend reconciliation fails, eliminating the blank preview state.
+- Increased preview pagination to 18 printable rows and included Job Nr. in backend preview rows.
+- Advanced the application contract and Styles/JavaScript cache keys to v0.199.
+- No database migration is required; schema version 5 remains active.
+
+## v0.198 - Route-First Print Filters, Quick Date, and Smart Search
+
+- Removed the Stage section from the Print / Export control center and made Route the primary source selector.
+- Added fixed Airport, Indian Trail, Greenville, CPU, and DTC route choices.
+- Defined Airport as the complete selected Airport Outbound workload and destination routes as focused subsets of those outbound rows.
+- Fixed the blank Route, Status, Attention, and Glass Type sections by replacing the undefined `printItemsForCountList` call with the maintained loaded item collection.
+- Added explicit loading and error states so filter failures cannot appear as unexplained empty sections.
+- Added a Quick Date selector that sets both ends of the date range to one available outbound delivery date.
+- Made glass-type options recalculate from the current date and route scope.
+- Added live smart order suggestions for partial customer names, partial or complete order numbers, and Job Nr. values.
+- Added Job Nr., product, and source-ID matching to the shared backend search filter.
+- Removed the second decorative header ring while retaining one subtle background accent.
+- Preserved schema version 5; no database migration is required.
+- Advanced the application contract and global Styles/JavaScript cache keys to v0.198.
+
+## v0.197 - Print / Export Document Preview Control Center
+
+- Rebuilt the Print / Export Delivery Lists modal to match the approved full-screen filters-and-document-preview layout.
+- Added left-side Search, Date Range, Stage, Route, Status, Attention, and exact Glass Type controls.
+- Added a live paged paper preview with page selection, zoom controls, and full-screen viewing.
+- Added preview rows for order, item, customer, delivery date, pieces, glass type, dimensions, scan status, attention state, and route.
+- Added shared backend filters for exact routes, scan statuses, attention states, and customer/order search.
+- Added browser-local named filter presets plus Reset Filters and Clear All actions.
+- Added the reference-style Export PDF split control while retaining XLSX as a selectable export format, with both outputs aligned to the exact live preview contract.
+- Preserved schema version 5; no database migration is required.
+- Advanced the application contract and changed global Styles/JavaScript cache keys to v0.197.
+
+## v0.196 - Scanner Panel Date, Station, and Stage Header
+
+- Moved the active Stage and Delivery Date selectors from the Scan page heading into the scanner panel header.
+- Replaced the combined stage/date scanner title with a three-column context row: Stage selector, assigned station, and Delivery Date selector.
+- Reduced Stage selector option text to the stage name only because the assigned station is now displayed separately in the center.
+- Styled both selectors with transparent header surfaces that retain the existing accessible custom-dropdown behavior and delivery-date update marker.
+- Preserved cross-date switching, list activation, stage permissions, hidden station selection, scan request metadata, and audit history.
+- Added a responsive two-row layout for narrow scanner panels.
+- Advanced the application contract and changed Scan/JavaScript cache keys to v0.196.
+- No database migration is required; schema version 5 remains current.
+
+### Changed files
+
+- `README.md`
+- `README_CHANGELOG.md`
+- `index.html`
+- `database/contract.py`
+- `static/js/app.js`
+- `static/css/scan.css`
+- `tests/test_static_structure.py`
+
+## v0.195 - Print / Export Filter Workspace and Exact Preview
+
+- Removed the visible Station status from the Scan page heading and right-aligned the Delivery Date and Stage selectors.
+- Preserved the hidden station selector and station profile elements so scan requests, permissions, station assignment, and audit history continue using the signed-in station.
+- Rebuilt the Print / Export modal around dedicated stage, exact-glass, customer, order, and content filter cards.
+- Added stage progress cards, glass search and mirror presets, whole-category glass selection, customer and order search, and Select all/Clear actions.
+- Added exact JSON-backed glass, customer, and order selection filters so checkbox choices do not broaden into substring matches or break on commas in customer names.
+- Removed the duplicate Selection Summary and retained one detailed Selection Preview.
+- Added `/api/print/package-preview`, which summarizes the exact `get_print_package` output used by both print preview and XLSX export.
+- Made Estimated Glass Pieces, printable rows, order/customer totals, normal/remake/Rush mix, and stage/glass/customer/order breakdowns reflect the final generated package.
+- Added a red zero-result preview with `Selected filters yield 0 results.` and disabled output while no printable rows match.
+- Keeps output disabled while the exact preview is calculating or unavailable so an earlier preview cannot authorize a newer filter combination.
+- Advanced the application contract and changed Styles/Scan/JavaScript cache keys to v0.195.
+- No database migration is required; schema version 5 remains current.
+
+### Changed files
+
+- `README.md`
+- `README_CHANGELOG.md`
+- `index.html`
+- `server.py`
+- `backend/store.py`
+- `database/contract.py`
+- `static/js/app.js`
+- `static/css/styles.css`
+- `static/css/scan.css`
+- `tests/test_static_structure.py`
+
+## v0.194 - Exact Manual Scans and Result Feedback Repair
+
+- Required manual scans to match the complete six-digit order and item instead of falling through to three-digit suffix recovery.
+- Applied exact manual matching to current-list scans, cross-date candidates, date hints, local mode, and Indian Trail receiving.
+- Preserved tolerant suffix recovery for physical barcode scans.
+- Restored green success and red failure backgrounds on the Last Scan card after page-specific CSS had overridden the shared status colors.
+- Mapped successful delivery-date switches to the packaged positive `scan_success.wav` cue while keeping normal scans on `notification.wav`.
+- Kept cross-date selection prompts on the warning cue until a scan succeeds.
+- Removed the Action History tab and history loading from the All Scans GUI.
+- Advanced the application contract and changed Scan/JavaScript cache keys to v0.194.
+- No database migration is required; schema version 5 remains current.
+
 ## v0.193 - Guarded Cross-Delivery-Date Scanning
 
 - Added cross-delivery-date matching to the maintained main Scan and Indian Trail receiving workflows without creating a second scanner implementation.
