@@ -12,7 +12,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260803-v0.205">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260805-v0.228">
     <link rel="stylesheet" href="static/css/rejects.css?v=20260730-v0.184">
     <link rel="stylesheet" href="static/css/home.css?v=20260729-v0.181">
     <link rel="stylesheet" href="static/css/scan.css?v=20260803-v0.196">
@@ -1377,13 +1377,13 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.205">
+        <span class="footer-version-v0163" aria-label="Application version 0.228">
           <small>Version</small>
-          <strong>0.205</strong>
+          <strong>0.228</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
-          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.205&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
+          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.228&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
           title="Report a Delivery List Scanner bug"
         >
           <span class="footer-bug-icon-v0163" aria-hidden="true"></span>
@@ -1414,13 +1414,13 @@
 
       <div class="print-options-workspace-v197">
         <aside class="print-filter-pane-v197" aria-label="Print and export filters">
-          <header class="print-pane-heading-v197 print-pane-heading-v203">
-            <div class="print-filter-heading-title-v203"><span class="print-filter-icon-v197" aria-hidden="true"></span><strong>Filters</strong></div>
-            <div class="print-filter-header-actions-v203 print-filter-header-actions-v205">
-              <div class="print-header-date-control-v203 print-header-control-v205">
+          <header class="print-pane-heading-v197 print-pane-heading-v203 print-pane-heading-v209">
+            <div class="print-filter-heading-cluster-v209">
+              <div class="print-filter-heading-title-v203"><span class="print-filter-icon-v197" aria-hidden="true"></span><strong>Filters</strong></div>
+              <div class="print-header-date-control-v203 print-header-control-v205 print-header-control-v209">
                 <label for="printDateQuickSelect"><span class="visually-hidden">Delivery Date</span>
                   <select id="printDateQuickSelect" aria-label="Choose one delivery date or a custom date range">
-                    <option value="__custom__">Custom date range…</option>
+                    <option value="__custom__">Custom Range…</option>
                   </select>
                 </label>
                 <div id="printDateCalendar" class="print-date-calendar-v201 print-date-calendar-v203 print-date-calendar-v205" hidden>
@@ -1449,18 +1449,20 @@
                     <span id="printCalendarSelectionText">Choose the Date From.</span>
                     <div>
                       <button id="printCalendarCancel" type="button">Cancel</button>
-                      <button id="printCalendarApply" class="primary" type="button" disabled>Apply Range</button>
+                      <button id="printCalendarApply" class="primary" type="button" disabled>Apply Dates</button>
                     </div>
                   </footer>
                 </div>
                 <input id="printDateFrom" type="hidden">
                 <input id="printDateTo" type="hidden">
               </div>
-              <button id="printSavePresetBtn" class="print-create-preset-v202 print-header-control-v205" type="button"><span aria-hidden="true">＋</span> Create Preset</button>
-              <div class="print-preset-select-control-v205 print-header-control-v205">
+            </div>
+            <div class="print-filter-header-actions-v203 print-filter-header-actions-v205 print-filter-header-actions-v209">
+              <button id="printSavePresetBtn" class="print-create-preset-v202 print-header-control-v205 print-header-control-v209" type="button"><span aria-hidden="true">＋</span> Create Preset</button>
+              <div class="print-preset-select-control-v205 print-header-control-v205 print-header-control-v209">
                 <select id="printPresetSelect" aria-label="Load saved print preset"><option value="">Saved Presets</option></select>
               </div>
-              <button id="printClearAllBtn" class="print-clear-filters-v200 print-header-control-v205" type="button"><span aria-hidden="true">↶</span> Clear Filters</button>
+              <button id="printClearAllBtn" class="print-clear-filters-v200 print-header-control-v205 print-header-control-v209" type="button"><span aria-hidden="true">↶</span> Clear Filters</button>
             </div>
           </header>
 
@@ -1474,7 +1476,7 @@
 
               <section class="print-filter-section-v197 print-glass-section-v197 print-glass-section-v203">
                 <strong class="print-filter-label-v197">Glass Type</strong>
-                <small class="print-filter-help-v197">Only glass types present in the selected date and route are shown</small>
+                <small class="print-filter-help-v197">Grouped by Mirror, Tempered, and Annealed for faster selection</small>
                 <label class="print-compact-search-v197">
                   <span class="visually-hidden">Search glass types</span>
                   <input id="printGlassSearch" type="search" autocomplete="off" placeholder="Search glass types">
@@ -1529,7 +1531,7 @@
             <div class="print-preview-controls-v197 print-preview-controls-v202">
               <span id="printPreviewPageCount" class="print-preview-page-count-v202">1 page</span>
               <button id="printPreviewZoomOut" type="button" aria-label="Zoom out">−</button>
-              <strong id="printPreviewZoomLabel">100%</strong>
+              <strong id="printPreviewZoomLabel">90%</strong>
               <button id="printPreviewZoomIn" type="button" aria-label="Zoom in">+</button>
               <button id="printPreviewFullscreen" type="button" aria-label="View preview full screen">↗</button>
             </div>
@@ -1579,25 +1581,75 @@
       </div>
     </section>
 
-    <div class="print-preset-backdrop-v199" id="printPresetModalBackdrop" hidden></div>
-    <section class="print-preset-modal-v199 print-preset-modal-v200" id="printPresetModal" role="dialog" aria-modal="true" aria-labelledby="printPresetModalTitle" hidden>
-      <header>
+    <div class="print-preset-backdrop-v199 print-preset-backdrop-v206 print-preset-backdrop-v209 print-preset-backdrop-v227 print-preset-backdrop-v228" id="printPresetModalBackdrop" hidden></div>
+    <section class="print-preset-modal-v199 print-preset-modal-v200 print-preset-modal-v206 print-preset-modal-v209 print-preset-modal-v227 print-preset-modal-v228" id="printPresetModal" role="dialog" aria-modal="true" aria-labelledby="printPresetModalTitle" hidden>
+      <header class="print-preset-hero-v227">
         <div>
-          <small>Print / Export Preset Builder</small>
-          <h3 id="printPresetModalTitle">Create Print Preset</h3>
-          <p>Choose the routes, glass types, status filters, attention filters, and output settings this preset should restore.</p>
+          <small>Delivery List Scanner</small>
+          <h3 id="printPresetModalTitle">Create Delivery List Preset</h3>
+          <p>Save default filters and print settings for fast delivery-list creation.</p>
         </div>
         <button id="printPresetModalClose" type="button" aria-label="Close preset window">×</button>
       </header>
-      <div class="print-preset-modal-body-v199 print-preset-modal-body-v200">
-        <label for="printPresetNameInput"><span>Preset Name</span><input id="printPresetNameInput" type="text" maxlength="50" autocomplete="off" placeholder="Example: Friday Airport Remakes"></label>
-        <div id="printPresetSummary" class="print-preset-summary-v199 print-preset-builder-v200"></div>
-        <p id="printPresetStatus" class="print-preset-status-v199" aria-live="polite"></p>
+
+      <div class="print-preset-workspace-v227">
+        <main class="print-preset-main-column-v227">
+          <section class="print-preset-card-v227 print-preset-details-card-v227">
+            <header class="print-preset-card-heading-v227">
+              <span class="print-preset-card-icon-v227" aria-hidden="true">▣</span>
+              <div><strong>Preset Details</strong><small>Name the setup and choose whether it should become your personal default.</small></div>
+            </header>
+            <div class="print-preset-details-grid-v227">
+              <label for="printPresetNameInput"><span>Preset Name</span><input id="printPresetNameInput" type="text" maxlength="50" autocomplete="off" placeholder="Example: Indian Trail Outbound Morning"></label>
+              <label for="printPresetDescriptionInput"><span>Description</span><input id="printPresetDescriptionInput" type="text" maxlength="160" autocomplete="off" placeholder="Explain when this preset should be used."></label>
+              <label class="print-preset-default-toggle-v227" for="printPresetDefaultToggle">
+                <span><strong>Set as default</strong><small>Use this preset when Print / Export opens.</small></span>
+                <input id="printPresetDefaultToggle" type="checkbox">
+                <i aria-hidden="true"></i>
+              </label>
+            </div>
+          </section>
+
+          <section class="print-preset-card-v227 print-preset-filters-card-v227">
+            <header class="print-preset-card-heading-v227">
+              <span class="print-preset-card-icon-v227" aria-hidden="true">▽</span>
+              <div><strong>Default Filters</strong><small>Choose the routes, statuses, attention filters, and glass types this preset restores.</small></div>
+            </header>
+            <div id="printPresetSummary" class="print-preset-filter-rows-v227"></div>
+          </section>
+
+          <section class="print-preset-card-v227 print-preset-options-card-v227">
+            <header class="print-preset-card-heading-v227">
+              <span class="print-preset-card-icon-v227" aria-hidden="true">▰</span>
+              <div><strong>Print Options</strong><small>Configure the output format, copies, and page orientation.</small></div>
+            </header>
+            <div id="printPresetOutputSettings" class="print-preset-output-settings-v227"></div>
+          </section>
+        </main>
+
+        <aside class="print-preset-side-column-v227">
+          <section class="print-preset-card-v227 print-preset-live-summary-card-v227">
+            <header class="print-preset-card-heading-v227">
+              <span class="print-preset-card-icon-v227" aria-hidden="true">☷</span>
+              <div><strong>Preset Summary</strong><small>Review exactly what will be saved.</small></div>
+            </header>
+            <div id="printPresetLiveSummary" class="print-preset-live-summary-v227"></div>
+          </section>
+
+          <section class="print-preset-card-v227 print-preset-actions-card-v227">
+            <header class="print-preset-card-heading-v227">
+              <span class="print-preset-card-icon-v227" aria-hidden="true">ϟ</span>
+              <div><strong>Actions</strong><small>Save now or save and immediately apply the preset.</small></div>
+            </header>
+            <button id="printPresetSaveOnlyBtn" class="primary" type="button">Save Preset</button>
+            <button id="printPresetConfirmBtn" type="button">Save &amp; Apply</button>
+            <button id="printPresetCancelBtn" type="button">Cancel</button>
+          </section>
+        </aside>
+
+        <p id="printPresetStatus" class="print-preset-status-v199 print-preset-status-v206 print-preset-status-v209 print-preset-status-v227" aria-live="polite"></p>
+        <footer class="print-preset-info-v227"><span aria-hidden="true">i</span> Presets save your default filters and print settings for future delivery-list creation.</footer>
       </div>
-      <footer>
-        <button id="printPresetCancelBtn" type="button">Cancel</button>
-        <button id="printPresetConfirmBtn" class="primary" type="button">Create &amp; Apply Preset</button>
-      </footer>
     </section>
 
     <!-- SECTION: Interactive statistics chart modal -->
@@ -1752,6 +1804,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260803-v0.205"></script>
+  <script src="static/js/app.js?v=20260805-v0.228"></script>
 </body>
 </html>

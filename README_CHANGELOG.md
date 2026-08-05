@@ -1,3 +1,250 @@
+## v0.228 - Create Preset Viewport Positioning Repair
+
+- Fixed the v0.227 Create Preset control center being shifted far beyond the top-left of the browser by inherited `top: 50%`, `left: 50%`, and `translate(-50%, -50%)` rules from the legacy compact modal.
+- Added a final v0.228 positioning layer that neutralizes the inherited legacy transform while retaining historical class compatibility.
+- Added dedicated v0.228 fixed-position ownership with safe desktop and mobile viewport insets.
+- Kept the modal workspace internally scrollable and added compact-height tuning for shorter screens.
+- Reset the workspace scroll position whenever Create Preset opens and focused the name field without causing viewport movement.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.228. Schema version 5 is unchanged.
+
+## v0.227 - Health-State Attention Filters and Preset Control Center
+
+- Changed Remakes, Rushes, and Internal Rejects so the entire filter button follows its live health state: red gradient with an exclamation when matching work exists, green gradient with a check when clear.
+- Rebuilt Create Preset around the supplied control-center reference with Preset Details, Default Filters, Print Options, Preset Summary, and Actions.
+- Removed the Visibility and Preview sections from the new preset workspace.
+- Added an optional preset description and a personal-default toggle while retaining the immutable System Default fallback for users who do not choose a custom default.
+- Added separate Save Preset and Save & Apply actions, live right-column summary updates, copy stepper controls, and responsive layout behavior.
+- Preserved the Lookup Manager product library, automatic All-choice collapse rules, grouped newest-first date history, and schema version 5.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.227.
+
+## v0.226 - Automatic All Selections and Newest-First Delivery Dates
+
+- Automatically replaces every available detailed Route selection with Airport, the maintained all-routes choice.
+- Automatically replaces complete Glass, Status, and Attention detail selections with their corresponding All choice in both Print / Export and Create Preset.
+- Reordered grouped Delivery Date weeks and individual dates from newest/future to oldest so later weeks appear above This Week and historical weeks.
+- Restored the v0.224 step-guided Create Preset layout while retaining the v0.225 grouped-date history and in-memory load-more behavior.
+- Increased glass-category count typography, changed Tempered section/chip styling from orange to green, and lengthened the borderless Checked By write-in line.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.226. Schema version 5 is unchanged.
+
+## v0.225 - Grouped Delivery Date History and Unified Preset Workspace
+
+- Reduced Landscape continuation-page pagination from 29 to 28 logical rows while retaining 27 logical rows on the first Landscape page and the existing Portrait limits.
+- Reworked Create Preset into one continuous workspace with the preset name, compact Route/Status/Attention cards, full Lookup Manager glass library, and output settings visible without step navigation.
+- Removed the Step 1 / Step 2 framing and retained immediate current-selection loading, overwrite guidance, per-user storage, and System Default protection.
+- Grouped Delivery Date options by Monday-Sunday week with clear This Week, Last Week, Next Week, and dated week headings.
+- Limited the initial historical date list to the rolling previous two weeks while continuing to show every available future delivery date.
+- Added in-memory two-week history expansion when the user reaches the bottom of the date menu, plus an explicit load-more row for pointer and keyboard access.
+- Kept custom date ranges and selected older dates available even when they fall outside the initial history window.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.225. Schema version 5 is unchanged.
+
+## v0.224 - Unavailable Filter States and Aligned Print Signoff
+
+- Grayed out and disabled zero-count Route, Status, New/Updated, and Errors choices in Print / Export so unavailable filters are visually and functionally distinct.
+- Kept Remakes, Rushes, and Internal Rejects enabled at zero so their Scan-page-style green-clear and red-alert indicators remain useful.
+- Added safe fallback selection behavior when a previously selected route or standard filter no longer contains rows after a date/scope change.
+- Increased the filter-chip count font for faster quantity scanning without increasing chip height.
+- Removed the border and background around Checked By, enlarged its text, and aligned it with the first-page Filters line at the right side of the title header.
+- Increased Rows, Orders, and QTY typography on first and continuation pages while retaining the more compact Filters treatment.
+- Preserved v0.223 pagination, table widths, shared preview/print styling, and schema version 5.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.224.
+
+## v0.223 - Table-Adjacent Signoff and Fuller Delivery Pages
+
+- Moved the first-page `Checked By` field out of the branded title block and placed it directly above the delivery-list column headings.
+- Kept the signoff right aligned in a compact print-safe row shared by preview and popup printing.
+- Increased safe pagination by two logical lines on first pages and three logical lines on continuation pages.
+- Set Portrait limits to 26/28 and Landscape limits to 27/29 logical rows for first/continuation pages; glass headings continue to count toward the limit.
+- Centered Order, Item, and QTY headings and values in preview and print output.
+- Narrowed Dimensions by less than one percentage point and gave that width to QTY so all three letters remain visible.
+- Preserved Letter geometry, Default margins, enlarged branded headers, repeating Filters, alternating row bands, fixed Printed at footer, and Rush/remake frames.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.223. Schema version 5 is unchanged.
+
+## v0.222 - Enlarged Branded Delivery-Sheet Headers
+
+- Enlarged the complete first-page title area by approximately 30%, including the supplied print logo, route heading, full weekday date, totals, Filters line, badge, and Checked By signoff.
+- Enlarged continuation-page branding by approximately 10% while keeping it visibly subordinate to the first-page header.
+- Added fit-aware first-page and continuation-page sizes for medium and long multi-route titles so headings remain on one line.
+- Applied all sizing through the shared delivery-sheet stylesheet, keeping preview and popup printing visually identical.
+- Adjusted safe pagination to 24/25 logical rows in Portrait and 25/26 in Landscape for first/continuation pages so enlarged headers do not clip table rows or the repeating footer.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.222. Schema version 5 is unchanged.
+
+## v0.221 - Idle Route and Print Row State Recovery
+
+- Fixed the intermittent Print / Export failure that appeared after leaving the browser tab or another app page idle while Airport still looked selected.
+- Changed background delivery-list catalog updates to merge lightweight summaries with already loaded item detail instead of replacing `state.lists` and silently discarding print rows.
+- Preserves cached item detail only while the delivery-list revision is unchanged; changed lists are invalidated and reloaded on demand.
+- Reasserts committed route controls on window focus, `pageshow`, tab visibility recovery, and catalog-sync events.
+- Added a single-flight recovery guard so simultaneous focus/catalog events cannot issue duplicate detail requests.
+- Keeps recovery event-driven with no new timer, polling loop, or recurring network work. Schema version 5 is unchanged.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.221.
+
+## v0.220 - Print Filter Visual Hierarchy and Compact Signoff
+
+- Removed the Date write-in field from the printed signoff block and kept one right-aligned Checked By line, giving route titles and filter metadata more horizontal room.
+- Repeated the compact active Filters line on every delivery-list page, including continuation pages.
+- Reduced continuation-page pagination by one logical row in Portrait and Landscape to keep the new repeating metadata inside Default Letter margins.
+- Added route-specific gradients for Airport, Indian Trail, Greenville, CPU, and DTC choices in Print / Export.
+- Grouped current glass choices beneath compact Mirror, Tempered, and Annealed separator headers with category-specific colors while preserving exact maintained product values.
+- Added distinct gradient treatments for Status and Attention choices.
+- Added Scan-page-style red exclamation circles when Remakes, Rushes, or Internal Rejects are present and green check circles when those categories are clear.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.220. Schema version 5 is unchanged.
+
+## v0.219 - Shared Preview and Print Styling
+
+- Lowered the first-page Checked By and Date signoff fields within the branded header and kept each field on one uninterrupted line.
+- Forced the full weekday delivery date to remain on one line in both Portrait and Landscape layouts.
+- Removed the duplicated popup sheet-design CSS and made the generated print window load the same versioned `static/css/styles.css` used by the on-screen preview.
+- Retained only Letter page size, 0.4-inch browser margin, page-break, and print-safe frame overrides inside the popup document.
+- Added print startup readiness checks for the shared stylesheet, fonts, and supplied logo before invoking the browser print dialog.
+- Changed the default Portrait preview zoom to 90%, including when switching back from Landscape.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.219. Schema version 5 is unchanged.
+
+## v0.218 - Reliable Print Logo and Tightened Branded Header
+
+- Restored `static/images/barefoot-company-builders-firstsource-print-logo.png` to the release package so both the Letter preview and popup print document show the supplied artwork instead of fallback alt text.
+- Resolves the print logo from the active application URL with a v0.218 cache key, avoiding relative-path ambiguity inside the generated popup document.
+- Removed the continuation-sheet sentence beneath the title; page progression remains available in the top-right `List page X of Y` label.
+- Prevented route-first titles from wrapping into an indented second line and added automatic medium/long title scaling for multi-route output.
+- Increased the full weekday date size so it is nearly as prominent as the delivery-list title while remaining visually secondary.
+- Reduced spacing between the totals line and active Filters line in preview and actual print CSS.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.218. Schema version 5 is unchanged.
+
+## v0.217 - Full Weekday Dates and Route-First Delivery Titles
+
+- Standardized delivery-date display text to the full weekday format, such as `Tuesday, August 4, 2026`, across the browser application including Home and Delivery List views.
+- Rebuilt the preview and printed header so the selected destination routes form the primary uppercase title, such as `INDIAN TRAIL DELIVERY LIST`.
+- Uses vertical separators for multi-route headings, such as `GREENVILLE | CPU | DTC DELIVERY LIST`, while retaining Airport as the safe default destination.
+- Places the full weekday date immediately beneath the route title on first and continuation pages.
+- Expanded the adaptive Print / Export date selector width for full weekday labels and custom date ranges.
+- Preserved the supplied monochrome print logo, totals, filters, signoff fields, page numbering, pagination, gray bands, alternating rows, and footer behavior.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.217. Schema version 5 is unchanged.
+
+## v0.216 - Supplied Print Logo and Cleaner Header Metadata
+
+- Added the user-supplied stacked Barefoot Company and Builders FirstSource logo to `static/images` and switched the delivery-list preview and print package to that dedicated asset.
+- Cropped only the broad unused white canvas around the supplied image so the artwork renders larger and cleaner without changing the logo design.
+- Removed the extra sheet-header divider immediately above the column headings on normal, continuation, Rush, and remake pages.
+- Kept the maintained black divider between the column header row and glass-type subheaders.
+- Moved the active Filters summary onto its own line directly beneath `Rows | Orders | QTY` so the metadata order is consistent and easier to scan.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.216. Schema version 5 is unchanged.
+
+## v0.215 - Date-First Branded Print Header and Alternating Rows
+
+- Rebuilt the delivery-list title so the delivery date is the dominant top-left heading in compact `M/D/YY` form, with `Delivery list for <destination>` directly beneath it.
+- Derives the printed destination title from the committed Print / Export Route selection, including maintained multi-route labels when more than one destination is selected.
+- Reuses the existing sidebar Barefoot/Builders FirstSource logo in the preview and generated print document, applying grayscale and contrast treatment so it remains clear on black-and-white paper.
+- Added a solid black divider beneath the column headings and above every glass-type subheader to create a clearer visual break between table structure and grouped products.
+- Added alternating white and light-gray order rows with exact print-color adjustment for improved scanability in preview, color printing, and monochrome printing.
+- Preserved v0.214 pagination, Route centering, first-page signoff fields, compact continuation headers, gray heading bands, remake/rush frames, and repeating Printed at footer.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.215. Schema version 5 is unchanged.
+
+## v0.214 - Fuller Page Capacity and Repeating Print Footer
+
+- Increased Portrait pagination from 23/25 to 25/27 logical rows while continuing to count glass-type headings so bottom rows remain inside Default Letter margins.
+- Increased Landscape pagination from 16/18 to 26/28 logical rows to use the wider page more effectively without allowing rows to enter the footer area.
+- Limited Checked By, Date, and the active filter summary to the first page of each delivery-list section; continuation pages use a compact title and totals header.
+- Moved `Printed at` into a fixed bottom-left footer on every preview and printed page.
+- Center aligned Route in Portrait and Landscape preview/print tables.
+- Strengthened column-header and glass-type subheader gray fills and enabled exact print-color adjustment so those bands appear on paper.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.214. Schema version 5 is unchanged.
+
+## v0.213 - Denser Delivery Sheets and Stable Remake Frames
+
+- Removed the Notes section from every delivery-list page and used the recovered vertical space for additional printable order rows.
+- Increased safe pagination to 23/25 logical rows for Portrait and 16/18 for Landscape while continuing to count glass group headings, preventing bottom-row clipping.
+- Left aligned Route in both the on-screen Letter preview and generated print document.
+- Raised the Check heading and checkbox cells to the same type scale as the other table columns in Portrait and Landscape.
+- Rebuilt the remake dashed frame with a contained printable inset and hidden overflow so no portion can appear on the previous sheet.
+- Added a narrow remake-only content gutter in preview and print output so the dashed frame remains visible without overlapping list content.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.213. Schema version 5 is unchanged.
+
+## v0.212 - Adaptive Print Metadata, Stable Route State, and Table Fit
+
+- Removed Route from the printed filter summary and changed the line to show only unique, active restrictions; completely unfiltered output now reads `Filters: All items`.
+- Shortened delivery-list totals to `Rows | Orders | QTY` so the print header uses less vertical and horizontal space.
+- Made Airport route state authoritative across date changes, panel reopen, preset application, and Portrait/Landscape switching instead of rereading stale visual checkbox markup.
+- Automatically fits Landscape Letter sheets to the available preview width when orientation changes while retaining manual zoom controls.
+- Renamed the compact table headings to `Order`, `Item`, and `QTY`; widened Dimensions, narrowed Customer, widened Route and Check, and restored Route text to the same readable size as the other columns.
+- Moved the remake dashed outline into the physical page-margin area so it surrounds the sheet without overlapping delivery-list content or being clipped by Default print margins.
+- Made the Delivery Date selector width respond to the active label: compact for one date and wider for a custom range.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.212. Schema version 5 is unchanged.
+
+## v0.211 - Letter Preview Parity and Printed Filter Summary
+
+- Rebuilt the Delivery List Preview around physical US Letter dimensions so Portrait uses 8.5 x 11 inches and Landscape uses 11 x 8.5 inches.
+- Matched preview and generated print output to the same 0.4-inch Chrome/Edge Default-margin model instead of using unrelated screen-only sheet padding.
+- Synchronized preview and print title sizes, metadata text, table measurements, column widths, notes boxes, Rush borders, remake borders, and landscape geometry.
+- Added a compact gray `Filters` sentence beneath the totals and above `Printed at` on normal, Rush, remake, and continuation pages.
+- The printed summary records Route, Glass, Status, Attention, exact order/item selection count, and Updated-only mode while compressing large multi-select groups into counts.
+- Kept the remake outline at a consistent printer-safe physical inset from all four Letter-page edges in both preview and print output.
+- Preserved the v0.210 deterministic Airport initialization, exact preview/output rows, system default preset, and schema version 5.
+- Advanced the application contract, visible version, asset cache keys, documentation, and focused structure tests to v0.211.
+
+## v0.210 - Deterministic Initial Airport Route
+
+- Fixed the intermittent state where Airport looked selected when Print / Export opened but was not yet committed for preview, print, or export.
+- Commits the System Default Airport route synchronously before the GUI is exposed or any asynchronous delivery-list detail request begins.
+- Added maintained route normalization so an empty, invalid, or conflicting route set resolves to the complete Airport outbound selection.
+- Prevents initial filter rendering from reading stale route markup left behind by a previous Print / Export session.
+- Replaced the redundant startup reset plus System Default reapplication with one initialization transaction, removing overlapping filter renders.
+- Tracks the active Print / Export open session so a late response from an older or closed session cannot replace current filter state.
+- Makes Print and Export await any in-progress workspace initialization before validating rows and creating output.
+- Preserved the v0.209 preset redesign, system default, landscape printing, print totals, inset remake border, and schema version 5.
+- Advanced the application contract, visible version, asset cache keys, documentation, and focused structure tests to v0.210.
+
+## v0.209 - System Default Preset, Landscape Sheets, and Print Totals
+
+- Moved the Delivery Date selector into the left Filters heading cluster so the active date sits immediately beside the section name instead of floating with the action buttons.
+- Increased Delivery Date, Create Preset, Saved Presets, and Clear Filters typography to a centered 12.5-pixel control style while preserving compact sizing.
+- Completely redesigned Create Preset as a guided two-column workspace with a dedicated name step, system-default explanation, usage guidance, balanced filter cards, and a responsive output-settings area.
+- Added an immutable `System Default` preset available to every user without duplicating it into per-user browser storage.
+- Applies System Default automatically on initial Print / Export open and after Clear Filters: Airport/all outbound items, All Glass, All Status, All Attention, PDF, one copy, and Portrait.
+- Kept user-created presets user-scoped, displayed them after System Default, and blocked users from replacing the reserved system preset name.
+- Added orientation-aware pagination so landscape sheets use their own page-height limits instead of reusing portrait pagination.
+- Designed a true landscape delivery-list sheet with a wider Customer and Dimensions layout, compact row spacing, landscape header geometry, and a reduced notes area.
+- Added Total printable rows, Total orders, and Total QTY metadata above the Printed at timestamp on normal, Rush, remake, and continuation sheets.
+- Replaced the remake sheet's outer dashed border with a printer-safe inset outline in both preview and print output so all four corners remain visible.
+- Kept the v0.208 exact glass-type filtering unchanged after confirming the reported zero-row case was caused by an intentionally selected Remakes attention filter.
+- Advanced the application contract, visible version, asset cache keys, documentation, and focused structure tests to v0.209 while retaining schema version 5.
+
+## v0.208 - Exact Glass Preview State and Centered Header Controls
+
+- Fixed exact glass-type choices showing nonzero chip counts while the Delivery List Preview incorrectly rendered zero printable rows.
+- Made committed route and exact-glass application state authoritative for preview filtering instead of rereading transient controls during asynchronous filter rerenders.
+- Added one maintained glass-type comparison key that normalizes Unicode, common inch/quote marks, repeated whitespace, surrounding whitespace, and letter case while preserving original product labels for display, presets, and output.
+- Captures Airport and exact glass selections before loading placeholders replace the filter controls, preventing a valid route from being lost during a glass selection refresh.
+- Reconciles retained and saved glass selections against the currently loaded product catalog by normalized identity so small formatting differences do not invalidate a selection.
+- Centered the Delivery Date and Saved Presets select labels across their full controls and kept Create Preset and Clear Filters content centered at the same vertical level.
+- Preserved the v0.207 custom-range calendar, Lookup Manager product library, responsive preset layout, exact order/item selection, PDF/XLSX/CSV behavior, and schema version 5.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.208.
+
+## v0.207 - Custom Range Completion, Stable Initial Filters, and Lookup Glass Library
+
+- Removed repeated leading wording from individual delivery-date and applied date-range selector labels.
+- Changed Custom Range to begin a fresh two-click draft when opened from a single date, preserving an existing range only when editing one.
+- Fixed calendar day clicks closing the picker after the grid rerender by using the original composed event path for outside-click detection.
+- Renamed the guarded calendar action to Apply Dates and continued to require both Date From and Date To.
+- Increased Delivery Date, Create Preset, Saved Presets, and Clear Filters typography to match the 10.5-pixel filter-chip content.
+- Added stable route and glass selection snapshots so the initial Airport / All Glass state survives asynchronous choice rendering and exact glass filters work on first selection.
+- Removed active-preset coupling from live glass selection state; applying a preset remains explicit while later manual filter changes remain authoritative.
+- Reorganized Create Preset into complete desktop, medium, and mobile grid areas with Attention, Glass Types, and Output Settings using all available space.
+- Added a lightweight Lookup Manager product-library prefetch and immediate modal enrichment without restoring historical delivery-list requests.
+- Uses every Lookup Manager product value as an exact glass option while displaying its maintained friendly product-name label and searching both value and label.
+- Centralized adoption of Lookup Manager payloads so Print / Export and Manual Delivery List Edit share the same normalized library state.
+- Preserved schema version 5 and advanced the application contract, visible version, cache keys, documentation, and structure tests to v0.207.
+
+## v0.206 - Compact Print Controls, Instant Preset Builder, and Calendar Repair
+
+- Reduced Delivery Date, Create Preset, Saved Presets, and Clear Filters from oversized equal-width controls to compact, purpose-sized controls on one aligned desktop row.
+- Added controlled wrapping and two-column mobile behavior without allowing the four controls to expand unnecessarily.
+- Rebuilt the Create Preset GUI with a polished header, guided preset-name card, clearer filter sections, improved output settings, and responsive footer actions.
+- Added searchable glass-type choices inside the preset builder.
+- Removed historical glass-type quantity totals from preset creation; presets now display and store glass-type labels only.
+- Eliminated the preset modal's full-catalog network wait by collecting glass types from the active workspace, already-loaded list detail, and existing user presets.
+- Fixed Custom Date Range immediately closing when selected from the detached enhanced dropdown menu.
+- Preserved user-specific preset persistence, exact print sessions, PDF/XLSX/CSV output, live preview behavior, and schema version 5.
+- Advanced the application contract, visible version, and Styles/JavaScript cache keys to v0.206.
+
 ## v0.205 - Consistent Header Controls, Range Calendar, and User Presets
 
 - Standardized Delivery Date, Create Preset, Saved Presets, and Clear Filters to the same height, border, radius, typography, and hover treatment.

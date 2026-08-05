@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "205"
+APPLICATION_VERSION = "228"
 CURRENT_SCHEMA_VERSION = 5
 
 TABLE_DESCRIPTIONS = {

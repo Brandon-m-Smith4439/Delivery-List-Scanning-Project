@@ -28672,12 +28672,6 @@ body[data-page="scan"] .app-header {
   white-space: nowrap;
 }
 
-.print-preset-choice-v200 b {
-  margin-left: auto;
-  color: #63768d;
-  font-size: 8px;
-}
-
 .print-preset-order-list-v200 {
   display: flex;
   flex-wrap: wrap;
@@ -29716,7 +29710,6 @@ body[data-page="scan"] .app-header {
 }
 
 .delivery-print-sheet-v203 .checked-line { width: 58px; }
-.delivery-print-sheet-v203 .date-line { width: 72px; }
 
 .delivery-print-sheet-v203 .delivery-print-table {
   width: 100%;
@@ -29764,23 +29757,12 @@ body[data-page="scan"] .app-header {
   font-size: 14px;
 }
 
-.delivery-print-sheet-v203 .notes {
-  min-height: 55px;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 7px;
-  margin-top: 9px;
-  border: 1px solid #333;
-  padding: 7px;
-  font-size: 11px;
-}
-
 .delivery-print-sheet-v203.rush {
   border: 4px double #000;
 }
 
 .delivery-print-sheet-v203.rush .sheet-header {
-  border-bottom: 6px double #000;
+  border-bottom: 0;
 }
 
 .delivery-print-sheet-v203.remake {
@@ -29788,7 +29770,7 @@ body[data-page="scan"] .app-header {
 }
 
 .delivery-print-sheet-v203.remake .sheet-header {
-  border-bottom: 3px dashed #000;
+  border-bottom: 0;
 }
 
 /* Keep the header calendar and bottom search results above the scrolling filter body. */
@@ -30285,16 +30267,15 @@ body[data-page="scan"] .app-header {
   font-size: 8.8px;
 }
 
-.delivery-print-sheet-v203 .notes {
-  min-height: 58px;
+.delivery-print-sheet-v203 th:nth-child(7),
+.delivery-print-sheet-v203 td:nth-child(7) {
+  padding-inline: 2px;
+  text-align: center;
 }
 
-.delivery-print-sheet-v203 th:nth-child(7),
-.delivery-print-sheet-v203 td:nth-child(7),
 .delivery-print-sheet-v203 th:nth-child(8),
 .delivery-print-sheet-v203 td:nth-child(8) {
   padding-inline: 2px;
-  font-size: 8.2px;
   text-align: center;
 }
 
@@ -30452,20 +30433,27 @@ body[data-page="scan"] .app-header {
 /* v0.205 consistent print controls, range calendar, and user preset state    */
 /* ========================================================================== */
 .print-pane-heading-v203 {
-  grid-template-columns: auto minmax(620px, 1fr);
-  min-height: 72px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 58px;
 }
 
 .print-filter-header-actions-v205 {
-  width: min(780px, 100%);
-  display: grid;
-  grid-template-columns: repeat(4, minmax(138px, 1fr));
+  width: auto;
+  display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   justify-self: end;
-  gap: 8px;
+  gap: 6px;
 }
 
-.print-header-control-v205,
+.print-filter-header-actions-v205 > * {
+  align-self: center;
+}
+
+.print-header-control-v205 {
+  min-width: 0;
+}
+
 .print-header-control-v205 .custom-select-shell,
 .print-header-control-v205 .custom-select-trigger,
 .print-header-control-v205 > label,
@@ -30476,24 +30464,49 @@ body[data-page="scan"] .app-header {
 
 .print-header-control-v205:is(button),
 .print-header-control-v205 .custom-select-trigger {
-  min-height: 40px !important;
-  height: 40px !important;
-  border: 1px solid #9eb6d2 !important;
-  border-radius: 9px !important;
-  background: linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%) !important;
+  min-height: 34px !important;
+  height: 34px !important;
+  border: 1px solid #a9bdd5 !important;
+  border-radius: 8px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%) !important;
   color: #173f70 !important;
-  padding: 0 12px !important;
+  padding: 0 10px !important;
   font-size: 10.5px !important;
   font-weight: 900 !important;
   line-height: 1 !important;
-  box-shadow: 0 4px 11px rgba(7, 42, 99, .06) !important;
+  text-align: center !important;
+  box-shadow: 0 3px 8px rgba(7, 42, 99, .05) !important;
+}
+
+/* Keep date and preset select text centered across the complete control while
+   reserving equal space for the optional status indicator and dropdown arrow. */
+.print-header-control-v205 .custom-select-trigger {
+  grid-template-columns: 18px minmax(0, 1fr) 18px;
+  gap: 0;
+}
+
+.print-header-control-v205 .custom-select-value {
+  grid-column: 2;
+  width: 100%;
+  text-align: center;
+}
+
+.print-header-control-v205 .custom-select-value-indicator {
+  grid-column: 1;
+  justify-self: center;
+}
+
+.print-header-control-v205 .custom-select-arrow {
+  grid-column: 3;
+  justify-self: center;
 }
 
 .print-header-control-v205:is(button) {
+  width: auto !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
   white-space: nowrap;
 }
 
@@ -30509,12 +30522,28 @@ body[data-page="scan"] .app-header {
 }
 
 .print-header-date-control-v203 {
-  min-width: 0;
+  width: 210px;
+  min-width: 210px;
+  flex: 0 0 210px;
+}
+
+.print-preset-select-control-v205 {
+  width: 154px;
+  min-width: 154px;
+  flex: 0 0 154px;
+}
+
+.print-create-preset-v202 {
+  min-width: 118px !important;
+}
+
+.print-pane-heading-v197 > .print-clear-filters-v200 {
+  min-width: 108px !important;
 }
 
 .print-create-preset-v202,
 .print-pane-heading-v197 > .print-clear-filters-v200 {
-  min-height: 40px !important;
+  min-height: 34px !important;
 }
 
 .print-date-calendar-v205 {
@@ -30660,19 +30689,6 @@ body[data-page="scan"] .app-header {
   text-align: center;
 }
 
-.print-preset-loading-v205 {
-  grid-column: 1 / -1;
-  min-height: 130px;
-  display: grid;
-  place-items: center;
-  border: 1px dashed #b9cade;
-  border-radius: 12px;
-  background: #f8fbff;
-  color: #526b87;
-  font-size: 12px;
-  font-weight: 850;
-}
-
 @media (max-width: 1280px) {
   .print-pane-heading-v203 {
     grid-template-columns: 1fr;
@@ -30681,12 +30697,23 @@ body[data-page="scan"] .app-header {
   .print-filter-header-actions-v205 {
     width: 100%;
     justify-self: stretch;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 
 @media (max-width: 820px) {
   .print-filter-header-actions-v205 {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .print-header-date-control-v203,
+  .print-preset-select-control-v205,
+  .print-create-preset-v202,
+  .print-pane-heading-v197 > .print-clear-filters-v200 {
+    width: 100% !important;
+    min-width: 0 !important;
   }
 
   .print-date-calendar-v205 {
@@ -30714,5 +30741,2713 @@ body[data-page="scan"] .app-header {
 
   .print-calendar-footer-v205 > span {
     text-align: left;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.206 compact print header, instant preset builder, and calendar repair   */
+/* ========================================================================== */
+.print-preset-backdrop-v206 {
+  background: rgba(6, 22, 48, .62);
+  backdrop-filter: blur(6px);
+}
+
+.print-preset-modal-v206 {
+  width: min(1040px, calc(100vw - 34px));
+  max-height: min(900px, calc(100vh - 34px));
+  border: 1px solid #9fb6d2;
+  border-radius: 18px;
+  background: #f4f7fb;
+  box-shadow: 0 34px 90px rgba(3, 18, 43, .38);
+}
+
+.print-preset-modal-v206 > .print-preset-hero-v206 {
+  grid-template-columns: 48px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 14px;
+  background: linear-gradient(135deg, #0a2d62 0%, #1558a2 72%, #2473c5 100%);
+  padding: 18px 20px;
+}
+
+.print-preset-hero-icon-v206 {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .3);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2);
+}
+
+.print-preset-hero-icon-v206::before,
+.print-preset-hero-icon-v206::after {
+  content: "";
+  position: absolute;
+  border-radius: 2px;
+  background: #fff;
+}
+
+.print-preset-hero-icon-v206::before {
+  width: 20px;
+  height: 3px;
+}
+
+.print-preset-hero-icon-v206::after {
+  width: 3px;
+  height: 20px;
+}
+
+.print-preset-modal-v206 h3 {
+  margin-top: 3px;
+  font-size: 23px;
+  letter-spacing: -.015em;
+}
+
+.print-preset-modal-v206 .print-preset-hero-v206 p {
+  max-width: 720px;
+  margin-top: 5px;
+  font-size: 11px;
+}
+
+.print-preset-modal-body-v206 {
+  gap: 12px;
+  background: #f4f7fb;
+  padding: 16px 18px 12px;
+}
+
+.print-preset-name-card-v206 {
+  display: grid;
+  grid-template-columns: minmax(210px, .72fr) minmax(300px, 1.28fr);
+  align-items: center;
+  gap: 16px;
+  border: 1px solid #c9d8e8;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px 14px;
+  box-shadow: 0 5px 14px rgba(13, 49, 93, .055);
+}
+
+.print-preset-name-card-v206 > div,
+.print-preset-name-card-v206 > label {
+  display: grid;
+  gap: 4px;
+}
+
+.print-preset-name-card-v206 > div strong,
+.print-preset-builder-heading-v206 strong {
+  color: #143965;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.print-preset-name-card-v206 > div span,
+.print-preset-builder-heading-v206 div span {
+  color: #667b93;
+  font-size: 9.5px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.print-preset-name-card-v206 label > span {
+  color: #526b87 !important;
+  font-size: 8.5px !important;
+  letter-spacing: .05em;
+  text-transform: uppercase !important;
+}
+
+.print-preset-name-card-v206 input {
+  min-height: 39px;
+  border-color: #aebfd3;
+  border-radius: 8px;
+  background: #fbfdff;
+  padding-inline: 12px;
+  font-size: 11px;
+}
+
+.print-preset-name-card-v206 input:focus {
+  outline: none;
+  border-color: #2868d1;
+  box-shadow: 0 0 0 3px rgba(40, 104, 209, .12);
+}
+
+.print-preset-builder-heading-v206 {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 0;
+}
+
+.print-preset-builder-heading-v206 > div {
+  display: grid;
+  gap: 2px;
+}
+
+.print-preset-builder-heading-v206 > span {
+  border: 1px solid #b7cbe3;
+  border-radius: 999px;
+  background: #eaf2ff;
+  color: #1b579f;
+  padding: 4px 9px;
+  font-size: 8.5px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+/* v0.207 fills every desktop grid cell and keeps related controls together. */
+.print-preset-builder-v206 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-areas:
+    "routes statuses attention"
+    "glass glass output";
+  align-items: start;
+  gap: 10px;
+}
+
+.print-preset-builder-section-v206[data-preset-group="routes"] { grid-area: routes; }
+.print-preset-builder-section-v206[data-preset-group="statuses"] { grid-area: statuses; }
+.print-preset-builder-section-v206[data-preset-group="attention"] { grid-area: attention; }
+
+.print-preset-builder-section-v206 {
+  position: relative;
+  gap: 9px;
+  overflow: hidden;
+  border-color: #c9d8e8;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  box-shadow: 0 5px 14px rgba(13, 49, 93, .05);
+}
+
+.print-preset-builder-section-v206::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: #4a88cf;
+}
+
+.print-preset-builder-section-v206[data-preset-group="statuses"]::before {
+  background: #21886d;
+}
+
+.print-preset-builder-section-v206[data-preset-group="attention"]::before {
+  background: #c56b24;
+}
+
+.print-preset-builder-section-v206[data-preset-group="glass"] {
+  grid-area: glass;
+}
+
+.print-preset-builder-section-v206[data-preset-group="glass"]::before {
+  background: #7752ba;
+}
+
+.print-preset-builder-section-v206 > header {
+  align-items: start;
+  padding-left: 2px;
+}
+
+.print-preset-builder-section-v206 > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.print-preset-builder-section-v206 > header strong {
+  font-size: 11.5px;
+}
+
+.print-preset-builder-section-v206 > header small {
+  color: #71839a;
+  font-size: 8.5px;
+  font-weight: 720;
+  line-height: 1.3;
+}
+
+.print-preset-builder-section-v206 > header > span {
+  border-radius: 999px;
+  background: #edf3fa;
+  color: #4b647f;
+  padding: 3px 7px;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.print-preset-choice-grid-v206 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 178px;
+  padding-right: 2px;
+}
+
+.print-preset-builder-section-v206[data-preset-group="glass"] .print-preset-choice-grid-v206 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-height: 220px;
+}
+
+.print-preset-choice-v206 {
+  min-height: 35px;
+  border-color: #ccd9e7;
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 6px 8px;
+  font-size: 9.5px;
+  transition: border-color .14s ease, background .14s ease, box-shadow .14s ease, transform .14s ease;
+}
+
+.print-preset-choice-v206:hover {
+  border-color: #7fa7d5;
+  background: #f2f7fd;
+  transform: translateY(-1px);
+}
+
+.print-preset-choice-v206:has(input:checked) {
+  border-color: #3476c4;
+  background: #eaf3ff;
+  box-shadow: 0 0 0 2px rgba(40, 104, 209, .08);
+}
+
+.print-preset-choice-v206 input {
+  accent-color: #2868d1;
+}
+
+.print-preset-glass-search-v206 {
+  display: block;
+}
+
+.print-preset-glass-search-v206 input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #bacadd;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 0 11px;
+  color: #173f70;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.print-preset-glass-search-v206 input:focus {
+  outline: none;
+  border-color: #2868d1;
+  box-shadow: 0 0 0 3px rgba(40, 104, 209, .1);
+}
+
+.print-preset-glass-empty-v206 {
+  grid-column: 1 / -1;
+  border: 1px dashed #b9cade;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #647b94;
+  padding: 14px;
+  font-size: 9.5px;
+  font-style: normal;
+  text-align: center;
+}
+
+.print-preset-output-section-v202.print-preset-builder-section-v206 {
+  grid-area: output;
+}
+
+.print-preset-output-grid-v202 {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.print-preset-output-grid-v202 label,
+.print-preset-orientation-v203 {
+  border: 1px solid #d1dce9;
+  border-radius: 9px;
+  background: #f8fbff;
+  padding: 8px;
+}
+
+.print-preset-status-v206 {
+  min-height: 16px;
+  color: #526f8e;
+  padding-inline: 2px;
+}
+
+.print-preset-modal-v206 > .print-preset-footer-v206 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: #fff;
+  padding: 12px 18px;
+}
+
+.print-preset-footer-v206 > span {
+  color: #687d94;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.print-preset-footer-v206 > div {
+  display: flex;
+  gap: 8px;
+}
+
+.print-preset-modal-v206 .print-preset-footer-v206 button {
+  min-height: 38px;
+  border-radius: 8px;
+}
+
+@media (max-width: 960px) {
+  .print-preset-builder-v206 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "routes statuses"
+      "attention output"
+      "glass glass";
+  }
+}
+
+@media (max-width: 840px) {
+  .print-preset-modal-v206 > .print-preset-hero-v206 {
+    grid-template-columns: 40px minmax(0, 1fr) 36px;
+  }
+
+  .print-preset-hero-icon-v206 {
+    width: 40px;
+    height: 40px;
+  }
+
+  .print-preset-name-card-v206,
+  .print-preset-output-grid-v202 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .print-preset-builder-v206 {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "routes"
+      "statuses"
+      "attention"
+      "glass"
+      "output";
+  }
+
+  .print-preset-builder-section-v206[data-preset-group="glass"] .print-preset-choice-grid-v206,
+  .print-preset-choice-grid-v206 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .print-preset-modal-v206 > .print-preset-footer-v206 {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .print-preset-footer-v206 > div,
+  .print-preset-footer-v206 button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .print-preset-builder-section-v206[data-preset-group="glass"] .print-preset-choice-grid-v206,
+  .print-preset-choice-grid-v206 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ========================================================================== */
+/* v0.212 print header, adaptive date, and paper-layout refinements          */
+/* ========================================================================== */
+.print-pane-heading-v209 {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.print-filter-heading-cluster-v209 {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.print-filter-heading-cluster-v209 .print-filter-heading-title-v203 {
+  flex: 0 0 auto;
+}
+
+.print-filter-heading-cluster-v209 .print-header-date-control-v203 {
+  --print-date-control-width: 170px;
+  width: var(--print-date-control-width);
+  min-width: var(--print-date-control-width);
+  flex: 0 0 var(--print-date-control-width);
+  transition: width 140ms ease, min-width 140ms ease, flex-basis 140ms ease;
+}
+
+.print-filter-header-actions-v209 {
+  justify-self: end;
+}
+
+.print-header-control-v209:is(button),
+.print-header-control-v209 .custom-select-trigger {
+  min-height: 36px !important;
+  height: 36px !important;
+  font-size: 12.5px !important;
+  letter-spacing: -.01em;
+  text-align: center !important;
+}
+
+.print-header-control-v209 .custom-select-value {
+  text-align: center !important;
+}
+
+.print-header-control-v209:is(button) {
+  justify-content: center !important;
+}
+
+.print-preset-select-control-v205.print-header-control-v209 {
+  width: 170px;
+  min-width: 170px;
+  flex-basis: 170px;
+}
+
+.print-create-preset-v202.print-header-control-v209 {
+  min-width: 132px !important;
+}
+
+.print-clear-filters-v200.print-header-control-v209 {
+  min-width: 122px !important;
+}
+
+.print-preset-backdrop-v209 {
+  background: rgba(4, 17, 39, .72);
+  backdrop-filter: blur(9px);
+}
+
+.print-preset-modal-v209 {
+  width: min(1180px, calc(100vw - 30px));
+  max-height: min(920px, calc(100vh - 30px));
+  overflow: hidden;
+  border: 1px solid rgba(151, 181, 217, .92);
+  border-radius: 22px;
+  background: #eef3f9;
+  box-shadow: 0 40px 110px rgba(1, 12, 31, .5);
+}
+
+.print-preset-hero-v209 {
+  min-height: 92px;
+  background:
+    radial-gradient(circle at 86% -35%, rgba(94, 164, 255, .55), transparent 42%),
+    linear-gradient(120deg, #092a5d 0%, #164f98 58%, #1f67b8 100%) !important;
+  padding: 20px 24px !important;
+}
+
+.print-preset-hero-v209 h3 {
+  font-size: 25px;
+}
+
+.print-preset-hero-v209 p {
+  font-size: 11.5px !important;
+}
+
+.print-preset-modal-body-v209 {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 16px;
+  overflow: auto;
+  background: #eef3f9;
+  padding: 16px 18px !important;
+}
+
+.print-preset-sidebar-v209 {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.print-preset-name-card-v209 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  border: 1px solid #b9cde4;
+  border-radius: 15px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 16px;
+  box-shadow: 0 9px 22px rgba(11, 46, 89, .08);
+}
+
+.print-preset-name-card-v209 > div strong {
+  font-size: 15px;
+}
+
+.print-preset-name-card-v209 > div span:not(.print-preset-step-label-v209) {
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.print-preset-name-card-v209 input {
+  min-height: 44px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.print-preset-step-label-v209 {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  border: 1px solid #9fc0e7;
+  border-radius: 999px;
+  background: #e8f2ff;
+  color: #15579f !important;
+  padding: 0 9px;
+  font-size: 8.5px !important;
+  font-weight: 950 !important;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.print-preset-default-card-v209,
+.print-preset-guide-v209 {
+  border: 1px solid #c6d6e7;
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px;
+  box-shadow: 0 6px 17px rgba(11, 46, 89, .055);
+}
+
+.print-preset-default-card-v209 {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border-color: #a8cfbe;
+  background: linear-gradient(180deg, #f8fffb 0%, #effaf5 100%);
+}
+
+.print-preset-default-icon-v209 {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #238365;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.print-preset-default-card-v209 strong,
+.print-preset-guide-v209 > strong {
+  color: #173b65;
+  font-size: 11.5px;
+  font-weight: 950;
+}
+
+.print-preset-default-card-v209 p {
+  margin: 4px 0 0;
+  color: #5d748c;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.print-preset-guide-v209 ol {
+  display: grid;
+  gap: 8px;
+  margin: 11px 0 0;
+  padding-left: 19px;
+  color: #5a718a;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.print-preset-status-v209 {
+  min-height: 34px;
+  margin: auto 0 0;
+  border: 1px solid #c3d5e8;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .8);
+  padding: 9px 10px;
+  color: #4f6d8d;
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
+.print-preset-main-v209 {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 11px;
+}
+
+.print-preset-builder-heading-v209 {
+  align-items: center;
+  border: 1px solid #c5d7e9;
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px 14px;
+  box-shadow: 0 6px 17px rgba(11, 46, 89, .055);
+}
+
+.print-preset-builder-heading-v209 > div {
+  gap: 4px;
+}
+
+.print-preset-builder-heading-v209 strong {
+  font-size: 14px;
+}
+
+.print-preset-builder-heading-v209 div > span:not(.print-preset-step-label-v209) {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.print-preset-builder-v209 {
+  grid-template-columns: minmax(235px, .78fr) minmax(360px, 1.22fr);
+  grid-template-areas:
+    "routes glass"
+    "statuses glass"
+    "attention output";
+  align-content: start;
+  gap: 11px;
+}
+
+.print-preset-builder-v209 .print-preset-builder-section-v206 {
+  min-height: 0;
+  border-radius: 14px;
+  padding: 13px 13px 13px 15px;
+}
+
+.print-preset-builder-v209 .print-preset-builder-section-v206 > header strong {
+  font-size: 12px;
+}
+
+.print-preset-builder-v209 .print-preset-builder-section-v206 > header small {
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.print-preset-builder-v209 .print-preset-choice-grid-v206 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 170px;
+  gap: 7px;
+}
+
+.print-preset-builder-v209 .print-preset-builder-section-v206[data-preset-group="glass"] .print-preset-choice-grid-v206 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-height: 334px;
+}
+
+.print-preset-builder-v209 .print-preset-choice-v206 {
+  min-height: 38px;
+  padding: 7px 9px;
+  font-size: 10px;
+}
+
+.print-preset-builder-v209 .print-preset-glass-search-v206 input {
+  min-height: 39px;
+  font-size: 10.5px;
+}
+
+.print-preset-builder-v209 .print-preset-output-grid-v202 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.print-preset-builder-v209 .print-preset-orientation-v203 {
+  grid-column: 1 / -1;
+}
+
+.print-preset-footer-v209 {
+  min-height: 66px;
+  border-top: 1px solid #c6d5e5;
+  padding: 13px 20px !important;
+}
+
+.print-preset-footer-v209 > span {
+  font-size: 9.5px;
+}
+
+.print-preset-footer-v209 button {
+  min-width: 118px;
+  min-height: 42px !important;
+  font-size: 11px;
+}
+
+.delivery-print-sheet-v203 {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  width: 8.5in !important;
+  min-width: 8.5in;
+  max-width: 8.5in;
+  height: 11in;
+  min-height: 11in;
+  margin: 0 !important;
+  border: 1px solid #aab5c2;
+  border-radius: 2px;
+  background: #fff;
+  padding: .4in;
+  overflow: hidden;
+  box-shadow: 0 18px 42px rgba(20, 43, 69, .2);
+}
+
+.delivery-print-sheet-v203 > * {
+  position: relative;
+  z-index: 1;
+}
+
+.delivery-print-sheet-v203 .sheet-page-top {
+  margin-bottom: 5px;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: right;
+}
+
+.delivery-print-sheet-v203 .sheet-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 0;
+  margin-bottom: 8px;
+  padding-bottom: 7px;
+}
+
+.delivery-print-sheet-v203 .sheet-brand-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.delivery-print-sheet-v203 .sheet-brand-mark {
+  width: .92in;
+  height: .82in;
+  flex: 0 0 .92in;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #fff;
+}
+
+.delivery-print-sheet-v203 .sheet-brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: grayscale(1) contrast(1.22);
+  mix-blend-mode: multiply;
+}
+
+.delivery-print-sheet-v203 .sheet-title-block {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: visible;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact {
+  align-items: center;
+  margin-bottom: 7px;
+  border-bottom: 0;
+  padding-bottom: 6px;
+}
+
+.delivery-print-sheet-v203 h1,
+.delivery-print-sheet-v203 h2 {
+  margin: 0;
+}
+
+.delivery-print-sheet-v203 .sheet-location-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.delivery-print-sheet-v203 .sheet-location-title {
+  margin: 0;
+  color: #111;
+  font-size: 23px;
+  font-weight: 950;
+  line-height: 1.03;
+  letter-spacing: .01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.delivery-print-sheet-v203 .sheet-location-row.is-medium .sheet-location-title {
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.delivery-print-sheet-v203 .sheet-location-row.is-long .sheet-location-title {
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.delivery-print-sheet-v203 .sheet-date-title {
+  margin: 3px 0 0;
+  color: #26313f;
+  font-size: 20px;
+  font-weight: 850;
+  line-height: 1.05;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-location-title {
+  font-size: 20px;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-date-title {
+  margin-top: 2px;
+  font-size: 17px;
+}
+
+.delivery-print-sheet-v203 .sheet-totals,
+.delivery-print-sheet-v203 .sheet-filter-summary,
+.delivery-print-sheet-v203 .printed-at {
+  color: #6b778a;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.delivery-print-sheet-v203 .sheet-totals {
+  display: block;
+  margin: 4px 0 0;
+  line-height: 1.05;
+}
+
+.delivery-print-sheet-v203 .sheet-filter-summary {
+  display: block;
+  max-width: 100%;
+  margin: 1px 0 0;
+  line-height: 1.05;
+}
+
+.delivery-print-sheet-v203 .sheet-footer {
+  position: absolute;
+  left: .4in;
+  bottom: .14in;
+  z-index: 2;
+}
+
+.delivery-print-sheet-v203 .sheet-filter-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delivery-print-sheet-v203 .sheet-badge {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #072a63;
+  border-radius: 999px;
+  background: #eaf2ff;
+  color: #041a3d;
+  padding: 0 11px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.delivery-print-sheet-v203 .copy-box {
+  width: auto;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid #333;
+  padding: 8px 10px;
+  font-size: 16px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.delivery-print-sheet-v203 .write-line {
+  display: inline-block;
+  height: 1em;
+  border-bottom: 1px solid #333;
+  vertical-align: -2px;
+}
+
+.delivery-print-sheet-v203 .checked-line { width: 82px; }
+
+.delivery-print-sheet-v203 .delivery-print-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12.25px;
+  line-height: 1.22;
+}
+
+.delivery-print-sheet-v203 .job-col { width: 25%; }
+.delivery-print-sheet-v203 .order-col { width: 8%; }
+.delivery-print-sheet-v203 .item-col { width: 7%; }
+.delivery-print-sheet-v203 .qty-col { width: 5.8%; }
+.delivery-print-sheet-v203 .dimensions-col { width: 20.2%; }
+.delivery-print-sheet-v203 .customer-col { width: 20%; }
+.delivery-print-sheet-v203 .route-col { width: 8%; }
+.delivery-print-sheet-v203 .check-col { width: 6%; }
+
+.delivery-print-sheet-v203 th,
+.delivery-print-sheet-v203 td {
+  border: 1px solid #d9e1ee;
+  padding: 6px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.delivery-print-sheet-v203 th {
+  background: #dfe3e8;
+  color: #041a3d;
+  border-bottom: 2px solid #000;
+  font-size: 11.5px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.delivery-print-sheet-v203 th:nth-child(7) {
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.delivery-print-sheet-v203 td:nth-child(7) {
+  font-size: 12.25px;
+  text-align: center;
+}
+
+.delivery-print-sheet-v203 th:nth-child(8) {
+  padding-inline: 4px;
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.delivery-print-sheet-v203 td:nth-child(8) {
+  padding-inline: 4px;
+  font-size: 12.25px;
+  text-align: center;
+}
+
+.delivery-print-sheet-v203 .glass-group td {
+  background: #dfe3e8;
+  border-top: 2px solid #000;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.delivery-print-sheet-v203 .print-data-row.is-even td {
+  background: #f1f2f4;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.delivery-print-sheet-v203 .print-data-row.is-odd td {
+  background: #fff;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.delivery-print-sheet-v203 .check-cell {
+  font-size: 12.25px;
+  text-align: center;
+}
+
+.delivery-print-sheet-v203.rush,
+.delivery-print-sheet-v203.remake {
+  border: 1px solid #aab5c2 !important;
+}
+
+.delivery-print-sheet-v203.rush::before,
+.delivery-print-sheet-v203.remake::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.delivery-print-sheet-v203.rush::before {
+  inset: .49in;
+  border: 4px double #000;
+}
+
+.delivery-print-sheet-v203.rush .sheet-header {
+  border-bottom: 0;
+}
+
+.delivery-print-sheet-v203.remake,
+.delivery-print-sheet-v203.is-landscape.remake {
+  padding: .5in;
+}
+
+.delivery-print-sheet-v203.remake::after {
+  inset: .42in;
+  border: 2.5px dashed #000;
+}
+
+.delivery-print-sheet-v203.remake .sheet-header {
+  border-bottom: 0;
+}
+
+.delivery-print-sheet-v203.is-landscape {
+  width: 11in !important;
+  min-width: 11in;
+  max-width: 11in;
+  height: 8.5in;
+  min-height: 8.5in;
+  padding: .4in;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header {
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 7px;
+  padding-bottom: 7px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-brand-title { gap: 9px; }
+.delivery-print-sheet-v203.is-landscape .sheet-brand-mark { width: .82in; height: .68in; flex-basis: .82in; }
+.delivery-print-sheet-v203.is-landscape .sheet-location-title { font-size: 21px; }
+.delivery-print-sheet-v203.is-landscape .sheet-location-row.is-medium .sheet-location-title { font-size: 18px; }
+.delivery-print-sheet-v203.is-landscape .sheet-location-row.is-long .sheet-location-title { font-size: 15px; }
+.delivery-print-sheet-v203.is-landscape .sheet-date-title { font-size: 17px; }
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-location-title { font-size: 18px; }
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-date-title { font-size: 15px; }
+
+.delivery-print-sheet-v203.is-landscape .sheet-totals,
+.delivery-print-sheet-v203.is-landscape .sheet-filter-summary,
+.delivery-print-sheet-v203.is-landscape .printed-at {
+  font-size: 9px;
+}
+
+.delivery-print-sheet-v203.is-landscape .copy-box {
+  gap: 12px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.delivery-print-sheet-v203.is-landscape .checked-line { width: 70px; }
+
+.delivery-print-sheet-v203.is-landscape .delivery-print-table {
+  font-size: 10.75px;
+  line-height: 1.14;
+}
+
+.delivery-print-sheet-v203.is-landscape .job-col { width: 21%; }
+.delivery-print-sheet-v203.is-landscape .order-col { width: 7%; }
+.delivery-print-sheet-v203.is-landscape .item-col { width: 6%; }
+.delivery-print-sheet-v203.is-landscape .qty-col { width: 5.8%; }
+.delivery-print-sheet-v203.is-landscape .dimensions-col { width: 22.2%; }
+.delivery-print-sheet-v203.is-landscape .customer-col { width: 24%; }
+.delivery-print-sheet-v203.is-landscape .route-col { width: 8%; }
+.delivery-print-sheet-v203.is-landscape .check-col { width: 6%; }
+
+.delivery-print-sheet-v203.is-landscape th,
+.delivery-print-sheet-v203.is-landscape td {
+  padding: 4px 6px;
+}
+
+.delivery-print-sheet-v203.is-landscape th { font-size: 10px; }
+.delivery-print-sheet-v203.is-landscape th:nth-child(7) {
+  font-size: 10px;
+  text-align: center;
+}
+.delivery-print-sheet-v203.is-landscape td:nth-child(7) {
+  font-size: 10.75px;
+  text-align: center;
+}
+.delivery-print-sheet-v203.is-landscape th:nth-child(8) { font-size: 10px; }
+.delivery-print-sheet-v203.is-landscape td:nth-child(8),
+.delivery-print-sheet-v203.is-landscape .check-cell { font-size: 10.75px; }
+.delivery-print-sheet-v203.is-landscape .glass-group td { font-size: 10.5px; }
+
+@media (max-width: 1280px) {
+  .print-pane-heading-v209 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .print-filter-header-actions-v209 {
+    width: 100%;
+    justify-self: stretch;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 980px) {
+  .print-preset-modal-body-v209 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .print-preset-sidebar-v209 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .print-preset-name-card-v209,
+  .print-preset-status-v209 {
+    grid-column: 1 / -1;
+  }
+
+  .print-preset-builder-v209 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "routes statuses"
+      "attention output"
+      "glass glass";
+  }
+}
+
+@media (max-width: 720px) {
+  .print-filter-heading-cluster-v209 {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .print-filter-heading-cluster-v209 .print-header-date-control-v203 {
+    width: 100%;
+    min-width: 0;
+    flex-basis: auto;
+  }
+
+  .print-preset-sidebar-v209,
+  .print-preset-builder-v209,
+  .print-preset-builder-v209 .print-preset-output-grid-v202 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .print-preset-builder-v209 {
+    grid-template-areas:
+      "routes"
+      "statuses"
+      "attention"
+      "glass"
+      "output";
+  }
+
+  .print-preset-builder-v209 .print-preset-builder-section-v206[data-preset-group="glass"] .print-preset-choice-grid-v206,
+  .print-preset-builder-v209 .print-preset-choice-grid-v206 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 500px) {
+  .print-preset-builder-v209 .print-preset-builder-section-v206[data-preset-group="glass"] .print-preset-choice-grid-v206,
+  .print-preset-builder-v209 .print-preset-choice-grid-v206 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.print-preset-status-v209:empty::before {
+  content: "Ready to create a reusable print setup.";
+  color: #71869d;
+}
+
+
+/* ========================================================================== */
+/* v0.219 shared preview/print header alignment and portrait zoom             */
+/* ========================================================================== */
+/* The popup print document now loads this same stylesheet. Keep all visual
+   delivery-sheet rules here so preview and paper cannot drift independently. */
+.delivery-print-sheet-v203 .sheet-header {
+  align-items: flex-start;
+}
+
+.delivery-print-sheet-v203 .sheet-date-title {
+  white-space: nowrap;
+}
+
+.delivery-print-sheet-v203 .copy-box {
+  align-self: flex-start;
+  flex-wrap: nowrap;
+  margin-top: 24px;
+}
+
+.delivery-print-sheet-v203 .copy-box > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header {
+  align-items: flex-start;
+}
+
+.delivery-print-sheet-v203.is-landscape .copy-box {
+  margin-top: 18px;
+}
+
+
+/* ========================================================================== */
+/* v0.220 Print / Export visual hierarchy and compact signoff                 */
+/* ========================================================================== */
+/* Route, glass, status, and attention chips use maintained workflow colors.
+   These rules intentionally live after earlier compatibility styles so one
+   shared visual language controls both normal and selected states. */
+.print-filter-chip-v197 {
+  --print-chip-soft-start: #ffffff;
+  --print-chip-soft-end: #f6f9fd;
+  --print-chip-active-start: #367bef;
+  --print-chip-active-end: #205fc9;
+  --print-chip-active-shadow: rgba(32, 95, 201, .22);
+  border-color: var(--print-chip-border, #c4d2e2);
+  background: linear-gradient(135deg, var(--print-chip-soft-start) 0%, var(--print-chip-soft-end) 100%);
+  color: var(--print-chip-color, #123f72);
+}
+
+.print-filter-chip-v197:has(input:checked) {
+  border-color: var(--print-chip-active, var(--print-chip-active-end));
+  background: linear-gradient(135deg, var(--print-chip-active-start) 0%, var(--print-chip-active-end) 100%);
+  box-shadow: 0 7px 16px var(--print-chip-active-shadow);
+}
+
+.print-filter-chip-v197.is-route-airport {
+  --print-chip-border: #86a9df;
+  --print-chip-color: #113f80;
+  --print-chip-soft-start: #f2f7ff;
+  --print-chip-soft-end: #dce9ff;
+  --print-chip-active-start: #245fb8;
+  --print-chip-active-end: #113e82;
+  --print-chip-active-shadow: rgba(17, 62, 130, .25);
+}
+
+.print-filter-chip-v197.is-route-indian-trail {
+  --print-chip-border: #91b7ee;
+  --print-chip-color: #1754a5;
+  --print-chip-soft-start: #f1f7ff;
+  --print-chip-soft-end: #d9e9ff;
+  --print-chip-active-start: #3d82ee;
+  --print-chip-active-end: #1e5ebc;
+  --print-chip-active-shadow: rgba(30, 94, 188, .24);
+}
+
+.print-filter-chip-v197.is-route-greenville {
+  --print-chip-border: #76cdb8;
+  --print-chip-color: #0b6d5e;
+  --print-chip-soft-start: #effcf8;
+  --print-chip-soft-end: #d4f4eb;
+  --print-chip-active-start: #20a589;
+  --print-chip-active-end: #0d7764;
+  --print-chip-active-shadow: rgba(13, 119, 100, .24);
+}
+
+.print-filter-chip-v197.is-route-cpu {
+  --print-chip-border: #e3c35a;
+  --print-chip-color: #785200;
+  --print-chip-soft-start: #fffdf2;
+  --print-chip-soft-end: #ffefb8;
+  --print-chip-active-start: #d8ad2c;
+  --print-chip-active-end: #a87800;
+  --print-chip-active-shadow: rgba(168, 120, 0, .24);
+}
+
+.print-filter-chip-v197.is-route-dtc {
+  --print-chip-border: #e4a0c4;
+  --print-chip-color: #982b62;
+  --print-chip-soft-start: #fff5fa;
+  --print-chip-soft-end: #f9d9e9;
+  --print-chip-active-start: #d75d9d;
+  --print-chip-active-end: #a63171;
+  --print-chip-active-shadow: rgba(166, 49, 113, .23);
+}
+
+.print-filter-chip-v197.is-status-all,
+.print-filter-chip-v197.is-attention-all,
+.print-filter-chip-v197.is-glass-all {
+  --print-chip-border: #8faad0;
+  --print-chip-color: #143f72;
+  --print-chip-soft-start: #f4f8fd;
+  --print-chip-soft-end: #e2ebf7;
+  --print-chip-active-start: #315f9d;
+  --print-chip-active-end: #163f75;
+  --print-chip-active-shadow: rgba(22, 63, 117, .22);
+}
+
+.print-filter-chip-v197.is-status-not-scanned {
+  --print-chip-border: #aeb9c7;
+  --print-chip-color: #4b596a;
+  --print-chip-soft-start: #fafbfc;
+  --print-chip-soft-end: #e7ebef;
+  --print-chip-active-start: #7d8a99;
+  --print-chip-active-end: #596676;
+  --print-chip-active-shadow: rgba(89, 102, 118, .22);
+}
+
+.print-filter-chip-v197.is-status-partial {
+  --print-chip-border: #e7bf6f;
+  --print-chip-color: #83540a;
+  --print-chip-soft-start: #fffaf0;
+  --print-chip-soft-end: #ffe7b9;
+  --print-chip-active-start: #e3a635;
+  --print-chip-active-end: #b8760e;
+  --print-chip-active-shadow: rgba(184, 118, 14, .22);
+}
+
+.print-filter-chip-v197.is-status-complete {
+  --print-chip-border: #80c692;
+  --print-chip-color: #216b34;
+  --print-chip-soft-start: #f1fbf3;
+  --print-chip-soft-end: #d5f1dc;
+  --print-chip-active-start: #45aa60;
+  --print-chip-active-end: #23763a;
+  --print-chip-active-shadow: rgba(35, 118, 58, .22);
+}
+
+.print-filter-chip-v197.is-attention-remake {
+  --print-chip-border: #e0a1aa;
+  --print-chip-color: #962f3e;
+  --print-chip-soft-start: #fff7f8;
+  --print-chip-soft-end: #f8dce1;
+  --print-chip-active-start: #d85a69;
+  --print-chip-active-end: #a92f40;
+  --print-chip-active-shadow: rgba(169, 47, 64, .22);
+}
+
+.print-filter-chip-v197.is-attention-rush {
+  --print-chip-border: #82c798;
+  --print-chip-color: #236d39;
+  --print-chip-soft-start: #f3fbf5;
+  --print-chip-soft-end: #d7f0de;
+  --print-chip-active-start: #49ad64;
+  --print-chip-active-end: #24783c;
+  --print-chip-active-shadow: rgba(36, 120, 60, .22);
+}
+
+.print-filter-chip-v197.is-attention-reject {
+  --print-chip-border: #72c8b2;
+  --print-chip-color: #0c6c59;
+  --print-chip-soft-start: #f0fcf8;
+  --print-chip-soft-end: #d2f2e9;
+  --print-chip-active-start: #24a783;
+  --print-chip-active-end: #0d755e;
+  --print-chip-active-shadow: rgba(13, 117, 94, .22);
+}
+
+.print-filter-chip-v197.is-attention-updated {
+  --print-chip-border: #91b4e7;
+  --print-chip-color: #225caa;
+  --print-chip-soft-start: #f2f7ff;
+  --print-chip-soft-end: #dce9fb;
+  --print-chip-active-start: #4a84da;
+  --print-chip-active-end: #285fae;
+  --print-chip-active-shadow: rgba(40, 95, 174, .22);
+}
+
+.print-filter-chip-v197.is-attention-error {
+  --print-chip-border: #b3bac5;
+  --print-chip-color: #545f6e;
+  --print-chip-soft-start: #fafbfc;
+  --print-chip-soft-end: #e7eaee;
+  --print-chip-active-start: #858f9d;
+  --print-chip-active-end: #5e6876;
+  --print-chip-active-shadow: rgba(94, 104, 118, .22);
+}
+
+.print-filter-chip-v197.has-alert,
+.print-filter-chip-v197.is-clear {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+}
+
+.print-filter-chip-v197.has-alert::before,
+.print-filter-chip-v197.is-clear::before {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(18, 42, 70, .16);
+}
+
+.print-filter-chip-v197.has-alert::before {
+  content: "!";
+  background: #c92f42;
+}
+
+.print-filter-chip-v197.is-clear::before {
+  content: "\2713";
+  background: #2f9c4f;
+}
+
+.print-glass-options-v197 {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.print-glass-category-v220 {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.print-glass-category-heading-v220 {
+  min-height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 8.5px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.print-glass-category-heading-v220 b {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.print-glass-category-options-v220 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.print-glass-category-v220.is-mirror .print-glass-category-heading-v220 {
+  background: linear-gradient(90deg, #eee6fb, #f8f4ff);
+  color: #68419a;
+  border-left: 4px solid #8259b6;
+}
+
+.print-glass-category-v220.is-tempered .print-glass-category-heading-v220 {
+  background: linear-gradient(90deg, #ffe8d8, #fff6ef);
+  color: #9a4a15;
+  border-left: 4px solid #d66d28;
+}
+
+.print-glass-category-v220.is-annealed .print-glass-category-heading-v220 {
+  background: linear-gradient(90deg, #dff4fb, #f2fbfe);
+  color: #176981;
+  border-left: 4px solid #2a91b1;
+}
+
+.print-filter-chip-v197.is-glass-mirror {
+  --print-chip-border: #c5addf;
+  --print-chip-color: #68429a;
+  --print-chip-soft-start: #fbf9ff;
+  --print-chip-soft-end: #eee6f8;
+  --print-chip-active-start: #9871c6;
+  --print-chip-active-end: #694197;
+  --print-chip-active-shadow: rgba(105, 65, 151, .22);
+}
+
+.print-filter-chip-v197.is-glass-tempered {
+  --print-chip-border: #efb588;
+  --print-chip-color: #924711;
+  --print-chip-soft-start: #fffaf6;
+  --print-chip-soft-end: #ffe5d2;
+  --print-chip-active-start: #e58a48;
+  --print-chip-active-end: #b95619;
+  --print-chip-active-shadow: rgba(185, 86, 25, .22);
+}
+
+.print-filter-chip-v197.is-glass-annealed {
+  --print-chip-border: #9bcbd9;
+  --print-chip-color: #17667e;
+  --print-chip-soft-start: #f7fdff;
+  --print-chip-soft-end: #dff2f8;
+  --print-chip-active-start: #4ba6bf;
+  --print-chip-active-end: #22788f;
+  --print-chip-active-shadow: rgba(34, 120, 143, .22);
+}
+
+/* The signoff area now has one purpose and stays at the far-right edge. The
+   recovered width belongs to the title metadata and repeating filter summary. */
+.delivery-print-sheet-v203 .copy-box {
+  min-width: 2.1in;
+  margin-left: auto;
+  justify-content: flex-end;
+  gap: 0;
+  padding-inline: 10px;
+}
+
+.delivery-print-sheet-v203 .checked-line {
+  width: 1.15in;
+}
+
+.delivery-print-sheet-v203.is-landscape .copy-box {
+  min-width: 1.9in;
+}
+
+.delivery-print-sheet-v203.is-landscape .checked-line {
+  width: 1.05in;
+}
+
+@media (max-width: 760px) {
+  .print-glass-category-options-v220 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ========================================================================== */
+/* v0.222 enlarged branded delivery-sheet headers                            */
+/* ========================================================================== */
+/* First pages receive the strongest visual hierarchy. Continuation pages use
+   a smaller increase so their extra metadata remains readable without taking
+   excessive row space. These rules are shared by preview and popup printing. */
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) {
+  gap: 20px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-brand-title {
+  gap: 13px;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-brand-mark {
+  width: 1.19in;
+  height: 1.06in;
+  flex-basis: 1.19in;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-location-title {
+  font-size: 29px;
+  line-height: 1.01;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-location-row.is-medium .sheet-location-title {
+  font-size: 24px;
+}
+
+/* Long multi-route titles use the largest size that still fits beside signoff. */
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-location-row.is-long .sheet-location-title {
+  font-size: 17.5px;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-date-title {
+  margin-top: 5px;
+  font-size: 25px;
+  line-height: 1.03;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-totals,
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-filter-summary {
+  font-size: 11.5px;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-totals {
+  margin-top: 6px;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .copy-box {
+  margin-top: 31px;
+  padding: 9px 11px;
+  font-size: 17px;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .checked-line {
+  width: 96px;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-badge {
+  min-height: 27px;
+  padding-inline: 12px;
+  font-size: 12px;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact {
+  gap: 19px;
+  margin-bottom: 8px;
+  padding-bottom: 7px;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-brand-title {
+  gap: 11px;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-brand-mark {
+  width: 1.01in;
+  height: .9in;
+  flex-basis: 1.01in;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-location-title {
+  font-size: 22px;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-location-row.is-medium .sheet-location-title {
+  font-size: 20px;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-location-row.is-long .sheet-location-title {
+  font-size: 17px;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-date-title {
+  margin-top: 3px;
+  font-size: 19px;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-totals,
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-filter-summary {
+  font-size: 11px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) {
+  gap: 17px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-brand-title {
+  gap: 12px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-brand-mark {
+  width: 1.05in;
+  height: .88in;
+  flex-basis: 1.05in;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-location-title {
+  font-size: 27px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-location-row.is-medium .sheet-location-title {
+  font-size: 22px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-location-row.is-long .sheet-location-title {
+  font-size: 18px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-date-title {
+  font-size: 22px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-totals,
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-filter-summary {
+  font-size: 10.5px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .copy-box {
+  margin-top: 25px;
+  padding: 7px 9px;
+  font-size: 15px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .checked-line {
+  width: 82px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact {
+  gap: 15px;
+  margin-bottom: 7px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-brand-mark {
+  width: .9in;
+  height: .75in;
+  flex-basis: .9in;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-location-title {
+  font-size: 20px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-location-row.is-medium .sheet-location-title {
+  font-size: 18px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-location-row.is-long .sheet-location-title {
+  font-size: 16px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-date-title {
+  font-size: 16.5px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-totals,
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-filter-summary {
+  font-size: 10px;
+}
+
+
+
+/* ========================================================================== */
+/* v0.223 table-adjacent signoff and fuller verified page capacity            */
+/* ========================================================================== */
+/* Checked By belongs to the table workflow, not the brand/title hierarchy.
+   Keep it immediately above the column headings and right aligned. The compact
+   treatment preserves the extra row capacity verified for Letter output. */
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) {
+  margin-bottom: 2px;
+}
+
+.delivery-print-sheet-v203 .sheet-table-signoff {
+  min-height: 28px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  margin: 0 0 4px;
+}
+
+.delivery-print-sheet-v203 .sheet-table-signoff .copy-box {
+  min-width: 2.18in;
+  width: auto;
+  flex: 0 0 auto;
+  align-self: auto;
+  justify-content: flex-end;
+  margin: 0;
+  border: 1px solid #333;
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.delivery-print-sheet-v203 .sheet-table-signoff .checked-line {
+  width: 1.18in;
+}
+
+/* Keep the three compact numeric/identifier columns easy to scan. Dimensions
+   yields a small amount of width to QTY so its complete heading remains visible. */
+.delivery-print-sheet-v203 :is(th, td):nth-child(2),
+.delivery-print-sheet-v203 :is(th, td):nth-child(3),
+.delivery-print-sheet-v203 :is(th, td):nth-child(4) {
+  text-align: center;
+}
+
+.delivery-print-sheet-v203 :is(th, td):nth-child(4) {
+  padding-inline: 4px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-table-signoff {
+  min-height: 24px;
+  margin-bottom: 3px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-table-signoff .copy-box {
+  min-width: 1.95in;
+  padding: 3px 7px;
+  font-size: 11.5px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-table-signoff .checked-line {
+  width: 1.02in;
+}
+
+
+/* ========================================================================== */
+/* v0.224 unavailable filter states and aligned print signoff                 */
+/* ========================================================================== */
+/* Zero-count route, status, and standard attention choices are intentionally
+   non-interactive. Remakes, Rushes, and Internal Rejects keep their health
+   indicators and remain available even at zero so operators can see the same
+   red-alert / green-clear language used by the Scan page. */
+.print-filter-chip-v197.is-unavailable {
+  border-color: #c9d0d8;
+  background: linear-gradient(135deg, #f5f6f8 0%, #e9edf1 100%);
+  color: #7b8591;
+  box-shadow: none;
+  cursor: not-allowed;
+  filter: grayscale(.92);
+  opacity: .55;
+}
+
+.print-filter-chip-v197.is-unavailable:hover,
+.print-filter-chip-v197.is-unavailable:focus-within {
+  border-color: #c9d0d8;
+  box-shadow: none;
+}
+
+.print-filter-chip-v197.is-unavailable span,
+.print-filter-chip-v197.is-unavailable b {
+  color: #7b8591;
+}
+
+/* Counts are operational information, not decorative badges. Keep them large
+   enough to scan quickly without increasing the overall chip height. */
+.print-filter-chip-v197 b {
+  font-size: 11.5px;
+  line-height: 1;
+}
+
+/* The first-page signoff shares the bottom metadata line with Filters. It has
+   no surrounding box, leaving more horizontal room for long filter summaries. */
+.delivery-print-sheet-v203 .sheet-header-signoff {
+  min-width: 1.9in;
+  flex: 0 0 auto;
+  align-self: flex-end;
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 1px;
+}
+
+.delivery-print-sheet-v203 .sheet-header-signoff .copy-box {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.delivery-print-sheet-v203 .sheet-header-signoff .checked-line {
+  width: 1.08in;
+  border-bottom-width: 1.5px;
+}
+
+/* Totals now carry more visual weight than the secondary Filters sentence on
+   both first and continuation pages. */
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-totals {
+  font-size: 14px;
+  line-height: 1.08;
+}
+
+.delivery-print-sheet-v203 .sheet-header-compact .sheet-totals {
+  font-size: 12.5px;
+  line-height: 1.08;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-signoff {
+  min-width: 1.7in;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-signoff .copy-box {
+  font-size: 14.5px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-signoff .checked-line {
+  width: .94in;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-totals {
+  font-size: 12.5px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-compact .sheet-totals {
+  font-size: 11.5px;
+}
+
+/* First-page header rules from earlier revisions used a higher-specificity
+   signoff box selector. Repeat the borderless treatment at the same scope so
+   no inherited margin or padding can silently make the header taller. */
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-header-signoff .copy-box {
+  min-width: 0;
+  align-self: auto;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-header-signoff .checked-line {
+  width: 1.08in;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-header-signoff .copy-box {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font-size: 14.5px;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-header-signoff .checked-line {
+  width: .94in;
+}
+
+
+/* ========================================================================== */
+/* v0.225 grouped delivery-date history                                      */
+/* ========================================================================== */
+/* Delivery dates are grouped by Monday-Sunday business weeks. Only the rolling
+   two-week history window is rendered initially; future dates remain visible,
+   and older weeks are appended in two-week batches at the bottom of the menu. */
+.custom-select-menu[data-select-id="printDateQuickSelect"] .custom-select-options {
+  scroll-padding-top: 34px;
+}
+
+.custom-select-menu[data-select-id="printDateQuickSelect"] .custom-select-group {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 4px 3px 3px;
+  border: 1px solid #c9d8e9;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f8fbff 0%, #e9f1fb 100%);
+  color: #385a82;
+  padding: 7px 9px;
+  box-shadow: 0 3px 8px rgba(16, 52, 94, .06);
+  font-size: 9.5px;
+  letter-spacing: .065em;
+}
+
+.custom-select-load-more.print-date-load-more-v225 {
+  width: calc(100% - 6px);
+  min-height: 48px;
+  display: grid;
+  gap: 2px;
+  margin: 6px 3px 3px;
+  border: 1px dashed #8eb0d7;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #f5f9ff 0%, #e8f1fc 100%);
+  color: #174f92;
+  padding: 8px 10px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.custom-select-load-more.print-date-load-more-v225:hover,
+.custom-select-load-more.print-date-load-more-v225:focus-visible {
+  border-style: solid;
+  border-color: #4e8bd0;
+  background: linear-gradient(180deg, #eef6ff 0%, #dbeaff 100%);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(44, 112, 193, .12);
+}
+
+.custom-select-load-more.print-date-load-more-v225 strong {
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.custom-select-load-more.print-date-load-more-v225 span {
+  color: #66809d;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+
+/* ========================================================================== */
+/* v0.226 automatic All selections, date ordering, and filter readability     */
+/* ========================================================================== */
+/* Category totals are operational counts. Increase only the count so the small
+   separator remains compact while quantities are easier to scan. */
+.print-glass-category-heading-v220 b {
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+/* Tempered uses green throughout the section header and selectable chips. */
+.print-glass-category-v220.is-tempered .print-glass-category-heading-v220 {
+  background: linear-gradient(90deg, #dff3e5, #f4fbf6);
+  color: #21683a;
+  border-left-color: #3a9859;
+}
+
+.print-filter-chip-v197.is-glass-tempered {
+  --print-chip-border: #9dcfaf;
+  --print-chip-color: #21683a;
+  --print-chip-soft-start: #f7fcf8;
+  --print-chip-soft-end: #dff3e5;
+  --print-chip-active-start: #58aa72;
+  --print-chip-active-end: #2f7d49;
+  --print-chip-active-shadow: rgba(47, 125, 73, .22);
+}
+
+/* Extend the handwritten signoff line without reintroducing a surrounding box. */
+.delivery-print-sheet-v203 .sheet-header-signoff {
+  min-width: 2.12in;
+}
+
+.delivery-print-sheet-v203 .sheet-header-signoff .checked-line,
+.delivery-print-sheet-v203 .sheet-header:not(.sheet-header-compact) .sheet-header-signoff .checked-line {
+  width: 1.30in;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-signoff {
+  min-width: 1.92in;
+}
+
+.delivery-print-sheet-v203.is-landscape .sheet-header-signoff .checked-line,
+.delivery-print-sheet-v203.is-landscape .sheet-header:not(.sheet-header-compact) .sheet-header-signoff .checked-line {
+  width: 1.12in;
+}
+
+
+/* ========================================================================== */
+/* v0.227 health-state attention buttons and full preset control center       */
+/* ========================================================================== */
+/* Remakes, Rushes, and Internal Rejects use one unmistakable health language:
+   red means matching work exists, green means the selected date/route is clear.
+   The complete button background follows the health state, not the category. */
+.print-filter-chip-v197:is(.is-attention-remake, .is-attention-rush, .is-attention-reject).has-alert {
+  --print-chip-border: #de8792;
+  --print-chip-color: #8d2130;
+  --print-chip-soft-start: #fff3f5;
+  --print-chip-soft-end: #f7cbd1;
+  --print-chip-active-start: #df596a;
+  --print-chip-active-end: #a92e40;
+  --print-chip-active-shadow: rgba(169, 46, 64, .24);
+}
+
+.print-filter-chip-v197:is(.is-attention-remake, .is-attention-rush, .is-attention-reject).is-clear {
+  --print-chip-border: #82c798;
+  --print-chip-color: #1f6c37;
+  --print-chip-soft-start: #f0fbf3;
+  --print-chip-soft-end: #cfeeda;
+  --print-chip-active-start: #4caf67;
+  --print-chip-active-end: #24783c;
+  --print-chip-active-shadow: rgba(36, 120, 60, .22);
+}
+
+.print-filter-chip-v197:is(.is-attention-remake, .is-attention-rush, .is-attention-reject).has-alert::before {
+  background: #c92f42;
+}
+
+.print-filter-chip-v197:is(.is-attention-remake, .is-attention-rush, .is-attention-reject).is-clear::before {
+  background: #239245;
+}
+
+.print-preset-backdrop-v227 {
+  background: rgba(5, 23, 50, .64);
+  backdrop-filter: blur(3px);
+}
+
+.print-preset-modal-v227 {
+  inset: 12px;
+  width: auto;
+  max-width: none;
+  height: calc(100vh - 24px);
+  max-height: none;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #9eb4ce;
+  border-radius: 20px;
+  background: #f7f9fc;
+  box-shadow: 0 28px 70px rgba(3, 24, 56, .32);
+}
+
+.print-preset-modal-v227 > .print-preset-hero-v227 {
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border: 0;
+  background:
+    radial-gradient(circle at 91% 40%, rgba(108, 161, 235, .24) 0 80px, transparent 81px),
+    linear-gradient(120deg, #0a285b 0%, #123e86 56%, #1d57a8 100%);
+  color: #fff;
+  padding: 17px 28px;
+}
+
+.print-preset-hero-v227 small {
+  display: block;
+  margin-bottom: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.print-preset-modal-v227 .print-preset-hero-v227 h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 29px;
+  font-weight: 950;
+  letter-spacing: -.02em;
+}
+
+.print-preset-modal-v227 .print-preset-hero-v227 p {
+  margin: 3px 0 0;
+  color: rgba(255, 255, 255, .9);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.print-preset-hero-v227 > button {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border: 1px solid rgba(255, 255, 255, .34);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  font-size: 25px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.print-preset-workspace-v227 {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(275px, 330px);
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  overflow: auto;
+  padding: 14px 18px 12px;
+}
+
+.print-preset-main-column-v227,
+.print-preset-side-column-v227 {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.print-preset-side-column-v227 {
+  grid-template-rows: auto auto;
+}
+
+.print-preset-card-v227 {
+  min-width: 0;
+  border: 1px solid #c9d6e5;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(23, 60, 103, .055);
+  padding: 13px 15px;
+}
+
+.print-preset-card-heading-v227 {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 11px;
+}
+
+.print-preset-card-icon-v227 {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: #edf3ff;
+  color: #1d62df;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.print-preset-card-heading-v227 strong {
+  display: block;
+  color: #123d72;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.print-preset-card-heading-v227 small {
+  display: block;
+  margin-top: 2px;
+  color: #62758d;
+  font-size: 9.5px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.print-preset-details-grid-v227 {
+  display: grid;
+  grid-template-columns: minmax(180px, .85fr) minmax(260px, 1.2fr) minmax(170px, .65fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.print-preset-details-grid-v227 > label:not(.print-preset-default-toggle-v227),
+.print-preset-option-field-v227 {
+  display: grid;
+  gap: 6px;
+}
+
+.print-preset-details-grid-v227 label > span,
+.print-preset-option-field-v227 > span {
+  color: #294a73;
+  font-size: 9.5px;
+  font-weight: 900;
+}
+
+.print-preset-details-grid-v227 input[type="text"],
+.print-preset-glass-search-v227 input,
+.print-preset-output-settings-v227 input,
+.print-preset-output-settings-v227 select {
+  min-height: 39px;
+  box-sizing: border-box;
+  border: 1px solid #b9cbe0;
+  border-radius: 8px;
+  background: #fbfdff;
+  color: #173b66;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  outline: none;
+}
+
+.print-preset-details-grid-v227 input:focus,
+.print-preset-glass-search-v227 input:focus,
+.print-preset-output-settings-v227 input:focus,
+.print-preset-output-settings-v227 select:focus {
+  border-color: #3979e8;
+  box-shadow: 0 0 0 3px rgba(57, 121, 232, .12);
+}
+
+.print-preset-default-toggle-v227 {
+  min-height: 39px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.print-preset-default-toggle-v227 > span strong,
+.print-preset-default-toggle-v227 > span small {
+  display: block;
+}
+
+.print-preset-default-toggle-v227 > span strong {
+  color: #294a73;
+  font-size: 9.5px;
+  font-weight: 900;
+}
+
+.print-preset-default-toggle-v227 > span small {
+  margin-top: 2px;
+  color: #73859b;
+  font-size: 8.5px;
+  line-height: 1.25;
+}
+
+.print-preset-default-toggle-v227 input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.print-preset-default-toggle-v227 i {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: #b9c5d2;
+  transition: .18s ease;
+}
+
+.print-preset-default-toggle-v227 i::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(14, 42, 75, .28);
+  transition: .18s ease;
+}
+
+.print-preset-default-toggle-v227:has(input:checked) i {
+  background: #2767e7;
+}
+
+.print-preset-default-toggle-v227:has(input:checked) i::after {
+  transform: translateX(16px);
+}
+
+.print-preset-filter-rows-v227 {
+  display: grid;
+  gap: 0;
+}
+
+.print-preset-filter-row-v227 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 135px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border-top: 1px solid #e0e7ef;
+  padding: 10px 0;
+}
+
+.print-preset-filter-row-v227:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.print-preset-filter-row-v227:last-child {
+  padding-bottom: 0;
+}
+
+.print-preset-filter-row-v227 > header strong,
+.print-preset-filter-row-v227 > header small {
+  display: block;
+}
+
+.print-preset-filter-row-v227 > header strong {
+  color: #173f70;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.print-preset-filter-row-v227 > header small {
+  margin-top: 2px;
+  color: #75869a;
+  font-size: 8.5px;
+  line-height: 1.3;
+}
+
+.print-preset-filter-row-v227 > b {
+  min-width: 64px;
+  color: #55708f;
+  padding-top: 10px;
+  font-size: 9px;
+  text-align: right;
+}
+
+.print-preset-filter-control-v227 {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.print-preset-choice-grid-v227 {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.print-preset-choice-v227 {
+  position: relative;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #b9cbe0;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #fff 0%, #f5f8fc 100%);
+  color: #173f70;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 850;
+  transition: .15s ease;
+}
+
+.print-preset-choice-v227 input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.print-preset-choice-v227:hover {
+  border-color: #6e9ee0;
+  transform: translateY(-1px);
+}
+
+.print-preset-choice-v227:has(input:checked) {
+  border-color: #245ed6;
+  background: linear-gradient(135deg, #376ff0 0%, #174dc8 100%);
+  color: #fff;
+  box-shadow: 0 5px 12px rgba(27, 79, 194, .18);
+}
+
+.print-preset-choice-v227:has(input:checked)::after {
+  content: "✓";
+  margin-left: 7px;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.print-preset-filter-row-v227.is-attention .print-preset-choice-v227:has(input[value="remake"]:checked),
+.print-preset-filter-row-v227.is-attention .print-preset-choice-v227:has(input[value="error"]:checked) {
+  border-color: #d74556;
+  background: linear-gradient(135deg, #e35c6d 0%, #b92e42 100%);
+}
+
+.print-preset-filter-row-v227.is-attention .print-preset-choice-v227:has(input[value="rush"]:checked),
+.print-preset-filter-row-v227.is-attention .print-preset-choice-v227:has(input[value="reject"]:checked) {
+  border-color: #329755;
+  background: linear-gradient(135deg, #4bad69 0%, #217640 100%);
+}
+
+.print-preset-glass-search-v227 {
+  display: block;
+}
+
+.print-preset-glass-search-v227 input {
+  width: min(390px, 100%);
+}
+
+.print-preset-filter-row-v227.is-glass .print-preset-choice-grid-v227 {
+  max-height: 150px;
+  overflow: auto;
+  align-content: flex-start;
+  padding-right: 4px;
+}
+
+.print-preset-output-settings-v227 {
+  display: grid;
+  grid-template-columns: minmax(140px, .55fr) minmax(250px, .9fr) minmax(220px, .85fr);
+  gap: 22px;
+  align-items: end;
+}
+
+.print-preset-copy-stepper-v227 {
+  display: grid;
+  grid-template-columns: 40px 62px 40px;
+}
+
+.print-preset-copy-stepper-v227 button,
+.print-preset-orientation-v227 button {
+  min-height: 39px;
+  border: 1px solid #b9cbe0;
+  background: #fff;
+  color: #174171;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.print-preset-copy-stepper-v227 button:first-child { border-radius: 8px 0 0 8px; }
+.print-preset-copy-stepper-v227 button:last-child { border-radius: 0 8px 8px 0; }
+.print-preset-copy-stepper-v227 input {
+  min-width: 0;
+  border-radius: 0;
+  text-align: center;
+  appearance: textfield;
+}
+
+.print-preset-orientation-v227 {
+  display: grid;
+  gap: 6px;
+}
+
+.print-preset-orientation-v227 > span {
+  color: #294a73;
+  font-size: 9.5px;
+  font-weight: 900;
+}
+
+.print-preset-orientation-v227 > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.print-preset-orientation-v227 button:first-of-type { border-radius: 8px 0 0 8px; }
+.print-preset-orientation-v227 button:last-of-type { border-radius: 0 8px 8px 0; }
+.print-preset-orientation-v227 button.is-active {
+  border-color: #245ed6;
+  background: #eef4ff;
+  color: #1d5cda;
+  box-shadow: inset 0 0 0 1px #245ed6;
+}
+
+.print-preset-live-summary-v227 {
+  display: grid;
+  gap: 0;
+}
+
+.print-preset-live-summary-v227 > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 9px;
+  border-top: 1px solid #e4eaf1;
+  padding: 8px 0;
+}
+
+.print-preset-live-summary-v227 > div:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.print-preset-live-summary-v227 span {
+  color: #5e7490;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.print-preset-live-summary-v227 strong {
+  min-width: 0;
+  color: #173d6c;
+  font-size: 9.5px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.print-preset-actions-card-v227 {
+  display: grid;
+  gap: 8px;
+}
+
+.print-preset-actions-card-v227 .print-preset-card-heading-v227 {
+  margin-bottom: 2px;
+}
+
+.print-preset-actions-card-v227 > button {
+  min-height: 39px;
+  border: 1px solid #9db4cf;
+  border-radius: 7px;
+  background: #fff;
+  color: #173d6b;
+  font-size: 10.5px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.print-preset-actions-card-v227 > button.primary {
+  border-color: #2459d7;
+  background: linear-gradient(135deg, #2f68ed 0%, #154bc9 100%);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(21, 75, 201, .2);
+}
+
+.print-preset-actions-card-v227 > button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.print-preset-status-v227 {
+  grid-column: 1 / -1;
+  min-height: 18px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  color: #576f8c;
+  font-size: 9.5px;
+  font-weight: 750;
+}
+
+.print-preset-info-v227 {
+  grid-column: 1 / -1;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #cbd8e7;
+  border-radius: 10px;
+  background: #fff;
+  color: #2458b5;
+  padding: 8px 13px;
+  font-size: 9.5px;
+  font-weight: 750;
+}
+
+.print-preset-info-v227 > span {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #2d69df;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+@media (max-width: 1050px) {
+  .print-preset-workspace-v227 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .print-preset-side-column-v227 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .print-preset-status-v227,
+  .print-preset-info-v227 { grid-column: 1; }
+}
+
+@media (max-width: 760px) {
+  .print-preset-modal-v227 { inset: 5px; height: calc(100vh - 10px); border-radius: 13px; }
+  .print-preset-modal-v227 > .print-preset-hero-v227 { min-height: 86px; padding: 14px 17px; }
+  .print-preset-modal-v227 .print-preset-hero-v227 h3 { font-size: 23px; }
+  .print-preset-workspace-v227 { padding: 10px; }
+  .print-preset-details-grid-v227,
+  .print-preset-output-settings-v227,
+  .print-preset-side-column-v227 { grid-template-columns: minmax(0, 1fr); }
+  .print-preset-filter-row-v227 { grid-template-columns: minmax(0, 1fr); gap: 7px; }
+  .print-preset-filter-row-v227 > b { padding-top: 0; text-align: left; }
+}
+
+
+/* ========================================================================== */
+/* v0.228 Create Preset viewport positioning and usability repair             */
+/* ========================================================================== */
+/*
+ * The v0.227 control center intentionally fills most of the browser viewport.
+ * Older preset classes also supplied top/left 50% plus translate(-50%, -50%).
+ * Keeping those legacy positioning rules on the same element shifted the new
+ * full-screen workspace far beyond the top-left edge. These v0.228 classes own
+ * all positioning so future visual changes cannot inherit that transform.
+ */
+.print-preset-backdrop-v228 {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+}
+
+.print-preset-modal-v228 {
+  position: fixed;
+  z-index: 221;
+  inset: 12px;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  transform: none;
+  box-sizing: border-box;
+}
+
+.print-preset-modal-v228 .print-preset-workspace-v227 {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 1050px) {
+  .print-preset-modal-v228 .print-preset-workspace-v227 {
+    grid-template-rows: auto auto auto auto;
+    align-content: start;
+  }
+}
+
+@media (max-width: 760px) {
+  .print-preset-modal-v228 {
+    inset: 5px;
+    top: 5px;
+    right: 5px;
+    bottom: 5px;
+    left: 5px;
+    width: auto;
+    height: auto;
+    transform: none;
+  }
+}
+
+@media (max-height: 720px) and (min-width: 761px) {
+  .print-preset-modal-v228 > .print-preset-hero-v227 {
+    min-height: 82px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .print-preset-modal-v228 .print-preset-hero-v227 h3 {
+    font-size: 25px;
+  }
+
+  .print-preset-modal-v228 .print-preset-workspace-v227 {
+    padding-top: 10px;
+    padding-bottom: 9px;
   }
 }

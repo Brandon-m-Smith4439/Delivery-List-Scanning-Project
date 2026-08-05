@@ -31,6 +31,7 @@ const CUSTOMER_ROUTE_DEFAULT_ADDRESSES = {
 };
 const ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS = 21;
 const ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS = 7;
+const PRINT_DATE_HISTORY_BATCH_WEEKS = 2;
 const SCAN_FILTER_GROUPS = Object.freeze({
   status: Object.freeze(["remaining", "partial", "complete"]),
   attention: Object.freeze(["remakes", "rushes", "internal-rejects", "priority", "updated", "errors"]),
@@ -123,14 +124,24 @@ const state = {
   printPreviewRequestId: 0,
   printPreviewResult: null,
   printPreviewPage: 1,
-  printPreviewZoom: 1,
+  printPreviewZoom: 0.9,
   printSelectedOrders: [],
   printSelectedItems: [],
   printEntityRenderId: 0,
   printCalendarMonth: "",
   printCalendarDraftStart: "",
   printCalendarDraftEnd: "",
+  printDateHistoryWeeks: PRINT_DATE_HISTORY_BATCH_WEEKS,
   printKnownGlassTypes: [],
+  printRouteGroups: ["airport"],
+  printGlassTypes: [],
+  printAllGlass: true,
+  printWorkspaceReady: false,
+  printWorkspaceOpenId: 0,
+  printWorkspacePromise: null,
+  printWorkspaceRecoveryPromise: null,
+  manualEditLookupsLoaded: false,
+  manualEditLookupsPromise: null,
   bayLayout: null,
   bays: [],
   bayEvents: [],
@@ -395,6 +406,55 @@ function dlsAutomationRefreshVisibleListViews(lastCheckedAt = "") {
   }
 }
 
+/** Return the catalog fields that determine whether cached line-item detail is still current. */
+function deliveryCatalogRevisionKey(list = {}) {
+  return [
+    list.id,
+    list.deliveryDate,
+    list.stage,
+    list.status,
+    list.updatedAt,
+    list.updated_at,
+    list.updatedAtUtc,
+    list.updated_at_utc,
+    list.itemCount,
+    list.totalQty,
+    list.scannedQty,
+  ].map((value) => String(value ?? "")).join("|");
+}
+
+/**
+ * Merge lightweight catalog refreshes without discarding already loaded Print / Export rows.
+ * Background catalog polling normally returns list summaries. Replacing state.lists outright
+ * used to remove the cached items after an idle period, making Airport look selected while
+ * preview and print had no rows. Preserve detail only while the list revision is unchanged;
+ * changed summaries are invalidated and reloaded on demand.
+ */
+function mergeDeliveryCatalogWithLoadedDetails(refreshedLists) {
+  const previousById = new Map((state.lists || []).map((list) => [String(list.id || ""), list]));
+  return refreshedLists.map((refreshed) => {
+    const previous = previousById.get(String(refreshed?.id || ""));
+    if (!previous) return { ...refreshed };
+
+    const merged = { ...previous, ...refreshed };
+    const refreshedItems = Array.isArray(refreshed?.items) ? refreshed.items : [];
+    const previousItems = Array.isArray(previous?.items) ? previous.items : [];
+    const sameRevision = deliveryCatalogRevisionKey(previous) === deliveryCatalogRevisionKey(refreshed);
+
+    if (refreshedItems.length) {
+      merged.items = refreshedItems;
+      merged._printItemsLoaded = true;
+    } else if (sameRevision && previous._printItemsLoaded && Array.isArray(previous.items)) {
+      merged.items = previousItems;
+      merged._printItemsLoaded = true;
+    } else {
+      merged.items = [];
+      merged._printItemsLoaded = false;
+    }
+    return merged;
+  });
+}
+
 function dlsAutomationApplyDeliveryCatalog(refreshedLists) {
   if (!Array.isArray(refreshedLists)) return false;
 
@@ -402,7 +462,7 @@ function dlsAutomationApplyDeliveryCatalog(refreshedLists) {
   const stageSelect = document.getElementById("deliveryStageSelect");
   const previousDate = String(dateSelect?.value || "");
   const previousStage = String(stageSelect?.value || state.activeListId || "");
-  state.lists = refreshedLists.slice();
+  state.lists = mergeDeliveryCatalogWithLoadedDetails(refreshedLists);
 
   const deliveryDates = [...new Set(
     state.lists.map((item) => String(item.deliveryDate || "").trim()).filter(Boolean)
@@ -989,9 +1049,14 @@ const els = {
   printPresetModal: document.getElementById("printPresetModal"),
   printPresetModalClose: document.getElementById("printPresetModalClose"),
   printPresetNameInput: document.getElementById("printPresetNameInput"),
+  printPresetDescriptionInput: document.getElementById("printPresetDescriptionInput"),
+  printPresetDefaultToggle: document.getElementById("printPresetDefaultToggle"),
   printPresetSummary: document.getElementById("printPresetSummary"),
+  printPresetOutputSettings: document.getElementById("printPresetOutputSettings"),
+  printPresetLiveSummary: document.getElementById("printPresetLiveSummary"),
   printPresetStatus: document.getElementById("printPresetStatus"),
   printPresetCancelBtn: document.getElementById("printPresetCancelBtn"),
+  printPresetSaveOnlyBtn: document.getElementById("printPresetSaveOnlyBtn"),
   printPresetConfirmBtn: document.getElementById("printPresetConfirmBtn"),
 
   adminPage: document.getElementById("adminPage"),
@@ -3729,6 +3794,8 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     });
   });
 
+  if (select.id === "printDateQuickSelect") appendPrintQuickDateHistoryControl(select, optionsHost, query);
+
   const enabledButtons = [...optionsHost.querySelectorAll("[data-custom-option-index]:not(:disabled)")];
   const selectedEnabledIndex = enabledButtons.findIndex((button) => Number(button.dataset.customOptionIndex) === select.selectedIndex);
   setCustomSelectHighlight(selectedEnabledIndex >= 0 ? selectedEnabledIndex : 0, false);
@@ -3808,6 +3875,18 @@ function openCustomSelect(select) {
   renderCustomSelectOptions(select, optionsHost);
   syncCustomSelect(select);
   positionCustomSelectMenu();
+
+  if (select.id === "printDateQuickSelect") {
+    let loadingOlderDates = false;
+    optionsHost.addEventListener("scroll", () => {
+      if (loadingOlderDates || select.dataset.hasMoreHistory !== "true") return;
+      const distanceFromBottom = optionsHost.scrollHeight - optionsHost.scrollTop - optionsHost.clientHeight;
+      if (distanceFromBottom > 18) return;
+      loadingOlderDates = true;
+      extendPrintQuickDateMenu(select, optionsHost, "");
+      window.requestAnimationFrame(() => { loadingOlderDates = false; });
+    }, { passive: true });
+  }
 
   menu.addEventListener("keydown", (event) => {
     const enabledButtons = [...menu.querySelectorAll("[data-custom-option-index]:not(:disabled)")];
@@ -4021,9 +4100,19 @@ function parseBayManualOrderItemReference(value) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function formatDisplayDate(value) {
-  const parts = String(value || "").split("-").map(Number);
-  if (parts.length !== 3 || parts.some(Number.isNaN)) return String(value || "");
-  return `${parts[1]}/${parts[2]}/${parts[0]}`;
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  const parsed = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    : new Date(text);
+  if (Number.isNaN(parsed.getTime())) return text;
+  return parsed.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 /**
@@ -16310,6 +16399,17 @@ const PRINT_PREVIEW_PAGE_SIZE = 18;
 const PRINT_PRESET_STORAGE_KEY = "deliveryScannerPrintPresetsV205";
 const PRINT_PRESET_LEGACY_STORAGE_KEY = "deliveryScannerPrintPresetsV197";
 const PRINT_ACTIVE_PRESET_STORAGE_KEY = "deliveryScannerActivePrintPresetV205";
+const PRINT_DEFAULT_PRESET_STORAGE_KEY = "deliveryScannerDefaultPrintPresetV227";
+const PRINT_SYSTEM_DEFAULT_PRESET_NAME = "System Default";
+const PRINT_SYSTEM_DEFAULT_PRESET = Object.freeze({
+  routeGroups: Object.freeze(["airport"]),
+  statuses: Object.freeze([]),
+  attention: Object.freeze([]),
+  glassTypes: Object.freeze([]),
+  outputType: "pdf",
+  copies: 1,
+  orientation: "portrait",
+});
 const PRINT_ROUTE_GROUPS = [
   { value: "airport", label: "Airport" },
   { value: "indian_trail", label: "Indian Trail" },
@@ -16343,16 +16443,38 @@ function selectedPrintAttentionValues() {
   return selectedPrintFilterValues(els.printAttentionOptions, 'input[data-print-attention]:not([data-print-attention-all])');
 }
 
-/** Return true when the unrestricted All Glass choice is selected. */
-function allPrintGlassTypesSelected() {
-  return Boolean(els.printOptionsGlassType?.querySelector('input[data-print-all-glass]')?.checked);
+/** Return a stable comparison key for an imported or selected glass type. */
+function printGlassTypeMatchKey(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[“”″]/g, '"')
+    .replace(/[‘’′]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
-/** Return exact glass types from the visible controls or the active user preset. */
+/** Commit the visible exact-glass controls into stable Print / Export state. */
+function commitPrintGlassSelectionFromControls() {
+  const allInput = els.printOptionsGlassType?.querySelector('input[data-print-all-glass]');
+  const inputs = selectedPrintGlassInputs();
+  if (!allInput || !inputs.length) return;
+  const exactValues = inputs
+    .filter((input) => input.checked)
+    .map((input) => String(input.dataset.printGlassValue || input.value || "").trim())
+    .filter(Boolean);
+  state.printAllGlass = Boolean(allInput.checked) || exactValues.length === 0;
+  state.printGlassTypes = state.printAllGlass ? [] : [...new Set(exactValues)];
+}
+
+/** Return true when the unrestricted All Glass choice is selected. */
+function allPrintGlassTypesSelected() {
+  return state.printAllGlass !== false;
+}
+
+/** Return exact glass types from stable state instead of transient loading markup. */
 function selectedPrintGlassTypeValues() {
-  const visible = selectedPrintGlassInputs().filter((input) => input.checked).map((input) => input.value);
-  if (visible.length || allPrintGlassTypesSelected()) return visible;
-  return [...(activePrintPreset()?.glassTypes || [])];
+  return state.printAllGlass === false ? [...(state.printGlassTypes || [])] : [];
 }
 
 /** Keep All Glass mutually exclusive with exact glass-type choices. */
@@ -16366,6 +16488,12 @@ function syncPrintAllGlassChoice(changed) {
     return;
   }
   if (changed.checked) allInput.checked = false;
+  const enabledDetails = detailInputs.filter((input) => !input.disabled);
+  if (enabledDetails.length && enabledDetails.every((input) => input.checked)) {
+    allInput.checked = true;
+    detailInputs.forEach((input) => { input.checked = false; });
+    return;
+  }
   if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
 }
 
@@ -16381,12 +16509,72 @@ function syncPrintAllFilterChoice(container, changed, allSelector, detailSelecto
     return;
   }
   if (changed.checked) allInput.checked = false;
+  const enabledDetails = detailInputs.filter((input) => !input.disabled);
+  if (enabledDetails.length && enabledDetails.every((input) => input.checked)) {
+    allInput.checked = true;
+    detailInputs.forEach((input) => { input.checked = false; });
+    return;
+  }
   if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
 }
 
-/** Return the selected destination groups from the Route section. */
+/** Collapse every available detailed route back to Airport, the maintained all-routes choice. */
+function syncPrintAllRouteChoice(container, changed) {
+  if (!container || !changed) return;
+  const routeInputs = [...container.querySelectorAll('input[data-print-route-group]')];
+  const airport = routeInputs.find((input) => input.value === "airport");
+  if (!airport) return;
+  const detailInputs = routeInputs.filter((input) => input !== airport);
+  const enabledDetails = detailInputs.filter((input) => !input.disabled);
+  if (changed === airport) {
+    if (airport.checked) detailInputs.forEach((input) => { input.checked = false; });
+    else if (!detailInputs.some((input) => input.checked)) airport.checked = true;
+    return;
+  }
+  if (changed.checked) airport.checked = false;
+  if (enabledDetails.length && enabledDetails.every((input) => input.checked)) {
+    airport.checked = true;
+    detailInputs.forEach((input) => { input.checked = false; });
+    return;
+  }
+  if (!routeInputs.some((input) => input.checked)) airport.checked = true;
+}
+
+/** Normalize route state and guarantee one usable initial destination. */
+function normalizePrintRouteGroups(values = state.printRouteGroups) {
+  const validValues = new Set(PRINT_ROUTE_GROUPS.map(({ value }) => value));
+  const selected = [...new Set((values || [])
+    .map((value) => String(value || "").trim())
+    .filter((value) => validValues.has(value)))];
+  if (!selected.length || selected.includes("airport")) return ["airport"];
+  return selected;
+}
+
+/** Commit route state first, then mirror it into any currently rendered controls. */
+function setPrintRouteGroups(values, { syncControls = true } = {}) {
+  const selected = normalizePrintRouteGroups(values);
+  state.printRouteGroups = [...selected];
+  if (syncControls) {
+    const wanted = new Set(selected);
+    els.printRouteOptions?.querySelectorAll('input[data-print-route-group]').forEach((input) => {
+      input.checked = wanted.has(String(input.value || ""));
+    });
+  }
+  return [...selected];
+}
+
+/** Commit the visible route controls into stable Print / Export state. */
+function commitPrintRouteSelectionFromControls() {
+  const routeInputs = [...(els.printRouteOptions?.querySelectorAll('input[data-print-route-group]') || [])];
+  if (!routeInputs.length) return selectedPrintRouteGroups();
+  return setPrintRouteGroups(routeInputs
+    .filter((input) => input.checked)
+    .map((input) => input.value));
+}
+
+/** Return selected destinations from stable state, never from temporary markup. */
 function selectedPrintRouteGroups() {
-  return selectedPrintFilterValues(els.printRouteOptions, 'input[data-print-route-group]');
+  return setPrintRouteGroups(state.printRouteGroups, { syncControls: false });
 }
 
 /** Return active delivery lists inside the selected date range. */
@@ -16434,6 +16622,53 @@ async function ensurePrintListDetails(listIds) {
       _printItemsLoaded: true,
     });
   }));
+}
+
+/** Return true while the Print / Export panel is open and ready for user actions. */
+function printWorkspaceIsVisible() {
+  return Boolean(els.printOptionsPanel && !els.printOptionsPanel.hidden && state.printWorkspaceReady);
+}
+
+/** Detect selected catalog summaries whose detailed rows were invalidated by a real list change. */
+function printWorkspaceNeedsDetailReload() {
+  const selectedIds = new Set(selectedPrintListIds().map(String));
+  if (!selectedIds.size) return false;
+  return state.lists.some((list) => {
+    if (!selectedIds.has(String(list.id || ""))) return false;
+    return !list._printItemsLoaded && (!Array.isArray(list.items) || !list.items.length);
+  });
+}
+
+/**
+ * Reassert committed route state and reload rows only when a catalog revision actually changed.
+ * This runs on focus/visibility/catalog events instead of polling, so idle recovery adds no
+ * continuous work and unchanged loaded lists remain entirely in memory.
+ */
+async function restorePrintWorkspaceAfterInactivity({ refreshIfHealthy = false } = {}) {
+  if (!printWorkspaceIsVisible()) return;
+  setPrintRouteGroups(selectedPrintRouteGroups());
+
+  if (!printWorkspaceNeedsDetailReload()) {
+    if (refreshIfHealthy) schedulePrintSelectionPreview(0);
+    return;
+  }
+  if (state.printWorkspaceRecoveryPromise) return state.printWorkspaceRecoveryPromise;
+
+  const openId = state.printWorkspaceOpenId;
+  const recovery = renderPrintFilterChoices({ preserveSelections: true, captureControlSelections: false })
+    .then(() => {
+      if (openId !== state.printWorkspaceOpenId || !printWorkspaceIsVisible()) return;
+      setPrintRouteGroups(selectedPrintRouteGroups());
+      schedulePrintSelectionPreview(0);
+    })
+    .catch((error) => {
+      if (openId === state.printWorkspaceOpenId) showInlineError(error.message, false);
+    })
+    .finally(() => {
+      if (state.printWorkspaceRecoveryPromise === recovery) state.printWorkspaceRecoveryPromise = null;
+    });
+  state.printWorkspaceRecoveryPromise = recovery;
+  return recovery;
 }
 
 /** Return selected list records in deterministic date and stage order. */
@@ -16488,15 +16723,60 @@ function printRowsForSelectedRoutes(rows, routeGroups = selectedPrintRouteGroups
   return rows.filter(({ item }) => selected.has(printRouteGroupForItem(item)));
 }
 
-/** Render a compact selectable chip used by the filter pane. */
-function printFilterChipMarkup({ value, label, count, checked = false, type = "standard", data = "" }) {
+/** Render one compact selectable chip used by the Print / Export filter pane. */
+function printFilterChipMarkup({ value, label, count, checked = false, disabled = false, type = "standard", data = "", state = "" }) {
+  const stateClass = state === "alert" ? "has-alert" : state === "clear" ? "is-clear" : "";
+  const availabilityClass = disabled ? "is-unavailable" : "";
   return `
-    <label class="print-filter-chip-v197 is-${escapeHtml(type)}">
-      <input type="checkbox" value="${escapeHtml(value)}" ${data} ${checked ? "checked" : ""}>
+    <label class="print-filter-chip-v197 is-${escapeHtml(type)} ${stateClass} ${availabilityClass}" ${disabled ? 'aria-disabled="true"' : ""}>
+      <input type="checkbox" value="${escapeHtml(value)}" ${data} ${checked && !disabled ? "checked" : ""} ${disabled ? "disabled" : ""}>
       <span>${escapeHtml(label)}</span>
       <b>${escapeHtml(count)}</b>
     </label>
   `;
+}
+
+const PRINT_GLASS_CATEGORY_DEFINITIONS = Object.freeze([
+  Object.freeze({ value: "mirror", label: "Mirror" }),
+  Object.freeze({ value: "tempered", label: "Tempered" }),
+  Object.freeze({ value: "annealed", label: "Annealed" }),
+]);
+
+/** Classify maintained product names into the three compact Print / Export glass groups. */
+function printGlassCategoryForLabel(label) {
+  const key = printGlassTypeMatchKey(label);
+  if (/\bmirror\b/.test(key)) return "mirror";
+  if (/\b(?:temper(?:ed)?|toughened|heat[- ]strengthened)\b/.test(key)) return "tempered";
+  // Legacy lookup values do not always include the word annealed. Anything that
+  // is not explicitly Mirror or Tempered belongs in the Annealed group so every
+  // maintained product remains selectable instead of falling into an unlabeled bucket.
+  return "annealed";
+}
+
+/** Render grouped glass choices with small color-coded category separators. */
+function printGlassCategoryMarkup(glassEntries, selectedKeys, selectAllCurrent) {
+  const grouped = new Map(PRINT_GLASS_CATEGORY_DEFINITIONS.map(({ value }) => [value, []]));
+  for (const entry of glassEntries || []) {
+    const [label, count] = entry;
+    grouped.get(printGlassCategoryForLabel(label)).push([label, count]);
+  }
+  return PRINT_GLASS_CATEGORY_DEFINITIONS.map(({ value, label }) => {
+    const entries = grouped.get(value) || [];
+    if (!entries.length) return "";
+    const pieceCount = entries.reduce((sum, entry) => sum + Number(entry[1] || 0), 0);
+    const choices = entries.map(([glassLabel, count]) => printFilterChipMarkup({
+      value: glassLabel,
+      label: glassLabel,
+      count,
+      checked: !selectAllCurrent && selectedKeys.has(printGlassTypeMatchKey(glassLabel)),
+      type: `glass-${value}`,
+      data: `data-print-glass-type="1" data-print-glass-value="${escapeHtml(glassLabel)}" data-print-glass-search="${escapeHtml(glassLabel.toLowerCase())}"`,
+    })).join("");
+    return `<section class="print-glass-category-v220 is-${escapeHtml(value)}" data-print-glass-category>
+      <header class="print-glass-category-heading-v220"><span>${escapeHtml(label)}</span><b>${escapeHtml(pieceCount)} pcs</b></header>
+      <div class="print-glass-category-options-v220">${choices}</div>
+    </section>`;
+  }).join("");
 }
 
 /** Convert a local Date into the scanner's YYYY-MM-DD date key. */
@@ -16521,35 +16801,184 @@ function printCalendarMonthDate(value) {
   return new Date(fallback.getFullYear(), fallback.getMonth(), 1);
 }
 
-/** Populate the header date selector with Custom Range first and every available outbound date after it. */
+/** Size the header date selector to its current date or date-range label. */
+function syncPrintDateControlWidth() {
+  const control = els.printDateQuickSelect?.closest(".print-header-date-control-v203");
+  if (!control || !els.printDateQuickSelect) return;
+  const text = customSelectSelectedText(els.printDateQuickSelect) || "Custom Range…";
+  const isRange = String(els.printDateFrom?.value || "") !== String(els.printDateTo?.value || "");
+  // Full weekday dates need more room than the former numeric labels, while
+  // custom ranges still grow only as far as the header can comfortably support.
+  const minimum = isRange ? 370 : 230;
+  const maximum = isRange ? 520 : 330;
+  const measured = Math.ceil(text.length * 7.35 + 54);
+  control.style.setProperty("--print-date-control-width", `${Math.min(Math.max(measured, minimum), maximum)}px`);
+}
+
+/** Return every unique outbound delivery date in chronological order. */
+function printQuickDateCatalog() {
+  return [...new Set(
+    state.lists
+      .filter((list) => stageCategory(list) === "outbound")
+      .map((list) => String(list.deliveryDate || ""))
+      .filter((date) => Boolean(printCalendarDateFromKey(date))),
+  )].sort((a, b) => a.localeCompare(b));
+}
+
+/** Return the Monday that starts the visual week containing one date. */
+function printQuickDateWeekStart(value) {
+  const date = value instanceof Date ? new Date(value.getFullYear(), value.getMonth(), value.getDate()) : printCalendarDateFromKey(value);
+  if (!date) return null;
+  const mondayOffset = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - mondayOffset);
+  return date;
+}
+
+/** Return a local calendar date shifted by an exact number of days. */
+function printQuickDateShift(value, days) {
+  const date = value instanceof Date ? new Date(value.getFullYear(), value.getMonth(), value.getDate()) : printCalendarDateFromKey(value);
+  if (!date) return null;
+  date.setDate(date.getDate() + Number(days || 0));
+  return date;
+}
+
+/** Format one compact Monday-Sunday range for a date-dropdown group heading. */
+function printQuickDateWeekRange(start) {
+  const end = printQuickDateShift(start, 6);
+  if (!start || !end) return "";
+  const startMonth = start.toLocaleDateString(undefined, { month: "short" });
+  const endMonth = end.toLocaleDateString(undefined, { month: "short" });
+  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+  const sameYear = start.getFullYear() === end.getFullYear();
+  if (sameMonth) return `${startMonth} ${start.getDate()}–${end.getDate()}, ${end.getFullYear()}`;
+  if (sameYear) return `${startMonth} ${start.getDate()}–${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
+  return `${startMonth} ${start.getDate()}, ${start.getFullYear()}–${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
+}
+
+/** Label date groups relative to the current business week when possible. */
+function printQuickDateWeekLabel(startKey) {
+  const start = printCalendarDateFromKey(startKey);
+  const currentWeek = printQuickDateWeekStart(new Date());
+  const previousWeek = printQuickDateShift(currentWeek, -7);
+  const nextWeek = printQuickDateShift(currentWeek, 7);
+  const key = printCalendarDateKey(start);
+  const prefix = key === printCalendarDateKey(currentWeek)
+    ? "This Week"
+    : key === printCalendarDateKey(previousWeek)
+      ? "Last Week"
+      : key === printCalendarDateKey(nextWeek)
+        ? "Next Week"
+        : "Week";
+  return `${prefix} · ${printQuickDateWeekRange(start)}`;
+}
+
+/** Return the oldest date exposed by the current two-week history window. */
+function printQuickDateHistoryCutoffKey() {
+  const days = Math.max(Number(state.printDateHistoryWeeks || PRINT_DATE_HISTORY_BATCH_WEEKS), PRINT_DATE_HISTORY_BATCH_WEEKS) * 7 - 1;
+  return printCalendarDateKey(printQuickDateShift(new Date(), -days));
+}
+
+/** Report whether more historical delivery dates remain outside the current window. */
+function printQuickDateHasMoreHistory() {
+  const cutoff = printQuickDateHistoryCutoffKey();
+  return printQuickDateCatalog().some((date) => date < cutoff);
+}
+
+/** Load exactly two more historical weeks without fetching or rerendering list detail. */
+function loadMorePrintQuickDateHistory() {
+  if (!printQuickDateHasMoreHistory()) return false;
+  state.printDateHistoryWeeks = Math.max(
+    Number(state.printDateHistoryWeeks || PRINT_DATE_HISTORY_BATCH_WEEKS),
+    PRINT_DATE_HISTORY_BATCH_WEEKS,
+  ) + PRINT_DATE_HISTORY_BATCH_WEEKS;
+  renderPrintQuickDateOptions();
+  return true;
+}
+
+/** Add the date menu's explicit and scroll-triggered history loader. */
+function appendPrintQuickDateHistoryControl(select, optionsHost, query = "") {
+  if (select.id !== "printDateQuickSelect" || select.dataset.hasMoreHistory !== "true" || String(query || "").trim()) return;
+  const control = document.createElement("button");
+  control.type = "button";
+  control.className = "custom-select-load-more print-date-load-more-v225";
+  control.innerHTML = '<strong>Load 2 older weeks</strong><span>Scroll to the bottom or select this row</span>';
+  control.addEventListener("click", () => extendPrintQuickDateMenu(select, optionsHost, query));
+  optionsHost.append(control);
+}
+
+/** Extend the open date menu while preserving its scroll position and selection. */
+function extendPrintQuickDateMenu(select, optionsHost, query = "") {
+  const previousHeight = optionsHost.scrollHeight;
+  const previousTop = optionsHost.scrollTop;
+  if (!loadMorePrintQuickDateHistory()) return false;
+  renderCustomSelectOptions(select, optionsHost, query);
+  window.requestAnimationFrame(() => {
+    const addedHeight = Math.max(optionsHost.scrollHeight - previousHeight, 0);
+    optionsHost.scrollTop = Math.max(previousTop, previousTop + Math.min(addedHeight * 0.08, 18));
+    positionCustomSelectMenu();
+  });
+  return true;
+}
+
+/** Populate grouped delivery dates, initially showing two past weeks and every future date. */
 function renderPrintQuickDateOptions() {
   if (!els.printDateQuickSelect) return;
   const start = String(els.printDateFrom?.value || "");
   const end = String(els.printDateTo?.value || start);
-  const dates = [...new Set(
-    state.lists
-      .filter((list) => stageCategory(list) === "outbound")
-      .map((list) => String(list.deliveryDate || ""))
-      .filter(Boolean),
-  )].sort((a, b) => b.localeCompare(a));
   const selectedValue = start && start === end ? start : "__range__";
   const rangeOption = start && end && start !== end
-    ? `<option value="__range__">Date Range: ${escapeHtml(formatDisplayDate(start))} – ${escapeHtml(formatDisplayDate(end))}</option>`
+    ? `<option value="__range__">${escapeHtml(formatDisplayDate(start))} – ${escapeHtml(formatDisplayDate(end))}</option>`
     : "";
-  els.printDateQuickSelect.innerHTML = `<option value="__custom__">Custom date range…</option>${rangeOption}${dates.map((date) => `<option value="${escapeHtml(date)}">Delivery Date: ${escapeHtml(formatDisplayDate(date))}</option>`).join("")}`;
-  if (selectedValue !== "__range__" && selectedValue && !dates.includes(selectedValue)) {
-    els.printDateQuickSelect.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(selectedValue)}">Delivery Date: ${escapeHtml(formatDisplayDate(selectedValue))}</option>`);
+
+  const catalog = printQuickDateCatalog();
+  const cutoff = printQuickDateHistoryCutoffKey();
+  const visibleDates = new Set(catalog.filter((date) => date >= cutoff));
+  if (selectedValue !== "__range__" && printCalendarDateFromKey(selectedValue)) {
+    const selectedWeekKey = printCalendarDateKey(printQuickDateWeekStart(selectedValue));
+    catalog.forEach((date) => {
+      const weekStart = printQuickDateWeekStart(date);
+      if (weekStart && printCalendarDateKey(weekStart) === selectedWeekKey) visibleDates.add(date);
+    });
+    visibleDates.add(selectedValue);
   }
+
+  const grouped = new Map();
+  [...visibleDates].forEach((date) => {
+    const weekStart = printQuickDateWeekStart(date);
+    if (!weekStart) return;
+    const weekKey = printCalendarDateKey(weekStart);
+    if (!grouped.has(weekKey)) grouped.set(weekKey, []);
+    grouped.get(weekKey).push(date);
+  });
+
+  // Keep the newest available week first: future weeks, then this week,
+  // then progressively older history. Dates inside each group follow the same
+  // high-to-low order so the menu reads consistently from top to bottom.
+  const orderedWeekKeys = [...grouped.keys()].sort((a, b) => b.localeCompare(a));
+  const groupedOptions = orderedWeekKeys.map((weekKey) => {
+    const options = grouped.get(weekKey)
+      .sort((a, b) => b.localeCompare(a))
+      .map((date) => `<option value="${escapeHtml(date)}">${escapeHtml(formatDisplayDate(date))}</option>`)
+      .join("");
+    return `<optgroup label="${escapeHtml(printQuickDateWeekLabel(weekKey))}">${options}</optgroup>`;
+  }).join("");
+
+  els.printDateQuickSelect.innerHTML = `<option value="__custom__">Custom Range…</option>${rangeOption}${groupedOptions}`;
+  els.printDateQuickSelect.dataset.hasMoreHistory = printQuickDateHasMoreHistory() ? "true" : "false";
   els.printDateQuickSelect.value = selectedValue === "__range__" && !rangeOption ? "__custom__" : selectedValue;
   syncCustomSelect(els.printDateQuickSelect);
+  syncPrintDateControlWidth();
 }
 
 /** Open the maintained custom-range calendar. */
 function openPrintDateCalendar() {
   const currentStart = String(els.printDateFrom?.value || dashboardDateKey() || printCalendarDateKey(new Date()));
   const currentEnd = String(els.printDateTo?.value || currentStart);
-  state.printCalendarDraftStart = currentStart;
-  state.printCalendarDraftEnd = currentEnd && currentEnd !== currentStart ? currentEnd : "";
+  const editingExistingRange = Boolean(currentStart && currentEnd && currentStart !== currentEnd);
+  // A single-date selection is only the calendar's opening month. Custom Range
+  // starts with an empty draft so the next two clicks are always Date From and Date To.
+  state.printCalendarDraftStart = editingExistingRange ? currentStart : "";
+  state.printCalendarDraftEnd = editingExistingRange ? currentEnd : "";
   state.printCalendarMonth = printCalendarDateKey(printCalendarMonthDate(currentStart));
   if (els.printDateCalendar) els.printDateCalendar.hidden = false;
   renderPrintDateCalendar();
@@ -16557,7 +16986,8 @@ function openPrintDateCalendar() {
 
 /** Close the date calendar without applying its draft. */
 function closePrintDateCalendar() {
-  if (els.printDateCalendar) els.printDateCalendar.hidden = true;
+  if (!els.printDateCalendar || els.printDateCalendar.hidden) return;
+  els.printDateCalendar.hidden = true;
   renderPrintQuickDateOptions();
 }
 
@@ -16662,18 +17092,27 @@ function setPrintFilterLoadingState() {
 }
 
 /** Render destination routes and all date/route-dependent filter choices. */
-async function renderPrintFilterChoices({ preserveSelections = true } = {}) {
+async function renderPrintFilterChoices({ preserveSelections = true, captureControlSelections = preserveSelections } = {}) {
   window.clearTimeout(state.printPreviewTimer);
   state.printPreviewRequestId += 1;
+  // Capture live controls only for an established workspace. Initial/default
+  // rendering starts from committed state so stale markup from a prior open
+  // cannot overwrite Airport before the first preview is ready. Preview
+  // Preview filtering must never depend on detached DOM.
+  if (captureControlSelections) {
+    // Route state is committed only by the route-control change handler. Reading
+    // checkbox markup during unrelated date/orientation refreshes caused Airport
+    // to look selected while the maintained route state was briefly replaced.
+    commitPrintGlassSelectionFromControls();
+  }
   const listIds = selectedPrintListIds();
   const renderId = ++state.printEntityRenderId;
   const previousRoutes = new Set(selectedPrintRouteGroups());
   const previousStatuses = new Set(selectedPrintFilterValues(els.printStatusOptions, 'input[data-print-status]'));
   const previousAttention = new Set(selectedPrintFilterValues(els.printAttentionOptions, 'input[data-print-attention]'));
-  const presetGlassTypes = activePrintPreset()?.glassTypes || null;
-  const previousGlass = new Set(presetGlassTypes || selectedPrintGlassInputs().filter((input) => input.checked).map((input) => input.value));
-  const previousAllGlass = presetGlassTypes ? presetGlassTypes.length === 0 : Boolean(els.printOptionsGlassType?.querySelector('input[data-print-all-glass]')?.checked);
-  const hadGlassChoices = presetGlassTypes ? true : selectedPrintGlassInputs().length > 0;
+  const previousGlass = new Set(selectedPrintGlassTypeValues());
+  const previousGlassKeys = new Set([...previousGlass].map(printGlassTypeMatchKey));
+  const previousAllGlass = allPrintGlassTypesSelected();
 
   setPrintFilterLoadingState();
   hidePrintSearchSuggestions();
@@ -16712,19 +17151,27 @@ async function renderPrintFilterChoices({ preserveSelections = true } = {}) {
 
   const validRouteValues = new Set(PRINT_ROUTE_GROUPS.map(({ value }) => value));
   let selectedRoutes = preserveSelections
-    ? [...previousRoutes].filter((value) => validRouteValues.has(value))
+    ? [...previousRoutes].filter((value) => validRouteValues.has(value) && Number(routeCounts.get(value) || 0) > 0)
     : [];
-  if (!selectedRoutes.length) selectedRoutes = ["airport"];
+  if (!selectedRoutes.length) {
+    const fallbackRoute = PRINT_ROUTE_GROUPS.find(({ value }) => Number(routeCounts.get(value) || 0) > 0)?.value || "airport";
+    selectedRoutes = [fallbackRoute];
+  }
+  setPrintRouteGroups(selectedRoutes, { syncControls: false });
 
   if (els.printRouteOptions) {
-    els.printRouteOptions.innerHTML = PRINT_ROUTE_GROUPS.map(({ value, label }) => printFilterChipMarkup({
-      value,
-      label,
-      count: routeCounts.get(value) || 0,
-      checked: selectedRoutes.includes(value),
-      type: `route-${value.replaceAll("_", "-")}`,
-      data: 'data-print-route-group="1"',
-    })).join("");
+    els.printRouteOptions.innerHTML = PRINT_ROUTE_GROUPS.map(({ value, label }) => {
+      const count = routeCounts.get(value) || 0;
+      return printFilterChipMarkup({
+        value,
+        label,
+        count,
+        checked: selectedRoutes.includes(value),
+        disabled: count <= 0,
+        type: `route-${value.replaceAll("_", "-")}`,
+        data: 'data-print-route-group="1"',
+      });
+    }).join("");
   }
 
   const scopedRows = printRowsForSelectedRoutes(baseRows, selectedRoutes);
@@ -16747,66 +17194,82 @@ async function renderPrintFilterChoices({ preserveSelections = true } = {}) {
     ["partial", "Partial"],
     ["complete", "Complete"],
   ];
-  const statusAllSelected = !preserveSelections || previousStatuses.has("__all__") || !previousStatuses.size;
+  const availableSelectedStatuses = statusDefinitions
+    .map(([value]) => value)
+    .filter((value) => previousStatuses.has(value) && Number(statusCounts.get(value) || 0) > 0);
+  const statusAllSelected = !preserveSelections || previousStatuses.has("__all__") || !availableSelectedStatuses.length;
   if (els.printStatusOptions) {
     els.printStatusOptions.innerHTML = `${printFilterChipMarkup({
       value: "__all__",
       label: "All Status",
       count: scopedPieceCount,
       checked: statusAllSelected,
+      disabled: scopedPieceCount <= 0,
       type: "status-all",
       data: 'data-print-status="1" data-print-status-all="1"',
-    })}${statusDefinitions.map(([value, label]) => printFilterChipMarkup({
-      value,
-      label,
-      count: statusCounts.get(value) || 0,
-      checked: !statusAllSelected && previousStatuses.has(value),
-      type: `status-${value}`,
-      data: 'data-print-status="1"',
-    })).join("")}`;
+    })}${statusDefinitions.map(([value, label]) => {
+      const count = statusCounts.get(value) || 0;
+      return printFilterChipMarkup({
+        value,
+        label,
+        count,
+        checked: !statusAllSelected && availableSelectedStatuses.includes(value),
+        disabled: count <= 0,
+        type: `status-${value}`,
+        data: 'data-print-status="1"',
+      });
+    }).join("")}`;
   }
 
   const attentionDefinitions = [
-    ["remake", "Remakes"],
-    ["rush", "Rushes"],
-    ["reject", "Internal Rejects"],
-    ["updated", "New/Updated"],
-    ["error", "Errors"],
+    ["remake", "Remakes", true],
+    ["rush", "Rushes", true],
+    ["reject", "Internal Rejects", true],
+    ["updated", "New/Updated", false],
+    ["error", "Errors", false],
   ];
-  const attentionAllSelected = !preserveSelections || previousAttention.has("__all__") || !previousAttention.size;
+  const availableSelectedAttention = attentionDefinitions
+    .map(([value, , showHealthState]) => ({ value, showHealthState }))
+    .filter(({ value, showHealthState }) => previousAttention.has(value) && (showHealthState || Number(attentionCounts.get(value) || 0) > 0))
+    .map(({ value }) => value);
+  const attentionAllSelected = !preserveSelections || previousAttention.has("__all__") || !availableSelectedAttention.length;
   if (els.printAttentionOptions) {
     els.printAttentionOptions.innerHTML = `${printFilterChipMarkup({
       value: "__all__",
       label: "All Attention",
       count: scopedPieceCount,
       checked: attentionAllSelected,
+      disabled: scopedPieceCount <= 0,
       type: "attention-all",
       data: 'data-print-attention="1" data-print-attention-all="1"',
-    })}${attentionDefinitions.map(([value, label]) => printFilterChipMarkup({
-      value,
-      label,
-      count: attentionCounts.get(value) || 0,
-      checked: !attentionAllSelected && previousAttention.has(value),
-      type: `attention-${value}`,
-      data: 'data-print-attention="1"',
-    })).join("")}`;
+    })}${attentionDefinitions.map(([value, label, showHealthState]) => {
+      const count = attentionCounts.get(value) || 0;
+      return printFilterChipMarkup({
+        value,
+        label,
+        count,
+        checked: !attentionAllSelected && availableSelectedAttention.includes(value),
+        disabled: !showHealthState && count <= 0,
+        type: `attention-${value}`,
+        data: 'data-print-attention="1"',
+        state: showHealthState ? (count > 0 ? "alert" : "clear") : "",
+      });
+    }).join("")}`;
   }
 
   const glassEntries = [...glassCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   if (els.printOptionsGlassType) {
     const totalPieces = glassEntries.reduce((sum, entry) => sum + Number(entry[1] || 0), 0);
-    const selectAllCurrent = !preserveSelections || !hadGlassChoices || previousAllGlass;
-    const glassMarkup = glassEntries.map(([label, count]) => printFilterChipMarkup({
-      value: label,
-      label,
-      count,
-      checked: !selectAllCurrent && previousGlass.has(label),
-      type: "glass",
-      data: `data-print-glass-type="1" data-print-glass-search="${escapeHtml(label.toLowerCase())}"`,
-    })).join("");
+    const matchedGlassLabels = glassEntries
+      .map(([label]) => label)
+      .filter((label) => previousGlassKeys.has(printGlassTypeMatchKey(label)));
+    const selectAllCurrent = !preserveSelections || previousAllGlass || !matchedGlassLabels.length;
+    const glassMarkup = printGlassCategoryMarkup(glassEntries, previousGlassKeys, selectAllCurrent);
     els.printOptionsGlassType.innerHTML = glassEntries.length
       ? `${printFilterChipMarkup({ value: "__all__", label: "All Glass", count: totalPieces, checked: selectAllCurrent, type: "glass-all", data: 'data-print-all-glass="1"' })}${glassMarkup}<div class="print-glass-search-empty-v197" hidden>No glass types match this search.</div>`
       : '<div class="print-filter-empty-v197">No glass types exist for the selected date and route.</div>';
+    state.printAllGlass = selectAllCurrent;
+    state.printGlassTypes = selectAllCurrent ? [] : matchedGlassLabels;
     updatePrintAllGlassState();
     applyPrintGlassSearch();
   }
@@ -16822,21 +17285,27 @@ function updatePrintAllGlassState() {
   const inputs = selectedPrintGlassInputs();
   if (!allInput) return;
   if (allInput.checked) inputs.forEach((input) => { input.checked = false; });
-  if (!inputs.some((input) => input.checked)) {
-    allInput.checked = !(activePrintPreset()?.glassTypes || []).length;
-  }
+  if (!inputs.some((input) => input.checked)) allInput.checked = true;
   allInput.indeterminate = false;
+  commitPrintGlassSelectionFromControls();
 }
 
 /** Filter glass chips without discarding their selected state. */
 function applyPrintGlassSearch() {
   const query = String(els.printGlassSearch?.value || "").trim().toLowerCase();
   let visible = 0;
-  els.printOptionsGlassType?.querySelectorAll('.print-filter-chip-v197:has(input[data-print-glass-type])').forEach((choice) => {
-    const input = choice.querySelector('input[data-print-glass-type]');
-    const matches = !query || String(input?.dataset.printGlassSearch || input?.value || "").includes(query);
-    choice.hidden = !matches;
-    if (matches) visible += 1;
+  els.printOptionsGlassType?.querySelectorAll('[data-print-glass-category]').forEach((group) => {
+    let groupVisible = 0;
+    group.querySelectorAll('.print-filter-chip-v197:has(input[data-print-glass-type])').forEach((choice) => {
+      const input = choice.querySelector('input[data-print-glass-type]');
+      const matches = !query || String(input?.dataset.printGlassSearch || input?.value || "").includes(query);
+      choice.hidden = !matches;
+      if (matches) {
+        groupVisible += 1;
+        visible += 1;
+      }
+    });
+    group.hidden = groupVisible === 0;
   });
   const empty = els.printOptionsGlassType?.querySelector('.print-glass-search-empty-v197');
   if (empty) empty.hidden = visible > 0;
@@ -17103,11 +17572,11 @@ function printRowMatchesExactSelection(list, item) {
 function printFilteredRows() {
   const selectedRoutes = selectedPrintRouteGroups();
   const allGlass = allPrintGlassTypesSelected();
-  const selectedGlass = new Set(selectedPrintGlassTypeValues());
+  const selectedGlass = new Set(selectedPrintGlassTypeValues().map(printGlassTypeMatchKey));
   const selectedStatuses = new Set(selectedPrintStatusValues());
   const selectedAttention = new Set(selectedPrintAttentionValues());
   return printRowsForSelectedRoutes(printBaseRows(selectedPrintListIds()), selectedRoutes).filter(({ list, item }) => {
-    if (!allGlass && selectedGlass.size && !selectedGlass.has(glassTypeLabel(item))) return false;
+    if (!allGlass && selectedGlass.size && !selectedGlass.has(printGlassTypeMatchKey(glassTypeLabel(item)))) return false;
     if (!allGlass && !selectedGlass.size) return false;
     if (selectedStatuses.size && !selectedStatuses.has(printItemStatusKey(item))) return false;
     if (selectedAttention.size && !printItemAttentionKeys(item).some((key) => selectedAttention.has(key))) return false;
@@ -17157,6 +17626,23 @@ function printSheetStageName(list) {
     || String(list?.stage || list?.label || "Delivery List").split(" - ")[0].trim();
 }
 
+/** Return the full weekday date used beneath the printed destination title. */
+function printSheetDateLabel(value) {
+  return formatDisplayDate(value);
+}
+
+/** Describe the maintained destination selection in the printed title. */
+function printSheetRouteLabel(routeGroups = selectedPrintRouteGroups()) {
+  const labels = new Map(PRINT_ROUTE_GROUPS.map(({ value, label }) => [value, label]));
+  const selected = normalizePrintRouteGroups(routeGroups).map((value) => labels.get(value)).filter(Boolean);
+  return (selected.length ? selected : ["Airport"]).join(" | ");
+}
+
+/** Build the route-driven uppercase heading used by preview and paper output. */
+function printSheetTitleLabel(routeGroups = selectedPrintRouteGroups()) {
+  return `${printSheetRouteLabel(routeGroups).toLocaleUpperCase()} DELIVERY LIST`;
+}
+
 /** Convert one loaded row into the common preview/print row contract. */
 function printPreviewRow(list, item) {
   const statusKey = printItemStatusKey(item);
@@ -17182,6 +17668,7 @@ function printPreviewRow(list, item) {
 /** Build sheet groups that follow the maintained normal, Rush, and remake print order. */
 function buildLocalPrintSheets(filteredRows) {
   const rowsByList = new Map();
+  const filterSummary = printCurrentFilterSummary();
   for (const row of filteredRows) {
     if (!rowsByList.has(row.list.id)) rowsByList.set(row.list.id, []);
     rowsByList.get(row.list.id).push(row);
@@ -17214,9 +17701,13 @@ function buildLocalPrintSheets(filteredRows) {
         listId: String(list.id || ""),
         stageName,
         deliveryDate: String(list.deliveryDate || ""),
+        dateLabel: printSheetDateLabel(list.deliveryDate || ""),
+        routeLabel: printSheetRouteLabel(),
+        titleLabel: printSheetTitleLabel(),
         mode,
         title,
         badge: mode === "rush" ? "RUSH" : mode === "remake" ? "REMAKE" : updated ? "UPDATED" : "",
+        filterSummary,
         rows: rows.sort((a, b) => String(a.glassType).localeCompare(String(b.glassType)) || Number(a.order || 0) - Number(b.order || 0) || Number(a.item || 0) - Number(b.item || 0)),
       });
     };
@@ -17232,7 +17723,8 @@ function buildLocalPrintSelectionPreview() {
   const filteredRows = printFilteredRows();
   const previewRows = filteredRows.map(({ list, item }) => printPreviewRow(list, item));
   const previewSheets = buildLocalPrintSheets(filteredRows);
-  const pageCount = previewSheets.reduce((sum, sheet) => sum + paginatePrintSheetRows(sheet.rows).length, 0);
+  const orientation = String(els.printOrientation?.value || "portrait") === "landscape" ? "landscape" : "portrait";
+  const pageCount = previewSheets.reduce((sum, sheet) => sum + paginatePrintSheetRows(sheet.rows, orientation).length, 0);
   return {
     generatedAt: new Date().toISOString(),
     totalPieces: previewRows.reduce((sum, row) => sum + Number(row.pieces || 0), 0),
@@ -17240,6 +17732,7 @@ function buildLocalPrintSelectionPreview() {
     orderCount: new Set(previewRows.map((row) => row.order).filter(Boolean)).size,
     customerCount: new Set(previewRows.map((row) => row.customer).filter(Boolean)).size,
     pageCount: Math.max(pageCount, 1),
+    filterSummary: printCurrentFilterSummary(),
     previewRows,
     previewSheets,
     noResults: previewRows.length === 0,
@@ -17254,22 +17747,58 @@ function printPreviewTimestamp(value) {
   return parsed.toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-/** Return a readable label for selected chips. */
-function printSelectedChipLabels(container, selector, fallback) {
-  const labels = [...(container?.querySelectorAll(selector) || [])]
-    .filter((input) => input.checked)
-    .map((input) => input.closest("label")?.querySelector("span")?.textContent?.trim() || input.value)
-    .filter(Boolean);
-  return labels.length ? labels.join(", ") : fallback;
+/** Compress one filter group into a readable print-header value. */
+function printCompactFilterValue(values, allLabel, labels = {}, countedLabel = "selected") {
+  const selected = [...new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!selected.length) return allLabel;
+  const display = selected.map((value) => labels[value] || value);
+  if (display.length <= 2) return display.join(", ");
+  return `${display.length} ${countedLabel}`;
 }
 
-/** Paginate rows with the same 21-row first page and 23-row continuation limits as the server printout. */
-function paginatePrintSheetRows(rows) {
+/** Build a route-free list of only the unique filters that narrow the output. */
+function printCurrentFilterSummary() {
+  const statusLabels = { "not-scanned": "Not Scanned", partial: "Partial", complete: "Complete" };
+  const attentionLabels = { remake: "Remakes", rush: "Rushes", reject: "Internal Rejects", updated: "New/Updated", error: "Errors" };
+  const parts = [];
+  const glassTypes = allPrintGlassTypesSelected() ? [] : selectedPrintGlassTypeValues();
+  const statuses = selectedPrintStatusValues();
+  const attention = selectedPrintAttentionValues();
+  if (glassTypes.length) parts.push(printCompactFilterValue(glassTypes, "", {}, "glass types"));
+  if (statuses.length) parts.push(printCompactFilterValue(statuses, "", statusLabels, "statuses"));
+  if (attention.length) parts.push(printCompactFilterValue(attention, "", attentionLabels, "attention filters"));
+
+  const exactOrders = selectedPrintOrderValues();
+  const exactItems = selectedPrintItemValues();
+  const exactSelectionCount = exactOrders.length + exactItems.length;
+  if (exactOrders.length === 1 && !exactItems.length) parts.push(`Order ${exactOrders[0]}`);
+  else if (exactSelectionCount) parts.push(`${exactSelectionCount} exact selection${exactSelectionCount === 1 ? "" : "s"}`);
+  if (state.printContext?.updatedOnly) parts.push("Updated only");
+
+  const seen = new Set();
+  const uniqueParts = parts.filter((part) => {
+    const key = String(part || "").trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return `Filters: ${uniqueParts.length ? uniqueParts.join(" | ") : "All items"}`;
+}
+
+/** Paginate rows using page-height limits designed for each paper orientation. */
+function paginatePrintSheetRows(rows, orientation = "portrait") {
+  const landscape = String(orientation || "portrait") === "landscape";
   const pages = [];
   let current = [];
   let count = 0;
   let currentGlass = "";
-  const limit = () => pages.length ? 23 : 21;
+  // v0.225 keeps the verified portrait limits and the 27-row landscape first
+  // page, while reducing landscape continuation pages by one logical line.
+  // Glass headings still consume one logical line so the final order row stays
+  // above the fixed footer and printer-safe margin.
+  const limit = () => landscape
+    ? (pages.length ? 28 : 27)
+    : (pages.length ? 28 : 26);
   const flush = () => { if (current.length) pages.push(current); current = []; count = 0; currentGlass = ""; };
   for (const row of rows || []) {
     const glass = String(row.glassType || "Unspecified Glass");
@@ -17285,10 +17814,13 @@ function paginatePrintSheetRows(rows) {
 }
 
 function printSheetBodyMarkup(pageRows) {
+  let visibleRowIndex = 0;
   return (pageRows || []).map((entry) => {
     if (entry.type === "group") return `<tr class="glass-group"><td colspan="8">${escapeHtml(entry.glassType)}</td></tr>`;
     const row = entry.row || {};
-    return `<tr><td class="print-truncate">${escapeHtml(row.job || row.glassType || "")}</td><td>${escapeHtml(row.order || "")}</td><td>${escapeHtml(row.item || "")}</td><td>${escapeHtml(row.pieces || 0)}</td><td class="print-truncate">${escapeHtml(row.dimensions || "")}</td><td class="print-truncate">${escapeHtml(row.customer || "")}</td><td>${escapeHtml(row.route || "Indian Trail")}</td><td class="check-cell">☐</td></tr>`;
+    const stripeClass = visibleRowIndex % 2 ? "is-even" : "is-odd";
+    visibleRowIndex += 1;
+    return `<tr class="print-data-row ${stripeClass}"><td class="print-truncate">${escapeHtml(row.job || row.glassType || "")}</td><td>${escapeHtml(row.order || "")}</td><td>${escapeHtml(row.item || "")}</td><td>${escapeHtml(row.pieces || 0)}</td><td class="print-truncate">${escapeHtml(row.dimensions || "")}</td><td class="print-truncate">${escapeHtml(row.customer || "")}</td><td>${escapeHtml(row.route || "Indian Trail")}</td><td class="check-cell">☐</td></tr>`;
   }).join("");
 }
 
@@ -17296,14 +17828,31 @@ function printSheetBodyMarkup(pageRows) {
 function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientation, generatedAt, previewClass = "") {
   const continuation = pageNumber > 1;
   const badge = sheet.badge ? `<span class="sheet-badge">${escapeHtml(sheet.badge)}</span>` : "";
+  const rows = Array.isArray(sheet.rows) ? sheet.rows : [];
+  const printableRows = rows.length;
+  const totalOrders = new Set(rows.map((row) => String(row.order || "").trim()).filter(Boolean)).size;
+  const totalQty = rows.reduce((sum, row) => sum + Number(row.pieces || 0), 0);
+  const filterSummary = String(sheet.filterSummary || printCurrentFilterSummary());
+  const dateLabel = String(sheet.dateLabel || printSheetDateLabel(sheet.deliveryDate || ""));
+  const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
+  const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
+  const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260805-v0.228", window.location.href).href;
+  const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
+  const firstPageSignoff = continuation
+    ? ""
+    : `<div class="sheet-header-signoff"><div class="copy-box"><span>Checked By: <i class="write-line checked-line"></i></span></div></div>`;
   return `<section class="delivery-print-sheet-v203 ${escapeHtml(sheet.mode || "normal")} is-${escapeHtml(orientation)} ${previewClass}">
     <div class="sheet-page-top">List page ${pageNumber} of ${pageTotal}</div>
     <header class="sheet-header ${continuation ? "sheet-header-compact" : ""}">
-      <div>${badge}<${continuation ? "h2" : "h1"}>${escapeHtml(sheet.title || "Delivery List")}</${continuation ? "h2" : "h1"}>${continuation ? `<p>Continuation sheet - List page ${pageNumber} of ${pageTotal}</p>` : ""}<p class="printed-at">Printed at: ${escapeHtml(printPreviewTimestamp(generatedAt))}</p></div>
-      <div class="copy-box"><span>Checked By: <i class="write-line checked-line"></i></span><span>Date: <i class="write-line date-line"></i></span></div>
+      <div class="sheet-brand-title">
+        <div class="sheet-brand-mark"><img src="${escapeHtml(logoUrl)}" alt="Barefoot Company and Builders FirstSource logo"></div>
+        <div class="sheet-title-block"><div class="sheet-location-row ${titleLengthClass}"><${continuation ? "h2" : "h1"} class="sheet-location-title">${escapeHtml(titleLabel)}</${continuation ? "h2" : "h1"}>${badge}</div><p class="sheet-date-title">${escapeHtml(dateLabel)}</p><p class="sheet-totals">Rows: ${printableRows} | Orders: ${totalOrders} | QTY: ${totalQty}</p>${pageFilterDetails}</div>
+      </div>
+      ${firstPageSignoff}
     </header>
-    <table class="delivery-print-table"><colgroup><col class="job-col"><col class="order-col"><col class="item-col"><col class="qty-col"><col class="dimensions-col"><col class="customer-col"><col class="route-col"><col class="check-col"></colgroup><thead><tr><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty.</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Check</th></tr></thead><tbody>${printSheetBodyMarkup(pageRows)}</tbody></table>
-    <div class="notes"><strong>Notes:</strong><span></span></div>
+    <table class="delivery-print-table"><colgroup><col class="job-col"><col class="order-col"><col class="item-col"><col class="qty-col"><col class="dimensions-col"><col class="customer-col"><col class="route-col"><col class="check-col"></colgroup><thead><tr><th>Job Nr.</th><th>Order</th><th>Item</th><th>QTY</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Check</th></tr></thead><tbody>${printSheetBodyMarkup(pageRows)}</tbody></table>
+    <footer class="sheet-footer printed-at">Printed at: ${escapeHtml(printPreviewTimestamp(generatedAt))}</footer>
   </section>`;
 }
 
@@ -17317,7 +17866,7 @@ function renderPrintDocumentPreview(preview = {}) {
     : buildLocalPrintSheets(printFilteredRows());
   const pages = [];
   for (const sheet of sheets) {
-    const chunks = paginatePrintSheetRows(sheet.rows || []);
+    const chunks = paginatePrintSheetRows(sheet.rows || [], orientation);
     chunks.forEach((chunk, index) => pages.push(printSheetPageMarkup(sheet, chunk, index + 1, chunks.length, orientation, preview.generatedAt, "is-preview")));
   }
   if (els.printPreviewPageCount) els.printPreviewPageCount.textContent = `${Math.max(pages.length, 1)} page${pages.length === 1 ? "" : "s"} · ${copies} cop${copies === 1 ? "y" : "ies"}`;
@@ -17326,9 +17875,17 @@ function renderPrintDocumentPreview(preview = {}) {
   els.printDocumentPaper.innerHTML = pages.length ? pages.join("") : `<section class="delivery-print-sheet-v203 is-${orientation} is-preview"><div class="print-paper-empty-v197"><strong>0</strong><h3>No printable rows</h3><p>Selected filters yield 0 results.</p></div></section>`;
 }
 
+/** Return the zoom needed to fit one Letter sheet inside the preview width. */
+function printPreviewFitZoom(orientation = els.printOrientation?.value || "portrait") {
+  const landscape = String(orientation || "portrait") === "landscape";
+  const availableWidth = Math.max(Number(els.printDocumentViewport?.clientWidth || 880) - 48, 320);
+  const paperWidth = (landscape ? 11 : 8.5) * 96;
+  return Math.min(1, Math.max(0.5, availableWidth / paperWidth));
+}
+
 /** Apply the current preview zoom without changing the document data. */
 function applyPrintPreviewZoom() {
-  state.printPreviewZoom = Math.min(Math.max(Number(state.printPreviewZoom || 1), 0.65), 1.45);
+  state.printPreviewZoom = Math.min(Math.max(Number(state.printPreviewZoom || 1), 0.5), 1.45);
   els.printDocumentPaper?.style.setProperty("--print-preview-zoom", String(state.printPreviewZoom));
   if (els.printPreviewZoomLabel) els.printPreviewZoomLabel.textContent = `${Math.round(state.printPreviewZoom * 100)}%`;
 }
@@ -17370,7 +17927,7 @@ async function refreshPrintSelectionPreview() {
   const listIds = selectedPrintListIds();
   const selectedRoutes = selectedPrintRouteGroups();
   const allGlass = allPrintGlassTypesSelected();
-  const selectedGlass = selectedPrintGlassInputs().filter((input) => input.checked);
+  const selectedGlass = selectedPrintGlassTypeValues();
   state.printPreviewRequestId += 1;
   if (!listIds.length || !selectedRoutes.length || (!allGlass && !selectedGlass.length)) {
     state.printPreviewResult = null;
@@ -17413,17 +17970,20 @@ async function resetPrintFilters({ clearActivePreset = true } = {}) {
   if (els.printGlassSearch) els.printGlassSearch.value = "";
   state.printSelectedOrders = [];
   state.printSelectedItems = [];
+  setPrintRouteGroups(["airport"], { syncControls: false });
+  state.printGlassTypes = [];
+  state.printAllGlass = true;
   if (els.printDateFrom) els.printDateFrom.value = requestedDate;
   if (els.printDateTo) els.printDateTo.value = requestedDate;
   setPrintCopies(1, false);
   setPrintOrientation("portrait", false);
   if (els.printExportType) els.printExportType.value = "pdf";
-  if (clearActivePreset) setActivePrintPresetName("");
-  renderPrintPresetOptions(clearActivePreset ? "" : null);
+  if (clearActivePreset) setActivePrintPresetName(PRINT_SYSTEM_DEFAULT_PRESET_NAME);
+  renderPrintPresetOptions(clearActivePreset ? PRINT_SYSTEM_DEFAULT_PRESET_NAME : null);
   renderPrintQuickDateOptions(requestedDate);
-  state.printPreviewZoom = 1;
+  state.printPreviewZoom = 0.9;
   updatePrintOutputAction();
-  await refreshPrintWorkspaceChoices({ preserveSelections: false });
+  await renderPrintFilterChoices({ preserveSelections: false, captureControlSelections: false });
 }
 
 function printPresetUserToken() {
@@ -17439,6 +17999,10 @@ function printPresetStorageKey() {
 
 function printActivePresetStorageKey() {
   return `${PRINT_ACTIVE_PRESET_STORAGE_KEY}:${printPresetUserToken()}`;
+}
+
+function printDefaultPresetStorageKey() {
+  return `${PRINT_DEFAULT_PRESET_STORAGE_KEY}:${printPresetUserToken()}`;
 }
 
 function readPrintPresets() {
@@ -17457,37 +18021,74 @@ function readPrintPresets() {
 }
 
 function writePrintPresets(presets) {
-  localStorage.setItem(printPresetStorageKey(), JSON.stringify(presets || {}));
+  const userPresets = { ...(presets || {}) };
+  delete userPresets[PRINT_SYSTEM_DEFAULT_PRESET_NAME];
+  localStorage.setItem(printPresetStorageKey(), JSON.stringify(userPresets));
+}
+
+/** Return the immutable system preset together with the signed-in user's presets. */
+function availablePrintPresets() {
+  return {
+    ...readPrintPresets(),
+    [PRINT_SYSTEM_DEFAULT_PRESET_NAME]: { ...PRINT_SYSTEM_DEFAULT_PRESET },
+  };
 }
 
 function activePrintPresetName() {
-  const name = String(localStorage.getItem(printActivePresetStorageKey()) || "");
-  return name && readPrintPresets()[name] ? name : "";
+  const savedName = String(localStorage.getItem(printActivePresetStorageKey()) || "");
+  return savedName && availablePrintPresets()[savedName]
+    ? savedName
+    : PRINT_SYSTEM_DEFAULT_PRESET_NAME;
 }
 
 function activePrintPreset() {
-  const name = activePrintPresetName();
-  return name ? readPrintPresets()[name] || null : null;
+  return availablePrintPresets()[activePrintPresetName()] || { ...PRINT_SYSTEM_DEFAULT_PRESET };
 }
 
 function setActivePrintPresetName(name) {
   const clean = String(name || "");
-  if (clean && readPrintPresets()[clean]) localStorage.setItem(printActivePresetStorageKey(), clean);
+  if (!clean || clean === PRINT_SYSTEM_DEFAULT_PRESET_NAME) {
+    localStorage.removeItem(printActivePresetStorageKey());
+    return;
+  }
+  if (readPrintPresets()[clean]) localStorage.setItem(printActivePresetStorageKey(), clean);
   else localStorage.removeItem(printActivePresetStorageKey());
 }
 
-/** Refresh the user-specific preset selector and preserve its active choice. */
+/** Return the user's explicit default without inheriting older active-selection state. */
+function defaultPrintPresetName() {
+  const savedName = String(localStorage.getItem(printDefaultPresetStorageKey()) || "");
+  return savedName && readPrintPresets()[savedName] ? savedName : PRINT_SYSTEM_DEFAULT_PRESET_NAME;
+}
+
+function setDefaultPrintPresetName(name) {
+  const clean = String(name || "");
+  if (!clean || clean === PRINT_SYSTEM_DEFAULT_PRESET_NAME) {
+    localStorage.removeItem(printDefaultPresetStorageKey());
+    return;
+  }
+  if (readPrintPresets()[clean]) localStorage.setItem(printDefaultPresetStorageKey(), clean);
+  else localStorage.removeItem(printDefaultPresetStorageKey());
+}
+
+/** Refresh the preset selector with the system default first, followed by user presets. */
 function renderPrintPresetOptions(selectedName = null) {
   if (!els.printPresetSelect) return;
-  const presets = readPrintPresets();
-  const requested = selectedName === null ? activePrintPresetName() : String(selectedName || "");
-  els.printPresetSelect.innerHTML = `<option value="">Saved Presets</option>${Object.keys(presets).sort().map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")}`;
-  els.printPresetSelect.value = requested && presets[requested] ? requested : "";
+  const userPresets = readPrintPresets();
+  const requested = selectedName === null ? activePrintPresetName() : String(selectedName || PRINT_SYSTEM_DEFAULT_PRESET_NAME);
+  const userOptions = Object.keys(userPresets)
+    .filter((name) => name !== PRINT_SYSTEM_DEFAULT_PRESET_NAME)
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+    .join("");
+  els.printPresetSelect.innerHTML = `<option value="${escapeHtml(PRINT_SYSTEM_DEFAULT_PRESET_NAME)}">System Default · All Items</option>${userOptions}`;
+  els.printPresetSelect.value = availablePrintPresets()[requested] ? requested : PRINT_SYSTEM_DEFAULT_PRESET_NAME;
   syncCustomSelect(els.printPresetSelect);
 }
 
 /** Capture the visible filter state for a local preset. */
 function currentPrintPreset() {
+  commitPrintGlassSelectionFromControls();
   return {
     routeGroups: selectedPrintRouteGroups(),
     statuses: selectedPrintStatusValues(),
@@ -17499,49 +18100,91 @@ function currentPrintPreset() {
   };
 }
 
-function printPresetBuilderGroup(title, name, options, selectedValues, allLabel = "") {
+function printPresetBuilderGroup(title, name, options, selectedValues, allLabel = "", help = "") {
   const selected = new Set(selectedValues || []);
   const allSelected = selected.size === 0;
   const allChoice = allLabel
-    ? `<label class="print-preset-choice-v200 is-all"><input type="checkbox" data-preset-all="${escapeHtml(name)}" ${allSelected ? "checked" : ""}><span>${escapeHtml(allLabel)}</span></label>`
+    ? `<label class="print-preset-choice-v227 is-all"><input type="checkbox" data-preset-all="${escapeHtml(name)}" ${allSelected ? "checked" : ""}><span>${escapeHtml(allLabel)}</span></label>`
+    : "";
+  const glassSearch = name === "glass"
+    ? `<label class="print-preset-glass-search-v227"><span class="visually-hidden">Search preset glass types</span><input type="search" data-preset-glass-search autocomplete="off" placeholder="Search glass types"></label>`
     : "";
   return `
-    <section class="print-preset-builder-section-v200" data-preset-group="${escapeHtml(name)}">
-      <header><strong>${escapeHtml(title)}</strong><span>${escapeHtml(allSelected && allLabel ? allLabel : `${selected.size} selected`)}</span></header>
-      <div class="print-preset-choice-grid-v200">
-        ${allChoice}
-        ${options.map(({ value, label, count = "" }) => `<label class="print-preset-choice-v200"><input type="checkbox" data-preset-value="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span>${count !== "" ? `<b>${escapeHtml(count)}</b>` : ""}</label>`).join("")}
+    <section class="print-preset-filter-row-v227 is-${escapeHtml(name)}" data-preset-group="${escapeHtml(name)}">
+      <header><strong>${escapeHtml(title)}</strong>${help ? `<small>${escapeHtml(help)}</small>` : ""}</header>
+      <div class="print-preset-filter-control-v227">
+        ${glassSearch}
+        <div class="print-preset-choice-grid-v227">
+          ${allChoice}
+          ${options.map(({ value, label }) => `<label class="print-preset-choice-v227" data-preset-search="${escapeHtml(`${value} ${label}`.toLowerCase())}"><input type="checkbox" data-preset-value="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("")}
+          ${name === "glass" ? '<div class="print-preset-glass-empty-v206" data-preset-glass-empty hidden>No glass types match this search.</div>' : ""}
+        </div>
       </div>
+      <b data-preset-group-summary>${escapeHtml(allSelected && allLabel ? allLabel : `${selected.size} selected`)}</b>
     </section>`;
 }
 
-/** Load every glass type currently known by the active delivery-list catalog. */
-async function loadKnownPrintGlassTypes() {
-  const listIds = [...new Set(state.lists.map((list) => String(list.id || "")).filter(Boolean))];
-  try {
-    await ensurePrintListDetails(listIds);
-  } catch (_error) {
-    // Preserve already-loaded rows if one older list cannot be refreshed.
+/** Adopt the shared Lookup Manager payload through one normalized assignment path. */
+function adoptManualEditLookups(payload = {}) {
+  state.manualEditLookups = {
+    products: Array.isArray(payload.products) ? payload.products : [],
+    routes: Array.isArray(payload.routes) ? payload.routes : [],
+    processes: Array.isArray(payload.processes) ? payload.processes : [],
+  };
+  state.manualEditLookupsLoaded = true;
+  return state.manualEditLookups;
+}
+
+/** Load only the small Lookup Manager library needed by Create Preset. */
+async function ensurePrintProductLookupLibrary() {
+  const currentProducts = Array.isArray(state.manualEditLookups?.products) ? state.manualEditLookups.products : [];
+  if (state.manualEditLookupsLoaded || currentProducts.length || !state.backend) return currentProducts;
+  if (!state.manualEditLookupsPromise) {
+    state.manualEditLookupsPromise = fetchJson("/api/admin/manual-edit-lookups")
+      .then((payload) => adoptManualEditLookups(payload).products)
+      .finally(() => { state.manualEditLookupsPromise = null; });
   }
-  const counts = new Map();
-  for (const list of state.lists) {
-    for (const item of Array.isArray(list.items) ? list.items : []) {
-      const label = glassTypeLabel(item) || "Other Glass";
-      counts.set(label, (counts.get(label) || 0) + itemPieceQty(item));
+  return state.manualEditLookupsPromise;
+}
+
+/** Collect every known product value and prefer Lookup Manager display names. */
+function collectKnownPrintGlassTypes() {
+  const options = new Map();
+  const addOption = (value, label = value, preferLabel = false) => {
+    const cleanValue = String(value || "").trim();
+    const cleanLabel = String(label || cleanValue).trim() || cleanValue;
+    if (!cleanValue) return;
+    const current = options.get(cleanValue);
+    if (!current || preferLabel || current.label === current.value) {
+      options.set(cleanValue, { value: cleanValue, label: cleanLabel });
     }
+  };
+
+  // Keep current and already-loaded delivery-list values available even when a
+  // product has not yet been added to the maintained Lookup Manager library.
+  selectedPrintGlassInputs().forEach((input) => addOption(input.value));
+  for (const list of state.lists) {
+    for (const item of Array.isArray(list.items) ? list.items : []) addOption(glassTypeLabel(item));
   }
-  const preset = currentPrintPreset();
-  for (const label of preset.glassTypes || []) if (!counts.has(label)) counts.set(label, 0);
-  state.printKnownGlassTypes = [...counts.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([value, count]) => ({ value, label: value, count }));
+  for (const preset of Object.values(readPrintPresets())) {
+    for (const value of preset?.glassTypes || []) addOption(value);
+  }
+  for (const value of currentPrintPreset().glassTypes || []) addOption(value);
+
+  // The Lookup Manager product-name library is authoritative for the complete
+  // known list and for the polished label shown beside each exact stored value.
+  for (const product of state.manualEditLookups?.products || []) {
+    addOption(product?.value, product?.label || product?.value, true);
+  }
+
+  state.printKnownGlassTypes = [...options.values()]
+    .sort((a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value));
   return state.printKnownGlassTypes;
 }
 
 /** Build an editable preset using the filters currently available in the workspace. */
-function renderPrintPresetSaveSummary(knownGlassOptions = state.printKnownGlassTypes) {
-  if (!els.printPresetSummary) return;
-  const preset = currentPrintPreset();
+function renderPrintPresetSaveSummary(knownGlassOptions = state.printKnownGlassTypes, preset = currentPrintPreset()) {
+  if (!els.printPresetSummary || !els.printPresetOutputSettings) return;
   const routeOptions = PRINT_ROUTE_GROUPS.map(({ value, label }) => ({ value, label }));
   const statusOptions = [
     { value: "not-scanned", label: "Not Scanned" },
@@ -17561,47 +18204,107 @@ function renderPrintPresetSaveSummary(knownGlassOptions = state.printKnownGlassT
   }
   const glassOptions = [...knownGlass.values()].sort((a, b) => String(a.label || a.value).localeCompare(String(b.label || b.value)));
   els.printPresetSummary.innerHTML = `
-    ${printPresetBuilderGroup("Routes", "routes", routeOptions, preset.routeGroups)}
-    ${printPresetBuilderGroup("Status", "statuses", statusOptions, preset.statuses, "All Status")}
-    ${printPresetBuilderGroup("Attention", "attention", attentionOptions, preset.attention, "All Attention")}
-    ${printPresetBuilderGroup("Glass Types", "glass", glassOptions, preset.glassTypes, "All Glass")}
-    <section class="print-preset-builder-section-v200 print-preset-output-section-v202">
-      <header><strong>Output Settings</strong><span>Restored when this preset is applied</span></header>
-      <div class="print-preset-output-grid-v202">
-        <label><span>File Type</span><select data-preset-output-type><option value="pdf" ${preset.outputType === "pdf" ? "selected" : ""}>PDF</option><option value="xlsx" ${preset.outputType === "xlsx" ? "selected" : ""}>Excel Workbook (.xlsx)</option><option value="csv" ${preset.outputType === "csv" ? "selected" : ""}>Comma-Separated Values (.csv)</option></select></label>
-        <label><span>Copies</span><input data-preset-copies type="number" min="1" max="10" step="1" value="${Math.max(1, Math.min(Number(preset.copies || 1), 10))}"></label>
-        <div class="print-preset-orientation-v203"><span>Layout</span><input data-preset-orientation type="hidden" value="${preset.orientation === "landscape" ? "landscape" : "portrait"}"><div><button type="button" class="${preset.orientation === "landscape" ? "" : "is-active"}" data-preset-orientation-choice="portrait">Portrait</button><button type="button" class="${preset.orientation === "landscape" ? "is-active" : ""}" data-preset-orientation-choice="landscape">Landscape</button></div></div>
-      </div>
-    </section>`;
-  enhanceCustomSelects(els.printPresetSummary);
+    ${printPresetBuilderGroup("Status", "statuses", statusOptions, preset.statuses, "All Status", "Select one or more scan states.")}
+    ${printPresetBuilderGroup("Attention", "attention", attentionOptions, preset.attention, "All Attention", "Find priority or changed pieces.")}
+    ${printPresetBuilderGroup("Routes", "routes", routeOptions, preset.routeGroups, "", "Choose one or more destinations.")}
+    ${printPresetBuilderGroup("Glass Types", "glass", glassOptions, preset.glassTypes, "All Glass", "Select multiple maintained glass types.")}`;
+  els.printPresetOutputSettings.innerHTML = `
+    <label class="print-preset-option-field-v227"><span>Copies</span><div class="print-preset-copy-stepper-v227"><button type="button" data-preset-copy-change="-1" aria-label="Decrease copies">−</button><input data-preset-copies type="number" min="1" max="10" step="1" value="${Math.max(1, Math.min(Number(preset.copies || 1), 10))}"><button type="button" data-preset-copy-change="1" aria-label="Increase copies">+</button></div></label>
+    <div class="print-preset-option-field-v227 print-preset-orientation-v227"><span>Orientation</span><input data-preset-orientation type="hidden" value="${preset.orientation === "landscape" ? "landscape" : "portrait"}"><div><button type="button" class="${preset.orientation === "landscape" ? "" : "is-active"}" data-preset-orientation-choice="portrait">Portrait</button><button type="button" class="${preset.orientation === "landscape" ? "is-active" : ""}" data-preset-orientation-choice="landscape">Landscape</button></div></div>
+    <label class="print-preset-option-field-v227"><span>File Format</span><select data-preset-output-type><option value="pdf" ${preset.outputType === "pdf" ? "selected" : ""}>PDF</option><option value="xlsx" ${preset.outputType === "xlsx" ? "selected" : ""}>Excel Workbook (.xlsx)</option><option value="csv" ${preset.outputType === "csv" ? "selected" : ""}>Comma-Separated Values (.csv)</option></select></label>`;
+  enhanceCustomSelects(els.printPresetOutputSettings);
+  renderPrintPresetLiveSummary();
 }
 
 function printPresetFromBuilder() {
   const values = (name) => [...(els.printPresetSummary?.querySelectorAll(`input[data-preset-value="${name}"]:checked`) || [])].map((input) => input.value);
   const allChecked = (name) => Boolean(els.printPresetSummary?.querySelector(`input[data-preset-all="${name}"]`)?.checked);
   return {
+    description: String(els.printPresetDescriptionInput?.value || "").trim().slice(0, 160),
     routeGroups: values("routes").length ? values("routes") : ["airport"],
     statuses: allChecked("statuses") ? [] : values("statuses"),
     attention: allChecked("attention") ? [] : values("attention"),
     glassTypes: allChecked("glass") ? [] : values("glass"),
-    outputType: String(els.printPresetSummary?.querySelector("[data-preset-output-type]")?.value || "pdf"),
-    copies: Math.max(Number(els.printPresetSummary?.querySelector("[data-preset-copies]")?.value || 1), 1),
-    orientation: String(els.printPresetSummary?.querySelector("[data-preset-orientation]")?.value || "portrait"),
+    outputType: String(els.printPresetOutputSettings?.querySelector("[data-preset-output-type]")?.value || "pdf"),
+    copies: Math.max(Number(els.printPresetOutputSettings?.querySelector("[data-preset-copies]")?.value || 1), 1),
+    orientation: String(els.printPresetOutputSettings?.querySelector("[data-preset-orientation]")?.value || "portrait"),
   };
 }
 
-async function savePrintPreset() {
+/** Render the compact right-column summary from the current builder controls. */
+function renderPrintPresetLiveSummary() {
+  if (!els.printPresetLiveSummary) return;
+  const preset = printPresetFromBuilder();
+  const routeLabels = Object.fromEntries(PRINT_ROUTE_GROUPS.map(({ value, label }) => [value, label]));
+  const statusLabels = { "not-scanned": "Not Scanned", partial: "Partial", complete: "Complete" };
+  const attentionLabels = { remake: "Remakes", rush: "Rushes", reject: "Internal Rejects", updated: "New/Updated", error: "Errors" };
+  const summarize = (values, labels, allLabel) => {
+    if (!(values || []).length) return allLabel;
+    const display = values.map((value) => labels[value] || value);
+    return display.length <= 2 ? display.join(", ") : `${display.length} selected`;
+  };
+  const rows = [
+    ["Name", String(els.printPresetNameInput?.value || "").trim() || "Untitled preset"],
+    ["Status", summarize(preset.statuses, statusLabels, "All Status")],
+    ["Attention", summarize(preset.attention, attentionLabels, "All Attention")],
+    ["Route", summarize(preset.routeGroups, routeLabels, "Airport")],
+    ["Glass Type", preset.glassTypes.length ? (preset.glassTypes.length <= 2 ? preset.glassTypes.join(", ") : `${preset.glassTypes.length} selected`) : "All Glass"],
+    ["Orientation", preset.orientation === "landscape" ? "Landscape" : "Portrait"],
+    ["Copies", String(preset.copies)],
+    ["File Format", preset.outputType === "xlsx" ? "Excel Workbook" : preset.outputType === "csv" ? "CSV" : "PDF"],
+  ];
+  els.printPresetLiveSummary.innerHTML = rows.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+}
+
+function savePrintPreset() {
   if (els.printPresetNameInput) els.printPresetNameInput.value = "";
-  if (els.printPresetStatus) els.printPresetStatus.textContent = "Loading the complete known glass-type catalog…";
-  if (els.printPresetConfirmBtn) els.printPresetConfirmBtn.textContent = "Create & Apply Preset";
-  if (els.printPresetSummary) els.printPresetSummary.innerHTML = '<div class="print-preset-loading-v205">Loading all known glass types and current filter choices…</div>';
+  if (els.printPresetDescriptionInput) els.printPresetDescriptionInput.value = "";
+  if (els.printPresetDefaultToggle) els.printPresetDefaultToggle.checked = false;
+  if (els.printPresetConfirmBtn) {
+    els.printPresetConfirmBtn.disabled = false;
+    els.printPresetConfirmBtn.textContent = "Save & Apply";
+  }
+  if (els.printPresetSaveOnlyBtn) {
+    els.printPresetSaveOnlyBtn.disabled = false;
+    els.printPresetSaveOnlyBtn.textContent = "Save Preset";
+  }
+
+  // Open immediately from memory. If the small product lookup has not been
+  // prefetched yet, enrich only the glass section as soon as that request completes.
+  const lookupReady = state.manualEditLookupsLoaded || Boolean(state.manualEditLookups?.products?.length) || !state.backend;
+  renderPrintPresetSaveSummary(collectKnownPrintGlassTypes());
+  if (els.printPresetStatus) {
+    els.printPresetStatus.textContent = lookupReady
+      ? "Glass types include the Lookup Manager product-name library."
+      : "Preset opened. Loading the Lookup Manager product-name library…";
+  }
   if (els.printPresetModalBackdrop) els.printPresetModalBackdrop.hidden = false;
-  if (els.printPresetModal) els.printPresetModal.hidden = false;
+  if (els.printPresetModal) {
+    els.printPresetModal.hidden = false;
+    const workspace = els.printPresetModal.querySelector(".print-preset-workspace-v227");
+    if (workspace) workspace.scrollTop = 0;
+  }
   updateModalScrollLock();
-  const knownGlass = await loadKnownPrintGlassTypes();
-  renderPrintPresetSaveSummary(knownGlass);
-  if (els.printPresetStatus) els.printPresetStatus.textContent = `${knownGlass.length} known glass type${knownGlass.length === 1 ? "" : "s"} available.`;
-  window.setTimeout(() => els.printPresetNameInput?.focus(), 0);
+  window.setTimeout(() => els.printPresetNameInput?.focus({ preventScroll: true }), 0);
+
+  if (!lookupReady) {
+    ensurePrintProductLookupLibrary()
+      .then(() => {
+        if (els.printPresetModal?.hidden) return;
+        const pendingPreset = printPresetFromBuilder();
+        const searchQuery = String(els.printPresetSummary?.querySelector("[data-preset-glass-search]")?.value || "");
+        renderPrintPresetSaveSummary(collectKnownPrintGlassTypes(), pendingPreset);
+        const searchInput = els.printPresetSummary?.querySelector("[data-preset-glass-search]");
+        if (searchInput) searchInput.value = searchQuery;
+        applyPrintPresetGlassSearch();
+        if (els.printPresetStatus) els.printPresetStatus.textContent = "Glass types refreshed from the Lookup Manager product-name library.";
+      })
+      .catch((error) => {
+        if (els.printPresetStatus && !els.printPresetModal?.hidden) {
+          els.printPresetStatus.textContent = `Lookup Manager glass types could not be loaded. Showing current known values. ${error.message}`;
+        }
+      });
+  }
 }
 
 /** Close the dedicated preset builder. */
@@ -17614,9 +18317,51 @@ function closePrintPresetModal() {
 /** Update overwrite guidance while the preset name is entered. */
 function updatePrintPresetNameStatus() {
   const name = String(els.printPresetNameInput?.value || "").trim();
+  const reserved = name.toLowerCase() === PRINT_SYSTEM_DEFAULT_PRESET_NAME.toLowerCase();
   const exists = Boolean(name && readPrintPresets()[name]);
-  if (els.printPresetStatus) els.printPresetStatus.textContent = exists ? "A preset with this name already exists and will be replaced." : "";
-  if (els.printPresetConfirmBtn) els.printPresetConfirmBtn.textContent = exists ? "Replace & Apply Preset" : "Create & Apply Preset";
+  if (els.printPresetStatus) {
+    els.printPresetStatus.textContent = reserved
+      ? "System Default is reserved and cannot be replaced. Choose a different name."
+      : exists
+        ? "A preset with this name already exists and will be replaced."
+        : "";
+  }
+  if (els.printPresetConfirmBtn) {
+    els.printPresetConfirmBtn.disabled = reserved;
+    els.printPresetConfirmBtn.textContent = exists ? "Replace & Apply" : "Save & Apply";
+  }
+  if (els.printPresetSaveOnlyBtn) {
+    els.printPresetSaveOnlyBtn.disabled = reserved;
+    els.printPresetSaveOnlyBtn.textContent = exists ? "Replace Preset" : "Save Preset";
+  }
+  renderPrintPresetLiveSummary();
+}
+
+/** Refresh one preset section's selection summary after a choice changes. */
+function updatePrintPresetBuilderGroupSummary(groupName) {
+  const section = els.printPresetSummary?.querySelector(`[data-preset-group="${groupName}"]`);
+  const summary = section?.querySelector("[data-preset-group-summary]");
+  if (!section || !summary) return;
+  const allInput = section.querySelector(`input[data-preset-all="${groupName}"]`);
+  const selectedCount = section.querySelectorAll(`input[data-preset-value="${groupName}"]:checked`).length;
+  const allLabel = allInput?.closest("label")?.querySelector("span")?.textContent?.trim() || "All";
+  summary.textContent = allInput?.checked ? allLabel : `${selectedCount} selected`;
+  renderPrintPresetLiveSummary();
+}
+
+/** Filter only the glass-type cards inside the preset builder. */
+function applyPrintPresetGlassSearch() {
+  const section = els.printPresetSummary?.querySelector('[data-preset-group="glass"]');
+  const query = String(section?.querySelector("[data-preset-glass-search]")?.value || "").trim().toLowerCase();
+  let visible = 0;
+  section?.querySelectorAll('label:has(input[data-preset-value="glass"])').forEach((choice) => {
+    const searchText = String(choice.dataset.presetSearch || choice.textContent || "").toLowerCase();
+    const matches = !query || searchText.includes(query);
+    choice.hidden = !matches;
+    if (matches) visible += 1;
+  });
+  const empty = section?.querySelector("[data-preset-glass-empty]");
+  if (empty) empty.hidden = visible > 0;
 }
 
 /** Keep All selections exclusive inside the preset builder. */
@@ -17629,54 +18374,81 @@ function handlePrintPresetBuilderChange(event) {
   if (!groupName) return;
   const allInput = els.printPresetSummary.querySelector(`input[data-preset-all="${groupName}"]`);
   const detailInputs = [...els.printPresetSummary.querySelectorAll(`input[data-preset-value="${groupName}"]`)];
+
+  if (groupName === "routes") {
+    const airport = detailInputs.find((input) => input.value === "airport");
+    const routeDetails = detailInputs.filter((input) => input !== airport);
+    if (changed === airport) {
+      if (airport.checked) routeDetails.forEach((input) => { input.checked = false; });
+      else if (!routeDetails.some((input) => input.checked)) airport.checked = true;
+    } else {
+      if (changed.checked && airport) airport.checked = false;
+      if (routeDetails.length && routeDetails.every((input) => input.checked)) {
+        if (airport) airport.checked = true;
+        routeDetails.forEach((input) => { input.checked = false; });
+      } else if (!detailInputs.some((input) => input.checked) && airport) {
+        airport.checked = true;
+      }
+    }
+    updatePrintPresetBuilderGroupSummary(groupName);
+    return;
+  }
+
   if (changed === allInput) {
     if (allInput.checked) detailInputs.forEach((input) => { input.checked = false; });
     else if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
   } else {
     if (changed.checked && allInput) allInput.checked = false;
-    if (allInput && !detailInputs.some((input) => input.checked)) allInput.checked = true;
+    if (detailInputs.length && detailInputs.every((input) => input.checked)) {
+      if (allInput) allInput.checked = true;
+      detailInputs.forEach((input) => { input.checked = false; });
+    } else if (allInput && !detailInputs.some((input) => input.checked)) {
+      allInput.checked = true;
+    }
   }
-  if (groupName === "routes") {
-    const airport = detailInputs.find((input) => input.value === "airport");
-    if (changed.value === "airport" && changed.checked) detailInputs.forEach((input) => { if (input !== changed) input.checked = false; });
-    else if (changed.checked && airport) airport.checked = false;
-    if (!detailInputs.some((input) => input.checked) && airport) airport.checked = true;
-  }
+  updatePrintPresetBuilderGroupSummary(groupName);
 }
 
-/** Commit and immediately apply the preset created in the builder. */
-async function confirmPrintPresetSave() {
+/** Save the preset, optionally applying it immediately. */
+async function confirmPrintPresetSave({ apply = true } = {}) {
   const cleanName = String(els.printPresetNameInput?.value || "").trim().slice(0, 50);
   if (!cleanName) {
-    if (els.printPresetStatus) els.printPresetStatus.textContent = "Enter a preset name before creating the preset.";
+    if (els.printPresetStatus) els.printPresetStatus.textContent = "Enter a preset name before saving the preset.";
+    els.printPresetNameInput?.focus();
+    return;
+  }
+  if (cleanName.toLowerCase() === PRINT_SYSTEM_DEFAULT_PRESET_NAME.toLowerCase()) {
+    if (els.printPresetStatus) els.printPresetStatus.textContent = "System Default is reserved and cannot be replaced. Choose a different name.";
     els.printPresetNameInput?.focus();
     return;
   }
   const presets = readPrintPresets();
   presets[cleanName] = printPresetFromBuilder();
   writePrintPresets(presets);
-  setActivePrintPresetName(cleanName);
+  const setAsDefault = Boolean(els.printPresetDefaultToggle?.checked);
+  if (setAsDefault) setDefaultPrintPresetName(cleanName);
   renderPrintPresetOptions(cleanName);
   closePrintPresetModal();
-  await applyPrintPreset(cleanName);
-  showFloatingNotice(`Created and applied print preset: ${cleanName}`, "success");
+  if (apply) {
+    await applyPrintPreset(cleanName, { persist: setAsDefault });
+    showFloatingNotice(`Saved and applied print preset: ${cleanName}`, "success");
+  } else {
+    showFloatingNotice(`Saved print preset: ${cleanName}`, "success");
+  }
 }
-
 /** Apply one saved preset after rebuilding the date-dependent choices. */
 async function applyPrintPreset(name, { persist = true } = {}) {
-  const preset = readPrintPresets()[name];
+  const preset = availablePrintPresets()[name];
   if (!preset) return;
   if (persist) setActivePrintPresetName(name);
   if (els.printSearchInput) els.printSearchInput.value = "";
   state.printSelectedOrders = [];
   state.printSelectedItems = [];
-  await renderPrintFilterChoices({ preserveSelections: false });
-  const applyValues = (container, selector, values) => {
-    const wanted = new Set(values || []);
-    container?.querySelectorAll(selector).forEach((input) => { input.checked = wanted.has(input.value); });
-  };
-  applyValues(els.printRouteOptions, 'input[data-print-route-group]', preset.routeGroups?.length ? preset.routeGroups : ["airport"]);
-  await renderPrintFilterChoices({ preserveSelections: true });
+  // Apply the route directly to maintained state before any date-dependent
+  // controls are rendered. Presets and orientation changes must not depend on
+  // checkbox markup that may still belong to a previous render.
+  setPrintRouteGroups(preset.routeGroups?.length ? preset.routeGroups : ["airport"], { syncControls: false });
+  await renderPrintFilterChoices({ preserveSelections: true, captureControlSelections: false });
   const applyAllAwareValues = (container, allSelector, detailSelector, values) => {
     const wanted = new Set(values || []);
     const allInput = container?.querySelector(allSelector);
@@ -17688,10 +18460,16 @@ async function applyPrintPreset(name, { persist = true } = {}) {
   applyAllAwareValues(els.printStatusOptions, 'input[data-print-status-all]', 'input[data-print-status]:not([data-print-status-all])', preset.statuses);
   applyAllAwareValues(els.printAttentionOptions, 'input[data-print-attention-all]', 'input[data-print-attention]:not([data-print-attention-all])', preset.attention);
   const glassWanted = new Set(preset.glassTypes || []);
+  const glassWantedKeys = new Set([...glassWanted].map(printGlassTypeMatchKey));
   const selectAllGlass = glassWanted.size === 0;
   const allGlassInput = els.printOptionsGlassType?.querySelector('input[data-print-all-glass]');
   if (allGlassInput) allGlassInput.checked = selectAllGlass;
-  selectedPrintGlassInputs().forEach((input) => { input.checked = !selectAllGlass && glassWanted.has(input.value); });
+  selectedPrintGlassInputs().forEach((input) => {
+    const exactValue = String(input.dataset.printGlassValue || input.value || "");
+    input.checked = !selectAllGlass && glassWantedKeys.has(printGlassTypeMatchKey(exactValue));
+  });
+  state.printAllGlass = selectAllGlass;
+  state.printGlassTypes = selectAllGlass ? [] : [...glassWanted];
   if (els.printExportType) els.printExportType.value = ["pdf", "xlsx", "csv"].includes(String(preset.outputType || "")) ? String(preset.outputType) : "pdf";
   setPrintCopies(preset.copies || 1, false);
   setPrintOrientation(preset.orientation || "portrait", false);
@@ -17704,26 +18482,61 @@ async function applyPrintPreset(name, { persist = true } = {}) {
 }
 
 function openPrintOptions(context = {}) {
+  const openId = ++state.printWorkspaceOpenId;
   state.printContext = context;
   state.printPreviewResult = null;
   state.printPreviewRequestId += 1;
+  state.printWorkspaceReady = false;
+  state.printDateHistoryWeeks = PRINT_DATE_HISTORY_BATCH_WEEKS;
   window.clearTimeout(state.printPreviewTimer);
   if (!listsByDeliveryDate().length) {
     showInlineError("No delivery lists are available to print.", false);
     return;
   }
+
+  // Commit the system default before exposing the panel. The route chip may be
+  // rendered later, but preview and print already have a real Airport selection.
+  setPrintRouteGroups(["airport"], { syncControls: false });
+  state.printGlassTypes = [];
+  state.printAllGlass = true;
+  setPrintFilterLoadingState();
+  renderEmptyPrintSelectionPreview();
+
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = false;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = false;
   updateModalScrollLock();
-  const activePreset = activePrintPresetName();
-  renderPrintPresetOptions(activePreset);
-  resetPrintFilters({ clearActivePreset: false })
-    .then(() => activePreset ? applyPrintPreset(activePreset, { persist: false }) : null)
-    .catch((error) => showInlineError(error.message, false));
+
+  const initialPreset = defaultPrintPresetName();
+  renderPrintPresetOptions(initialPreset);
+  ensurePrintProductLookupLibrary().catch(() => {});
+
+  // One initialization transaction replaces the old reset-then-reapply cycle.
+  // Keeping its promise lets an immediate Print click wait for current list rows
+  // instead of using stale or not-yet-loaded data from a previous GUI session.
+  const initialization = resetPrintFilters({ clearActivePreset: false })
+    .then(async () => {
+      if (openId !== state.printWorkspaceOpenId || els.printOptionsPanel?.hidden) return;
+      if (initialPreset !== PRINT_SYSTEM_DEFAULT_PRESET_NAME && availablePrintPresets()[initialPreset]) {
+        await applyPrintPreset(initialPreset, { persist: false });
+      } else {
+        setPrintRouteGroups(["airport"]);
+        schedulePrintSelectionPreview(0);
+      }
+      state.printWorkspaceReady = true;
+    })
+    .catch((error) => {
+      if (openId === state.printWorkspaceOpenId) showInlineError(error.message, false);
+    })
+    .finally(() => {
+      if (state.printWorkspacePromise === initialization) state.printWorkspacePromise = null;
+    });
+  state.printWorkspacePromise = initialization;
 }
 
 /** Close the Print / Export control center. */
 function closePrintOptions() {
+  state.printWorkspaceOpenId += 1;
+  state.printWorkspaceReady = false;
   closePrintPresetModal();
   closePrintDateCalendar();
   hidePrintSearchSuggestions();
@@ -17731,6 +18544,12 @@ function closePrintOptions() {
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = true;
   updateModalScrollLock();
 }
+
+// A background catalog refresh can invalidate changed lists while the modal is open.
+// Recover only when selected detail is actually missing; unchanged catalog heartbeats do no work.
+document.addEventListener("dls:delivery-list-catalog-synced", () => {
+  if (printWorkspaceNeedsDetailReload()) void restorePrintWorkspaceAfterInactivity();
+});
 
 /** Clamp and render the copies increment box. */
 function setPrintCopies(value, refresh = true) {
@@ -17743,14 +18562,52 @@ function setPrintCopies(value, refresh = true) {
 /** Keep the two orientation buttons exclusive and synchronize the hidden value. */
 function setPrintOrientation(value, refresh = true) {
   const orientation = String(value || "portrait") === "landscape" ? "landscape" : "portrait";
+  const previousOrientation = String(els.printOrientation?.value || "portrait") === "landscape" ? "landscape" : "portrait";
   if (els.printOrientation) els.printOrientation.value = orientation;
+  // Reassert the committed route whenever output geometry changes. Landscape
+  // switching must never read or replace route state from visual checkbox markup.
+  setPrintRouteGroups(selectedPrintRouteGroups());
   document.querySelectorAll('[data-print-orientation]').forEach((button) => {
     const selected = button.dataset.printOrientation === orientation;
     button.classList.toggle("is-active", selected);
     button.setAttribute("aria-pressed", selected ? "true" : "false");
   });
+  if (orientation === "landscape" && previousOrientation !== "landscape") {
+    state.printPreviewZoom = printPreviewFitZoom("landscape");
+  } else if (orientation === "portrait" && previousOrientation === "landscape") {
+    state.printPreviewZoom = 0.9;
+  }
+  applyPrintPreviewZoom();
   if (refresh) schedulePrintSelectionPreview(0);
   return orientation;
+}
+
+/** Return the shared application stylesheet URL used by preview and popup printing. */
+function localPrintPackageStylesheetUrl() {
+  return new URL("static/css/styles.css?v=20260805-v0.228", window.location.href).href;
+}
+
+/** Return only printer-page overrides; all visual sheet styling comes from styles.css. */
+function localPrintPackageStyles(orientation) {
+  const landscape = orientation === "landscape";
+  const printableHeight = landscape ? "7.7in" : "10.2in";
+  const pageSize = landscape ? "letter landscape" : "letter portrait";
+  return `
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:#e5ebf2}
+    body{color:#07122f;font-family:"Segoe UI",Arial,sans-serif}
+    @page{size:${pageSize};margin:.4in}
+    @media print{
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      html,body{background:#fff}
+      .delivery-print-sheet-v203{width:100%!important;min-width:100%!important;max-width:100%!important;height:${printableHeight}!important;min-height:${printableHeight}!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;overflow:hidden!important;box-shadow:none!important;page-break-after:always;break-after:page}
+      .delivery-print-sheet-v203:last-child{page-break-after:auto;break-after:auto}
+      .delivery-print-sheet-v203.rush::before{inset:.09in}
+      .delivery-print-sheet-v203.remake{padding:.1in!important}
+      .delivery-print-sheet-v203.remake::after{inset:.02in}
+      .delivery-print-sheet-v203 .sheet-footer{left:0;bottom:0}
+      .delivery-print-sheet-v203.remake .sheet-footer{left:.1in;bottom:.04in}
+    }`;
 }
 
 /** Build and synchronously open the exact local delivery-list print document. */
@@ -17765,14 +18622,22 @@ function launchLocalPrintPackage(preview) {
   const sheets = Array.isArray(preview.previewSheets) ? preview.previewSheets : [];
   const basePages = [];
   for (const sheet of sheets) {
-    const chunks = paginatePrintSheetRows(sheet.rows || []);
+    const chunks = paginatePrintSheetRows(sheet.rows || [], orientation);
     chunks.forEach((chunk, index) => basePages.push(printSheetPageMarkup(sheet, chunk, index + 1, chunks.length, orientation, preview.generatedAt)));
   }
   const pages = Array.from({ length: copies }, () => basePages).flat();
-  const pageSize = orientation === "landscape" ? "letter landscape" : "letter portrait";
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Delivery List Print Package</title><style>
-    *{box-sizing:border-box}body{margin:0;color:#07122f;font-family:"Segoe UI",Arial,sans-serif;background:#f6f8fb}.delivery-print-sheet-v203{width:${orientation === "landscape" ? "min(1460px,calc(100% - 32px))" : "min(1120px,calc(100% - 32px))"};margin:16px auto;padding:18px 20px 14px;background:#fff;border:1px solid #444;break-inside:avoid;page-break-inside:avoid}.sheet-page-top{color:#526078;font-size:12px;font-weight:900;text-align:right;margin-bottom:5px}.sheet-header{display:flex;justify-content:space-between;gap:18px;align-items:end;border-bottom:3px solid #072a63;padding-bottom:10px;margin-bottom:10px}.sheet-header-compact{align-items:center;padding-bottom:8px;margin-bottom:9px;border-bottom-width:2px}h1{margin:4px 0 0;color:#041a3d;font-size:26px;line-height:1.12;text-transform:uppercase}h2{margin:3px 0 0;color:#041a3d;font-size:18px;line-height:1.15;text-transform:uppercase}p{margin:3px 0 0;font-weight:750;color:#41506c}.printed-at{color:#263550;font-size:12px;font-weight:850}.sheet-badge{display:inline-flex;min-height:24px;align-items:center;border:1px solid #072a63;border-radius:999px;background:#eaf2ff;color:#041a3d;padding:0 11px;font-size:11px;font-weight:900;letter-spacing:.08em}.delivery-print-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12.25px;line-height:1.22}.job-col{width:26%}.order-col{width:9%}.item-col{width:8%}.qty-col{width:5%}.dimensions-col{width:17%}.customer-col{width:24%}.route-col{width:6%}.check-col{width:5%}th,td{border:1px solid #d9e1ee;padding:6px 7px;text-align:left;vertical-align:top}th{background:#f1f1f1;color:#041a3d;font-size:11.5px}.print-truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.glass-group td{background:#e9e9e9;font-size:12px;font-weight:900;text-transform:uppercase}.check-cell{text-align:center;font-size:16px}.copy-box{border:1px solid #333;padding:8px 10px;font-size:16px;font-weight:850;white-space:nowrap;display:flex;align-items:center;gap:16px}.write-line{display:inline-block;height:1em;border-bottom:1px solid #333;vertical-align:-2px}.checked-line{width:82px}.date-line{width:112px}.notes{margin-top:10px;min-height:72px;border:1px solid #333;display:grid;grid-template-columns:auto 1fr;gap:8px;padding:9px;font-size:14px}.rush{border:4px double #000}.rush .sheet-header{border-bottom:6px double #000}.remake{border:3px dashed #000}.remake .sheet-header{border-bottom:3px dashed #000}@page{size:${pageSize};margin:.25in}@media print{body{background:#fff}.delivery-print-sheet-v203{width:auto;margin:0;padding:.04in .06in .03in;border:0;page-break-after:always;break-after:page}.delivery-print-sheet-v203:last-child{page-break-after:auto;break-after:auto}}
-  </style></head><body>${pages.join("")}<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),120));window.addEventListener("afterprint",()=>window.close());<\/script></body></html>`;
+  const stylesheetUrl = localPrintPackageStylesheetUrl();
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Delivery List Print Package</title><link rel="stylesheet" href="${escapeHtml(stylesheetUrl)}"><style>${localPrintPackageStyles(orientation)}</style></head><body>${pages.join("")}<script>
+    window.addEventListener("load", async () => {
+      const imageLoads = Array.from(document.images).map((image) => image.complete
+        ? (image.decode ? image.decode().catch(() => {}) : Promise.resolve())
+        : new Promise((resolve) => { image.addEventListener("load", resolve, { once: true }); image.addEventListener("error", resolve, { once: true }); }));
+      if (document.fonts && document.fonts.ready) await document.fonts.ready.catch(() => {});
+      await Promise.all(imageLoads);
+      setTimeout(() => window.print(), 100);
+    });
+    window.addEventListener("afterprint", () => window.close());
+  <\/script></body></html>`;
   state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
   watchManagedPrintWindow(printWindow);
   printWindow.document.open();
@@ -17798,6 +18663,15 @@ function updatePrintOutputAction() {
 }
 
 async function submitPrintOptions(mode = "pdf") {
+  // A quick click immediately after opening must wait for the same initialization
+  // that loads list rows and commits Airport. This removes the intermittent need
+  // to toggle the visible route chip before preview or print will work.
+  if (state.printWorkspacePromise) await state.printWorkspacePromise;
+  if (!state.printWorkspaceReady) {
+    showInlineError("Print / Export is still loading the selected delivery list. Try again when the preview is ready.", false);
+    return;
+  }
+  setPrintRouteGroups(selectedPrintRouteGroups());
   const listIds = selectedPrintListIds();
   if (!listIds.length) { showInlineError("No Airport Outbound delivery list is available for the selected date range.", false); return; }
   if (!selectedPrintRouteGroups().length) { showInlineError("Select at least one route to print or export.", false); return; }
@@ -19571,11 +20445,7 @@ async function saveManualEditLookup() {
     body: JSON.stringify({ type, value, label, category, matchTerms }),
   });
 
-  state.manualEditLookups = {
-    products: payload.products || [],
-    routes: payload.routes || [],
-    processes: payload.processes || [],
-  };
+  adoptManualEditLookups(payload);
 
   state.lookupManagerActiveType = type || state.lookupManagerActiveType;
   renderLookupManagerModal();
@@ -20734,11 +21604,7 @@ async function ensureManualEditLookupsLoaded() {
   const manualLookupResult = lookups[2];
 
   if (manualLookupResult.status === "fulfilled") {
-    state.manualEditLookups = {
-      products: manualLookupResult.value.products || [],
-      routes: manualLookupResult.value.routes || [],
-      processes: manualLookupResult.value.processes || [],
-    };
+    adoptManualEditLookups(manualLookupResult.value);
   }
 }
 
@@ -27402,9 +28268,16 @@ function wireEvents() {
   window.addEventListener("focus", () => {
     checkManagedPrintWindowClosed();
     void pollUserNotifications();
+    void restorePrintWorkspaceAfterInactivity({ refreshIfHealthy: true });
+  });
+  window.addEventListener("pageshow", () => {
+    void restorePrintWorkspaceAfterInactivity({ refreshIfHealthy: true });
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) void pollUserNotifications();
+    if (!document.hidden) {
+      void pollUserNotifications();
+      void restorePrintWorkspaceAfterInactivity({ refreshIfHealthy: true });
+    }
   });
 
   document.addEventListener("toggle", (event) => {
@@ -27806,20 +28679,21 @@ function wireEvents() {
   els.printSelectedOrdersClear?.addEventListener("click", clearPrintSelectedOrders);
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".print-search-shell-v198")) hidePrintSearchSuggestions();
-    if (!event.target.closest(".print-header-date-control-v203")) closePrintDateCalendar();
+    const eventPath = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const clickedDateControl = event.target.closest(".print-header-date-control-v203") || eventPath.includes(els.printDateCalendar);
+    const clickedDateSelectMenu = event.target.closest('.custom-select-menu[data-select-id="printDateQuickSelect"]');
+    // Calendar day grids are rerendered after each click, which detaches the
+    // original button before this document handler runs. composedPath preserves
+    // the original calendar ancestry and prevents the first date from closing it.
+    if (!clickedDateControl && !clickedDateSelectMenu) closePrintDateCalendar();
   });
   els.printGlassSearch?.addEventListener("input", applyPrintGlassSearch);
 
   els.printRouteOptions?.addEventListener("change", (event) => {
     const changed = event.target.closest('input[data-print-route-group]');
     if (!changed) return;
-    const routes = [...els.printRouteOptions.querySelectorAll('input[data-print-route-group]')];
-    if (changed.value === "airport" && changed.checked) {
-      routes.forEach((input) => { if (input !== changed) input.checked = false; });
-    } else if (changed.checked) {
-      const airport = routes.find((input) => input.value === "airport");
-      if (airport) airport.checked = false;
-    }
+    syncPrintAllRouteChoice(els.printRouteOptions, changed);
+    commitPrintRouteSelectionFromControls();
     renderPrintFilterChoices({ preserveSelections: true }).catch((error) => showInlineError(error.message, false));
   });
   els.printStatusOptions?.addEventListener("change", (event) => {
@@ -27838,6 +28712,8 @@ function wireEvents() {
     const changed = event.target.closest('input[data-print-all-glass], input[data-print-glass-type]');
     if (!changed) return;
     syncPrintAllGlassChoice(changed);
+    // Commit first, then preview from state. This prevents selected glass types
+    // from being compared against a control tree that is being rerendered.
     updatePrintAllGlassState();
     schedulePrintSelectionPreview();
   });
@@ -27860,29 +28736,52 @@ function wireEvents() {
   });
 
   els.printClearAllBtn?.addEventListener("click", () => resetPrintFilters({ clearActivePreset: true }).catch((error) => showInlineError(error.message, false)));
-  els.printSavePresetBtn?.addEventListener("click", () => savePrintPreset().catch((error) => showInlineError(error.message, false)));
+  els.printSavePresetBtn?.addEventListener("click", () => {
+    try {
+      savePrintPreset();
+    } catch (error) {
+      showInlineError(error.message, false);
+    }
+  });
   els.printPresetModalClose?.addEventListener("click", closePrintPresetModal);
   els.printPresetCancelBtn?.addEventListener("click", closePrintPresetModal);
   els.printPresetModalBackdrop?.addEventListener("click", closePrintPresetModal);
   els.printPresetNameInput?.addEventListener("input", updatePrintPresetNameStatus);
+  els.printPresetDescriptionInput?.addEventListener("input", renderPrintPresetLiveSummary);
+  els.printPresetDefaultToggle?.addEventListener("change", renderPrintPresetLiveSummary);
   els.printPresetSummary?.addEventListener("change", handlePrintPresetBuilderChange);
-  els.printPresetSummary?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-preset-orientation-choice]");
-    if (!button) return;
-    const value = button.dataset.presetOrientationChoice === "landscape" ? "landscape" : "portrait";
-    const input = els.printPresetSummary.querySelector("[data-preset-orientation]");
-    if (input) input.value = value;
-    els.printPresetSummary.querySelectorAll("[data-preset-orientation-choice]").forEach((choice) => choice.classList.toggle("is-active", choice === button));
+  els.printPresetSummary?.addEventListener("input", (event) => {
+    if (event.target.matches("[data-preset-glass-search]")) applyPrintPresetGlassSearch();
+  });
+  els.printPresetOutputSettings?.addEventListener("change", renderPrintPresetLiveSummary);
+  els.printPresetOutputSettings?.addEventListener("input", renderPrintPresetLiveSummary);
+  els.printPresetOutputSettings?.addEventListener("click", (event) => {
+    const orientationButton = event.target.closest("[data-preset-orientation-choice]");
+    if (orientationButton) {
+      const value = orientationButton.dataset.presetOrientationChoice === "landscape" ? "landscape" : "portrait";
+      const input = els.printPresetOutputSettings.querySelector("[data-preset-orientation]");
+      if (input) input.value = value;
+      els.printPresetOutputSettings.querySelectorAll("[data-preset-orientation-choice]").forEach((choice) => choice.classList.toggle("is-active", choice === orientationButton));
+      renderPrintPresetLiveSummary();
+      return;
+    }
+    const copyButton = event.target.closest("[data-preset-copy-change]");
+    if (!copyButton) return;
+    const input = els.printPresetOutputSettings.querySelector("[data-preset-copies]");
+    if (!input) return;
+    input.value = String(Math.max(1, Math.min(Number(input.value || 1) + Number(copyButton.dataset.presetCopyChange || 0), 10)));
+    renderPrintPresetLiveSummary();
   });
   els.printPresetNameInput?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") confirmPrintPresetSave();
+    if (event.key === "Enter") confirmPrintPresetSave({ apply: true });
     if (event.key === "Escape") closePrintPresetModal();
   });
-  els.printPresetConfirmBtn?.addEventListener("click", confirmPrintPresetSave);
+  els.printPresetSaveOnlyBtn?.addEventListener("click", () => confirmPrintPresetSave({ apply: false }));
+  els.printPresetConfirmBtn?.addEventListener("click", () => confirmPrintPresetSave({ apply: true }));
   els.printPresetSelect?.addEventListener("change", () => {
     const name = els.printPresetSelect.value;
     if (name) applyPrintPreset(name).catch((error) => showInlineError(error.message, false));
-    else setActivePrintPresetName("");
+    else applyPrintPreset(PRINT_SYSTEM_DEFAULT_PRESET_NAME).catch((error) => showInlineError(error.message, false));
   });
   els.printOptionsClose?.addEventListener("click", closePrintOptions);
   els.printOptionsBackdrop?.addEventListener("click", closePrintOptions);

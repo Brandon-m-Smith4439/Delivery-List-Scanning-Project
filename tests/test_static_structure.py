@@ -55,7 +55,7 @@ def test_version_numbers_are_not_embedded_in_asset_filenames() -> None:
 def test_single_javascript_bundle_is_loaded() -> None:
     index = (ROOT / "index.html").read_text(encoding="utf-8")
     scripts = re.findall(r'<script\s+src="([^"]+)"', index)
-    assert scripts == ["static/js/app.js?v=20260803-v0.205"]
+    assert scripts == ["static/js/app.js?v=20260805-v0.228"]
     app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
     assert "DELIVERY AUTOMATION CONTROL CENTER" in app
     assert "NOTIFICATION CENTER AND LINE UPDATE REVIEW" in app
@@ -160,7 +160,7 @@ def test_scan_time_pill_qty_headers_and_table_are_width_safe() -> None:
     assert "<th>Item Nr.</th>" not in index[index.index('<table class="delivery-table">'):index.index('</table>', index.index('<table class="delivery-table">'))]
     assert "<th>Process State</th>" not in index[index.index('<table class="delivery-table">'):index.index('</table>', index.index('<table class="delivery-table">'))]
     assert "static/css/scan.css?v=20260803-v0.196" in index
-    assert "static/js/app.js?v=20260803-v0.205" in index
+    assert "static/js/app.js?v=20260805-v0.228" in index
 
 
 def test_v158_core_page_polish_and_scan_geometry() -> None:
@@ -192,7 +192,7 @@ def test_v158_core_page_polish_and_scan_geometry() -> None:
     }
     for name, cache_key in expected_asset_keys.items():
         assert f"static/css/{name}.css?v={cache_key}" in index
-    assert "static/js/app.js?v=20260803-v0.205" in index
+    assert "static/js/app.js?v=20260805-v0.228" in index
 
 
 def test_admin_control_center_modal_structure() -> None:
@@ -227,7 +227,7 @@ def test_v161_scan_timestamp_rack_status_and_rack_control_centers() -> None:
 
     assert "static/css/scan.css?v=20260803-v0.196" in index
     assert "static/css/racks.css?v=20260729-v0.180" in index
-    assert "static/js/app.js?v=20260803-v0.205" in index
+    assert "static/js/app.js?v=20260805-v0.228" in index
     for element_id in (
         "operationsModalDescription",
         "operationsModalStatusText",
@@ -263,7 +263,7 @@ def test_v162_scan_typography_and_control_center_layering_repair() -> None:
     assert "static/css/scan.css?v=20260803-v0.196" in index
     assert "static/css/racks.css?v=20260729-v0.180" in index
     assert "static/css/admin.css?v=20260731-v0.193" in index
-    assert "static/js/app.js?v=20260803-v0.205" in index
+    assert "static/js/app.js?v=20260805-v0.228" in index
 
     assert ".last-scan-pill-v157 > :is(span, b, em)" in scan
     assert "font-size: 11.5px" in scan
@@ -286,7 +286,7 @@ def test_v163_modal_hidden_state_and_close_repair() -> None:
 
     assert "static/css/racks.css?v=20260729-v0.180" in index
     assert "static/css/admin.css?v=20260731-v0.193" in index
-    assert "static/js/app.js?v=20260803-v0.205" in index
+    assert "static/js/app.js?v=20260805-v0.228" in index
     assert 'id="adminModal" aria-hidden="true" hidden' in index
     assert 'id="operationsModal" aria-hidden="true" hidden' in index
 
@@ -308,7 +308,7 @@ def test_v164_simplified_gui_headers_and_automation_action() -> None:
 
     assert "static/css/admin.css?v=20260731-v0.193" in index
     assert "static/css/racks.css?v=20260729-v0.180" in index
-    assert "static/js/app.js?v=20260803-v0.205" in index
+    assert "static/js/app.js?v=20260805-v0.228" in index
     assert 'id="folderImportBtn" class="link-button admin-automation-link"' in index
     assert "Edit automated DL import" in index
     assert index.index("Edit automated DL import") < index.index("Edit delivery lists")
@@ -404,7 +404,7 @@ def test_v168_manual_edit_exact_row_capture_repair() -> None:
     assert "data.clientChangedFields = clientChangedFields" in app
     assert "The row has been left open so the entered values are not lost." in app
     assert "saveManualLineItem(saveLineItemButton.dataset.saveLineItem, saveLineItemButton)" in app
-    assert "static/js/app.js?v=20260803-v0.205" in html
+    assert "static/js/app.js?v=20260805-v0.228" in html
 
 
 def test_v169_manual_edit_glass_type_filters() -> None:
@@ -426,7 +426,7 @@ def test_v169_manual_edit_glass_type_filters() -> None:
     assert '"pieceQty": int(row["piece_qty"] or 0)' in store
     assert '.manual-edit-glass-filter-options' in css
     assert 'static/css/admin.css?v=20260731-v0.193' in html
-    assert 'static/js/app.js?v=20260803-v0.205' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
 
 
 def test_v193_guarded_cross_delivery_date_scanning() -> None:
@@ -441,7 +441,7 @@ def test_v193_guarded_cross_delivery_date_scanning() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 5' in contract
     assert '"v192_action_history_archive"' in migrations
     assert 'v193_' not in migrations
@@ -476,9 +476,9 @@ def test_v193_guarded_cross_delivery_date_scanning() -> None:
     assert 'data-admin-modal="crossDateScanning"' in index
     assert 'static/css/scan.css?v=20260803-v0.196' in index
     assert 'static/css/admin.css?v=20260731-v0.193' in index
-    assert 'static/js/app.js?v=20260803-v0.205' in index
-    assert 'aria-label="Application version 0.205"' in index
-    assert '<strong>0.205</strong>' in index
+    assert 'static/js/app.js?v=20260805-v0.228' in index
+    assert 'aria-label="Application version 0.228"' in index
+    assert '<strong>0.228</strong>' in index
 
     assert 'v0.193 guarded cross-delivery-date scanning' in scan_css
     assert '.cross-date-scan-dialog' in scan_css
@@ -486,7 +486,7 @@ def test_v193_guarded_cross_delivery_date_scanning() -> None:
     assert 'v0.193 cross-delivery-date scan settings' in admin_css
     assert '.cross-date-settings-shell' in admin_css
 
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'Current maintained release: **v0.228**' in readme
     assert 'No database migration or separate setup script is required' in readme
     assert '## v0.193 - Guarded Cross-Delivery-Date Scanning' in changelog
 
@@ -500,7 +500,7 @@ def test_v194_exact_manual_scans_result_colors_sound_and_all_scans_history() -> 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     assert 'strict_order_item: bool = False' in store
     assert 'strict_order_item=is_manual' in store
     assert 'No exact order/item match' in store
@@ -519,8 +519,8 @@ def test_v194_exact_manual_scans_result_colors_sound_and_all_scans_history() -> 
     assert '.scan-page .scanner-panel .last-card.error' in scan_css
 
     assert 'static/css/scan.css?v=20260803-v0.196' in index
-    assert 'static/js/app.js?v=20260803-v0.205' in index
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'static/js/app.js?v=20260805-v0.228' in index
+    assert 'Current maintained release: **v0.228**' in readme
     assert '## v0.194 - Exact Manual Scans and Result Feedback Repair' in changelog
 
 
@@ -531,7 +531,7 @@ def test_v195_print_export_filter_workspace_and_exact_preview() -> None:
     contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 5' in contract
     assert 'def summarize_print_package' in server
     assert 'parsed.path == "/api/print/package-preview"' in server
@@ -553,7 +553,7 @@ def test_v196_scanner_panel_context_selectors() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     scan_heading = index[index.index('<div class="scan-heading">'):index.index('<main class="workspace">')]
     assert 'deliveryDateSelect' not in scan_heading
     assert 'deliveryStageSelect' not in scan_heading
@@ -580,10 +580,10 @@ def test_v196_scanner_panel_context_selectors() -> None:
     assert 'background: rgba(255, 255, 255, 0.07) !important' in scan
 
     assert 'static/css/scan.css?v=20260803-v0.196' in index
-    assert 'static/js/app.js?v=20260803-v0.205' in index
-    assert 'aria-label="Application version 0.205"' in index
-    assert '<strong>0.205</strong>' in index
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'static/js/app.js?v=20260805-v0.228' in index
+    assert 'aria-label="Application version 0.228"' in index
+    assert '<strong>0.228</strong>' in index
+    assert 'Current maintained release: **v0.228**' in readme
     assert '## v0.196 - Scanner Panel Date, Station, and Stage Header' in changelog
 
 
@@ -597,7 +597,7 @@ def test_v197_print_export_document_preview_control_center() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 5' in contract
     for element_id in (
         "printSearchInput", "printDateFrom", "printDateTo",
@@ -640,11 +640,11 @@ def test_v197_print_export_document_preview_control_center() -> None:
     assert '"previewRows": preview_rows' in server
     assert '"pageCount": max((len(preview_rows)' in server
 
-    assert 'static/css/styles.css?v=20260803-v0.205' in index
-    assert 'static/js/app.js?v=20260803-v0.205' in index
-    assert 'aria-label="Application version 0.205"' in index
-    assert '<strong>0.205</strong>' in index
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'static/css/styles.css?v=20260805-v0.228' in index
+    assert 'static/js/app.js?v=20260805-v0.228' in index
+    assert 'aria-label="Application version 0.228"' in index
+    assert '<strong>0.228</strong>' in index
+    assert 'Current maintained release: **v0.228**' in readme
     assert '## v0.197 - Print / Export Document Preview Control Center' in changelog
 
 
@@ -658,7 +658,7 @@ def test_v198_route_first_print_filters_quick_date_and_smart_search() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 5' in contract
     assert 'id="printOptionsStages"' not in index
     assert 'id="printQuickDate"' not in index
@@ -700,11 +700,11 @@ def test_v198_route_first_print_filters_quick_date_and_smart_search() -> None:
     hero_end = styles.index('}', hero_start)
     assert 'radial-gradient(circle at 96%' not in styles[hero_start:hero_end]
 
-    assert 'static/css/styles.css?v=20260803-v0.205' in index
-    assert 'static/js/app.js?v=20260803-v0.205' in index
-    assert 'aria-label="Application version 0.205"' in index
-    assert '<strong>0.205</strong>' in index
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'static/css/styles.css?v=20260805-v0.228' in index
+    assert 'static/js/app.js?v=20260805-v0.228' in index
+    assert 'aria-label="Application version 0.228"' in index
+    assert '<strong>0.228</strong>' in index
+    assert 'Current maintained release: **v0.228**' in readme
     assert '## v0.198 - Route-First Print Filters, Quick Date, and Smart Search' in changelog
 
 
@@ -739,9 +739,9 @@ def test_v199_multi_order_preset_gui_and_live_preview() -> None:
     assert ".print-filter-chip-v197:has(input:checked) span" in css
     assert ".print-selected-orders-list-v199" in css
     assert ".print-preset-modal-v199" in css
-    assert "APPLICATION_VERSION = \"205\"" in contract
-    assert "static/css/styles.css?v=20260803-v0.205" in html
-    assert "static/js/app.js?v=20260803-v0.205" in html
+    assert "APPLICATION_VERSION = \"212\"" in contract
+    assert "static/css/styles.css?v=20260805-v0.228" in html
+    assert "static/js/app.js?v=20260805-v0.228" in html
 
 
 def test_v200_live_preview_all_filters_preset_builder_and_output_selector() -> None:
@@ -778,11 +778,11 @@ def test_v200_live_preview_all_filters_preset_builder_and_output_selector() -> N
     assert '.print-clear-filters-v200' in css
     assert '.print-output-format-v200 .custom-select-trigger' in css
     assert '.print-preset-builder-v200' in css
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 5' in contract
-    assert 'static/css/styles.css?v=20260803-v0.205' in html
-    assert 'static/js/app.js?v=20260803-v0.205' in html
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'Current maintained release: **v0.228**' in readme
 
 
 def test_v201_print_calendar_all_glass_and_preview_stability() -> None:
@@ -800,12 +800,12 @@ def test_v201_print_calendar_all_glass_and_preview_stability() -> None:
         assert f'id="{element_id}"' in html
     assert 'printCalendarSingleMode' not in html
     assert 'printCalendarRangeMode' not in html
-    assert '<option value="__custom__">Custom date range…</option>' in html
+    assert '<option value="__custom__">Custom Range…</option>' in html
     assert 'id="printQuickDate"' not in html
     assert 'type="hidden"' in html[html.index('id="printDateFrom"') - 40:html.index('id="printDateFrom"') + 80]
     assert "function syncPrintAllGlassChoice(changed)" in app
     assert "if (allInput.checked) detailInputs.forEach((input) => { input.checked = false; });" in app
-    assert 'checked: !selectAllCurrent && previousGlass.has(label)' in app
+    assert 'function printGlassCategoryMarkup(glassEntries, selectedKeys, selectAllCurrent)' in app
     assert 'if (!allGlass && !selectedGlass.size) return false;' in app
     assert 'function renderPrintDateCalendar()' in app
     assert 'is-today' in app
@@ -814,11 +814,11 @@ def test_v201_print_calendar_all_glass_and_preview_stability() -> None:
     assert '.print-header-date-control-v203' in css
     assert '.print-calendar-day-v201.is-today' in css
     assert 'grid-column: auto;' in css[css.index('.print-filter-chip-v197.is-status-all'):css.index('.print-options-footer-v200')]
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 5' in contract
-    assert 'static/css/styles.css?v=20260803-v0.205' in html
-    assert 'static/js/app.js?v=20260803-v0.205' in html
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'Current maintained release: **v0.228**' in readme
 
 
 def test_v202_exact_print_sessions_item_selection_output_presets_and_scroll_preview() -> None:
@@ -831,7 +831,7 @@ def test_v202_exact_print_sessions_item_selection_output_presets_and_scroll_prev
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    header_start = html.index('class="print-pane-heading-v197 print-pane-heading-v203"')
+    header_start = html.index('class="print-pane-heading-v197 print-pane-heading-v203')
     header_end = html.index('<div class="print-filter-scroll-v197">', header_start)
     filter_header = html[header_start:header_end]
     assert filter_header.index('id="printSavePresetBtn"') < filter_header.index('id="printClearAllBtn"')
@@ -880,11 +880,11 @@ def test_v202_exact_print_sessions_item_selection_output_presets_and_scroll_prev
     assert '.print-search-result-actions-v202' in css
     assert '.print-preset-output-grid-v202' in css
 
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 5' in contract
-    assert 'static/css/styles.css?v=20260803-v0.205' in html
-    assert 'static/js/app.js?v=20260803-v0.205' in html
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'Current maintained release: **v0.228**' in readme
     assert '## v0.203 - Print Layout Completion and Direct Preview Printing' in changelog
 
 
@@ -896,11 +896,11 @@ def test_v203_print_header_date_layout_direct_print_and_exact_preview() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    header_start = html.index('class="print-pane-heading-v197 print-pane-heading-v203"')
+    header_start = html.index('class="print-pane-heading-v197 print-pane-heading-v203')
     header_end = html.index('<div class="print-filter-scroll-v197">', header_start)
     header = html[header_start:header_end]
     assert 'id="printDateQuickSelect"' in header
-    assert '<option value="__custom__">Custom date range…</option>' in header
+    assert '<option value="__custom__">Custom Range…</option>' in header
     assert header.index('id="printDateQuickSelect"') < header.index('id="printSavePresetBtn"') < header.index('id="printClearAllBtn"')
     assert 'class="print-filter-matrix-v203"' in html
     assert html.index('print-route-section-v203') < html.index('print-glass-section-v203') < html.index('print-status-section-v203') < html.index('print-attention-section-v203')
@@ -914,7 +914,7 @@ def test_v203_print_header_date_layout_direct_print_and_exact_preview() -> None:
     assert 'function launchLocalPrintPackage(preview)' in app
     assert 'window.open("", "deliveryListPdfExportWindow"' in app
     assert '@page{size:${pageSize}' in app
-    assert 'function paginatePrintSheetRows(rows)' in app
+    assert 'function paginatePrintSheetRows(rows, orientation = "portrait")' in app
     assert 'function printSheetPageMarkup(' in app
     assert 'renderPrintSelectionPreview(buildLocalPrintSelectionPreview())' in app
     assert 'The exact server preview could not be refreshed' not in app
@@ -927,11 +927,11 @@ def test_v203_print_header_date_layout_direct_print_and_exact_preview() -> None:
     assert '.print-copy-stepper-v203' in css
     assert '.print-orientation-toggle-v203' in css
     assert '.delivery-print-sheet-v203' in css
-    assert 'APPLICATION_VERSION = "205"' in contract
+    assert 'APPLICATION_VERSION = "228"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 5' in contract
-    assert 'static/css/styles.css?v=20260803-v0.205' in html
-    assert 'static/js/app.js?v=20260803-v0.205' in html
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'Current maintained release: **v0.228**' in readme
     assert '## v0.203 - Print Layout Completion and Direct Preview Printing' in changelog
 
 
@@ -943,12 +943,12 @@ def test_v204_print_preview_geometry_and_visual_polish() -> None:
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
     contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
 
-    assert 'static/css/styles.css?v=20260803-v0.205' in html
-    assert 'static/js/app.js?v=20260803-v0.205' in html
-    assert 'aria-label="Application version 0.205"' in html
-    assert '<strong>0.205</strong>' in html
-    assert 'APPLICATION_VERSION = "205"' in contract
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'Current maintained release: **v0.228**' in readme
     assert '## v0.204 - Print / Export Visual Polish and Preview Geometry Repair' in changelog
     assert 'v0.204 Print / Export visual polish and preview geometry repair' in css
 
@@ -979,21 +979,477 @@ def test_v205_range_calendar_known_glass_and_user_preset_persistence() -> None:
     assert 'id="printCalendarReset"' in html
     assert 'printCalendarSingleMode' not in html
     assert 'printCalendarRangeMode' not in html
-    assert 'Custom date range…' in html
+    assert 'Custom Range…' in html
     assert 'printCalendarMonthButtons' in app
     assert 'resetPrintCalendarRange' in app
     assert 'if (els.printCalendarApply) els.printCalendarApply.disabled = !(start && end)' in app
-    assert 'loadKnownPrintGlassTypes' in app
+    assert 'collectKnownPrintGlassTypes' in app
     assert 'deliveryScannerActivePrintPresetV205' in app
     assert 'printPresetUserToken' in app
     assert 'resetPrintFilters({ clearActivePreset: false })' in app
-    assert 'applyPrintPreset(activePreset, { persist: false })' in app
+    assert 'const initialization = resetPrintFilters({ clearActivePreset: false })' in app
     assert 'v0.205 consistent print controls, range calendar, and user preset state' in css
-    assert 'APPLICATION_VERSION = "205"' in contract
-    assert 'static/css/styles.css?v=20260803-v0.205' in html
-    assert 'static/js/app.js?v=20260803-v0.205' in html
-    assert 'Current maintained release: **v0.205**' in readme
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'Current maintained release: **v0.228**' in readme
     assert '## v0.205 - Consistent Header Controls, Range Calendar, and User Presets' in changelog
+
+
+def test_v206_compact_print_controls_instant_preset_builder_and_calendar_repair() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'print-preset-modal-v206' in html
+    assert 'print-preset-name-card-v206' in html
+    assert 'print-preset-builder-heading-v206' in html
+    assert 'collectKnownPrintGlassTypes' in app
+    assert 'loadKnownPrintGlassTypes' not in app
+    assert 'ensurePrintListDetails(listIds)' not in app[app.index('function collectKnownPrintGlassTypes'):app.index('/** Build an editable preset', app.index('function collectKnownPrintGlassTypes'))]
+    assert 'data-preset-glass-search' in app
+    assert 'count !== ""' not in app[app.index('function printPresetBuilderGroup'):app.index('/** Collect every known product value', app.index('function printPresetBuilderGroup'))]
+    assert '.custom-select-menu[data-select-id="printDateQuickSelect"]' in app
+    assert 'v0.206 compact print header, instant preset builder, and calendar repair' in css
+    assert 'min-height: 34px !important;' in css[css.index('v0.205 consistent print controls'):]
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.206 - Compact Print Controls, Instant Preset Builder, and Calendar Repair' in changelog
+
+
+def test_v207_custom_range_stable_initial_filters_and_lookup_glass_library() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert '<option value="__custom__">Custom Range…</option>' in html
+    assert '>Apply Dates</button>' in html
+    assert 'editingExistingRange' in app
+    assert 'event.composedPath' in app
+    assert 'eventPath.includes(els.printDateCalendar)' in app
+    assert 'setPrintRouteGroups(["airport"], { syncControls: false });' in app
+    assert 'state.printAllGlass = true' in app
+    assert 'activePrintPreset()?.glassTypes' not in app[app.index('function allPrintGlassTypesSelected'):app.index('/** Keep All Glass mutually exclusive')]
+    assert 'ensurePrintProductLookupLibrary' in app
+    assert 'adoptManualEditLookups' in app
+    assert 'product?.label || product?.value' in app
+    assert 'data-preset-search' in app
+    assert 'grid-template-areas:' in css[css.index('v0.207 fills every desktop grid cell'):]
+    assert 'font-size: 10.5px !important;' in css[css.index('v0.205 consistent print controls'):]
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.207 - Custom Range Completion, Stable Initial Filters, and Lookup Glass Library' in changelog
+
+
+def test_v208_exact_glass_preview_state_and_centered_header_controls() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'function printGlassTypeMatchKey(value)' in app
+    assert '.normalize("NFKC")' in app
+    assert '[“”″]' in app
+    assert 'function commitPrintGlassSelectionFromControls()' in app
+    assert 'function commitPrintRouteSelectionFromControls()' in app
+    assert 'Preview filtering must never depend on detached DOM.' in app
+    assert 'selectedPrintGlassTypeValues().map(printGlassTypeMatchKey)' in app
+    assert 'selectedGlass.has(printGlassTypeMatchKey(glassTypeLabel(item)))' in app
+    assert 'data-print-glass-value=' in app
+    assert 'commitPrintRouteSelectionFromControls();' in app
+    assert 'const selectedGlass = selectedPrintGlassTypeValues();' in app
+    assert 'grid-template-columns: 18px minmax(0, 1fr) 18px;' in css
+    assert '.print-header-control-v205 .custom-select-value {' in css
+    assert 'text-align: center !important;' in css[css.index('v0.205 consistent print controls'):]
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.208 - Exact Glass Preview State and Centered Header Controls' in changelog
+
+
+def test_v209_system_default_landscape_totals_and_preset_redesign() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'print-filter-heading-cluster-v209' in html
+    assert 'print-preset-modal-v209' in html
+    assert 'print-preset-sidebar-v209' in html
+    assert 'PRINT_SYSTEM_DEFAULT_PRESET_NAME = "System Default"' in app
+    assert 'System Default · All Items' in app
+    assert 'routeGroups: Object.freeze(["airport"])' in app
+    assert 'outputType: "pdf"' in app
+    assert 'orientation: "portrait"' in app
+    assert 'function localPrintPackageStyles(orientation)' in app
+    assert 'paginatePrintSheetRows(sheet.rows || [], orientation)' in app
+    assert 'class="sheet-totals"' in app
+    assert 'Rows: ${printableRows}' in app
+    assert 'Orders: ${totalOrders}' in app
+    assert 'QTY: ${totalQty}' in app
+    assert '.delivery-print-sheet-v203.remake::after' in css
+    assert 'inset: 10px;' in css
+    assert '.delivery-print-sheet-v203.is-landscape .customer-col { width: 24%; }' in css
+    assert 'font-size: 12.5px !important;' in css[css.index('v0.212 print header'):]
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.209 - System Default Preset, Landscape Sheets, and Print Totals' in changelog
+
+
+def test_v210_deterministic_initial_airport_route() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'function normalizePrintRouteGroups(values = state.printRouteGroups)' in app
+    assert 'if (!selected.length || selected.includes("airport")) return ["airport"];' in app
+    assert 'function setPrintRouteGroups(values, { syncControls = true } = {})' in app
+    assert 'captureControlSelections = preserveSelections' in app
+    assert 'if (captureControlSelections) {' in app
+    assert 'setPrintRouteGroups(["airport"], { syncControls: false });' in app
+    assert 'const openId = ++state.printWorkspaceOpenId;' in app
+    assert 'const initialization = resetPrintFilters({ clearActivePreset: false })' in app
+    assert '.then(() => applyPrintPreset(initialPreset' not in app
+    assert 'if (state.printWorkspacePromise) await state.printWorkspacePromise;' in app
+    assert 'state.printWorkspaceReady = true;' in app
+    assert 'if (!state.printWorkspaceReady) {' in app
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.210 - Deterministic Initial Airport Route' in changelog
+
+
+def test_v211_letter_preview_parity_and_filter_summary() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'function printCurrentFilterSummary()' in app
+    assert 'class="sheet-filter-summary"' in app
+    assert 'filterSummary,' in app
+    assert 'function localPrintPackageStylesheetUrl()' in app
+    assert 'static/css/styles.css?v=20260805-v0.228' in app
+    assert '@page{size:${pageSize};margin:.4in}' in app
+    assert 'width: 8.5in !important;' in css
+    assert 'height: 11in;' in css
+    assert 'width: 11in !important;' in css
+    assert 'height: 8.5in;' in css
+    assert '.delivery-print-sheet-v203 .sheet-filter-summary' in css
+    assert 'inset: .49in;' in css
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.211 - Letter Preview Parity and Printed Filter Summary' in changelog
+
+
+def test_v212_adaptive_filters_columns_and_route_state() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'return `Filters: ${uniqueParts.length ? uniqueParts.join(" | ") : "All items"}`;' in app
+    assert 'Route:' not in app[app.index('function printCurrentFilterSummary()'):app.index('/** Paginate rows', app.index('function printCurrentFilterSummary()'))]
+    assert 'Rows: ${printableRows} | Orders: ${totalOrders} | QTY: ${totalQty}' in app
+    assert '<th>Order</th><th>Item</th><th>QTY</th>' in app
+    assert 'function printPreviewFitZoom(' in app
+    assert 'state.printPreviewZoom = printPreviewFitZoom("landscape")' in app
+    assert 'setPrintRouteGroups(selectedPrintRouteGroups());' in app
+    assert app.count('commitPrintRouteSelectionFromControls();') == 1
+    assert 'setPrintRouteGroups(preset.routeGroups?.length ? preset.routeGroups : ["airport"], { syncControls: false });' in app
+    assert '--print-date-control-width' in css
+    assert '.delivery-print-sheet-v203 .dimensions-col { width: 21%; }' in css
+    assert '.delivery-print-sheet-v203 .customer-col { width: 20%; }' in css
+    assert '.delivery-print-sheet-v203.is-landscape .dimensions-col { width: 23%; }' in css
+    assert '.delivery-print-sheet-v203.is-landscape .customer-col { width: 24%; }' in css
+    assert 'inset: .42in;' in css
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.212 - Adaptive Print Metadata, Stable Route State, and Table Fit' in changelog
+
+
+def test_v213_dense_rows_route_check_and_remake_frame() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    sheet_markup = app[app.index('function printSheetPageMarkup('):app.index('/** Render every actual print sheet', app.index('function printSheetPageMarkup('))]
+    pagination = app[app.index('function paginatePrintSheetRows('):app.index('function printSheetBodyMarkup', app.index('function paginatePrintSheetRows('))]
+    print_styles = app[app.index('function localPrintPackageStyles('):app.index('/** Build and synchronously open', app.index('function localPrintPackageStyles('))]
+
+    assert '<div class="notes">' not in sheet_markup
+    assert '? (pages.length ? 28 : 27)' in pagination
+    assert ': (pages.length ? 28 : 26)' in pagination
+    assert 'function localPrintPackageStylesheetUrl()' in app
+    assert 'static/css/styles.css?v=20260805-v0.228' in app
+    assert '.delivery-print-sheet-v203 .check-cell {' in css
+    assert '.delivery-print-sheet-v203 th:nth-child(7) {' in css
+    assert '.delivery-print-sheet-v203 td:nth-child(7) {' in css
+    assert '.delivery-print-sheet-v203.remake,' in css
+    assert '.delivery-print-sheet-v203.remake::after {' in css
+    assert 'overflow:hidden!important' in print_styles
+    assert '.delivery-print-sheet-v203.remake{padding:.1in!important}' in print_styles
+    assert '.delivery-print-sheet-v203.remake::after{inset:.02in}' in print_styles
+    assert '.delivery-print-sheet-v203 .notes' not in css
+    assert '.delivery-print-sheet-v203.is-landscape .notes' not in css
+    assert '.delivery-print-sheet-v203 .check-cell {\n  font-size: 12.25px;' in css
+    assert 'text-align: center;' in css[css.index('.delivery-print-sheet-v203 th:nth-child(7)'):css.index('.delivery-print-sheet-v203 th:nth-child(8)')]
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.213 - Denser Delivery Sheets and Stable Remake Frames' in changelog
+
+
+def test_v214_fuller_pages_gray_bands_and_repeating_footer() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    pagination = app[app.index('function paginatePrintSheetRows('):app.index('function printSheetBodyMarkup', app.index('function paginatePrintSheetRows('))]
+    sheet_markup = app[app.index('function printSheetPageMarkup('):app.index('/** Render every actual print sheet', app.index('function printSheetPageMarkup('))]
+    print_styles = app[app.index('function localPrintPackageStyles('):app.index('/** Build and synchronously open', app.index('function localPrintPackageStyles('))]
+
+    assert '? (pages.length ? 28 : 27)' in pagination
+    assert ': (pages.length ? 28 : 26)' in pagination
+    assert 'const pageFilterDetails = `<p class="sheet-filter-summary"' in sheet_markup
+    assert 'const firstPageSignoff = continuation' in sheet_markup
+    assert '<footer class="sheet-footer printed-at">Printed at:' in sheet_markup
+    assert '.delivery-print-sheet-v203 .sheet-footer {' in css
+    assert 'left: .4in;' in css[css.index('.delivery-print-sheet-v203 .sheet-footer {'):css.index('.delivery-print-sheet-v203 .sheet-filter-summary {', css.index('.delivery-print-sheet-v203 .sheet-footer {'))]
+    assert '.delivery-print-sheet-v203 .sheet-footer{left:0;bottom:0}' in print_styles
+    assert '.delivery-print-sheet-v203 th:nth-child(7) {' in css
+    assert '.delivery-print-sheet-v203 td:nth-child(7) {' in css
+    assert '-webkit-print-color-adjust:exact;print-color-adjust:exact' in print_styles
+    assert 'background: #dfe3e8;' in css
+    assert '.delivery-print-sheet-v203 .sheet-footer {' in css
+    assert 'text-align: center;' in css[css.index('.delivery-print-sheet-v203 th:nth-child(7)'):css.index('.delivery-print-sheet-v203 th:nth-child(8)')]
+    assert 'print-color-adjust: exact;' in css
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.214 - Fuller Page Capacity and Repeating Print Footer' in changelog
+
+
+def test_v215_date_first_branded_header_and_alternating_rows() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    sheet_markup = app[app.index('function printSheetPageMarkup('):app.index('/** Render every actual print sheet', app.index('function printSheetPageMarkup('))]
+    row_markup = app[app.index('function printSheetBodyMarkup('):app.index('/** Return the exact visual sheet markup', app.index('function printSheetBodyMarkup('))]
+    print_styles = app[app.index('function localPrintPackageStyles('):app.index('/** Build and synchronously open', app.index('function localPrintPackageStyles('))]
+
+    assert 'function printSheetDateLabel(value)' in app
+    assert 'function printSheetRouteLabel(routeGroups = selectedPrintRouteGroups())' in app
+    assert 'dateLabel: printSheetDateLabel(list.deliveryDate || "")' in app
+    assert 'routeLabel: printSheetRouteLabel()' in app
+    assert 'class="sheet-brand-mark"><img src="${escapeHtml(logoUrl)}"' in sheet_markup
+    assert 'barefoot-company-builders-firstsource-print-logo.png?v=20260805-v0.228' in sheet_markup
+    assert 'class="sheet-date-title"' in sheet_markup
+    assert 'class="sheet-location-title"' in sheet_markup
+    assert 'class="print-data-row ${stripeClass}"' in row_markup
+    assert 'border-bottom: 2px solid #000;' in css
+    assert 'border-top: 2px solid #000;' in css
+    assert '.delivery-print-sheet-v203 .print-data-row.is-even td {' in css
+    assert 'filter: grayscale(1) contrast(1.22);' in css
+    assert '.delivery-print-sheet-v203 .sheet-brand-mark img {' in css
+    assert 'filter: grayscale(1) contrast(1.22);' in css
+    assert 'border-bottom: 2px solid #000;' in css
+    assert 'border-top: 2px solid #000;' in css
+    assert '.delivery-print-sheet-v203 .print-data-row.is-even td {' in css
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.215 - Date-First Branded Print Header and Alternating Rows' in changelog
+
+
+def test_v216_supplied_logo_clean_header_and_stacked_filters() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+    logo = ROOT / "static/images/barefoot-company-builders-firstsource-print-logo.png"
+
+    sheet_markup = app[app.index('function printSheetPageMarkup('):app.index('/** Render every actual print sheet', app.index('function printSheetPageMarkup('))]
+    print_styles = app[app.index('function localPrintPackageStyles('):app.index('/** Build and synchronously open', app.index('function localPrintPackageStyles('))]
+
+    assert logo.exists() and logo.stat().st_size > 0
+    assert 'src="${escapeHtml(logoUrl)}"' in sheet_markup
+    assert 'barefoot-company-builders-firstsource-print-logo.png?v=20260805-v0.228' in sheet_markup
+    assert 'function localPrintPackageStylesheetUrl()' in app
+    assert '.delivery-print-sheet-v203.rush .sheet-header {' in css
+    assert '.delivery-print-sheet-v203.remake .sheet-header {' in css
+    assert '.delivery-print-sheet-v203 .sheet-totals {' in css
+    assert '.delivery-print-sheet-v203 .sheet-filter-summary {' in css
+    assert 'border-bottom: 2px solid #000;' in css
+    assert 'border-top: 2px solid #000;' in css
+    assert 'border-bottom: 0;' in css[css.index('.delivery-print-sheet-v203 .sheet-header {'):css.index('.delivery-print-sheet-v203 .sheet-brand-title {')]
+    assert 'display: block;' in css[css.index('.delivery-print-sheet-v203 .sheet-totals {'):css.index('.delivery-print-sheet-v203 .sheet-footer {')]
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.216 - Supplied Print Logo and Cleaner Header Metadata' in changelog
+
+
+def test_v217_full_weekday_dates_and_route_first_titles() -> None:
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    date_helper = app[app.index('function formatDisplayDate('):app.index('/**\n * Purpose: Normalize the format date time', app.index('function formatDisplayDate('))]
+    route_helper = app[app.index('function printSheetRouteLabel('):app.index('/** Convert one loaded row', app.index('function printSheetRouteLabel('))]
+    sheet_markup = app[app.index('function printSheetPageMarkup('):app.index('/** Render every actual print sheet', app.index('function printSheetPageMarkup('))]
+    print_styles = app[app.index('function localPrintPackageStyles('):app.index('/** Build and synchronously open', app.index('function localPrintPackageStyles('))]
+
+    assert 'weekday: "long"' in date_helper
+    assert 'month: "long"' in date_helper
+    assert 'day: "numeric"' in date_helper
+    assert 'year: "numeric"' in date_helper
+    assert '.join(" | ")' in route_helper
+    assert 'function printSheetTitleLabel(routeGroups = selectedPrintRouteGroups())' in route_helper
+    assert 'DELIVERY LIST`' in route_helper
+    assert 'titleLabel: printSheetTitleLabel()' in app
+    assert 'class="sheet-location-title">${escapeHtml(titleLabel)}' in sheet_markup
+    assert 'class="sheet-date-title">${escapeHtml(dateLabel)}' in sheet_markup
+    assert '.delivery-print-sheet-v203 .sheet-location-title {' in css
+    assert '.delivery-print-sheet-v203 .sheet-date-title {' in css
+    assert '.delivery-print-sheet-v203 .sheet-location-title {' in css
+    assert '.delivery-print-sheet-v203 .sheet-date-title {' in css
+    assert 'const minimum = isRange ? 370 : 230;' in app
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.217 - Full Weekday Dates and Route-First Delivery Titles' in changelog
+
+
+def test_v218_reliable_print_logo_and_tightened_header():
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+    logo = ROOT / "static/images/barefoot-company-builders-firstsource-print-logo.png"
+
+    markup = app[app.index('function printSheetPageMarkup('):app.index('/** Render every actual print sheet', app.index('function printSheetPageMarkup('))]
+    print_styles = app[app.index('function localPrintPackageStyles('):app.index('/** Build and synchronously open', app.index('function localPrintPackageStyles('))]
+
+    assert logo.is_file() and logo.stat().st_size > 1000
+    assert 'barefoot-company-builders-firstsource-print-logo.png?v=20260805-v0.228' in markup
+    assert 'new URL(' in markup
+    assert 'Continuation sheet' not in markup
+    assert 'white-space: nowrap;' in css
+    assert '.delivery-print-sheet-v203 .sheet-location-row.is-medium .sheet-location-title' in css
+    assert '.delivery-print-sheet-v203 .sheet-location-row.is-long .sheet-location-title' in css
+    assert 'font-size: 20px;' in css
+    assert '.delivery-print-sheet-v203 .sheet-filter-summary {' in css
+    assert 'white-space: nowrap;' in css
+    assert '.delivery-print-sheet-v203 .sheet-location-row.is-medium .sheet-location-title' in css
+    assert '.delivery-print-sheet-v203 .sheet-location-row.is-long .sheet-location-title' in css
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.218 - Reliable Print Logo and Tightened Branded Header' in changelog
+
+
+def test_v219_shared_preview_print_styles_and_portrait_zoom():
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'printPreviewZoom: 0.9' in app
+    assert '<strong id="printPreviewZoomLabel">90%</strong>' in html
+    assert 'state.printPreviewZoom = 0.9;' in app
+    assert 'function localPrintPackageStylesheetUrl()' in app
+    assert 'static/css/styles.css?v=20260805-v0.228' in app
+    assert '<link rel="stylesheet" href="${escapeHtml(stylesheetUrl)}">' in app
+    assert 'document.fonts && document.fonts.ready' in app
+    assert 'await Promise.all(imageLoads);' in app
+    assert '.delivery-print-sheet-v203 .copy-box > span {' in css
+    assert 'margin-top: 24px;' in css
+    assert 'white-space: nowrap;' in css[css.rindex('/* v0.219 shared preview/print header alignment'):]
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.219 - Shared Preview and Print Styling' in changelog
 
 if __name__ == "__main__":
     test_index_local_assets_exist()
@@ -1013,6 +1469,19 @@ if __name__ == "__main__":
     test_v168_manual_edit_exact_row_capture_repair()
     test_v169_manual_edit_glass_type_filters()
     test_v205_range_calendar_known_glass_and_user_preset_persistence()
+    test_v214_fuller_pages_gray_bands_and_repeating_footer()
+    test_v215_date_first_branded_header_and_alternating_rows()
+    test_v216_supplied_logo_clean_header_and_stacked_filters()
+    test_v217_full_weekday_dates_and_route_first_titles()
+    test_v218_reliable_print_logo_and_tightened_header()
+    test_v206_compact_print_controls_instant_preset_builder_and_calendar_repair()
+    test_v207_custom_range_stable_initial_filters_and_lookup_glass_library()
+    test_v208_exact_glass_preview_state_and_centered_header_controls()
+    test_v209_system_default_landscape_totals_and_preset_redesign()
+    test_v210_deterministic_initial_airport_route()
+    test_v211_letter_preview_parity_and_filter_summary()
+    test_v212_adaptive_filters_columns_and_route_state()
+    test_v213_dense_rows_route_check_and_remake_frame()
     test_v199_multi_order_preset_gui_and_live_preview()
     test_v200_live_preview_all_filters_preset_builder_and_output_selector()
     test_v201_print_calendar_all_glass_and_preview_stability()
@@ -1029,3 +1498,288 @@ if __name__ == "__main__":
     test_v154_admin_reject_management_and_scan_ribbon()
     test_v204_print_preview_geometry_and_visual_polish()
     print("Static structure checks passed.")
+
+
+
+def test_v0220_print_filter_polish_and_repeating_metadata():
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "static/js/app.js").read_text(encoding="utf-8")
+    css = (root / "static/css/styles.css").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'pageFilterDetails = `<p class="sheet-filter-summary"' in app
+    assert 'Checked By: <i class="write-line checked-line"></i>' in app
+    assert 'Date: <i class="write-line date-line"></i>' not in app
+    assert 'printGlassCategoryForLabel' in app
+    assert 'printGlassCategoryMarkup' in app
+    assert 'state: showHealthState ? (count > 0 ? "alert" : "clear") : ""' in app
+    assert '? (pages.length ? 28 : 27)' in app
+    assert ': (pages.length ? 28 : 26)' in app
+
+    assert '.print-filter-chip-v197.is-route-airport' in css
+    assert '.print-filter-chip-v197.is-route-greenville' in css
+    assert '.print-glass-category-v220.is-mirror' in css
+    assert '.print-glass-category-v220.is-tempered' in css
+    assert '.print-glass-category-v220.is-annealed' in css
+    assert '.print-filter-chip-v197.has-alert::before' in css
+    assert '.print-filter-chip-v197.is-clear::before' in css
+    assert 'content: "\\2713";' in css
+
+    assert 'Grouped by Mirror, Tempered, and Annealed for faster selection' in html
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.220 - Print Filter Visual Hierarchy and Compact Signoff' in changelog
+
+
+def test_v0221_idle_route_and_catalog_detail_recovery():
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "static/js/app.js").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    contract = (root / "database/contract.py").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert "function deliveryCatalogRevisionKey(list = {})" in app
+    assert "function mergeDeliveryCatalogWithLoadedDetails(refreshedLists)" in app
+    assert "state.lists = mergeDeliveryCatalogWithLoadedDetails(refreshedLists);" in app
+    assert "sameRevision && previous._printItemsLoaded && Array.isArray(previous.items)" in app
+    assert "merged._printItemsLoaded = false;" in app
+    assert "function restorePrintWorkspaceAfterInactivity({ refreshIfHealthy = false } = {})" in app
+    assert "printWorkspaceRecoveryPromise" in app
+    assert 'window.addEventListener("pageshow"' in app
+    assert 'document.addEventListener("dls:delivery-list-catalog-synced"' in app
+    assert 'if (printWorkspaceNeedsDetailReload()) void restorePrintWorkspaceAfterInactivity();' in app
+    assert 'restorePrintWorkspaceAfterInactivity({ refreshIfHealthy: true })' in app
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.221 - Idle Route and Print Row State Recovery' in changelog
+
+def test_v0222_enlarged_branded_delivery_sheet_headers():
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "static/js/app.js").read_text(encoding="utf-8")
+    css = (root / "static/css/styles.css").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    contract = (root / "database/contract.py").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert "v0.222 enlarged branded delivery-sheet headers" in css
+    assert ".sheet-header:not(.sheet-header-compact) .sheet-brand-mark" in css
+    assert "width: 1.19in;" in css
+    assert "font-size: 29px;" in css
+    assert ".sheet-header-compact .sheet-brand-mark" in css
+    assert "width: 1.01in;" in css
+    assert "font-size: 22px;" in css
+    assert "? (pages.length ? 28 : 27)" in app
+    assert ": (pages.length ? 28 : 26)" in app
+    assert "static/css/styles.css?v=20260805-v0.228" in html
+    assert "static/js/app.js?v=20260805-v0.228" in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert "Current maintained release: **v0.228**" in readme
+    assert "## v0.222 - Enlarged Branded Delivery-Sheet Headers" in changelog
+
+
+
+
+def test_v0223_fuller_page_capacity_and_centered_compact_columns():
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "static/js/app.js").read_text(encoding="utf-8")
+    css = (root / "static/css/styles.css").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    contract = (root / "database/contract.py").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert '? (pages.length ? 28 : 27)' in app
+    assert ': (pages.length ? 28 : 26)' in app
+    assert 'v0.223 table-adjacent signoff and fuller verified page capacity' in css
+    assert '.delivery-print-sheet-v203 .qty-col { width: 5.8%; }' in css
+    assert '.delivery-print-sheet-v203 .dimensions-col { width: 20.2%; }' in css
+    assert '.delivery-print-sheet-v203.is-landscape .qty-col { width: 5.8%; }' in css
+    assert '.delivery-print-sheet-v203.is-landscape .dimensions-col { width: 22.2%; }' in css
+    assert '.delivery-print-sheet-v203 :is(th, td):nth-child(2)' in css
+    assert '.delivery-print-sheet-v203 :is(th, td):nth-child(4)' in css
+    assert 'text-align: center;' in css[css.rindex('/* v0.223 table-adjacent signoff'): ]
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.223 - Table-Adjacent Signoff and Fuller Delivery Pages' in changelog
+
+
+def test_v0224_unavailable_filters_and_aligned_borderless_signoff():
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "static/js/app.js").read_text(encoding="utf-8")
+    css = (root / "static/css/styles.css").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    contract = (root / "database/contract.py").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'disabled = false' in app
+    assert 'availabilityClass = disabled ? "is-unavailable"' in app
+    assert 'disabled: count <= 0' in app
+    assert 'disabled: !showHealthState && count <= 0' in app
+    assert 'showHealthState || Number(attentionCounts.get(value) || 0) > 0' in app
+    assert 'class="sheet-header-signoff"' in app
+    assert '${firstPageSignoff}\n    </header>' in app
+    assert 'class="sheet-table-signoff"' not in app
+    assert 'v0.224 unavailable filter states and aligned print signoff' in css
+    assert '.print-filter-chip-v197.is-unavailable' in css
+    assert 'font-size: 11.5px;' in css
+    assert '.delivery-print-sheet-v203 .sheet-header-signoff .copy-box' in css
+    signoff_css = css[css.rindex('/* v0.224 unavailable filter states'):]
+    assert 'border: 0;' in signoff_css
+    assert 'font-size: 16px;' in signoff_css
+    assert 'font-size: 14px;' in signoff_css
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.224 - Unavailable Filter States and Aligned Print Signoff' in changelog
+
+
+
+def test_v0225_grouped_date_history_and_landscape_density():
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "static/js/app.js").read_text(encoding="utf-8")
+    css = (root / "static/css/styles.css").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    pagination = app[app.index('function paginatePrintSheetRows('):app.index('function printSheetBodyMarkup', app.index('function paginatePrintSheetRows('))]
+    assert '? (pages.length ? 28 : 27)' in pagination
+    assert ': (pages.length ? 28 : 26)' in pagination
+    assert 'PRINT_DATE_HISTORY_BATCH_WEEKS = 2' in app
+    assert 'function printQuickDateWeekLabel(startKey)' in app
+    assert 'function loadMorePrintQuickDateHistory()' in app
+    assert '<optgroup label="${escapeHtml(printQuickDateWeekLabel(weekKey))}">' in app
+    assert '.print-date-load-more-v225' in css
+    assert 'print-preset-modal-v209' in html
+    assert '## v0.225 - Grouped Delivery Date History and Unified Preset Workspace' in changelog
+
+
+def test_v0226_automatic_all_choices_newest_dates_and_filter_readability():
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "static/js/app.js").read_text(encoding="utf-8")
+    css = (root / "static/css/styles.css").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    contract = (root / "database/contract.py").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'function syncPrintAllRouteChoice(container, changed)' in app
+    assert 'enabledDetails.every((input) => input.checked)' in app
+    assert 'syncPrintAllRouteChoice(els.printRouteOptions, changed);' in app
+    assert 'routeDetails.every((input) => input.checked)' in app
+    assert 'detailInputs.every((input) => input.checked)' in app
+    assert 'const orderedWeekKeys = [...grouped.keys()].sort((a, b) => b.localeCompare(a));' in app
+    assert '.sort((a, b) => b.localeCompare(a))' in app
+    assert 'font-size: 10.5px;' in css[css.rindex('/* v0.226 automatic All selections'):]
+    assert 'print-glass-category-v220.is-tempered' in css
+    assert '--print-chip-active-end: #2f7d49;' in css
+    assert 'width: 1.30in;' in css
+    assert 'width: 1.12in;' in css
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.226 - Automatic All Selections and Newest-First Delivery Dates' in changelog
+
+
+def test_v0227_health_state_attention_and_preset_control_center():
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "static/js/app.js").read_text(encoding="utf-8")
+    css = (root / "static/css/styles.css").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    contract = (root / "database/contract.py").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'state: showHealthState ? (count > 0 ? "alert" : "clear") : ""' in app
+    assert ':is(.is-attention-remake, .is-attention-rush, .is-attention-reject).has-alert' in css
+    assert ':is(.is-attention-remake, .is-attention-rush, .is-attention-reject).is-clear' in css
+    assert '--print-chip-soft-end: #f7cbd1;' in css
+    assert '--print-chip-soft-end: #cfeeda;' in css
+
+    preset_html = html[html.index('id="printPresetModal"'):html.index('<!-- SECTION: Interactive statistics chart modal -->')]
+    assert 'Create Delivery List Preset' in preset_html
+    assert 'printPresetDescriptionInput' in preset_html
+    assert 'printPresetDefaultToggle' in preset_html
+    assert 'printPresetLiveSummary' in preset_html
+    assert 'printPresetOutputSettings' in preset_html
+    assert 'printPresetSaveOnlyBtn' in preset_html
+    assert 'Visibility' not in preset_html
+    assert 'id="printPresetPreview"' not in preset_html
+    assert 'Step 1' not in preset_html
+    assert 'Step 2' not in preset_html
+
+    assert 'function renderPrintPresetLiveSummary()' in app
+    assert 'async function confirmPrintPresetSave({ apply = true } = {})' in app
+    assert 'printPresetSaveOnlyBtn?.addEventListener' in app
+    assert 'const setAsDefault = Boolean(els.printPresetDefaultToggle?.checked);' in app
+    assert 'PRINT_DEFAULT_PRESET_STORAGE_KEY' in app
+    assert 'function defaultPrintPresetName()' in app
+    assert 'if (setAsDefault) setDefaultPrintPresetName(cleanName);' in app
+    assert 'const initialPreset = defaultPrintPresetName();' in app
+
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.227 - Health-State Attention Filters and Preset Control Center' in changelog
+
+
+
+
+def test_v0228_create_preset_viewport_positioning_repair():
+    root = Path(__file__).resolve().parents[1]
+    app = (root / "static/js/app.js").read_text(encoding="utf-8")
+    css = (root / "static/css/styles.css").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    contract = (root / "database/contract.py").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    preset_html = html[html.index('class="print-preset-backdrop-v199'):html.index('<!-- SECTION: Interactive statistics chart modal -->')]
+    assert 'print-preset-backdrop-v227 print-preset-backdrop-v228' in preset_html
+    assert 'print-preset-modal-v227 print-preset-modal-v228' in preset_html
+
+    repair_css = css[css.rindex('/* v0.228 Create Preset viewport positioning') :]
+    assert '.print-preset-modal-v228' in repair_css
+    assert 'position: fixed;' in repair_css
+    assert 'inset: 12px;' in repair_css
+    assert 'transform: none;' in repair_css
+    assert 'overscroll-behavior: contain;' in repair_css
+    assert 'grid-template-rows: auto auto auto auto;' in repair_css
+    assert 'inset: 5px;' in repair_css
+
+    assert 'const workspace = els.printPresetModal.querySelector(".print-preset-workspace-v227");' in app
+    assert 'if (workspace) workspace.scrollTop = 0;' in app
+    assert 'focus({ preventScroll: true })' in app
+
+    assert 'static/css/styles.css?v=20260805-v0.228' in html
+    assert 'static/js/app.js?v=20260805-v0.228' in html
+    assert 'aria-label="Application version 0.228"' in html
+    assert '<strong>0.228</strong>' in html
+    assert 'APPLICATION_VERSION = "228"' in contract
+    assert 'Current maintained release: **v0.228**' in readme
+    assert '## v0.228 - Create Preset Viewport Positioning Repair' in changelog
