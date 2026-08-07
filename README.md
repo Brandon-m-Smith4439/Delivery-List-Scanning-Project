@@ -1,8 +1,139 @@
-# Delivery List Scanner 
+# Delivery List Scanner
 
-Current maintained release: **v0.228**. SQLite remains the active/default backend.
+Current maintained release: **v0.262**. SQLite remains the active/default backend.
 
-v0.228 repairs the Create Preset control center so it is centered inside the browser viewport and remains fully usable at common desktop and mobile resolutions.
+v0.262 consolidates breakage reporting into readable machine, glass-type, and reject-reason views. Statistics now supports the same polished custom date-range calendar pattern used by Print / Export, while breakage charts switch units without duplicating datasets.
+
+## Install v0.262
+
+1. Back up the current project folder before replacing files.
+2. Extract the v0.262 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project` and replace the included files.
+3. Restart the Delivery List Scanner.
+4. Refresh the browser with `Ctrl+F5`.
+
+No database migration is required. `CURRENT_SCHEMA_VERSION` remains **5**. This release reads existing reject reason/machine fields and the existing administrator-managed glass-cost lookup data.
+
+## v0.262 highlights
+
+- Consolidated the previous machine piece/SQFT/cost datasets into one **Machine breakage overview** with a Chart Unit selector for Square feet, Pieces, or Cost.
+- Consolidated glass breakage into one **Glass type breakage overview** with the same switchable ranking measure.
+- Added **Reject reasons by machine**, showing how many reject events each reason generated for each machine plus pieces, SQFT, cost, and affected glass types.
+- Added machine drilldowns for top reject reasons and broken glass types, and glass-type drilldowns for responsible machines and reject reasons.
+- Added a polished Statistics custom-date calendar using the established Print / Export two-month range-picker visual language. A custom range overrides the preset range until another preset is selected.
+- Limited the **External remakes** switch to breakage reporting and restyled it as a compact web-app toggle. External remakes remain separate from real machine accountability.
+- Expanded combined breakage table rows so pieces, SQFT, material cost, reject-event count, related machines/glass, top reasons, and data coverage can be reviewed without changing datasets.
+- Updated the Statistics PDF with machine reject counts, broken glass context, and top reject reasons while keeping the report focused on operationally useful information.
+- Preserved the default Top 10 / Show more data behavior and the compact v0.260 chart geometry.
+- Advanced `APPLICATION_VERSION` to 262 while preserving `CURRENT_SCHEMA_VERSION = 5`; no schema migration, database reset, or migration-registry change is included.
+
+## v0.261 highlights
+
+- Added **Glass costs** as a fourth library inside Admin → Lookup Manager.
+- Displays all built-in glass rates plus newly discovered unpriced glass products in one searchable list.
+- Administrators can edit an existing rate or add a rate for a new glass type using **Cost per SQFT**.
+- Saved rates persist through the existing `admin_lookup_values` table; no schema change or migration is required.
+- Statistics breakage calculations use the effective administrator-maintained price map, with the built-in rates retained as fallbacks.
+- Lookup Manager identifies default, discovered, and manually maintained pricing sources and highlights glass with no configured cost.
+- Preserved `CURRENT_SCHEMA_VERSION = 5`; no migration was introduced.
+
+## v0.260 highlights
+
+- Opens Statistics on **Glass type quantity** in the donut/circle view with a default display limit of 10 categories.
+- Adds **Show more data** below the main analytics region; each click increases the display limit before eventually exposing all matching categories.
+- Reduces main chart/table geometry and typography by roughly one third so substantially more data fits in the same workspace.
+- Uses compact workflow labels in Statistics: Staging, Outbound, Inbound, CPU, Greenville, and DTC.
+- Adds internal reject datasets by machine and glass type for piece count, SQFT, and estimated material cost.
+- Makes breakage table view show pieces, SQFT, estimated cost, data coverage, and source together so machine accountability can be reviewed without switching measures.
+- Calculates piece and SQFT breakage percentages against estimated total produced glass and adds an explicit toggle to include or exclude external remakes.
+- Uses the maintained per-SQFT glass pricing supplied for Clear, UltraClear, Mirror, and Antique Mirror products; unknown prices and missing dimensions are reported instead of silently estimated.
+- Replaces the prior Statistics PDF clutter with delivery progress, breakage KPIs, workflow progress, machine breakage, glass-type breakage, and calculation coverage notes.
+- Keeps external remakes separate from production-machine accountability even when they are included in the overall breakage percentage.
+- Preserves `CURRENT_SCHEMA_VERSION = 5`; no migration, database reset, or schema-contract change is part of this release.
+
+## v0.253 highlights
+
+- Replaces the repeated dashboard totals with four priority cards: delivery completion, open pieces, on-time completion, and remake pieces.
+- Keeps glass-mix visualization on the dashboard while improving hierarchy, legend readability, summary context, responsive behavior, and empty states.
+- Rebuilds stage cards around completion, scanned pieces, open pieces, and list counts without repeating top-level totals.
+- Consolidates scan exceptions, manual scans, bay overrides, rack activity, bay activity, manual edits, and top-operator activity into one operational-health section.
+- Removes the obsolete duplicate snapshot/remake containers and eliminates the second redundant statistics render pass.
+- Modernizes the full chart explorer and replaces its repeated dashboard KPIs with chart-specific category, total, average, and highest-value summaries.
+- Preserves all existing chart metrics, filters, sorting, limits, bar/donut views, and PDF reporting. No new migration was intended; v0.255 keeps the maintained schema contract at version 5.
+
+## Install v0.232
+
+1. Start from the maintained v0.231 project.
+2. Extract the v0.232 changed-files ZIP directly into the current project folder.
+3. Preserve the existing `data` folder and database files.
+4. Restart the scanner server and refresh the browser with `Ctrl+F5`.
+
+No database migration or separate setup script is required. v0.232 keeps schema version 5.
+
+## v0.232 highlights
+
+- Removes the Description field from Create Preset and keeps Preset Name beside the personal-default toggle.
+- Increases the desktop modal height to 860 pixels while retaining safe scrolling only for shorter or narrower browser windows.
+- Expands Glass Types into side-by-side Annealed, Tempered, and Mirror panels on desktop.
+- Restores subtle route-specific tints and restrained blue, green, and purple glass-family colors.
+- Keeps Status and Attention controls neutral so selected filters remain clear without overwhelming the workspace.
+- Preserves Preset Summary, Print Options, bottom-right Save Preset actions, Lookup Manager values, and schema version 5.
+
+## Install v0.231
+
+1. Start from the maintained v0.230 project.
+2. Extract the v0.231 changed-files ZIP directly into the current project folder.
+3. Preserve the existing `data` folder and database files.
+4. Restart the scanner server and refresh the browser with `Ctrl+F5`.
+
+No database migration or separate setup script is required. v0.231 keeps schema version 5.
+
+## v0.231 highlights
+
+- Organizes Create Preset glass types into Annealed, Tempered, and Mirror sections while preserving exact Lookup Manager values.
+- Replaces category-specific button colors with one neutral control treatment.
+- Makes selected filters obvious through a stronger border, soft shared background, check badge, and selected-count pill.
+- Moves Print Options directly below Preset Summary in the right column.
+- Anchors Save Preset actions at the bottom-right of the desktop workspace.
+- Shortens instructional text and keeps the responsive tablet/mobile stacking behavior.
+- Consolidates the final preset CSS ownership layer instead of stacking another duplicate override block.
+- Preserves schema version 5.
+
+## Install v0.230
+
+1. Start from the maintained v0.229 project.
+2. Extract the v0.230 changed-files ZIP directly into the current project folder.
+3. Preserve the existing `data` folder and database files.
+4. Restart the scanner server and refresh the browser with `Ctrl+F5`.
+
+No database migration or separate setup script is required. v0.230 keeps schema version 5.
+
+## v0.230 highlights
+
+- Rebuilds the Create Preset workspace rows around content height instead of forcing the main cards into a fixed-height grid row.
+- Prevents Print Options, Preset Summary, Actions, status messages, and the information footer from occupying the same vertical space.
+- Keeps the compact centered workspace and uses internal scrolling only when the browser is too short to show every card.
+- Replaces saturated selected filter fills with soft tinted backgrounds, stronger borders, readable dark text, and retained check marks.
+- Softens action, orientation, card-accent, and backdrop colors while preserving clear hierarchy and route/category identity.
+- Preserves responsive stacking, Lookup Manager glass types, live summary, personal defaults, and Save/Apply behavior.
+- Preserves schema version 5.
+
+## Install v0.229
+
+1. Start from the maintained v0.228 project.
+2. Extract the v0.229 changed-files ZIP directly into the current project folder.
+3. Preserve the existing `data` folder and database files.
+4. Restart the scanner server and refresh the browser with `Ctrl+F5`.
+
+No database migration or separate setup script is required. v0.229 keeps schema version 5.
+
+## v0.229 highlights
+
+- Reduces the desktop Create Preset workspace to a centered maximum of 1240 × 780 pixels while retaining responsive full-screen behavior on smaller displays.
+- Increases labels, inputs, filter choices, summaries, and action-button typography without increasing the overall modal footprint.
+- Carries the Print / Export route, status, attention, All-choice, Mirror, Tempered, and Annealed gradients into Create Preset.
+- Adds stronger card hierarchy, section accent rails, polished shadows, and the maintained Print / Export blue workspace treatment.
+- Keeps the v0.228 viewport repair, internal scrolling, Lookup Manager glass library, live summary, personal default, and Save/Apply behavior.
+- Preserves schema version 5.
 
 ## Install v0.228
 
@@ -443,7 +574,10 @@ See `automation\sql_delivery_export\README.md` for the installed runtime and tro
 - Azure migration dry run: `py -3 -m database.migrate_sqlite_to_azure_sql --sqlite-path data\delivery-scanner-pilot.db`
 - SQLite migrations are owned by `database\migrations.py`.
 - The logical cross-database contract is owned by `database\contract.py`.
-- v0.218 application contract: **218**.
+- v0.256 application contract: **256**.
+- v0.253 application contract: **253**.
+- v0.246 application contract: **246**.
+- v0.235 application contract: **235**.
 - Current SQLite schema contract: **5**.
 
 ## Optional container deployment

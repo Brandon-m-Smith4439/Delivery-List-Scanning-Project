@@ -2282,7 +2282,7 @@ tr.has-internal-reject > td:first-child {
     border-right: 0;
   }
 
-  .reject-summary-bar-v151 article:nth-child(-n+2) {
+  .reject-summary-bar-v151 article:nth-child(-n/**/+2) {
     border-bottom: 1px solid #e2e8ef;
   }
 
@@ -2669,7 +2669,7 @@ tr.has-internal-reject > td:first-child {
 .operations-modal-panel[data-kind="reject-log"] .operations-modal-heading h2 { margin: 3px 0 4px; font-size: clamp(1.75rem, 2.5vw, 2.2rem); }
 .operations-modal-panel[data-kind="reject-log"] .operations-modal-heading p { max-width: 780px; font-size: .76rem; line-height: 1.35; opacity: .88; }
 .operations-modal-panel[data-kind="reject-log"] .operations-modal-health-pill { display: none; }
-.operations-modal-panel[data-kind="reject-log"] .modal-close-x { width: 42px; height: 42px; min-height: 42px; border: 1px solid rgba(255,255,255,.34); border-radius: 11px; background: rgba(255,255,255,.12); color: #fff; }
+
 
 .reject-operations-tabs-v183 {
   grid-row: 2;
@@ -2977,16 +2977,7 @@ tr.has-internal-reject > td:first-child {
   text-overflow: clip !important;
 }
 
-.operations-modal-panel[data-kind="reject-log"] .operations-modal-close {
-  position: relative;
-  z-index: 4;
-  width: 42px;
-  height: 42px;
-  border: 1px solid rgba(255,255,255,.36);
-  border-radius: 11px;
-  background: rgba(255,255,255,.11);
-  color: #fff;
-}
+
 
 .reject-operations-tabs-v183 {
   z-index: 4;
@@ -3146,4 +3137,12 @@ tr.has-internal-reject > td:first-child {
   .reject-log-step-v182 {
     padding: 7px 10px;
   }
+}
+
+/* REJECT GUI CLOSE-BUTTON POSITIONING - v0.247 */
+/* Close-button layout only. shared-ui.css owns geometry and interaction. */
+.operations-modal-panel[data-kind="reject-log"] .operations-modal-close {
+  position: relative;
+  inset: auto;
+  z-index: 4;
 }

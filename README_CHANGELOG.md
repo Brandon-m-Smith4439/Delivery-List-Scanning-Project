@@ -1,3 +1,363 @@
+## v0.262 - Combined Breakage Accountability and Custom Statistics Range
+
+- Combined machine breakage piece, SQFT, and cost datasets into one machine accountability view with a live Chart Unit selector.
+- Combined glass-type breakage piece, SQFT, and cost datasets into one glass accountability view while retaining all three measures in table and selection details.
+- Added reject-reason aggregation by machine, including occurrence count, rejected pieces, rejected SQFT, estimated material cost, and affected glass types.
+- Added machine drilldowns for reject reasons and glass types, plus glass-type drilldowns for machines and reject reasons.
+- Added a Statistics custom date-range picker using the maintained Print / Export two-month calendar classes and range-selection interaction.
+- Made the custom Statistics range authoritative for both delivery-list filtering and the `/api/reports/summary` request until the user selects a preset range.
+- Restricted and restyled the External remakes control so it appears only for breakage comparisons where external remake inclusion changes the result.
+- Expanded combined breakage table layouts and kept the main chart single-measure so SQFT, pieces, cost, glass, machines, and reasons remain readable instead of competing on one visual scale.
+- Updated the Statistics PDF breakage tables with reject counts, glass context, and top reject reasons.
+- Kept `CURRENT_SCHEMA_VERSION = 5` unchanged and advanced only `APPLICATION_VERSION` to 262. No database migration is included.
+
+## v0.261 - Admin-Managed Glass Material Costs
+
+- Added **Glass costs** as a dedicated Lookup Manager library alongside Products, Routes, and Process states.
+- Exposed every default per-SQFT glass rate in the admin UI and made existing rates editable without touching application code.
+- Added discovered, currently unpriced product types to the Glass Costs library so administrators can price newly introduced glass as soon as it appears in imported data.
+- Persisted glass-cost overrides in the existing `admin_lookup_values` table using the `glass_cost` lookup type, keeping schema version 5 unchanged.
+- Updated Statistics breakage-cost calculations and PDF inputs to consume the effective default-plus-admin pricing map.
+- Kept built-in rates as safe fallbacks, while manual overrides take precedence immediately after save.
+- Added glass-cost validation, audit payloads, source/coverage messaging, and English/Spanish Lookup Manager copy.
+- Updated Admin overview copy and v0.261 cache/version references.
+- Added focused regression coverage for the new lookup bucket, glass-cost editor, persisted override path, effective Statistics pricing, and unchanged database schema contract.
+
+## v0.260 - Compact Glass-First Statistics and Breakage Analytics
+
+- Reduced the main Statistics chart/table presentation by roughly 35% through tighter row geometry, smaller chart canvases, compact legends, and denser table typography while preserving interactive selection and accessibility.
+- Changed the initial Statistics presentation to **Glass type quantity** in the donut/circle view and changed the default display limit to 10.
+- Added a bottom **Show more data** action that advances the display limit through larger result sets so long datasets do not overwhelm the first view.
+- Shortened Statistics workflow labels to Staging, Outbound, Inbound, CPU, Greenville, and DTC so stage names remain fully visible inside the main chart.
+- Added reporting calculations for internal rejects by machine/location and by glass type, including rejected pieces, rejected SQFT, and estimated material cost.
+- Expanded breakage table view to show pieces, SQFT, estimated cost, coverage gaps, and source in one compact row for each machine/location or glass type.
+- Added the supplied per-SQFT material pricing for six standard glass products and six Antique Mirror products; unpriced glass and missing dimensions are surfaced as coverage gaps rather than assigned guessed values.
+- Added piece-based and SQFT-based breakage percentages using estimated total produced glass. Internal rejects are included by default, with an explicit Statistics toggle to include/exclude external remake production.
+- Kept external remakes out of individual machine accountability; when included in machine comparisons they appear only as an explicit **External remakes** comparison bucket.
+- Reworked the Statistics PDF report to include only delivery progress, breakage KPIs, workflow progress, machine breakage, glass-type breakage, and calculation coverage notes.
+- Added Spanish mappings for the new breakage controls, datasets, and progressive **Show more data** action so the existing language toggle remains complete.
+- Added regression coverage for the glass-first defaults, progressive display limit, short stage labels, reject datasets, pricing reference, produced totals, updated PDF content, v0.260 cache keys, and unchanged schema version 5.
+- Advanced `APPLICATION_VERSION` to 260 while preserving `CURRENT_SCHEMA_VERSION = 5`; no database migration, reset, or schema-contract change is included.
+
+## v0.259 - Dense Statistics Workspace and Stable Range Control
+
+- Reduced the visual footprint of the main Statistics chart workspace so more live categories and supporting information remain visible without scrolling.
+- Tightened chart header spacing, view controls, filter controls, KPI cards, result messaging, chart canvas padding, table rows, legends, and selected-category details.
+- Reduced bar-chart row geometry from 54px to 42px, compacted the line chart from 500px to 420px high, and reduced the donut canvas from 480px to 400px while preserving the same data and interactions.
+- Replaced the Statistics side-navigation pseudo-element graphic with an explicit masked chart icon so the icon renders consistently with the other main navigation entries.
+- Changed the Statistics reporting-range selector to an intentionally native control and added a stable navy background, white chevron, and scoped hover/focus styling to prevent the transient white state seen during live rerenders.
+- Added regression coverage for the Statistics navigation icon, native date-range ownership, compact chart geometry, v0.259 cache keys, and unchanged schema contract.
+- Advanced the application revision to 259 while preserving `CURRENT_SCHEMA_VERSION = 5`; no database migration or data change is included.
+
+## v0.258 - Inline Live Statistics Analytics Workspace
+
+- Removed the separate chart explorer modal and promoted the full analytics experience into the Statistics page.
+- Added live bar, line, donut, and table views with immediate updates for range, dataset, sort, limit, and category-search changes.
+- Expanded the dataset library with delivery completion, open pieces, on-time results, incomplete lists, stage workload, stage open work, scanned/open stage work, glass mix, four delivery-date views, operator scans, scan issues, operational actions, and remakes.
+- Kept only four priority metrics above the main chart and removed duplicate workflow and operational-attention cards.
+- Added chart-specific KPI cards, selected-category details, accessible chart/table selection, source-order sorting, and top 10/20/50/all display limits.
+- Added compact supporting charts for stage completion, open work, and operational activity, each linked back to the main analytics workspace.
+- Added icons to Statistics headings, filters, buttons, KPI cards, chart types, data rows, selections, and supporting panels.
+- Applied the shared `app-primary-button` component to every blue Statistics action, including Refresh, PDF report, Reset, active view, and Analyze buttons.
+- Consolidated all new Statistics chart and table ownership in `static/css/statistics.css` without adding another competing Home-page override layer.
+- Advanced the application revision to 258 while preserving `CURRENT_SCHEMA_VERSION = 5`; no database migration or data change is included.
+
+## v0.257 - Dedicated Statistics Workspace
+
+- Added Statistics as its own main navigation page between Home and Scan.
+- Removed the statistics dashboard from Home and expanded delivery-list discovery to the full page width.
+- Built a polished Statistics command header using the same navy, white-card, restrained-accent, and rounded-control language as the rest of the web app.
+- Kept the four priority metrics at the top and enlarged them for faster scanning without adding duplicate totals.
+- Promoted glass mix and the full chart explorer into a larger production-mix card.
+- Moved stage completion into a dedicated workflow card and retained concise progress, open-piece, and list-count details.
+- Kept operational attention limited to scan issues, manual handling, and bay/rack actions.
+- Preserved all existing chart datasets, date ranges, PDF reporting, filtering, sorting, display limits, bar/donut views, and chart selection behavior.
+- Added `static/css/statistics.css` as the maintained page owner and removed the current statistics ownership block from `home.css`.
+- Advanced the application revision to 257 while preserving `CURRENT_SCHEMA_VERSION = 5`; no database migration or data change is included.
+
+## v0.256 - Calm Statistics Dashboard and Progressive Chart Explorer
+
+- Reworked the Home statistics dashboard to match the web app’s established white-card, navy-accent, compact-control visual language.
+- Reduced first-view information density to four priority metrics, one glass-mix chart, concise workflow progress, and three operational-health summaries.
+- Removed the chart’s repeated largest-quantity and average-per-type summary tiles; the dashboard now shows one actionable largest-share insight.
+- Replaced large stage metric cards with compact progress rows showing completion, open pieces, and list count.
+- Consolidated scan exceptions, manual scans, bay overrides, manual edits, rack activity, and bay activity into three readable operational summaries.
+- Rebuilt the full chart explorer with a dark application header, left setup sidebar, dedicated chart workspace, and progressively disclosed advanced filters.
+- Preserved every existing chart metric, date range, sorting option, display limit, search filter, bar/donut view, PDF report, and chart selection behavior.
+- Advanced the application revision to 256 while keeping `CURRENT_SCHEMA_VERSION = 5`; no database migration or data change is included.
+- Strengthened static regression coverage so the application contract must remain aligned with the maintained migration registry before a release is accepted.
+
+## v0.255 - Five-Migration Contract Startup Recovery
+
+- Fixed the second startup failure caused by applying the v0.254 schema-10 contract to the maintained project checkout whose `database/migrations.py` registry defines migrations 1 through 5.
+- Restored `CURRENT_SCHEMA_VERSION` to 5 while advancing `APPLICATION_VERSION` to 255; application revisions and database schema versions are intentionally independent.
+- Preserved the verified backup created during the failed startup and made no database reset, replacement, deletion, or manual schema edit.
+- Added a contract maintenance comment that frontend-only releases must not change the expected schema version.
+- Replaced the incorrect schema-10 regression with a registry parser that validates the actual migration definition sequence `[1, 2, 3, 4, 5]` when the full project is present.
+- Preserved the v0.253 Statistics Dashboard redesign and all v0.252 Bay Map/shared-button improvements.
+- Advanced the visible version, cache keys, documentation, and tests to v0.255.
+
+## v0.254 - Database Contract Registry Alignment Hotfix
+
+- Fixed the startup-blocking contract mismatch introduced by the v0.253 changed-files package: `database/contract.py` expected only migrations 1 through 5 while the maintained migration registry defines migrations 1 through 10.
+- Restored `CURRENT_SCHEMA_VERSION` to 10 so `validate_migration_registry()` accepts the complete maintained registry and database initialization can continue.
+- Added an inline maintenance note requiring the contract version to remain synchronized with the highest definition in `database/migrations.py`.
+- Added focused regression coverage for application version 254, schema version 10, and the maintained migration range.
+- Preserved all v0.253 Statistics Dashboard and chart-explorer changes; this hotfix does not alter, reset, replace, or migrate the existing SQLite database.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.254.
+
+## v0.253 - Statistics Dashboard Hierarchy and Chart Explorer Polish
+
+- Rebuilt the Home statistics dashboard around four priority metrics so delivery completion, open pieces, on-time completion, and remake volume appear first.
+- Removed the duplicated snapshot/remake statistic containers and consolidated operational exceptions and audited actions into one health section.
+- Reworked stage cards to show completion, scanned quantity, open quantity, and list count without repeating top-level KPI values.
+- Polished the embedded glass-mix chart with a stronger header, clearer donut presentation, improved legend rows, useful chart context, responsive layout, and a professional empty state.
+- Modernized the full statistics explorer with a dark command header, structured filter toolbar, cleaner canvas, and chart-specific summary cards instead of repeated dashboard KPIs.
+- Integrated the chart explorer header with the shared dark-header close-button variant so the close control remains consistent and legible.
+- Removed the second redundant `renderHomeStatistics` call from the Home render workflow, reducing unnecessary DOM work.
+- Added focused structure coverage for the new dashboard ownership, removed duplicate containers, contextual explorer summaries, and single-render behavior.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.253. No new migration was intended; v0.255 restores the maintained schema-5 contract for the current project checkout.
+
+## v0.252 - Uniform Bay Map Actions and Sidebar-Aligned Primary Buttons
+
+- Fixed the Bay Map action toolbar root cause by explicitly resetting each launcher's grid column and row in the maintained owner; the older odd-last-child rule can no longer stretch Edit Map across the toolbar.
+- Kept all five Bay Map actions at the same 54-pixel height and equal-width five-column layout, including narrow-screen horizontal scrolling.
+- Retuned the reusable `app-primary-button` component from the brighter blue palette to the deeper navy family used by the application sidebar.
+- Centralized the revised normal, hover, focus, active, border, edge, and shadow colors in `static/css/shared-ui.css` so pages continue sharing one professional button system.
+- Added focused structure coverage for the explicit Bay Map grid reset and sidebar-aligned shared palette.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.252. Schema version 5 is unchanged.
+
+## v0.251 - Flat Bay Actions and Compact Centered Scan Selectors
+
+- Removed the v0.250 category-gradient override from Print / Export so its filters return to the established pre-gradient visual system.
+- Rebuilt the five Bay Map launcher buttons as one equal-height row with flat, restrained category surfaces; narrow layouts scroll horizontally instead of wrapping Edit Map beneath the other actions.
+- Reduced the Scan panel Date and Stage selectors to matching 120-pixel controls and centered them around the station title.
+- Positioned each custom-select arrow independently from the selected value so the date and stage text remain optically centered.
+- Increased selector line height and vertical room enough to prevent descenders, including the “g” in Staging, from clipping.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.251. Schema version 5 is unchanged.
+
+## v0.250 - Numeric Week Dates, Centered Scan Identity, and Bay Status Clarity
+
+- Restored compact M/D/YYYY delivery-date labels in maintained date selectors and Print / Export while retaining Monday-Friday business-week separators.
+- Added reusable business-week grouping to the Home delivery-list catalog with This Week, Next Week, Last Week, and dated week headings.
+- Centered the Scan panel station title and placed equally prominent Date and Stage controls immediately beside it with centered selection text.
+- Applied the shared primary-button treatment to Sign In and password-reset primary actions and darkened the reusable blue beveled palette across the webapp.
+- Standardized the five Bay Map launcher buttons to equal dimensions with restrained dark-blue-to-category gradients.
+- Added matching category-gradient treatment to Print / Export filter buttons and header actions while preserving clear selected-state outlines.
+- Changed grouped bay totals to occupied/total with the available count, moved Auto/Man policy indicators to the upper-left, and strengthened individual bay Available, Occupied, Preassigned, and Picking states.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.250. Schema version 5 is unchanged.
+
+## v0.249 - Guided Rack Editing, Scan Header Clarity, and Business-Week Date Menus
+
+- Kept Edit Bays and a smaller Edit Map action adjacent at the right side of the Bay Map action row.
+- Reduced Delivery List Management Previous/Next controls and centered them as a tighter pager pair.
+- Reworked Edit Racks into a guided workspace with icon-led Add Rack Set and Add Individual Rack actions inside the content area, clearer set summaries, and group icons.
+- Removed generic green-dot status pills from static modal headers. Live status remains available for changing workspaces such as individual rack state, active sessions, manual edits, current delivery data, and the Automation Control Center.
+- Swapped Date and Stage in the Scan panel, enlarged the station name as the panel title, removed the visible Assigned station label, and standardized Scan stage names to Staging, Outbound, Indian Trail, CPU, DTC, and Greenville.
+- Added Monday-Friday business-week optgroup separators to maintained delivery-date dropdowns outside Print / Export.
+- Reduced shared full-GUI close buttons by approximately 15%, from 58px to 49px, while preserving one centered-X component.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.249. Schema version 5 is unchanged.
+
+## v0.248 - Bay Map Streamlining, Rack Set Icons, and Timed Update Review
+
+- Removed the Bay Map Physical Floor View helper strip and its duplicate Open Manage Items action while preserving the maintained Manage Items control in the right-side action panel.
+- Hid the physical-bay summary bar when no filters are active, eliminating the persistent “Showing all physical bays” and compact-filter guidance text.
+- Reduced Bay Map Undo/Redo controls through page-owned shared-component variables and reduced the compact Submit action by approximately twenty percent.
+- Reorganized the Admin import-run pager so Previous and Next sit together in the center with smaller dimensions.
+- Reworked rack-set icons so the set-specific symbol occupies the main icon tile and the secondary corner badge is removed; individual rack GUI icons remain unchanged.
+- Moved new/updated review presentation out of the global stylesheet and into `static/css/scan.css`, moved the notice below the filter toolbar, polished the notice, and applied the shared primary-button treatment to Mark Reviewed.
+- Added a visible 15-second countdown and automatic dismissal to the delivery-list update popup.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.248. Schema version 5 is unchanged.
+
+## v0.247 - CSS Ownership Cleanup and Stable Shared Controls
+
+- Reorganized recent UI work so reusable blue actions and close buttons live only in `static/css/shared-ui.css`, Print / Export and Create Preset rules live in `static/css/print.css`, and rack icons/modal polish live in `static/css/racks.css`.
+- Removed duplicate `.gui-close-button` and recent shared-primary ownership from `static/css/styles.css` instead of adding another release override.
+- Removed Admin, Bay, Rack, and Reject close-button shape/color rules, retaining only page-specific placement while the shared component owns geometry and interaction.
+- Fixed the resting X by giving its SVG mask an explicit color independent of the hidden legacy text glyph.
+- Separated keyboard focus from destructive hover styling so the Automated Control Center no longer opens with a false red-hover state.
+- Strengthened shared component specificity with reusable anchors so older page IDs cannot resize, flatten, or recolor only one copy of a common control.
+- Restored white Search text and icon states and applied the shared beveled style to the Scan page Print Packing Slip button.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.247. Schema version 5 is unchanged.
+
+## v0.246 - Unified Square Close Buttons and Distinct Rack Set Icons
+
+- Standardized every full-GUI close button to one truly square shared control with the X locked to the visual center, eliminating the stretched and off-center variants.
+- Hardened the shared close-button ownership rule so older modal and header selectors cannot reintroduce the prior automation-center close-button overlap or legacy glyph sizing.
+- Removed inherited rack-set icon classes that were leaking the old legacy corner icons into the new rack visuals.
+- Expanded rack-set and individual rack icon mapping so Coral, LR, RR, Showers, Mirrors, BFS Mirrors, Framed Mirrors, CRL, and Spacers each render with their own icon family and matching set color treatment.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.246. Schema version 5 is unchanged.
+
+## v0.244 - Beveled Actions and Rack GUI Visual Identity
+
+- Enlarged the reusable `.gui-close-button` to a 58-pixel rounded square and replaced browser-dependent X glyph positioning with one generated, consistently centered X.
+- Preserved the maintained white-X/red-background hover and keyboard-focus treatment while adding a pressed state and beveled resting surface.
+- Kept transient toast and banner dismissals compact so the larger modal-close geometry applies only to full GUI controls.
+- Added a deeper reusable bevel to `.app-primary-button`, including raised, hover, pressed, focus, and disabled states.
+- Migrated Global Search, Bay Map Find Match, Racks History, Print/Export, and Scan-page Complete controls to the shared blue action class.
+- Repaired the Racks History button's pointer and hover surface so the complete button remains selectable and never flashes white over only part of its content.
+- Added deterministic rack-set hues and icon families that are shared by rack-set selectors and each individual rack detail GUI.
+- Added rack-set-colored headers, rack-set icons, hollow top-right header rings, themed list accents, and restrained row hover polish to individual rack GUIs.
+- Added a polished audited-records header, history icon, and hollow top-right header ring to the Racks History GUI.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.244. Schema version 5 is unchanged.
+
+## v0.243 - Formatted Excel Export and Shared Webapp Controls
+
+- Replaced the plain server-generated XLSX handoff with a browser-built workbook based on the exact printable preview selection.
+- Added one formatted worksheet per normal, Rush, or remake delivery sheet with the supplied company logo, route-first title, full delivery date, row/order/QTY totals, filter summary, Checked By line, glass-type section bands, alternating rows, and print-ready page setup.
+- Added workbook print areas, repeated column headings, frozen headings, Letter orientation support, hidden gridlines, and maintained column widths so Excel output remains useful on screen and on paper.
+- Kept CSV output deliberately raw and unformatted with one record per selected item and explicit identifiers, date, quantity, status, attention, glass, dimensions, and route fields.
+- Added `.app-primary-button` as the reusable polished blue action style and made existing maintained primary selectors compatibility aliases for consistent webapp behavior.
+- Standardized `.gui-close-button` as a centered 34-pixel rounded square with the existing white-X/red-background hover and focus behavior, including remaining dynamic dismiss controls.
+- Restored the supplied print logo to the changed-files package because both browser printing and formatted XLSX export depend on the same maintained asset.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.243. Schema version 5 is unchanged.
+
+## v0.242 - Preset Dialog and Adaptive Glass Layout Polish
+
+- Replaced the browser-native print-preset deletion confirmation with the existing shared `confirmWebAppAction` dialog.
+- Added the shared success feedback dialog and application save sound after successful preset deletion, including Default fallback details when applicable.
+- Removed fixed-height stretching from Annealed, Tempered, and Mirror panels so each family sizes to its actual product list and grows naturally when new glass types are discovered.
+- Increased exact glass-product font size, enabled full multi-line wrapping, added comfortable cell indentation, and preserved a fixed-width check indicator.
+- Removed the browser-native Copies spinner so the maintained minus/plus stepper is the only visible increment control.
+- Replaced the Save Preset card's temporary lightning symbol with the standard save icon.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.242. Schema version 5 is unchanged.
+
+## v0.241 - Preset Management and Shared GUI Close Controls
+
+- Added a trash-can action beside every user-created Print / Export preset while protecting the built-in preset from deletion.
+- Renamed the visible built-in preset from `System Default` to `Default` and retained compatibility with the former reserved name.
+- Added deletion cleanup for active and personal-default presets so deleting one safely falls back to Default.
+- Added one reusable `gui-close-button` class for all maintained top-right GUI X controls, with corrected glyph centering and consistent white-on-red hover/focus feedback.
+- Moved the Create Preset Glass Types row title to the top of the expanded section.
+- Changed Annealed, Tempered, and Mirror product lists to one vertical column per family.
+- Added fixed-width glass selection indicators so check marks remain aligned regardless of product-name length.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.241. Schema version 5 is unchanged.
+
+## v0.240 - Consistent Header Rings and Compact Preset Workspace
+
+- Removed the remaining filled radial circle from the Print / Export header.
+- Added the maintained hollow outline-ring decoration to both Print / Export and Create Preset using one consistent size, weight, and placement.
+- Increased the practical Create Preset desktop height and compacted card spacing, filter rows, choices, and the grouped glass library so routine desktop use no longer needs vertical scrolling.
+- Preserved safe internal scrolling for narrow stacked layouts and unusually short browser windows so no controls become unreachable.
+- Added explicit hover feedback to the Create Preset Attention choices without moving or highlighting the surrounding section.
+- Removed parent-level focus outlines from the Preset Name label and Smart Search container while keeping accessible focus feedback on the actual input, choice, or switch.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.240. Schema version 5 is unchanged.
+
+## v0.239 - Stable Workspace Surfaces and Business-Week Labels
+
+- Removed hover movement, border changes, and elevation from Print / Export filter sections, preview surfaces, and Create Preset cards; hover feedback remains on actual controls and buttons.
+- Removed the large outline circle from the Print / Export header and both outline circles from the Create Preset header.
+- Removed the `Ready to create a reusable print setup.` empty-state sentence from the bottom of Create Preset.
+- Changed Delivery Date group ranges from Monday-Sunday to Monday-Friday so a week beginning August 3 displays as `Aug 3–7` rather than `Aug 3–9`.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.239. Schema version 5 is unchanged.
+
+## v0.238 - Print Workspace Interaction Polish
+
+- Added the maintained hollow outline-circle motif to the top-right of both Print / Export and Create Preset.
+- Added restrained hover and focus elevation to filter sections, preview controls, preset cards, header controls, and primary actions.
+- Added clearer hover feedback to modal close buttons and a quiet inner highlight to selected controls.
+- Added consistent keyboard focus rings across buttons, inputs, selects, and checkbox-backed controls.
+- Added `prefers-reduced-motion` handling so the polish does not force movement on motion-sensitive users.
+- Kept the entire visual pass CSS-only, adding no timers, API calls, or JavaScript work during normal interaction.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.238. Schema version 5 is unchanged.
+
+## v0.237 - Persistent Smart Search and Dynamic Glass-Family Presets
+
+- Fixed Smart Search closing after Add Item or Add Order by stopping the result click before the rerendered button can be treated as an outside click.
+- Added composed-path protection to the document outside-click handler so the Smart Search panel remains open during continuous order/item selection.
+- Increased Add Item and Add Order action size and typography while preserving the detail-first result layout.
+- Added Annealed set, Tempered set, and Mirror set selectors to Create Preset alongside exact product choices.
+- Stored selected glass families as semantic preset rules so future imported products in those Lookup Manager families are included automatically.
+- Reapplied semantic family and exact-product rules after every date or route change, including dates where a selected family temporarily has no matching rows.
+- Preserved existing exact-glass presets through backward-compatible `glassTypes` handling and added optional `glassFamilies` data without a database migration.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.237. Schema version 5 is unchanged.
+
+## v0.236 - Print Filter Cleanup and Persistent Smart Search
+
+- Removed the main Print / Export Glass Type search bar and its obsolete client-side filtering implementation.
+- Removed the requested explanatory text beneath Route, Glass Type, Status, and Attention.
+- Rebuilt Smart Search result cards around one clear set of order, item, customer, job, glass, quantity, and delivery-date fields.
+- Increased result-information typography while reducing Add Item and Add Order to compact actions.
+- Preserved the active query and kept Smart Search open after Add Item or Add Order so users can continue selecting without reopening the panel.
+- Removed search-only empty-state markup, event wiring, reset logic, element registration, and dedicated CSS to avoid dead code.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.236. Schema version 5 is unchanged.
+
+## v0.235 - Startup-Safe Create Preset Event Wiring
+
+- Removed the stale `renderPrintPresetLiveSummary` listener that caused a `ReferenceError` during application startup after the Preset Summary feature was removed.
+- Consolidated Create Preset listeners into `wirePrintPresetEvents()` so the feature has one maintained event-wiring owner.
+- Added `wireOptionalStartupFeature()` to isolate optional Create Preset initialization failures from the core application startup path.
+- Added `addOptionalUiEventListener()` so absent optional controls or handlers are skipped safely instead of throwing.
+- Preserved all v0.234 Create Preset behavior, output settings, saved presets, and personal-default handling.
+- Added focused regression checks for deleted helper references and startup isolation.
+- Advanced the application contract, visible version, cache keys, documentation, and tests to v0.235. Schema version 5 is unchanged.
+
+## v0.234 - Create Preset Simplification and Theme Alignment
+
+- Removed the requested helper text from Preset Details, filter groups, Save Preset, and the bottom information footer.
+- Removed the Glass Types search control and its event/search implementation.
+- Removed the complete Preset Summary card and its live-rendering code.
+- Moved Print Options and Save Preset upward into the right column.
+- Rebalanced the modal into a wider filter workspace and a compact output/action column.
+- Updated the modal shell, cards, buttons, fields, backdrop, and selected states to match the webapp's maintained navy, blue, gray, and white palette.
+- Preserved route and glass-family accents as restrained category cues.
+- Preserved the v0.233 single-scroll-owner behavior and schema version 5.
+- Advanced the application contract, visible version, cache keys, documentation, and focused tests to v0.234.
+
+## v0.233 - Create Preset Scroll and Bottom Containment Repair
+
+- Restored one reliable internal vertical scrollbar to the complete Create Preset workspace at all supported viewport heights.
+- Kept the branded modal header fixed while every editable section and the bottom Save Preset/help area scrolls together inside the dialog.
+- Replaced stretch-owned workspace rows with content-sized rows so expanded glass categories cannot push Summary, Print Options, Actions, status, or help content beyond the modal boundary.
+- Removed the right-column auto spacer that could leave Save Preset outside the reachable content flow.
+- Added stable scrollbar gutter spacing, touch momentum scrolling, scroll padding, and comfortable bottom containment without introducing nested scroll regions or background work.
+- Preserved the v0.232 visual palette, grouped glass library, route accents, responsive layout, personal preset behavior, and schema version 5.
+- Advanced the application contract, visible version, cache keys, documentation, and focused tests to v0.233.
+
+## v0.232 - Expanded Preset Workspace and Restrained Category Colors
+
+- Removed the Create Preset Description field and simplified Preset Details to Preset Name plus the personal-default toggle.
+- Increased the desktop workspace height from 760 to 860 pixels so standard desktop displays can show the complete modal without routine vertical scrolling.
+- Kept one safe internal scrollbar for shorter desktop, tablet, and mobile viewports.
+- Expanded Glass Types into three side-by-side desktop panels ordered Annealed, Tempered, and Mirror.
+- Restored restrained route-specific tints for Airport, Indian Trail, Greenville, CPU, and DTC.
+- Restored restrained glass-family colors: blue for Annealed, green for Tempered, and purple for Mirror.
+- Kept Status and Attention choices neutral to prevent the color system from becoming visually overwhelming.
+- Consolidated final Create Preset styling into the v0.232 ownership block rather than stacking another duplicate override layer.
+- Advanced the application contract, visible version, cache keys, documentation, and focused tests to v0.232. Schema version 5 is unchanged.
+
+## v0.231 - Neutral Preset Selection and Grouped Glass Library
+
+- Organized Create Preset glass choices into Annealed, Tempered, and Mirror sections without changing their exact stored or Lookup Manager values.
+- Updated glass search so empty category sections hide automatically while matching categories remain grouped.
+- Replaced route-, status-, attention-, and glass-specific preset button colors with one neutral unselected style and one clearly defined selected style.
+- Strengthened selection visibility with a two-pixel border, shared soft background, circular check badge, and selected-count pills.
+- Moved Print Options below Preset Summary and anchored Save Preset actions at the bottom-right of the desktop workspace.
+- Simplified headings, descriptions, placeholders, and the preset information footer to reduce visual and reading load.
+- Consolidated the former v0.230 flow-repair ownership block into the v0.231 layer instead of adding another duplicate CSS override section.
+- Preserved responsive stacking, personal defaults, live summary, Save/Apply behavior, and schema version 5.
+- Advanced the application contract, visible version, cache keys, documentation, and focused tests to v0.231.
+
+## v0.230 - Create Preset Flow Repair and Subtle Control Palette
+
+- Replaced the fixed first workspace row with content-sized grid rows so the main column can no longer overflow underneath the status and information rows.
+- Assigned explicit desktop, tablet, and mobile grid placement for the main column, summary/actions column, status message, and information footer.
+- Retained a compact centered modal while allowing one maintained internal scrollbar when content exceeds the available browser height.
+- Replaced saturated selected route, status, attention, and glass fills with soft category tints, defined borders, dark readable labels, and preserved check marks.
+- Softened action buttons, orientation controls, card accent rails, shadows, workspace patterning, and the modal backdrop.
+- Added v0.230 ownership classes so the repair cleanly overrides v0.227-v0.229 presentation rules without changing preset behavior.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.230. Schema version 5 is unchanged.
+
+## v0.229 - Compact Polished Create Preset Workspace
+
+- Reduced the desktop Create Preset control center from a near-full-screen window to a centered 1240 × 780 maximum while retaining safe responsive sizing at 1024px and mobile widths.
+- Increased the typography for preset labels, descriptions, input values, filter choices, selection totals, live summary values, and action buttons.
+- Added final v0.229 modal ownership so the smaller centered geometry does not conflict with the v0.228 viewport repair or older modal transforms.
+- Reused the maintained Print / Export route, status, attention, All-choice, Mirror, Tempered, and Annealed gradient palettes inside Create Preset.
+- Added card accent rails, layered panel gradients, polished controls, and a subtle workspace grid so Create Preset and Print / Export read as one product.
+- Preserved internal scrolling, responsive stacking, Lookup Manager glass types, live summary, personal-default selection, and all existing save/apply behavior.
+- Advanced the application contract, visible version, cache keys, documentation, and focused structure tests to v0.229. Schema version 5 is unchanged.
+
 ## v0.228 - Create Preset Viewport Positioning Repair
 
 - Fixed the v0.227 Create Preset control center being shifted far beyond the top-left of the browser by inherited `top: 50%`, `left: 50%`, and `translate(-50%, -50%)` rules from the legacy compact modal.

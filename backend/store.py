@@ -574,6 +574,82 @@ def parse_dimension_number(part: str) -> float:
     return value
 
 
+
+# Default material-cost reference used by reporting and the Admin Lookup Manager.
+# These values are expressed in dollars per square foot. v0.261 keeps the defaults
+# in code for a safe fallback, while administrator overrides are persisted in the
+# existing admin_lookup_values table so no database migration is required.
+GLASS_COST_PER_SQFT = {
+    "3/8 Clear": 1.83,
+    "1/2 Clear": 2.11,
+    "1/4 Clear": 0.96,
+    "3/8 UltraClear": 4.78,
+    "1/4 Mirror": 2.60,
+    "1/8 Clear": 2.47,
+    "1/4 French Antique Mirror": 20.93,
+    "1/4 Summer Cloud Antique Mirror": 20.93,
+    "1/4 Dark Cloud Antique Mirror": 20.93,
+    "1/4 Rainbow Antique Mirror": 20.93,
+    "1/4 Hollywood Antique Mirror": 20.93,
+    "1/4 Woodford Antique Mirror": 20.93,
+}
+
+
+def dimensions_square_feet(value: Any) -> float:
+    """Return square feet for the first width x height pair in an item dimension.
+
+    Effects: Performs a calculation only; no database or file state is changed.
+    Flow: Accepts common whole, decimal, and mixed-fraction inch formats such as
+    ``36 x 72`` or ``36 1/2 x 72 3/4`` and returns zero when the dimensions are
+    incomplete. Reporting callers can therefore track missing-dimension coverage
+    instead of inventing an area.
+    """
+    text = str(value or "").strip().replace("×", "x")
+    parts = re.split(r"\s*[xX]\s*", text, maxsplit=1)
+    if len(parts) < 2:
+        return 0.0
+
+    def dimension_value(part: str) -> float:
+        cleaned = re.sub(r"(?<=\d)-(?=\d+\s*/\s*\d+)", " ", str(part or ""))
+        cleaned = cleaned.replace('"', " ").replace("inches", " ").replace("inch", " ").replace("in", " ")
+        match = re.search(r"\d+(?:\.\d+)?(?:\s+\d+\s*/\s*\d+)?|\d+\s*/\s*\d+", cleaned)
+        if not match:
+            return 0.0
+        return parse_dimension_number(re.sub(r"\s*/\s*", "/", match.group(0)))
+
+    width = dimension_value(parts[0])
+    height = dimension_value(parts[1])
+    if width <= 0 or height <= 0:
+        return 0.0
+    return (width * height) / 144.0
+
+
+def glass_cost_profile(value: Any, pricing: dict[str, float] | None = None) -> tuple[str, float | None]:
+    """Resolve one product label to the effective glass-cost reference.
+
+    Effects: Performs an in-memory lookup only.
+    Flow: Matches the longest normalized configured label inside the imported
+    product text so harmless suffixes such as process wording do not prevent a
+    match. Callers may supply the administrator-maintained effective price map;
+    otherwise the built-in defaults remain the safe fallback. Unknown glass is
+    preserved by name and returned without a price so reporting can disclose the
+    coverage gap rather than silently estimate it.
+    """
+    raw = " ".join(str(value or "").split()).strip() or "Other Glass"
+    normalized = re.sub(r"[^A-Z0-9]+", "", raw.upper())
+    cost_map = pricing if isinstance(pricing, dict) else GLASS_COST_PER_SQFT
+    candidates = sorted(
+        cost_map.items(),
+        key=lambda entry: len(re.sub(r"[^A-Z0-9]+", "", entry[0].upper())),
+        reverse=True,
+    )
+    for label, rate in candidates:
+        key = re.sub(r"[^A-Z0-9]+", "", label.upper())
+        if key and key in normalized:
+            return label, float(rate)
+    return raw, None
+
+
 def route_signal_text(item: dict[str, Any]) -> str:
     """Purpose: Run the route signal text workflow for the delivery-list scanner.
 
@@ -6605,23 +6681,31 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
 
     def get_manual_edit_lookups(self) -> dict[str, list[dict[str, Any]]]:
-        """Purpose: Read manual edit lookups for the delivery-list scanner workflow.
+        """Return maintained manual-edit choices plus editable glass pricing.
 
-        Effects: This function reads or changes database records.
-        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        Effects: Reads existing line-item products and the shared admin lookup table.
+        Flow: Builds the product/route/process libraries as before, exposes every
+        default glass rate, overlays administrator glass-cost overrides, and adds
+        discovered unpriced products so new glass types are visible for pricing.
         """
         buckets: dict[str, dict[str, dict[str, Any]]] = {
             "product": {},
             "route": {},
             "process": {},
+            "glass_cost": {},
         }
 
-        def add_lookup(kind: str, value: Any, label: Any = "", category: Any = "", match_terms: Any = "", source: str = "discovered", lookup_id: int | None = None) -> None:
-            """Purpose: Create lookup for the delivery-list scanner workflow.
-
-            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-            Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
-            """
+        def add_lookup(
+            kind: str,
+            value: Any,
+            label: Any = "",
+            category: Any = "",
+            match_terms: Any = "",
+            source: str = "discovered",
+            lookup_id: int | None = None,
+            rate: float | None = None,
+        ) -> None:
+            """Add one normalized library row, preferring maintained/manual values."""
             clean_kind = str(kind or "").strip().lower()
             clean_value = str(value or "").strip()
             if clean_kind not in buckets or not clean_value:
@@ -6637,41 +6721,110 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "matchTerms": str(match_terms or "").strip(),
                 "source": source,
             }
-            if not existing or existing.get("source") == "discovered":
+            if clean_kind == "glass_cost":
+                next_item["rate"] = round(float(rate), 4) if rate is not None else None
+            replaceable_sources = {"discovered", "default"}
+            if not existing or existing.get("source") in replaceable_sources or source == "manual":
                 buckets[clean_kind][key] = next_item
 
         with self.connect() as con:
-            for row in con.execute("SELECT DISTINCT product FROM line_items WHERE TRIM(product) <> '' ORDER BY product").fetchall():
-                add_lookup("product", row["product"])
-            for row in con.execute("SELECT DISTINCT route FROM line_items WHERE TRIM(route) <> '' ORDER BY route").fetchall():
-                add_lookup("route", row["route"])
-            for row in con.execute("SELECT DISTINCT process_state FROM line_items WHERE TRIM(process_state) <> '' ORDER BY process_state").fetchall():
-                add_lookup("process", row["process_state"])
-            for row in con.execute(
+            admin_rows = con.execute(
                 """
                 SELECT id, type, value, label, category, match_terms, source
                 FROM admin_lookup_values
                 WHERE is_active = 1
                 ORDER BY type, label, value
                 """
-            ).fetchall():
-                add_lookup(row["type"], row["value"], row["label"], row["category"], row["match_terms"], row["source"] or "manual", row["id"])
+            ).fetchall()
+
+            # Defaults remain available even on a fresh database. A saved
+            # glass_cost row with the same value overrides the default without
+            # changing schema or requiring a migration.
+            effective_costs = dict(GLASS_COST_PER_SQFT)
+            for row in admin_rows:
+                if str(row["type"] or "").strip().lower() != "glass_cost":
+                    continue
+                try:
+                    rate = float(str(row["category"] or "").strip())
+                except (TypeError, ValueError):
+                    continue
+                if rate >= 0:
+                    effective_costs[str(row["value"] or "").strip()] = rate
+
+            for glass_type, rate in GLASS_COST_PER_SQFT.items():
+                add_lookup("glass_cost", glass_type, glass_type, source="default", rate=rate)
+
+            product_rows = con.execute(
+                "SELECT DISTINCT product FROM line_items WHERE TRIM(product) <> '' ORDER BY product"
+            ).fetchall()
+            for row in product_rows:
+                product = str(row["product"] or "").strip()
+                add_lookup("product", product)
+                _matched_label, matched_rate = glass_cost_profile(product, effective_costs)
+                if matched_rate is None:
+                    add_lookup("glass_cost", product, product, source="discovered", rate=None)
+
+            for row in con.execute("SELECT DISTINCT route FROM line_items WHERE TRIM(route) <> '' ORDER BY route").fetchall():
+                add_lookup("route", row["route"])
+            for row in con.execute("SELECT DISTINCT process_state FROM line_items WHERE TRIM(process_state) <> '' ORDER BY process_state").fetchall():
+                add_lookup("process", row["process_state"])
+
+            for row in admin_rows:
+                row_type = str(row["type"] or "").strip().lower()
+                if row_type == "glass_cost":
+                    try:
+                        rate = float(str(row["category"] or "").strip())
+                    except (TypeError, ValueError):
+                        rate = None
+                    add_lookup(
+                        row_type,
+                        row["value"],
+                        row["label"],
+                        row["category"],
+                        row["match_terms"],
+                        row["source"] or "manual",
+                        row["id"],
+                        rate,
+                    )
+                else:
+                    add_lookup(
+                        row_type,
+                        row["value"],
+                        row["label"],
+                        row["category"],
+                        row["match_terms"],
+                        row["source"] or "manual",
+                        row["id"],
+                    )
+                    # A newly added Product lookup should immediately become
+                    # priceable even before that product appears on an import.
+                    if row_type == "product":
+                        product_value = str(row["value"] or "").strip()
+                        _matched_label, matched_rate = glass_cost_profile(product_value, effective_costs)
+                        if product_value and matched_rate is None:
+                            add_lookup("glass_cost", product_value, product_value, source="discovered", rate=None)
 
         return {
             "products": sorted(buckets["product"].values(), key=lambda item: item["label"].lower()),
             "routes": sorted(buckets["route"].values(), key=lambda item: (item["category"].lower(), item["label"].lower())),
             "processes": sorted(buckets["process"].values(), key=lambda item: item["label"].lower()),
+            "glassCosts": sorted(
+                buckets["glass_cost"].values(),
+                key=lambda item: (item.get("rate") is None, item["label"].lower()),
+            ),
         }
 
     def add_manual_edit_lookup(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
-        """Purpose: Create manual edit lookup for the delivery-list scanner workflow.
+        """Create or update a Lookup Manager value, including glass cost per SQFT.
 
-        Effects: This function reads or changes database records.
-        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        Effects: Writes one row to the existing admin_lookup_values table and records
+        the normal audit entry. No schema change is required for glass pricing.
+        Flow: Validates the active library type, stores glass cost in the existing
+        category field for glass_cost rows, then returns the refreshed libraries.
         """
         lookup_type = str(data.get("type") or "").strip().lower()
-        if lookup_type not in {"product", "route", "process"}:
-            raise ValueError("Lookup type must be product, route, or process")
+        if lookup_type not in {"product", "route", "process", "glass_cost"}:
+            raise ValueError("Lookup type must be product, route, process, or glass cost")
         value = str(data.get("value") or "").strip()
         label = str(data.get("label") or value).strip()
         category = str(data.get("category") or "").strip() if lookup_type == "route" else ""
@@ -6680,6 +6833,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             raise ValueError("Lookup value is required")
         if not label:
             label = value
+
+        if lookup_type == "glass_cost":
+            raw_rate = data.get("rate")
+            try:
+                rate = float(raw_rate)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Glass cost per SQFT is required") from exc
+            if rate < 0:
+                raise ValueError("Glass cost per SQFT cannot be negative")
+            # category is intentionally reused as the persisted numeric value so
+            # v0.261 remains schema-neutral and compatible with current databases.
+            category = f"{rate:.4f}".rstrip("0").rstrip(".")
+            label = value
+            match_terms = ""
+
         value = (value.upper() if lookup_type == "route" else value)[:255]
         label = label[:255]
         category = category[:80]
@@ -6701,7 +6869,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 (lookup_type, value, label, category, match_terms, created, created),
             )
-            self.insert_audit(con, "admin_lookup_value", f"{lookup_type}:{value}", "upsert_manual_edit_lookup", user, "", "", {"label": label, "category": category})
+            audit_payload: dict[str, Any] = {"label": label, "category": category}
+            if lookup_type == "glass_cost":
+                audit_payload = {"glassType": value, "costPerSqft": float(category)}
+            self.insert_audit(
+                con,
+                "admin_lookup_value",
+                f"{lookup_type}:{value}",
+                "upsert_manual_edit_lookup",
+                user,
+                "",
+                "",
+                audit_payload,
+            )
             con.commit()
         return self.get_manual_edit_lookups()
 
@@ -11153,21 +11333,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "deliveryDate": clean_date, "deletedCount": len(list_ids), "lists": self.get_delivery_lists()}
 
     def reports_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Purpose: Run the reports summary workflow for the delivery-list scanner.
+        """Return the Statistics page reporting payload for the selected range.
 
-        Effects: This function reads or changes database records.
-        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        Effects: Reads scanner operational data only; no reporting query changes
+        floor state or the database schema.
+        Flow: Keeps event metrics on event timestamps, inventory metrics on
+        delivery-list dates, deduplicates physical glass across workflow-stage
+        copies, and derives reject SQFT/cost from the maintained product and
+        dimension data already stored for each order/item.
         """
         filters = filters or {}
         date_from = str(filters.get("dateFrom") or "").strip()
         date_to = str(filters.get("dateTo") or "").strip()
 
         def date_clause(alias: str = "") -> tuple[str, list[str]]:
-            """Purpose: Run the date clause workflow for the delivery-list scanner.
-
-            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
-            """
             column = f"{alias}.created_at" if alias else "created_at"
             parts: list[str] = []
             params: list[str] = []
@@ -11180,12 +11359,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return (" AND " + " AND ".join(parts), params) if parts else ("", [])
 
         def delivery_list_date_clause(alias: str = "dl") -> tuple[str, list[str]]:
-            # Dashboard inventory stats are based on delivery-list dates, not scan timestamps.
-            """Purpose: Run the delivery list date clause workflow for the delivery-list scanner.
-
-            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-            Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
-            """
+            # Inventory/production statistics use delivery-list dates because a
+            # separate manufacturing-complete timestamp is not stored today.
             column = f"{alias}.delivery_date" if alias else "delivery_date"
             parts: list[str] = []
             params: list[str] = []
@@ -11197,17 +11372,78 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 params.append(date_to)
             return (" AND " + " AND ".join(parts), params) if parts else ("", [])
 
+        def reject_date_clause(alias: str = "re") -> tuple[str, list[str]]:
+            column = f"{alias}.rejected_at" if alias else "rejected_at"
+            parts: list[str] = []
+            params: list[str] = []
+            if date_from:
+                parts.append(f"substr({column}, 1, 10) >= ?")
+                params.append(date_from)
+            if date_to:
+                parts.append(f"substr({column}, 1, 10) <= ?")
+                params.append(date_to)
+            return (" AND " + " AND ".join(parts), params) if parts else ("", [])
+
+        def empty_breakage_bucket() -> dict[str, Any]:
+            return {
+                "pieces": 0,
+                "sqft": 0.0,
+                "estimatedCost": 0.0,
+                "eventCount": 0,
+                "unpricedPieces": 0,
+                "unpricedSqft": 0.0,
+                "missingDimensionPieces": 0,
+            }
+
+        def add_breakage(bucket: dict[str, Any], qty: int, sqft: float, rate: float | None, *, event_count: int = 0) -> None:
+            clean_qty = max(int(qty or 0), 0)
+            clean_sqft = max(float(sqft or 0.0), 0.0)
+            bucket["pieces"] += clean_qty
+            bucket["sqft"] += clean_sqft
+            bucket["eventCount"] += max(int(event_count or 0), 0)
+            if clean_sqft <= 0 and clean_qty:
+                bucket["missingDimensionPieces"] += clean_qty
+            if rate is None:
+                bucket["unpricedPieces"] += clean_qty
+                bucket["unpricedSqft"] += clean_sqft
+            else:
+                bucket["estimatedCost"] += clean_sqft * float(rate)
+
         scan_date_sql, scan_params = date_clause()
         audit_date_sql, audit_params = date_clause()
         list_date_sql, list_date_params = delivery_list_date_clause("dl")
+        reject_date_sql, reject_date_params = reject_date_clause("re")
         current_month = datetime.now(timezone.utc).date().replace(day=1)
-        next_month = (current_month.replace(year=current_month.year + 1, month=1) if current_month.month == 12 else current_month.replace(month=current_month.month + 1))
+        next_month = (
+            current_month.replace(year=current_month.year + 1, month=1)
+            if current_month.month == 12
+            else current_month.replace(month=current_month.month + 1)
+        )
         remake_sql = """
             (UPPER(li.process_state) LIKE '%REMAKE%' OR UPPER(li.queue_state) LIKE '%REMAKE%'
              OR (' ' || UPPER(li.process_state) || ' ') LIKE '% RM %'
              OR (' ' || UPPER(li.queue_state) || ' ') LIKE '% RM %')
         """
+
         with self.connect() as con:
+            # v0.261: Administrator-maintained glass pricing overlays the safe
+            # built-in defaults using the existing Lookup Manager storage.
+            effective_glass_costs = dict(GLASS_COST_PER_SQFT)
+            for cost_row in con.execute(
+                """
+                SELECT value, category
+                FROM admin_lookup_values
+                WHERE is_active = 1 AND type = 'glass_cost'
+                ORDER BY value
+                """
+            ).fetchall():
+                try:
+                    configured_rate = float(str(cost_row["category"] or "").strip())
+                except (TypeError, ValueError):
+                    continue
+                if configured_rate >= 0:
+                    effective_glass_costs[str(cost_row["value"] or "").strip()] = configured_rate
+
             scans_by_user = con.execute(
                 f"""
                 SELECT user_name, COUNT(*) AS scans
@@ -11219,14 +11455,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 scan_params,
             ).fetchall()
             incomplete = con.execute(
-                """
+                f"""
                 SELECT dl.label, COUNT(*) AS item_count, SUM(li.qty - li.scanned_qty) AS remaining_qty
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE li.scanned_qty < li.qty
+                  AND dl.status = 'active'{list_date_sql}
                 GROUP BY dl.id, dl.label, dl.delivery_date
                 ORDER BY dl.delivery_date DESC, dl.label
-                """
+                """,
+                list_date_params,
             ).fetchall()
             bad_scans = con.execute(
                 f"SELECT COUNT(*) FROM scan_events WHERE event_type = 'error'{scan_date_sql}",
@@ -11287,26 +11525,42 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 audit_params,
             ).fetchone()[0]
             sdi_count = con.execute("SELECT COUNT(*) FROM bay_assignments WHERE status = 'SDIOverride'").fetchone()[0]
-            glass_rows = con.execute(
+
+            # Pull only fields required for production/breakage analytics, then
+            # deduplicate stage copies in Python. This avoids counting the same
+            # physical piece once for Staging, Outbound, and its destination.
+            production_rows = con.execute(
                 f"""
-                SELECT glass_type, SUM(qty) AS qty, COUNT(*) AS row_count
-                FROM (
-                    SELECT
-                        dl.delivery_date,
-                        li.source_id,
-                        COALESCE(NULLIF(MAX(li.product), ''), NULLIF(MAX(li.job), ''), 'Other Glass') AS glass_type,
-                        MAX(li.qty) AS qty
-                    FROM line_items li
-                    JOIN delivery_lists dl ON dl.id = li.list_id
-                    WHERE dl.status = 'active'{list_date_sql}
-                    GROUP BY dl.delivery_date, li.source_id
-                ) unique_items
-                GROUP BY glass_type
-                HAVING SUM(qty) > 0
-                ORDER BY qty DESC, glass_type
+                SELECT dl.delivery_date, li.source_id, li.order_no, li.item_no, li.qty,
+                       li.dimensions, li.product, li.job, li.process_state, li.queue_state
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE dl.status = 'active'{list_date_sql}
+                ORDER BY dl.delivery_date, li.source_id, li.order_no, li.item_no
                 """,
                 list_date_params,
             ).fetchall()
+
+            reject_rows = con.execute(
+                f"""
+                SELECT re.id, re.delivery_date, re.order_no, re.item_no, re.qty,
+                       re.product, re.reason_label, re.location_label, re.rejected_at,
+                       COALESCE(NULLIF(re.product, ''), NULLIF(MAX(li.product), ''), NULLIF(MAX(li.job), ''), 'Other Glass') AS resolved_product,
+                       COALESCE(NULLIF(MAX(li.dimensions), ''), '') AS dimensions
+                FROM reject_events re
+                LEFT JOIN delivery_lists dl ON dl.delivery_date = re.delivery_date
+                LEFT JOIN line_items li
+                  ON li.list_id = dl.id
+                 AND li.order_no = re.order_no
+                 AND li.item_no = re.item_no
+                WHERE 1 = 1{reject_date_sql}
+                GROUP BY re.id, re.delivery_date, re.order_no, re.item_no, re.qty,
+                         re.product, re.reason_label, re.location_label, re.rejected_at
+                ORDER BY re.rejected_at DESC, re.id DESC
+                """,
+                reject_date_params,
+            ).fetchall()
+
             monthly_remake_row = con.execute(
                 f"""
                 SELECT COUNT(*) AS row_count, COALESCE(SUM(qty), 0) AS qty
@@ -11337,6 +11591,205 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 list_date_params,
             ).fetchone()
+
+        physical_items: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in production_rows:
+            delivery_date = str(row_value(row, "delivery_date", "") or "")
+            source_id = str(row_value(row, "source_id", "") or "").strip()
+            order_no = str(row_value(row, "order_no", "") or "").strip()
+            item_no = str(row_value(row, "item_no", "") or "").strip()
+            physical_id = source_id or f"{order_no}:{item_no}"
+            key = (delivery_date, physical_id)
+            current = physical_items.get(key)
+            if current is None:
+                current = {
+                    "qty": 0,
+                    "dimensions": "",
+                    "product": "",
+                    "job": "",
+                    "isRemake": False,
+                }
+                physical_items[key] = current
+            current["qty"] = max(int(current["qty"] or 0), max(int(row_value(row, "qty", 0) or 0), 0))
+            for field in ("dimensions", "product", "job"):
+                if not current[field] and row_value(row, field, ""):
+                    current[field] = str(row_value(row, field, "") or "")
+            current["isRemake"] = bool(current["isRemake"] or is_remake_item({
+                "processState": row_value(row, "process_state", ""),
+                "queueState": row_value(row, "queue_state", ""),
+            }))
+
+        production = empty_breakage_bucket()
+        external_remakes = empty_breakage_bucket()
+        production_glass: dict[str, dict[str, Any]] = {}
+        external_by_glass: dict[str, dict[str, Any]] = {}
+
+        for item in physical_items.values():
+            qty = max(int(item.get("qty") or 0), 0)
+            raw_product = str(item.get("product") or item.get("job") or "Other Glass")
+            glass_label, rate = glass_cost_profile(raw_product, effective_glass_costs)
+            per_piece_sqft = dimensions_square_feet(item.get("dimensions"))
+            sqft = per_piece_sqft * qty
+
+            glass_bucket = production_glass.setdefault(glass_label, empty_breakage_bucket())
+            add_breakage(glass_bucket, qty, sqft, rate)
+
+            if item.get("isRemake"):
+                add_breakage(external_remakes, qty, sqft, rate)
+                target = external_by_glass.setdefault(glass_label, empty_breakage_bucket())
+                add_breakage(target, qty, sqft, rate)
+                continue
+            add_breakage(production, qty, sqft, rate)
+
+        internal_rejects = empty_breakage_bucket()
+        internal_by_machine: dict[str, dict[str, Any]] = {}
+        internal_by_glass: dict[str, dict[str, Any]] = {}
+        internal_by_machine_glass: dict[str, dict[str, dict[str, Any]]] = {}
+        internal_by_machine_reason: dict[str, dict[str, dict[str, Any]]] = {}
+        internal_by_glass_machine: dict[str, dict[str, dict[str, Any]]] = {}
+        internal_by_glass_reason: dict[str, dict[str, dict[str, Any]]] = {}
+        internal_reason_machine_glass: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+
+        for row in reject_rows:
+            qty = max(int(row_value(row, "qty", 0) or 0), 0)
+            raw_product = str(row_value(row, "resolved_product", "") or row_value(row, "product", "") or "Other Glass")
+            glass_label, rate = glass_cost_profile(raw_product, effective_glass_costs)
+            per_piece_sqft = dimensions_square_feet(row_value(row, "dimensions", ""))
+            sqft = per_piece_sqft * qty
+            machine = str(row_value(row, "location_label", "") or "Unknown machine").strip() or "Unknown machine"
+            reason = str(row_value(row, "reason_label", "") or "Unspecified reason").strip() or "Unspecified reason"
+
+            add_breakage(internal_rejects, qty, sqft, rate, event_count=1)
+
+            machine_bucket = internal_by_machine.setdefault(machine, empty_breakage_bucket())
+            add_breakage(machine_bucket, qty, sqft, rate, event_count=1)
+            machine_glass_bucket = internal_by_machine_glass.setdefault(machine, {}).setdefault(glass_label, empty_breakage_bucket())
+            add_breakage(machine_glass_bucket, qty, sqft, rate, event_count=1)
+            machine_reason_bucket = internal_by_machine_reason.setdefault(machine, {}).setdefault(reason, empty_breakage_bucket())
+            add_breakage(machine_reason_bucket, qty, sqft, rate, event_count=1)
+
+            glass_bucket = internal_by_glass.setdefault(glass_label, empty_breakage_bucket())
+            add_breakage(glass_bucket, qty, sqft, rate, event_count=1)
+            glass_machine_bucket = internal_by_glass_machine.setdefault(glass_label, {}).setdefault(machine, empty_breakage_bucket())
+            add_breakage(glass_machine_bucket, qty, sqft, rate, event_count=1)
+            glass_reason_bucket = internal_by_glass_reason.setdefault(glass_label, {}).setdefault(reason, empty_breakage_bucket())
+            add_breakage(glass_reason_bucket, qty, sqft, rate, event_count=1)
+
+            reason_glass_bucket = internal_reason_machine_glass.setdefault((machine, reason), {}).setdefault(glass_label, empty_breakage_bucket())
+            add_breakage(reason_glass_bucket, qty, sqft, rate, event_count=1)
+
+        def rounded_bucket(bucket: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "pieces": int(bucket.get("pieces") or 0),
+                "sqft": round(float(bucket.get("sqft") or 0.0), 2),
+                "estimatedCost": round(float(bucket.get("estimatedCost") or 0.0), 2),
+                "eventCount": int(bucket.get("eventCount") or 0),
+                "unpricedPieces": int(bucket.get("unpricedPieces") or 0),
+                "unpricedSqft": round(float(bucket.get("unpricedSqft") or 0.0), 2),
+                "missingDimensionPieces": int(bucket.get("missingDimensionPieces") or 0),
+            }
+
+        def bucket_rows(values: dict[str, dict[str, Any]], label_key: str) -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            for label, bucket in values.items():
+                rows.append({label_key: label, **rounded_bucket(bucket)})
+            return sorted(
+                rows,
+                key=lambda row: (
+                    -float(row.get("estimatedCost") or 0.0),
+                    -float(row.get("sqft") or 0.0),
+                    -int(row.get("pieces") or 0),
+                    str(row.get(label_key) or "").lower(),
+                ),
+            )
+
+        def reason_rows(values: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+            rows = [{"reason": label, **rounded_bucket(bucket)} for label, bucket in values.items()]
+            return sorted(
+                rows,
+                key=lambda row: (
+                    -int(row.get("eventCount") or 0),
+                    -int(row.get("pieces") or 0),
+                    -float(row.get("sqft") or 0.0),
+                    str(row.get("reason") or "").lower(),
+                ),
+            )
+
+        internal_machine_rows = bucket_rows(internal_by_machine, "machine")
+        for machine_row in internal_machine_rows:
+            machine = str(machine_row.get("machine") or "Unknown machine")
+            machine_row["glassTypes"] = bucket_rows(internal_by_machine_glass.get(machine, {}), "glassType")
+            machine_row["reasons"] = reason_rows(internal_by_machine_reason.get(machine, {}))
+
+        internal_glass_rows = bucket_rows(internal_by_glass, "glassType")
+        for glass_row in internal_glass_rows:
+            glass_type = str(glass_row.get("glassType") or "Other Glass")
+            glass_row["machines"] = bucket_rows(internal_by_glass_machine.get(glass_type, {}), "machine")
+            glass_row["reasons"] = reason_rows(internal_by_glass_reason.get(glass_type, {}))
+
+        internal_reason_rows: list[dict[str, Any]] = []
+        for machine, reason_map in internal_by_machine_reason.items():
+            for reason_row in reason_rows(reason_map):
+                reason = str(reason_row.get("reason") or "Unspecified reason")
+                internal_reason_rows.append({
+                    "machine": machine,
+                    **reason_row,
+                    "glassTypes": bucket_rows(internal_reason_machine_glass.get((machine, reason), {}), "glassType"),
+                })
+        internal_reason_rows.sort(
+            key=lambda row: (
+                -int(row.get("eventCount") or 0),
+                -int(row.get("pieces") or 0),
+                str(row.get("machine") or "").lower(),
+                str(row.get("reason") or "").lower(),
+            )
+        )
+
+        production_summary = rounded_bucket(production)
+        internal_summary = rounded_bucket(internal_rejects)
+        external_summary = rounded_bucket(external_remakes)
+        production_pieces = max(int(production_summary["pieces"]), 0)
+        production_sqft = max(float(production_summary["sqft"]), 0.0)
+        internal_total_pieces = production_pieces + int(internal_summary["pieces"] or 0)
+        internal_total_sqft = production_sqft + float(internal_summary["sqft"] or 0.0)
+        combined_total_pieces = internal_total_pieces + int(external_summary["pieces"] or 0)
+        combined_total_sqft = internal_total_sqft + float(external_summary["sqft"] or 0.0)
+
+        def percentage(numerator: float, denominator: float) -> float:
+            return round((float(numerator) / float(denominator)) * 100.0, 2) if denominator > 0 else 0.0
+
+        # A breakage percentage should compare scrapped production with all glass
+        # that had to be produced, not only with the final good-piece requirement.
+        # Internal rejects therefore increase both the reject numerator and the
+        # produced denominator. When external remakes are included, those remake
+        # pieces are added to both as additional replacement production.
+        breakage_rates = {
+            "internalPiecesPercent": percentage(internal_summary["pieces"], internal_total_pieces),
+            "internalSqftPercent": percentage(internal_summary["sqft"], internal_total_sqft),
+            "withExternalPiecesPercent": percentage(internal_summary["pieces"] + external_summary["pieces"], combined_total_pieces),
+            "withExternalSqftPercent": percentage(internal_summary["sqft"] + external_summary["sqft"], combined_total_sqft),
+        }
+        produced_totals = {
+            "internalOnlyPieces": internal_total_pieces,
+            "internalOnlySqft": round(internal_total_sqft, 2),
+            "withExternalPieces": combined_total_pieces,
+            "withExternalSqft": round(combined_total_sqft, 2),
+        }
+
+        glass_quantity_by_type = [
+            {
+                "glassType": label,
+                "qty": int(bucket.get("pieces") or 0),
+                "rowCount": 0,
+                "sqft": round(float(bucket.get("sqft") or 0.0), 2),
+            }
+            for label, bucket in sorted(
+                production_glass.items(),
+                key=lambda entry: (-int(entry[1].get("pieces") or 0), entry[0].lower()),
+            )
+            if int(bucket.get("pieces") or 0) > 0
+        ]
+
         return {
             "dateFrom": date_from,
             "dateTo": date_to,
@@ -11354,16 +11807,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "bayActionCount": bay_actions,
             "userActionCount": user_actions,
             "sdiCount": sdi_count,
-            "glassQuantityByType": [
-                {"glassType": row["glass_type"], "qty": int(row["qty"] or 0), "rowCount": int(row["row_count"] or 0)}
-                for row in glass_rows
-            ],
+            "glassQuantityByType": glass_quantity_by_type,
             "monthlyRemakeCount": int(monthly_remake_row["row_count"] or 0),
             "monthlyRemakeQty": int(monthly_remake_row["qty"] or 0),
             "monthlyRemakeMonth": current_month.strftime("%B %Y"),
             "rangeRemakeCount": int(range_remake_row["row_count"] or 0),
             "rangeRemakeQty": int(range_remake_row["qty"] or 0),
             "actionCounts": {row["action"]: row["count"] for row in action_rows},
+            "breakage": {
+                "costBasis": "USD per square foot",
+                "pricingPerSqft": [{"glassType": label, "rate": rate} for label, rate in effective_glass_costs.items()],
+                "production": production_summary,
+                "producedTotals": produced_totals,
+                "internalRejects": internal_summary,
+                "externalRemakes": external_summary,
+                "rates": breakage_rates,
+                "internalByMachine": internal_machine_rows,
+                "internalByGlass": internal_glass_rows,
+                "internalReasonsByMachine": internal_reason_rows,
+                "externalRemakesByGlass": bucket_rows(external_by_glass, "glassType"),
+            },
         }
 
     @staticmethod

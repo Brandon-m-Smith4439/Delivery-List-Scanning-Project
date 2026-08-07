@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "228"
+APPLICATION_VERSION = "262"
+# Schema version 5 matches the maintained migration registry (definitions 1 through 5).
+# Frontend-only releases must advance APPLICATION_VERSION without changing this value.
+# Backend reporting changes without a maintained migration follow the same rule.
 CURRENT_SCHEMA_VERSION = 5
 
 TABLE_DESCRIPTIONS = {
@@ -14,7 +17,7 @@ TABLE_DESCRIPTIONS = {
     "stations": "Configured application scanning stations.",
     "customer_route_rules": "Customer-to-route import classification rules.",
     "system_metadata": "Small idempotent system configuration markers.",
-    "admin_lookup_values": "Admin-managed product, route, and process lookups.",
+    "admin_lookup_values": "Admin-managed product, route, process, and glass-cost lookups.",
     "imports": "Delivery-list import batches and source fingerprints.",
     "exceptions": "Resolvable scanning and workflow exceptions.",
     "audit_events": "Immutable append-only administrative history.",

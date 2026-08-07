@@ -1,0 +1,316 @@
+/* File: static/css/shared-ui.css
+ * Reusable application controls.
+ *
+ * This stylesheet loads after every page stylesheet. It owns only controls
+ * used across multiple pages. Page layout, modal placement, and feature icons
+ * remain in their page-specific CSS files.
+ */
+
+:root {
+  /* v0.252: Reusable blue actions now use the same deep navy family as the
+     application sidebar. Keep these centralized tokens as the single palette
+     owner so page-specific controls do not drift into unrelated bright blues. */
+  --shared-primary-top: #12467f;
+  --shared-primary-mid: #0a3568;
+  --shared-primary-bottom: #05265c;
+  --shared-primary-border: #041f4d;
+  --shared-primary-edge: #03183b;
+  --shared-primary-shadow: rgba(4, 31, 77, .30);
+  --shared-close-size: 49px;
+  --shared-close-icon-size: 20px;
+}
+
+/* Three specificity anchors keep one reusable component authoritative even
+   when older page selectors contain IDs and !important declarations. */
+body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *) {
+  position: relative !important;
+  isolation: isolate !important;
+  min-width: 0 !important;
+  min-height: var(--app-primary-min-height, 42px) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: var(--app-primary-gap, 8px) !important;
+  overflow: hidden !important;
+  padding: var(--app-primary-padding, 9px 17px) !important;
+  border: 1px solid var(--shared-primary-border) !important;
+  border-bottom-color: #03204a !important;
+  border-radius: var(--app-primary-radius, 10px) !important;
+  background: linear-gradient(180deg, var(--shared-primary-top) 0%, var(--shared-primary-mid) 46%, var(--shared-primary-bottom) 100%) !important;
+  color: #fff !important;
+  font-family: inherit !important;
+  font-size: var(--app-primary-font-size, 13px) !important;
+  font-weight: 850 !important;
+  line-height: 1.1 !important;
+  letter-spacing: .01em !important;
+  text-align: center !important;
+  text-decoration: none !important;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .25) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .42),
+    inset 0 -2px 0 rgba(5, 32, 62, .28),
+    0 3px 0 var(--shared-primary-edge),
+    0 8px 16px var(--shared-primary-shadow) !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  transition: transform 130ms ease, background 130ms ease, border-color 130ms ease, box-shadow 130ms ease, filter 130ms ease !important;
+}
+
+body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *) > * {
+  position: relative !important;
+  z-index: 1 !important;
+  color: inherit !important;
+  pointer-events: none !important;
+}
+
+body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *):hover:not(:disabled),
+body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *):focus-visible:not(:disabled) {
+  border-color: #052554 !important;
+  border-bottom-color: #03183b !important;
+  background: linear-gradient(180deg, #1b5896 0%, #0d427c 46%, #07306c 100%) !important;
+  color: #fff !important;
+  outline: none !important;
+  transform: translateY(-1px) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .48),
+    inset 0 -2px 0 rgba(5, 32, 62, .25),
+    0 4px 0 var(--shared-primary-edge),
+    0 11px 20px rgba(4, 35, 82, .31),
+    0 0 0 3px rgba(58, 122, 184, .17) !important;
+}
+
+body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *):active:not(:disabled) {
+  border-color: #03183b !important;
+  background: linear-gradient(180deg, #0a3568 0%, #041f4d 100%) !important;
+  color: #fff !important;
+  transform: translateY(2px) !important;
+  box-shadow:
+    inset 0 2px 3px rgba(4, 27, 53, .26),
+    inset 0 1px 0 rgba(255, 255, 255, .15),
+    0 1px 0 var(--shared-primary-edge),
+    0 4px 8px rgba(4, 31, 77, .22) !important;
+}
+
+body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *):disabled {
+  border-color: #70839a !important;
+  background: linear-gradient(180deg, #9eacbc 0%, #7b8da1 100%) !important;
+  color: rgba(255, 255, 255, .88) !important;
+  filter: saturate(.55) !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .26), 0 2px 0 #63758a !important;
+}
+
+body button.app-primary-button.app-icon-primary:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *) {
+  width: var(--app-icon-primary-width, 48px) !important;
+  min-width: var(--app-icon-primary-width, 48px) !important;
+  max-width: var(--app-icon-primary-width, 48px) !important;
+  height: var(--app-icon-primary-height, 46px) !important;
+  min-height: var(--app-icon-primary-height, 46px) !important;
+  max-height: var(--app-icon-primary-height, 46px) !important;
+  padding: var(--app-icon-primary-padding, 4px) !important;
+  gap: var(--app-icon-primary-gap, 1px) !important;
+}
+
+body button.app-primary-button.app-icon-primary:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *) :is(.undo-icon, .redo-icon, small) {
+  color: inherit !important;
+}
+
+
+/* Every full GUI uses this exact square and the same centered SVG mask. The
+   pseudo-element has its own color, so hiding the legacy text glyph cannot
+   hide the X at rest. */
+body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *) {
+  position: var(--gui-close-position, relative) !important;
+  top: var(--gui-close-top, auto) !important;
+  right: var(--gui-close-right, auto) !important;
+  bottom: var(--gui-close-bottom, auto) !important;
+  left: var(--gui-close-left, auto) !important;
+  z-index: var(--gui-close-z-index, auto) !important;
+  box-sizing: border-box !important;
+  width: var(--shared-close-size) !important;
+  min-width: var(--shared-close-size) !important;
+  max-width: var(--shared-close-size) !important;
+  height: var(--shared-close-size) !important;
+  min-height: var(--shared-close-size) !important;
+  max-height: var(--shared-close-size) !important;
+  inline-size: var(--shared-close-size) !important;
+  block-size: var(--shared-close-size) !important;
+  aspect-ratio: 1 / 1 !important;
+  flex: 0 0 var(--shared-close-size) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  vertical-align: middle !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  border: 1px solid #aebed1 !important;
+  border-bottom-color: #879bb3 !important;
+  border-radius: 11px !important;
+  background: linear-gradient(180deg, #fff 0%, #e8eef5 100%) !important;
+  background-clip: padding-box !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  letter-spacing: 0 !important;
+  text-indent: -9999px !important;
+  text-shadow: none !important;
+  white-space: nowrap !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .92),
+    inset 0 -2px 0 rgba(69, 91, 116, .1),
+    0 3px 0 #8b9eb3,
+    0 7px 14px rgba(21, 46, 76, .16) !important;
+  cursor: pointer !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  transform: none !important;
+  transition: transform 130ms ease, background 130ms ease, border-color 130ms ease, box-shadow 130ms ease !important;
+}
+
+body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *)::before {
+  content: "" !important;
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  width: var(--shared-close-icon-size) !important;
+  height: var(--shared-close-icon-size) !important;
+  display: block !important;
+  margin: 0 !important;
+  background-color: #2f4865 !important;
+  background-image: none !important;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4 6.4 5Z'/%3E%3C/svg%3E") center / contain no-repeat !important;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4 6.4 5Z'/%3E%3C/svg%3E") center / contain no-repeat !important;
+  transform: translate(-50%, -50%) !important;
+  text-indent: 0 !important;
+  pointer-events: none !important;
+}
+
+body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *):hover {
+  border-color: #8f1d2c !important;
+  border-bottom-color: #67131f !important;
+  background: linear-gradient(180deg, #e65f6e 0%, #c92f42 48%, #a52032 100%) !important;
+  outline: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .32),
+    inset 0 -2px 0 rgba(88, 8, 20, .25),
+    0 3px 0 #7b1826,
+    0 10px 18px rgba(170, 28, 47, .28),
+    0 0 0 3px rgba(201, 47, 66, .15) !important;
+  transform: translateY(-1px) !important;
+}
+
+body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *):hover::before {
+  background-color: #fff !important;
+}
+
+body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *):focus-visible {
+  outline: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .92),
+    inset 0 -2px 0 rgba(69, 91, 116, .1),
+    0 3px 0 #8b9eb3,
+    0 7px 14px rgba(21, 46, 76, .16),
+    0 0 0 4px rgba(47, 119, 184, .25) !important;
+}
+
+body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *):active {
+  border-color: #7b1826 !important;
+  background: linear-gradient(180deg, #b82639 0%, #901b2b 100%) !important;
+  transform: translateY(2px) !important;
+  box-shadow: inset 0 2px 3px rgba(82, 8, 19, .3), 0 1px 0 #7b1826 !important;
+}
+
+/* Dark-header variant: the same square and X geometry, with a white resting X. */
+body :is(
+  .print-options-hero-v240,
+  .print-preset-hero-v240,
+  .operations-modal-heading,
+  .statistics-chart-modal-header-v0256,
+  .admin-control-center-header,
+  .admin-modal-panel > .section-heading,
+  .delivery-automation-header,
+  .notification-center-header,
+  .bay-selected-modal-header-v160,
+  .stale-bay-header-v181,
+  .sdi-heading-v182,
+  .manage-items-heading,
+  .bay-editor-heading
+) button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *) {
+  border-color: rgba(255, 255, 255, .44) !important;
+  border-bottom-color: rgba(255, 255, 255, .22) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .24), rgba(255, 255, 255, .09)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .27),
+    inset 0 -2px 0 rgba(0, 0, 0, .08),
+    0 3px 0 rgba(0, 0, 0, .18),
+    0 8px 16px rgba(0, 0, 0, .16) !important;
+}
+
+body :is(
+  .print-options-hero-v240,
+  .print-preset-hero-v240,
+  .operations-modal-heading,
+  .statistics-chart-modal-header-v0256,
+  .admin-control-center-header,
+  .admin-modal-panel > .section-heading,
+  .delivery-automation-header,
+  .notification-center-header,
+  .bay-selected-modal-header-v160,
+  .stale-bay-header-v181,
+  .sdi-heading-v182,
+  .manage-items-heading,
+  .bay-editor-heading
+) button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *)::before {
+  background-color: #fff !important;
+}
+
+body :is(
+  .print-options-hero-v240,
+  .print-preset-hero-v240,
+  .operations-modal-heading,
+  .statistics-chart-modal-header-v0256,
+  .admin-control-center-header,
+  .admin-modal-panel > .section-heading,
+  .delivery-automation-header,
+  .notification-center-header,
+  .bay-selected-modal-header-v160,
+  .stale-bay-header-v181,
+  .sdi-heading-v182,
+  .manage-items-heading,
+  .bay-editor-heading
+) button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *):hover {
+  border-color: #8f1d2c !important;
+  border-bottom-color: #67131f !important;
+  background: linear-gradient(180deg, #e65f6e 0%, #c92f42 48%, #a52032 100%) !important;
+}
+
+/* Toast/banner dismissals intentionally remain compact. */
+body button:is(.automation-update-toast-close, .line-update-review-close, .old-bay-review-dismiss).gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *) {
+  --shared-close-size: 32px;
+  --shared-close-icon-size: 17px;
+  border-radius: 8px !important;
+}
+
+@media (max-width: 760px) {
+  :root {
+    --shared-close-size: 44px;
+    --shared-close-icon-size: 18px;
+  }
+
+  body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *) {
+    min-height: 40px !important;
+    padding: 8px 14px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *),
+  body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *) {
+    transition: none !important;
+  }
+}

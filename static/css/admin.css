@@ -2,7 +2,7 @@
 /*
   Delivery List Scanner - Admin Page Styles
   Generated from the maintained v150 cascade during the static asset
-  organization pass. Keep shared rules in styles.css.
+  organization pass. Keep reusable controls in shared-ui.css and page-specific layout in this file.
 */
 
 .app-nav button,
@@ -3015,6 +3015,11 @@
 }
 
 
+.lookup-manager-list.glass-costs .lookup-type-icon {
+  background: #0f6f59;
+}
+
+
 
 .lookup-row-list {
   max-height: 48vh;
@@ -3574,7 +3579,8 @@ button.custom-select-trigger:hover:not(:disabled),
 
 .lookup-type-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* v0.261: Lookup Manager now owns four peer libraries, including glass pricing. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 9px;
 }
 
@@ -4246,20 +4252,11 @@ button.custom-select-trigger:hover:not(:disabled),
 
 
 
-.admin-modal-panel > .section-heading .modal-close-x {
-  border-color: rgba(255, 255, 255, 0.32);
-  background: rgba(255, 255, 255, 0.10);
-  color: #fff;
-  box-shadow: none;
-}
 
 
 
-.admin-modal-panel > .section-heading .modal-close-x:hover {
-  border-color: rgba(255, 255, 255, 0.6);
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-}
+
+
 
 
 
@@ -4298,17 +4295,34 @@ button.custom-select-trigger:hover:not(:disabled),
 
 .admin-import-run-pager {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
+  justify-items: center;
+  gap: 6px;
   margin: 9px 0 12px;
 }
 
 
-.admin-import-run-pager span { color: #69788e; font-size: 10px; font-weight: 750; text-align: center; }
+.admin-import-run-pager > span:first-child {
+  color: #69788e;
+  font-size: 10px;
+  font-weight: 750;
+  text-align: center;
+}
 
 
-.admin-import-run-pager button { min-height: 34px; padding: 7px 12px; }
+.admin-import-run-pager-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+
+.admin-import-run-pager button {
+  --app-primary-min-height: 32px;
+  --app-primary-padding: 5px 11px;
+  --app-primary-font-size: 11px;
+  min-width: 82px !important;
+}
 
 
 
@@ -4404,10 +4418,14 @@ button.custom-select-trigger:hover:not(:disabled),
 .admin-import-run-day-heading { align-items: flex-start; flex-direction: column; }
 
 
-  .admin-import-run-pager { grid-template-columns: 1fr 1fr; }
+  .admin-import-run-pager-actions {
+    width: 100%;
+  }
 
 
-  .admin-import-run-pager span { grid-column: 1 / -1; grid-row: 1; }
+  .admin-import-run-pager-actions button {
+    flex: 0 1 96px;
+  }
 }
 
 
@@ -4627,26 +4645,9 @@ button.custom-select-trigger:hover:not(:disabled),
   animation: automationPulse 1.2s ease-in-out infinite;
 }
 
-.delivery-automation-close {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  font-size: 25px;
-  line-height: 1;
-  cursor: pointer;
-}
 
-.delivery-automation-close:hover,
-.delivery-automation-close:focus-visible {
-  background: rgba(255, 255, 255, 0.22);
-  outline: none;
-}
+
+
 
 .delivery-automation-tabs {
   display: flex;
@@ -6542,29 +6543,9 @@ button.custom-select-trigger:hover:not(:disabled),
   box-shadow: 0 0 0 4px rgba(109, 227, 162, .16);
 }
 
-#adminModal > .admin-control-center-header .modal-close-x {
-  position: relative !important;
-  inset: auto !important;
-  z-index: 5;
-  width: 42px !important;
-  min-width: 42px !important;
-  height: 42px !important;
-  min-height: 42px !important;
-  flex: 0 0 42px;
-  border-color: rgba(255, 255, 255, .34);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, .12);
-  color: #fff;
-  font-size: 24px;
-}
 
-#adminModal > .admin-control-center-header .modal-close-x:hover,
-#adminModal > .admin-control-center-header .modal-close-x:focus-visible {
-  outline: none;
-  border-color: rgba(255, 255, 255, .55);
-  background: rgba(255, 255, 255, .22);
-  color: #fff;
-}
+
+
 
 
 #adminModalBody {
@@ -8418,4 +8399,29 @@ button.custom-select-trigger:hover:not(:disabled),
   .cross-date-settings-window {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* ADMIN CLOSE-BUTTON POSITIONING - v0.247 */
+/* Close-button layout only. shared-ui.css owns geometry and interaction. */
+.delivery-automation-close,
+.admin-modal-panel > .section-heading .modal-close-x,
+#adminModal > .admin-control-center-header .modal-close-x {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 5;
+  flex: 0 0 auto;
+  justify-self: end;
+}
+
+
+/* v0.249 Delivery List Management pager sizing --------------------------- */
+.admin-import-run-pager-actions {
+  gap: 3px;
+}
+
+.admin-import-run-pager button {
+  --app-primary-min-height: 28px;
+  --app-primary-padding: 4px 9px;
+  --app-primary-font-size: 10px;
+  min-width: 68px !important;
 }

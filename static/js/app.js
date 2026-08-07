@@ -135,6 +135,8 @@ const state = {
   printKnownGlassTypes: [],
   printRouteGroups: ["airport"],
   printGlassTypes: [],
+  printGlassFamilies: [],
+  printGlassRuleTypes: [],
   printAllGlass: true,
   printWorkspaceReady: false,
   printWorkspaceOpenId: 0,
@@ -181,7 +183,7 @@ const state = {
   rolePermissionOpenRoles: new Set(),
   rolePermissionOpenCategories: new Set(),
   rolePermissionScrollTop: 0,
-  manualEditLookups: { products: [], routes: [], processes: [] },
+  manualEditLookups: { products: [], routes: [], processes: [], glassCosts: [] },
   lookupManagerActiveType: "product",
   lookupManagerSearch: "",
   manualEditDirty: false,
@@ -210,12 +212,24 @@ const state = {
   rushRedirectInProgress: false,
   lastScan: null,
   homeReportSummary: null,
+  // v0.260: Statistics opens glass-first with a compact top-10 donut.
+  // The external-remake toggle is intentionally independent so machine
+  // accountability never silently attributes customer/external remakes.
   homeChartMetric: "glass",
-  homeChartView: "bar",
+  homeChartView: "donut",
   homeChartQuery: "",
-  homeChartLimit: "all",
+  homeChartLimit: "10",
   homeChartSort: "value-desc",
   homeChartSelectedLabel: "",
+  statisticsIncludeExternalRemakes: false,
+  // v0.262: breakage charts use one combined dataset and switch the charted
+  // unit without forcing users through duplicate piece/SQFT/cost datasets.
+  statisticsBreakageMeasure: "sqft",
+  statisticsCustomDateFrom: "",
+  statisticsCustomDateTo: "",
+  statisticsCalendarMonth: "",
+  statisticsCalendarDraftStart: "",
+  statisticsCalendarDraftEnd: "",
   language: (() => {
     try {
       return localStorage.getItem(LANGUAGE_KEY) === "es" ? "es" : "en";
@@ -344,10 +358,11 @@ function dlsAutomationDateLabel(value) {
   const parsed = parseAutomationDateValue(value, { dateOnlyAtNoon: true });
   return !parsed
     ? value
-    : parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+    : `${parsed.getMonth() + 1}/${parsed.getDate()}/${parsed.getFullYear()}`;
 }
 
 function dlsAutomationStageLabel(item) {
+  if (typeof scanStageLabel === "function") return scanStageLabel(item);
   return String(item.stage || item.label || item.scanner || item.id || "Delivery-list stage").trim();
 }
 
@@ -394,6 +409,14 @@ function dlsAutomationRefreshVisibleListViews(lastCheckedAt = "") {
       dlsAutomationTryRenderer(renderAdminDashboard, "renderAdminDashboard");
     }
     window.requestAnimationFrame(() => dlsAutomationApplyLastUpdatedTimestamp(lastCheckedAt));
+    return;
+  }
+
+  const statisticsPage = document.getElementById("statisticsPage");
+  if (statisticsPage && !statisticsPage.hidden) {
+    if (typeof renderStatisticsPage === "function") {
+      dlsAutomationTryRenderer(renderStatisticsPage, "renderStatisticsPage");
+    }
     return;
   }
 
@@ -475,9 +498,15 @@ function dlsAutomationApplyDeliveryCatalog(refreshedLists) {
       ? previousDate
       : deliveryDates.find((value) => value >= todayKey) || deliveryDates[deliveryDates.length - 1];
 
-    dateSelect.innerHTML = deliveryDates.map(
-      (value) => `<option value="${value}">${dlsAutomationDateLabel(value)}</option>`
-    ).join("");
+    const deliveryDateGroups = deliveryDates.map((date) => ({
+      date,
+      lists: state.lists.filter((item) => String(item.deliveryDate || "") === date),
+    }));
+    dateSelect.dataset.deliveryDateSelect = "true";
+    dateSelect.innerHTML = groupedDeliveryDateOptions(
+      deliveryDateGroups,
+      (group) => `<option value="${escapeHtml(group.date)}">${escapeHtml(dlsAutomationDateLabel(group.date))}</option>`,
+    );
     dateSelect.value = selectedDate;
 
     const selectedDateLists = state.lists.filter(
@@ -715,31 +744,47 @@ const els = {
   bayAutoAssignOverview: document.getElementById("bayAutoAssignOverview"),
 
   homePage: document.getElementById("homePage"),
+  statisticsPage: document.getElementById("statisticsPage"),
+  statisticsLastUpdated: document.getElementById("statisticsLastUpdated"),
+  statisticsRefreshBtn: document.getElementById("statisticsRefreshBtn"),
+  statisticsAnalyticsWorkspace: document.getElementById("statisticsAnalyticsWorkspace"),
+  statisticsChartTitle: document.getElementById("statisticsChartTitle"),
+  statisticsChartSubtitle: document.getElementById("statisticsChartSubtitle"),
+  statisticsChartDatasetIcon: document.getElementById("statisticsChartDatasetIcon"),
+  statisticsChartCanvas: document.getElementById("statisticsChartCanvas"),
+  statisticsChartViewButtons: document.querySelectorAll("[data-statistics-view]"),
+  statisticsMiniCharts: document.getElementById("statisticsMiniCharts"),
   homeWelcome: document.getElementById("homeWelcome"),
   overviewStats: document.getElementById("overviewStats"),
   overviewRangeSelect: document.getElementById("overviewRangeSelect"),
-  homeUserCard: document.getElementById("homeUserCard"),
-  homeRecentLists: document.getElementById("homeRecentLists"),
-  homeActivity: document.getElementById("homeActivity"),
   homeStatsPdfBtn: document.getElementById("homeStatsPdfBtn"),
   homeStatisticsRangeText: document.getElementById("homeStatisticsRangeText"),
-  homeStatsChart: document.getElementById("homeStatsChart"),
-  homeMonthlyRemakes: document.getElementById("homeMonthlyRemakes"),
-  statsChartModal: document.getElementById("statsChartModal"),
-  statsChartBackdrop: document.getElementById("statsChartBackdrop"),
-  statsChartCloseBtn: document.getElementById("statsChartCloseBtn"),
-  statsChartRangeSelect: document.getElementById("statsChartRangeSelect"),
   statsChartMetricSelect: document.getElementById("statsChartMetricSelect"),
-  statsChartViewSelect: document.getElementById("statsChartViewSelect"),
   statsChartSortSelect: document.getElementById("statsChartSortSelect"),
   statsChartLimitSelect: document.getElementById("statsChartLimitSelect"),
   statsChartFilterInput: document.getElementById("statsChartFilterInput"),
+  statisticsBreakageMeasureControl: document.getElementById("statisticsBreakageMeasureControl"),
+  statsBreakageMeasureSelect: document.getElementById("statsBreakageMeasureSelect"),
+  statisticsExternalRemakesControl: document.getElementById("statisticsExternalRemakesControl"),
+  statsIncludeExternalRemakes: document.getElementById("statsIncludeExternalRemakes"),
+  statisticsDateCalendar: document.getElementById("statisticsDateCalendar"),
+  statisticsCalendarFromValue: document.getElementById("statisticsCalendarFromValue"),
+  statisticsCalendarToValue: document.getElementById("statisticsCalendarToValue"),
+  statisticsCalendarPrev: document.getElementById("statisticsCalendarPrev"),
+  statisticsCalendarNext: document.getElementById("statisticsCalendarNext"),
+  statisticsCalendarLeftMonthLabel: document.getElementById("statisticsCalendarLeftMonthLabel"),
+  statisticsCalendarRightMonthLabel: document.getElementById("statisticsCalendarRightMonthLabel"),
+  statisticsCalendarLeftGrid: document.getElementById("statisticsCalendarLeftGrid"),
+  statisticsCalendarRightGrid: document.getElementById("statisticsCalendarRightGrid"),
+  statisticsCalendarReset: document.getElementById("statisticsCalendarReset"),
+  statisticsCalendarSelectionText: document.getElementById("statisticsCalendarSelectionText"),
+  statisticsCalendarCancel: document.getElementById("statisticsCalendarCancel"),
+  statisticsCalendarApply: document.getElementById("statisticsCalendarApply"),
   statsChartResetBtn: document.getElementById("statsChartResetBtn"),
   statsChartKpis: document.getElementById("statsChartKpis"),
   statsChartResultCount: document.getElementById("statsChartResultCount"),
-  statsChartModalTitle: document.getElementById("statsChartModalTitle"),
-  statsChartModalSubtitle: document.getElementById("statsChartModalSubtitle"),
-  statsChartModalCanvas: document.getElementById("statsChartModalCanvas"),
+  statsChartShowMoreRow: document.getElementById("statsChartShowMoreRow"),
+  statsChartShowMoreBtn: document.getElementById("statsChartShowMoreBtn"),
   homeListSearch: document.getElementById("homeListSearch"),
   homeStageFilter: document.getElementById("homeStageFilter"),
   homeListGrid: document.getElementById("homeListGrid"),
@@ -1020,7 +1065,6 @@ const els = {
   printAttentionOptions: document.getElementById("printAttentionOptions"),
   printRouteOptions: document.getElementById("printRouteOptions"),
   printOptionsGlassType: document.getElementById("printOptionsGlassType"),
-  printGlassSearch: document.getElementById("printGlassSearch"),
   printCustomerFilter: document.getElementById("printCustomerFilter"),
   printOrderFilter: document.getElementById("printOrderFilter"),
   printSelectedOrdersList: document.getElementById("printSelectedOrdersList"),
@@ -1049,11 +1093,9 @@ const els = {
   printPresetModal: document.getElementById("printPresetModal"),
   printPresetModalClose: document.getElementById("printPresetModalClose"),
   printPresetNameInput: document.getElementById("printPresetNameInput"),
-  printPresetDescriptionInput: document.getElementById("printPresetDescriptionInput"),
   printPresetDefaultToggle: document.getElementById("printPresetDefaultToggle"),
   printPresetSummary: document.getElementById("printPresetSummary"),
   printPresetOutputSettings: document.getElementById("printPresetOutputSettings"),
-  printPresetLiveSummary: document.getElementById("printPresetLiveSummary"),
   printPresetStatus: document.getElementById("printPresetStatus"),
   printPresetCancelBtn: document.getElementById("printPresetCancelBtn"),
   printPresetSaveOnlyBtn: document.getElementById("printPresetSaveOnlyBtn"),
@@ -1191,6 +1233,17 @@ const SPANISH_UI_TEXT = new Map([
   ["Preserved safeguards", "Protecciones conservadas"],
   ["Save Cross-Date Settings", "Guardar configuración entre fechas"],
   ["Home", "Inicio"],
+  ["Statistics", "Estadísticas"],
+  ["Performance center", "Centro de rendimiento"],
+  ["Statistics & Insights", "Estadísticas e información"],
+  ["Review delivery progress, production mix, and exceptions in one focused workspace.", "Revise el progreso de entregas, la mezcla de producción y las excepciones en un solo espacio de trabajo."],
+  ["The four most important signals for the selected range", "Las cuatro señales más importantes del rango seleccionado"],
+  ["Completion, open pieces, and delivery-list count by stage", "Finalización, piezas pendientes y cantidad de listas por etapa"],
+  ["Operational attention", "Atención operativa"],
+  ["Exceptions, manual handling, and bay or rack activity", "Excepciones, manejo manual y actividad de bahías o racks"],
+  ["Live data", "Datos en vivo"],
+  ["Current statistics range", "Rango actual de estadísticas"],
+  ["Open explorer", "Abrir explorador"],
   ["Scan", "Escanear"],
   ["Racks", "Racks"],
   ["Search", "Buscar"],
@@ -1199,6 +1252,40 @@ const SPANISH_UI_TEXT = new Map([
   ["Delivery List Overview", "Resumen de listas de entrega"],
   ["Find Delivery List", "Buscar lista de entrega"],
   ["Plant performance", "Rendimiento de planta"],
+  ["Operations intelligence", "Inteligencia operativa"],
+  ["At a glance", "De un vistazo"],
+  ["Operations Overview", "Resumen de operaciones"],
+  ["Current performance", "Rendimiento actual"],
+  ["Four signals for the selected range", "Cuatro señales para el rango seleccionado"],
+  ["Workflow progress", "Progreso del flujo"],
+  ["Completion by stage", "Finalización por etapa"],
+  ["Needs attention", "Requiere atención"],
+  ["Exceptions and manual handling", "Excepciones y manejo manual"],
+  ["Chart setup", "Configuración del gráfico"],
+  ["Choose the data and view.", "Elija los datos y la vista."],
+  ["More filters", "Más filtros"],
+  ["Sort, limit, and search", "Ordenar, limitar y buscar"],
+  ["Scan issues", "Problemas de escaneo"],
+  ["Manual handling", "Manejo manual"],
+  ["Bay & rack actions", "Acciones de bahías y racks"],
+  ["No scan issues detected", "No se detectaron problemas de escaneo"],
+  ["Track current workload, delivery performance, and exceptions without repeating the same totals.", "Supervise la carga actual, el rendimiento de entregas y las excepciones sin repetir los mismos totales."],
+  ["Priority metrics", "Métricas prioritarias"],
+  ["Most important signals for the selected range", "Señales más importantes del rango seleccionado"],
+  ["Operational Health", "Estado operativo"],
+  ["Exceptions and audited activity", "Excepciones y actividad auditada"],
+  ["Delivery completion", "Finalización de entregas"],
+  ["Open pieces", "Piezas pendientes"],
+  ["On-time completion", "Finalización a tiempo"],
+  ["Remake pieces", "Piezas rehechas"],
+  ["Scan exceptions", "Excepciones de escaneo"],
+  ["Rack activity", "Actividad de racks"],
+  ["Bay activity", "Actividad de bahías"],
+  ["Top operator", "Operador principal"],
+  ["Displayed categories", "Categorías mostradas"],
+  ["Displayed total", "Total mostrado"],
+  ["Average value", "Valor promedio"],
+  ["Highest value", "Valor más alto"],
   ["Range", "Rango"],
   ["All lists", "Todas las listas"],
   ["PDF", "PDF"],
@@ -1500,6 +1587,33 @@ const SPANISH_UI_TEXT = new Map([
 ].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
 
 const SPANISH_UI_ADDITIONS = new Map([
+  ["Actions", "Acciones"],
+  ["All glass types", "Todos los tipos de vidrio"],
+  ["Bar", "Barras"],
+  ["Completion by delivery date", "Finalización por fecha de entrega"],
+  ["Data", "Datos"],
+  ["Delivery dates", "Fechas de entrega"],
+  ["Filter categories", "Filtrar categorías"],
+  ["Incomplete delivery lists", "Listas de entrega incompletas"],
+  ["Line", "Línea"],
+  ["Live analytics", "Análisis en vivo"],
+  ["Open pieces by delivery date", "Piezas pendientes por fecha de entrega"],
+  ["Open work by stage", "Trabajo pendiente por etapa"],
+  ["Operational actions", "Acciones operativas"],
+  ["PDF report", "Informe PDF"],
+  ["Pieces by delivery date", "Piezas por fecha de entrega"],
+  ["Priority metrics", "Métricas prioritarias"],
+  ["Production mix", "Mezcla de producción"],
+  ["Refresh", "Actualizar"],
+  ["Refresh statistics data", "Actualizar datos de estadísticas"],
+  ["Reset", "Restablecer"],
+  ["Scan issues", "Problemas de escaneo"],
+  ["Scanned pieces by delivery date", "Piezas escaneadas por fecha de entrega"],
+  ["Show all", "Mostrar todo"],
+  ["Source order", "Orden original"],
+  ["Supporting statistics charts", "Gráficas estadísticas complementarias"],
+  ["Table", "Tabla"],
+  ["Top 50", "50 principales"],
   ["+ New Bay Group", "+ Nuevo grupo de bahías"],
   ["A to Z", "A a Z"],
   ["Action", "Acción"],
@@ -1559,6 +1673,22 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Extra scan formats for the Bay Map scanner only.", "Formatos de escaneo adicionales solo para el escáner del mapa de bahías."],
   ["Find bays, assign glass, review old orders, and manage the physical bay layout from one page.", "Busque bahías, asigne vidrio, revise órdenes antiguas y administre el diseño físico desde una sola página."],
   ["Generate statistics PDF report", "Generar informe PDF de estadísticas"],
+  ["Custom range…", "Rango personalizado…"],
+  ["Custom range", "Rango personalizado"],
+  ["Custom Statistics Range", "Rango personalizado de estadísticas"],
+  ["Machine breakage overview", "Resumen de roturas por máquina"],
+  ["Glass type breakage overview", "Resumen de roturas por tipo de vidrio"],
+  ["Reject reasons by machine", "Motivos de rechazo por máquina"],
+  ["Chart unit", "Unidad de gráfica"],
+  ["Square feet", "Pies cuadrados"],
+  ["Occurrences", "Incidencias"],
+  ["Glass broken", "Vidrio roto"],
+  ["Top reasons", "Principales motivos"],
+  ["Top machines", "Principales máquinas"],
+  ["Internal reject events", "Eventos de rechazo interno"],
+  ["Reason occurrences", "Incidencias del motivo"],
+  ["Machine / location", "Máquina / ubicación"],
+  ["Reject events", "Eventos de rechazo"],
   ["Glass Delivery Scanner", "Escáner de entregas de vidrio"],
   ["Glass type filters", "Filtros de tipo de vidrio"],
   ["Glass type quantity chart", "Gráfica de cantidad por tipo de vidrio"],
@@ -1574,6 +1704,14 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Live", "En vivo"],
   ["Local demo", "Demostración local"],
   ["Lookup Manager", "Administrador de catálogos"],
+  ["Glass costs", "Costos de vidrio"],
+  ["Glass cost", "Costo de vidrio"],
+  ["Cost per SQFT", "Costo por pie cuadrado"],
+  ["Save glass cost", "Guardar costo de vidrio"],
+  ["Priced glass", "Vidrios con precio"],
+  ["Cost not configured", "Costo no configurado"],
+  ["Search glass types or costs...", "Buscar tipos de vidrio o costos..."],
+  ["Material-only cost used for reject and breakage reporting.", "Costo de material utilizado para los informes de rechazos y roturas."],
   ["Main pages", "Páginas principales"],
   ["Manage system settings, users, stations, imports, racks, and plant operations.", "Administre la configuración, los usuarios, las estaciones, las importaciones, los racks y las operaciones de planta."],
   ["Manual assign memory", "Memoria de asignación manual"],
@@ -2830,6 +2968,36 @@ const SPANISH_UI_V195 = new Map([
 ]);
 SPANISH_UI_V195.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
+// v0.260 Statistics workspace terminology. Keep these exact labels synchronized
+// with the compact analytics controls so the language toggle remains complete.
+const SPANISH_UI_V260 = new Map([
+  ["External remakes", "Rehechos externos"],
+  ["Include in breakage", "Incluir en roturas"],
+  ["Show more data", "Mostrar más datos"],
+  ["Glass type quantity", "Cantidad por tipo de vidrio"],
+  ["Breakage & rejects", "Roturas y rechazos"],
+  ["Machine breakage - pieces", "Roturas por máquina - piezas"],
+  ["Machine breakage - SQFT", "Roturas por máquina - pies²"],
+  ["Machine breakage - cost", "Roturas por máquina - costo"],
+  ["Glass breakage - pieces", "Roturas por vidrio - piezas"],
+  ["Glass breakage - SQFT", "Roturas por vidrio - pies²"],
+  ["Glass breakage - cost", "Roturas por vidrio - costo"],
+  ["Breakage percentage", "Porcentaje de rotura"],
+  ["Breakage rate", "Tasa de rotura"],
+  ["Breakage cost by machine", "Costo de rotura por máquina"],
+  ["Internal rejects only", "Solo rechazos internos"],
+  ["includes external remakes", "incluye rehechos externos"],
+  ["Internal breakage by machine", "Roturas internas por máquina"],
+  ["Breakage by glass type", "Roturas por tipo de vidrio"],
+  ["Estimated material loss", "Pérdida de material estimada"],
+  ["Internal reject pieces", "Piezas de rechazo interno"],
+  ["External remake pieces", "Piezas de rehecho externo"],
+  ["SQFT breakage rate", "Tasa de rotura por pies²"],
+  ["Piece breakage rate", "Tasa de rotura por piezas"],
+  ["Breakage pieces", "Piezas rotas"],
+]);
+SPANISH_UI_V260.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
 const SPANISH_PLACEHOLDERS = new Map([
   ["Global search...", "Búsqueda global..."],
   ["Search date, stage, route...", "Buscar fecha, etapa o ruta..."],
@@ -3755,7 +3923,7 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", row.index === select.selectedIndex ? "true" : "false");
     button.classList.toggle("is-selected", row.index === select.selectedIndex);
-    button.classList.toggle("is-date-option", select.id === "deliveryDateSelect");
+    button.classList.toggle("is-date-option", select.id === "deliveryDateSelect" || select.dataset.deliveryDateSelect === "true");
 
     const label = document.createElement("span");
     label.className = "custom-select-option-label";
@@ -3777,7 +3945,15 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
       : "";
 
     button.append(label, indicator, check);
-    optionsHost.append(button);
+    const deleteAction = String(row.option.dataset.customDeleteAction || "").trim();
+    const optionRow = deleteAction ? document.createElement("div") : null;
+    if (optionRow) {
+      optionRow.className = "custom-select-option-row";
+      optionRow.append(button);
+      optionsHost.append(optionRow);
+    } else {
+      optionsHost.append(button);
+    }
 
     button.addEventListener("click", () => {
       if (row.option.disabled) return;
@@ -3792,6 +3968,31 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
         select.dispatchEvent(new Event("change", { bubbles: true }));
       }
     });
+
+    if (optionRow) {
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "custom-select-option-delete";
+      deleteButton.setAttribute("aria-label", `Delete ${row.text}`);
+      deleteButton.title = `Delete ${row.text}`;
+      deleteButton.dataset.customDeleteAction = deleteAction;
+      deleteButton.innerHTML = `<span class="custom-select-delete-icon" aria-hidden="true"></span>`;
+      deleteButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        select.dispatchEvent(new CustomEvent("custom-option-delete", {
+          bubbles: true,
+          detail: {
+            action: deleteAction,
+            value: row.option.value,
+            text: row.text,
+            index: row.index,
+          },
+        }));
+        closeCustomSelect(true);
+      });
+      optionRow.append(deleteButton);
+    }
   });
 
   if (select.id === "printDateQuickSelect") appendPrintQuickDateHistoryControl(select, optionsHost, query);
@@ -4115,6 +4316,18 @@ function formatDisplayDate(value) {
   });
 }
 
+/** Format delivery dates as M/D/YYYY for compact selectors and grouped lists. */
+function formatNumericDeliveryDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  const parsed = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0)
+    : new Date(text);
+  if (Number.isNaN(parsed.getTime())) return text;
+  return `${parsed.getMonth() + 1}/${parsed.getDate()}/${parsed.getFullYear()}`;
+}
+
 /**
  * Purpose: Normalize the format date time workflow using the existing shared UI state.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -4224,6 +4437,19 @@ function parseDateKey(value) {
  */
 function filterListsByOverviewRange(lists = state.lists) {
   if (state.overviewRange === "all") return lists.slice();
+
+  if (state.overviewRange === "custom") {
+    const start = parseDateKey(state.statisticsCustomDateFrom);
+    const end = parseDateKey(state.statisticsCustomDateTo);
+    if (!start || !end) return lists.slice();
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    return lists.filter((list) => {
+      const date = parseDateKey(list.deliveryDate);
+      return date && date >= start && date <= end;
+    });
+  }
+
   const days = Number(state.overviewRange || 30);
   if (!days) return lists.slice();
   const end = new Date();
@@ -4305,6 +4531,17 @@ function stageLabel(list) {
   return "Staged";
 }
 
+/** Return the compact operational stage names used by the Scan panel. */
+function scanStageLabel(list) {
+  const category = stageCategory(list);
+  if (category === "outbound") return "Outbound";
+  if (category === "greenville") return "Greenville";
+  if (category === "received") return "Indian Trail";
+  if (category === "pickup") return "CPU";
+  if (category === "dtc") return "DTC";
+  return "Staging";
+}
+
 /**
  * Purpose: Run the priority lists include indian trail workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -4361,6 +4598,78 @@ function listsByDeliveryDate(lists = state.lists) {
       date,
       lists: dateLists.slice().sort((a, b) => stageSort(a) - stageSort(b) || a.label.localeCompare(b.label)),
     }));
+}
+
+/** Parse one YYYY-MM-DD delivery date without UTC shifting. */
+function deliveryDateFromKey(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Return the Monday for the business week containing one delivery date. */
+function deliveryBusinessWeekStart(value) {
+  const date = value instanceof Date
+    ? new Date(value.getFullYear(), value.getMonth(), value.getDate(), 12, 0, 0, 0)
+    : deliveryDateFromKey(value);
+  if (!date) return null;
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  return date;
+}
+
+function deliveryDateKey(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "";
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+/** Format the same Monday-Friday week separator used by Print / Export. */
+function deliveryBusinessWeekLabel(value) {
+  const start = deliveryBusinessWeekStart(value);
+  if (!start) return "Delivery Dates";
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 4, 12, 0, 0, 0);
+  const current = deliveryBusinessWeekStart(new Date());
+  const previous = new Date(current.getFullYear(), current.getMonth(), current.getDate() - 7, 12, 0, 0, 0);
+  const next = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7, 12, 0, 0, 0);
+  const key = deliveryDateKey(start);
+  const prefix = key === deliveryDateKey(current)
+    ? "This Week"
+    : key === deliveryDateKey(previous)
+      ? "Last Week"
+      : key === deliveryDateKey(next)
+        ? "Next Week"
+        : "Week";
+  const range = `${formatNumericDeliveryDate(start)}–${formatNumericDeliveryDate(end)}`;
+  return `${prefix} · ${range}`;
+}
+
+/** Group delivery-date records into newest-first Monday-Friday business weeks. */
+function deliveryDateGroupsByBusinessWeek(groups) {
+  const weeks = new Map();
+  for (const group of Array.isArray(groups) ? groups : []) {
+    const weekStart = deliveryBusinessWeekStart(group.date);
+    const weekKey = deliveryDateKey(weekStart);
+    if (!weekKey) continue;
+    if (!weeks.has(weekKey)) weeks.set(weekKey, []);
+    weeks.get(weekKey).push(group);
+  }
+  return [...weeks.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([weekKey, weekGroups]) => ({
+      weekKey,
+      label: deliveryBusinessWeekLabel(weekKey),
+      groups: weekGroups.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))),
+    }));
+}
+
+/** Build newest-first delivery date optgroups with Monday-Friday separators. */
+function groupedDeliveryDateOptions(groups, optionHtml) {
+  return deliveryDateGroupsByBusinessWeek(groups)
+    .map(({ label, groups: weekGroups }) => {
+      const options = weekGroups.map((group) => optionHtml(group)).join("");
+      return `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
+    })
+    .join("");
 }
 
 /**
@@ -4551,7 +4860,6 @@ function updateModalScrollLock() {
     document.getElementById("rushAlertShell"),
     document.getElementById("indianTrailOutboundOverrideShell"),
     document.querySelector(".action-confirm-backdrop"),
-    els.statsChartModal,
   ].some(panelIsActuallyVisible);
 
   document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
@@ -5024,7 +5332,7 @@ function renderStationOptions(preferredStation = "") {
   els.stationSelect.value = state.stations.includes(current) ? current : state.stations[0];
   els.stationSelect.disabled = true;
   els.stationSelect.title = assignedStations.length
-    ? `Assigned station${assignedStations.length === 1 ? "" : "s"}: ${assignedStations.join(", ")}`
+    ? assignedStations.join(", ")
     : "No assigned station on this login; using the selected delivery list default.";
 
   if (els.stationProfileDisplay) {
@@ -5122,6 +5430,7 @@ async function loadDeliveryLists(preferredListId = "") {
     state.lists = payload.lists || [];
   }
   renderHome();
+  renderStatisticsPage();
   renderDeliveryListSelect();
   if (preferredListId) {
     await activateList(preferredListId, false);
@@ -6599,6 +6908,76 @@ function rackGroupLabel(rack) {
 }
 
 /**
+ * Return the stable color hue shared by one rack set card and its rack-detail GUI.
+ * Known material groups keep intentional colors; custom sets receive a restrained,
+ * deterministic hue so their header remains recognizable after every refresh.
+ */
+function rackSetVisualHue(value) {
+  const label = String(value || "Racks").trim().toLowerCase();
+  if (/truck/.test(label)) return 174;
+  if (/coral/.test(label)) return 39;
+  if (/\blr\b|left.*right/.test(label)) return 214;
+  if (/\brr\b|right.*return|return.*right/.test(label)) return 219;
+  if (/shower|tempered/.test(label)) return 145;
+  if (/framed.*mirror|mirror.*framed/.test(label)) return 188;
+  if (/bfs.*mirror/.test(label)) return 266;
+  if (/mirror|annealed/.test(label)) return 275;
+  if (/crl|laurence/.test(label)) return 48;
+  if (/spacer/.test(label)) return 198;
+  if (/wood|timber/.test(label)) return 31;
+  if (/alum/.test(label)) return 204;
+  if (/steel|metal|rack/.test(label)) return 211;
+
+  let hash = 0;
+  for (const char of label) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+  return 196 + (hash % 82);
+}
+
+/** Return the maintained icon family for a rack set or individual rack. */
+function rackSetVisualIcon(value) {
+  const label = String(value || "Racks").trim().toLowerCase();
+  if (/truck/.test(label)) return "truck";
+  if (/coral/.test(label)) return "coral";
+  if (/\blr\b|left.*right/.test(label)) return "lr";
+  if (/\brr\b|right.*return|return.*right/.test(label)) return "rr";
+  if (/shower|tempered/.test(label)) return "showers";
+  if (/framed.*mirror|mirror.*framed/.test(label)) return "framed-mirror";
+  if (/bfs.*mirror/.test(label)) return "bfs-mirror";
+  if (/mirror|annealed/.test(label)) return "mirror";
+  if (/crl|laurence/.test(label)) return "crl";
+  if (/spacer/.test(label)) return "spacer";
+  if (/wood|timber/.test(label)) return "wood";
+  if (/alum/.test(label)) return "aluminum";
+  if (/steel|metal/.test(label)) return "steel";
+  return "rack";
+}
+
+/** Apply one rack set's color and icon to the shared operations modal header. */
+function applyRackOperationsVisual(rack) {
+  if (!els.operationsModal || !rack) return;
+  const rackSet = rackGroupLabel(rack);
+  els.operationsModal.dataset.rackSet = rackSet;
+  els.operationsModal.dataset.rackIcon = rackSetVisualIcon(rackSet);
+  els.operationsModal.style.setProperty("--rack-set-hue", String(rackSetVisualHue(rackSet)));
+}
+
+/** Apply the audited records treatment to the shared Racks History GUI. */
+function applyRackHistoryOperationsVisual() {
+  if (!els.operationsModal) return;
+  els.operationsModal.dataset.rackSet = "Rack History";
+  els.operationsModal.dataset.rackIcon = "history";
+  els.operationsModal.style.setProperty("--rack-set-hue", "211");
+}
+
+/** Clear rack-specific visual state before the shared modal serves another GUI. */
+function clearRackOperationsVisual() {
+  if (!els.operationsModal) return;
+  delete els.operationsModal.dataset.rackSet;
+  delete els.operationsModal.dataset.rackIcon;
+  els.operationsModal.style.removeProperty("--rack-set-hue");
+}
+
+/**
  * Purpose: Run the grouped rack options HTML workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
@@ -7160,10 +7539,12 @@ function renderRacksPage() {
     const activeCount = racks.filter((rack) => Number(rack.qty || 0) > 0).length;
     const completeCount = racks.filter((rack) => String(rack.status || "").toLowerCase() === "closed").length;
     const setClass = slugify(label || "rack-set") || "rack-set";
+    const setHue = rackSetVisualHue(label);
+    const setIcon = rackSetVisualIcon(label);
 
     return `
-      <button type="button" class="rack-set-card ${escapeHtml(setClass)} ${selected ? "is-selected" : ""}" data-rack-set-select="${escapeHtml(label)}">
-        <span class="rack-set-icon ${escapeHtml(setClass)}" aria-hidden="true"></span>
+      <button type="button" class="rack-set-card ${escapeHtml(setClass)} ${selected ? "is-selected" : ""}" data-rack-set-select="${escapeHtml(label)}" data-rack-icon="${escapeHtml(setIcon)}" style="--rack-set-hue:${escapeHtml(setHue)}">
+        <span class="rack-set-icon" data-rack-icon="${escapeHtml(setIcon)}" aria-hidden="true"></span>
         <span class="rack-set-copy">
           <strong>${escapeHtml(label)}</strong>
           <small>${escapeHtml(racks.length)} rack${racks.length === 1 ? "" : "s"}</small>
@@ -7321,7 +7702,7 @@ async function chooseRackDestination(rack) {
     shell.className = "rack-destination-backdrop";
     shell.innerHTML = `
       <section class="rack-destination-dialog" role="dialog" aria-modal="true" aria-labelledby="rackDestinationTitle">
-        <button class="modal-close-x rack-destination-close" type="button" data-rack-destination-cancel aria-label="Close">&times;</button>
+        <button class="modal-close-x gui-close-button rack-destination-close" type="button" data-rack-destination-cancel aria-label="Close">&times;</button>
         <div class="rack-destination-copy">
           <small>Complete rack</small>
           <h2 id="rackDestinationTitle">Where is ${escapeHtml(rack?.code || "this rack")} going?</h2>
@@ -8215,7 +8596,7 @@ function renderMeta() {
   if (!state.meta) return;
   const dateText = formatDisplayDate(state.meta.deliveryDate);
   if (els.pageTitle) els.pageTitle.textContent = `Delivery List for ${dateText}`;
-  if (els.stageSubtitle) els.stageSubtitle.textContent = state.meta.stage;
+  if (els.stageSubtitle) els.stageSubtitle.textContent = scanStageLabel(state.meta);
   if (els.scannerName) els.scannerName.textContent = state.meta.scanner;
   if (els.backendStatus) {
     els.backendStatus.textContent = state.backend ? "SQLite live" : "Local demo";
@@ -8233,12 +8614,11 @@ function renderDeliveryListSelect() {
   const groups = listsByDeliveryDate();
   const activeDate = selectedDeliveryDate();
   if (els.deliveryDateSelect) {
-    els.deliveryDateSelect.innerHTML = groups
-      .map((group) => {
-        const pendingCount = Math.max(Number(state.pendingUpdateDates.get(group.date) || 0), 0);
-        return `<option value="${escapeHtml(group.date)}" data-custom-indicator="${pendingCount ? "new" : ""}" data-custom-indicator-count="${pendingCount}">${escapeHtml(formatDisplayDate(group.date))}</option>`;
-      })
-      .join("");
+    els.deliveryDateSelect.dataset.deliveryDateSelect = "true";
+    els.deliveryDateSelect.innerHTML = groupedDeliveryDateOptions(groups, (group) => {
+      const pendingCount = Math.max(Number(state.pendingUpdateDates.get(group.date) || 0), 0);
+      return `<option value="${escapeHtml(group.date)}" data-custom-indicator="${pendingCount ? "new" : ""}" data-custom-indicator-count="${pendingCount}">${escapeHtml(formatNumericDeliveryDate(group.date))}</option>`;
+    });
     els.deliveryDateSelect.value = activeDate;
   }
   if (els.deliveryStageSelect) {
@@ -8249,7 +8629,7 @@ function renderDeliveryListSelect() {
      */
     const stageLists = (groups.find((group) => group.date === activeDate)?.lists || state.lists).filter((list) => list.deliveryDate === activeDate);
     els.deliveryStageSelect.innerHTML = stageLists
-      .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(list.stage)}</option>`)
+      .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(scanStageLabel(list))}</option>`)
       .join("");
     els.deliveryStageSelect.value = state.activeListId;
   }
@@ -8866,7 +9246,17 @@ function homeStageBreakdown(lists) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function homeStatisticsRangeParts() {
-  const label = els.overviewRangeSelect?.selectedOptions?.[0]?.textContent || "Current dashboard range";
+  const label = state.overviewRange === "custom"
+    ? "Custom range"
+    : (els.overviewRangeSelect?.selectedOptions?.[0]?.textContent || "Current statistics range");
+
+  if (state.overviewRange === "custom" && state.statisticsCustomDateFrom && state.statisticsCustomDateTo) {
+    return {
+      label,
+      dates: `${formatDisplayDate(state.statisticsCustomDateFrom)} through ${formatDisplayDate(state.statisticsCustomDateTo)}`,
+    };
+  }
+
   const lists = filterListsByOverviewRange(state.lists).map((list) => list.deliveryDate).filter(Boolean).sort();
   if (!lists.length) return { label, dates: "No active delivery dates" };
   return { label, dates: `${formatDisplayDate(lists[0])} through ${formatDisplayDate(lists[lists.length - 1])}` };
@@ -8889,6 +9279,12 @@ function homeStatisticsRangeLabel() {
  */
 function homeReportDateParams() {
   if (state.overviewRange === "all") return "";
+  if (state.overviewRange === "custom") {
+    const dateFrom = String(state.statisticsCustomDateFrom || "");
+    const dateTo = String(state.statisticsCustomDateTo || "");
+    if (!dateFrom || !dateTo) return "";
+    return `?dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`;
+  }
   const days = Number(state.overviewRange || 30);
   if (!days) return "";
   const end = new Date();
@@ -8898,6 +9294,87 @@ function homeReportDateParams() {
   start.setHours(0, 0, 0, 0);
   return `?dateFrom=${encodeURIComponent(dateInputValue(start))}&dateTo=${encodeURIComponent(dateInputValue(end))}`;
 }
+
+/** Open the Statistics custom-range picker using the maintained Print / Export calendar language. */
+function openStatisticsDateCalendar() {
+  const fallbackEnd = todayKey() || printCalendarDateKey(new Date());
+  const currentStart = String(state.statisticsCustomDateFrom || fallbackEnd);
+  const currentEnd = String(state.statisticsCustomDateTo || currentStart);
+  const editingExistingRange = state.overviewRange === "custom" && Boolean(currentStart && currentEnd);
+  state.statisticsCalendarDraftStart = editingExistingRange ? currentStart : "";
+  state.statisticsCalendarDraftEnd = editingExistingRange ? currentEnd : "";
+  state.statisticsCalendarMonth = printCalendarDateKey(printCalendarMonthDate(currentStart));
+  if (els.statisticsDateCalendar) els.statisticsDateCalendar.hidden = false;
+  renderStatisticsDateCalendar();
+}
+
+/** Close the Statistics custom-range picker without applying its draft. */
+function closeStatisticsDateCalendar() {
+  if (els.statisticsDateCalendar) els.statisticsDateCalendar.hidden = true;
+  if (els.overviewRangeSelect) els.overviewRangeSelect.value = state.overviewRange || "30";
+}
+
+/** Render the same two-month custom-range interaction used by Print / Export. */
+function renderStatisticsDateCalendar() {
+  if (!els.statisticsCalendarLeftGrid || !els.statisticsCalendarRightGrid) return;
+  const leftMonth = printCalendarMonthDate(state.statisticsCalendarMonth || state.statisticsCalendarDraftStart || todayKey());
+  const rightMonth = new Date(leftMonth.getFullYear(), leftMonth.getMonth() + 1, 1);
+  const today = todayKey() || printCalendarDateKey(new Date());
+  const availableDates = new Set(state.lists.map((list) => String(list.deliveryDate || "")).filter(Boolean));
+  const start = String(state.statisticsCalendarDraftStart || "");
+  const end = String(state.statisticsCalendarDraftEnd || "");
+  const monthLabel = (month) => month.toLocaleDateString([], { month: "long", year: "numeric" });
+  if (els.statisticsCalendarLeftMonthLabel) els.statisticsCalendarLeftMonthLabel.textContent = monthLabel(leftMonth);
+  if (els.statisticsCalendarRightMonthLabel) els.statisticsCalendarRightMonthLabel.textContent = monthLabel(rightMonth);
+  els.statisticsCalendarLeftGrid.innerHTML = dateRangeCalendarMonthButtons(leftMonth, today, availableDates, start, end, "data-statistics-calendar-date");
+  els.statisticsCalendarRightGrid.innerHTML = dateRangeCalendarMonthButtons(rightMonth, today, availableDates, start, end, "data-statistics-calendar-date");
+  if (els.statisticsCalendarFromValue) els.statisticsCalendarFromValue.textContent = start ? formatDisplayDate(start) : "Select start date";
+  if (els.statisticsCalendarToValue) els.statisticsCalendarToValue.textContent = end ? formatDisplayDate(end) : "Select end date";
+  els.statisticsDateCalendar?.querySelector('[data-statistics-range-role="from"]')?.classList.toggle("is-active", !start || Boolean(end));
+  els.statisticsDateCalendar?.querySelector('[data-statistics-range-role="to"]')?.classList.toggle("is-active", Boolean(start) && !end);
+  if (els.statisticsCalendarSelectionText) {
+    if (!start) els.statisticsCalendarSelectionText.textContent = "Choose the Date From.";
+    else if (!end) els.statisticsCalendarSelectionText.textContent = `Date From: ${formatDisplayDate(start)}. Now choose the Date To.`;
+    else els.statisticsCalendarSelectionText.textContent = `${formatDisplayDate(start)} – ${formatDisplayDate(end)}`;
+  }
+  if (els.statisticsCalendarApply) els.statisticsCalendarApply.disabled = !(start && end);
+}
+
+function chooseStatisticsCalendarDate(dateKey) {
+  const key = String(dateKey || "");
+  if (!printCalendarDateFromKey(key)) return;
+  if (!state.statisticsCalendarDraftStart || state.statisticsCalendarDraftEnd) {
+    state.statisticsCalendarDraftStart = key;
+    state.statisticsCalendarDraftEnd = "";
+  } else if (key < state.statisticsCalendarDraftStart) {
+    state.statisticsCalendarDraftEnd = state.statisticsCalendarDraftStart;
+    state.statisticsCalendarDraftStart = key;
+  } else {
+    state.statisticsCalendarDraftEnd = key;
+  }
+  renderStatisticsDateCalendar();
+}
+
+function resetStatisticsCalendarRange() {
+  state.statisticsCalendarDraftStart = "";
+  state.statisticsCalendarDraftEnd = "";
+  renderStatisticsDateCalendar();
+}
+
+function applyStatisticsCalendarRange() {
+  const dateFrom = String(state.statisticsCalendarDraftStart || "");
+  const dateTo = String(state.statisticsCalendarDraftEnd || "");
+  if (!dateFrom || !dateTo) return;
+  state.statisticsCustomDateFrom = dateFrom;
+  state.statisticsCustomDateTo = dateTo;
+  state.overviewRange = "custom";
+  state.homeChartSelectedLabel = "";
+  if (els.statisticsDateCalendar) els.statisticsDateCalendar.hidden = true;
+  if (els.overviewRangeSelect) els.overviewRangeSelect.value = "custom";
+  renderStatisticsPage();
+  void loadHomeReportSummary();
+}
+
 
 /**
  * Purpose: Run the report action count workflow for the browser application.
@@ -8943,116 +9420,176 @@ function glassQuantitiesForStatistics(overviewLists) {
 }
 
 /**
- * Purpose: Render the render home stats chart workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ * Purpose: Return the compact Statistics label for one delivery workflow stage.
+ * Effects: Formats only; no shared application state is changed.
+ * Flow: Converts maintained stage categories to the short names used inside
+ * charts so labels cannot consume the plot area or become visually clipped.
  */
-function renderHomeStatsChart(overviewLists) {
-  if (!els.homeStatsChart) return;
-  const entries = glassQuantitiesForStatistics(overviewLists);
-  const totalQty = entries.reduce((sum, row) => sum + Number(row.qty || 0), 0);
-
-  if (!entries.length || !totalQty) {
-    els.homeStatsChart.innerHTML = `
-      <div class="statistics-chart-heading">
-        <div>
-          <strong>Glass types by quantity</strong>
-          <span>No glass quantity data yet.</span>
-        </div>
-        <button class="statistics-chart-expand" type="button" data-open-statistics-chart>Open full chart</button>
-      </div>
-      <div class="statistics-chart-empty">Import delivery lists to populate the glass-type pie chart.</div>
-    `;
-    return;
-  }
-
-  let cursor = 0;
-  const slices = entries.map((entry, index) => {
-    const start = cursor;
-    const percent = (Number(entry.qty || 0) / totalQty) * 100;
-    cursor += percent;
-    return `var(--pie-${(index % 8) + 1}) ${start.toFixed(3)}% ${cursor.toFixed(3)}%`;
-  });
-
-  const legendRows = entries
-    .slice(0, 7)
-    .map((entry, index) => {
-      const percent = totalQty ? (Number(entry.qty || 0) / totalQty) * 100 : 0;
-      return `
-        <div class="statistics-pie-legend-row">
-          <i style="--slice-color: var(--pie-${(index % 8) + 1})"></i>
-          <span>${escapeHtml(entry.label)}</span>
-          <strong>${escapeHtml(entry.qty)} pcs <em>${formatPercent(percent)}</em></strong>
-        </div>
-      `;
-    })
-    .join("");
-  const extraCount = Math.max(entries.length - 7, 0);
-  const topEntry = entries[0];
-  const topPercent = topEntry && totalQty ? (Number(topEntry.qty || 0) / totalQty) * 100 : 0;
-
-  els.homeStatsChart.innerHTML = `
-    <div class="statistics-chart-heading">
-      <div>
-        <strong>Glass mix by quantity</strong>
-        <span>${escapeHtml(totalQty)} total pieces in this range</span>
-      </div>
-      <div class="statistics-chart-heading-actions">
-        <div class="statistics-chart-highlight">
-          <small>Top type</small>
-          <b>${escapeHtml(topEntry?.label || "-")}</b>
-          <span>${topEntry ? `${escapeHtml(topEntry.qty)} pcs | ${formatPercent(topPercent)}` : "No data"}</span>
-        </div>
-        <button class="statistics-chart-expand" type="button" data-open-statistics-chart>Open full chart</button>
-      </div>
-    </div>
-    <div class="statistics-pie-layout">
-      <div class="statistics-pie" style="background: conic-gradient(${slices.join(", ")})">
-        <span>${escapeHtml(totalQty)}<small>pieces</small></span>
-      </div>
-      <div class="statistics-pie-legend">
-        ${legendRows}
-        ${extraCount ? `<div class="statistics-pie-more">+${escapeHtml(extraCount)} more glass types</div>` : ""}
-      </div>
-    </div>
-  `;
+function statisticsStageShortLabel(stageOrCategory) {
+  const raw = typeof stageOrCategory === "string"
+    ? String(stageOrCategory || "").trim().toLowerCase()
+    : stageCategory(stageOrCategory);
+  const category = ["staged", "outbound", "received", "pickup", "greenville", "dtc"].includes(raw)
+    ? raw
+    : stageCategory(stageOrCategory || {});
+  return {
+    staged: "Staging",
+    outbound: "Outbound",
+    received: "Inbound",
+    pickup: "CPU",
+    greenville: "Greenville",
+    dtc: "DTC",
+  }[category] || String(typeof stageOrCategory === "string" ? stageOrCategory : stageLabel(stageOrCategory || {})) || "Stage";
 }
 
+/**
+ * Purpose: Normalize the breakage payload returned by the reporting API.
+ * Effects: Reads Statistics report state only.
+ * Flow: Supplies stable empty collections while backend data is loading so the
+ * page can render safely in local/demo mode without inventing reject values.
+ */
+function statisticsBreakagePayload() {
+  const breakage = state.homeReportSummary?.breakage;
+  return breakage && typeof breakage === "object" ? breakage : {
+    production: {},
+    producedTotals: {},
+    internalRejects: {},
+    externalRemakes: {},
+    rates: {},
+    internalByMachine: [],
+    internalByGlass: [],
+    internalReasonsByMachine: [],
+    externalRemakesByGlass: [],
+    pricingPerSqft: [],
+  };
+}
 
 /**
- * Purpose: Run the statistics chart kpi HTML workflow for the browser application.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Merge internal reject glass rows with optional external remakes.
+ * Effects: Returns new reporting rows only.
+ * Flow: External remake values remain a separate source in the backend but can
+ * be combined by glass type when the user explicitly enables the comparison.
  */
-function statisticsChartKpiHtml(overviewLists = []) {
-  const overview = aggregateListStats(overviewLists);
-  const report = state.homeReportSummary || {};
-  const completedLists = overviewLists.filter((list) => Number(list.totalQty || 0) > 0 && Number(list.scannedQty || 0) >= Number(list.totalQty || 0)).length;
-  /**
-   * Purpose: Run the successful scans workflow for the browser application.
-   * Effects: May call the backend api.
-   * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
-   */
-  const successfulScans = (report.scansByOperator || []).reduce((sum, row) => sum + Number(row.scans || 0), 0);
-  const scanExceptions = Number(report.badScanCount || 0) + Number(report.duplicateScanCount || 0);
-  const scanAttempts = successfulScans + scanExceptions;
-  const timedPieces = overview.onTimeQty + overview.lateQty;
-  const scanQualityPercent = scanAttempts ? (successfulScans / scanAttempts) * 100 : 0;
+function statisticsBreakageGlassRows(includeExternal = state.statisticsIncludeExternalRemakes) {
+  const breakage = statisticsBreakagePayload();
+  const buckets = new Map();
+  const addRows = (rows, source) => {
+    for (const row of rows || []) {
+      const label = String(row.glassType || "Other Glass").trim() || "Other Glass";
+      const current = buckets.get(label) || {
+        glassType: label,
+        pieces: 0,
+        sqft: 0,
+        estimatedCost: 0,
+        eventCount: 0,
+        unpricedPieces: 0,
+        missingDimensionPieces: 0,
+        machines: [],
+        reasons: [],
+        sources: new Set(),
+      };
+      current.pieces += Number(row.pieces || 0);
+      current.sqft += Number(row.sqft || 0);
+      current.estimatedCost += Number(row.estimatedCost || 0);
+      current.eventCount += Number(row.eventCount || 0);
+      current.unpricedPieces += Number(row.unpricedPieces || 0);
+      current.missingDimensionPieces += Number(row.missingDimensionPieces || 0);
+      if (source === "Internal rejects") {
+        current.machines = Array.isArray(row.machines) ? row.machines : current.machines;
+        current.reasons = Array.isArray(row.reasons) ? row.reasons : current.reasons;
+      }
+      current.sources.add(source);
+      buckets.set(label, current);
+    }
+  };
+  addRows(breakage.internalByGlass || [], "Internal rejects");
+  if (includeExternal) addRows(breakage.externalRemakesByGlass || [], "External remakes");
+  return [...buckets.values()].map((row) => ({ ...row, sources: [...row.sources] }));
+}
 
-  const cards = [
-    ["Delivery percentage", formatPercent(overview.deliveryPercent), `${overview.scannedQty} / ${overview.totalQty} pieces`],
-    ["Pieces completed", overview.scannedQty, `${overview.remainingQty} pieces still open`],
-    ["Open pieces", overview.remainingQty, `${overview.totalLists} delivery lists in range`],
-    ["Lists complete", `${completedLists}/${overview.totalLists}`, overview.totalLists ? formatPercent((completedLists / overview.totalLists) * 100) : "0%"],
-    ["On-time completion", timedPieces ? formatPercent(overview.onTimePercent) : "—", timedPieces ? `${overview.onTimeQty} on time / ${overview.lateQty} late` : "No timed completions in range"],
-    ["Scan quality", scanAttempts ? formatPercent(scanQualityPercent) : "—", scanAttempts ? `${successfulScans} successful / ${scanExceptions} exceptions` : "No scan activity in range"],
-  ];
+/**
+ * Purpose: Return one display string for a Statistics chart value.
+ * Effects: Formats only; no DOM or shared state changes.
+ */
+function statisticsFormatChartValue(dataset, value) {
+  const numeric = Number(value || 0);
+  if (dataset?.format === "currency") {
+    return numeric.toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (dataset?.format === "sqft") {
+    return `${numeric.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 })} ft²`;
+  }
+  if (dataset?.isRate || dataset?.suffix === "%") {
+    const digits = Number.isInteger(numeric) ? 0 : 2;
+    return `${numeric.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: 2 })}%`;
+  }
+  return `${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}${dataset?.suffix || ""}`;
+}
 
-  return cards.map(([label, value, detail]) => `
-    <article class="statistics-chart-kpi">
-      <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(value)}</strong>
-      <small>${escapeHtml(detail)}</small>
+/**
+ * Purpose: Build concise coverage notes for a reject reporting row.
+ * Effects: Formats reporting metadata only.
+ */
+function statisticsBreakageCoverageDetail(row = {}) {
+  const notes = [];
+  if (Number(row.unpricedPieces || 0) > 0) notes.push(`${Number(row.unpricedPieces || 0)} unpriced piece${Number(row.unpricedPieces || 0) === 1 ? "" : "s"}`);
+  if (Number(row.missingDimensionPieces || 0) > 0) notes.push(`${Number(row.missingDimensionPieces || 0)} missing dimensions`);
+  return notes.length ? ` · ${notes.join(" · ")}` : "";
+}
+
+/**
+ * Purpose: Build concise, dataset-aware summary cards above the live chart.
+ * Effects: Returns markup only; the chart renderer owns DOM updates.
+ */
+function statisticsChartKpiHtml(dataset, entries = [], totalMatches = 0, allEntryCount = 0) {
+  if (dataset?.isBreakageDetail) {
+    const pieces = entries.reduce((sum, entry) => sum + Number(entry.pieces || 0), 0);
+    const sqft = entries.reduce((sum, entry) => sum + Number(entry.sqft || 0), 0);
+    const estimatedCost = entries.reduce((sum, entry) => sum + Number(entry.estimatedCost || 0), 0);
+    const events = entries.reduce((sum, entry) => sum + Number(entry.eventCount || 0), 0);
+    const cards = [
+      ["categories", dataset.metric === "breakage-reasons" ? "Reason occurrences" : "Internal reject events", events.toLocaleString(), `${entries.length} of ${totalMatches} matching rows`],
+      ["total", "Broken pieces", pieces.toLocaleString(), "Across the displayed breakage rows"],
+      ["average", "Broken SQFT", statisticsFormatChartValue({ format: "sqft" }, sqft), "Square footage with usable dimensions"],
+      ["highest", "Estimated material loss", statisticsFormatChartValue({ format: "currency" }, estimatedCost), "Using configured glass cost per SQFT"],
+    ];
+    return cards.map(([icon, label, value, detail]) => `
+      <article class="statistics-chart-kpi-v0258">
+        <span class="statistics-chart-kpi-icon-v0258 is-${escapeHtml(icon)}" aria-hidden="true"></span>
+        <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(detail)}</small></div>
+      </article>
+    `).join("");
+  }
+
+  const values = entries.map((entry) => Number(entry.value || 0));
+  const displayedTotal = values.reduce((sum, value) => sum + value, 0);
+  const averageValue = values.length ? displayedTotal / values.length : 0;
+  const highestEntry = entries.reduce((best, entry) => !best || Number(entry.value || 0) > Number(best.value || 0) ? entry : best, null);
+  const lowestEntry = entries.reduce((best, entry) => !best || Number(entry.value || 0) < Number(best.value || 0) ? entry : best, null);
+  const formatValue = (value) => statisticsFormatChartValue(dataset, value);
+
+  const cards = dataset.isRate
+    ? [
+        ["categories", "Visible categories", entries.length, `${totalMatches} match filters · ${allEntryCount} available`],
+        ["average", "Average rate", formatValue(averageValue), "Across the displayed categories"],
+        ["highest", "Highest rate", highestEntry ? formatValue(highestEntry.value) : "—", highestEntry?.label || "No categories displayed"],
+        ["lowest", "Lowest rate", lowestEntry ? formatValue(lowestEntry.value) : "—", lowestEntry?.label || "No categories displayed"],
+      ]
+    : [
+        ["categories", "Visible categories", entries.length, `${totalMatches} match filters · ${allEntryCount} available`],
+        ["total", "Displayed total", formatValue(displayedTotal), "Sum of the currently displayed values"],
+        ["average", "Average value", formatValue(averageValue), "Per displayed category"],
+        ["highest", "Highest value", highestEntry ? formatValue(highestEntry.value) : "—", highestEntry?.label || "No categories displayed"],
+      ];
+
+  return cards.map(([icon, label, value, detail]) => `
+    <article class="statistics-chart-kpi-v0258">
+      <span class="statistics-chart-kpi-icon-v0258 is-${escapeHtml(icon)}" aria-hidden="true"></span>
+      <div>
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+        <small>${escapeHtml(detail)}</small>
+      </div>
     </article>
   `).join("");
 }
@@ -9068,21 +9605,54 @@ function statisticsChartListLabel(list) {
 }
 
 /**
- * Purpose: Run the statistics chart dataset workflow for the browser application.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Aggregate delivery-list quantities into stable delivery-date buckets.
+ * Effects: Returns sorted data only and does not mutate application state.
  */
-function statisticsChartDataset(metric = state.homeChartMetric) {
+function statisticsDateBuckets(overviewLists = []) {
+  const buckets = new Map();
+  for (const list of overviewLists) {
+    const date = String(list.deliveryDate || "Unscheduled");
+    const bucket = buckets.get(date) || {
+      date,
+      lists: 0,
+      totalQty: 0,
+      scannedQty: 0,
+      remainingQty: 0,
+      onTimeQty: 0,
+      lateQty: 0,
+    };
+    const totalQty = Number(list.totalQty || 0);
+    const scannedQty = Number(list.scannedQty || 0);
+    bucket.lists += 1;
+    bucket.totalQty += totalQty;
+    bucket.scannedQty += scannedQty;
+    bucket.remainingQty += Math.max(totalQty - scannedQty, 0);
+    bucket.onTimeQty += Number(list.onTimeQty || 0);
+    bucket.lateQty += Number(list.lateQty || 0);
+    buckets.set(date, bucket);
+  }
+  return [...buckets.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+/**
+ * Purpose: Build one normalized analytics dataset for the selected metric.
+ * Effects: Reads shared list/report state without mutating it.
+ */
+function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureOverride = "") {
   const overviewLists = filterListsByOverviewRange(state.lists);
   const report = state.homeReportSummary || {};
+  const dateBuckets = statisticsDateBuckets(overviewLists);
 
   if (metric === "delivery") {
     return {
+      metric,
+      icon: "delivery",
       title: "Delivery completion by list",
       subtitle: "Completion percentage for each delivery-list stage in the selected range.",
       suffix: "%",
       allowDonut: false,
       shareable: false,
+      isRate: true,
       entries: overviewLists.map((list) => {
         const totalQty = Number(list.totalQty || 0);
         const scannedQty = Number(list.scannedQty || 0);
@@ -9098,6 +9668,8 @@ function statisticsChartDataset(metric = state.homeChartMetric) {
 
   if (metric === "remaining") {
     return {
+      metric,
+      icon: "open",
       title: "Open pieces by delivery list",
       subtitle: "Remaining piece quantity for each delivery-list stage in the selected range.",
       suffix: "",
@@ -9116,11 +9688,14 @@ function statisticsChartDataset(metric = state.homeChartMetric) {
 
   if (metric === "timeliness") {
     return {
+      metric,
+      icon: "clock",
       title: "On-time completion by list",
       subtitle: "Percentage of recorded pieces completed on or before their delivery date.",
       suffix: "%",
       allowDonut: false,
       shareable: false,
+      isRate: true,
       entries: overviewLists
         .filter((list) => Number(list.onTimeQty || 0) + Number(list.lateQty || 0) > 0)
         .map((list) => ({
@@ -9131,38 +9706,239 @@ function statisticsChartDataset(metric = state.homeChartMetric) {
     };
   }
 
+  if (metric === "incomplete") {
+    const backendRows = report.incompleteByDeliveryList || [];
+    const entries = backendRows.length
+      ? backendRows.map((row) => ({
+          label: row.deliveryList || row.label || "Delivery list",
+          value: Number(row.remainingQty || 0),
+          detail: `${Number(row.itemCount || 0)} rows · ${Number(row.remainingQty || 0)} pieces open`,
+        }))
+      : overviewLists.map((list) => {
+          const remainingQty = Math.max(Number(list.totalQty || 0) - Number(list.scannedQty || 0), 0);
+          return {
+            label: statisticsChartListLabel(list),
+            value: remainingQty,
+            detail: `${remainingQty} pieces open · ${formatDisplayDate(list.deliveryDate)}`,
+          };
+        }).filter((entry) => entry.value > 0);
+    return {
+      metric,
+      icon: "warning",
+      title: "Incomplete delivery lists",
+      subtitle: "Delivery lists with remaining pieces that still require completion.",
+      suffix: "",
+      entries,
+    };
+  }
+
   if (metric === "stage-volume") {
     return {
+      metric,
+      icon: "stage",
       title: "Stage workload",
       subtitle: "Total piece volume assigned to each workflow stage in the selected range.",
       suffix: "",
       entries: homeStageBreakdown(overviewLists).map((stage) => ({
-        label: stage.label,
+        label: statisticsStageShortLabel(stage.category),
         value: Number(stage.totalQty || 0),
         detail: `${Number(stage.scannedQty || 0)} completed · ${Number(stage.remainingQty || 0)} open`,
       })),
     };
   }
 
+  if (metric === "stage-open") {
+    return {
+      metric,
+      icon: "open",
+      title: "Open work by stage",
+      subtitle: "Remaining piece quantity assigned to each workflow stage.",
+      suffix: "",
+      entries: homeStageBreakdown(overviewLists).map((stage) => ({
+        label: statisticsStageShortLabel(stage.category),
+        value: Number(stage.remainingQty || 0),
+        detail: `${Number(stage.remainingQty || 0)} open · ${Number(stage.scannedQty || 0)} completed`,
+      })),
+    };
+  }
+
   if (metric === "stages") {
     return {
+      metric,
+      icon: "progress",
       title: "Stage completion",
-      subtitle: "Completion percentage for every stage in the selected dashboard range.",
+      subtitle: "Completion percentage for every stage in the selected reporting range.",
       suffix: "%",
       allowDonut: false,
       shareable: false,
+      isRate: true,
       entries: homeStageBreakdown(overviewLists).map((stage) => ({
-        label: stage.label,
+        label: statisticsStageShortLabel(stage.category),
         value: stage.totalQty ? Math.round((stage.scannedQty / stage.totalQty) * 100) : 0,
-        detail: `${stage.scannedQty} / ${stage.totalQty} pieces`,
+        detail: `${stage.scannedQty} / ${stage.totalQty} pieces · ${stage.remainingQty} open`,
       })),
+    };
+  }
+
+  if (metric === "work") {
+    return {
+      metric,
+      icon: "work",
+      title: "Scanned and open work by stage",
+      subtitle: "Completed and remaining piece counts for every workflow stage.",
+      suffix: "",
+      entries: homeStageBreakdown(overviewLists).flatMap((stage) => [
+        {
+          label: `${statisticsStageShortLabel(stage.category)} - Scanned`,
+          value: Number(stage.scannedQty || 0),
+          detail: `${Number(stage.scannedQty || 0)} scanned pieces`,
+        },
+        {
+          label: `${statisticsStageShortLabel(stage.category)} - Open`,
+          value: Number(stage.remainingQty || 0),
+          detail: `${Number(stage.remainingQty || 0)} open pieces`,
+        },
+      ]),
+    };
+  }
+
+  if (metric === "glass") {
+    return {
+      metric,
+      icon: "glass",
+      title: "Glass mix by quantity",
+      subtitle: "Piece quantity by glass type for the selected reporting range.",
+      suffix: "",
+      entries: glassQuantitiesForStatistics(overviewLists).map((row) => ({
+        label: row.label,
+        value: Number(row.qty || 0),
+        detail: `${Number(row.qty || 0)} pieces`,
+      })),
+    };
+  }
+
+  if (["breakage-machines", "breakage-glass", "breakage-reasons", "breakage-rate"].includes(metric)) {
+    const breakage = statisticsBreakagePayload();
+    const includeExternal = Boolean(state.statisticsIncludeExternalRemakes);
+    const internal = breakage.internalRejects || {};
+    const external = breakage.externalRemakes || {};
+    const sourceNote = includeExternal ? "Internal rejects plus external remakes" : "Internal rejects only";
+
+    if (metric === "breakage-rate") {
+      const rates = breakage.rates || {};
+      const piecesRate = Number(includeExternal ? rates.withExternalPiecesPercent : rates.internalPiecesPercent) || 0;
+      const sqftRate = Number(includeExternal ? rates.withExternalSqftPercent : rates.internalSqftPercent) || 0;
+      const produced = breakage.producedTotals || {};
+      const producedPieces = Number(includeExternal ? produced.withExternalPieces : produced.internalOnlyPieces) || 0;
+      const producedSqft = Number(includeExternal ? produced.withExternalSqft : produced.internalOnlySqft) || 0;
+      return {
+        metric, icon: "reject", title: "Breakage percentage",
+        subtitle: `${sourceNote}. Reject/remake loss is divided by the estimated total glass produced in the selected range.`,
+        suffix: "%", allowDonut: false, shareable: false, isRate: true,
+        entries: [
+          { label: "Pieces", value: piecesRate, detail: `${Number(internal.pieces || 0) + (includeExternal ? Number(external.pieces || 0) : 0)} breakage pieces · ${producedPieces} estimated produced pieces` },
+          { label: "Square feet", value: sqftRate, detail: `${(Number(internal.sqft || 0) + (includeExternal ? Number(external.sqft || 0) : 0)).toFixed(1)} breakage ft² · ${producedSqft.toFixed(1)} estimated produced ft²` },
+        ],
+      };
+    }
+
+    if (metric === "breakage-reasons") {
+      const rows = (breakage.internalReasonsByMachine || []).map((row) => {
+        const machine = row.machine || "Unknown machine";
+        const reason = row.reason || "Unspecified reason";
+        const glassTypes = Array.isArray(row.glassTypes) ? row.glassTypes : [];
+        return {
+          label: `${machine} — ${reason}`,
+          machine, reason,
+          value: Number(row.eventCount || 0),
+          pieces: Number(row.pieces || 0),
+          sqft: Number(row.sqft || 0),
+          estimatedCost: Number(row.estimatedCost || 0),
+          eventCount: Number(row.eventCount || 0),
+          glassTypes,
+          unpricedPieces: Number(row.unpricedPieces || 0),
+          missingDimensionPieces: Number(row.missingDimensionPieces || 0),
+          searchText: `${machine} ${reason} ${glassTypes.map((entry) => entry.glassType || "").join(" ")}`,
+          detail: `${Number(row.eventCount || 0)} occurrence${Number(row.eventCount || 0) === 1 ? "" : "s"} · ${Number(row.pieces || 0)} pieces · ${Number(row.sqft || 0).toFixed(1)} ft² · ${statisticsFormatChartValue({ format: "currency" }, row.estimatedCost || 0)}`,
+        };
+      });
+      return {
+        metric, icon: "warning", title: "Reject reasons by machine",
+        subtitle: "Each row is one machine/reason combination, ranked by how often that reject reason was recorded.",
+        suffix: "", format: "integer", allowDonut: false, shareable: false, isBreakageDetail: true, breakageKind: "reason", entries: rows,
+      };
+    }
+
+    const measure = breakageMeasureOverride || state.statisticsBreakageMeasure || "sqft";
+    const format = measure === "estimatedCost" ? "currency" : measure === "sqft" ? "sqft" : "integer";
+    const measureLabel = measure === "estimatedCost" ? "estimated cost" : measure === "sqft" ? "square feet" : "pieces";
+    const machineMetric = metric === "breakage-machines";
+    let rows = [];
+
+    if (machineMetric) {
+      rows = (breakage.internalByMachine || []).map((row) => ({ ...row, label: row.machine || "Unknown machine", source: "Internal rejects" }));
+      if (includeExternal && (Number(external.pieces || 0) > 0 || Number(external.sqft || 0) > 0)) {
+        rows.push({ ...external, label: "External remakes", source: "External remakes", glassTypes: breakage.externalRemakesByGlass || [], reasons: [] });
+      }
+    } else {
+      rows = statisticsBreakageGlassRows(includeExternal).map((row) => ({
+        ...row, label: row.glassType || "Other Glass", source: (row.sources || []).join(" + ") || "Internal rejects",
+      }));
+    }
+
+    return {
+      metric, icon: machineMetric ? "machine" : "reject",
+      title: `${machineMetric ? "Machine" : "Glass type"} breakage overview`,
+      subtitle: `${sourceNote}. The chart ranks by ${measureLabel}; table and selection details keep pieces, SQFT, cost, glass, machines, and reasons together.`,
+      suffix: "", format, isBreakageDetail: true, breakageKind: machineMetric ? "machine" : "glass", breakageMeasure: measure,
+      entries: rows.map((row) => ({
+        label: row.label, value: Number(row[measure] || 0),
+        pieces: Number(row.pieces || 0), sqft: Number(row.sqft || 0), estimatedCost: Number(row.estimatedCost || 0), eventCount: Number(row.eventCount || 0),
+        unpricedPieces: Number(row.unpricedPieces || 0), missingDimensionPieces: Number(row.missingDimensionPieces || 0),
+        glassTypes: Array.isArray(row.glassTypes) ? row.glassTypes : [], machines: Array.isArray(row.machines) ? row.machines : [], reasons: Array.isArray(row.reasons) ? row.reasons : [],
+        source: row.source || "Internal rejects",
+        searchText: `${row.label || ""} ${(row.glassTypes || []).map((entry) => entry.glassType || "").join(" ")} ${(row.machines || []).map((entry) => entry.machine || "").join(" ")} ${(row.reasons || []).map((entry) => entry.reason || "").join(" ")}`,
+        detail: `${Number(row.pieces || 0)} pieces · ${Number(row.sqft || 0).toFixed(1)} ft² · ${statisticsFormatChartValue({ format: "currency" }, row.estimatedCost || 0)} · ${Number(row.eventCount || 0)} reject event${Number(row.eventCount || 0) === 1 ? "" : "s"}${statisticsBreakageCoverageDetail(row)} · ${row.source || "Internal rejects"}`,
+      })),
+    };
+  }
+
+  if (["date-volume", "date-scanned", "date-open", "date-completion"].includes(metric)) {
+    const config = {
+      "date-volume": ["calendar", "Pieces by delivery date", "Total planned piece volume for each delivery date.", "totalQty", ""],
+      "date-scanned": ["scan", "Scanned pieces by delivery date", "Completed piece quantity for each delivery date.", "scannedQty", ""],
+      "date-open": ["open", "Open pieces by delivery date", "Remaining piece quantity for each delivery date.", "remainingQty", ""],
+      "date-completion": ["progress", "Completion by delivery date", "Completion percentage for each delivery date.", "completionPercent", "%"],
+    }[metric];
+    const [icon, title, subtitle, field, suffix] = config;
+    return {
+      metric,
+      icon,
+      title,
+      subtitle,
+      suffix,
+      allowDonut: metric !== "date-completion",
+      shareable: metric !== "date-completion",
+      isRate: metric === "date-completion",
+      entries: dateBuckets.map((bucket) => {
+        const value = field === "completionPercent"
+          ? (bucket.totalQty ? Math.round((bucket.scannedQty / bucket.totalQty) * 100) : 0)
+          : Number(bucket[field] || 0);
+        return {
+          label: bucket.date === "Unscheduled" ? bucket.date : formatDisplayDate(bucket.date),
+          value,
+          detail: `${bucket.lists} list${bucket.lists === 1 ? "" : "s"} · ${bucket.scannedQty} scanned · ${bucket.remainingQty} open`,
+        };
+      }),
     };
   }
 
   if (metric === "operators") {
     return {
+      metric,
+      icon: "users",
       title: "Scans by operator",
-      subtitle: "Recorded scan activity by user for the selected dashboard range.",
+      subtitle: "Recorded scan activity by user for the selected reporting range.",
       suffix: "",
       entries: (report.scansByOperator || []).map((row) => ({
         label: row.user || "Unknown user",
@@ -9172,28 +9948,48 @@ function statisticsChartDataset(metric = state.homeChartMetric) {
     };
   }
 
-  if (metric === "activity") {
+  if (metric === "scan-issues") {
+    const remake = selectedRangeRemakeStats(overviewLists);
+    return {
+      metric,
+      icon: "warning",
+      title: "Scan issues",
+      subtitle: "Bad scans, duplicate attempts, and remake activity in the selected range.",
+      suffix: "",
+      entries: [
+        { label: "Bad scans", value: Number(report.badScanCount || 0), detail: "Invalid or blocked scan attempts" },
+        { label: "Duplicate scans", value: Number(report.duplicateScanCount || 0), detail: "Duplicate attempts prevented by the system" },
+        { label: "Remake pieces", value: Number(remake.qty || 0), detail: `${Number(remake.rows || 0)} remake lines` },
+      ],
+    };
+  }
+
+  if (metric === "actions") {
     const entries = [
-      ["Manual scans", Number(report.manualScanCount || 0)],
-      ["Bad scans", Number(report.badScanCount || 0)],
-      ["Duplicate scans", Number(report.duplicateScanCount || 0)],
-      ["Rack actions", Number(report.rackActionCount || 0)],
-      ["Bay actions", Number(report.bayActionCount || 0)],
-      ["User actions", Number(report.userActionCount || 0)],
+      ["Manual scans", Number(report.manualScanCount || reportActionCount("manual_scan") || 0), "Typed order and item scans"],
+      ["Manual edits", Number(report.manualEditCount || reportActionCount("manual_edit") || 0), "Delivery-list row corrections"],
+      ["Bay overrides", Number(report.bayOverrideCount || reportActionCount("indian_trail_receive_bay_override") || 0), "Manual bay assignments and overrides"],
+      ["Bay actions", Number(report.bayActionCount || 0), "Bay moves, clears, and assignments"],
+      ["Rack actions", Number(report.rackActionCount || 0), "Rack moves, closes, and edits"],
+      ["User actions", Number(report.userActionCount || 0), "Recorded administrative actions"],
     ];
     return {
-      title: "System activity",
-      subtitle: "Scan exceptions and operational actions in the selected dashboard range.",
+      metric,
+      icon: "actions",
+      title: "Operational actions",
+      subtitle: "Manual, bay, rack, and administrative activity in the selected range.",
       suffix: "",
-      entries: entries.map(([label, value]) => ({ label, value, detail: `${value} events` })),
+      entries: entries.map(([label, value, detail]) => ({ label, value, detail })),
     };
   }
 
   if (metric === "remakes") {
     const remake = selectedRangeRemakeStats(overviewLists);
     return {
+      metric,
+      icon: "remake",
       title: "Remakes in selected range",
-      subtitle: "Remake pieces and distinct remake lines for the active dashboard filter.",
+      subtitle: "Remake pieces and distinct remake lines for the active filter.",
       suffix: "",
       entries: [
         { label: "Remake pieces", value: Number(remake.qty || 0), detail: `${Number(remake.qty || 0)} pieces` },
@@ -9202,63 +9998,27 @@ function statisticsChartDataset(metric = state.homeChartMetric) {
     };
   }
 
-  if (metric === "work") {
-    const stageRows = homeStageBreakdown(overviewLists);
-    return {
-      title: "Scanned and open work by stage",
-      subtitle: "Piece counts completed versus still open for every stage in the selected dashboard range.",
-      suffix: "",
-      entries: stageRows.flatMap((stage) => [
-        {
-          label: `${stage.label} - Scanned`,
-          value: Number(stage.scannedQty || 0),
-          detail: `${Number(stage.scannedQty || 0)} scanned pieces`,
-        },
-        {
-          label: `${stage.label} - Open`,
-          value: Math.max(Number(stage.totalQty || 0) - Number(stage.scannedQty || 0), 0),
-          detail: `${Math.max(Number(stage.totalQty || 0) - Number(stage.scannedQty || 0), 0)} open pieces`,
-        },
-      ]),
-    };
-  }
-
-  return {
-    title: "Glass mix by quantity",
-    subtitle: "Piece quantity by glass type for the selected dashboard range.",
-    suffix: "",
-    entries: glassQuantitiesForStatistics(overviewLists).map((row) => ({
-      label: row.label,
-      value: Number(row.qty || 0),
-      detail: `${Number(row.qty || 0)} pieces`,
-    })),
-  };
+  return statisticsChartDataset("glass");
 }
 
 /**
- * Purpose: Run the filtered statistics chart entries workflow for the browser application.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Apply the current search, ordering, and display limit to one dataset.
+ * Effects: Returns a new array and leaves the source dataset unchanged.
  */
 function filteredStatisticsChartEntries(dataset) {
   const query = String(state.homeChartQuery || "").trim().toLowerCase();
-  const limitValue = String(state.homeChartLimit || "all");
+  const limitValue = String(state.homeChartLimit || "10");
   const sortMode = String(state.homeChartSort || "value-desc");
-
-  /**
-   * Purpose: Run the entries workflow for the browser application.
-   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-   */
-  let entries = (dataset.entries || []).filter((entry) => Number(entry.value || 0) >= 0);
+  let entries = (dataset.entries || [])
+    .map((entry, sourceIndex) => ({ ...entry, sourceIndex }))
+    .filter((entry) => Number(entry.value || 0) >= 0);
 
   if (query) {
-    entries = entries.filter((entry) =>
-      `${entry.label || ""} ${entry.detail || ""}`.toLowerCase().includes(query),
-    );
+    entries = entries.filter((entry) => `${entry.label || ""} ${entry.detail || ""} ${entry.searchText || ""}`.toLowerCase().includes(query));
   }
 
   entries = entries.slice().sort((a, b) => {
+    if (sortMode === "source") return Number(a.sourceIndex || 0) - Number(b.sourceIndex || 0);
     if (sortMode === "label-asc") return String(a.label || "").localeCompare(String(b.label || ""), undefined, { numeric: true });
     if (sortMode === "label-desc") return String(b.label || "").localeCompare(String(a.label || ""), undefined, { numeric: true });
     if (sortMode === "value-asc") return Number(a.value || 0) - Number(b.value || 0) || String(a.label || "").localeCompare(String(b.label || ""));
@@ -9268,7 +10028,6 @@ function filteredStatisticsChartEntries(dataset) {
   const totalMatches = entries.length;
   const numericLimit = limitValue === "all" ? 0 : Number(limitValue || 0);
   if (numericLimit > 0) entries = entries.slice(0, numericLimit);
-
   return { entries, totalMatches };
 }
 
@@ -9292,9 +10051,8 @@ function truncateChartLabel(value, maxLength = 34) {
 }
 
 /**
- * Purpose: Run the statistics chart selection HTML workflow for the browser application.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Build the selected-category detail strip shared by every view.
+ * Effects: Keeps the selected label synchronized with visible categories.
  */
 function statisticsChartSelectionHtml(dataset, entries, total) {
   const selected = entries.find((entry) => entry.label === state.homeChartSelectedLabel) || entries[0];
@@ -9302,11 +10060,47 @@ function statisticsChartSelectionHtml(dataset, entries, total) {
   state.homeChartSelectedLabel = selected.label;
   const percent = total > 0 ? (Number(selected.value || 0) / total) * 100 : 0;
   const shareText = dataset.shareable === false ? "" : ` · ${formatPercent(percent)} of displayed total`;
+
+  if (dataset?.isBreakageDetail) {
+    const detailRows = (items, labelKey, valueBuilder) => (items || []).slice(0, 6).map((item) => `
+      <li><span>${escapeHtml(item[labelKey] || "Unknown")}</span><strong>${escapeHtml(valueBuilder(item))}</strong></li>
+    `).join("");
+    let groups = "";
+    if (dataset.breakageKind === "machine") {
+      groups = `
+        <div class="statistics-breakage-drill-grid-v0262">
+          <section><h4>Reject reasons</h4><ul>${detailRows(selected.reasons, "reason", (item) => `${Number(item.eventCount || 0)}× · ${Number(item.pieces || 0)} pcs`) || "<li><span>No reject reasons recorded</span></li>"}</ul></section>
+          <section><h4>Glass types broken</h4><ul>${detailRows(selected.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`) || "<li><span>No glass detail recorded</span></li>"}</ul></section>
+        </div>`;
+    } else if (dataset.breakageKind === "glass") {
+      groups = `
+        <div class="statistics-breakage-drill-grid-v0262">
+          <section><h4>Machines</h4><ul>${detailRows(selected.machines, "machine", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`) || "<li><span>External remake / no machine attribution</span></li>"}</ul></section>
+          <section><h4>Reject reasons</h4><ul>${detailRows(selected.reasons, "reason", (item) => `${Number(item.eventCount || 0)}× · ${Number(item.pieces || 0)} pcs`) || "<li><span>No internal reject reasons recorded</span></li>"}</ul></section>
+        </div>`;
+    } else if (dataset.breakageKind === "reason") {
+      groups = `<div class="statistics-breakage-drill-grid-v0262 is-single"><section><h4>Glass types for this reason</h4><ul>${detailRows(selected.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`) || "<li><span>No glass detail recorded</span></li>"}</ul></section></div>`;
+    }
+    return `
+      <section class="statistics-chart-selection-v0258 statistics-breakage-selection-v0262" aria-live="polite">
+        <span class="statistics-selection-icon-v0258" aria-hidden="true"></span>
+        <div class="statistics-breakage-selection-summary-v0262">
+          <span>Selected ${escapeHtml(dataset.breakageKind === "reason" ? "reason" : dataset.breakageKind)}</span>
+          <strong>${escapeHtml(selected.label)}</strong>
+          <div><b>${escapeHtml(Number(selected.pieces || 0).toLocaleString())} pcs</b><b>${escapeHtml(statisticsFormatChartValue({ format: "sqft" }, selected.sqft || 0))}</b><b>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, selected.estimatedCost || 0))}</b><b>${escapeHtml(Number(selected.eventCount || 0).toLocaleString())} reject events</b></div>
+        </div>
+        ${groups}
+      </section>`;
+  }
+
   return `
-    <section class="statistics-chart-selection" aria-live="polite">
-      <span>Selected category</span>
-      <strong>${escapeHtml(selected.label)}</strong>
-      <b>${escapeHtml(selected.value)}${escapeHtml(dataset.suffix)}${escapeHtml(shareText)}</b>
+    <section class="statistics-chart-selection-v0258" aria-live="polite">
+      <span class="statistics-selection-icon-v0258" aria-hidden="true"></span>
+      <div>
+        <span>Selected category</span>
+        <strong>${escapeHtml(selected.label)}</strong>
+      </div>
+      <b>${escapeHtml(statisticsFormatChartValue(dataset, selected.value))}${escapeHtml(shareText)}</b>
       <small>${escapeHtml(selected.detail || "")}</small>
     </section>
   `;
@@ -9318,23 +10112,25 @@ function statisticsChartSelectionHtml(dataset, entries, total) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function statisticsBarChartHtml(dataset, entries) {
-  const width = 1120;
-  const labelWidth = 250;
-  const valueWidth = 100;
-  const top = 54;
-  const bottom = 54;
-  const rowHeight = 54;
+  // v0.260: reduce main-chart geometry by about one third so more rows remain
+  // visible while preserving readable labels and click targets.
+  const width = 900;
+  const labelWidth = 160;
+  const valueWidth = 76;
+  const top = 30;
+  const bottom = 34;
+  const rowHeight = 28;
   const plotWidth = width - labelWidth - valueWidth;
   const maxValue = Math.max(...entries.map((entry) => Number(entry.value || 0)), 1);
-  const height = Math.max(430, top + entries.length * rowHeight + bottom);
+  const height = Math.max(250, top + entries.length * rowHeight + bottom);
   const tickCount = 5;
   const ticks = Array.from({ length: tickCount }, (_, index) => {
     const ratio = index / (tickCount - 1);
     const x = labelWidth + plotWidth * ratio;
-    const value = Math.round(maxValue * ratio);
+    const value = maxValue * ratio;
     return `
-      <line x1="${x}" y1="${top - 16}" x2="${x}" y2="${height - bottom + 8}" class="statistics-chart-grid-line"></line>
-      <text x="${x}" y="${height - 18}" text-anchor="middle" class="statistics-chart-axis-label">${escapeHtml(value)}${escapeHtml(dataset.suffix)}</text>
+      <line x1="${x}" y1="${top - 11}" x2="${x}" y2="${height - bottom + 6}" class="statistics-chart-grid-line"></line>
+      <text x="${x}" y="${height - 12}" text-anchor="middle" class="statistics-chart-axis-label">${escapeHtml(statisticsFormatChartValue(dataset, value))}</text>
     `;
   }).join("");
 
@@ -9343,14 +10139,14 @@ function statisticsBarChartHtml(dataset, entries) {
     const barWidth = value > 0 ? Math.max((value / maxValue) * plotWidth, 4) : 0;
     const y = top + index * rowHeight;
     const selected = entry.label === state.homeChartSelectedLabel;
-    const aria = `${entry.label}: ${value}${dataset.suffix}. ${entry.detail || ""}`.trim();
+    const aria = `${entry.label}: ${statisticsFormatChartValue(dataset, value)}. ${entry.detail || ""}`.trim();
     return `
       <g class="statistics-chart-svg-entry ${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}">
         <title>${escapeHtml(aria)}</title>
-        <text x="${labelWidth - 14}" y="${y + 24}" text-anchor="end" class="statistics-chart-category-label">${escapeHtml(truncateChartLabel(entry.label))}</text>
-        <rect x="${labelWidth}" y="${y + 5}" width="${plotWidth}" height="28" rx="8" class="statistics-chart-bar-rail"></rect>
-        <rect x="${labelWidth}" y="${y + 5}" width="${barWidth}" height="28" rx="8" class="statistics-chart-bar-value" style="--chart-color:${chartEntryColor(index)}"></rect>
-        <text x="${width - valueWidth + 14}" y="${y + 24}" class="statistics-chart-value-label">${escapeHtml(value)}${escapeHtml(dataset.suffix)}</text>
+        <text x="${labelWidth - 9}" y="${y + 14}" text-anchor="end" class="statistics-chart-category-label">${escapeHtml(truncateChartLabel(entry.label, 22))}</text>
+        <rect x="${labelWidth}" y="${y + 3}" width="${plotWidth}" height="16" rx="5" class="statistics-chart-bar-rail"></rect>
+        <rect x="${labelWidth}" y="${y + 3}" width="${barWidth}" height="16" rx="5" class="statistics-chart-bar-value" style="--chart-color:${chartEntryColor(index)}"></rect>
+        <text x="${width - valueWidth + 8}" y="${y + 14}" class="statistics-chart-value-label">${escapeHtml(statisticsFormatChartValue(dataset, value))}</text>
       </g>
     `;
   }).join("");
@@ -9358,8 +10154,8 @@ function statisticsBarChartHtml(dataset, entries) {
   return `
     <div class="statistics-chart-svg-viewport statistics-chart-bar-viewport">
       <svg class="statistics-chart-svg statistics-chart-bar-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(dataset.title)} bar chart">
-        <text x="${labelWidth}" y="24" class="statistics-chart-axis-title">Category</text>
-        <text x="${width - valueWidth + 14}" y="24" class="statistics-chart-axis-title">Value</text>
+        <text x="${labelWidth}" y="18" class="statistics-chart-axis-title">Category</text>
+        <text x="${width - valueWidth + 9}" y="18" class="statistics-chart-axis-title">Value</text>
         ${ticks}
         ${rows}
       </svg>
@@ -9374,19 +10170,27 @@ function statisticsBarChartHtml(dataset, entries) {
  */
 function statisticsDonutChartHtml(dataset, entries, total) {
   if (total <= 0) {
-    return `<div class="statistics-chart-modal-empty">The displayed categories are all zero, so a donut chart cannot be drawn. Switch to the bar chart to compare them.</div>`;
+    return `
+      <div class="statistics-chart-empty-v0258">
+        <span class="statistics-empty-icon-v0258" aria-hidden="true"></span>
+        <strong>A donut chart needs a positive total</strong>
+        <p>The displayed categories are all zero. Switch to Bar or Table to compare them.</p>
+      </div>
+    `;
   }
 
-  const size = 480;
+  // v0.260: the default glass-mix donut is intentionally compact so its top-10
+  // legend and supporting content fit comfortably in one desktop viewport.
+  const size = 280;
   const center = size / 2;
-  const radius = 148;
+  const radius = 84;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
   const slices = entries.map((entry, index) => {
     const value = Number(entry.value || 0);
     const length = (value / total) * circumference;
     const selected = entry.label === state.homeChartSelectedLabel;
-    const aria = `${entry.label}: ${value}${dataset.suffix}, ${formatPercent((value / total) * 100)}. ${entry.detail || ""}`.trim();
+    const aria = `${entry.label}: ${statisticsFormatChartValue(dataset, value)}, ${formatPercent((value / total) * 100)}. ${entry.detail || ""}`.trim();
     const markup = `
       <circle
         class="statistics-chart-donut-slice ${selected ? "is-selected" : ""}"
@@ -9398,7 +10202,7 @@ function statisticsDonutChartHtml(dataset, entries, total) {
         cy="${center}"
         r="${radius}"
         fill="none"
-        stroke-width="72"
+        stroke-width="42"
         style="stroke:${chartEntryColor(index)}"
         stroke-dasharray="${length} ${Math.max(circumference - length, 0)}"
         stroke-dashoffset="${-offset}"
@@ -9416,7 +10220,7 @@ function statisticsDonutChartHtml(dataset, entries, total) {
       <button class="statistics-chart-svg-legend-row ${selected ? "is-selected" : ""}" type="button" data-chart-entry-label="${escapeHtml(entry.label)}">
         <i style="--chart-color:${chartEntryColor(index)}"></i>
         <span>${escapeHtml(entry.label)}</span>
-        <strong>${escapeHtml(entry.value)}${escapeHtml(dataset.suffix)} <small>${formatPercent(percent)}</small></strong>
+        <strong>${escapeHtml(statisticsFormatChartValue(dataset, entry.value))} <small>${formatPercent(percent)}</small></strong>
       </button>
     `;
   }).join("");
@@ -9425,11 +10229,11 @@ function statisticsDonutChartHtml(dataset, entries, total) {
     <div class="statistics-chart-donut-layout">
       <div class="statistics-chart-svg-viewport statistics-chart-donut-viewport">
         <svg class="statistics-chart-svg statistics-chart-donut-svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="${escapeHtml(dataset.title)} donut chart">
-          <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="#e8eef7" stroke-width="72"></circle>
+          <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="#e8eef7" stroke-width="50"></circle>
           ${slices}
-          <circle cx="${center}" cy="${center}" r="94" class="statistics-chart-donut-center"></circle>
-          <text x="${center}" y="${center - 2}" text-anchor="middle" class="statistics-chart-donut-total">${escapeHtml(total)}</text>
-          <text x="${center}" y="${center + 28}" text-anchor="middle" class="statistics-chart-donut-caption">Displayed total</text>
+          <circle cx="${center}" cy="${center}" r="54" class="statistics-chart-donut-center"></circle>
+          <text x="${center}" y="${center - 1}" text-anchor="middle" class="statistics-chart-donut-total">${escapeHtml(statisticsFormatChartValue(dataset, total))}</text>
+          <text x="${center}" y="${center + 16}" text-anchor="middle" class="statistics-chart-donut-caption">Displayed total</text>
         </svg>
       </div>
       <div class="statistics-chart-svg-legend" aria-label="Chart categories">${legend}</div>
@@ -9438,102 +10242,261 @@ function statisticsDonutChartHtml(dataset, entries, total) {
 }
 
 /**
- * Purpose: Render the render statistics chart modal workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ * Purpose: Build a responsive line chart for ordered or comparative categories.
+ * Effects: Returns SVG markup only.
  */
-function renderStatisticsChartModal() {
-  if (!els.statsChartModalCanvas) return;
+function statisticsLineChartHtml(dataset, entries) {
+  // v0.260: compact line geometry mirrors the denser table/bar presentation.
+  const width = Math.max(760, entries.length * 54);
+  const height = 300;
+  const left = 48;
+  const right = 28;
+  const top = 28;
+  const bottom = 52;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const maxObserved = Math.max(...entries.map((entry) => Number(entry.value || 0)), 1);
+  const maxValue = dataset.isRate ? 100 : maxObserved;
+  const points = entries.map((entry, index) => {
+    const x = entries.length === 1 ? left + plotWidth / 2 : left + (plotWidth * index) / (entries.length - 1);
+    const y = top + plotHeight - (Number(entry.value || 0) / maxValue) * plotHeight;
+    return { ...entry, x, y };
+  });
+  const path = points.map((point, index) => `${index ? "L" : "M"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+  const area = points.length
+    ? `${path} L ${points[points.length - 1].x.toFixed(2)} ${(top + plotHeight).toFixed(2)} L ${points[0].x.toFixed(2)} ${(top + plotHeight).toFixed(2)} Z`
+    : "";
+  const grid = Array.from({ length: 6 }, (_, index) => {
+    const ratio = index / 5;
+    const y = top + plotHeight - plotHeight * ratio;
+    const value = maxValue * ratio;
+    return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="statistics-chart-grid-line"></line><text x="${left - 8}" y="${y + 3}" text-anchor="end" class="statistics-chart-axis-label">${escapeHtml(statisticsFormatChartValue(dataset, value))}</text>`;
+  }).join("");
+  const labelStep = Math.max(1, Math.ceil(entries.length / 12));
+  const pointMarkup = points.map((point, index) => {
+    const selected = point.label === state.homeChartSelectedLabel;
+    const showLabel = index === 0 || index === points.length - 1 || index % labelStep === 0;
+    const aria = `${point.label}: ${statisticsFormatChartValue(dataset, point.value)}. ${point.detail || ""}`.trim();
+    return `
+      <g class="statistics-chart-line-entry ${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(point.label)}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}">
+        <title>${escapeHtml(aria)}</title>
+        <circle cx="${point.x}" cy="${point.y}" r="${selected ? 5 : 4}" class="statistics-chart-line-point"></circle>
+        <circle cx="${point.x}" cy="${point.y}" r="12" class="statistics-chart-line-hit"></circle>
+        ${showLabel ? `<text x="${point.x}" y="${height - 24}" text-anchor="middle" class="statistics-chart-line-label">${escapeHtml(truncateChartLabel(point.label, 13))}</text>` : ""}
+      </g>
+    `;
+  }).join("");
 
-  if (els.overviewRangeSelect && els.overviewRangeSelect.value !== state.overviewRange) {
-    els.overviewRangeSelect.value = state.overviewRange;
+  return `
+    <div class="statistics-chart-svg-viewport statistics-chart-line-viewport">
+      <svg class="statistics-chart-svg statistics-chart-line-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(dataset.title)} line chart">
+        ${grid}
+        <path d="${area}" class="statistics-chart-line-area"></path>
+        <path d="${path}" class="statistics-chart-line-path"></path>
+        ${pointMarkup}
+      </svg>
+    </div>
+  `;
+}
+
+/**
+ * Purpose: Build an accessible table using the same filtered chart categories.
+ * Effects: Returns table markup only.
+ */
+function statisticsDataTableHtml(dataset, entries, total) {
+  if (dataset?.isBreakageDetail) {
+    const summaryLabels = (items, key, formatter) => (items || []).slice(0, 3).map((item) => `${item[key] || "Unknown"} (${formatter(item)})`).join(" · ") || "—";
+
+    if (dataset.breakageKind === "reason") {
+      const rows = entries.map((entry, index) => `
+        <tr class="${entry.label === state.homeChartSelectedLabel ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0">
+          <td><span class="statistics-table-rank-v0258">${index + 1}</span></td>
+          <td><strong>${escapeHtml(entry.machine || "Unknown machine")}</strong></td>
+          <td><span class="statistics-reason-pill-v0262">${escapeHtml(entry.reason || "Unspecified reason")}</span></td>
+          <td><b>${escapeHtml(Number(entry.eventCount || 0).toLocaleString())}</b></td>
+          <td>${escapeHtml(Number(entry.pieces || 0).toLocaleString())}</td>
+          <td>${escapeHtml(statisticsFormatChartValue({ format: "sqft" }, entry.sqft || 0))}</td>
+          <td>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, entry.estimatedCost || 0))}</td>
+          <td>${escapeHtml(summaryLabels(entry.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs`))}</td>
+        </tr>`).join("");
+      return `<div class="statistics-data-table-shell-v0258"><table class="statistics-data-table-v0258 is-breakage-v0260 is-reasons-v0262"><thead><tr><th>Rank</th><th>Machine</th><th>Reason</th><th>Occurrences</th><th>Pieces</th><th>SQFT</th><th>Cost</th><th>Glass types</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
+
+    const machineMode = dataset.breakageKind === "machine";
+    const rows = entries.map((entry, index) => {
+      const selected = entry.label === state.homeChartSelectedLabel;
+      const coverage = statisticsBreakageCoverageDetail(entry).replace(/^\s*·\s*/, "") || "Complete";
+      const related = machineMode
+        ? summaryLabels(entry.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs`)
+        : summaryLabels(entry.machines, "machine", (item) => `${Number(item.pieces || 0)} pcs`);
+      const reasons = summaryLabels(entry.reasons, "reason", (item) => `${Number(item.eventCount || 0)}×`);
+      return `
+        <tr class="${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0">
+          <td><span class="statistics-table-rank-v0258">${index + 1}</span></td>
+          <td><span class="statistics-table-category-v0258"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span></td>
+          <td><b>${escapeHtml(Number(entry.pieces || 0).toLocaleString())}</b></td>
+          <td><b>${escapeHtml(statisticsFormatChartValue({ format: "sqft" }, entry.sqft || 0))}</b></td>
+          <td><b>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, entry.estimatedCost || 0))}</b></td>
+          <td>${escapeHtml(Number(entry.eventCount || 0).toLocaleString())}</td>
+          <td>${escapeHtml(related)}</td>
+          <td>${escapeHtml(reasons)}</td>
+          <td>${escapeHtml(coverage)}</td>
+        </tr>`;
+    }).join("");
+    return `
+      <div class="statistics-data-table-shell-v0258">
+        <table class="statistics-data-table-v0258 is-breakage-v0260 is-combined-v0262">
+          <thead><tr><th>Rank</th><th>${machineMode ? "Machine / location" : "Glass type"}</th><th>Pieces</th><th>SQFT</th><th>Cost</th><th>Rejects</th><th>${machineMode ? "Glass broken" : "Machines"}</th><th>Top reasons</th><th>Coverage</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
   }
-  if (els.statsChartRangeSelect) els.statsChartRangeSelect.value = state.overviewRange;
 
-  const overviewLists = filterListsByOverviewRange(state.lists);
+  const rows = entries.map((entry, index) => {
+    const share = dataset.shareable === false || total <= 0 ? "—" : formatPercent((Number(entry.value || 0) / total) * 100);
+    const selected = entry.label === state.homeChartSelectedLabel;
+    return `
+      <tr class="${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0">
+        <td><span class="statistics-table-rank-v0258">${index + 1}</span></td>
+        <td><span class="statistics-table-category-v0258"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span></td>
+        <td><b>${escapeHtml(statisticsFormatChartValue(dataset, entry.value))}</b></td>
+        <td>${escapeHtml(share)}</td>
+        <td>${escapeHtml(entry.detail || "")}</td>
+      </tr>`;
+  }).join("");
+  return `<div class="statistics-data-table-shell-v0258"><table class="statistics-data-table-v0258"><thead><tr><th>Rank</th><th>Category</th><th>Value</th><th>Share</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+/**
+ * Purpose: Advance the Statistics display limit in predictable increments.
+ * Effects: Updates only the chart display parameter when invoked by the user.
+ * Flow: Starts at 10 and expands through useful review sizes before showing all
+ * remaining categories, avoiding an unexpectedly tall chart on first load.
+ */
+function statisticsNextDisplayLimit(currentValue = state.homeChartLimit) {
+  const steps = [10, 20, 30, 40, 50, 100];
+  if (String(currentValue) === "all") return "all";
+  const current = Number(currentValue || 10);
+  return String(steps.find((value) => value > current) || "all");
+}
+
+/**
+ * Purpose: Render the full live Statistics analytics workspace inline.
+ * Effects: Synchronizes controls, chart/table markup, summary cards, and selection.
+ */
+function renderStatisticsAnalytics() {
+  if (!els.statisticsChartCanvas) return;
+
   const dataset = statisticsChartDataset(state.homeChartMetric);
-  const donutOption = els.statsChartViewSelect?.querySelector('option[value="donut"]');
-  if (donutOption) donutOption.disabled = dataset.allowDonut === false;
-  if (dataset.allowDonut === false && state.homeChartView === "donut") {
-    state.homeChartView = "bar";
-  }
-
+  if (dataset.allowDonut === false && state.homeChartView === "donut") state.homeChartView = "bar";
   const allEntryCount = (dataset.entries || []).length;
   const filtered = filteredStatisticsChartEntries(dataset);
   const entries = filtered.entries;
   const total = entries.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
 
-  if (els.statsChartModalTitle) els.statsChartModalTitle.textContent = dataset.title;
-  if (els.statsChartModalSubtitle) {
-    els.statsChartModalSubtitle.textContent = `${dataset.subtitle} ${homeStatisticsRangeLabel()}`;
+  if (els.statisticsChartTitle) els.statisticsChartTitle.textContent = dataset.title;
+  if (els.statisticsChartSubtitle) els.statisticsChartSubtitle.textContent = `${dataset.subtitle} ${homeStatisticsRangeLabel()}`;
+  if (els.statisticsChartDatasetIcon) {
+    els.statisticsChartDatasetIcon.className = `statistics-section-icon-v0258 is-analytics is-${dataset.icon || "analytics"}`;
   }
   if (els.statsChartMetricSelect) els.statsChartMetricSelect.value = state.homeChartMetric;
-  if (els.statsChartViewSelect) els.statsChartViewSelect.value = state.homeChartView;
   if (els.statsChartSortSelect) els.statsChartSortSelect.value = state.homeChartSort;
   if (els.statsChartLimitSelect) els.statsChartLimitSelect.value = state.homeChartLimit;
-  if (els.statsChartFilterInput && els.statsChartFilterInput.value !== state.homeChartQuery) {
-    els.statsChartFilterInput.value = state.homeChartQuery;
-  }
-  if (els.statsChartKpis) {
-    els.statsChartKpis.innerHTML = statisticsChartKpiHtml(overviewLists);
-  }
-  if (els.statsChartResultCount) {
-    const range = homeStatisticsRangeParts();
-    els.statsChartResultCount.textContent = `Showing ${entries.length} of ${filtered.totalMatches} matching categories (${allEntryCount} total) for ${range.label}. Select a chart item to inspect it.`;
-  }
-  [
-    els.statsChartRangeSelect,
-    els.statsChartMetricSelect,
-    els.statsChartViewSelect,
-    els.statsChartSortSelect,
-    els.statsChartLimitSelect,
-    els.overviewRangeSelect,
-  ].forEach((select) => {
+  if (els.statsChartFilterInput && els.statsChartFilterInput.value !== state.homeChartQuery) els.statsChartFilterInput.value = state.homeChartQuery;
+  const breakageMeasureVisible = ["breakage-machines", "breakage-glass"].includes(state.homeChartMetric);
+  const externalRemakesVisible = ["breakage-machines", "breakage-glass", "breakage-rate"].includes(state.homeChartMetric);
+  if (els.statisticsBreakageMeasureControl) els.statisticsBreakageMeasureControl.hidden = !breakageMeasureVisible;
+  if (els.statsBreakageMeasureSelect) els.statsBreakageMeasureSelect.value = state.statisticsBreakageMeasure;
+  if (els.statisticsExternalRemakesControl) els.statisticsExternalRemakesControl.hidden = !externalRemakesVisible;
+  if (els.statsIncludeExternalRemakes) els.statsIncludeExternalRemakes.checked = Boolean(state.statisticsIncludeExternalRemakes);
+  [els.statsChartMetricSelect, els.statsBreakageMeasureSelect, els.statsChartSortSelect, els.statsChartLimitSelect, els.overviewRangeSelect].forEach((select) => {
     if (select) syncCustomSelect(select);
   });
 
+  els.statisticsChartViewButtons?.forEach((button) => {
+    const view = button.dataset.statisticsView || "bar";
+    const disabled = view === "donut" && dataset.allowDonut === false;
+    const active = view === state.homeChartView;
+    button.disabled = disabled;
+    button.classList.toggle("app-primary-button", active);
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+
+  if (els.statsChartKpis) els.statsChartKpis.innerHTML = statisticsChartKpiHtml(dataset, entries, filtered.totalMatches, allEntryCount);
+  if (els.statsChartResultCount) {
+    const range = homeStatisticsRangeParts();
+    els.statsChartResultCount.textContent = `Showing ${entries.length} of ${filtered.totalMatches} matching categories (${allEntryCount} total) for ${range.label}. Select any chart point or table row for details.`;
+  }
+
+  const hasMoreData = entries.length < filtered.totalMatches;
+  if (els.statsChartShowMoreRow) els.statsChartShowMoreRow.hidden = !hasMoreData;
+  if (els.statsChartShowMoreBtn) {
+    els.statsChartShowMoreBtn.disabled = !hasMoreData;
+    els.statsChartShowMoreBtn.title = hasMoreData ? `Show more data beyond the current ${entries.length} categories` : "All matching data is displayed";
+  }
+
   if (!entries.length) {
     state.homeChartSelectedLabel = "";
-    els.statsChartModalCanvas.innerHTML = `<div class="statistics-chart-modal-empty">No data is available for this chart in the selected range.</div>`;
+    els.statisticsChartCanvas.innerHTML = `
+      <div class="statistics-chart-empty-v0258">
+        <span class="statistics-empty-icon-v0258" aria-hidden="true"></span>
+        <strong>No data is available</strong>
+        <p>Change the range, data type, or category filter to display results.</p>
+      </div>
+    `;
     return;
   }
 
-  if (!entries.some((entry) => entry.label === state.homeChartSelectedLabel)) {
-    state.homeChartSelectedLabel = entries[0].label;
-  }
+  if (!entries.some((entry) => entry.label === state.homeChartSelectedLabel)) state.homeChartSelectedLabel = entries[0].label;
 
-  const chart = state.homeChartView === "donut"
-    ? statisticsDonutChartHtml(dataset, entries, total)
-    : statisticsBarChartHtml(dataset, entries);
+  let visualization = "";
+  if (state.homeChartView === "donut") visualization = statisticsDonutChartHtml(dataset, entries, total);
+  else if (state.homeChartView === "line") visualization = statisticsLineChartHtml(dataset, entries);
+  else if (state.homeChartView === "table") visualization = statisticsDataTableHtml(dataset, entries, total);
+  else visualization = statisticsBarChartHtml(dataset, entries);
 
-  els.statsChartModalCanvas.innerHTML = `
-    ${chart}
-    ${statisticsChartSelectionHtml(dataset, entries, total)}
-  `;
+  els.statisticsChartCanvas.innerHTML = `${visualization}${statisticsChartSelectionHtml(dataset, entries, total)}`;
 }
 
 /**
- * Purpose: Open the open statistics chart modal workflow using the existing shared UI state.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Build compact supporting charts without repeating the priority cards.
+ * Effects: Updates the supporting chart grid only.
  */
-function openStatisticsChartModal() {
-  if (!els.statsChartModal || !els.statsChartBackdrop) return;
-  els.statsChartModal.hidden = false;
-  els.statsChartBackdrop.hidden = false;
-  renderStatisticsChartModal();
-  updateModalScrollLock();
-}
+function renderStatisticsMiniCharts() {
+  if (!els.statisticsMiniCharts) return;
+  const cards = [
+    { metric: "stages", title: "Stage completion", subtitle: "Completion rate by workflow stage", icon: "progress" },
+    { metric: "stage-open", title: "Open work", subtitle: "Remaining pieces by workflow stage", icon: "open" },
+    { metric: "breakage-machines", measure: "estimatedCost", title: "Breakage cost by machine", subtitle: "Estimated internal reject material cost", icon: "reject" },
+  ];
 
-/**
- * Purpose: Close the close statistics chart modal workflow using the existing shared UI state.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function closeStatisticsChartModal() {
-  if (els.statsChartModal) els.statsChartModal.hidden = true;
-  if (els.statsChartBackdrop) els.statsChartBackdrop.hidden = true;
-  updateModalScrollLock();
+  els.statisticsMiniCharts.innerHTML = cards.map((card) => {
+    const dataset = statisticsChartDataset(card.metric, card.measure || "");
+    const entries = (dataset.entries || []).slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0)).slice(0, 6);
+    const maxValue = Math.max(...entries.map((entry) => Number(entry.value || 0)), 1);
+    const rows = entries.length
+      ? entries.map((entry) => `
+          <div class="statistics-mini-row-v0258">
+            <span title="${escapeHtml(entry.label)}">${escapeHtml(entry.label)}</span>
+            <div><i style="width:${Math.max((Number(entry.value || 0) / maxValue) * 100, Number(entry.value || 0) > 0 ? 3 : 0)}%"></i></div>
+            <strong>${escapeHtml(statisticsFormatChartValue(dataset, entry.value))}</strong>
+          </div>
+        `).join("")
+      : `<div class="statistics-mini-empty-v0258">No data is available for this range.</div>`;
+    return `
+      <article class="statistics-card-v0258 statistics-mini-card-v0258">
+        <header>
+          <span class="statistics-mini-icon-v0258 is-${escapeHtml(card.icon)}" aria-hidden="true"></span>
+          <div><h3>${escapeHtml(card.title)}</h3><p>${escapeHtml(card.subtitle)}</p></div>
+          <button class="statistics-mini-open-button-v0258 app-primary-button" type="button" data-statistics-metric="${escapeHtml(card.metric)}" data-statistics-measure="${escapeHtml(card.measure || "")}">
+            <span class="statistics-button-icon-v0258 is-chart" aria-hidden="true"></span><span>Analyze</span>
+          </button>
+        </header>
+        <div class="statistics-mini-chart-v0258">${rows}</div>
+      </article>
+    `;
+  }).join("");
 }
 
 /**
@@ -9569,107 +10532,102 @@ function selectedRangeRemakeStats(overviewLists = []) {
 }
 
 /**
- * Purpose: Render the render monthly remakes workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ * Purpose: Return the active breakage summary for priority cards and reports.
+ * Effects: Reads report state only.
+ * Flow: Uses internal rejects by default and folds in external remakes only when
+ * the user has explicitly enabled the Statistics comparison toggle.
  */
-function renderMonthlyRemakes(overviewLists = []) {
-  if (!els.homeMonthlyRemakes) return;
-  const stats = selectedRangeRemakeStats(overviewLists);
-  const rangeParts = homeStatisticsRangeParts();
-  els.homeMonthlyRemakes.innerHTML = `
-    <div class="statistics-remake-card ${stats.qty ? "notice" : "ok"}">
-      <small>Remakes</small>
-      <strong>${escapeHtml(stats.qty)}</strong>
-      <span>Filtered range</span>
-      <em>${escapeHtml(stats.rows)} remake row${stats.rows === 1 ? "" : "s"}</em>
-      <b>${escapeHtml(rangeParts.label)}</b>
-    </div>
-  `;
+function selectedRangeBreakageStats() {
+  const breakage = statisticsBreakagePayload();
+  const includeExternal = Boolean(state.statisticsIncludeExternalRemakes);
+  const internal = breakage.internalRejects || {};
+  const external = breakage.externalRemakes || {};
+  const rates = breakage.rates || {};
+  const produced = breakage.producedTotals || {};
+  return {
+    includeExternal,
+    pieces: Number(internal.pieces || 0) + (includeExternal ? Number(external.pieces || 0) : 0),
+    sqft: Number(internal.sqft || 0) + (includeExternal ? Number(external.sqft || 0) : 0),
+    estimatedCost: Number(internal.estimatedCost || 0) + (includeExternal ? Number(external.estimatedCost || 0) : 0),
+    pieceRate: Number(includeExternal ? rates.withExternalPiecesPercent : rates.internalPiecesPercent) || 0,
+    sqftRate: Number(includeExternal ? rates.withExternalSqftPercent : rates.internalSqftPercent) || 0,
+    producedPieces: Number(includeExternal ? produced.withExternalPieces : produced.internalOnlyPieces) || 0,
+    producedSqft: Number(includeExternal ? produced.withExternalSqft : produced.internalOnlySqft) || 0,
+    internal,
+    external,
+  };
 }
 
 /**
- * Purpose: Render the render home statistics workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ * Purpose: Render the dedicated Statistics page summaries and live analytics.
+ * Effects: Updates priority metrics, the main analytics workspace, and mini charts.
  */
 function renderHomeStatistics(overviewLists, overview) {
-  const report = state.homeReportSummary || {};
-  const stages = homeStageBreakdown(overviewLists);
-  const badScans = Number(report.badScanCount || 0);
-  const duplicateScans = Number(report.duplicateScanCount || 0);
-  const sdiCount = Number(report.sdiCount || 0);
-  const manualScans = Number(report.manualScanCount || reportActionCount("manual_scan") || 0);
-  const bayOverrides = Number(report.bayOverrideCount || reportActionCount("indian_trail_receive_bay_override") || 0);
-  const resetScans = reportActionCount("reset_scans");
-  const manualEdits = Number(report.manualEditCount || reportActionCount("manual_edit") || 0);
-  const rackActions = Number(report.rackActionCount || 0);
-  const bayActions = Number(report.bayActionCount || 0);
-  const userActions = Number(report.userActionCount || 0);
-  const topOperator = (report.scansByOperator || [])[0];
+  const breakageStats = selectedRangeBreakageStats();
+  const timedPieces = Number(overview.onTimeQty || 0) + Number(overview.lateQty || 0);
 
-  // Statistics panel is the single source for dashboard KPI boxes.
-  // Keep the top page heading clean, and add future KPI cards here instead.
   if (els.homeStatisticsRangeText) {
     const rangeParts = homeStatisticsRangeParts();
     els.homeStatisticsRangeText.innerHTML = `<b>${escapeHtml(rangeParts.label)}</b><span>${escapeHtml(rangeParts.dates)}</span>`;
   }
 
   if (els.overviewStats) {
-    els.overviewStats.innerHTML = [
-      miniStat("Delivery Progress", formatPercent(overview.deliveryPercent), `${overview.scannedQty}/${overview.totalQty} pieces`),
-      miniStat("On-Time / Late", `${formatPercent(overview.onTimePercent)} / ${overview.lateQty}`, `${overview.onTimeQty} on time`),
-      miniStat("Open Work", overview.remainingQty, "Pieces remaining"),
-      miniStat("Delivery Lists", overview.totalLists, "In selected range"),
-    ].join("");
+    const priorityCards = [
+      {
+        tone: "primary",
+        icon: "completion",
+        label: "Delivery completion",
+        value: formatPercent(overview.deliveryPercent),
+        detail: `${overview.scannedQty} of ${overview.totalQty} pieces scanned`,
+        progress: overview.deliveryPercent,
+      },
+      {
+        tone: overview.remainingQty ? "open" : "success",
+        icon: "open",
+        label: "Open pieces",
+        value: overview.remainingQty,
+        detail: `${overview.totalLists} delivery lists in range`,
+        progress: null,
+      },
+      {
+        tone: overview.lateQty ? "warning" : "success",
+        icon: "clock",
+        label: "On-time completion",
+        value: timedPieces ? formatPercent(overview.onTimePercent) : "—",
+        detail: timedPieces ? `${overview.onTimeQty} on time · ${overview.lateQty} late` : "No timed completions in range",
+        progress: timedPieces ? overview.onTimePercent : null,
+      },
+      {
+        tone: breakageStats.pieces ? "warning" : "success",
+        icon: "reject",
+        label: "Breakage rate",
+        value: statisticsFormatChartValue({ isRate: true }, breakageStats.pieceRate),
+        detail: `${breakageStats.pieces} breakage pieces · ${breakageStats.includeExternal ? "includes external remakes" : "internal rejects only"}`,
+        progress: breakageStats.pieceRate,
+      },
+    ];
+
+    els.overviewStats.innerHTML = priorityCards.map((card) => {
+      const progress = card.progress === null ? null : Number(card.progress);
+      const progressMarkup = progress !== null && Number.isFinite(progress)
+        ? `<div class="statistics-priority-progress-v0258"><span style="width:${Math.min(Math.max(progress, 0), 100)}%"></span></div>`
+        : "";
+      return `
+        <article class="statistics-priority-card-v0258 is-${escapeHtml(card.tone)}">
+          <span class="statistics-priority-icon-v0258 is-${escapeHtml(card.icon)}" aria-hidden="true"></span>
+          <div>
+            <small>${escapeHtml(card.label)}</small>
+            <strong>${escapeHtml(card.value)}</strong>
+            <p>${escapeHtml(card.detail)}</p>
+            ${progressMarkup}
+          </div>
+        </article>
+      `;
+    }).join("");
   }
 
-  renderHomeStatsChart(overviewLists);
-  renderMonthlyRemakes(overviewLists);
-
-  if (els.homeUserCard) {
-    els.homeUserCard.innerHTML = `
-      <div class="statistics-snapshot-grid">
-        ${miniStat("Pieces Scanned", `${overview.scannedQty}/${overview.totalQty}`, `${formatPercent(overview.deliveryPercent)} complete`)}
-        ${miniStat("Remaining", overview.remainingQty, `${overview.totalLists} active lists`)}
-        ${miniStat("Manual Scans", manualScans, "Typed order/item scans")}
-        ${miniStat("Bay Overrides", bayOverrides, "Indian Trail receive")}
-        ${miniStat("Rack Actions", rackActions, "Rack edits, clears, moves")}
-        ${miniStat("Bay Actions", bayActions, "Assign, move, clear, SDI")}
-      </div>
-    `;
-  }
-
-  if (els.homeRecentLists) {
-    els.homeRecentLists.innerHTML = stages.length
-      ? stages
-          .map((stage) => {
-            const percent = stage.totalQty ? (stage.scannedQty / stage.totalQty) * 100 : 0;
-            return `
-              <article class="statistics-stage-card ${escapeHtml(stage.category)}">
-                <div>
-                  <strong>${escapeHtml(stage.label)}</strong>
-                  <span>${escapeHtml(stage.lists)} lists</span>
-                </div>
-                <div class="list-card-progress"><span style="width:${Math.min(percent, 100)}%"></span></div>
-                <small>${escapeHtml(stage.scannedQty)} / ${escapeHtml(stage.totalQty)} scanned - ${formatPercent(percent)}</small>
-              </article>
-            `;
-          })
-          .join("")
-      : `<div><strong>No stage data</strong><span>Import delivery lists to populate statistics.</span></div>`;
-  }
-
-  if (els.homeActivity) {
-    els.homeActivity.innerHTML = [
-      `<article class="statistics-health-card ${badScans ? "warning" : "ok"}"><strong>${escapeHtml(badScans)}</strong><span>Bad scans</span></article>`,
-      `<article class="statistics-health-card ${duplicateScans ? "notice" : "ok"}"><strong>${escapeHtml(duplicateScans)}</strong><span>Duplicate scans</span></article>`,
-      `<article class="statistics-health-card"><strong>${escapeHtml(topOperator?.scans || 0)}</strong><span>${escapeHtml(topOperator?.user || "Top operator")}</span></article>`,
-      `<article class="statistics-health-card ${resetScans ? "notice" : "ok"}"><strong>${escapeHtml(resetScans)}</strong><span>Reset scans</span></article>`,
-      `<article class="statistics-health-card"><strong>${escapeHtml(manualEdits)}</strong><span>Manual edits</span></article>`,
-      `<article class="statistics-health-card"><strong>${escapeHtml(userActions)}</strong><span>User actions</span></article>`,
-    ].join("");
-  }
+  renderStatisticsAnalytics();
+  renderStatisticsMiniCharts();
 }
 
 /**
@@ -9681,9 +10639,9 @@ async function loadHomeReportSummary() {
   if (!state.backend || !hasPermission("view_reports")) return;
   try {
     state.homeReportSummary = await fetchJson(`/api/reports/summary${homeReportDateParams()}`);
-    if (state.page === "home") renderHome();
+    if (state.page === "statistics") renderStatisticsPage();
   } catch {
-    // Reports are a nice-to-have on the dashboard. Keep the home page usable
+    // Report details enrich the Statistics page. Keep the core page usable
     // even when a user lacks report access or the report query fails.
     state.homeReportSummary = null;
   }
@@ -9699,34 +10657,48 @@ function openHomeStatisticsReport() {
   const overview = aggregateListStats(overviewLists);
   const stages = homeStageBreakdown(overviewLists);
   const report = state.homeReportSummary || {};
-  const manualScans = Number(report.manualScanCount || 0);
-  const rackActions = Number(report.rackActionCount || 0);
-  const bayActions = Number(report.bayActionCount || 0);
-  const userActions = Number(report.userActionCount || 0);
+  const breakage = statisticsBreakagePayload();
+  const breakageStats = selectedRangeBreakageStats();
   const generatedAt = new Date().toLocaleString();
-  const rangeLabel = els.overviewRangeSelect?.selectedOptions?.[0]?.textContent || "Current dashboard range";
-  const glassEntries = glassQuantitiesForStatistics(overviewLists);
-  const glassRows = glassEntries
-    .slice(0, 18)
-    .map((row) => `<tr><td>${escapeHtml(row.label)}</td><td>${escapeHtml(row.qty)}</td></tr>`)
-    .join("") || `<tr><td colspan="2">No glass type quantity data available.</td></tr>`;
-  const monthlyRemakeQty = Number(report.monthlyRemakeQty || 0);
-  const monthlyRemakeCount = Number(report.monthlyRemakeCount || 0);
-  const monthlyRemakeMonth = report.monthlyRemakeMonth || new Date().toLocaleString(undefined, { month: "long", year: "numeric" });
-  const operatorRows = (report.scansByOperator || [])
-    .slice(0, 12)
-    .map((row) => `<tr><td>${escapeHtml(row.user || "Unknown")}</td><td>${escapeHtml(row.scans || 0)}</td></tr>`)
-    .join("") || `<tr><td colspan="2">No operator scan data available.</td></tr>`;
-  const incompleteRows = (report.incompleteByDeliveryList || [])
-    .slice(0, 12)
-    .map((row) => `<tr><td>${escapeHtml(row.deliveryList || "")}</td><td>${escapeHtml(row.itemCount || 0)}</td><td>${escapeHtml(row.remainingQty || 0)}</td></tr>`)
-    .join("") || `<tr><td colspan="3">No incomplete-list report data available.</td></tr>`;
+  const rangeLabel = els.overviewRangeSelect?.selectedOptions?.[0]?.textContent || "Current statistics range";
+  const externalLabel = breakageStats.includeExternal ? "Included" : "Excluded";
+
   const stageRows = stages
     .map((stage) => {
       const percent = stage.totalQty ? (stage.scannedQty / stage.totalQty) * 100 : 0;
-      return `<tr><td>${escapeHtml(stage.label)}</td><td>${escapeHtml(stage.lists)}</td><td>${escapeHtml(stage.scannedQty)} / ${escapeHtml(stage.totalQty)}</td><td>${formatPercent(percent)}</td></tr>`;
+      return `<tr><td>${escapeHtml(statisticsStageShortLabel(stage.category))}</td><td>${escapeHtml(stage.totalQty)}</td><td>${escapeHtml(stage.scannedQty)}</td><td>${escapeHtml(stage.remainingQty)}</td><td>${formatPercent(percent)}</td></tr>`;
     })
-    .join("") || `<tr><td colspan="4">No stage data available.</td></tr>`;
+    .join("") || `<tr><td colspan="5">No workflow-stage data is available for this range.</td></tr>`;
+
+  const machineRows = (breakage.internalByMachine || [])
+    .slice(0, 15)
+    .map((row) => {
+      const topGlass = (row.glassTypes || []).slice(0, 3).map((item) => `${item.glassType}: ${Number(item.pieces || 0)} pcs`).join("; ") || "—";
+      const topReasons = (row.reasons || []).slice(0, 3).map((item) => `${item.reason}: ${Number(item.eventCount || 0)}×`).join("; ") || "—";
+      return `<tr><td>${escapeHtml(row.machine || "Unknown machine")}</td><td>${escapeHtml(Number(row.eventCount || 0))}</td><td>${escapeHtml(Number(row.pieces || 0))}</td><td>${escapeHtml(Number(row.sqft || 0).toFixed(1))}</td><td>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, row.estimatedCost || 0))}</td><td>${escapeHtml(topGlass)}</td><td>${escapeHtml(topReasons)}</td></tr>`;
+    })
+    .join("") || `<tr><td colspan="7">No internal rejects are recorded for this range.</td></tr>`;
+
+  const glassRows = statisticsBreakageGlassRows(breakageStats.includeExternal)
+    .sort((a, b) => Number(b.estimatedCost || 0) - Number(a.estimatedCost || 0) || Number(b.sqft || 0) - Number(a.sqft || 0))
+    .slice(0, 15)
+    .map((row) => {
+      const machines = (row.machines || []).slice(0, 3).map((item) => `${item.machine}: ${Number(item.pieces || 0)} pcs`).join("; ") || ((row.sources || []).includes("External remakes") ? "External remake / no machine" : "—");
+      const topReasons = (row.reasons || []).slice(0, 3).map((item) => `${item.reason}: ${Number(item.eventCount || 0)}×`).join("; ") || "—";
+      return `<tr><td>${escapeHtml(row.glassType || "Other Glass")}</td><td>${escapeHtml(Number(row.pieces || 0))}</td><td>${escapeHtml(Number(row.sqft || 0).toFixed(1))}</td><td>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, row.estimatedCost || 0))}</td><td>${escapeHtml(machines)}</td><td>${escapeHtml(topReasons)}</td></tr>`;
+    })
+    .join("") || `<tr><td colspan="6">No breakage by glass type is recorded for this range.</td></tr>`;
+
+  const internalCoverage = breakage.internalRejects || {};
+  const externalCoverage = breakageStats.includeExternal ? (breakage.externalRemakes || {}) : {};
+  const unpricedPieces = Number(internalCoverage.unpricedPieces || 0) + Number(externalCoverage.unpricedPieces || 0);
+  const missingDimensionPieces = Number(internalCoverage.missingDimensionPieces || 0) + Number(externalCoverage.missingDimensionPieces || 0);
+  const coverageNotes = [
+    `Material cost basis: ${String(breakage.costBasis || "USD per square foot")}.`,
+    `External remakes: ${externalLabel}.`,
+    unpricedPieces ? `${unpricedPieces} breakage piece${unpricedPieces === 1 ? "" : "s"} have no configured glass price and are excluded from estimated cost.` : "All priced breakage uses the configured glass-rate table.",
+    missingDimensionPieces ? `${missingDimensionPieces} breakage piece${missingDimensionPieces === 1 ? "" : "s"} lack usable dimensions and are excluded from SQFT/cost calculations.` : "All counted breakage pieces have usable dimensions for SQFT reporting.",
+  ];
 
   const markup = `<!doctype html>
 <html>
@@ -9734,55 +10706,73 @@ function openHomeStatisticsReport() {
   <meta charset="utf-8">
   <title>Delivery Scanner Statistics Report</title>
   <style>
-    body { margin: 24px; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; }
-    header { border-bottom: 3px solid #072a63; padding-bottom: 12px; margin-bottom: 18px; }
-    h1 { margin: 0; color: #041a3d; font-size: 28px; }
-    h2 { margin: 20px 0 8px; color: #041a3d; font-size: 18px; }
-    p { margin: 5px 0 0; color: #526078; font-weight: 700; }
-    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
-    .kpis.secondary { margin-top: -6px; }
-    .kpi { border: 1px solid #d9e1ee; border-radius: 8px; padding: 10px; background: #f8fafc; }
-    .kpi small { display: block; color: #526078; font-weight: 800; }
-    .kpi strong { display: block; margin-top: 4px; font-size: 22px; color: #041a3d; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th, td { border: 1px solid #d9e1ee; padding: 7px 8px; text-align: left; }
-    th { background: #eef3fa; color: #041a3d; }
-    @media print { body { margin: 0.35in; } button { display: none; } }
+    * { box-sizing: border-box; }
+    body { margin: 22px; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #fff; }
+    button { margin-bottom: 12px; border: 1px solid #062f59; border-radius: 8px; background: #062f59; color: #fff; padding: 8px 12px; font-weight: 850; }
+    header { display: flex; justify-content: space-between; gap: 18px; align-items: end; border-bottom: 3px solid #062f59; padding-bottom: 12px; }
+    h1 { margin: 0; color: #041a3d; font-size: 27px; }
+    h2 { margin: 18px 0 8px; color: #041a3d; font-size: 17px; }
+    p { margin: 4px 0 0; color: #526078; font-weight: 700; }
+    .report-meta { text-align: right; font-size: 11px; color: #526078; font-weight: 800; }
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 14px 0 0; }
+    .kpi { border: 1px solid #d7e1ee; border-radius: 8px; background: #f7faff; padding: 9px 10px; }
+    .kpi small { display: block; color: #60728a; font-size: 10px; font-weight: 900; text-transform: uppercase; }
+    .kpi strong { display: block; margin-top: 3px; color: #062f59; font-size: 20px; }
+    .kpi span { display: block; margin-top: 2px; color: #60728a; font-size: 10px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10.5px; }
+    th, td { border: 1px solid #d9e1ee; padding: 5px 6px; text-align: left; vertical-align: middle; }
+    th { background: #edf4fb; color: #173d67; font-size: 9.5px; text-transform: uppercase; }
+    .two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .notes { margin-top: 14px; border: 1px solid #d9e1ee; border-radius: 8px; background: #f8fafc; padding: 9px 11px; }
+    .notes strong { color: #041a3d; }
+    .notes ul { margin: 6px 0 0 18px; padding: 0; color: #526078; font-size: 10px; font-weight: 700; }
+    @page { size: letter landscape; margin: .3in; }
+    @media print { body { margin: 0; } button { display: none; } .two-column { break-inside: avoid; } }
   </style>
 </head>
 <body>
   <button onclick="window.print()">Print / Save PDF</button>
   <header>
-    <h1>Delivery Scanner Statistics Report</h1>
-    <p>${escapeHtml(rangeLabel)} - Generated ${escapeHtml(generatedAt)}</p>
+    <div>
+      <h1>Delivery Scanner Statistics Report</h1>
+      <p>${escapeHtml(rangeLabel)} · ${escapeHtml(homeStatisticsRangeParts().dates)}</p>
+    </div>
+    <div class="report-meta">Generated ${escapeHtml(generatedAt)}<br>External remakes: ${escapeHtml(externalLabel)}</div>
   </header>
+
   <section class="kpis">
-    <div class="kpi"><small>Delivery Progress</small><strong>${formatPercent(overview.deliveryPercent)}</strong><span>${escapeHtml(overview.scannedQty)} / ${escapeHtml(overview.totalQty)} pieces</span></div>
-    <div class="kpi"><small>On-Time Delivery</small><strong>${formatPercent(overview.onTimePercent)}</strong><span>${escapeHtml(overview.onTimeQty)} on time / ${escapeHtml(overview.lateQty)} late</span></div>
-    <div class="kpi"><small>Manual Scans</small><strong>${escapeHtml(manualScans)}</strong><span>Typed order/item scans</span></div>
-    <div class="kpi"><small>Monthly Remakes</small><strong>${escapeHtml(monthlyRemakeQty)}</strong><span>${escapeHtml(monthlyRemakeCount)} rows - ${escapeHtml(monthlyRemakeMonth)}</span></div>
+    <div class="kpi"><small>Delivery completion</small><strong>${formatPercent(overview.deliveryPercent)}</strong><span>${escapeHtml(overview.scannedQty)} / ${escapeHtml(overview.totalQty)} workflow pieces scanned</span></div>
+    <div class="kpi"><small>On-time completion</small><strong>${Number(overview.onTimeQty || 0) + Number(overview.lateQty || 0) ? formatPercent(overview.onTimePercent) : "—"}</strong><span>${escapeHtml(overview.onTimeQty)} on time · ${escapeHtml(overview.lateQty)} late</span></div>
+    <div class="kpi"><small>Breakage pieces</small><strong>${escapeHtml(breakageStats.pieces)}</strong><span>${escapeHtml(breakageStats.sqft.toFixed(1))} ft² rejected/remade</span></div>
+    <div class="kpi"><small>Piece breakage rate</small><strong>${statisticsFormatChartValue({ isRate: true }, breakageStats.pieceRate)}</strong><span>${escapeHtml(breakageStats.pieces)} / ${escapeHtml(breakageStats.producedPieces)} estimated produced pieces</span></div>
   </section>
-  <section class="kpis secondary">
-    <div class="kpi"><small>Bad Scans</small><strong>${escapeHtml(report.badScanCount || 0)}</strong><span>Needs review</span></div>
-    <div class="kpi"><small>Duplicate Scans</small><strong>${escapeHtml(report.duplicateScanCount || 0)}</strong><span>Prevented by system</span></div>
-    <div class="kpi"><small>Rack Actions</small><strong>${escapeHtml(rackActions)}</strong><span>Clears, moves, edits</span></div>
-    <div class="kpi"><small>Bay / User Actions</small><strong>${escapeHtml(bayActions + userActions)}</strong><span>Admin and bay activity</span></div>
+  <section class="kpis">
+    <div class="kpi"><small>SQFT breakage rate</small><strong>${statisticsFormatChartValue({ isRate: true }, breakageStats.sqftRate)}</strong><span>${escapeHtml(breakageStats.sqft.toFixed(1))} / ${escapeHtml(breakageStats.producedSqft.toFixed(1))} ft²</span></div>
+    <div class="kpi"><small>Estimated material loss</small><strong>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, breakageStats.estimatedCost))}</strong><span>Configured material cost per SQFT</span></div>
+    <div class="kpi"><small>Internal reject pieces</small><strong>${escapeHtml(Number(breakageStats.internal.pieces || 0))}</strong><span>${escapeHtml(Number(breakageStats.internal.sqft || 0).toFixed(1))} ft²</span></div>
+    <div class="kpi"><small>External remake pieces</small><strong>${escapeHtml(Number(breakageStats.external.pieces || 0))}</strong><span>${escapeHtml(externalLabel)} in active breakage rate</span></div>
   </section>
-  <h2>Glass Types by Quantity</h2>
-  <table><thead><tr><th>Glass Type</th><th>Qty</th></tr></thead><tbody>${glassRows}</tbody></table>
-  <h2>Stage Breakdown</h2>
-  <table><thead><tr><th>Stage</th><th>Lists</th><th>Scanned Pieces</th><th>Complete</th></tr></thead><tbody>${stageRows}</tbody></table>
-  <h2>Scans by Operator</h2>
-  <table><thead><tr><th>Operator</th><th>Scans</th></tr></thead><tbody>${operatorRows}</tbody></table>
-  <h2>Incomplete Delivery Lists</h2>
-  <table><thead><tr><th>Delivery List</th><th>Rows</th><th>Remaining Qty</th></tr></thead><tbody>${incompleteRows}</tbody></table>
+
+  <h2>Workflow progress</h2>
+  <table><thead><tr><th>Stage</th><th>Total pieces</th><th>Completed</th><th>Open</th><th>Completion</th></tr></thead><tbody>${stageRows}</tbody></table>
+
+  <div class="two-column">
+    <section>
+      <h2>Internal breakage by machine</h2>
+      <table><thead><tr><th>Machine / location</th><th>Reject events</th><th>Pieces</th><th>SQFT</th><th>Estimated cost</th><th>Glass broken</th><th>Top reasons</th></tr></thead><tbody>${machineRows}</tbody></table>
+    </section>
+    <section>
+      <h2>Breakage by glass type</h2>
+      <table><thead><tr><th>Glass type</th><th>Pieces</th><th>SQFT</th><th>Estimated cost</th><th>Top machines</th><th>Top reasons</th></tr></thead><tbody>${glassRows}</tbody></table>
+    </section>
+  </div>
+
+  <section class="notes">
+    <strong>Reporting notes</strong>
+    <ul>${coverageNotes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>
+  </section>
   <script>
     let printCompleteSent = false;
-    /**
-     * Purpose: Run the notify print complete workflow for the browser application.
-     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-     */
     const notifyPrintComplete = () => {
       if (printCompleteSent) return;
       printCompleteSent = true;
@@ -9802,7 +10792,7 @@ function openHomeStatisticsReport() {
 </html>`;
 
   state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
-  const win = window.open("", "deliveryStatisticsPrintWindow", "popup=yes,width=1120,height=820,resizable=yes,scrollbars=yes");
+  const win = window.open("", "deliveryStatisticsPrintWindow", "popup=yes,width=1180,height=820,resizable=yes,scrollbars=yes");
   if (!win) {
     showInlineError("Allow popups to generate the statistics PDF report.");
     return;
@@ -9973,6 +10963,26 @@ function renderHomeStageFilter() {
 }
 
 /**
+ * Purpose: Render the dedicated Statistics page from the shared delivery-list and report state.
+ * Effects: Updates only the Statistics page controls and visual summaries.
+ * Flow: Applies the selected range, then renders priority metrics, the live analytics workspace, and supporting charts.
+ */
+function renderStatisticsPage() {
+  if (!els.statisticsPage) return;
+  const overviewLists = filterListsByOverviewRange(state.lists);
+  const overview = aggregateListStats(overviewLists);
+  if (els.overviewRangeSelect && els.overviewRangeSelect.value !== state.overviewRange) {
+    els.overviewRangeSelect.value = state.overviewRange;
+    syncCustomSelect(els.overviewRangeSelect);
+  }
+  if (els.statisticsLastUpdated) {
+    const updated = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    els.statisticsLastUpdated.textContent = `Updated ${updated}`;
+  }
+  renderHomeStatistics(overviewLists, overview);
+}
+
+/**
  * Purpose: Render the render home workflow using the existing shared UI state.
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
@@ -9980,15 +10990,9 @@ function renderHomeStageFilter() {
 function renderHome() {
   if (!els.homePage) return;
   renderHomeStageFilter();
-  const overviewLists = filterListsByOverviewRange(state.lists);
-  const overview = aggregateListStats(overviewLists);
   if (els.homeWelcome) {
     els.homeWelcome.textContent = `Signed in as ${state.user?.displayName || state.user?.username || "Demo user"}`;
   }
-  if (els.overviewRangeSelect && els.overviewRangeSelect.value !== state.overviewRange) {
-    els.overviewRangeSelect.value = state.overviewRange;
-  }
-  renderHomeStatistics(overviewLists, overview);
   renderTodayProgress();
   const filtered = filteredDeliveryLists();
   const dateGroups = listsByDeliveryDate(filtered);
@@ -9999,27 +11003,38 @@ function renderHome() {
   if (!dateGroups.some((group) => group.date === state.expandedDeliveryDate)) state.expandedDeliveryDate = "";
   if (els.homeListCount) els.homeListCount.textContent = `${dateGroups.length} dates / ${filtered.length} stages`;
   if (els.homeListGrid) {
+    const visibleWeekGroups = deliveryDateGroupsByBusinessWeek(visibleDateGroups);
     els.homeListGrid.innerHTML = visibleDateGroups.length
-      ? visibleDateGroups
-          .map((group) => {
-            const stats = aggregateListStats(group.lists);
-            return `
-              <details class="delivery-date-group" data-delivery-date="${escapeHtml(group.date)}" ${group.date === state.expandedDeliveryDate ? "open" : ""}>
-                <summary>
-                  <span class="home-date-chevron" aria-hidden="true"></span>
-                  <span class="home-date-summary-main">
-                    <strong>${escapeHtml(formatDisplayDate(group.date))}</strong>
-                    <small>${escapeHtml(group.lists.length)} stages - Delivery on-time ${formatPercent(stats.onTimePercent)}</small>
-                    ${renderStackedProgress(group.lists, stats)}
-                  </span>
-                  <span class="delivery-date-total"><small>Pieces</small><strong>${escapeHtml(stats.pieceQty || stats.totalQty)}</strong></span>
-                </summary>
-                <div class="delivery-stage-list">
-                  ${group.lists.map((list) => deliveryListCard(list, "date-grouped")).join("")}
-                </div>
-              </details>
-            `;
-          })
+      ? visibleWeekGroups
+          .map(({ weekKey, label, groups: weekDateGroups }) => `
+            <section class="home-delivery-week" data-home-delivery-week="${escapeHtml(weekKey)}">
+              <header class="home-delivery-week-heading">
+                <span>${escapeHtml(label)}</span>
+                <b>${escapeHtml(weekDateGroups.length)} delivery date${weekDateGroups.length === 1 ? "" : "s"}</b>
+              </header>
+              <div class="home-delivery-week-list">
+                ${weekDateGroups.map((group) => {
+                  const stats = aggregateListStats(group.lists);
+                  return `
+                    <details class="delivery-date-group" data-delivery-date="${escapeHtml(group.date)}" ${group.date === state.expandedDeliveryDate ? "open" : ""}>
+                      <summary>
+                        <span class="home-date-chevron" aria-hidden="true"></span>
+                        <span class="home-date-summary-main">
+                          <strong>${escapeHtml(formatNumericDeliveryDate(group.date))}</strong>
+                          <small>${escapeHtml(group.lists.length)} stages - Delivery on-time ${formatPercent(stats.onTimePercent)}</small>
+                          ${renderStackedProgress(group.lists, stats)}
+                        </span>
+                        <span class="delivery-date-total"><small>Pieces</small><strong>${escapeHtml(stats.pieceQty || stats.totalQty)}</strong></span>
+                      </summary>
+                      <div class="delivery-stage-list">
+                        ${group.lists.map((list) => deliveryListCard(list, "date-grouped")).join("")}
+                      </div>
+                    </details>
+                  `;
+                }).join("")}
+              </div>
+            </section>
+          `)
           .join("")
       : `<div class="admin-empty">No delivery lists match.</div>`;
     els.homeListGrid.querySelectorAll(".delivery-date-group").forEach((details) => {
@@ -10045,7 +11060,8 @@ function renderHome() {
     els.homePager.innerHTML = pagerHtml;
     if (els.homePagerTop) els.homePagerTop.innerHTML = pagerHtml;
   }
-  renderHomeStatistics(overviewLists, overview);
+  // Statistics are rendered once near the start of this workflow; avoid a duplicate DOM pass.
+
   applyPermissionUi();
 }
 
@@ -10080,6 +11096,7 @@ function showPage(page) {
   updateModalScrollLock();
   requestAnimationFrame(() => updateModalScrollLock());
   if (page === "home") renderHome();
+  if (page === "statistics") renderStatisticsPage();
   if (page === "scan") renderScanPage();
   if (page === "racks") refreshRacksPage().catch((error) => showInlineError(error.message, true));
   // Reject history is refreshed on every page entry, replacing the old manual Refresh button.
@@ -10131,7 +11148,7 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
     dialog.className = "outbound-override-backdrop";
     dialog.innerHTML = `
       <section class="outbound-override-dialog" role="dialog" aria-modal="true" aria-labelledby="outboundOverrideTitle">
-        <button type="button" class="outbound-override-close" data-outbound-override-cancel aria-label="Close outbound override">&times;</button>
+        <button type="button" class="outbound-override-close gui-close-button" data-outbound-override-cancel aria-label="Close outbound override">&times;</button>
         <div class="outbound-override-icon" aria-hidden="true"></div>
         <div class="outbound-override-copy">
           <span class="outbound-override-eyebrow">Outbound safety check</span>
@@ -10258,7 +11275,7 @@ async function showIndianTrailOutboundReceiveOverride(payload, scanText, options
     shell.className = "action-confirm-backdrop indian-trail-override-backdrop";
     shell.innerHTML = `
       <section class="action-confirm-dialog indian-trail-override-dialog" role="dialog" aria-modal="true" aria-labelledby="indianTrailBayOverrideTitle">
-        <button type="button" class="action-confirm-close" data-indian-trail-override-cancel aria-label="Close">&times;</button>
+        <button type="button" class="action-confirm-close gui-close-button" data-indian-trail-override-cancel aria-label="Close">&times;</button>
         <span class="action-confirm-icon" aria-hidden="true"></span>
         <div class="action-confirm-copy">
           <small class="dialog-eyebrow">${spanish ? "Asignación de bahía de Indian Trail" : "Indian Trail bay assignment"}</small>
@@ -10756,7 +11773,7 @@ function showCrossDateScanSelection(payload) {
     dialog.className = "action-confirm-backdrop cross-date-scan-backdrop";
     dialog.innerHTML = `
       <section class="cross-date-scan-dialog" role="dialog" aria-modal="true" aria-labelledby="crossDateScanTitle">
-        <button type="button" class="action-confirm-close" data-cross-date-cancel aria-label="Close cross-date selection">&times;</button>
+        <button type="button" class="action-confirm-close gui-close-button" data-cross-date-cancel aria-label="Close cross-date selection">&times;</button>
         <header class="cross-date-scan-heading">
           <span class="cross-date-scan-icon" aria-hidden="true"></span>
           <div>
@@ -10848,7 +11865,7 @@ function showCrossDateSwitchNotice(payload) {
   notice.innerHTML = `
     <span class="cross-date-switch-icon" aria-hidden="true"></span>
     <div><small>Delivery date changed</small><strong>${escapeHtml(payload.crossDateMessage || "The scan was applied to another delivery date.")}</strong>${payload.crossDateSafetyReason ? `<p>${escapeHtml(payload.crossDateSafetyReason)}</p>` : ""}</div>
-    <button type="button" aria-label="Close delivery-date notice">&times;</button>
+    <button type="button" class="gui-close-button" aria-label="Close delivery-date notice">&times;</button>
   `;
   const close = () => notice.remove();
   notice.querySelector("button")?.addEventListener("click", close);
@@ -12330,7 +13347,7 @@ function transitManifestHtml(payload) {
         </div>
         <div class="transit-manifest-header-actions">
           <button class="scan-sound-test-progress-button" type="button" data-progress-sound-test="transit">Test 100% sound</button>
-          <button class="modal-close-x transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
+          <button class="modal-close-x gui-close-button transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
         </div>
       </header>
       <div class="transit-summary-row transit-summary-row-v31">
@@ -12361,7 +13378,7 @@ async function openInTransitManifest() {
     <section class="modal-panel transit-manifest-panel is-loading" role="dialog" aria-modal="true" aria-label="Indian Trail in-transit manifest">
       <header class="transit-manifest-header">
         <div><small>Indian Trail Receiving</small><h2>Loading in-transit manifest...</h2><span>Checking outbound scans against received scans.</span></div>
-        <button class="modal-close-x transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
+        <button class="modal-close-x gui-close-button transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
       </header>
       <div class="transit-empty"><strong>Loading</strong><span>Please wait while the current in-transit jobs are pulled together.</span></div>
     </section>
@@ -12528,28 +13545,34 @@ function renderBayFilterSummary() {
    */
   const countable = (state.bays || []).filter((bay) => bay.active !== false && bayCategoryKind(bay) !== "spacer");
   const visibleCount = countable.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))).length;
-  const summaryText = activeCount
-    ? `${visibleCount} of ${countable.length} bays shown`
-    : `Showing all ${countable.length} physical bays`;
+  const summaryText = `${visibleCount} of ${countable.length} bays shown`;
+  const shouldShowSummary = activeCount > 0;
 
   if (els.bayActiveFilterSummary) {
-    const chipHtml = chips
-      .map(([label, value]) => `<span class="bay-active-filter-chip"><small>${escapeHtml(label)}</small>${escapeHtml(value)}</span>`)
-      .join("");
+    if (!shouldShowSummary) {
+      els.bayActiveFilterSummary.replaceChildren();
+    } else {
+      const chipHtml = chips
+        .map(([label, value]) => `<span class="bay-active-filter-chip"><small>${escapeHtml(label)}</small>${escapeHtml(value)}</span>`)
+        .join("");
 
-    els.bayActiveFilterSummary.innerHTML = `
-      <strong>${escapeHtml(summaryText)}</strong>
-      ${chipHtml ? `<div class="bay-active-filter-chips">${chipHtml}</div>` : `<span>Search and filter controls are tucked into one compact bar.</span>`}
-    `;
+      els.bayActiveFilterSummary.innerHTML = `
+        <strong>${escapeHtml(summaryText)}</strong>
+        <div class="bay-active-filter-chips">${chipHtml}</div>
+      `;
+    }
   }
 
   if (els.bayActiveFilterCount) {
     els.bayActiveFilterCount.textContent = String(activeCount);
-    els.bayActiveFilterCount.hidden = activeCount === 0;
+    els.bayActiveFilterCount.hidden = !shouldShowSummary;
   }
 
-  if (els.bayClearFiltersBtn) els.bayClearFiltersBtn.hidden = activeCount === 0;
-  els.bayActiveFilterBar?.classList.toggle("has-active-filters", activeCount > 0);
+  if (els.bayClearFiltersBtn) els.bayClearFiltersBtn.hidden = !shouldShowSummary;
+  if (els.bayActiveFilterBar) {
+    els.bayActiveFilterBar.hidden = !shouldShowSummary;
+    els.bayActiveFilterBar.classList.toggle("has-active-filters", shouldShowSummary);
+  }
 }
 
 /**
@@ -12588,15 +13611,14 @@ function isWorkbookLegendCell(cell) {
 function statusAbbreviation(status, bay) {
   if (!bay) return "";
   if (bayCategoryKind(bay) === "spacer") return "";
-  const policy = bayPolicyKind(bay);
-  if (policy === "manual") return "MAN";
-  if (policy === "blocked") return "BLK";
-  if (status === "SDI") return "SDI";
-  if (/pre|assign/i.test(status)) return "PRE";
-  if (status === "Full" || status === "Occupied") return "OCC";
-  if (status === "Partial") return "PAR";
-  if (status === "Empty" || status === "Available") return "AVL";
-  return "";
+  const kind = bayStatusKind(bay);
+  if (kind === "picking") return "PICK";
+  if (kind === "preassigned") return "PRE";
+  if (kind === "occupied") return "OCC";
+  if (kind === "available") return "OPEN";
+  if (kind === "manual") return "MAN";
+  if (kind === "blocked") return "BLK";
+  return String(status || "").slice(0, 4).toUpperCase();
 }
 
 /**
@@ -13124,10 +14146,12 @@ function renderBaySection(section) {
   const displayBays = filtersActive ? section.bays.filter((bay) => bayMatchesFilter(bay, baySearchText(bay))) : section.bays;
   const visible = displayBays.length;
   const dimmed = !visible && filtersActive;
-  const occupied = section.bays.filter((bay) => Number(bay.assignedQty || 0) > 0).length;
-  const attention = section.bays.filter((bay) => bayHasErrorState(bay) || Number(bay.staleDays || 0) > 10 || bayStatusKind(bay) === "picking").length;
-  const available = section.bays.filter((bay) => bayStatusKind(bay) === "available").length;
-  const blocked = section.bays.filter((bay) => bayPolicyKind(bay) === "blocked").length;
+  const operationalBays = section.bays.filter((bay) => bayCategoryKind(bay) !== "spacer");
+  const occupied = operationalBays.filter((bay) => ["occupied", "preassigned", "picking"].includes(bayStatusKind(bay))).length;
+  const attention = operationalBays.filter((bay) => bayHasErrorState(bay) || Number(bay.staleDays || 0) > 10 || bayStatusKind(bay) === "picking").length;
+  const available = operationalBays.filter((bay) => bayStatusKind(bay) === "available").length;
+  const blocked = operationalBays.filter((bay) => bayPolicyKind(bay) === "blocked").length;
+  const totalBays = operationalBays.length;
   const groupPolicy = bayGroupPolicySummary(section);
   const open = Boolean(filtersActive) || !state.collapsedBaySections.has(section.label);
   const cols = Math.max(1, Math.min(Number(state.bayGroupColumns[section.label] || 1), 2));
@@ -13139,8 +14163,8 @@ function renderBaySection(section) {
           <strong>${escapeHtml(groupPolicy.label)}</strong>
           <small>${escapeHtml(groupPolicy.detail)}</small>
         </span>
-        <span class="bay-section-counts">
-          <b>${escapeHtml(occupied)}</b>
+        <span class="bay-section-counts" aria-label="${escapeHtml(occupied)} occupied of ${escapeHtml(totalBays)} bays; ${escapeHtml(available)} open">
+          <b>${escapeHtml(occupied)}/${escapeHtml(totalBays)}</b>
           <i>${escapeHtml(available)} open</i>
           ${blocked ? `<em class="blocked">${escapeHtml(blocked)} blocked</em>` : ""}
           ${attention ? `<em>${escapeHtml(attention)} attention</em>` : ""}
@@ -13321,16 +14345,8 @@ function renderBayGrid(physicalSections) {
   if (state.bayEditMode && !state.bayLayoutDraft) initializeBayLayoutDraft();
   if (!state.bayEditMode) {
     const filtersActive = state.baySearch.trim() || state.bayStatusFilter !== "all" || state.bayCategoryFilter !== "all" || state.bayGlassFilter !== "all" || state.baySpecialFilter !== "all";
-    const helper = `
-      <div class="bay-map-helper-v17">
-        <strong>${filtersActive ? "Filtered view" : "Physical floor view"}</strong>
-        <span>${escapeHtml(physicalSections.length)} bay group${physicalSections.length === 1 ? "" : "s"} shown. Click a bay for tools or use Manage Items for bulk order work.</span>
-        <button type="button" data-bay-action="item-management">Open Manage Items</button>
-      </div>
-    `;
     if (filtersActive) {
       return `
-        ${helper}
         <section class="bay-dense-grid bay-dense-grid-v17">
           ${physicalSections.length ? physicalSections.map((section) => renderBaySection(section)).join("") : `<div class="admin-empty">No bays match those filters.</div>`}
         </section>
@@ -13361,7 +14377,6 @@ function renderBayGrid(physicalSections) {
       })
       .join("");
     return `
-      ${helper}
       <section class="bay-floor-grid-v18 bay-floor-grid-v19">
         ${physicalSections.length ? columnMarkup : `<div class="admin-empty">No bays match those filters.</div>`}
       </section>
@@ -13740,7 +14755,7 @@ function showOldBayReviewNotice(count) {
       <span>You have ${escapeHtml(count)} old order${count === 1 ? "" : "s"} that need review.</span>
     </div>
     <button type="button" data-old-bay-review>Review</button>
-    <button type="button" class="old-bay-review-dismiss" data-old-bay-dismiss aria-label="Dismiss old bay notice">&times;</button>
+    <button type="button" class="old-bay-review-dismiss gui-close-button" data-old-bay-dismiss aria-label="Dismiss old bay notice">&times;</button>
   `;
   document.body.appendChild(notice);
   notice.querySelector("[data-old-bay-review]")?.addEventListener("click", async () => {
@@ -16400,12 +17415,14 @@ const PRINT_PRESET_STORAGE_KEY = "deliveryScannerPrintPresetsV205";
 const PRINT_PRESET_LEGACY_STORAGE_KEY = "deliveryScannerPrintPresetsV197";
 const PRINT_ACTIVE_PRESET_STORAGE_KEY = "deliveryScannerActivePrintPresetV205";
 const PRINT_DEFAULT_PRESET_STORAGE_KEY = "deliveryScannerDefaultPrintPresetV227";
-const PRINT_SYSTEM_DEFAULT_PRESET_NAME = "System Default";
+const PRINT_SYSTEM_DEFAULT_PRESET_NAME = "Default";
+const PRINT_LEGACY_SYSTEM_DEFAULT_PRESET_NAME = "System Default";
 const PRINT_SYSTEM_DEFAULT_PRESET = Object.freeze({
   routeGroups: Object.freeze(["airport"]),
   statuses: Object.freeze([]),
   attention: Object.freeze([]),
   glassTypes: Object.freeze([]),
+  glassFamilies: Object.freeze([]),
   outputType: "pdf",
   copies: 1,
   orientation: "portrait",
@@ -16454,7 +17471,7 @@ function printGlassTypeMatchKey(value) {
     .toLowerCase();
 }
 
-/** Commit the visible exact-glass controls into stable Print / Export state. */
+/** Commit a manual exact-glass choice and replace any preset family rule. */
 function commitPrintGlassSelectionFromControls() {
   const allInput = els.printOptionsGlassType?.querySelector('input[data-print-all-glass]');
   const inputs = selectedPrintGlassInputs();
@@ -16465,6 +17482,21 @@ function commitPrintGlassSelectionFromControls() {
     .filter(Boolean);
   state.printAllGlass = Boolean(allInput.checked) || exactValues.length === 0;
   state.printGlassTypes = state.printAllGlass ? [] : [...new Set(exactValues)];
+  // Manual changes intentionally become an exact rule. Preset family rules are
+  // retained across date/route rerenders until the user changes Glass Types.
+  state.printGlassFamilies = [];
+  state.printGlassRuleTypes = state.printAllGlass ? [] : [...state.printGlassTypes];
+}
+
+/** Return true when one product matches the maintained preset glass-family rule. */
+function printGlassMatchesFamilyRule(label, families = state.printGlassFamilies) {
+  const selectedFamilies = new Set((families || []).map((value) => String(value || "").trim().toLowerCase()));
+  return selectedFamilies.has(printGlassCategoryForLabel(label));
+}
+
+/** Report whether an exact/family glass rule should be reapplied after a rerender. */
+function hasPrintGlassSelectionRule() {
+  return Boolean((state.printGlassFamilies || []).length || (state.printGlassRuleTypes || []).length);
 }
 
 /** Return true when the unrestricted All Glass choice is selected. */
@@ -16807,11 +17839,11 @@ function syncPrintDateControlWidth() {
   if (!control || !els.printDateQuickSelect) return;
   const text = customSelectSelectedText(els.printDateQuickSelect) || "Custom Range…";
   const isRange = String(els.printDateFrom?.value || "") !== String(els.printDateTo?.value || "");
-  // Full weekday dates need more room than the former numeric labels, while
-  // custom ranges still grow only as far as the header can comfortably support.
-  const minimum = isRange ? 370 : 230;
-  const maximum = isRange ? 520 : 330;
-  const measured = Math.ceil(text.length * 7.35 + 54);
+  // Compact numeric dates keep the header balanced while custom ranges still
+  // grow enough to show both endpoints without truncation.
+  const minimum = isRange ? 270 : 160;
+  const maximum = isRange ? 390 : 230;
+  const measured = Math.ceil(text.length * 7.2 + 52);
   control.style.setProperty("--print-date-control-width", `${Math.min(Math.max(measured, minimum), maximum)}px`);
 }
 
@@ -16842,17 +17874,11 @@ function printQuickDateShift(value, days) {
   return date;
 }
 
-/** Format one compact Monday-Sunday range for a date-dropdown group heading. */
+/** Format one compact Monday-Friday business-week range for a date-dropdown group heading. */
 function printQuickDateWeekRange(start) {
-  const end = printQuickDateShift(start, 6);
+  const end = printQuickDateShift(start, 4);
   if (!start || !end) return "";
-  const startMonth = start.toLocaleDateString(undefined, { month: "short" });
-  const endMonth = end.toLocaleDateString(undefined, { month: "short" });
-  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
-  const sameYear = start.getFullYear() === end.getFullYear();
-  if (sameMonth) return `${startMonth} ${start.getDate()}–${end.getDate()}, ${end.getFullYear()}`;
-  if (sameYear) return `${startMonth} ${start.getDate()}–${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
-  return `${startMonth} ${start.getDate()}, ${start.getFullYear()}–${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
+  return `${formatNumericDeliveryDate(start)}–${formatNumericDeliveryDate(end)}`;
 }
 
 /** Label date groups relative to the current business week when possible. */
@@ -16927,7 +17953,7 @@ function renderPrintQuickDateOptions() {
   const end = String(els.printDateTo?.value || start);
   const selectedValue = start && start === end ? start : "__range__";
   const rangeOption = start && end && start !== end
-    ? `<option value="__range__">${escapeHtml(formatDisplayDate(start))} – ${escapeHtml(formatDisplayDate(end))}</option>`
+    ? `<option value="__range__">${escapeHtml(formatNumericDeliveryDate(start))} – ${escapeHtml(formatNumericDeliveryDate(end))}</option>`
     : "";
 
   const catalog = printQuickDateCatalog();
@@ -16958,7 +17984,7 @@ function renderPrintQuickDateOptions() {
   const groupedOptions = orderedWeekKeys.map((weekKey) => {
     const options = grouped.get(weekKey)
       .sort((a, b) => b.localeCompare(a))
-      .map((date) => `<option value="${escapeHtml(date)}">${escapeHtml(formatDisplayDate(date))}</option>`)
+      .map((date) => `<option value="${escapeHtml(date)}">${escapeHtml(formatNumericDeliveryDate(date))}</option>`)
       .join("");
     return `<optgroup label="${escapeHtml(printQuickDateWeekLabel(weekKey))}">${options}</optgroup>`;
   }).join("");
@@ -16992,7 +18018,7 @@ function closePrintDateCalendar() {
 }
 
 /** Return one calendar month's six-week button grid. */
-function printCalendarMonthButtons(month, today, availableDates, start, end) {
+function dateRangeCalendarMonthButtons(month, today, availableDates, start, end, dataAttribute = "data-print-calendar-date") {
   const firstCell = new Date(month.getFullYear(), month.getMonth(), 1 - month.getDay());
   return Array.from({ length: 42 }, (_, offset) => {
     const date = new Date(firstCell.getFullYear(), firstCell.getMonth(), firstCell.getDate() + offset);
@@ -17004,8 +18030,12 @@ function printCalendarMonthButtons(month, today, availableDates, start, end) {
     if (key === end) classes.push("is-range-end", "is-selected");
     if (start && end && key > start && key < end) classes.push("is-in-range");
     if (availableDates.has(key)) classes.push("has-delivery-list");
-    return `<button class="${classes.join(" ")}" type="button" data-print-calendar-date="${escapeHtml(key)}" aria-label="${escapeHtml(date.toLocaleDateString())}"><span>${date.getDate()}</span></button>`;
+    return `<button class="${classes.join(" ")}" type="button" ${dataAttribute}="${escapeHtml(key)}" aria-label="${escapeHtml(date.toLocaleDateString())}"><span>${date.getDate()}</span></button>`;
   }).join("");
+}
+
+function printCalendarMonthButtons(month, today, availableDates, start, end) {
+  return dateRangeCalendarMonthButtons(month, today, availableDates, start, end, "data-print-calendar-date");
 }
 
 /** Render a two-month Date From / Date To range picker with today highlighted. */
@@ -17100,10 +18130,9 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
   // cannot overwrite Airport before the first preview is ready. Preview
   // Preview filtering must never depend on detached DOM.
   if (captureControlSelections) {
-    // Route state is committed only by the route-control change handler. Reading
-    // checkbox markup during unrelated date/orientation refreshes caused Airport
-    // to look selected while the maintained route state was briefly replaced.
-    commitPrintGlassSelectionFromControls();
+    // Route and Glass Type state are committed only by their own change handlers.
+    // Date, route, orientation, and catalog rerenders must preserve the preset's
+    // semantic glass-family rule instead of replacing it with today's exact rows.
   }
   const listIds = selectedPrintListIds();
   const renderId = ++state.printEntityRenderId;
@@ -17260,18 +18289,24 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
   const glassEntries = [...glassCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   if (els.printOptionsGlassType) {
     const totalPieces = glassEntries.reduce((sum, entry) => sum + Number(entry[1] || 0), 0);
+    const ruleTypeKeys = new Set((state.printGlassRuleTypes || []).map(printGlassTypeMatchKey));
+    const ruleActive = hasPrintGlassSelectionRule();
     const matchedGlassLabels = glassEntries
       .map(([label]) => label)
-      .filter((label) => previousGlassKeys.has(printGlassTypeMatchKey(label)));
-    const selectAllCurrent = !preserveSelections || previousAllGlass || !matchedGlassLabels.length;
-    const glassMarkup = printGlassCategoryMarkup(glassEntries, previousGlassKeys, selectAllCurrent);
+      .filter((label) => ruleActive
+        ? printGlassMatchesFamilyRule(label) || ruleTypeKeys.has(printGlassTypeMatchKey(label))
+        : previousGlassKeys.has(printGlassTypeMatchKey(label)));
+    // A semantic family preset may legitimately match zero products on one date.
+    // Keep it restrictive so returning to another date automatically restores the
+    // family instead of silently switching the preset to All Glass.
+    const selectAllCurrent = !preserveSelections || (!ruleActive && (previousAllGlass || !matchedGlassLabels.length));
+    const selectedKeys = new Set(matchedGlassLabels.map(printGlassTypeMatchKey));
+    const glassMarkup = printGlassCategoryMarkup(glassEntries, selectedKeys, selectAllCurrent);
     els.printOptionsGlassType.innerHTML = glassEntries.length
-      ? `${printFilterChipMarkup({ value: "__all__", label: "All Glass", count: totalPieces, checked: selectAllCurrent, type: "glass-all", data: 'data-print-all-glass="1"' })}${glassMarkup}<div class="print-glass-search-empty-v197" hidden>No glass types match this search.</div>`
+      ? `${printFilterChipMarkup({ value: "__all__", label: "All Glass", count: totalPieces, checked: selectAllCurrent, type: "glass-all", data: 'data-print-all-glass="1"' })}${glassMarkup}`
       : '<div class="print-filter-empty-v197">No glass types exist for the selected date and route.</div>';
     state.printAllGlass = selectAllCurrent;
     state.printGlassTypes = selectAllCurrent ? [] : matchedGlassLabels;
-    updatePrintAllGlassState();
-    applyPrintGlassSearch();
   }
 
   renderPrintSelectedOrders();
@@ -17290,26 +18325,6 @@ function updatePrintAllGlassState() {
   commitPrintGlassSelectionFromControls();
 }
 
-/** Filter glass chips without discarding their selected state. */
-function applyPrintGlassSearch() {
-  const query = String(els.printGlassSearch?.value || "").trim().toLowerCase();
-  let visible = 0;
-  els.printOptionsGlassType?.querySelectorAll('[data-print-glass-category]').forEach((group) => {
-    let groupVisible = 0;
-    group.querySelectorAll('.print-filter-chip-v197:has(input[data-print-glass-type])').forEach((choice) => {
-      const input = choice.querySelector('input[data-print-glass-type]');
-      const matches = !query || String(input?.dataset.printGlassSearch || input?.value || "").includes(query);
-      choice.hidden = !matches;
-      if (matches) {
-        groupVisible += 1;
-        visible += 1;
-      }
-    });
-    group.hidden = groupVisible === 0;
-  });
-  const empty = els.printOptionsGlassType?.querySelector('.print-glass-search-empty-v197');
-  if (empty) empty.hidden = visible > 0;
-}
 
 /** Return exact order numbers selected for the current package. */
 function selectedPrintOrderValues() {
@@ -17451,9 +18466,9 @@ function addPrintSelectedOrder(order) {
   if (!normalized || selectedPrintOrderValues().includes(normalized)) return;
   state.printSelectedOrders.push(printSelectedOrderRecord(normalized));
   state.printSelectedItems = (state.printSelectedItems || []).filter((entry) => String(entry.order || "") !== normalized);
-  if (els.printSearchInput) els.printSearchInput.value = "";
-  hidePrintSearchSuggestions();
   renderPrintSelectedOrders();
+  renderPrintSearchSuggestions();
+  els.printSearchInput?.focus({ preventScroll: true });
   schedulePrintSelectionPreview(0);
 }
 
@@ -17464,9 +18479,9 @@ function addPrintSelectedItem(selectionKey) {
   const entry = catalog.items.get(cleanKey);
   if (!entry || selectedPrintItemValues().includes(cleanKey) || selectedPrintOrderValues().includes(entry.order)) return;
   state.printSelectedItems.push({ ...entry });
-  if (els.printSearchInput) els.printSearchInput.value = "";
-  hidePrintSearchSuggestions();
   renderPrintSelectedOrders();
+  renderPrintSearchSuggestions();
+  els.printSearchInput?.focus({ preventScroll: true });
   schedulePrintSelectionPreview(0);
 }
 
@@ -17532,10 +18547,21 @@ function renderPrintSearchSuggestions() {
       const itemSelected = selectedItems.has(entry.selectionKey) || orderSelected;
       return `
         <article class="print-search-result-v202">
-          <span><strong>Order ${escapeHtml(entry.order)} · Item ${escapeHtml(entry.item || "—")}</strong><small>${escapeHtml(entry.customer)}</small></span>
-          <span><b>${escapeHtml(entry.job)}</b><small>${escapeHtml(entry.pieces)} pieces · ${escapeHtml(entry.glassType || "Glass")}</small></span>
+          <div class="print-search-result-info-v236">
+            <div class="print-search-result-title-v236">
+              <strong>Order ${escapeHtml(entry.order)}</strong>
+              <span>Item ${escapeHtml(entry.item || "—")}</span>
+            </div>
+            <div class="print-search-result-meta-v236">
+              <span><small>Customer</small><b>${escapeHtml(entry.customer)}</b></span>
+              <span><small>Job</small><b>${escapeHtml(entry.job)}</b></span>
+              <span><small>Glass</small><b>${escapeHtml(entry.glassType || "Glass")}</b></span>
+              <span><small>QTY</small><b>${escapeHtml(entry.pieces)}</b></span>
+              <span><small>Date</small><b>${escapeHtml(formatDisplayDate(entry.deliveryDate || ""))}</b></span>
+            </div>
+          </div>
           <div class="print-search-result-actions-v202">
-            <button type="button" data-print-add-item="${escapeHtml(entry.selectionKey)}" ${itemSelected ? "disabled" : ""}>${itemSelected ? "Selected" : "Add Item"}</button>
+            <button type="button" data-print-add-item="${escapeHtml(entry.selectionKey)}" ${itemSelected ? "disabled" : ""}>${itemSelected ? "Item Added" : "Add Item"}</button>
             <button type="button" data-print-add-order="${escapeHtml(entry.order)}" ${orderSelected ? "disabled" : ""}>${orderSelected ? "Order Added" : "Add Order"}</button>
           </div>
         </article>`;
@@ -17837,7 +18863,7 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
   const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260805-v0.228", window.location.href).href;
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260807-v0.262", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
@@ -17967,11 +18993,12 @@ async function resetPrintFilters({ clearActivePreset = true } = {}) {
   const groups = listsByDeliveryDate();
   const requestedDate = state.printContext?.date || selectedDeliveryDate() || dashboardDateKey() || groups[0]?.date || "";
   if (els.printSearchInput) els.printSearchInput.value = "";
-  if (els.printGlassSearch) els.printGlassSearch.value = "";
   state.printSelectedOrders = [];
   state.printSelectedItems = [];
   setPrintRouteGroups(["airport"], { syncControls: false });
   state.printGlassTypes = [];
+  state.printGlassFamilies = [];
+  state.printGlassRuleTypes = [];
   state.printAllGlass = true;
   if (els.printDateFrom) els.printDateFrom.value = requestedDate;
   if (els.printDateTo) els.printDateTo.value = requestedDate;
@@ -18005,6 +19032,13 @@ function printDefaultPresetStorageKey() {
   return `${PRINT_DEFAULT_PRESET_STORAGE_KEY}:${printPresetUserToken()}`;
 }
 
+/** Protect the built-in Default preset and its legacy display name. */
+function isReservedPrintPresetName(name) {
+  const clean = String(name || "").trim().toLowerCase();
+  return clean === PRINT_SYSTEM_DEFAULT_PRESET_NAME.toLowerCase()
+    || clean === PRINT_LEGACY_SYSTEM_DEFAULT_PRESET_NAME.toLowerCase();
+}
+
 function readPrintPresets() {
   try {
     const userKey = printPresetStorageKey();
@@ -18014,7 +19048,16 @@ function readPrintPresets() {
       if (raw) localStorage.setItem(userKey, raw);
     }
     const parsed = JSON.parse(raw || "{}");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    // Preserve an older user-created preset that happened to use the newly
+    // reserved display name instead of silently discarding its settings.
+    if (parsed[PRINT_SYSTEM_DEFAULT_PRESET_NAME]) {
+      const migratedName = parsed["Default (Saved)"] ? "Default (Saved 2)" : "Default (Saved)";
+      parsed[migratedName] = parsed[PRINT_SYSTEM_DEFAULT_PRESET_NAME];
+    }
+    delete parsed[PRINT_SYSTEM_DEFAULT_PRESET_NAME];
+    delete parsed[PRINT_LEGACY_SYSTEM_DEFAULT_PRESET_NAME];
+    return parsed;
   } catch (_error) {
     return {};
   }
@@ -18023,6 +19066,7 @@ function readPrintPresets() {
 function writePrintPresets(presets) {
   const userPresets = { ...(presets || {}) };
   delete userPresets[PRINT_SYSTEM_DEFAULT_PRESET_NAME];
+  delete userPresets[PRINT_LEGACY_SYSTEM_DEFAULT_PRESET_NAME];
   localStorage.setItem(printPresetStorageKey(), JSON.stringify(userPresets));
 }
 
@@ -18036,6 +19080,7 @@ function availablePrintPresets() {
 
 function activePrintPresetName() {
   const savedName = String(localStorage.getItem(printActivePresetStorageKey()) || "");
+  if (savedName === PRINT_LEGACY_SYSTEM_DEFAULT_PRESET_NAME) return PRINT_SYSTEM_DEFAULT_PRESET_NAME;
   return savedName && availablePrintPresets()[savedName]
     ? savedName
     : PRINT_SYSTEM_DEFAULT_PRESET_NAME;
@@ -18047,7 +19092,7 @@ function activePrintPreset() {
 
 function setActivePrintPresetName(name) {
   const clean = String(name || "");
-  if (!clean || clean === PRINT_SYSTEM_DEFAULT_PRESET_NAME) {
+  if (!clean || isReservedPrintPresetName(clean)) {
     localStorage.removeItem(printActivePresetStorageKey());
     return;
   }
@@ -18058,12 +19103,13 @@ function setActivePrintPresetName(name) {
 /** Return the user's explicit default without inheriting older active-selection state. */
 function defaultPrintPresetName() {
   const savedName = String(localStorage.getItem(printDefaultPresetStorageKey()) || "");
+  if (savedName === PRINT_LEGACY_SYSTEM_DEFAULT_PRESET_NAME) return PRINT_SYSTEM_DEFAULT_PRESET_NAME;
   return savedName && readPrintPresets()[savedName] ? savedName : PRINT_SYSTEM_DEFAULT_PRESET_NAME;
 }
 
 function setDefaultPrintPresetName(name) {
   const clean = String(name || "");
-  if (!clean || clean === PRINT_SYSTEM_DEFAULT_PRESET_NAME) {
+  if (!clean || isReservedPrintPresetName(clean)) {
     localStorage.removeItem(printDefaultPresetStorageKey());
     return;
   }
@@ -18079,48 +19125,111 @@ function renderPrintPresetOptions(selectedName = null) {
   const userOptions = Object.keys(userPresets)
     .filter((name) => name !== PRINT_SYSTEM_DEFAULT_PRESET_NAME)
     .sort((a, b) => a.localeCompare(b))
-    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+    .map((name) => `<option value="${escapeHtml(name)}" data-custom-delete-action="print-preset">${escapeHtml(name)}</option>`)
     .join("");
-  els.printPresetSelect.innerHTML = `<option value="${escapeHtml(PRINT_SYSTEM_DEFAULT_PRESET_NAME)}">System Default · All Items</option>${userOptions}`;
+  els.printPresetSelect.innerHTML = `<option value="${escapeHtml(PRINT_SYSTEM_DEFAULT_PRESET_NAME)}">Default</option>${userOptions}`;
   els.printPresetSelect.value = availablePrintPresets()[requested] ? requested : PRINT_SYSTEM_DEFAULT_PRESET_NAME;
   syncCustomSelect(els.printPresetSelect);
 }
 
-/** Capture the visible filter state for a local preset. */
+/** Capture the maintained filter state for a local preset. */
 function currentPrintPreset() {
-  commitPrintGlassSelectionFromControls();
+  const allGlass = allPrintGlassTypesSelected();
+  const hasFamilyRule = Boolean((state.printGlassFamilies || []).length);
+  const ruleTypes = (state.printGlassRuleTypes || []).length
+    ? [...state.printGlassRuleTypes]
+    : hasFamilyRule
+      ? []
+      : selectedPrintGlassTypeValues();
   return {
     routeGroups: selectedPrintRouteGroups(),
     statuses: selectedPrintStatusValues(),
     attention: selectedPrintAttentionValues(),
-    glassTypes: allPrintGlassTypesSelected() ? [] : selectedPrintGlassTypeValues(),
+    glassTypes: allGlass ? [] : [...new Set(ruleTypes)],
+    glassFamilies: allGlass ? [] : [...new Set(state.printGlassFamilies || [])],
     outputType: String(els.printExportType?.value || "pdf"),
     copies: Math.max(Number(els.printCopies?.value || 1), 1),
     orientation: String(els.printOrientation?.value || "portrait"),
   };
 }
 
-function printPresetBuilderGroup(title, name, options, selectedValues, allLabel = "", help = "") {
+/** Retain semantic choice hooks for the restrained v0.234 route and glass accents. */
+function printPresetChoiceVisualClass(name, value, label = value) {
+  const cleanName = String(name || "").trim().toLowerCase();
+  const cleanValue = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+  if (cleanName === "routes") return `is-route-${cleanValue}`;
+  if (cleanName === "statuses") return `is-status-${cleanValue}`;
+  if (cleanName === "attention") return `is-attention-${cleanValue}`;
+  if (cleanName === "glass") return `is-glass-${printGlassCategoryForLabel(label)}`;
+  return "";
+}
+
+const PRINT_PRESET_GLASS_CATEGORY_DEFINITIONS = Object.freeze([
+  Object.freeze({ value: "annealed", label: "Annealed" }),
+  Object.freeze({ value: "tempered", label: "Tempered" }),
+  Object.freeze({ value: "mirror", label: "Mirror" }),
+]);
+
+/** Group exact products and durable glass-family sets in Create Preset. */
+function printPresetGlassChoiceMarkup(options, selectedValues, selectedFamilies = []) {
   const selected = new Set(selectedValues || []);
-  const allSelected = selected.size === 0;
+  const families = new Set((selectedFamilies || []).map((value) => String(value || "").trim().toLowerCase()));
+  const grouped = new Map(PRINT_PRESET_GLASS_CATEGORY_DEFINITIONS.map(({ value }) => [value, []]));
+  for (const option of options || []) {
+    const category = printGlassCategoryForLabel(option.label || option.value);
+    grouped.get(category).push(option);
+  }
+  return PRINT_PRESET_GLASS_CATEGORY_DEFINITIONS.map(({ value, label }) => {
+    const entries = (grouped.get(value) || [])
+      .sort((a, b) => String(a.label || a.value).localeCompare(String(b.label || b.value)));
+    const familySelected = families.has(value);
+    const choices = entries.length
+      ? entries.map(({ value: optionValue, label: optionLabel }) => `
+        <label class="print-preset-choice-v227 ${escapeHtml(printPresetChoiceVisualClass("glass", optionValue, optionLabel))}">
+          <input type="checkbox" data-preset-value="glass" value="${escapeHtml(optionValue)}" ${selected.has(optionValue) && !familySelected ? "checked" : ""} ${familySelected ? "disabled" : ""}>
+          <span>${escapeHtml(optionLabel)}</span>
+          <i class="print-preset-glass-check-v241" aria-hidden="true">✓</i>
+        </label>`).join("")
+      : `<div class="print-preset-glass-family-empty-v237">No known ${escapeHtml(label.toLowerCase())} products yet.</div>`;
+    return `<section class="print-preset-glass-category-v232 is-${escapeHtml(value)}" data-preset-glass-category="${escapeHtml(value)}">
+      <header>
+        <label class="print-preset-glass-family-v237">
+          <input type="checkbox" data-preset-glass-family="${escapeHtml(value)}" ${familySelected ? "checked" : ""}>
+          <span>${escapeHtml(label)} set</span>
+        </label>
+        <span>${entries.length} ${entries.length === 1 ? "type" : "types"}</span>
+      </header>
+      <div class="print-preset-glass-category-options-v232">${choices}</div>
+    </section>`;
+  }).join("");
+}
+
+function printPresetBuilderGroup(title, name, options, selectedValues, allLabel = "", selectedFamilies = []) {
+  const selected = new Set(selectedValues || []);
+  const selectedFamilyCount = name === "glass" ? (selectedFamilies || []).length : 0;
+  const allSelected = selected.size === 0 && selectedFamilyCount === 0;
+  const selectionSummary = allSelected && allLabel
+    ? allLabel
+    : [selectedFamilyCount ? `${selectedFamilyCount} ${selectedFamilyCount === 1 ? "set" : "sets"}` : "", selected.size ? `${selected.size} ${selected.size === 1 ? "type" : "types"}` : ""]
+      .filter(Boolean)
+      .join(" + ") || "None selected";
+  const allChoiceClass = name === "statuses" ? "is-status-all" : name === "attention" ? "is-attention-all" : name === "glass" ? "is-glass-all" : "";
   const allChoice = allLabel
-    ? `<label class="print-preset-choice-v227 is-all"><input type="checkbox" data-preset-all="${escapeHtml(name)}" ${allSelected ? "checked" : ""}><span>${escapeHtml(allLabel)}</span></label>`
+    ? `<label class="print-preset-choice-v227 is-all ${allChoiceClass}"><input type="checkbox" data-preset-all="${escapeHtml(name)}" ${allSelected ? "checked" : ""}><span>${escapeHtml(allLabel)}</span></label>`
     : "";
-  const glassSearch = name === "glass"
-    ? `<label class="print-preset-glass-search-v227"><span class="visually-hidden">Search preset glass types</span><input type="search" data-preset-glass-search autocomplete="off" placeholder="Search glass types"></label>`
-    : "";
+  const choices = name === "glass"
+    ? printPresetGlassChoiceMarkup(options, selectedValues, selectedFamilies)
+    : options.map(({ value, label }) => `<label class="print-preset-choice-v227 ${escapeHtml(printPresetChoiceVisualClass(name, value, label))}"><input type="checkbox" data-preset-value="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("");
   return `
     <section class="print-preset-filter-row-v227 is-${escapeHtml(name)}" data-preset-group="${escapeHtml(name)}">
-      <header><strong>${escapeHtml(title)}</strong>${help ? `<small>${escapeHtml(help)}</small>` : ""}</header>
+      <header><strong>${escapeHtml(title)}</strong></header>
       <div class="print-preset-filter-control-v227">
-        ${glassSearch}
-        <div class="print-preset-choice-grid-v227">
+        <div class="print-preset-choice-grid-v227 ${name === "glass" ? "is-grouped-glass-v232" : ""}">
           ${allChoice}
-          ${options.map(({ value, label }) => `<label class="print-preset-choice-v227" data-preset-search="${escapeHtml(`${value} ${label}`.toLowerCase())}"><input type="checkbox" data-preset-value="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("")}
-          ${name === "glass" ? '<div class="print-preset-glass-empty-v206" data-preset-glass-empty hidden>No glass types match this search.</div>' : ""}
+          ${choices}
         </div>
       </div>
-      <b data-preset-group-summary>${escapeHtml(allSelected && allLabel ? allLabel : `${selected.size} selected`)}</b>
+      <b data-preset-group-summary>${escapeHtml(selectionSummary)}</b>
     </section>`;
 }
 
@@ -18130,6 +19239,7 @@ function adoptManualEditLookups(payload = {}) {
     products: Array.isArray(payload.products) ? payload.products : [],
     routes: Array.isArray(payload.routes) ? payload.routes : [],
     processes: Array.isArray(payload.processes) ? payload.processes : [],
+    glassCosts: Array.isArray(payload.glassCosts) ? payload.glassCosts : [],
   };
   state.manualEditLookupsLoaded = true;
   return state.manualEditLookups;
@@ -18204,61 +19314,38 @@ function renderPrintPresetSaveSummary(knownGlassOptions = state.printKnownGlassT
   }
   const glassOptions = [...knownGlass.values()].sort((a, b) => String(a.label || a.value).localeCompare(String(b.label || b.value)));
   els.printPresetSummary.innerHTML = `
-    ${printPresetBuilderGroup("Status", "statuses", statusOptions, preset.statuses, "All Status", "Select one or more scan states.")}
-    ${printPresetBuilderGroup("Attention", "attention", attentionOptions, preset.attention, "All Attention", "Find priority or changed pieces.")}
-    ${printPresetBuilderGroup("Routes", "routes", routeOptions, preset.routeGroups, "", "Choose one or more destinations.")}
-    ${printPresetBuilderGroup("Glass Types", "glass", glassOptions, preset.glassTypes, "All Glass", "Select multiple maintained glass types.")}`;
+    ${printPresetBuilderGroup("Status", "statuses", statusOptions, preset.statuses, "All Status")}
+    ${printPresetBuilderGroup("Attention", "attention", attentionOptions, preset.attention, "All Attention")}
+    ${printPresetBuilderGroup("Routes", "routes", routeOptions, preset.routeGroups)}
+    ${printPresetBuilderGroup("Glass Types", "glass", glassOptions, preset.glassTypes, "All Glass", preset.glassFamilies)}`;
   els.printPresetOutputSettings.innerHTML = `
-    <label class="print-preset-option-field-v227"><span>Copies</span><div class="print-preset-copy-stepper-v227"><button type="button" data-preset-copy-change="-1" aria-label="Decrease copies">−</button><input data-preset-copies type="number" min="1" max="10" step="1" value="${Math.max(1, Math.min(Number(preset.copies || 1), 10))}"><button type="button" data-preset-copy-change="1" aria-label="Increase copies">+</button></div></label>
+    <label class="print-preset-option-field-v227"><span>Copies</span><div class="print-preset-copy-stepper-v227"><button type="button" data-preset-copy-change="-1" aria-label="Decrease copies">−</button><input data-preset-copies type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" aria-label="Number of copies" value="${Math.max(1, Math.min(Number(preset.copies || 1), 10))}"><button type="button" data-preset-copy-change="1" aria-label="Increase copies">+</button></div></label>
     <div class="print-preset-option-field-v227 print-preset-orientation-v227"><span>Orientation</span><input data-preset-orientation type="hidden" value="${preset.orientation === "landscape" ? "landscape" : "portrait"}"><div><button type="button" class="${preset.orientation === "landscape" ? "" : "is-active"}" data-preset-orientation-choice="portrait">Portrait</button><button type="button" class="${preset.orientation === "landscape" ? "is-active" : ""}" data-preset-orientation-choice="landscape">Landscape</button></div></div>
     <label class="print-preset-option-field-v227"><span>File Format</span><select data-preset-output-type><option value="pdf" ${preset.outputType === "pdf" ? "selected" : ""}>PDF</option><option value="xlsx" ${preset.outputType === "xlsx" ? "selected" : ""}>Excel Workbook (.xlsx)</option><option value="csv" ${preset.outputType === "csv" ? "selected" : ""}>Comma-Separated Values (.csv)</option></select></label>`;
   enhanceCustomSelects(els.printPresetOutputSettings);
-  renderPrintPresetLiveSummary();
 }
 
 function printPresetFromBuilder() {
   const values = (name) => [...(els.printPresetSummary?.querySelectorAll(`input[data-preset-value="${name}"]:checked`) || [])].map((input) => input.value);
   const allChecked = (name) => Boolean(els.printPresetSummary?.querySelector(`input[data-preset-all="${name}"]`)?.checked);
+  const glassFamilies = [...(els.printPresetSummary?.querySelectorAll('input[data-preset-glass-family]:checked') || [])]
+    .map((input) => String(input.dataset.presetGlassFamily || ""))
+    .filter(Boolean);
+  const allGlass = allChecked("glass");
   return {
-    description: String(els.printPresetDescriptionInput?.value || "").trim().slice(0, 160),
     routeGroups: values("routes").length ? values("routes") : ["airport"],
     statuses: allChecked("statuses") ? [] : values("statuses"),
     attention: allChecked("attention") ? [] : values("attention"),
-    glassTypes: allChecked("glass") ? [] : values("glass"),
+    glassTypes: allGlass ? [] : values("glass"),
+    glassFamilies: allGlass ? [] : glassFamilies,
     outputType: String(els.printPresetOutputSettings?.querySelector("[data-preset-output-type]")?.value || "pdf"),
     copies: Math.max(Number(els.printPresetOutputSettings?.querySelector("[data-preset-copies]")?.value || 1), 1),
     orientation: String(els.printPresetOutputSettings?.querySelector("[data-preset-orientation]")?.value || "portrait"),
   };
 }
 
-/** Render the compact right-column summary from the current builder controls. */
-function renderPrintPresetLiveSummary() {
-  if (!els.printPresetLiveSummary) return;
-  const preset = printPresetFromBuilder();
-  const routeLabels = Object.fromEntries(PRINT_ROUTE_GROUPS.map(({ value, label }) => [value, label]));
-  const statusLabels = { "not-scanned": "Not Scanned", partial: "Partial", complete: "Complete" };
-  const attentionLabels = { remake: "Remakes", rush: "Rushes", reject: "Internal Rejects", updated: "New/Updated", error: "Errors" };
-  const summarize = (values, labels, allLabel) => {
-    if (!(values || []).length) return allLabel;
-    const display = values.map((value) => labels[value] || value);
-    return display.length <= 2 ? display.join(", ") : `${display.length} selected`;
-  };
-  const rows = [
-    ["Name", String(els.printPresetNameInput?.value || "").trim() || "Untitled preset"],
-    ["Status", summarize(preset.statuses, statusLabels, "All Status")],
-    ["Attention", summarize(preset.attention, attentionLabels, "All Attention")],
-    ["Route", summarize(preset.routeGroups, routeLabels, "Airport")],
-    ["Glass Type", preset.glassTypes.length ? (preset.glassTypes.length <= 2 ? preset.glassTypes.join(", ") : `${preset.glassTypes.length} selected`) : "All Glass"],
-    ["Orientation", preset.orientation === "landscape" ? "Landscape" : "Portrait"],
-    ["Copies", String(preset.copies)],
-    ["File Format", preset.outputType === "xlsx" ? "Excel Workbook" : preset.outputType === "csv" ? "CSV" : "PDF"],
-  ];
-  els.printPresetLiveSummary.innerHTML = rows.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
-}
-
 function savePrintPreset() {
   if (els.printPresetNameInput) els.printPresetNameInput.value = "";
-  if (els.printPresetDescriptionInput) els.printPresetDescriptionInput.value = "";
   if (els.printPresetDefaultToggle) els.printPresetDefaultToggle.checked = false;
   if (els.printPresetConfirmBtn) {
     els.printPresetConfirmBtn.disabled = false;
@@ -18274,9 +19361,7 @@ function savePrintPreset() {
   const lookupReady = state.manualEditLookupsLoaded || Boolean(state.manualEditLookups?.products?.length) || !state.backend;
   renderPrintPresetSaveSummary(collectKnownPrintGlassTypes());
   if (els.printPresetStatus) {
-    els.printPresetStatus.textContent = lookupReady
-      ? "Glass types include the Lookup Manager product-name library."
-      : "Preset opened. Loading the Lookup Manager product-name library…";
+    els.printPresetStatus.textContent = lookupReady ? "" : "Loading glass types…";
   }
   if (els.printPresetModalBackdrop) els.printPresetModalBackdrop.hidden = false;
   if (els.printPresetModal) {
@@ -18292,16 +19377,12 @@ function savePrintPreset() {
       .then(() => {
         if (els.printPresetModal?.hidden) return;
         const pendingPreset = printPresetFromBuilder();
-        const searchQuery = String(els.printPresetSummary?.querySelector("[data-preset-glass-search]")?.value || "");
         renderPrintPresetSaveSummary(collectKnownPrintGlassTypes(), pendingPreset);
-        const searchInput = els.printPresetSummary?.querySelector("[data-preset-glass-search]");
-        if (searchInput) searchInput.value = searchQuery;
-        applyPrintPresetGlassSearch();
-        if (els.printPresetStatus) els.printPresetStatus.textContent = "Glass types refreshed from the Lookup Manager product-name library.";
+        if (els.printPresetStatus) els.printPresetStatus.textContent = "";
       })
       .catch((error) => {
         if (els.printPresetStatus && !els.printPresetModal?.hidden) {
-          els.printPresetStatus.textContent = `Lookup Manager glass types could not be loaded. Showing current known values. ${error.message}`;
+          els.printPresetStatus.textContent = `Glass types could not be refreshed. ${error.message}`;
         }
       });
   }
@@ -18317,11 +19398,11 @@ function closePrintPresetModal() {
 /** Update overwrite guidance while the preset name is entered. */
 function updatePrintPresetNameStatus() {
   const name = String(els.printPresetNameInput?.value || "").trim();
-  const reserved = name.toLowerCase() === PRINT_SYSTEM_DEFAULT_PRESET_NAME.toLowerCase();
+  const reserved = isReservedPrintPresetName(name);
   const exists = Boolean(name && readPrintPresets()[name]);
   if (els.printPresetStatus) {
     els.printPresetStatus.textContent = reserved
-      ? "System Default is reserved and cannot be replaced. Choose a different name."
+      ? "Default is reserved and cannot be replaced. Choose a different name."
       : exists
         ? "A preset with this name already exists and will be replaced."
         : "";
@@ -18334,7 +19415,6 @@ function updatePrintPresetNameStatus() {
     els.printPresetSaveOnlyBtn.disabled = reserved;
     els.printPresetSaveOnlyBtn.textContent = exists ? "Replace Preset" : "Save Preset";
   }
-  renderPrintPresetLiveSummary();
 }
 
 /** Refresh one preset section's selection summary after a choice changes. */
@@ -18344,24 +19424,14 @@ function updatePrintPresetBuilderGroupSummary(groupName) {
   if (!section || !summary) return;
   const allInput = section.querySelector(`input[data-preset-all="${groupName}"]`);
   const selectedCount = section.querySelectorAll(`input[data-preset-value="${groupName}"]:checked`).length;
+  const familyCount = groupName === "glass"
+    ? section.querySelectorAll('input[data-preset-glass-family]:checked').length
+    : 0;
   const allLabel = allInput?.closest("label")?.querySelector("span")?.textContent?.trim() || "All";
-  summary.textContent = allInput?.checked ? allLabel : `${selectedCount} selected`;
-  renderPrintPresetLiveSummary();
-}
-
-/** Filter only the glass-type cards inside the preset builder. */
-function applyPrintPresetGlassSearch() {
-  const section = els.printPresetSummary?.querySelector('[data-preset-group="glass"]');
-  const query = String(section?.querySelector("[data-preset-glass-search]")?.value || "").trim().toLowerCase();
-  let visible = 0;
-  section?.querySelectorAll('label:has(input[data-preset-value="glass"])').forEach((choice) => {
-    const searchText = String(choice.dataset.presetSearch || choice.textContent || "").toLowerCase();
-    const matches = !query || searchText.includes(query);
-    choice.hidden = !matches;
-    if (matches) visible += 1;
-  });
-  const empty = section?.querySelector("[data-preset-glass-empty]");
-  if (empty) empty.hidden = visible > 0;
+  const parts = [];
+  if (familyCount) parts.push(`${familyCount} ${familyCount === 1 ? "set" : "sets"}`);
+  if (selectedCount) parts.push(`${selectedCount} ${selectedCount === 1 ? "type" : "types"}`);
+  summary.textContent = allInput?.checked ? allLabel : (parts.join(" + ") || "None selected");
 }
 
 /** Keep All selections exclusive inside the preset builder. */
@@ -18370,7 +19440,8 @@ function handlePrintPresetBuilderChange(event) {
   if (!changed || !els.printPresetSummary?.contains(changed)) return;
   const allName = changed.dataset.presetAll;
   const valueName = changed.dataset.presetValue;
-  const groupName = allName || valueName;
+  const familyName = changed.dataset.presetGlassFamily;
+  const groupName = allName || valueName || (familyName ? "glass" : "");
   if (!groupName) return;
   const allInput = els.printPresetSummary.querySelector(`input[data-preset-all="${groupName}"]`);
   const detailInputs = [...els.printPresetSummary.querySelectorAll(`input[data-preset-value="${groupName}"]`)];
@@ -18390,6 +19461,47 @@ function handlePrintPresetBuilderChange(event) {
         airport.checked = true;
       }
     }
+    updatePrintPresetBuilderGroupSummary(groupName);
+    return;
+  }
+
+  if (groupName === "glass") {
+    const familyInputs = [...els.printPresetSummary.querySelectorAll('input[data-preset-glass-family]')];
+    const syncFamilyDetails = () => {
+      for (const familyInput of familyInputs) {
+        const category = familyInput.closest('[data-preset-glass-category]');
+        category?.querySelectorAll('input[data-preset-value="glass"]').forEach((input) => {
+          if (familyInput.checked) input.checked = false;
+          input.disabled = familyInput.checked;
+        });
+      }
+    };
+
+    if (changed === allInput) {
+      if (allInput.checked) {
+        familyInputs.forEach((input) => { input.checked = false; });
+        detailInputs.forEach((input) => { input.checked = false; input.disabled = false; });
+      } else if (!familyInputs.some((input) => input.checked) && !detailInputs.some((input) => input.checked)) {
+        allInput.checked = true;
+      }
+    } else {
+      if (changed.checked && allInput) allInput.checked = false;
+      syncFamilyDetails();
+      const categorySections = [...els.printPresetSummary.querySelectorAll('[data-preset-glass-category]')];
+      const everyCategoryCovered = categorySections.length > 0 && categorySections.every((category) => {
+        const familyInput = category.querySelector('input[data-preset-glass-family]');
+        const categoryDetails = [...category.querySelectorAll('input[data-preset-value="glass"]')];
+        return Boolean(familyInput?.checked) || (categoryDetails.length > 0 && categoryDetails.every((input) => input.checked));
+      });
+      if (everyCategoryCovered) {
+        if (allInput) allInput.checked = true;
+        familyInputs.forEach((input) => { input.checked = false; });
+        detailInputs.forEach((input) => { input.checked = false; input.disabled = false; });
+      } else if (allInput && !familyInputs.some((input) => input.checked) && !detailInputs.some((input) => input.checked)) {
+        allInput.checked = true;
+      }
+    }
+    syncFamilyDetails();
     updatePrintPresetBuilderGroupSummary(groupName);
     return;
   }
@@ -18417,8 +19529,8 @@ async function confirmPrintPresetSave({ apply = true } = {}) {
     els.printPresetNameInput?.focus();
     return;
   }
-  if (cleanName.toLowerCase() === PRINT_SYSTEM_DEFAULT_PRESET_NAME.toLowerCase()) {
-    if (els.printPresetStatus) els.printPresetStatus.textContent = "System Default is reserved and cannot be replaced. Choose a different name.";
+  if (isReservedPrintPresetName(cleanName)) {
+    if (els.printPresetStatus) els.printPresetStatus.textContent = "Default is reserved and cannot be replaced. Choose a different name.";
     els.printPresetNameInput?.focus();
     return;
   }
@@ -18436,6 +19548,50 @@ async function confirmPrintPresetSave({ apply = true } = {}) {
     showFloatingNotice(`Saved print preset: ${cleanName}`, "success");
   }
 }
+/** Delete one user preset through the shared confirmation and success dialogs. */
+async function deletePrintPreset(name) {
+  const cleanName = String(name || "").trim();
+  if (!cleanName || isReservedPrintPresetName(cleanName)) return;
+  const presets = readPrintPresets();
+  if (!presets[cleanName]) return;
+
+  const confirmed = await confirmWebAppAction({
+    title: "Delete print preset?",
+    message: `Delete <strong>${escapeHtml(cleanName)}</strong>?`,
+    details: "This removes the saved preset from this browser profile. The built-in Default preset remains available.",
+    confirmLabel: "Delete Preset",
+    cancelLabel: "Keep Preset",
+    danger: true,
+  });
+  if (!confirmed) return;
+
+  const wasActive = activePrintPresetName() === cleanName;
+  const wasDefault = defaultPrintPresetName() === cleanName;
+  delete presets[cleanName];
+  writePrintPresets(presets);
+  if (wasDefault) setDefaultPrintPresetName(PRINT_SYSTEM_DEFAULT_PRESET_NAME);
+
+  if (wasActive) {
+    setActivePrintPresetName(PRINT_SYSTEM_DEFAULT_PRESET_NAME);
+    await applyPrintPreset(PRINT_SYSTEM_DEFAULT_PRESET_NAME);
+  } else {
+    renderPrintPresetOptions(activePrintPresetName());
+  }
+
+  playAppSound("save");
+  showActionFeedback({
+    kind: "success",
+    eyebrow: "Preset updated",
+    title: "Preset deleted",
+    message: `${cleanName} was removed successfully.`,
+    details: [
+      ...(wasActive ? [{ label: "Active preset", value: "Default was applied" }] : []),
+      ...(wasDefault ? [{ label: "Personal default", value: "Reset to Default" }] : []),
+    ],
+    secondaryLabel: "Done",
+  });
+}
+
 /** Apply one saved preset after rebuilding the date-dependent choices. */
 async function applyPrintPreset(name, { persist = true } = {}) {
   const preset = availablePrintPresets()[name];
@@ -18444,10 +19600,14 @@ async function applyPrintPreset(name, { persist = true } = {}) {
   if (els.printSearchInput) els.printSearchInput.value = "";
   state.printSelectedOrders = [];
   state.printSelectedItems = [];
-  // Apply the route directly to maintained state before any date-dependent
-  // controls are rendered. Presets and orientation changes must not depend on
-  // checkbox markup that may still belong to a previous render.
+  // Apply route and semantic Glass Type rules before any date-dependent choices
+  // render. Family sets expand against the current date, then automatically
+  // expand again after every later date or route change.
   setPrintRouteGroups(preset.routeGroups?.length ? preset.routeGroups : ["airport"], { syncControls: false });
+  state.printGlassFamilies = [...new Set((preset.glassFamilies || []).map((value) => String(value || "").trim().toLowerCase()).filter(Boolean))];
+  state.printGlassRuleTypes = [...new Set((preset.glassTypes || []).map((value) => String(value || "").trim()).filter(Boolean))];
+  state.printAllGlass = !state.printGlassFamilies.length && !state.printGlassRuleTypes.length;
+  state.printGlassTypes = [];
   await renderPrintFilterChoices({ preserveSelections: true, captureControlSelections: false });
   const applyAllAwareValues = (container, allSelector, detailSelector, values) => {
     const wanted = new Set(values || []);
@@ -18459,21 +19619,9 @@ async function applyPrintPreset(name, { persist = true } = {}) {
   };
   applyAllAwareValues(els.printStatusOptions, 'input[data-print-status-all]', 'input[data-print-status]:not([data-print-status-all])', preset.statuses);
   applyAllAwareValues(els.printAttentionOptions, 'input[data-print-attention-all]', 'input[data-print-attention]:not([data-print-attention-all])', preset.attention);
-  const glassWanted = new Set(preset.glassTypes || []);
-  const glassWantedKeys = new Set([...glassWanted].map(printGlassTypeMatchKey));
-  const selectAllGlass = glassWanted.size === 0;
-  const allGlassInput = els.printOptionsGlassType?.querySelector('input[data-print-all-glass]');
-  if (allGlassInput) allGlassInput.checked = selectAllGlass;
-  selectedPrintGlassInputs().forEach((input) => {
-    const exactValue = String(input.dataset.printGlassValue || input.value || "");
-    input.checked = !selectAllGlass && glassWantedKeys.has(printGlassTypeMatchKey(exactValue));
-  });
-  state.printAllGlass = selectAllGlass;
-  state.printGlassTypes = selectAllGlass ? [] : [...glassWanted];
   if (els.printExportType) els.printExportType.value = ["pdf", "xlsx", "csv"].includes(String(preset.outputType || "")) ? String(preset.outputType) : "pdf";
   setPrintCopies(preset.copies || 1, false);
   setPrintOrientation(preset.orientation || "portrait", false);
-  updatePrintAllGlassState();
   renderPrintSelectedOrders();
   renderPrintSearchSuggestions();
   updatePrintOutputAction();
@@ -18498,6 +19646,8 @@ function openPrintOptions(context = {}) {
   // rendered later, but preview and print already have a real Airport selection.
   setPrintRouteGroups(["airport"], { syncControls: false });
   state.printGlassTypes = [];
+  state.printGlassFamilies = [];
+  state.printGlassRuleTypes = [];
   state.printAllGlass = true;
   setPrintFilterLoadingState();
   renderEmptyPrintSelectionPreview();
@@ -18582,12 +19732,15 @@ function setPrintOrientation(value, refresh = true) {
   return orientation;
 }
 
-/** Return the shared application stylesheet URL used by preview and popup printing. */
-function localPrintPackageStylesheetUrl() {
-  return new URL("static/css/styles.css?v=20260805-v0.228", window.location.href).href;
+/** Return the global and Print-specific stylesheets used by popup printing. */
+function localPrintPackageStylesheetUrls() {
+  return [
+    new URL("static/css/styles.css?v=20260807-v0.262", window.location.href).href,
+    new URL("static/css/print.css?v=20260807-v0.262", window.location.href).href,
+  ];
 }
 
-/** Return only printer-page overrides; all visual sheet styling comes from styles.css. */
+/** Return only printer-page overrides; reusable and Print-specific styling comes from linked stylesheets. */
 function localPrintPackageStyles(orientation) {
   const landscape = orientation === "landscape";
   const printableHeight = landscape ? "7.7in" : "10.2in";
@@ -18626,8 +19779,10 @@ function launchLocalPrintPackage(preview) {
     chunks.forEach((chunk, index) => basePages.push(printSheetPageMarkup(sheet, chunk, index + 1, chunks.length, orientation, preview.generatedAt)));
   }
   const pages = Array.from({ length: copies }, () => basePages).flat();
-  const stylesheetUrl = localPrintPackageStylesheetUrl();
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Delivery List Print Package</title><link rel="stylesheet" href="${escapeHtml(stylesheetUrl)}"><style>${localPrintPackageStyles(orientation)}</style></head><body>${pages.join("")}<script>
+  const stylesheetLinks = localPrintPackageStylesheetUrls()
+    .map((stylesheetUrl) => `<link rel="stylesheet" href="${escapeHtml(stylesheetUrl)}">`)
+    .join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Delivery List Print Package</title>${stylesheetLinks}<style>${localPrintPackageStyles(orientation)}</style></head><body>${pages.join("")}<script>
     window.addEventListener("load", async () => {
       const imageLoads = Array.from(document.images).map((image) => image.complete
         ? (image.decode ? image.decode().catch(() => {}) : Promise.resolve())
@@ -18645,6 +19800,448 @@ function launchLocalPrintPackage(preview) {
   printWindow.document.close();
   printWindow.focus();
   return printWindow;
+}
+
+
+/* ========================================================================== */
+/* v0.243 formatted XLSX and raw CSV exports                                  */
+/* ========================================================================== */
+/*
+ * XLSX intentionally uses a small built-in OOXML writer instead of a remote
+ * library. The scanner can therefore export the exact loaded print selection
+ * on an offline plant network. ZIP entries use the standard stored method;
+ * Excel handles the resulting workbook without a server round trip.
+ */
+const PRINT_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260807-v0.262";
+
+function printExportFileStem(preview = {}) {
+  const route = printSheetRouteLabel().replace(/\s*\|\s*/g, "-");
+  const dates = [...new Set((preview.previewRows || []).map((row) => String(row.deliveryDate || "").trim()).filter(Boolean))];
+  const dateLabel = dates.length === 1 ? dates[0] : dates.length > 1 ? `${dates[0]}-through-${dates[dates.length - 1]}` : "selected-dates";
+  return `${route}-${dateLabel}-delivery-list`
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "delivery-list";
+}
+
+function downloadGeneratedFile(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+/** Export one intentionally plain, analysis-friendly row per selected item. */
+function exportRawPrintCsv(preview = {}) {
+  const headers = [
+    "List ID", "Line Item ID", "Order", "Item", "Job", "Customer",
+    "Delivery Date", "QTY", "Glass Type", "Dimensions", "Status", "Attention", "Route",
+  ];
+  const rows = (preview.previewRows || []).map((row) => [
+    row.listId,
+    row.lineItemId,
+    row.order,
+    row.item,
+    row.job,
+    row.customer,
+    row.deliveryDate,
+    Number(row.pieces || 0),
+    row.glassType,
+    row.dimensions,
+    row.statusLabel,
+    (row.attention || []).map((entry) => entry.label || entry.key).filter(Boolean).join(" | "),
+    row.route,
+  ]);
+  const csv = `\uFEFF${[headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
+  downloadGeneratedFile(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${printExportFileStem(preview)}.csv`);
+}
+
+function xlsxXmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function xlsxColumnName(index) {
+  let value = Math.max(1, Number(index || 1));
+  let name = "";
+  while (value) {
+    value -= 1;
+    name = String.fromCharCode(65 + (value % 26)) + name;
+    value = Math.floor(value / 26);
+  }
+  return name;
+}
+
+function xlsxInlineCell(reference, value, style = 0) {
+  return `<c r="${reference}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xlsxXmlEscape(value)}</t></is></c>`;
+}
+
+function xlsxNumberCell(reference, value, style = 0) {
+  const number = Number(value || 0);
+  return `<c r="${reference}" s="${style}"><v>${Number.isFinite(number) ? number : 0}</v></c>`;
+}
+
+function xlsxRowXml(rowNumber, cells, { height = null } = {}) {
+  const size = height ? ` ht="${height}" customHeight="1"` : "";
+  return `<row r="${rowNumber}"${size}>${cells.join("")}</row>`;
+}
+
+function xlsxSafeSheetName(value, usedNames) {
+  const base = String(value || "Delivery List")
+    .replace(/[\\/*?:\[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 31) || "Delivery List";
+  let candidate = base;
+  let suffix = 2;
+  while (usedNames.has(candidate.toLowerCase())) {
+    const tail = ` ${suffix}`;
+    candidate = `${base.slice(0, Math.max(1, 31 - tail.length))}${tail}`;
+    suffix += 1;
+  }
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
+function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetName) {
+  const rows = Array.isArray(sheet.rows) ? sheet.rows : [];
+  const totalOrders = new Set(rows.map((row) => String(row.order || "").trim()).filter(Boolean)).size;
+  const totalQty = rows.reduce((sum, row) => sum + Number(row.pieces || 0), 0);
+  const badge = sheet.badge ? `  [${sheet.badge}]` : "";
+  const title = `${String(sheet.titleLabel || printSheetTitleLabel())}${badge}`;
+  const dateLabel = String(sheet.dateLabel || printSheetDateLabel(sheet.deliveryDate || ""));
+  const filterSummary = String(sheet.filterSummary || printCurrentFilterSummary());
+  const rowXml = [];
+  const merges = ["C1:H1", "C2:H2", "C3:H3", "C4:H4", "F5:H5"];
+
+  rowXml.push(xlsxRowXml(1, [xlsxInlineCell("C1", title, 1)], { height: 26 }));
+  rowXml.push(xlsxRowXml(2, [xlsxInlineCell("C2", dateLabel, 2)], { height: 20 }));
+  rowXml.push(xlsxRowXml(3, [xlsxInlineCell("C3", `Rows: ${rows.length} | Orders: ${totalOrders} | QTY: ${totalQty}`, 3)], { height: 18 }));
+  rowXml.push(xlsxRowXml(4, [xlsxInlineCell("C4", filterSummary, 4)], { height: 20 }));
+  rowXml.push(xlsxRowXml(5, [xlsxInlineCell("F5", "Checked By: ____________________", 13)], { height: 20 }));
+
+  const headers = ["Job Nr.", "Order", "Item", "QTY", "Dimensions", "Customer", "Route", "Check"];
+  rowXml.push(xlsxRowXml(6, headers.map((label, index) => xlsxInlineCell(`${xlsxColumnName(index + 1)}6`, label, 5)), { height: 22 }));
+
+  let excelRow = 7;
+  let visibleRowIndex = 0;
+  let currentGlass = "";
+  for (const row of rows) {
+    const glass = String(row.glassType || "Unspecified Glass");
+    if (glass !== currentGlass) {
+      rowXml.push(xlsxRowXml(excelRow, [xlsxInlineCell(`A${excelRow}`, glass, 6)], { height: 19 }));
+      merges.push(`A${excelRow}:H${excelRow}`);
+      excelRow += 1;
+      currentGlass = glass;
+    }
+    const alternate = visibleRowIndex % 2 === 1;
+    const textStyle = alternate ? 8 : 7;
+    const centeredStyle = alternate ? 10 : 9;
+    const checkStyle = alternate ? 12 : 11;
+    const values = [
+      row.job || row.glassType || "",
+      row.order || "",
+      row.item || "",
+      Number(row.pieces || 0),
+      row.dimensions || "",
+      row.customer || "",
+      row.route || "Indian Trail",
+      "☐",
+    ];
+    const cells = values.map((value, index) => {
+      const reference = `${xlsxColumnName(index + 1)}${excelRow}`;
+      if (index === 3) return xlsxNumberCell(reference, value, centeredStyle);
+      if (index === 7) return xlsxInlineCell(reference, value, checkStyle);
+      return xlsxInlineCell(reference, value, textStyle);
+    });
+    rowXml.push(xlsxRowXml(excelRow, cells, { height: 18 }));
+    excelRow += 1;
+    visibleRowIndex += 1;
+  }
+
+  const footerRow = excelRow + 1;
+  rowXml.push(xlsxRowXml(footerRow, [xlsxInlineCell(`A${footerRow}`, `Printed at: ${printPreviewTimestamp(generatedAt)}`, 14)], { height: 18 }));
+  merges.push(`A${footerRow}:H${footerRow}`);
+
+  const printArea = `'${sheetName.replace(/'/g, "''")}'!$A$1:$H$${footerRow}`;
+  const printTitles = `'${sheetName.replace(/'/g, "''")}'!$6:$6`;
+  const worksheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
+  <dimension ref="A1:H${footerRow}"/>
+  <sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="6" topLeftCell="A7" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <sheetFormatPr defaultRowHeight="18"/>
+  <cols>
+    <col min="1" max="1" width="24" customWidth="1"/><col min="2" max="2" width="14" customWidth="1"/>
+    <col min="3" max="3" width="10" customWidth="1"/><col min="4" max="4" width="8" customWidth="1"/>
+    <col min="5" max="5" width="17" customWidth="1"/><col min="6" max="6" width="25" customWidth="1"/>
+    <col min="7" max="7" width="15" customWidth="1"/><col min="8" max="8" width="9" customWidth="1"/>
+  </cols>
+  <sheetData>${rowXml.join("")}</sheetData>
+  <mergeCells count="${merges.length}">${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>
+  <pageMargins left="0.25" right="0.25" top="0.35" bottom="0.35" header="0.15" footer="0.15"/>
+  <pageSetup paperSize="1" orientation="${orientation}" fitToWidth="1" fitToHeight="0" horizontalDpi="300" verticalDpi="300"/>
+  <drawing r:id="rId1"/>
+</worksheet>`;
+  return { worksheet, footerRow, printArea, printTitles, sheetIndex };
+}
+
+function xlsxStylesDocument() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="6">
+    <font><sz val="10"/><name val="Aptos"/><family val="2"/></font>
+    <font><b/><sz val="17"/><color rgb="FF17395F"/><name val="Aptos Display"/><family val="2"/></font>
+    <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/><family val="2"/></font>
+    <font><b/><sz val="10"/><color rgb="FF17395F"/><name val="Aptos"/><family val="2"/></font>
+    <font><sz val="9"/><color rgb="FF3E536D"/><name val="Aptos"/><family val="2"/></font>
+    <font><i/><sz val="9"/><color rgb="FF526078"/><name val="Aptos"/><family val="2"/></font>
+  </fonts>
+  <fills count="6">
+    <fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF1D4F91"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFDCE9F5"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFDDEEDF"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFF4F7FA"/><bgColor indexed="64"/></patternFill></fill>
+  </fills>
+  <borders count="3">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border><left style="thin"><color rgb="FFC4CFDB"/></left><right style="thin"><color rgb="FFC4CFDB"/></right><top style="thin"><color rgb="FFC4CFDB"/></top><bottom style="thin"><color rgb="FFC4CFDB"/></bottom><diagonal/></border>
+    <border><left/><right/><top/><bottom style="medium"><color rgb="FF1D4F91"/></bottom><diagonal/></border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="15">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="2" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
+    <xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
+    <xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" indent="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" shrinkToFit="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" shrinkToFit="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>`;
+}
+
+function xlsxDrawingDocument(imageId = 1) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:twoCellAnchor editAs="oneCell">
+    <xdr:from><xdr:col>0</xdr:col><xdr:colOff>50000</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>30000</xdr:rowOff></xdr:from>
+    <xdr:to><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>4</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
+    <xdr:pic>
+      <xdr:nvPicPr><xdr:cNvPr id="${imageId}" name="Barefoot Company and Builders FirstSource logo"/><xdr:cNvPicPr/></xdr:nvPicPr>
+      <xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>
+      <xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>
+    </xdr:pic>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>`;
+}
+
+let xlsxCrcTable = null;
+function xlsxCrc32(bytes) {
+  if (!xlsxCrcTable) {
+    xlsxCrcTable = new Uint32Array(256);
+    for (let index = 0; index < 256; index += 1) {
+      let value = index;
+      for (let bit = 0; bit < 8; bit += 1) value = (value & 1) ? (0xEDB88320 ^ (value >>> 1)) : (value >>> 1);
+      xlsxCrcTable[index] = value >>> 0;
+    }
+  }
+  let crc = 0xFFFFFFFF;
+  for (const byte of bytes) crc = xlsxCrcTable[(crc ^ byte) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function xlsxZipDateParts(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear());
+  const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+  const dosDate = ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { dosTime, dosDate };
+}
+
+function xlsxConcatBytes(parts) {
+  const length = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+  return output;
+}
+
+function xlsxStoredZip(entries) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  const { dosTime, dosDate } = xlsxZipDateParts();
+  let localOffset = 0;
+
+  for (const entry of entries) {
+    const nameBytes = encoder.encode(entry.name);
+    const dataBytes = entry.data instanceof Uint8Array ? entry.data : encoder.encode(String(entry.data));
+    const crc = xlsxCrc32(dataBytes);
+    const localHeader = new Uint8Array(30);
+    const localView = new DataView(localHeader.buffer);
+    localView.setUint32(0, 0x04034B50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0x0800, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint16(10, dosTime, true);
+    localView.setUint16(12, dosDate, true);
+    localView.setUint32(14, crc, true);
+    localView.setUint32(18, dataBytes.length, true);
+    localView.setUint32(22, dataBytes.length, true);
+    localView.setUint16(26, nameBytes.length, true);
+    localView.setUint16(28, 0, true);
+    localParts.push(localHeader, nameBytes, dataBytes);
+
+    const centralHeader = new Uint8Array(46);
+    const centralView = new DataView(centralHeader.buffer);
+    centralView.setUint32(0, 0x02014B50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0x0800, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint16(12, dosTime, true);
+    centralView.setUint16(14, dosDate, true);
+    centralView.setUint32(16, crc, true);
+    centralView.setUint32(20, dataBytes.length, true);
+    centralView.setUint32(24, dataBytes.length, true);
+    centralView.setUint16(28, nameBytes.length, true);
+    centralView.setUint16(30, 0, true);
+    centralView.setUint16(32, 0, true);
+    centralView.setUint16(34, 0, true);
+    centralView.setUint16(36, 0, true);
+    centralView.setUint32(38, 0, true);
+    centralView.setUint32(42, localOffset, true);
+    centralParts.push(centralHeader, nameBytes);
+    localOffset += localHeader.length + nameBytes.length + dataBytes.length;
+  }
+
+  const centralDirectory = xlsxConcatBytes(centralParts);
+  const end = new Uint8Array(22);
+  const endView = new DataView(end.buffer);
+  endView.setUint32(0, 0x06054B50, true);
+  endView.setUint16(4, 0, true);
+  endView.setUint16(6, 0, true);
+  endView.setUint16(8, entries.length, true);
+  endView.setUint16(10, entries.length, true);
+  endView.setUint32(12, centralDirectory.length, true);
+  endView.setUint32(16, localOffset, true);
+  endView.setUint16(20, 0, true);
+  return xlsxConcatBytes([...localParts, centralDirectory, end]);
+}
+
+/** Build one logo-bearing, print-configured worksheet for each printable sheet. */
+function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "portrait") {
+  const sheets = Array.isArray(preview.previewSheets) && preview.previewSheets.length
+    ? preview.previewSheets
+    : buildLocalPrintSheets(printFilteredRows());
+  const usedNames = new Set();
+  const sheetRecords = sheets.map((sheet, index) => {
+    const datePart = String(sheet.deliveryDate || "Date").replace(/^\d{4}-/, "");
+    const modePart = sheet.mode === "rush" ? "Rush" : sheet.mode === "remake" ? "Remake" : "Delivery";
+    const name = xlsxSafeSheetName(`${datePart} ${modePart}`, usedNames);
+    return { sheet, index: index + 1, name };
+  });
+  const generatedAt = preview.generatedAt || new Date().toISOString();
+  const worksheetRecords = sheetRecords.map(({ sheet, index, name }) => xlsxSheetDocument(sheet, orientation, generatedAt, index, name));
+  const encoder = new TextEncoder();
+  const entries = [];
+  const worksheetOverrides = sheetRecords.map(({ index }) => `<Override PartName="/xl/worksheets/sheet${index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
+  const drawingOverrides = sheetRecords.map(({ index }) => `<Override PartName="/xl/drawings/drawing${index}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join("");
+
+  entries.push({ name: "[Content_Types].xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  ${worksheetOverrides}${drawingOverrides}
+</Types>` });
+  entries.push({ name: "_rels/.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>` });
+  entries.push({ name: "docProps/core.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>Formatted Delivery List</dc:title><dc:creator>Delivery List Scanner</dc:creator><cp:lastModifiedBy>Delivery List Scanner</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${xlsxXmlEscape(generatedAt)}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${xlsxXmlEscape(generatedAt)}</dcterms:modified>
+</cp:coreProperties>` });
+  entries.push({ name: "docProps/app.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>Delivery List Scanner</Application><AppVersion>0.262</AppVersion><Company>Builders FirstSource</Company>
+  <TitlesOfParts><vt:vector size="${sheetRecords.length}" baseType="lpstr">${sheetRecords.map(({ name }) => `<vt:lpstr>${xlsxXmlEscape(name)}</vt:lpstr>`).join("")}</vt:vector></TitlesOfParts>
+</Properties>` });
+
+  const workbookSheets = sheetRecords.map(({ index, name }) => `<sheet name="${xlsxXmlEscape(name)}" sheetId="${index}" r:id="rId${index}"/>`).join("");
+  const definedNames = worksheetRecords.map((record, index) => `<definedName name="_xlnm.Print_Area" localSheetId="${index}">${record.printArea}</definedName><definedName name="_xlnm.Print_Titles" localSheetId="${index}">${record.printTitles}</definedName>`).join("");
+  entries.push({ name: "xl/workbook.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="14000"/></bookViews>
+  <sheets>${workbookSheets}</sheets><definedNames>${definedNames}</definedNames><calcPr calcId="191029" fullCalcOnLoad="1"/>
+</workbook>` });
+  entries.push({ name: "xl/_rels/workbook.xml.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${sheetRecords.map(({ index }) => `<Relationship Id="rId${index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index}.xml"/>`).join("")}
+  <Relationship Id="rId${sheetRecords.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>` });
+  entries.push({ name: "xl/styles.xml", data: xlsxStylesDocument() });
+  entries.push({ name: "xl/media/logo.png", data: logoBytes instanceof Uint8Array ? logoBytes : new Uint8Array(logoBytes || []) });
+
+  for (const record of worksheetRecords) {
+    const index = record.sheetIndex;
+    entries.push({ name: `xl/worksheets/sheet${index}.xml`, data: record.worksheet });
+    entries.push({ name: `xl/worksheets/_rels/sheet${index}.xml.rels`, data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${index}.xml"/></Relationships>` });
+    entries.push({ name: `xl/drawings/drawing${index}.xml`, data: xlsxDrawingDocument(index) });
+    entries.push({ name: `xl/drawings/_rels/drawing${index}.xml.rels`, data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.png"/></Relationships>` });
+  }
+  return xlsxStoredZip(entries.map((entry) => ({ ...entry, data: entry.data instanceof Uint8Array ? entry.data : encoder.encode(String(entry.data)) })));
+}
+
+async function exportFormattedPrintXlsx(preview = {}) {
+  const logoUrl = new URL(PRINT_XLSX_LOGO_PATH, window.location.href).href;
+  const logoResponse = await fetch(logoUrl, { cache: "force-cache" });
+  if (!logoResponse.ok) throw new Error("The delivery-list logo could not be loaded for the Excel workbook.");
+  const logoBytes = new Uint8Array(await logoResponse.arrayBuffer());
+  const orientation = String(els.printOrientation?.value || "portrait") === "landscape" ? "landscape" : "portrait";
+  const workbookBytes = buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation);
+  downloadGeneratedFile(new Blob([workbookBytes], { type: PRINT_XLSX_CONTENT_TYPE }), `${printExportFileStem(preview)}.xlsx`);
 }
 
 /** Keep the single output button aligned with the selected file type. */
@@ -18683,15 +20280,12 @@ async function submitPrintOptions(mode = "pdf") {
     launchLocalPrintPackage(localPreview);
     return;
   }
-  if (!state.backend) { showInlineError("Spreadsheet exports require the scanner server.", false); return; }
   const originalLabel = els.printOutputActionLabel?.textContent || "Export List";
   if (els.printOptionsSubmit) els.printOptionsSubmit.disabled = true;
-  if (els.printOutputActionLabel) els.printOutputActionLabel.textContent = "Preparing Export…";
+  if (els.printOutputActionLabel) els.printOutputActionLabel.textContent = selectedMode === "xlsx" ? "Building Workbook…" : "Preparing CSV…";
   try {
-    const session = await fetchJson("/api/print/package-session", { method: "POST", body: JSON.stringify(printBackendSelectionPayload()) });
-    const token = encodeURIComponent(String(session?.token || ""));
-    if (!token) throw new Error("The server did not create an export selection token.");
-    window.open(selectedMode === "xlsx" ? `/api/export/package.xlsx?token=${token}` : `/api/export/package.csv?token=${token}`, "_blank", "noopener");
+    if (selectedMode === "xlsx") await exportFormattedPrintXlsx(localPreview);
+    else exportRawPrintCsv(localPreview);
   } catch (error) {
     showInlineError(error.message || "Could not prepare the selected delivery-list export.", false);
   } finally {
@@ -19680,6 +21274,7 @@ function setBayModalSection(kind, section = "workspace") {
 
 const ADMIN_MODAL_PROFILES = {
   deliveryLists: {
+    showStatus: true,
     title: "All Delivery Lists",
     eyebrow: "Delivery List Management",
     description: "Search active delivery dates, review stage progress, and open the maintained edit, reset, or delete actions.",
@@ -19704,6 +21299,7 @@ const ADMIN_MODAL_PROFILES = {
     group: "records",
   },
   manualEdit: {
+    showStatus: true,
     title: "Manual Delivery List Edit",
     eyebrow: "Delivery List Management",
     description: "Locate a list, review its line items, and apply intentional manual corrections without changing unrelated stages.",
@@ -19728,6 +21324,7 @@ const ADMIN_MODAL_PROFILES = {
     group: "access",
   },
   sessions: {
+    showStatus: true,
     title: "Active Sessions",
     eyebrow: "Security & Activity",
     description: "Review currently active scanner sessions, assigned stations, and recent user activity.",
@@ -19824,6 +21421,7 @@ const ADMIN_MODAL_PROFILES = {
     group: "racks",
   },
   recentScans: {
+    showStatus: true,
     title: "All Scans",
     eyebrow: "Scan Audit",
     description: "Review recent scan activity, operational outcomes, and maintained location-correction controls.",
@@ -19840,6 +21438,7 @@ function adminModalProfile(kind, options = null) {
     description: "Manage scanner configuration and operational records from one controlled workspace.",
     context: "Management workspace",
     status: "Admin access",
+    showStatus: false,
     group: "configuration",
   };
   const profile = { ...fallback, ...(ADMIN_MODAL_PROFILES[kind] || {}) };
@@ -19869,7 +21468,11 @@ function applyAdminModalProfile(kind, options = null) {
   if (els.adminModalTitle) els.adminModalTitle.textContent = profile.title;
   if (els.adminModalEyebrow) els.adminModalEyebrow.textContent = profile.eyebrow;
   if (els.adminModalDescription) els.adminModalDescription.textContent = profile.description;
-  if (els.adminModalStatusText) els.adminModalStatusText.textContent = profile.status;
+  if (els.adminModalStatusText) {
+    els.adminModalStatusText.textContent = profile.status;
+    const statusPill = els.adminModalStatusText.closest(".admin-modal-health-pill");
+    if (statusPill) statusPill.hidden = !Boolean(profile.showStatus);
+  }
   if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = profile.title;
   if (els.adminModal) els.adminModal.dataset.group = profile.group;
   return profile;
@@ -20096,6 +21699,7 @@ function lookupBucketForType(type) {
   const clean = String(type || "").trim().toLowerCase();
   if (clean === "route") return "routes";
   if (clean === "process") return "processes";
+  if (clean === "glass_cost") return "glassCosts";
   return "products";
 }
 
@@ -20116,6 +21720,18 @@ function lookupItemsForType(type) {
  */
 function lookupEditorMeta(type) {
   const clean = String(type || "product").trim().toLowerCase();
+  if (clean === "glass_cost") {
+    return {
+      type: "glass_cost",
+      title: "Glass cost",
+      explanation: "Controls the material cost per square foot used by Statistics breakage reporting. New or previously unpriced glass types can be added here without a database migration.",
+      valueLabel: "Glass type",
+      valuePlaceholder: "3/8 Clear",
+      labelPlaceholder: "1.83",
+      example: "3/8 Clear → $1.83 / SQFT",
+      className: "glass-costs",
+    };
+  }
   if (clean === "route") {
     return {
       type: "route",
@@ -20160,6 +21776,7 @@ function lookupEditorMeta(type) {
 function lookupListHtml(type, items = []) {
   const meta = lookupEditorMeta(type);
   const visibleItems = items;
+  const isGlassCost = meta.type === "glass_cost";
 
   return `
     <section class="lookup-manager-list lookup-library ${escapeHtml(meta.className)}">
@@ -20175,7 +21792,7 @@ function lookupListHtml(type, items = []) {
       <div class="lookup-library-search">
         <label class="search-box">
           <span class="search-icon" aria-hidden="true"></span>
-          <input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="Search saved values, labels, categories, or match terms...">
+          <input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="${isGlassCost ? "Search glass types or costs..." : "Search saved values, labels, categories, or match terms..."}">
         </label>
       </div>
 
@@ -20183,16 +21800,23 @@ function lookupListHtml(type, items = []) {
         ${
           visibleItems.length
             ? visibleItems
-                .map((item) => `
-                  <article class="lookup-row" data-lookup-row data-lookup-search="${escapeHtml([item.label, item.value, item.category, item.matchTerms, item.source].join(" ").toLowerCase())}">
+                .map((item) => {
+                  const hasRate = item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate));
+                  const rate = hasRate ? Number(item.rate) : 0;
+                  const costText = hasRate ? `$${rate.toFixed(2)} / SQFT` : "Cost not configured";
+                  const sourceLabel = String(item.source || "manual");
+                  return `
+                  <article class="lookup-row" data-lookup-row data-lookup-search="${escapeHtml([item.label, item.value, item.category, item.matchTerms, sourceLabel, isGlassCost ? costText : ""].join(" ").toLowerCase())}">
                     <div class="lookup-row-main">
                       <span class="lookup-row-heading">
                         <strong>${escapeHtml(item.label || item.value)}</strong>
-                        <em class="lookup-source-badge ${String(item.source || "manual").toLowerCase() === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(item.source || "manual")}</em>
+                        <em class="lookup-source-badge ${sourceLabel.toLowerCase() === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(sourceLabel)}</em>
                       </span>
-                      <span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
-                      ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
-                      ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}
+                      ${isGlassCost
+                        ? `<span><b>Cost per SQFT:</b> ${escapeHtml(costText)}</span>${!hasRate ? "<small>Add a cost so breakage dollars can be calculated for this glass.</small>" : ""}`
+                        : `<span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
+                           ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
+                           ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`}
                     </div>
                     <button
                       type="button"
@@ -20200,8 +21824,8 @@ function lookupListHtml(type, items = []) {
                       data-lookup-use-type="${escapeHtml(meta.type)}"
                       data-lookup-use-value="${escapeHtml(item.value || "")}"
                     >Use / edit</button>
-                  </article>
-                `)
+                  </article>`;
+                })
                 .join("")
             : `<div class="lookup-empty-state" data-lookup-empty-state><strong>No matching ${escapeHtml(meta.title.toLowerCase())} values</strong><span>Clear the search or save a new value with the editor.</span></div>`
         }
@@ -20216,18 +21840,23 @@ function lookupListHtml(type, items = []) {
  * Flow: Builds guided type tabs, a contextual editor with a live preview, and one focused searchable library instead of three competing columns.
  */
 function lookupManagerModalHtml() {
-  const lookups = state.manualEditLookups || { products: [], routes: [], processes: [] };
-  const activeType = ["product", "route", "process"].includes(state.lookupManagerActiveType)
+  const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [] };
+  const supportedTypes = ["product", "route", "process", "glass_cost"];
+  const activeType = supportedTypes.includes(state.lookupManagerActiveType)
     ? state.lookupManagerActiveType
     : "product";
   const meta = lookupEditorMeta(activeType);
   const productCount = (lookups.products || []).length;
   const routeCount = (lookups.routes || []).length;
   const processCount = (lookups.processes || []).length;
+  const glassCostCount = (lookups.glassCosts || []).filter((item) => item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate))).length;
+  const glassCostTotal = (lookups.glassCosts || []).length;
+  const isGlassCost = activeType === "glass_cost";
   const tabs = [
     ["product", "Products", productCount],
     ["route", "Routes", routeCount],
     ["process", "Process states", processCount],
+    ["glass_cost", "Glass costs", glassCostTotal],
   ];
 
   return `
@@ -20235,13 +21864,13 @@ function lookupManagerModalHtml() {
       <section class="lookup-manager-hero">
         <div>
           <span class="lookup-hero-label">Lookup Manager</span>
-          <strong>Maintain the choices used by manual delivery-list editing</strong>
-          <span>Choose one type, review what each field controls, and use the live preview before saving. Existing values can be loaded back into the editor.</span>
+          <strong>Maintain editing choices and Statistics material costs</strong>
+          <span>Choose one library, review what each field controls, and save updates in one place. Glass costs feed breakage-dollar reporting immediately.</span>
         </div>
         <div class="lookup-manager-kpis">
           ${miniStat("Products", productCount)}
           ${miniStat("Routes", routeCount)}
-          ${miniStat("Processes", processCount)}
+          ${miniStat("Priced glass", `${glassCostCount}/${glassCostTotal}`)}
         </div>
       </section>
 
@@ -20271,13 +21900,21 @@ function lookupManagerModalHtml() {
               <label>
                 <span>${escapeHtml(meta.valueLabel)}</span>
                 <input id="lookupValueInput" type="text" autocomplete="off" placeholder="${escapeHtml(meta.valuePlaceholder)}">
-                <small>This is the exact value saved to the delivery-list item.</small>
+                <small>${isGlassCost ? "Use the glass/product wording that should match imported delivery-list data." : "This is the exact value saved to the delivery-list item."}</small>
               </label>
-              <label>
-                <span>Display label</span>
-                <input id="lookupLabelInput" type="text" autocomplete="off" placeholder="${escapeHtml(meta.labelPlaceholder)}">
-                <small>This is the cleaner wording users see in dropdowns.</small>
-              </label>
+              ${isGlassCost ? `
+                <label>
+                  <span>Cost per SQFT</span>
+                  <input id="lookupCostInput" type="number" min="0" step="0.01" inputmode="decimal" autocomplete="off" placeholder="1.83">
+                  <small>Material-only cost used for reject and breakage reporting.</small>
+                </label>
+              ` : `
+                <label>
+                  <span>Display label</span>
+                  <input id="lookupLabelInput" type="text" autocomplete="off" placeholder="${escapeHtml(meta.labelPlaceholder)}">
+                  <small>This is the cleaner wording users see in dropdowns.</small>
+                </label>
+              `}
             </div>
 
             <div class="lookup-route-fields" data-lookup-route-fields ${activeType === "route" ? "" : "hidden"}>
@@ -20298,14 +21935,14 @@ function lookupManagerModalHtml() {
               <div>
                 <small>Preview before saving</small>
                 <strong data-lookup-preview-label>${escapeHtml(meta.example.split(" → ")[1])}</strong>
-                <span><b>Saved value:</b> <em data-lookup-preview-value>${escapeHtml(meta.example.split(" → ")[0])}</em></span>
+                <span><b>${isGlassCost ? "Glass type" : "Saved value"}:</b> <em data-lookup-preview-value>${escapeHtml(meta.example.split(" → ")[0])}</em></span>
                 <p data-lookup-preview-note>${escapeHtml(meta.explanation)}</p>
               </div>
             </aside>
 
             <footer class="lookup-form-actions">
               <button type="button" class="secondary" data-lookup-clear-form>Clear form</button>
-              <button type="submit">Save lookup</button>
+              <button type="submit">${isGlassCost ? "Save glass cost" : "Save lookup"}</button>
             </footer>
           </form>
         </section>
@@ -20326,6 +21963,7 @@ function syncLookupManagerFormGuidance() {
   const meta = lookupEditorMeta(type);
   const value = document.getElementById("lookupValueInput")?.value.trim() || meta.example.split(" → ")[0];
   const label = document.getElementById("lookupLabelInput")?.value.trim() || value || meta.example.split(" → ")[1];
+  const costInput = document.getElementById("lookupCostInput");
   const routeFields = document.querySelector("[data-lookup-route-fields]");
   const previewValue = document.querySelector("[data-lookup-preview-value]");
   const previewLabel = document.querySelector("[data-lookup-preview-label]");
@@ -20333,7 +21971,14 @@ function syncLookupManagerFormGuidance() {
 
   if (routeFields) routeFields.hidden = type !== "route";
   if (previewValue) previewValue.textContent = value;
-  if (previewLabel) previewLabel.textContent = label;
+  if (previewLabel) {
+    if (type === "glass_cost") {
+      const rate = Number(costInput?.value);
+      previewLabel.textContent = Number.isFinite(rate) && costInput?.value !== "" ? `$${rate.toFixed(2)} / SQFT` : "Cost not configured";
+    } else {
+      previewLabel.textContent = label;
+    }
+  }
   if (previewNote) previewNote.textContent = meta.explanation;
 }
 
@@ -20356,7 +22001,7 @@ function renderLookupManagerModal() {
  * Flow: Finds the requested row by type/value, activates the matching tab, re-renders once, then fills and focuses the editor for an upsert save.
  */
 function useLookupInEditor(type, value) {
-  const cleanType = ["product", "route", "process"].includes(type) ? type : "product";
+  const cleanType = ["product", "route", "process", "glass_cost"].includes(type) ? type : "product";
   const item = lookupItemsForType(cleanType).find((entry) => String(entry.value || "") === String(value || ""));
   if (!item) return;
 
@@ -20366,10 +22011,12 @@ function useLookupInEditor(type, value) {
   const labelInput = document.getElementById("lookupLabelInput");
   const categoryInput = document.getElementById("lookupCategoryInput");
   const matchInput = document.getElementById("lookupMatchTermsInput");
+  const costInput = document.getElementById("lookupCostInput");
   if (valueInput) valueInput.value = item.value || "";
   if (labelInput) labelInput.value = item.label || item.value || "";
   if (categoryInput) categoryInput.value = item.category || "";
   if (matchInput) matchInput.value = item.matchTerms || "";
+  if (costInput) costInput.value = item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate)) ? String(item.rate) : "";
   syncLookupManagerFormGuidance();
   valueInput?.focus();
   valueInput?.select();
@@ -20381,7 +22028,7 @@ function useLookupInEditor(type, value) {
  * Flow: Clears all editable fields, restores contextual guidance, and returns focus to the saved-value field.
  */
 function clearLookupManagerForm() {
-  ["lookupValueInput", "lookupLabelInput", "lookupCategoryInput", "lookupMatchTermsInput"].forEach((id) => {
+  ["lookupValueInput", "lookupLabelInput", "lookupCategoryInput", "lookupMatchTermsInput", "lookupCostInput"].forEach((id) => {
     const input = document.getElementById(id);
     if (input) input.value = "";
   });
@@ -20435,21 +22082,37 @@ async function saveManualEditLookup() {
   const label = document.getElementById("lookupLabelInput")?.value.trim() || value;
   const category = document.getElementById("lookupCategoryInput")?.value.trim() || "";
   const matchTerms = document.getElementById("lookupMatchTermsInput")?.value.trim() || "";
+  const costText = document.getElementById("lookupCostInput")?.value.trim() || "";
 
   if (!value) {
-    throw new Error("Lookup value is required.");
+    throw new Error(type === "glass_cost" ? "Glass type is required." : "Lookup value is required.");
+  }
+
+  const request = { type, value, label, category, matchTerms };
+  if (type === "glass_cost") {
+    const rate = Number(costText);
+    if (!costText || !Number.isFinite(rate) || rate < 0) {
+      throw new Error("Enter a valid glass cost per SQFT.");
+    }
+    request.rate = rate;
   }
 
   const payload = await fetchJson("/api/admin/manual-edit-lookups", {
     method: "POST",
-    body: JSON.stringify({ type, value, label, category, matchTerms }),
+    body: JSON.stringify(request),
   });
 
   adoptManualEditLookups(payload);
 
+  // v0.261: Refresh the report summary after a pricing save so the next
+  // Statistics view and PDF use the new material rate without a browser reload.
+  if (type === "glass_cost") await loadHomeReportSummary();
+
   state.lookupManagerActiveType = type || state.lookupManagerActiveType;
   renderLookupManagerModal();
-  showSaveConfirmation(`${label || value} was saved to the Lookup Manager.`);
+  showSaveConfirmation(type === "glass_cost"
+    ? `${value} material cost was saved to the Lookup Manager.`
+    : `${label || value} was saved to the Lookup Manager.`);
 }
 
 /**
@@ -20718,13 +22381,23 @@ function rackManagerModalHtml() {
       <div class="rack-manager-topbar">
         <div>
           <strong>Rack Manager</strong>
-          <span>Edit individual racks, add rack sets, delete empty racks, or delete empty rack sets.</span>
+          <span>Create rack sets first, add individual racks where they belong, and edit each group without leaving this workspace.</span>
         </div>
-        <div class="rack-manager-actions">
-          <button type="button" data-rack-manager-new-rack>Create Rack</button>
-          <button type="button" data-rack-manager-new-set>Create Rack Set</button>
-        </div>
+        <span class="rack-manager-summary">${escapeHtml(sortedGroups.length)} sets · ${escapeHtml(state.racks.length)} racks</span>
       </div>
+
+      <section class="rack-manager-create-grid" aria-label="Add rack configuration">
+        <button type="button" class="rack-manager-create-card is-set" data-rack-manager-new-set>
+          <span class="rack-manager-create-icon rack-set-create-icon" aria-hidden="true"></span>
+          <span><strong>Add Rack Set</strong><small>Create a new group for racks that share the same purpose or material.</small></span>
+          <b aria-hidden="true">+</b>
+        </button>
+        <button type="button" class="rack-manager-create-card is-rack" data-rack-manager-new-rack>
+          <span class="rack-manager-create-icon rack-create-icon" aria-hidden="true"></span>
+          <span><strong>Add Individual Rack</strong><small>Create one rack and assign it to an existing rack set.</small></span>
+          <b aria-hidden="true">+</b>
+        </button>
+      </section>
 
       ${rackManagerRackEditHtml() || rackManagerSetEditHtml()}
 
@@ -20739,6 +22412,7 @@ function rackManagerModalHtml() {
                   return `
                     <section class="rack-manager-group">
                       <header>
+                        <span class="rack-manager-group-icon" data-rack-icon="${escapeHtml(rackSetVisualIcon(label))}" aria-hidden="true"></span>
                         <div>
                           <h3>${escapeHtml(label)}</h3>
                           <span>${escapeHtml(racks.length)} rack${racks.length === 1 ? "" : "s"} | ${escapeHtml(totalQty)} pcs</span>
@@ -22306,9 +23980,11 @@ function renderAdminDeleteControls() {
   if (!els.deleteDateSelect || !els.deleteListSelect) return;
   const groups = listsByDeliveryDate();
   const selectedDate = els.deleteDateSelect.value || groups[0]?.date || "";
-  els.deleteDateSelect.innerHTML = groups
-    .map((group) => `<option value="${escapeHtml(group.date)}">${escapeHtml(formatDisplayDate(group.date))}</option>`)
-    .join("");
+  els.deleteDateSelect.dataset.deliveryDateSelect = "true";
+  els.deleteDateSelect.innerHTML = groupedDeliveryDateOptions(
+    groups,
+    (group) => `<option value="${escapeHtml(group.date)}">${escapeHtml(formatNumericDeliveryDate(group.date))}</option>`,
+  );
   els.deleteDateSelect.value = groups.some((group) => group.date === selectedDate) ? selectedDate : groups[0]?.date || "";
   const lists = groups.find((group) => group.date === els.deleteDateSelect.value)?.lists || [];
   const selectedList = els.deleteListSelect.value || lists[0]?.id || "";
@@ -23011,7 +24687,7 @@ function confirmWebAppAction({
     dialog.className = "action-confirm-backdrop";
     dialog.innerHTML = `
       <section class="action-confirm-dialog ${danger ? "is-danger" : ""}" role="dialog" aria-modal="true" aria-labelledby="actionConfirmTitle">
-        <button type="button" class="action-confirm-close" data-action-confirm-cancel aria-label="Close confirmation">&times;</button>
+        <button type="button" class="action-confirm-close gui-close-button" data-action-confirm-cancel aria-label="Close confirmation">&times;</button>
 
         <span class="action-confirm-icon" aria-hidden="true"></span>
 
@@ -23126,7 +24802,7 @@ function promptWebAppAction({
     dialog.className = "action-confirm-backdrop action-prompt-backdrop";
     dialog.innerHTML = `
       <section class="action-confirm-dialog action-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="actionPromptTitle">
-        <button type="button" class="action-confirm-close" data-action-prompt-cancel aria-label="Close">&times;</button>
+        <button type="button" class="action-confirm-close gui-close-button" data-action-prompt-cancel aria-label="Close">&times;</button>
         <span class="action-confirm-icon" aria-hidden="true"></span>
         <div class="action-confirm-copy">
           <h2 id="actionPromptTitle">${escapeHtml(title)}</h2>
@@ -23207,7 +24883,7 @@ function confirmDeactivateUser(username) {
     dialog.className = "user-deactivate-backdrop";
     dialog.innerHTML = `
       <section class="user-deactivate-dialog" role="dialog" aria-modal="true" aria-labelledby="deactivateUserTitle">
-        <button type="button" class="user-deactivate-close" data-user-deactivate-cancel aria-label="Close deactivate user confirmation">&times;</button>
+        <button type="button" class="user-deactivate-close gui-close-button" data-user-deactivate-cancel aria-label="Close deactivate user confirmation">&times;</button>
 
         <span class="user-deactivate-icon" aria-hidden="true"></span>
 
@@ -24446,7 +26122,7 @@ function emailDraftPreviewHtml(email) {
           <h2>${escapeHtml(email.subject || "Email draft")}</h2>
           <span>${escapeHtml(email.emailType || "email")} - ${escapeHtml(email.customerName || "Customer email")}</span>
         </div>
-        <button class="modal-close-x" type="button" data-close-email-draft aria-label="Close">&times;</button>
+        <button class="modal-close-x gui-close-button" type="button" data-close-email-draft aria-label="Close">&times;</button>
       </header>
       <div class="email-draft-meta-grid">
         <span><small>To</small><b>${escapeHtml(emailAddressListText(email.toEmails) || "-")}</b></span>
@@ -25878,6 +27554,7 @@ function exportStaticCsv() {
 const OPERATIONS_MODAL_PROFILES = {
   "rack-details": {
     controlCenter: true,
+    showStatus: true,
     eyebrow: "Rack Operations",
     description: "Review assigned pieces, current rack status, packing actions, and controlled rack recovery from one live workspace.",
     context: "Individual rack workspace",
@@ -25886,6 +27563,7 @@ const OPERATIONS_MODAL_PROFILES = {
   },
   "rack-history": {
     controlCenter: true,
+    showStatus: false,
     eyebrow: "Rack Records",
     description: "Review packing-list snapshots or investigate actions across every rack from one searchable history workspace.",
     context: "Rack history workspace",
@@ -25905,7 +27583,11 @@ function applyOperationsModalProfile(kind, options = {}) {
   if (els.operationsModalEyebrow) els.operationsModalEyebrow.textContent = profile.eyebrow || "Operations";
   if (els.operationsModalTitle) els.operationsModalTitle.textContent = profile.title || "Operations";
   if (els.operationsModalDescription) els.operationsModalDescription.textContent = profile.description || "";
-  if (els.operationsModalStatusText) els.operationsModalStatusText.textContent = profile.status || "Live operations";
+  if (els.operationsModalStatusText) {
+    els.operationsModalStatusText.textContent = profile.status || "Live operations";
+    const statusPill = els.operationsModalStatusText.closest(".operations-modal-health-pill");
+    if (statusPill) statusPill.hidden = !Boolean(profile.showStatus);
+  }
   if (els.rejectOperationsTabs) els.rejectOperationsTabs.hidden = kind !== "reject-log";
   if (els.operationsRackTabs) els.operationsRackTabs.hidden = kind !== "rack-details";
   if (els.operationsRackRecordsTabs) els.operationsRackRecordsTabs.hidden = kind !== "rack-history";
@@ -25926,17 +27608,20 @@ function openOperationsModal({
   description = "",
   context = "",
   status = "",
+  showStatus = null,
   group = "",
   body = "",
 } = {}) {
   if (!els.operationsModal || !els.operationsModalBody) return;
   state.operationsModalKind = kind;
+  if (!['rack-details', 'rack-history'].includes(kind)) clearRackOperationsVisual();
   applyOperationsModalProfile(kind, {
     ...(eyebrow ? { eyebrow } : {}),
     ...(title ? { title } : {}),
     ...(description ? { description } : {}),
     ...(context ? { context } : {}),
     ...(status ? { status } : {}),
+    ...(showStatus !== null ? { showStatus: Boolean(showStatus) } : {}),
     ...(group ? { group } : {}),
   });
   els.operationsModalBody.innerHTML = body;
@@ -25983,6 +27668,7 @@ function closeOperationsModal() {
   if (els.operationsModal) {
     delete els.operationsModal.dataset.kind;
     delete els.operationsModal.dataset.group;
+    clearRackOperationsVisual();
     els.operationsModal.classList.remove("is-control-center", "show-reject-history", "show-rack-history");
     els.operationsModal.hidden = true;
     els.operationsModal.setAttribute("aria-hidden", "true");
@@ -26056,10 +27742,10 @@ function rackModalHeaderActionsHtml(rack) {
   const transferOptions = rackTransferOptions(rack.code);
   const printLabel = isTruck ? "Print Truck Packing Slip" : "Print Packing Slip";
   return `
-    ${hasItems && statusLower === "open" ? `<button type="button" data-rack-modal-complete="${escapeHtml(rack.code)}">Complete Rack</button>` : ""}
-    ${hasItems && statusLower === "closed" ? `<button type="button" data-rack-modal-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : ""}
-    ${statusLower === "in transit" ? `<button type="button" data-rack-modal-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" class="secondary" data-rack-modal-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>` : ""}
-    <button type="button" data-rack-modal-print="${escapeHtml(rack.code)}" ${hasItems && ["closed", "in transit"].includes(statusLower) ? "" : "disabled"}>${printLabel}</button>
+    ${hasItems && statusLower === "open" ? `<button class="app-primary-button" type="button" data-rack-modal-complete="${escapeHtml(rack.code)}">Complete Rack</button>` : ""}
+    ${hasItems && statusLower === "closed" ? `<button class="app-primary-button" type="button" data-rack-modal-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : ""}
+    ${statusLower === "in transit" ? `<button class="app-primary-button" type="button" data-rack-modal-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" class="secondary" data-rack-modal-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>` : ""}
+    <button class="app-primary-button" type="button" data-rack-modal-print="${escapeHtml(rack.code)}" ${hasItems && ["closed", "in transit"].includes(statusLower) ? "" : "disabled"}>${printLabel}</button>
     ${canTransfer && hasItems ? `<button class="icon-only icon-move rack-scope-move-button rack-move-all-icon" type="button" data-rack-modal-move-all="${escapeHtml(rack.code)}" ${transferOptions ? "" : "disabled"} title="Move all rack contents" aria-label="Move all contents from rack ${escapeHtml(rack.code)}"></button>` : ""}`;
 }
 
@@ -26128,7 +27814,7 @@ function chooseRackTransferDestination(sourceRackCode, options = {}) {
         : "every active item on this rack";
     shell.innerHTML = `
       <section class="rack-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="rackTransferTitle">
-        <button class="modal-close-x rack-transfer-close" type="button" data-rack-transfer-cancel aria-label="Close">&times;</button>
+        <button class="modal-close-x gui-close-button rack-transfer-close" type="button" data-rack-transfer-cancel aria-label="Close">&times;</button>
         <div class="rack-transfer-dialog-copy">
           <small>Rack transfer</small>
           <h2 id="rackTransferTitle">Move ${escapeHtml(scopeText)}</h2>
@@ -26227,12 +27913,14 @@ function openRackDetailsModal(rackCode) {
   state.selectedRackOverviewCode = rack.code;
   openOperationsModal({
     kind: "rack-details",
-    eyebrow: "Rack Overview",
+    eyebrow: rackGroupLabel(rack),
     title: rack.code === "T" ? "Truck / No Rack" : `Rack ${rack.code}`,
+    description: `${rack.name || rack.type || rackGroupLabel(rack)} · ${rackStatusLabel(rack)} · ${Number(rack.qty || 0)} pieces`,
     context: rack.code === "T" ? "Truck loading workspace" : `${rack.type || "Rack"} workspace`,
     status: rackStatusLabel(rack),
     body: rackDetailsModalHtml(rack),
   });
+  applyRackOperationsVisual(rack);
   updateRackModalHeaderActions(rack);
 }
 
@@ -26242,10 +27930,13 @@ async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode)
   const rack = state.racks.find((item) => String(item.code) === String(rackCode));
   if (rack && state.operationsModalKind === "rack-details") {
     applyOperationsModalProfile("rack-details", {
+      eyebrow: rackGroupLabel(rack),
       title: rack.code === "T" ? "Truck / No Rack" : `Rack ${rack.code}`,
+      description: `${rack.name || rack.type || rackGroupLabel(rack)} · ${rackStatusLabel(rack)} · ${Number(rack.qty || 0)} pieces`,
       context: rack.code === "T" ? "Truck loading workspace" : `${rack.type || "Rack"} workspace`,
       status: rackStatusLabel(rack),
     });
+    applyRackOperationsVisual(rack);
     els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
     updateRackModalHeaderActions(rack);
   } else if (!rack) {
@@ -26565,8 +28256,10 @@ async function openRacksHistoryModal() {
     kind: "rack-history",
     eyebrow: "Rack Records",
     title: "Racks History",
+    description: "Packing-list snapshots and audited activity across every rack.",
     body: rackHistoryModalHtml(),
   });
+  applyRackHistoryOperationsVisual();
   setRackHistoryView("packing");
   await loadRackHistoryPage();
 }
@@ -27457,9 +29150,11 @@ function renderAdminImportRunBrowser(imports = []) {
   const status = importRunClassification(selected.entries);
   const pager = totalPages > 1 ? `
     <nav class="admin-import-run-pager" aria-label="Today's import run pages">
-      <button type="button" data-admin-import-page="${state.adminImportRunPage - 1}" ${state.adminImportRunPage <= 1 ? "disabled" : ""}>Previous</button>
       <span>Runs ${pageStart + 1}-${Math.min(pageStart + pageSize, groups.length)} of ${groups.length} · Page ${state.adminImportRunPage} of ${totalPages}</span>
-      <button type="button" data-admin-import-page="${state.adminImportRunPage + 1}" ${state.adminImportRunPage >= totalPages ? "disabled" : ""}>Next</button>
+      <span class="admin-import-run-pager-actions">
+        <button type="button" class="app-primary-button admin-pager-primary" data-admin-import-page="${state.adminImportRunPage - 1}" ${state.adminImportRunPage <= 1 ? "disabled" : ""}>Previous</button>
+        <button type="button" class="app-primary-button admin-pager-primary" data-admin-import-page="${state.adminImportRunPage + 1}" ${state.adminImportRunPage >= totalPages ? "disabled" : ""}>Next</button>
+      </span>
     </nav>` : "";
   return `
     <section class="admin-import-run-browser" data-selected-run="${escapeHtml(selected.key)}">
@@ -28085,6 +29780,85 @@ function replayExpandableListAnimation(details) {
 }
 
 /**
+ * Initialize an optional UI feature without allowing one stale helper reference
+ * to prevent the core application from starting.
+ */
+function wireOptionalStartupFeature(featureName, setup) {
+  try {
+    setup();
+    return true;
+  } catch (error) {
+    console.error(`[Delivery List Scanner] ${featureName} could not be initialized.`, error);
+    window.setTimeout(() => {
+      if (typeof showFloatingNotice === "function") {
+        showFloatingNotice(`${featureName} is temporarily unavailable. The rest of the webapp is still available.`, "notice");
+      }
+    }, 0);
+    return false;
+  }
+}
+
+/** Add one listener only when both its optional element and handler exist. */
+function addOptionalUiEventListener(target, eventName, handler, options) {
+  if (!target || typeof handler !== "function") return false;
+  target.addEventListener(eventName, handler, options);
+  return true;
+}
+
+/** Wire Create Preset independently so an optional preset regression cannot block startup. */
+function wirePrintPresetEvents() {
+  addOptionalUiEventListener(els.printPresetModalClose, "click", closePrintPresetModal);
+  addOptionalUiEventListener(els.printPresetCancelBtn, "click", closePrintPresetModal);
+  addOptionalUiEventListener(els.printPresetModalBackdrop, "click", closePrintPresetModal);
+  addOptionalUiEventListener(els.printPresetNameInput, "input", updatePrintPresetNameStatus);
+  addOptionalUiEventListener(els.printPresetSummary, "change", handlePrintPresetBuilderChange);
+  addOptionalUiEventListener(els.printPresetOutputSettings, "click", (event) => {
+    const orientationButton = event.target.closest("[data-preset-orientation-choice]");
+    if (orientationButton) {
+      const value = orientationButton.dataset.presetOrientationChoice === "landscape" ? "landscape" : "portrait";
+      const input = els.printPresetOutputSettings.querySelector("[data-preset-orientation]");
+      if (input) input.value = value;
+      els.printPresetOutputSettings.querySelectorAll("[data-preset-orientation-choice]").forEach((choice) => {
+        choice.classList.toggle("is-active", choice === orientationButton);
+      });
+      return;
+    }
+
+    const copyButton = event.target.closest("[data-preset-copy-change]");
+    if (!copyButton) return;
+    const input = els.printPresetOutputSettings.querySelector("[data-preset-copies]");
+    if (!input) return;
+    input.value = String(Math.max(1, Math.min(Number(input.value || 1) + Number(copyButton.dataset.presetCopyChange || 0), 10)));
+  });
+  addOptionalUiEventListener(els.printPresetOutputSettings, "input", (event) => {
+    const input = event.target.closest?.("[data-preset-copies]");
+    if (!input) return;
+    const digits = String(input.value || "").replace(/\D+/g, "").slice(0, 2);
+    input.value = digits ? String(Math.min(Number(digits), 10)) : "";
+  });
+  addOptionalUiEventListener(els.printPresetOutputSettings, "focusout", (event) => {
+    const input = event.target.closest?.("[data-preset-copies]");
+    if (!input) return;
+    input.value = String(Math.max(1, Math.min(Number(input.value || 1), 10)));
+  });
+  addOptionalUiEventListener(els.printPresetNameInput, "keydown", (event) => {
+    if (event.key === "Enter") confirmPrintPresetSave({ apply: true });
+    if (event.key === "Escape") closePrintPresetModal();
+  });
+  addOptionalUiEventListener(els.printPresetSaveOnlyBtn, "click", () => confirmPrintPresetSave({ apply: false }));
+  addOptionalUiEventListener(els.printPresetConfirmBtn, "click", () => confirmPrintPresetSave({ apply: true }));
+  addOptionalUiEventListener(els.printPresetSelect, "change", () => {
+    const name = els.printPresetSelect.value;
+    const presetName = name || PRINT_SYSTEM_DEFAULT_PRESET_NAME;
+    applyPrintPreset(presetName).catch((error) => showInlineError(error.message, false));
+  });
+  addOptionalUiEventListener(els.printPresetSelect, "custom-option-delete", (event) => {
+    if (event.detail?.action !== "print-preset") return;
+    deletePrintPreset(event.detail.value).catch((error) => showInlineError(error.message, false));
+  });
+}
+
+/**
  * Purpose: Connect the wire events workflow using the existing shared UI state.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
@@ -28395,67 +30169,108 @@ function wireEvents() {
   });
 
   els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
-  els.homeStatsChart?.addEventListener("click", (event) => {
-    if (event.target.closest("[data-open-statistics-chart]")) openStatisticsChartModal();
+  els.statisticsRefreshBtn?.addEventListener("click", async () => {
+    const button = els.statisticsRefreshBtn;
+    if (button) {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+    }
+    try {
+      await loadDeliveryLists();
+      await loadHomeReportSummary();
+      renderStatisticsPage();
+      showFloatingNotice("Statistics refreshed.", "success");
+    } catch (error) {
+      showFloatingNotice(error.message || "Statistics could not be refreshed.", "error");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+      }
+    }
   });
-  els.statsChartCloseBtn?.addEventListener("click", () => closeStatisticsChartModal());
-  els.statsChartBackdrop?.addEventListener("click", () => closeStatisticsChartModal());
-  els.statsChartModalCanvas?.addEventListener("click", (event) => {
+  els.statisticsChartCanvas?.addEventListener("click", (event) => {
     const target = event.target.closest("[data-chart-entry-label]");
     if (!target) return;
     state.homeChartSelectedLabel = target.dataset.chartEntryLabel || "";
-    renderStatisticsChartModal();
+    renderStatisticsAnalytics();
   });
-  els.statsChartModalCanvas?.addEventListener("keydown", (event) => {
+  els.statisticsChartCanvas?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const target = event.target.closest("[data-chart-entry-label]");
     if (!target) return;
     event.preventDefault();
     state.homeChartSelectedLabel = target.dataset.chartEntryLabel || "";
-    renderStatisticsChartModal();
+    renderStatisticsAnalytics();
   });
-  els.statsChartRangeSelect?.addEventListener("change", async () => {
-    state.overviewRange = els.statsChartRangeSelect.value || "30";
-    state.homeChartSelectedLabel = "";
-    if (els.overviewRangeSelect) {
-      els.overviewRangeSelect.value = state.overviewRange;
-      syncCustomSelect(els.overviewRangeSelect);
-    }
-    renderHome();
-    renderStatisticsChartModal();
-    await loadHomeReportSummary();
-    if (els.statsChartModal && !els.statsChartModal.hidden) renderStatisticsChartModal();
+  els.statisticsChartViewButtons?.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      state.homeChartView = button.dataset.statisticsView || "bar";
+      renderStatisticsAnalytics();
+    });
   });
   els.statsChartMetricSelect?.addEventListener("change", () => {
     state.homeChartMetric = els.statsChartMetricSelect.value || "glass";
+    // Delivery-date datasets are chronological by nature. Keep their first
+    // render in source order while preserving the user's explicit sort choice
+    // for every other dataset.
+    if (state.homeChartMetric.startsWith("date-")) {
+      state.homeChartSort = "source";
+    } else if (state.homeChartSort === "source") {
+      state.homeChartSort = "value-desc";
+    }
     state.homeChartSelectedLabel = "";
-    renderStatisticsChartModal();
+    renderStatisticsAnalytics();
   });
-  els.statsChartViewSelect?.addEventListener("change", () => {
-    state.homeChartView = els.statsChartViewSelect.value || "bar";
-    renderStatisticsChartModal();
+  els.statsBreakageMeasureSelect?.addEventListener("change", () => {
+    state.statisticsBreakageMeasure = els.statsBreakageMeasureSelect.value || "sqft";
+    state.homeChartSelectedLabel = "";
+    renderStatisticsAnalytics();
   });
   els.statsChartSortSelect?.addEventListener("change", () => {
     state.homeChartSort = els.statsChartSortSelect.value || "value-desc";
-    renderStatisticsChartModal();
+    renderStatisticsAnalytics();
   });
   els.statsChartLimitSelect?.addEventListener("change", () => {
-    state.homeChartLimit = els.statsChartLimitSelect.value || "all";
-    renderStatisticsChartModal();
+    state.homeChartLimit = els.statsChartLimitSelect.value || "10";
+    renderStatisticsAnalytics();
   });
   els.statsChartFilterInput?.addEventListener("input", () => {
     state.homeChartQuery = els.statsChartFilterInput.value || "";
     state.homeChartSelectedLabel = "";
-    renderStatisticsChartModal();
+    renderStatisticsAnalytics();
   });
   els.statsChartResetBtn?.addEventListener("click", () => {
     state.homeChartMetric = "glass";
-    state.homeChartView = "bar";
+    state.homeChartView = "donut";
     state.homeChartQuery = "";
-    state.homeChartLimit = "all";
+    state.homeChartLimit = "10";
     state.homeChartSort = "value-desc";
     state.homeChartSelectedLabel = "";
-    renderStatisticsChartModal();
+    state.statisticsIncludeExternalRemakes = false;
+    state.statisticsBreakageMeasure = "sqft";
+    renderStatisticsPage();
+  });
+  els.statsIncludeExternalRemakes?.addEventListener("change", () => {
+    state.statisticsIncludeExternalRemakes = Boolean(els.statsIncludeExternalRemakes.checked);
+    state.homeChartSelectedLabel = "";
+    renderStatisticsPage();
+  });
+  els.statsChartShowMoreBtn?.addEventListener("click", () => {
+    state.homeChartLimit = statisticsNextDisplayLimit(state.homeChartLimit);
+    if (els.statsChartLimitSelect) els.statsChartLimitSelect.value = state.homeChartLimit;
+    renderStatisticsAnalytics();
+  });
+  els.statisticsMiniCharts?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-statistics-metric]");
+    if (!button) return;
+    state.homeChartMetric = button.dataset.statisticsMetric || "delivery";
+    if (button.dataset.statisticsMeasure) state.statisticsBreakageMeasure = button.dataset.statisticsMeasure;
+    state.homeChartView = "bar";
+    state.homeChartSelectedLabel = "";
+    renderStatisticsAnalytics();
+    els.statisticsAnalyticsWorkspace?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   els.viewAllRecent?.addEventListener("click", () => {
     openRecentScansModal().catch((error) => showFloatingNotice(error.message, "error"));
@@ -28539,11 +30354,35 @@ function wireEvents() {
     renderHome();
   });
   els.overviewRangeSelect?.addEventListener("change", () => {
-    state.overviewRange = els.overviewRangeSelect.value || "30";
+    const requestedRange = els.overviewRangeSelect.value || "30";
+    if (requestedRange === "custom") {
+      openStatisticsDateCalendar();
+      return;
+    }
+    state.overviewRange = requestedRange;
+    state.statisticsCustomDateFrom = "";
+    state.statisticsCustomDateTo = "";
     state.homeChartSelectedLabel = "";
-    renderHome();
-    if (els.statsChartModal && !els.statsChartModal.hidden) renderStatisticsChartModal();
+    closeStatisticsDateCalendar();
+    renderStatisticsPage();
     void loadHomeReportSummary();
+  });
+  els.statisticsCalendarPrev?.addEventListener("click", () => {
+    const month = printCalendarMonthDate(state.statisticsCalendarMonth || todayKey());
+    state.statisticsCalendarMonth = printCalendarDateKey(new Date(month.getFullYear(), month.getMonth() - 1, 1));
+    renderStatisticsDateCalendar();
+  });
+  els.statisticsCalendarNext?.addEventListener("click", () => {
+    const month = printCalendarMonthDate(state.statisticsCalendarMonth || todayKey());
+    state.statisticsCalendarMonth = printCalendarDateKey(new Date(month.getFullYear(), month.getMonth() + 1, 1));
+    renderStatisticsDateCalendar();
+  });
+  els.statisticsCalendarReset?.addEventListener("click", resetStatisticsCalendarRange);
+  els.statisticsCalendarCancel?.addEventListener("click", closeStatisticsDateCalendar);
+  els.statisticsCalendarApply?.addEventListener("click", applyStatisticsCalendarRange);
+  els.statisticsDateCalendar?.addEventListener("click", (event) => {
+    const day = event.target.closest("[data-statistics-calendar-date]");
+    if (day) chooseStatisticsCalendarDate(day.dataset.statisticsCalendarDate);
   });
   els.homePageSize?.addEventListener("change", () => {
     state.homePageSize = Number(els.homePageSize.value) || 25;
@@ -28659,6 +30498,10 @@ function wireEvents() {
   });
   els.printSearchSuggestions?.addEventListener("mousedown", (event) => event.preventDefault());
   els.printSearchSuggestions?.addEventListener("click", (event) => {
+    // Adding a result rerenders this container before the document click handler
+    // runs. Stop propagation so the detached original button cannot be mistaken
+    // for an outside click and close the continuing multi-select workflow.
+    event.stopPropagation();
     const itemChoice = event.target.closest("[data-print-add-item]");
     if (itemChoice) {
       addPrintSelectedItem(itemChoice.dataset.printAddItem || "");
@@ -28678,8 +30521,11 @@ function wireEvents() {
   });
   els.printSelectedOrdersClear?.addEventListener("click", clearPrintSelectedOrders);
   document.addEventListener("click", (event) => {
-    if (!event.target.closest(".print-search-shell-v198")) hidePrintSearchSuggestions();
     const eventPath = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const clickedSmartSearch = Boolean(event.target.closest(".print-search-shell-v198"))
+      || eventPath.includes(els.printSearchSuggestions)
+      || eventPath.includes(els.printSearchInput);
+    if (!clickedSmartSearch) hidePrintSearchSuggestions();
     const clickedDateControl = event.target.closest(".print-header-date-control-v203") || eventPath.includes(els.printDateCalendar);
     const clickedDateSelectMenu = event.target.closest('.custom-select-menu[data-select-id="printDateQuickSelect"]');
     // Calendar day grids are rerendered after each click, which detaches the
@@ -28687,7 +30533,6 @@ function wireEvents() {
     // the original calendar ancestry and prevents the first date from closing it.
     if (!clickedDateControl && !clickedDateSelectMenu) closePrintDateCalendar();
   });
-  els.printGlassSearch?.addEventListener("input", applyPrintGlassSearch);
 
   els.printRouteOptions?.addEventListener("change", (event) => {
     const changed = event.target.closest('input[data-print-route-group]');
@@ -28743,46 +30588,7 @@ function wireEvents() {
       showInlineError(error.message, false);
     }
   });
-  els.printPresetModalClose?.addEventListener("click", closePrintPresetModal);
-  els.printPresetCancelBtn?.addEventListener("click", closePrintPresetModal);
-  els.printPresetModalBackdrop?.addEventListener("click", closePrintPresetModal);
-  els.printPresetNameInput?.addEventListener("input", updatePrintPresetNameStatus);
-  els.printPresetDescriptionInput?.addEventListener("input", renderPrintPresetLiveSummary);
-  els.printPresetDefaultToggle?.addEventListener("change", renderPrintPresetLiveSummary);
-  els.printPresetSummary?.addEventListener("change", handlePrintPresetBuilderChange);
-  els.printPresetSummary?.addEventListener("input", (event) => {
-    if (event.target.matches("[data-preset-glass-search]")) applyPrintPresetGlassSearch();
-  });
-  els.printPresetOutputSettings?.addEventListener("change", renderPrintPresetLiveSummary);
-  els.printPresetOutputSettings?.addEventListener("input", renderPrintPresetLiveSummary);
-  els.printPresetOutputSettings?.addEventListener("click", (event) => {
-    const orientationButton = event.target.closest("[data-preset-orientation-choice]");
-    if (orientationButton) {
-      const value = orientationButton.dataset.presetOrientationChoice === "landscape" ? "landscape" : "portrait";
-      const input = els.printPresetOutputSettings.querySelector("[data-preset-orientation]");
-      if (input) input.value = value;
-      els.printPresetOutputSettings.querySelectorAll("[data-preset-orientation-choice]").forEach((choice) => choice.classList.toggle("is-active", choice === orientationButton));
-      renderPrintPresetLiveSummary();
-      return;
-    }
-    const copyButton = event.target.closest("[data-preset-copy-change]");
-    if (!copyButton) return;
-    const input = els.printPresetOutputSettings.querySelector("[data-preset-copies]");
-    if (!input) return;
-    input.value = String(Math.max(1, Math.min(Number(input.value || 1) + Number(copyButton.dataset.presetCopyChange || 0), 10)));
-    renderPrintPresetLiveSummary();
-  });
-  els.printPresetNameInput?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") confirmPrintPresetSave({ apply: true });
-    if (event.key === "Escape") closePrintPresetModal();
-  });
-  els.printPresetSaveOnlyBtn?.addEventListener("click", () => confirmPrintPresetSave({ apply: false }));
-  els.printPresetConfirmBtn?.addEventListener("click", () => confirmPrintPresetSave({ apply: true }));
-  els.printPresetSelect?.addEventListener("change", () => {
-    const name = els.printPresetSelect.value;
-    if (name) applyPrintPreset(name).catch((error) => showInlineError(error.message, false));
-    else applyPrintPreset(PRINT_SYSTEM_DEFAULT_PRESET_NAME).catch((error) => showInlineError(error.message, false));
-  });
+  wireOptionalStartupFeature("Create Preset", wirePrintPresetEvents);
   els.printOptionsClose?.addEventListener("click", closePrintOptions);
   els.printOptionsBackdrop?.addEventListener("click", closePrintOptions);
   els.printExportType?.addEventListener("change", () => {
@@ -31304,7 +33110,7 @@ init().catch((error) => {
         </div>
         <div class="delivery-automation-header-actions">
           <span class="delivery-automation-health-pill" id="automationHeaderHealth"><i></i><span>Checking runtime</span></span>
-          <button class="delivery-automation-close" type="button" data-automation-close aria-label="Close automation window">×</button>
+          <button class="delivery-automation-close gui-close-button" type="button" data-automation-close aria-label="Close automation window">×</button>
         </div>
       </header>
 
@@ -31869,6 +33675,7 @@ init().catch((error) => {
   const FLAGS_ENDPOINT = "/api/operations/line-flags";
   const UPDATE_ACK_ENDPOINT = "/api/operations/line-flags/acknowledge";
   const POLL_MS = 10000;
+  const UPDATE_PROMPT_TIMEOUT_MS = 15000;
 
   let host = null;
   let button = null;
@@ -31886,6 +33693,8 @@ init().catch((error) => {
   let newestAutomationId = 0;
   let newestRejectId = 0;
   let currentPromptListId = "";
+  let currentPromptTimer = 0;
+  let currentPromptCountdownTimer = 0;
   let currentFlags = null;
   const flagsByList = new Map();
   const inflightByList = new Map();
@@ -31974,7 +33783,7 @@ init().catch((error) => {
     panel.innerHTML = `
       <header class="notification-center-header">
         <div class="notification-center-header-copy"><small>System messages</small><strong>Notifications</strong></div>
-        <button class="notification-center-close" type="button" aria-label="Close notifications">×</button>
+        <button class="notification-center-close gui-close-button" type="button" aria-label="Close notifications">×</button>
       </header>
       <div class="notification-center-toolbar"><span id="notificationCenterSummary">Checking notifications...</span></div>
       <div class="notification-center-list" id="notificationCenterList"></div>
@@ -32178,7 +33987,7 @@ init().catch((error) => {
         <span>${escapeHtml(item.message || "The delivery-list catalog has been checked.")}</span>
       </span>
       <button class="automation-update-toast-view" type="button">View run</button>
-      <button class="automation-update-toast-close" type="button" aria-label="Dismiss notification">×</button>`;
+      <button class="automation-update-toast-close gui-close-button" type="button" aria-label="Dismiss notification">×</button>`;
     toast.querySelector(".automation-update-toast-view")?.addEventListener("click", () => openNotification(item));
     toast.querySelector(".automation-update-toast-close")?.addEventListener("click", dismissToast);
     toast.hidden = false;
@@ -32347,6 +34156,10 @@ init().catch((error) => {
   }
 
   function closeUpdatePrompt() {
+    window.clearTimeout(currentPromptTimer);
+    window.clearInterval(currentPromptCountdownTimer);
+    currentPromptTimer = 0;
+    currentPromptCountdownTimer = 0;
     document.getElementById("lineUpdateReviewPromptV135")?.remove();
     currentPromptListId = "";
   }
@@ -32359,16 +34172,18 @@ init().catch((error) => {
     const shell = document.createElement("div");
     shell.id = "lineUpdateReviewPromptV135";
     shell.className = "line-update-review-prompt-shell";
+    const initialSeconds = Math.ceil(UPDATE_PROMPT_TIMEOUT_MS / 1000);
     shell.innerHTML = `
-      <section class="line-update-review-prompt" role="dialog" aria-modal="false" aria-labelledby="lineUpdatePromptTitle">
-        <button class="line-update-review-close" type="button" aria-label="Close">×</button>
+      <section class="line-update-review-prompt" role="status" aria-live="polite" aria-labelledby="lineUpdatePromptTitle">
+        <button class="line-update-review-close gui-close-button" type="button" aria-label="Close">×</button>
         <span class="line-update-review-icon" aria-hidden="true">!</span>
-        <div>
+        <div class="line-update-review-prompt-copy">
           <small>Delivery list updated</small>
           <h2 id="lineUpdatePromptTitle">${flags.pendingLineCount} changed line${flags.pendingLineCount === 1 ? "" : "s"} need review</h2>
-          <p>${flags.newLineCount ? `${flags.newLineCount} new` : ""}${flags.newLineCount && flags.updatedLineCount ? " · " : ""}${flags.updatedLineCount ? `${flags.updatedLineCount} updated` : ""}. Review them now, then use Mark Reviewed beside Filters.</p>
+          <p>${flags.newLineCount ? `${flags.newLineCount} new` : ""}${flags.newLineCount && flags.updatedLineCount ? " · " : ""}${flags.updatedLineCount ? `${flags.updatedLineCount} updated` : ""}. Review them now, then mark the displayed changes reviewed.</p>
+          <span class="line-update-review-time" data-update-prompt-time>Closes in ${initialSeconds}s</span>
         </div>
-        <button class="line-update-review-primary" type="button">Review now</button>
+        <button class="line-update-review-primary app-primary-button" type="button">Review now</button>
       </section>`;
     document.body.append(shell);
     shell.querySelector(".line-update-review-close")?.addEventListener("click", closeUpdatePrompt);
@@ -32376,6 +34191,15 @@ init().catch((error) => {
       closeUpdatePrompt();
       reviewUpdates(flags);
     });
+
+    const openedAt = Date.now();
+    const countdownElement = shell.querySelector("[data-update-prompt-time]");
+    currentPromptCountdownTimer = window.setInterval(() => {
+      const elapsed = Date.now() - openedAt;
+      const remaining = Math.max(0, Math.ceil((UPDATE_PROMPT_TIMEOUT_MS - elapsed) / 1000));
+      if (countdownElement) countdownElement.textContent = remaining ? `Closes in ${remaining}s` : "Closing...";
+    }, 1000);
+    currentPromptTimer = window.setTimeout(closeUpdatePrompt, UPDATE_PROMPT_TIMEOUT_MS);
   }
 
   function reviewUpdates(flags = currentFlags) {

@@ -2,8 +2,8 @@
 <!--
   Delivery List Scanner shell.
   Keep this file as stable markup for the main pages and modal anchors.
-  Browser assets live under static/. Shared visuals stay in styles.css while
-  each main page owns its page-specific stylesheet.
+  Browser assets live under static/. Global tokens stay in styles.css, reusable
+  controls stay in shared-ui.css, and each page owns its feature-specific layout.
 -->
 <!doctype html>
 <html lang="en">
@@ -12,15 +12,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260805-v0.228">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260730-v0.184">
-    <link rel="stylesheet" href="static/css/home.css?v=20260729-v0.181">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260803-v0.196">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260729-v0.180">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260731-v0.193">
-    <link rel="stylesheet" href="static/css/print.css?v=20260729-v0.180">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260730-v0.184">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/home.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/print.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260807-v0.262">
     <link rel="stylesheet" href="static/css/shell.css?v=20260731-v0.192">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260807-v0.262">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <!-- SECTION: Authentication and password reset -->
@@ -60,7 +62,7 @@
           <input id="loginPassword" name="dls_login_password" type="password" autocomplete="current-password" placeholder="Enter password">
         </label>
         <div class="login-action-row">
-          <button type="submit">Sign in</button>
+          <button class="app-primary-button" type="submit">Sign in</button>
           <button id="forgotPasswordBtn" class="login-link-button" type="button">Forgot password?</button>
         </div>
         <p id="loginError" class="login-error"></p>
@@ -79,7 +81,7 @@
           <span>BFS Email or Username</span>
           <input id="resetIdentityInput" type="text" autocomplete="username" placeholder="name@bfs.local">
         </label>
-        <button id="requestResetCodeBtn" type="button">Request reset code</button>
+        <button id="requestResetCodeBtn" class="app-primary-button" type="button">Request reset code</button>
         <label>
           <span>Reset Code</span>
           <input id="resetCodeInput" type="text" autocomplete="one-time-code" placeholder="6-digit code">
@@ -89,7 +91,7 @@
           <input id="resetNewPasswordInput" type="password" autocomplete="new-password" placeholder="At least 8 characters">
         </label>
         <div class="login-action-row">
-          <button id="confirmPasswordResetBtn" type="button">Reset password</button>
+          <button id="confirmPasswordResetBtn" class="app-primary-button" type="button">Reset password</button>
           <button id="cancelPasswordResetBtn" class="login-link-button" type="button">Back to sign in</button>
         </div>
         <p id="passwordResetMessage" class="login-error password-reset-message"></p>
@@ -113,6 +115,7 @@
 
       <nav class="app-nav" aria-label="Main pages">
         <button class="is-active" data-page-target="home" type="button" title="Home"><span class="top-nav-icon home"></span><span>Home</span></button>
+        <button data-page-target="statistics" type="button" title="Statistics"><span class="top-nav-icon statistics"></span><span>Statistics</span></button>
         <button data-page-target="scan" type="button" title="Scan"><span class="top-nav-icon scan"></span><span>Scan</span></button>
         <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button" title="Racks"><span class="top-nav-icon racks"></span><span>Racks</span></button>
         <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button" title="Bay Map"><span class="top-nav-icon bays"></span><span>Bay Map</span></button>
@@ -170,13 +173,13 @@
           <span class="search-icon"></span>
           <input id="headerGlobalSearchInput" type="search" autocomplete="off" placeholder="Global search...">
         </label>
-        <button class="tool-button header-action-icon-button search-action-button" id="headerGlobalSearchBtn" type="button"><span class="button-icon search-button-icon" aria-hidden="true"></span><span>Search</span></button>
+        <button class="tool-button app-primary-button header-action-icon-button search-action-button" id="headerGlobalSearchBtn" type="button"><span class="button-icon search-button-icon" aria-hidden="true"></span><span>Search</span></button>
         <div class="header-search-results" id="headerGlobalSearchResults" hidden></div>
       </div>
 
       <div class="header-actions">
         <div class="header-quick-actions" aria-label="Application actions">
-          <button class="tool-button primary-tool header-action-icon-button print-export-button" id="globalPrintExportBtn" type="button"><span class="button-icon print-export-icon" aria-hidden="true"></span><span>Print/Export</span></button>
+          <button class="tool-button primary-tool app-primary-button header-action-icon-button print-export-button" id="globalPrintExportBtn" type="button"><span class="button-icon print-export-icon" aria-hidden="true"></span><span>Print/Export</span></button>
           <button class="tool-button header-utility-button language-toggle-button" id="languageToggleBtn" type="button" aria-label="Cambiar a Español" title="Cambiar a Español">
             <span class="language-globe-icon" aria-hidden="true"></span>
             <span>ES</span>
@@ -250,56 +253,219 @@
             </div>
           </section>
 
-          <aside class="panel home-side home-statistics-panel statistics-dashboard-v019">
-            <section class="statistics-main-block">
-              <div class="section-heading statistics-heading statistics-heading-v019">
-                <div class="statistics-title-copy">
-                  <span class="statistics-eyebrow">Plant performance</span>
-                  <h2>Statistics Dashboard</h2>
-                  <div class="statistics-range-row">
-                    <label class="overview-range-control statistics-range-control statistics-range-pill-control">
-                      <span>Range</span>
-                      <select id="overviewRangeSelect">
-                        <option value="1">Today</option>
-                        <option value="7">Last week</option>
-                        <option value="30">Last 30 days</option>
-                        <option value="90">Last 90 days</option>
-                        <option value="365">Full year</option>
-                        <option value="all">All lists</option>
-                      </select>
-                    </label>
-                    <span id="homeStatisticsRangeText">Current dashboard range</span>
-                  </div>
-                </div>
-                <div class="statistics-heading-tools">
-                  <button class="tool-button pdf-text-button" id="homeStatsPdfBtn" type="button" title="Generate statistics PDF report" aria-label="Generate statistics PDF report">PDF</button>
-                </div>
-              </div>
 
-              <div class="statistics-primary-grid">
-                <div class="overview-kpis statistics-overview-kpis" id="overviewStats"></div>
-                <div id="homeMonthlyRemakes" class="statistics-monthly-remakes"></div>
-              </div>
-
-              <div id="homeStatsChart" class="statistics-chart statistics-pie-chart" aria-label="Glass type quantity chart"></div>
-              <div id="homeUserCard" class="user-card statistics-snapshot"></div>
-            </section>
-            <section class="statistics-secondary-block">
-              <div class="statistics-section-title">
-                <h2>Stage Breakdown</h2>
-                <span>Progress by route/stage</span>
-              </div>
-              <div id="homeRecentLists" class="compact-list statistics-stage-list"></div>
-            </section>
-            <section class="statistics-secondary-block">
-              <div class="statistics-section-title">
-                <h2>Action & Scan Health</h2>
-                <span>Exceptions and manual activity</span>
-              </div>
-              <div id="homeActivity" class="compact-list statistics-health-list"></div>
-            </section>
-          </aside>
         </div>
+      </section>
+
+      <!-- SECTION: Dedicated statistics and performance insights -->
+      <section class="page-view statistics-page statistics-page-v0258" id="statisticsPage" hidden>
+        <header class="statistics-command-header-v0258">
+          <div class="statistics-command-identity-v0258">
+            <span class="statistics-command-icon-v0258" aria-hidden="true"></span>
+            <div class="statistics-command-copy-v0258">
+              <span class="statistics-page-eyebrow-v0258">Performance center</span>
+              <h1>Statistics &amp; Insights</h1>
+              <p>Explore delivery progress, production mix, workflow performance, and operational activity from one live analytics workspace.</p>
+              <div class="statistics-command-meta-v0258">
+                <span id="homeStatisticsRangeText" class="statistics-range-summary-v0258">Current statistics range</span>
+                <span class="statistics-live-status-v0258"><i aria-hidden="true"></i><span id="statisticsLastUpdated">Live data</span></span>
+              </div>
+            </div>
+          </div>
+          <div class="statistics-page-actions-v0258">
+            <div class="statistics-date-range-picker-v0262">
+              <label class="statistics-control-v0258 statistics-range-control-v0258">
+                <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-calendar" aria-hidden="true"></i>Date range</span>
+                <select id="overviewRangeSelect" data-native-select="true" aria-label="Statistics date range">
+                  <option value="1">Today</option>
+                  <option value="7">Last week</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="90">Last 90 days</option>
+                  <option value="365">Full year</option>
+                  <option value="all">All lists</option>
+                  <option value="custom">Custom range…</option>
+                </select>
+              </label>
+              <div id="statisticsDateCalendar" class="print-date-calendar-v201 print-date-calendar-v203 print-date-calendar-v205 statistics-date-calendar-v0262" hidden>
+                <header class="print-range-calendar-heading-v205">
+                  <div><small>Custom Statistics Range</small><strong>Select a Date From and Date To</strong></div>
+                </header>
+                <div class="print-range-values-v205">
+                  <article data-statistics-range-role="from"><small>Date From</small><strong id="statisticsCalendarFromValue">Select start date</strong></article>
+                  <span aria-hidden="true">→</span>
+                  <article data-statistics-range-role="to"><small>Date To</small><strong id="statisticsCalendarToValue">Select end date</strong></article>
+                </div>
+                <div class="print-range-months-v205">
+                  <section class="print-range-month-v205">
+                    <header><button id="statisticsCalendarPrev" type="button" aria-label="Previous month">‹</button><strong id="statisticsCalendarLeftMonthLabel"></strong><span></span></header>
+                    <div class="print-calendar-weekdays-v201" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+                    <div id="statisticsCalendarLeftGrid" class="print-calendar-grid-v201" role="grid" aria-label="Choose statistics range dates from the first month"></div>
+                  </section>
+                  <section class="print-range-month-v205">
+                    <header><span></span><strong id="statisticsCalendarRightMonthLabel"></strong><button id="statisticsCalendarNext" type="button" aria-label="Next month">›</button></header>
+                    <div class="print-calendar-weekdays-v201" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+                    <div id="statisticsCalendarRightGrid" class="print-calendar-grid-v201" role="grid" aria-label="Choose statistics range dates from the second month"></div>
+                  </section>
+                </div>
+                <footer class="print-calendar-footer-v201 print-calendar-footer-v205">
+                  <button id="statisticsCalendarReset" type="button">Reset Range</button>
+                  <span id="statisticsCalendarSelectionText">Choose the Date From.</span>
+                  <div>
+                    <button id="statisticsCalendarCancel" type="button">Cancel</button>
+                    <button id="statisticsCalendarApply" class="primary app-primary-button" type="button" disabled>Apply Dates</button>
+                  </div>
+                </footer>
+              </div>
+            </div>
+            <button class="statistics-header-action-v0258 app-primary-button" id="statisticsRefreshBtn" type="button" title="Refresh statistics data" aria-label="Refresh statistics data">
+              <span class="statistics-button-icon-v0258 is-refresh" aria-hidden="true"></span>
+              <span>Refresh</span>
+            </button>
+            <button class="statistics-header-action-v0258 app-primary-button" id="homeStatsPdfBtn" type="button" title="Generate statistics PDF report" aria-label="Generate statistics PDF report">
+              <span class="statistics-button-icon-v0258 is-pdf" aria-hidden="true"></span>
+              <span>PDF report</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="statistics-card-v0258 statistics-priority-panel-v0258">
+          <header class="statistics-section-heading-v0258">
+            <span class="statistics-section-icon-v0258 is-priority" aria-hidden="true"></span>
+            <div>
+              <h2>Priority metrics</h2>
+              <p>Four high-value signals for the selected reporting range.</p>
+            </div>
+          </header>
+          <div id="overviewStats" class="statistics-priority-grid-v0258"></div>
+        </section>
+
+        <section class="statistics-card-v0258 statistics-analytics-workspace-v0258" id="statisticsAnalyticsWorkspace">
+          <header class="statistics-analytics-heading-v0258">
+            <div class="statistics-analytics-title-v0258">
+              <span class="statistics-section-icon-v0258 is-analytics" id="statisticsChartDatasetIcon" aria-hidden="true"></span>
+              <div>
+                <span>Live analytics</span>
+                <h2 id="statisticsChartTitle">Glass mix by quantity</h2>
+                <p id="statisticsChartSubtitle">Piece quantity by glass type for the selected reporting range.</p>
+              </div>
+            </div>
+            <div class="statistics-view-switcher-v0258" role="group" aria-label="Statistics presentation type">
+              <button class="statistics-view-button-v0258" type="button" data-statistics-view="bar" aria-pressed="false">
+                <span class="statistics-view-icon-v0258 is-bar" aria-hidden="true"></span><span>Bar</span>
+              </button>
+              <button class="statistics-view-button-v0258" type="button" data-statistics-view="line" aria-pressed="false">
+                <span class="statistics-view-icon-v0258 is-line" aria-hidden="true"></span><span>Line</span>
+              </button>
+              <button class="statistics-view-button-v0258 app-primary-button" type="button" data-statistics-view="donut" aria-pressed="true">
+                <span class="statistics-view-icon-v0258 is-donut" aria-hidden="true"></span><span>Donut</span>
+              </button>
+              <button class="statistics-view-button-v0258" type="button" data-statistics-view="table" aria-pressed="false">
+                <span class="statistics-view-icon-v0258 is-table" aria-hidden="true"></span><span>Table</span>
+              </button>
+            </div>
+          </header>
+
+          <div class="statistics-filter-deck-v0258">
+            <label class="statistics-control-v0258 statistics-data-control-v0258">
+              <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-data" aria-hidden="true"></i>Data</span>
+              <select id="statsChartMetricSelect">
+                <optgroup label="Delivery lists">
+                  <option value="delivery">Delivery completion by list</option>
+                  <option value="remaining">Open pieces by delivery list</option>
+                  <option value="timeliness">On-time completion by list</option>
+                  <option value="incomplete">Incomplete delivery lists</option>
+                </optgroup>
+                <optgroup label="Workflow stages">
+                  <option value="stage-volume">Stage workload</option>
+                  <option value="stage-open">Open work by stage</option>
+                  <option value="stages">Stage completion</option>
+                  <option value="work">Scanned vs open work</option>
+                </optgroup>
+                <optgroup label="Production mix">
+                  <option value="glass" selected>Glass type quantity</option>
+                </optgroup>
+                <optgroup label="Breakage &amp; rejects">
+                  <option value="breakage-machines">Machine breakage overview</option>
+                  <option value="breakage-glass">Glass type breakage overview</option>
+                  <option value="breakage-reasons">Reject reasons by machine</option>
+                  <option value="breakage-rate">Breakage percentage</option>
+                </optgroup>
+                <optgroup label="Delivery dates">
+                  <option value="date-volume">Pieces by delivery date</option>
+                  <option value="date-scanned">Scanned pieces by delivery date</option>
+                  <option value="date-open">Open pieces by delivery date</option>
+                  <option value="date-completion">Completion by delivery date</option>
+                </optgroup>
+                <optgroup label="People and activity">
+                  <option value="operators">Scans by operator</option>
+                  <option value="scan-issues">Scan issues</option>
+                  <option value="actions">Operational actions</option>
+                  <option value="remakes">Remakes</option>
+                </optgroup>
+              </select>
+            </label>
+            <label id="statisticsBreakageMeasureControl" class="statistics-control-v0258 statistics-breakage-measure-control-v0262" hidden>
+              <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-measure" aria-hidden="true"></i>Chart unit</span>
+              <select id="statsBreakageMeasureSelect" aria-label="Breakage chart unit">
+                <option value="sqft" selected>Square feet</option>
+                <option value="pieces">Pieces</option>
+                <option value="estimatedCost">Cost</option>
+              </select>
+            </label>
+            <label class="statistics-control-v0258">
+              <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-sort" aria-hidden="true"></i>Sort</span>
+              <select id="statsChartSortSelect">
+                <option value="value-desc">Highest first</option>
+                <option value="value-asc">Lowest first</option>
+                <option value="label-asc">A to Z</option>
+                <option value="label-desc">Z to A</option>
+                <option value="source">Source order</option>
+              </select>
+            </label>
+            <label class="statistics-control-v0258">
+              <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-limit" aria-hidden="true"></i>Display</span>
+              <select id="statsChartLimitSelect">
+                <option value="10" selected>Top 10</option>
+                <option value="20">Top 20</option>
+                <option value="30">Top 30</option>
+                <option value="40">Top 40</option>
+                <option value="50">Top 50</option>
+                <option value="100">Top 100</option>
+                <option value="all">Show all</option>
+              </select>
+            </label>
+            <label class="statistics-control-v0258 statistics-search-control-v0258">
+              <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-search" aria-hidden="true"></i>Filter categories</span>
+              <input id="statsChartFilterInput" type="search" autocomplete="off" placeholder="Search labels or details...">
+            </label>
+            <label id="statisticsExternalRemakesControl" class="statistics-remake-toggle-v0260 statistics-remake-toggle-v0262" title="Include external remake pieces in breakage comparisons without assigning them to a production machine." hidden>
+              <input id="statsIncludeExternalRemakes" type="checkbox">
+              <span class="statistics-remake-toggle-icon-v0260" aria-hidden="true"></span>
+              <span><strong>External remakes</strong><small>Include in breakage</small></span>
+            </label>
+            <button id="statsChartResetBtn" class="statistics-reset-button-v0258 app-primary-button" type="button">
+              <span class="statistics-button-icon-v0258 is-reset" aria-hidden="true"></span>
+              <span>Reset</span>
+            </button>
+          </div>
+
+          <div id="statsChartKpis" class="statistics-chart-kpis-v0258" aria-label="Chart range summary"></div>
+
+          <div class="statistics-chart-result-bar-v0258">
+            <span class="statistics-result-icon-v0258" aria-hidden="true"></span>
+            <span id="statsChartResultCount">Showing chart categories</span>
+          </div>
+
+          <div id="statisticsChartCanvas" class="statistics-chart-canvas-v0258" aria-live="polite"></div>
+          <div id="statsChartShowMoreRow" class="statistics-show-more-row-v0260" hidden>
+            <button id="statsChartShowMoreBtn" class="statistics-show-more-button-v0260 app-primary-button" type="button">
+              <span class="statistics-button-icon-v0258 is-more" aria-hidden="true"></span>
+              <span>Show more data</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="statistics-support-grid-v0258" id="statisticsMiniCharts" aria-label="Supporting statistics charts"></section>
       </section>
 
       <!-- SECTION: Main stage scanning workflow -->
@@ -397,12 +563,15 @@
                 <span class="scan-active-filter-empty">No filters applied</span>
                 <div class="scan-active-filter-chips" id="scanActiveFilterChips"></div>
               </div>
-              <div class="scan-update-review-control" id="scanUpdateReviewControl" hidden aria-live="polite">
-                <span class="scan-update-review-icon" aria-hidden="true"></span>
-                <span class="scan-update-review-copy" id="scanUpdateReviewSummary">New or updated lines are ready to review.</span>
-                <button class="scan-update-review-button" id="scanUpdateReviewBtn" type="button">Review</button>
-                <button class="scan-update-reviewed-button" id="scanUpdateMarkReviewedBtn" type="button" disabled>Mark Reviewed</button>
-              </div>
+            </div>
+
+            <div class="scan-update-review-control" id="scanUpdateReviewControl" hidden aria-live="polite">
+              <span class="scan-update-review-icon" aria-hidden="true"></span>
+              <span class="scan-update-review-copy" id="scanUpdateReviewSummary">New or updated lines are ready to review.</span>
+              <span class="scan-update-review-actions">
+                <button class="scan-update-review-button" id="scanUpdateReviewBtn" type="button">Review Updates</button>
+                <button class="scan-update-reviewed-button app-primary-button" id="scanUpdateMarkReviewedBtn" type="button" disabled>Mark Reviewed</button>
+              </span>
             </div>
 
 <div class="list-table-controls">
@@ -461,17 +630,16 @@
           <aside class="scanner-panel" id="scanPanel">
             <section class="progress-band scanner-summary-header" id="scanProgressBand">
               <div class="scanner-panel-context-row-v196">
+                <label class="scanner-panel-context-select-v196 scanner-panel-date-select-v196">
+                  <span class="visually-hidden">Delivery date</span>
+                  <select id="deliveryDateSelect" data-delivery-date-select="true" aria-label="Delivery date"></select>
+                </label>
+                <div class="scanner-panel-station-v196" aria-label="Current station">
+                  <strong id="stationProfileDisplay">No assigned station</strong>
+                </div>
                 <label class="scanner-panel-context-select-v196 scanner-panel-stage-select-v196">
                   <span class="visually-hidden">Stage</span>
                   <select id="deliveryStageSelect" aria-label="Delivery stage"></select>
-                </label>
-                <div class="scanner-panel-station-v196" aria-label="Assigned station">
-                  <span>Assigned station</span>
-                  <strong id="stationProfileDisplay">No assigned station</strong>
-                </div>
-                <label class="scanner-panel-context-select-v196 scanner-panel-date-select-v196">
-                  <span class="visually-hidden">Delivery date</span>
-                  <select id="deliveryDateSelect" aria-label="Delivery date"></select>
                 </label>
                 <select id="stationSelect" hidden></select>
                 <input id="operatorInput" class="visually-hidden" type="text" autocomplete="off" value="Scanner">
@@ -495,8 +663,8 @@
                   <select id="scanRackSelect"></select>
                 </label>
                 <div class="scan-rack-actions">
-                  <button id="scanRackCompleteBtn" type="button">Complete</button>
-                  <button id="scanRackPrintBtn" type="button">Print Packing Slip</button>
+                  <button id="scanRackCompleteBtn" class="app-primary-button" type="button">Complete</button>
+                  <button id="scanRackPrintBtn" class="app-primary-button" type="button">Print Packing Slip</button>
                 </div>
               </div>
               <p id="scanRackStatus" hidden></p>
@@ -665,8 +833,8 @@
           </div>
           <div class="page-heading-actions rack-heading-actions">
             <div class="rack-create-actions" data-permission-any="manage_racks">
-              <button id="rackPackingHistoryBtn" type="button">Racks History</button>
-              <button id="rackEditOpenBtn" type="button">Edit Racks</button>
+              <button id="rackPackingHistoryBtn" class="app-primary-button" type="button">Racks History</button>
+              <button id="rackEditOpenBtn" class="app-primary-button" type="button">Edit Racks</button>
             </div>
           </div>
         </div>
@@ -784,8 +952,8 @@
             </div>
           </div>
           <div class="bay-layout-tools bay-layout-tools-simple">
-            <button class="icon-button undo-redo-icon undo-icon-button" id="bayLayoutUndoBtn" type="button" title="Undo layout change" aria-label="Undo layout change"><span class="undo-icon"></span><small>Undo</small></button>
-            <button class="icon-button undo-redo-icon redo-icon-button" id="bayLayoutRedoBtn" type="button" title="Redo layout change" aria-label="Redo layout change"><span class="redo-icon"></span><small>Redo</small></button>
+            <button class="icon-button undo-redo-icon undo-icon-button app-primary-button app-icon-primary" id="bayLayoutUndoBtn" type="button" title="Undo layout change" aria-label="Undo layout change"><span class="undo-icon"></span><small>Undo</small></button>
+            <button class="icon-button undo-redo-icon redo-icon-button app-primary-button app-icon-primary" id="bayLayoutRedoBtn" type="button" title="Redo layout change" aria-label="Redo layout change"><span class="redo-icon"></span><small>Redo</small></button>
             <button id="bayCollapseAllBtn" type="button">Collapse All</button>
             <button id="bayExpandAllBtn" type="button">Expand All</button>
             <button id="bayLayoutCancelBtn" type="button">Cancel</button>
@@ -800,7 +968,7 @@
                 <span class="search-icon"></span>
                 <input id="bayMapSearch" type="search" autocomplete="off" placeholder="Search bay, order, item, customer, glass type, size...">
               </label>
-              <button class="tool-button bay-find-btn" id="bayCheckBtn" type="button">Find Match</button>
+              <button class="tool-button app-primary-button bay-find-btn" id="bayCheckBtn" type="button">Find Match</button>
               <details class="bay-filter-drawer" id="bayFilterDrawer">
                 <summary>
                   <span class="bay-filter-icon" aria-hidden="true"></span>
@@ -841,7 +1009,7 @@
               </details>
             </section>
 
-            <div class="bay-active-filter-bar" id="bayActiveFilterBar" aria-live="polite">
+            <div class="bay-active-filter-bar" id="bayActiveFilterBar" aria-live="polite" hidden>
               <div id="bayActiveFilterSummary"></div>
               <button class="tool-button" id="bayClearFiltersBtn" type="button">Clear filters</button>
             </div>
@@ -938,8 +1106,8 @@
                           <span class="barcode-icon" aria-hidden="true"></span>
                           <input id="bayScanOutInput" type="text" autocomplete="off" placeholder="Scan or type the piece barcode...">
                           <span class="bay-command-history-overlay-v150" aria-label="Bay scan correction tools">
-                            <button class="icon-button undo-redo-icon undo-icon-button bay-command-history-button-v150" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action"><span class="undo-icon" aria-hidden="true"></span><span class="sr-only">Undo</span></button>
-                            <button class="icon-button undo-redo-icon redo-icon-button bay-command-history-button-v150" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action"><span class="redo-icon" aria-hidden="true"></span><span class="sr-only">Redo</span></button>
+                            <button class="icon-button undo-redo-icon undo-icon-button bay-command-history-button-v150 app-primary-button app-icon-primary" id="bayUndoBtn" type="button" title="Undo last bay action" aria-label="Undo last bay action"><span class="undo-icon" aria-hidden="true"></span><span class="sr-only">Undo</span></button>
+                            <button class="icon-button undo-redo-icon redo-icon-button bay-command-history-button-v150 app-primary-button app-icon-primary" id="bayRedoBtn" type="button" title="Redo last bay action" aria-label="Redo last bay action"><span class="redo-icon" aria-hidden="true"></span><span class="sr-only">Redo</span></button>
                           </span>
                         </span>
                       </div>
@@ -949,7 +1117,7 @@
                       <div class="bay-manual-controls-v160">
                         <input class="bay-manual-reference-v160" id="bayManualReferenceInput" type="text" inputmode="text" enterkeyhint="go" autocomplete="off" spellcheck="false" placeholder="Order + item (236505.1)" aria-label="Order number and item number" required>
                         <input id="bayManualQtyInput" type="hidden" value="1">
-                        <button class="tool-button primary-tool bay-manual-submit-v160" id="bayManualSubmitBtn" type="button">Submit</button>
+                        <button class="tool-button primary-tool bay-manual-submit-v160 app-primary-button" id="bayManualSubmitBtn" type="button">Submit</button>
                       </div>
                       <small class="bay-manual-format-help-v160">Accepted: 236505001, 236505 1, 236505.1, or 236505/1</small>
                     </section>
@@ -1033,7 +1201,7 @@
               <h2>Selected Bay</h2>
               <p>Review bay fulfillment, choose scanner actions, and manage the glass assigned to this location.</p>
             </div>
-            <button id="baySelectedCloseBtn" class="modal-close-x" type="button" aria-label="Close selected bay">×</button>
+            <button id="baySelectedCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close selected bay">×</button>
           </header>
           <div id="baySelectedPanel"></div>
         </section>
@@ -1046,7 +1214,7 @@
               <h2>Old Bay Control Center</h2>
               <p>Review aged assignments, confirm their physical location, and snooze only work that has been checked.</p>
             </div>
-            <button id="staleBayCloseBtn" class="modal-close-x" type="button" aria-label="Close old bay orders">×</button>
+            <button id="staleBayCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close old bay orders">×</button>
           </header>
 
           <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Old Bay sections">
@@ -1106,7 +1274,7 @@
               <h2>Rush Order</h2>
               <span class="bay-scanner-subtitle">Create and manage intentional Rush work without counting imported remake markers.</span>
             </div>
-            <button id="sdiCloseBtn" class="modal-close-x" type="button" aria-label="Close Rush window">×</button>
+            <button id="sdiCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close Rush window">×</button>
           </div>
 
           <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Rush sections">
@@ -1180,7 +1348,7 @@
         <section class="modal-panel manage-items-panel manage-items-panel-v182" id="manageItemsPanel" hidden>
           <div class="section-heading manage-items-heading">
             <div><small>Indian Trail inventory</small><h2>Manage Bay Items</h2><span>Filter, review, move, clear, target, or mark Rush work from one larger workspace.</span></div>
-            <button id="manageItemsCloseBtn" class="modal-close-x" type="button" aria-label="Close manage items window">×</button>
+            <button id="manageItemsCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close manage items window">×</button>
           </div>
           <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Manage Items sections">
             <button class="is-active" type="button" data-bay-modal="manage" data-bay-modal-section="workspace" aria-selected="true"><span>Workspace</span></button>
@@ -1220,7 +1388,7 @@
         <section class="modal-panel bay-editor-panel bay-editor-panel-v182" id="bayEditorPanel" hidden>
           <div class="section-heading bay-editor-heading">
             <div><small>Physical bay configuration</small><h2>Edit Bays</h2><span>Create, rename, delete, and set bay group behavior without horizontal scrolling.</span></div>
-            <button id="bayEditorCloseBtn" class="modal-close-x" type="button" aria-label="Close edit bays window">×</button>
+            <button id="bayEditorCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close edit bays window">×</button>
           </div>
           <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Edit Bays sections">
             <button class="is-active" type="button" data-bay-modal="editor" data-bay-modal-section="workspace" aria-selected="true"><span>Workspace</span></button>
@@ -1305,8 +1473,8 @@
               <button class="link-button" type="button" data-admin-modal="lookups">Edit lookups</button>
             </div>
             <div class="compact-list lookup-summary-list">
-              <div><strong>Manual Edit dropdowns</strong><span>Products, routes, and process options.</span></div>
-              <div><strong>Data driven</strong><span>Imports plus admin-added values.</span></div>
+              <div><strong>Manual Edit & pricing</strong><span>Products, routes, process options, and glass cost per SQFT.</span></div>
+              <div><strong>Data driven</strong><span>Imports plus admin-added values, including new unpriced glass types.</span></div>
             </div>
           </section>
 
@@ -1377,13 +1545,13 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.228">
+        <span class="footer-version-v0163" aria-label="Application version 0.262">
           <small>Version</small>
-          <strong>0.228</strong>
+          <strong>0.262</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
-          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.228&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
+          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.262&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
           title="Report a Delivery List Scanner bug"
         >
           <span class="footer-bug-icon-v0163" aria-hidden="true"></span>
@@ -1402,18 +1570,18 @@
 
     <!-- SECTION: Global print and export modal -->
     <div class="print-options-backdrop" id="printOptionsBackdrop" hidden></div>
-    <section class="print-options-panel print-options-panel-v197" id="printOptionsPanel" hidden>
-      <header class="print-options-hero-v197">
+    <section class="print-options-panel print-options-panel-v197 print-options-panel-v238 print-options-panel-v240" id="printOptionsPanel" hidden>
+      <header class="print-options-hero-v197 print-options-hero-v238 print-options-hero-v240">
         <div>
           <small>Delivery List Scanner</small>
           <h2>Print / Export Delivery Lists</h2>
           <p>Select routes, dates, glass types, scan states, and attention filters before generating the document.</p>
         </div>
-        <button id="printOptionsClose" class="print-options-close-v197" type="button" aria-label="Close print/export">×</button>
+        <button id="printOptionsClose" class="print-options-close-v197 gui-close-button" type="button" aria-label="Close print/export">×</button>
       </header>
 
       <div class="print-options-workspace-v197">
-        <aside class="print-filter-pane-v197" aria-label="Print and export filters">
+        <aside class="print-filter-pane-v197 print-filter-pane-v238" aria-label="Print and export filters">
           <header class="print-pane-heading-v197 print-pane-heading-v203 print-pane-heading-v209">
             <div class="print-filter-heading-cluster-v209">
               <div class="print-filter-heading-title-v203"><span class="print-filter-icon-v197" aria-hidden="true"></span><strong>Filters</strong></div>
@@ -1449,7 +1617,7 @@
                     <span id="printCalendarSelectionText">Choose the Date From.</span>
                     <div>
                       <button id="printCalendarCancel" type="button">Cancel</button>
-                      <button id="printCalendarApply" class="primary" type="button" disabled>Apply Dates</button>
+                      <button id="printCalendarApply" class="primary app-primary-button" type="button" disabled>Apply Dates</button>
                     </div>
                   </footer>
                 </div>
@@ -1470,29 +1638,21 @@
             <div class="print-filter-matrix-v203">
               <section class="print-filter-section-v197 print-route-section-v203">
                 <strong class="print-filter-label-v197">Route</strong>
-                <small class="print-filter-help-v197">Airport includes every outbound item. Select destination routes for focused lists.</small>
                 <div id="printRouteOptions" class="print-chip-grid-v197 print-route-options-v197"></div>
               </section>
 
               <section class="print-filter-section-v197 print-glass-section-v197 print-glass-section-v203">
                 <strong class="print-filter-label-v197">Glass Type</strong>
-                <small class="print-filter-help-v197">Grouped by Mirror, Tempered, and Annealed for faster selection</small>
-                <label class="print-compact-search-v197">
-                  <span class="visually-hidden">Search glass types</span>
-                  <input id="printGlassSearch" type="search" autocomplete="off" placeholder="Search glass types">
-                </label>
                 <div id="printOptionsGlassType" class="print-chip-stack-v197 print-glass-options-v197"></div>
               </section>
 
               <section class="print-filter-section-v197 print-status-section-v203">
                 <strong class="print-filter-label-v197">Status</strong>
-                <small class="print-filter-help-v197">Select one or more scan states</small>
                 <div id="printStatusOptions" class="print-chip-grid-v197 print-status-options-v197"></div>
               </section>
 
               <section class="print-filter-section-v197 print-attention-section-v203">
                 <strong class="print-filter-label-v197">Attention</strong>
-                <small class="print-filter-help-v197">Find priority or changed pieces</small>
                 <div id="printAttentionOptions" class="print-chip-grid-v197 print-attention-options-v197"></div>
               </section>
             </div>
@@ -1521,7 +1681,7 @@
           </div>
         </aside>
 
-        <section class="print-preview-pane-v197" aria-label="Delivery list preview">
+        <section class="print-preview-pane-v197 print-preview-pane-v238" aria-label="Delivery list preview">
           <header class="print-preview-toolbar-v197">
             <div class="print-preview-title-v197">
               <span class="print-document-icon-v197" aria-hidden="true"></span>
@@ -1571,7 +1731,7 @@
                   <option value="csv">Comma-Separated Values (.csv)</option>
                 </select>
               </label>
-              <button id="printOptionsSubmit" class="print-primary-action-v197 is-print" type="button"><span id="printOutputActionIcon" class="print-printer-icon-v197" aria-hidden="true"></span><span id="printOutputActionLabel">Print List</span></button>
+              <button id="printOptionsSubmit" class="print-primary-action-v197 app-primary-button is-print" type="button"><span id="printOutputActionIcon" class="print-printer-icon-v197" aria-hidden="true"></span><span id="printOutputActionLabel">Print List</span></button>
             </div>
           </footer>
 
@@ -1581,29 +1741,28 @@
       </div>
     </section>
 
-    <div class="print-preset-backdrop-v199 print-preset-backdrop-v206 print-preset-backdrop-v209 print-preset-backdrop-v227 print-preset-backdrop-v228" id="printPresetModalBackdrop" hidden></div>
-    <section class="print-preset-modal-v199 print-preset-modal-v200 print-preset-modal-v206 print-preset-modal-v209 print-preset-modal-v227 print-preset-modal-v228" id="printPresetModal" role="dialog" aria-modal="true" aria-labelledby="printPresetModalTitle" hidden>
-      <header class="print-preset-hero-v227">
+    <div class="print-preset-backdrop-v199 print-preset-backdrop-v206 print-preset-backdrop-v209 print-preset-backdrop-v227 print-preset-backdrop-v228 print-preset-backdrop-v229 print-preset-backdrop-v232 print-preset-backdrop-v233 print-preset-backdrop-v234 print-preset-backdrop-v238" id="printPresetModalBackdrop" hidden></div>
+    <section class="print-preset-modal-v199 print-preset-modal-v200 print-preset-modal-v206 print-preset-modal-v209 print-preset-modal-v227 print-preset-modal-v228 print-preset-modal-v229 print-preset-modal-v232 print-preset-modal-v233 print-preset-modal-v234 print-preset-modal-v238 print-preset-modal-v240 print-preset-modal-v242" id="printPresetModal" role="dialog" aria-modal="true" aria-labelledby="printPresetModalTitle" hidden>
+      <header class="print-preset-hero-v227 print-preset-hero-v238 print-preset-hero-v240">
         <div>
           <small>Delivery List Scanner</small>
           <h3 id="printPresetModalTitle">Create Delivery List Preset</h3>
-          <p>Save default filters and print settings for fast delivery-list creation.</p>
+          <p>Save a reusable filter and output setup for delivery lists.</p>
         </div>
-        <button id="printPresetModalClose" type="button" aria-label="Close preset window">×</button>
+        <button id="printPresetModalClose" class="gui-close-button" type="button" aria-label="Close preset window">×</button>
       </header>
 
-      <div class="print-preset-workspace-v227">
+      <div class="print-preset-workspace-v227 print-preset-workspace-v229 print-preset-workspace-v232 print-preset-workspace-v233 print-preset-workspace-v234 print-preset-workspace-v238 print-preset-workspace-v240">
         <main class="print-preset-main-column-v227">
           <section class="print-preset-card-v227 print-preset-details-card-v227">
             <header class="print-preset-card-heading-v227">
               <span class="print-preset-card-icon-v227" aria-hidden="true">▣</span>
-              <div><strong>Preset Details</strong><small>Name the setup and choose whether it should become your personal default.</small></div>
+              <div><strong>Preset Details</strong></div>
             </header>
             <div class="print-preset-details-grid-v227">
               <label for="printPresetNameInput"><span>Preset Name</span><input id="printPresetNameInput" type="text" maxlength="50" autocomplete="off" placeholder="Example: Indian Trail Outbound Morning"></label>
-              <label for="printPresetDescriptionInput"><span>Description</span><input id="printPresetDescriptionInput" type="text" maxlength="160" autocomplete="off" placeholder="Explain when this preset should be used."></label>
               <label class="print-preset-default-toggle-v227" for="printPresetDefaultToggle">
-                <span><strong>Set as default</strong><small>Use this preset when Print / Export opens.</small></span>
+                <span><strong>Set as default</strong><small>Open Print / Export with this preset.</small></span>
                 <input id="printPresetDefaultToggle" type="checkbox">
                 <i aria-hidden="true"></i>
               </label>
@@ -1613,134 +1772,51 @@
           <section class="print-preset-card-v227 print-preset-filters-card-v227">
             <header class="print-preset-card-heading-v227">
               <span class="print-preset-card-icon-v227" aria-hidden="true">▽</span>
-              <div><strong>Default Filters</strong><small>Choose the routes, statuses, attention filters, and glass types this preset restores.</small></div>
+              <div><strong>Default Filters</strong></div>
             </header>
             <div id="printPresetSummary" class="print-preset-filter-rows-v227"></div>
-          </section>
-
-          <section class="print-preset-card-v227 print-preset-options-card-v227">
-            <header class="print-preset-card-heading-v227">
-              <span class="print-preset-card-icon-v227" aria-hidden="true">▰</span>
-              <div><strong>Print Options</strong><small>Configure the output format, copies, and page orientation.</small></div>
-            </header>
-            <div id="printPresetOutputSettings" class="print-preset-output-settings-v227"></div>
           </section>
         </main>
 
         <aside class="print-preset-side-column-v227">
-          <section class="print-preset-card-v227 print-preset-live-summary-card-v227">
+          <section class="print-preset-card-v227 print-preset-options-card-v227">
             <header class="print-preset-card-heading-v227">
-              <span class="print-preset-card-icon-v227" aria-hidden="true">☷</span>
-              <div><strong>Preset Summary</strong><small>Review exactly what will be saved.</small></div>
+              <span class="print-preset-card-icon-v227" aria-hidden="true">▰</span>
+              <div><strong>Print Options</strong></div>
             </header>
-            <div id="printPresetLiveSummary" class="print-preset-live-summary-v227"></div>
+            <div id="printPresetOutputSettings" class="print-preset-output-settings-v227"></div>
           </section>
 
           <section class="print-preset-card-v227 print-preset-actions-card-v227">
             <header class="print-preset-card-heading-v227">
-              <span class="print-preset-card-icon-v227" aria-hidden="true">ϟ</span>
-              <div><strong>Actions</strong><small>Save now or save and immediately apply the preset.</small></div>
+              <span class="print-preset-card-icon-v227 print-preset-save-icon-v242" aria-hidden="true"></span>
+              <div><strong>Save Preset</strong></div>
             </header>
-            <button id="printPresetSaveOnlyBtn" class="primary" type="button">Save Preset</button>
+            <button id="printPresetSaveOnlyBtn" class="primary app-primary-button" type="button">Save Preset</button>
             <button id="printPresetConfirmBtn" type="button">Save &amp; Apply</button>
             <button id="printPresetCancelBtn" type="button">Cancel</button>
           </section>
         </aside>
 
         <p id="printPresetStatus" class="print-preset-status-v199 print-preset-status-v206 print-preset-status-v209 print-preset-status-v227" aria-live="polite"></p>
-        <footer class="print-preset-info-v227"><span aria-hidden="true">i</span> Presets save your default filters and print settings for future delivery-list creation.</footer>
       </div>
     </section>
-
-    <!-- SECTION: Interactive statistics chart modal -->
-    <div class="modal-backdrop statistics-chart-backdrop" id="statsChartBackdrop" hidden></div>
-    <section class="modal-panel statistics-chart-modal" id="statsChartModal" hidden>
-      <div class="statistics-chart-modal-header">
-        <div>
-          <span class="statistics-eyebrow">Statistics explorer</span>
-          <h2 id="statsChartModalTitle">Full Statistics Chart</h2>
-          <p id="statsChartModalSubtitle">Explore the selected dashboard range.</p>
-        </div>
-        <button id="statsChartCloseBtn" class="modal-close-x" type="button" aria-label="Close statistics chart">×</button>
-      </div>
-      <div class="statistics-chart-modal-controls">
-        <label>
-          <span>Date range</span>
-          <select id="statsChartRangeSelect">
-            <option value="1">Today</option>
-            <option value="7">Last week</option>
-            <option value="30">Last 30 days</option>
-            <option value="90">Last 90 days</option>
-            <option value="365">Full year</option>
-            <option value="all">All lists</option>
-          </select>
-        </label>
-        <label>
-          <span>Chart data</span>
-          <select id="statsChartMetricSelect">
-            <option value="delivery">Delivery completion by list</option>
-            <option value="remaining">Open pieces by delivery list</option>
-            <option value="timeliness">On-time completion by list</option>
-            <option value="stage-volume">Stage workload</option>
-            <option value="glass">All glass types</option>
-            <option value="stages">Stage completion</option>
-            <option value="work">Scanned vs open work</option>
-            <option value="operators">Scans by operator</option>
-            <option value="activity">System activity</option>
-            <option value="remakes">Remakes</option>
-          </select>
-        </label>
-        <label>
-          <span>Chart style</span>
-          <select id="statsChartViewSelect">
-            <option value="bar">Bar chart</option>
-            <option value="donut">Donut chart</option>
-          </select>
-        </label>
-        <label>
-          <span>Sort</span>
-          <select id="statsChartSortSelect">
-            <option value="value-desc">Highest first</option>
-            <option value="value-asc">Lowest first</option>
-            <option value="label-asc">A to Z</option>
-            <option value="label-desc">Z to A</option>
-          </select>
-        </label>
-        <label>
-          <span>Display</span>
-          <select id="statsChartLimitSelect">
-            <option value="all">Show all</option>
-            <option value="5">Top 5</option>
-            <option value="10">Top 10</option>
-            <option value="20">Top 20</option>
-          </select>
-        </label>
-        <label class="statistics-chart-filter-control">
-          <span>Filter chart labels</span>
-          <input id="statsChartFilterInput" type="search" autocomplete="off" placeholder="Search glass types, stages, users...">
-        </label>
-        <button id="statsChartResetBtn" class="statistics-chart-reset" type="button">Reset filters</button>
-      </div>
-      <div id="statsChartKpis" class="statistics-chart-kpis" aria-label="Chart range summary"></div>
-      <div class="statistics-chart-result-bar">
-        <span id="statsChartResultCount">Showing all chart categories</span>
-      </div>
-      <div id="statsChartModalCanvas" class="statistics-chart-modal-canvas"></div>
-    </section>
-
 
     <!-- SECTION: Shared operational workflow modal (racks, rejects, and history) -->
     <div class="modal-backdrop operations-modal-backdrop" id="operationsModalBackdrop" aria-hidden="true" hidden></div>
     <section class="modal-panel operations-modal-panel" id="operationsModal" aria-hidden="true" hidden>
       <header class="section-heading operations-modal-heading">
         <div class="operations-modal-heading-copy">
-          <small id="operationsModalEyebrow">Operations</small>
-          <h2 id="operationsModalTitle">Operations</h2>
-          <p id="operationsModalDescription"></p>
+          <span class="operations-modal-visual-icon" aria-hidden="true"></span>
+          <div class="operations-modal-heading-text">
+            <small id="operationsModalEyebrow">Operations</small>
+            <h2 id="operationsModalTitle">Operations</h2>
+            <p id="operationsModalDescription"></p>
+          </div>
         </div>
         <div class="operations-modal-heading-actions">
-          <span class="operations-modal-health-pill"><i aria-hidden="true"></i><span id="operationsModalStatusText">Live operations</span></span>
-          <button id="operationsModalClose" class="modal-close-x" type="button" aria-label="Close operations window">×</button>
+          <span class="operations-modal-health-pill" hidden><i aria-hidden="true"></i><span id="operationsModalStatusText">Live operations</span></span>
+          <button id="operationsModalClose" class="modal-close-x gui-close-button" type="button" aria-label="Close operations window">×</button>
         </div>
       </header>
       <nav class="admin-modal-section-tabs reject-operations-tabs-v183" id="rejectOperationsTabs" aria-label="Internal reject sections" hidden>
@@ -1777,8 +1853,8 @@
           <p id="adminModalDescription">Manage scanner configuration and operational records.</p>
         </div>
         <div class="admin-modal-heading-actions">
-          <span class="admin-modal-health-pill"><i aria-hidden="true"></i><span id="adminModalStatusText">Admin access</span></span>
-          <button id="adminModalClose" class="modal-close-x" type="button" aria-label="Close admin window">×</button>
+          <span class="admin-modal-health-pill" hidden><i aria-hidden="true"></i><span id="adminModalStatusText">Admin access</span></span>
+          <button id="adminModalClose" class="modal-close-x gui-close-button" type="button" aria-label="Close admin window">×</button>
         </div>
       </header>
       <nav class="admin-modal-section-tabs" id="adminModalSectionTabs" aria-label="Admin editor sections">
@@ -1804,6 +1880,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260805-v0.228"></script>
+  <script src="static/js/app.js?v=20260807-v0.262"></script>
 </body>
 </html>

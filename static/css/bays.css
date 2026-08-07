@@ -2,7 +2,7 @@
 /*
   Delivery List Scanner - Bays Page Styles
   Generated from the maintained v150 cascade during the static asset
-  organization pass. Keep shared rules in styles.css.
+  organization pass. Keep reusable controls in shared-ui.css and page-specific layout in this file.
 */
 
 .panel h2,
@@ -3389,42 +3389,6 @@ body.bay-move-mode .excel-bay-map {
 
 
 
-.bay-map-helper-v17 {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 12px;
-  padding: 11px 12px;
-  border: 1px solid #cfdcf0;
-  border-radius: 14px;
-  background: #fff;
-  color: #53627b;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-
-
-.bay-map-helper-v17 strong {
-  color: var(--navy-dark);
-  font-size: 13px;
-}
-
-
-
-.bay-map-helper-v17 button {
-  min-height: 34px;
-  border: 1px solid var(--navy);
-  border-radius: 10px;
-  background: var(--navy);
-  color: #fff;
-  padding: 0 12px;
-  font-weight: 900;
-}
-
-
 
 .bay-dense-grid-v17 {
   display: grid;
@@ -3702,8 +3666,7 @@ body.bay-move-mode .excel-bay-map {
   .manage-items-target-card,
   .manage-items-actions,
   .manage-selected-stats,
-  .bay-scan-mode-card,
-  .bay-map-helper-v17 {
+  .bay-scan-mode-card {
     grid-template-columns: 1fr;
   }
 }
@@ -3814,11 +3777,7 @@ body.bay-move-mode .excel-bay-map {
 
 
 
-.sdi-panel.modal-panel .modal-close-x {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.24);
-  background: rgba(255, 255, 255, 0.12);
-}
+
 
 
 
@@ -6664,24 +6623,9 @@ body.bay-move-mode .excel-bay-map {
 .bay-selected-modal-icon-v160::before { top: 10px; }
 .bay-selected-modal-icon-v160::after { bottom: 10px; }
 
-.bay-selected-modal-header-v160 .modal-close-x {
-  position: static !important;
-  width: 38px !important;
-  height: 38px !important;
-  min-height: 38px !important;
-  margin: 0 !important;
-  border: 1px solid rgba(255, 255, 255, 0.22) !important;
-  border-radius: 10px !important;
-  background: rgba(255, 255, 255, 0.10) !important;
-  color: #ffffff !important;
-}
 
-.bay-selected-modal-header-v160 .modal-close-x:hover,
-.bay-selected-modal-header-v160 .modal-close-x:focus-visible {
-  outline: none !important;
-  border-color: rgba(255, 255, 255, 0.48) !important;
-  background: rgba(255, 255, 255, 0.18) !important;
-}
+
+
 
 .bay-selected-modal-v160 #baySelectedPanel {
   max-height: calc(100vh - 164px) !important;
@@ -7230,7 +7174,7 @@ body.bay-move-mode .excel-bay-map {
   position: relative !important;
   display: block !important;
   width: 100% !important;
-  min-height: 88px !important;
+  min-height: 94px !important;
   padding: 12px 66px 12px 32px !important;
   overflow: hidden !important;
 }
@@ -7242,7 +7186,7 @@ body.bay-move-mode .excel-bay-map {
 .bay-edit-column-grid-v23 .physical-bay-section-v17 > summary::before {
   position: absolute !important;
   left: 16px !important;
-  top: 18px !important;
+  top: 43px !important;
   margin: 0 !important;
 }
 
@@ -7253,7 +7197,7 @@ body.bay-move-mode .excel-bay-map {
 .bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-title {
   position: absolute !important;
   left: 34px !important;
-  top: 12px !important;
+  top: 31px !important;
   right: 66px !important;
   min-width: 0 !important;
   padding: 0 !important;
@@ -7266,8 +7210,8 @@ body.bay-move-mode .excel-bay-map {
 .bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-status {
   position: absolute !important;
   top: 7px !important;
-  right: 7px !important;
-  left: auto !important;
+  right: auto !important;
+  left: 7px !important;
   bottom: auto !important;
   transform: none !important;
   width: 48px !important;
@@ -7290,7 +7234,7 @@ body.bay-move-mode .excel-bay-map {
 .bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-counts {
   position: absolute !important;
   left: 34px !important;
-  top: 48px !important;
+  top: 62px !important;
   right: 66px !important;
   display: flex !important;
   gap: 5px !important;
@@ -15916,27 +15860,9 @@ padding: 0;
   letter-spacing: -0.02em;
 }
 
-#sdiPanel .modal-close-x,
-#manageItemsPanel .modal-close-x,
-#bayEditorPanel .modal-close-x {
-  position: relative;
-  z-index: 2;
-  width: 38px !important;
-  height: 38px !important;
-  min-height: 38px !important;
-  border: 1px solid rgba(255, 255, 255, 0.34) !important;
-  border-radius: 11px !important;
-  background: rgba(255, 255, 255, 0.12) !important;
-  color: #ffffff !important;
-  box-shadow: none !important;
-}
 
-#sdiPanel .modal-close-x:hover,
-#manageItemsPanel .modal-close-x:hover,
-#bayEditorPanel .modal-close-x:hover {
-  background: rgba(255, 255, 255, 0.22) !important;
-  transform: translateY(-1px);
-}
+
+
 
 #sdiPanel .sdi-form-v069 {
   gap: 13px !important;
@@ -16584,20 +16510,9 @@ body.bay-move-mode .bay-layout-drop-zone {
   letter-spacing: 0.01em;
 }
 
-#adminModal[data-custom-view="bay-all-scans"] > .section-heading .modal-close-x {
-  width: 38px;
-  height: 38px;
-  border-color: rgba(255, 255, 255, 0.32) !important;
-  background: rgba(255, 255, 255, 0.12) !important;
-  color: #ffffff !important;
-  box-shadow: none !important;
-}
 
-#adminModal[data-custom-view="bay-all-scans"] > .section-heading .modal-close-x:hover,
-#adminModal[data-custom-view="bay-all-scans"] > .section-heading .modal-close-x:focus-visible {
-  border-color: rgba(255, 255, 255, 0.72) !important;
-  background: rgba(255, 255, 255, 0.22) !important;
-}
+
+
 
 #adminModal[data-custom-view="bay-all-scans"] #adminModalBody {
   min-height: 0;
@@ -17733,11 +17648,7 @@ body.bay-move-mode .bay-layout-drop-zone {
   opacity: 0.88;
 }
 
-.stale-bay-header-v181 .modal-close-x {
-  border-color: rgba(255, 255, 255, 0.42);
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-}
+
 
 .stale-bay-workspace-v181 {
   display: grid;
@@ -17888,13 +17799,7 @@ body.bay-move-mode .bay-layout-drop-zone {
   opacity: 0.86;
 }
 
-.sdi-heading-v182 .modal-close-x,
-.manage-items-heading .modal-close-x,
-.bay-editor-heading .modal-close-x {
-  border-color: rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-}
+
 
 .sdi-rush-workspace-v182,
 .sdi-current-workspace-v182 {
@@ -18730,3 +18635,210 @@ body.bay-move-mode .bay-layout-drop-zone {
     height: 96px !important;
   }
 }
+
+/* BAY GUI CLOSE-BUTTON POSITIONING - v0.247 */
+/* Close-button layout only. shared-ui.css owns geometry and interaction. */
+.bay-selected-modal-header-v160 .modal-close-x,
+#sdiPanel .modal-close-x,
+#manageItemsPanel .modal-close-x,
+#bayEditorPanel .modal-close-x,
+#adminModal[data-custom-view="bay-all-scans"] > .section-heading .modal-close-x,
+.stale-bay-header-v181 .modal-close-x {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 5;
+  margin: 0 !important;
+  justify-self: end;
+}
+
+
+/* v0.248 Bay Map compact action ownership ---------------------------------
+   Shared button visuals remain in shared-ui.css. Bay-specific dimensions are
+   declared here through the shared component variables. */
+#bayUndoBtn,
+#bayRedoBtn,
+#bayLayoutUndoBtn,
+#bayLayoutRedoBtn {
+  --app-icon-primary-width: 26px;
+  --app-icon-primary-height: 26px;
+  --app-icon-primary-padding: 2px;
+  --app-primary-radius: 7px;
+}
+
+#bayUndoBtn :is(.undo-icon, .redo-icon),
+#bayRedoBtn :is(.undo-icon, .redo-icon),
+#bayLayoutUndoBtn :is(.undo-icon, .redo-icon),
+#bayLayoutRedoBtn :is(.undo-icon, .redo-icon) {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.bay-scanner-panel-v150 .bay-command-history-overlay-v150 {
+  top: -13px !important;
+  gap: 4px !important;
+}
+
+.bay-scanner-panel-v150 #bayManualSubmitBtn.bay-manual-submit-v160 {
+  --app-primary-min-height: 30px;
+  --app-primary-padding: 0 10px;
+  --app-primary-font-size: 0.66rem;
+  width: 84px !important;
+  min-width: 84px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+}
+
+@media (max-width: 760px) {
+  .bay-scanner-panel-v150 #bayManualSubmitBtn.bay-manual-submit-v160 {
+    width: 78px !important;
+    min-width: 78px !important;
+  }
+}
+
+
+/* v0.251 Single-row Bay Map action controls without category gradients ----
+   All five actions share one fixed row and equal dimensions. On narrow
+   screens the row scrolls horizontally instead of pushing Edit Map below. */
+#bayActionButtons.bay-action-buttons-v150 {
+  grid-template-columns: repeat(5, minmax(74px, 1fr)) !important;
+  grid-template-rows: 54px !important;
+  grid-auto-flow: column !important;
+  grid-auto-rows: 54px !important;
+  gap: 6px !important;
+  overflow-x: visible !important;
+  overflow-y: visible !important;
+}
+
+#bayActionButtons.bay-action-buttons-v150 > button {
+  --bay-action-accent: #4f6f91;
+  --bay-action-surface: #f4f7fa;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  /* v0.252: Override the legacy odd-last-child full-row placement. Every
+     launcher owns one column in the single action row, including Edit Map. */
+  grid-column: auto !important;
+  grid-row: 1 !important;
+  height: 54px !important;
+  min-height: 54px !important;
+  max-height: 54px !important;
+  align-self: stretch !important;
+  border-color: color-mix(in srgb, var(--bay-action-accent) 46%, #cad5e2) !important;
+  background: var(--bay-action-surface) !important;
+  color: color-mix(in srgb, var(--bay-action-accent) 84%, #102d4d) !important;
+  padding: 5px 4px 6px !important;
+  font-size: .65rem !important;
+  line-height: 1.05 !important;
+  text-shadow: none !important;
+  box-shadow:
+    inset 0 -3px 0 var(--bay-action-accent),
+    0 4px 10px rgba(8, 38, 75, .09) !important;
+}
+
+#bayActionButtons.bay-action-buttons-v150 > button[data-bay-action="old-bays"] {
+  --bay-action-accent: #607087;
+  --bay-action-surface: #f3f5f7;
+}
+
+#bayActionButtons.bay-action-buttons-v150 > button[data-bay-action="sdi"] {
+  --bay-action-accent: #a33d4d;
+  --bay-action-surface: #fff2f4;
+}
+
+#bayActionButtons.bay-action-buttons-v150 > button[data-bay-action="item-management"] {
+  --bay-action-accent: #2f68a3;
+  --bay-action-surface: #eef5fd;
+}
+
+#bayActionButtons.bay-action-buttons-v150 > button[data-bay-action="bay-editor"] {
+  --bay-action-accent: #6a55a0;
+  --bay-action-surface: #f5f1fc;
+}
+
+#bayActionButtons.bay-action-buttons-v150 > button[data-bay-action="layout"] {
+  --bay-action-accent: #33796e;
+  --bay-action-surface: #edf8f5;
+}
+
+#bayActionButtons.bay-action-buttons-v150 > button:hover:not(:disabled),
+#bayActionButtons.bay-action-buttons-v150 > button:focus-visible {
+  border-color: var(--bay-action-accent) !important;
+  background: #fff !important;
+  color: color-mix(in srgb, var(--bay-action-accent) 90%, #082b52) !important;
+  box-shadow:
+    inset 0 -4px 0 var(--bay-action-accent),
+    0 8px 16px rgba(8, 38, 75, .13) !important;
+  transform: translateY(-1px) !important;
+}
+
+#bayActionButtons.bay-action-buttons-v150 .bay-action-icon,
+#bayActionButtons.bay-action-buttons-v150 > button[data-bay-action="layout"] .bay-action-icon {
+  width: 22px !important;
+  height: 22px !important;
+  flex-basis: 22px !important;
+  border-color: color-mix(in srgb, var(--bay-action-accent) 34%, #ffffff) !important;
+  background: #fff !important;
+  color: var(--bay-action-accent) !important;
+}
+
+@media (max-width: 940px) {
+  #bayActionButtons.bay-action-buttons-v150 {
+    grid-template-columns: repeat(5, minmax(78px, 1fr)) !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: thin;
+    padding-bottom: 4px !important;
+  }
+}
+
+.bay-floor-grid-v19 .physical-bay-section-v17 > summary .bay-section-counts b,
+.bay-dense-grid-v17 .physical-bay-section-v17 > summary .bay-section-counts b,
+.bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-counts b {
+  min-width: 44px;
+  color: #102f55;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+
+.bay-floor-grid-v19 .bay-slot-v17.status-available {
+  border-color: #69ad7a !important;
+  background: linear-gradient(135deg, rgba(54, 156, 78, .18), rgba(54, 156, 78, .04)), var(--bay-bg) !important;
+  box-shadow: inset 0 -4px 0 #31934a !important;
+}
+
+.bay-floor-grid-v19 .bay-slot-v17.status-occupied {
+  border-color: #5489ca !important;
+  background: linear-gradient(135deg, rgba(42, 106, 188, .20), rgba(42, 106, 188, .05)), var(--bay-bg) !important;
+  box-shadow: inset 0 -4px 0 #245fa9 !important;
+}
+
+.bay-floor-grid-v19 .bay-slot-v17.status-preassigned {
+  border-color: #d29a3e !important;
+  background: linear-gradient(135deg, rgba(225, 157, 42, .22), rgba(225, 157, 42, .05)), var(--bay-bg) !important;
+  box-shadow: inset 0 -4px 0 #bd7916 !important;
+}
+
+.bay-floor-grid-v19 .bay-slot-v17.status-picking {
+  border-color: #c85361 !important;
+  background: linear-gradient(135deg, rgba(201, 47, 66, .20), rgba(201, 47, 66, .05)), var(--bay-bg) !important;
+  box-shadow: inset 0 -4px 0 #b42335 !important;
+}
+
+.bay-floor-grid-v19 .bay-slot-v17 .bay-state {
+  min-width: 31px;
+  color: #fff !important;
+  font-size: 7.5px !important;
+  font-weight: 950 !important;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .18);
+}
+
+.bay-floor-grid-v19 .bay-slot-v17 .bay-state.status-available { background: #2f9349 !important; }
+.bay-floor-grid-v19 .bay-slot-v17 .bay-state.status-occupied { background: #245fa9 !important; }
+.bay-floor-grid-v19 .bay-slot-v17 .bay-state.status-preassigned { background: #b87413 !important; }
+.bay-floor-grid-v19 .bay-slot-v17 .bay-state.status-picking { background: #b42335 !important; }
+.bay-floor-grid-v19 .bay-slot-v17 .bay-state.status-manual,
+.bay-floor-grid-v19 .bay-slot-v17 .bay-state.status-blocked { background: #59687a !important; }
+
+
