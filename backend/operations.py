@@ -145,6 +145,7 @@ class OperationsFeatureService:
                   ON r.notice_id = n.id
                  AND r.user_id = ?
                 WHERE li.list_id = ?
+                  AND COALESCE(li.is_deleted, 0) = 0
                 ORDER BY li.id, n.id
                 """,
                 (user_id, clean_list_id),
@@ -306,7 +307,7 @@ class OperationsFeatureService:
                        GROUP_CONCAT(DISTINCT dl.stage) AS stages
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
-                WHERE dl.status = 'active' AND li.order_no = ? AND li.item_no = ?
+                WHERE dl.status = 'active' AND COALESCE(li.is_deleted, 0) = 0 AND li.order_no = ? AND li.item_no = ?
                 GROUP BY dl.delivery_date, li.order_no, li.item_no
                 ORDER BY dl.delivery_date DESC
                 """,
@@ -383,7 +384,7 @@ class OperationsFeatureService:
                 SELECT li.id
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
-                WHERE dl.delivery_date = ? AND li.order_no = ? AND li.item_no = ?
+                WHERE dl.delivery_date = ? AND COALESCE(li.is_deleted, 0) = 0 AND li.order_no = ? AND li.item_no = ?
             )
             """,
             (total_qty, reason, location, rejected_at, updated_at, delivery_date, order, item),
@@ -419,7 +420,7 @@ class OperationsFeatureService:
                 SELECT MAX(li.qty) AS max_qty
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
-                WHERE dl.delivery_date = ? AND li.order_no = ? AND li.item_no = ?
+                WHERE dl.delivery_date = ? AND COALESCE(li.is_deleted, 0) = 0 AND li.order_no = ? AND li.item_no = ?
                 """,
                 (str(row["delivery_date"]), str(row["order_no"]), str(row["item_no"])),
             ).fetchone()
@@ -525,7 +526,7 @@ class OperationsFeatureService:
                     """
                     SELECT dl.delivery_date
                     FROM line_items li JOIN delivery_lists dl ON dl.id = li.list_id
-                    WHERE dl.status = 'active' AND li.order_no = ? AND li.item_no = ?
+                    WHERE dl.status = 'active' AND COALESCE(li.is_deleted, 0) = 0 AND li.order_no = ? AND li.item_no = ?
                     ORDER BY CASE WHEN dl.delivery_date >= date('now') THEN 0 ELSE 1 END,
                              ABS(julianday(dl.delivery_date) - julianday('now')), dl.delivery_date DESC
                     LIMIT 1
@@ -538,6 +539,7 @@ class OperationsFeatureService:
                 SELECT li.*, dl.delivery_date, dl.stage, dl.scanner
                 FROM line_items li JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE dl.status = 'active' AND dl.delivery_date = ?
+                  AND COALESCE(li.is_deleted, 0) = 0
                   AND li.order_no = ? AND li.item_no = ?
                 ORDER BY dl.stage, li.id
                 """,
@@ -790,6 +792,7 @@ class OperationsFeatureService:
                 SELECT dl.delivery_date, dl.stage
                 FROM line_items li JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE dl.status = 'active' AND dl.delivery_date BETWEEN ? AND ?
+                  AND COALESCE(li.is_deleted, 0) = 0
                   AND li.order_no = ? AND li.item_no = ?
                 ORDER BY dl.delivery_date, dl.stage LIMIT 1
                 """,
@@ -914,7 +917,8 @@ class OperationsFeatureService:
                 JOIN racks r ON r.id = ri.rack_id
                 JOIN line_items li ON li.id = ri.line_item_id
                 JOIN delivery_lists dl ON dl.id = li.list_id
-                WHERE r.rack_code = ? AND ri.status = 'Active' {date_clause}
+                WHERE r.rack_code = ? AND ri.status = 'Active'
+                  AND COALESCE(li.is_deleted, 0) = 0 {date_clause}
                 ORDER BY dl.delivery_date, CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER)
                 """,
                 params,

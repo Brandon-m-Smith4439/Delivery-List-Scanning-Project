@@ -8,6 +8,7 @@ may select only the predefined exporter/importer actions exposed here.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -31,6 +32,16 @@ RUN_ACTIONS = {
     "sql-export-only": "SqlExportOnly",
     "sql-export-and-import": "SqlExportAndImport",
 }
+
+# The browser control plane deploys only the runtime files that participate in
+# authoritative import reconciliation. Keeping this list explicit prevents the
+# web server from overwriting local configuration or setup-only scripts.
+AUTOMATION_RUNTIME_FILES = (
+    "Run-DeliveryListSqlAutomation.ps1",
+    "import_delivery_folder.py",
+    "delivery_import_safety.py",
+    "verified-source-exclusions.json",
+)
 
 
 def utc_now() -> str:
@@ -69,6 +80,30 @@ class DeliveryAutomationController:
         self._state_lock = threading.Lock()
         self._active_process: subprocess.Popen[str] | None = None
         self._active_status: dict[str, Any] = {}
+        self._runtime_sync_status: dict[str, Any] = {
+            "attempted": False,
+            "ok": True,
+            "synchronizedFiles": [],
+            "error": "",
+        }
+
+        # Scheduled tasks execute the installed runtime under
+        # C:\DeliveryListAutomation\Scripts without passing through start_run().
+        # Refresh that runtime once when the web app starts so a scheduled task
+        # cannot launch an older exporter after an application update. A sync
+        # warning is surfaced on the dashboard but does not prevent app startup.
+        try:
+            startup_config = self._read_config(required=False)
+            if startup_config:
+                self._refresh_runtime_scripts_if_safe(startup_config)
+        except Exception as exc:
+            self._runtime_sync_status = {
+                "attempted": True,
+                "ok": False,
+                "deferred": False,
+                "synchronizedFiles": [],
+                "error": str(exc),
+            }
 
     def _candidate_config_paths(self) -> list[Path]:
         candidates: list[Path] = []
@@ -109,17 +144,109 @@ class DeliveryAutomationController:
     def _runtime_paths(self, config: dict[str, Any]) -> dict[str, Path]:
         working_root = Path(str(config.get("WorkingRoot") or r"C:\DeliveryListAutomation"))
         script_root = working_root / "Scripts"
+        maintained_script_root = self.project_root / "automation" / "sql_delivery_export"
+        runtime_runner = script_root / "Run-DeliveryListSqlAutomation.ps1"
         return {
             "working_root": working_root,
             "script_root": script_root,
-            "runner": script_root / "Run-DeliveryListSqlAutomation.ps1",
+            "maintained_script_root": maintained_script_root,
+            # Manual and scheduled runs now share the same installed runtime path.
+            # start_run() refreshes the maintained reconciliation files first, so
+            # PowerShell and every helper continue to execute from one directory.
+            "runner": runtime_runner,
+            "runtime_runner": runtime_runner,
             "installer": script_root / "Install-DeliveryListSqlAutomationTasks.ps1",
             "remover": script_root / "Remove-DeliveryListSqlAutomationTasks.ps1",
             "last_run": working_root / "State" / "last-run.json",
             "gui_run": working_root / "State" / "web-gui-run.json",
+            "gui_summary": working_root / "State" / "web-gui-summary.json",
+            "run_lock": working_root / "State" / "run.lock",
             "logs_dir": working_root / "Logs",
             "last_import_result": working_root / "State" / "last-import-result.json",
         }
+
+    def _sync_runtime_scripts(self, config: dict[str, Any]) -> list[str]:
+        """Atomically refresh the installed files used by browser-started runs.
+
+        v0.231 executed the project PowerShell file directly while its working
+        directory and installed helpers remained under C:\\DeliveryListAutomation.
+        Some Windows hosts stalled before the script emitted its first line. This
+        repair restores one runtime directory while still preventing an outdated
+        installed importer from bypassing current reconciliation rules.
+        """
+        paths = self._runtime_paths(config)
+        source_root = paths["maintained_script_root"]
+        target_root = paths["script_root"]
+        target_root.mkdir(parents=True, exist_ok=True)
+        synchronized: list[str] = []
+
+        for file_name in AUTOMATION_RUNTIME_FILES:
+            source = source_root / file_name
+            target = target_root / file_name
+            if not source.is_file():
+                raise FileNotFoundError(f"Maintained automation file is missing: {source}")
+
+            source_bytes = source.read_bytes()
+            if target.is_file() and target.read_bytes() == source_bytes:
+                continue
+
+            temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                temporary.write_bytes(source_bytes)
+                os.replace(temporary, target)
+            finally:
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
+            synchronized.append(file_name)
+
+        return synchronized
+
+    def _runtime_lock_busy(self, config: dict[str, Any]) -> bool:
+        """Return True when PowerShell currently owns the shared automation lock."""
+        lock_path = self._runtime_paths(config)["run_lock"]
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT)
+        except PermissionError:
+            return True
+        except OSError as exc:
+            if getattr(exc, "winerror", None) in {32, 33} or exc.errno in {errno.EACCES, errno.EBUSY}:
+                return True
+            raise
+        else:
+            os.close(descriptor)
+            return False
+
+    def _refresh_runtime_scripts_if_safe(self, config: dict[str, Any]) -> None:
+        """Refresh scheduled-task runtime files without modifying an active run."""
+        try:
+            if self._runtime_lock_busy(config):
+                self._runtime_sync_status = {
+                    "attempted": True,
+                    "ok": False,
+                    "deferred": True,
+                    "synchronizedFiles": [],
+                    "error": "Runtime refresh is waiting for the active automation run to finish.",
+                }
+                return
+            synchronized = self._sync_runtime_scripts(config)
+            self._runtime_sync_status = {
+                "attempted": True,
+                "ok": True,
+                "deferred": False,
+                "synchronizedFiles": synchronized,
+                "error": "",
+            }
+        except Exception as exc:
+            self._runtime_sync_status = {
+                "attempted": True,
+                "ok": False,
+                "deferred": False,
+                "synchronizedFiles": [],
+                "error": str(exc),
+            }
 
     def _power_shell(self, config: dict[str, Any]) -> str:
         runtime = config.get("Runtime") or {}
@@ -180,6 +307,8 @@ class DeliveryAutomationController:
 
     def get_dashboard(self) -> dict[str, Any]:
         config = self._read_config(required=False)
+        if config:
+            self._refresh_runtime_scripts_if_safe(config)
         path = self.config_path()
         runtime_paths = self._runtime_paths(config) if config else {}
         with self._state_lock:
@@ -203,6 +332,7 @@ class DeliveryAutomationController:
             "installed": bool(config),
             "configPath": str(path),
             "runtimeReady": bool(config and runtime_paths["runner"].is_file()),
+            "runtimeSync": dict(self._runtime_sync_status),
             "running": running,
             "scheduleInstalled": self._schedule_installed() if config else False,
             "settings": {
@@ -283,6 +413,17 @@ class DeliveryAutomationController:
             reactivated_count = int(change.get("reactivatedCount") or 0)
             updated_count = int(change.get("updatedCount") or 0)
             changed_list_ids = [str(value) for value in (change.get("changedListIds") or []) if value]
+            stage_summaries = [
+                dict(value)
+                for value in (change.get("stages") or change.get("stageSummaries") or [])
+                if isinstance(value, dict)
+            ]
+            duplicate_manual_line_count = sum(
+                int(value.get("duplicateManualLineCount") or 0) for value in stage_summaries
+            )
+            duplicate_manual_piece_qty = sum(
+                int(value.get("duplicateManualPieceQty") or 0) for value in stage_summaries
+            )
             status = str(self._row_value(row, "status", default="published") or "published")
             if status.lower() not in {"published", "success", "completed"}:
                 classification = "failed"
@@ -305,6 +446,14 @@ class DeliveryAutomationController:
             items.append(
                 {
                     "id": int(self._row_value(row, "id", default=0) or 0),
+                    "batchId": int(self._row_value(row, "id", default=0) or 0),
+                    "runId": str(
+                        change.get("runId")
+                        or change.get("requestId")
+                        or f"import-{int(self._row_value(row, 'id', default=0) or 0)}"
+                    ),
+                    "runStartedAt": str(change.get("runStartedAt") or ""),
+                    "runCompletedAt": str(change.get("runCompletedAt") or self._row_value(row, "imported_at", "importedAt") or ""),
                     "deliveryDate": str(self._row_value(row, "delivery_date", "deliveryDate") or ""),
                     "sourceName": str(self._row_value(row, "source_name", "sourceName") or ""),
                     "rowCount": int(self._row_value(row, "row_count", "rowCount", default=0) or 0),
@@ -319,19 +468,19 @@ class DeliveryAutomationController:
                     "createdCount": created_count,
                     "reactivatedCount": reactivated_count,
                     "updatedCount": updated_count,
+                    "newPieceQty": int(change.get("newPieceQty") or 0),
                     "addedPieceQty": int(change.get("addedPieceQty") or 0),
+                    "updatedPieceQty": int(change.get("updatedPieceQty") or 0),
                     "changedPieceQty": int(change.get("changedPieceQty") or 0),
                     "removedLineCount": int(change.get("removedLineCount") or 0),
                     "removedPieceQty": int(change.get("removedPieceQty") or 0),
+                    "duplicateManualLineCount": duplicate_manual_line_count,
+                    "duplicateManualPieceQty": duplicate_manual_piece_qty,
                     "changedListIds": changed_list_ids,
                     "reactivatedListIds": [
                         str(value) for value in (change.get("reactivatedListIds") or []) if value
                     ],
-                    "stageSummaries": [
-                        dict(value)
-                        for value in (change.get("stages") or change.get("stageSummaries") or [])
-                        if isinstance(value, dict)
-                    ],
+                    "stageSummaries": stage_summaries,
                     "reason": str(change.get("reason") or ""),
                     "errors": [str(value) for value in (change.get("errors") or [])],
                     "changeSummary": change,
@@ -424,14 +573,33 @@ class DeliveryAutomationController:
                 "errors": [str(latest_summary.get("error") or latest_summary.get("message") or "Automation failed")],
             }]
 
+        run_started_at = str(latest_summary.get("startedAt") or "")
+        run_id = str(
+            latest_summary.get("requestId")
+            or latest_summary.get("runId")
+            or f"{str(latest_summary.get('runOrigin') or 'automation')}:{run_started_at or imported_at}"
+        )
         items: list[dict[str, Any]] = []
         for index, item in enumerate(raw_results):
             classification = str(item.get("classification") or "no_changes").lower()
             if classification not in labels:
                 classification = "no_changes"
+            list_ids = [
+                str(value)
+                for value in (item.get("listIds") or item.get("changedListIds") or [])
+                if value
+            ]
+            raw_changed_list_ids = item.get("changedListIds")
+            if raw_changed_list_ids is None and classification != "no_changes":
+                raw_changed_list_ids = item.get("listIds") or []
+            changed_list_ids = [str(value) for value in (raw_changed_list_ids or []) if value]
             items.append(
                 {
                     "id": -1 - index,
+                    "batchId": -1 - index,
+                    "runId": str(item.get("runId") or run_id),
+                    "runStartedAt": str(item.get("runStartedAt") or run_started_at),
+                    "runCompletedAt": imported_at,
                     "deliveryDate": str(item.get("deliveryDate") or "").strip(),
                     "sourceName": str(item.get("fileName") or item.get("sourceName") or "").strip(),
                     "rowCount": int(item.get("rowCount") or 0),
@@ -448,11 +616,16 @@ class DeliveryAutomationController:
                     "createdCount": int(item.get("createdCount") or 0),
                     "reactivatedCount": int(item.get("reactivatedCount") or 0),
                     "updatedCount": int(item.get("updatedCount") or 0),
+                    "newPieceQty": int(item.get("newPieceQty") or 0),
                     "addedPieceQty": int(item.get("addedPieceQty") or 0),
+                    "updatedPieceQty": int(item.get("updatedPieceQty") or 0),
                     "changedPieceQty": int(item.get("changedPieceQty") or 0),
                     "removedLineCount": int(item.get("removedLineCount") or 0),
                     "removedPieceQty": int(item.get("removedPieceQty") or 0),
-                    "changedListIds": [str(value) for value in (item.get("changedListIds") or item.get("listIds") or []) if value],
+                    "duplicateManualLineCount": int(item.get("duplicateManualLineCount") or 0),
+                    "duplicateManualPieceQty": int(item.get("duplicateManualPieceQty") or 0),
+                    "listIds": list_ids,
+                    "changedListIds": changed_list_ids,
                     "reactivatedListIds": [
                         str(value) for value in (item.get("reactivatedListIds") or []) if value
                     ],
@@ -535,6 +708,12 @@ class DeliveryAutomationController:
             "lastCheckedAt": completed_at,
             "latestRunKey": run_key,
             "latestRun": {
+                "runId": str(
+                    (latest_items[0].get("runId") if latest_items else "")
+                    or latest_summary.get("requestId")
+                    or latest_summary.get("runId")
+                    or f"{str(latest_summary.get('runOrigin') or 'automation')}:{str(latest_summary.get('startedAt') or completed_at)}"
+                ),
                 "completedAt": completed_at,
                 "startedAt": str(latest_summary.get("startedAt") or ""),
                 "succeeded": latest_summary.get("succeeded"),
@@ -556,7 +735,7 @@ class DeliveryAutomationController:
     ) -> dict[str, Any]:
         """Return searchable, filterable, newest-first import audit history."""
         clean_page = max(1, int(page or 1))
-        clean_page_size = max(10, min(int(page_size or 20), 200))
+        clean_page_size = max(10, min(int(page_size or 20), 2000))
         clean_query = str(query or "").strip().lower()[:200]
         clean_classification = str(classification or "").strip().lower()
         allowed_classifications = {"", "new", "updated", "new_updated", "no_changes", "failed"}
@@ -569,31 +748,91 @@ class DeliveryAutomationController:
 
         database_items = self._database_import_history_items()
         latest_items, latest_summary = self._latest_automation_import_items()
-        latest_keys = {
-            (
-                str(item.get("deliveryDate") or ""),
-                str(item.get("sourceName") or "").lower(),
-            )
-            for item in latest_items
-        }
-        latest_dates = {
-            str(item.get("deliveryDate") or "")
-            for item in latest_items
-            if str(item.get("deliveryDate") or "")
-        }
-        historical_items: list[dict[str, Any]] = []
-        for item in database_items:
-            key = (
-                str(item.get("deliveryDate") or ""),
-                str(item.get("sourceName") or "").lower(),
-            )
-            if key in latest_keys:
-                continue
-            if not key[1] and key[0] in latest_dates:
-                continue
-            historical_items.append(item)
 
-        merged = latest_items + historical_items
+        def parsed_timestamp(value: Any) -> datetime | None:
+            """Return an aware UTC timestamp so mixed local/UTC history can be compared safely."""
+            text_value = str(value or "").strip()
+            if not text_value:
+                return None
+            try:
+                parsed = datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+
+        def import_signature(item: dict[str, Any]) -> tuple[Any, ...]:
+            return (
+                str(item.get("deliveryDate") or ""),
+                str(item.get("sourceName") or "").strip().lower(),
+                str(item.get("classification") or "no_changes").lower(),
+                int(item.get("rowCount") or 0),
+                int(item.get("totalQty") or 0),
+                int(item.get("createdCount") or 0),
+                int(item.get("updatedCount") or 0),
+                int(item.get("newPieceQty") or 0),
+                int(item.get("addedPieceQty") or 0),
+                int(item.get("updatedPieceQty") or 0),
+                int(item.get("changedPieceQty") or 0),
+                int(item.get("removedLineCount") or 0),
+                int(item.get("removedPieceQty") or 0),
+            )
+
+        # Database import rows are the durable history. Add a runtime item only
+        # when no corresponding durable row exists. Matching by exact result
+        # signature plus the closest timestamp prevents the newest run from
+        # appearing twice without hiding earlier same-day imports of the same file.
+        unmatched_latest: list[dict[str, Any]] = []
+        database_by_signature: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        for database_item in database_items:
+            database_by_signature.setdefault(import_signature(database_item), []).append(database_item)
+        for latest_item in latest_items:
+            candidates = database_by_signature.get(import_signature(latest_item), [])
+            latest_run_id = str(latest_item.get("runId") or "").strip()
+            meaningful_latest_run_id = latest_run_id and not latest_run_id.startswith("import-")
+
+            if meaningful_latest_run_id:
+                exact_run_match = any(
+                    str(candidate.get("runId") or "").strip() == latest_run_id
+                    for candidate in candidates
+                )
+                if exact_run_match:
+                    continue
+
+                # A different stable run ID is a different import, even when it
+                # checked the same workbook and produced the same totals. Do not
+                # let a nearby automated run hide a later manual run.
+                candidate_run_ids = {
+                    str(candidate.get("runId") or "").strip()
+                    for candidate in candidates
+                    if str(candidate.get("runId") or "").strip()
+                    and not str(candidate.get("runId") or "").strip().startswith("import-")
+                }
+                if candidate_run_ids:
+                    unmatched_latest.append(latest_item)
+                    continue
+
+            latest_time = parsed_timestamp(
+                latest_item.get("runCompletedAt")
+                or latest_item.get("importedAt")
+                or latest_item.get("checkedAt")
+            )
+            closest_seconds: float | None = None
+            for candidate in candidates:
+                candidate_time = parsed_timestamp(candidate.get("importedAt"))
+                if latest_time is None or candidate_time is None:
+                    if str(candidate.get("importedAt") or "") == str(latest_item.get("importedAt") or ""):
+                        closest_seconds = 0.0
+                        break
+                    continue
+                seconds = abs((latest_time - candidate_time).total_seconds())
+                if closest_seconds is None or seconds < closest_seconds:
+                    closest_seconds = seconds
+            if closest_seconds is None or closest_seconds > 15 * 60:
+                unmatched_latest.append(latest_item)
+
+        merged = unmatched_latest + database_items
         merged.sort(
             key=lambda item: (
                 str(item.get("importedAt") or ""),
@@ -709,8 +948,6 @@ class DeliveryAutomationController:
     def start_run(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         config = self._read_config(required=True)
         paths = self._runtime_paths(config)
-        if not paths["runner"].is_file():
-            raise FileNotFoundError("Automation runner is missing. Run v121 setup again.")
         action = str(data.get("action") or "").strip().lower()
         if action not in RUN_ACTIONS:
             raise ValueError("Choose folder import, SQL export only, or SQL export and import")
@@ -731,10 +968,45 @@ class DeliveryAutomationController:
         else:
             run_mode = "Custom"
 
+        # Reject overlap with both browser-started and Task Scheduler runs before
+        # replacing installed helper files. PowerShell repeats this check after
+        # launch to close the unavoidable race between inspection and lock acquire.
         with self._state_lock:
             if self._active_process and self._active_process.poll() is None:
-                raise RuntimeError("Another delivery-list automation run is already active")
+                raise RuntimeError("Another browser-started delivery-list update is already active")
+        if self._runtime_lock_busy(config):
+            raise RuntimeError(
+                "A scheduled delivery-list update is currently running. Wait for it to finish, then start the manual update again."
+            )
+
+        synchronized_files = self._sync_runtime_scripts(config)
+        self._runtime_sync_status = {
+            "attempted": True,
+            "ok": True,
+            "deferred": False,
+            "synchronizedFiles": synchronized_files,
+            "error": "",
+        }
+        if not paths["runner"].is_file():
+            raise FileNotFoundError("Automation runner could not be synchronized to the runtime folder.")
+        if self._runtime_lock_busy(config):
+            raise RuntimeError(
+                "A scheduled delivery-list update started while the manual request was being prepared. Wait for it to finish and try again."
+            )
+
+        with self._state_lock:
+            if self._active_process and self._active_process.poll() is None:
+                raise RuntimeError("Another browser-started delivery-list update is already active")
             task_id = uuid.uuid4().hex[:12]
+            log_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            log_path = paths["logs_dir"] / f"web-gui-{log_stamp}-{task_id}.log"
+            summary_path = paths["gui_summary"]
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                summary_path.unlink()
+            except FileNotFoundError:
+                pass
             status = {
                 "taskId": task_id,
                 "running": True,
@@ -748,13 +1020,20 @@ class DeliveryAutomationController:
                 "currentStep": "Starting PowerShell automation runner...",
                 "commandOutput": "",
                 "outputLineCount": 0,
+                "logPath": str(log_path),
+                "summaryPath": str(summary_path),
+                "runOrigin": "manual",
+                "runnerPath": str(paths["runner"]),
+                "synchronizedRuntimeFiles": synchronized_files,
             }
             self._active_status = status
             self._write_gui_status(config, status)
 
             command = [
                 self._power_shell(config),
+                "-NoLogo",
                 "-NoProfile",
+                "-NonInteractive",
                 "-ExecutionPolicy",
                 "Bypass",
                 "-File",
@@ -765,22 +1044,46 @@ class DeliveryAutomationController:
                 RUN_ACTIONS[action],
                 "-ConfigPath",
                 str(self.config_path()),
+                "-LogPath",
+                str(log_path),
+                "-SummaryPath",
+                str(summary_path),
+                "-RequestId",
+                task_id,
+                "-FailIfBusy",
             ]
             if date_from:
                 command.extend(["-DateFrom", date_from])
             if date_to:
                 command.extend(["-DateTo", date_to])
-            process = subprocess.Popen(
-                command,
-                cwd=str(paths["script_root"]),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            try:
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(paths["script_root"]),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except Exception as exc:
+                failed_status = {
+                    **status,
+                    "running": False,
+                    "succeeded": False,
+                    "completedAt": utc_now(),
+                    "message": "PowerShell automation could not be started.",
+                    "currentStep": str(exc),
+                    "commandOutput": str(exc),
+                    "outputLineCount": 1,
+                    "error": str(exc),
+                }
+                self._active_status = failed_status
+                self._write_gui_status(config, failed_status)
+                raise RuntimeError(f"PowerShell automation could not be started: {exc}") from exc
+
             self._active_process = process
             thread = threading.Thread(
                 target=self._finish_run,
@@ -840,14 +1143,24 @@ class DeliveryAutomationController:
             output_lines.extend(str(stdout or "").splitlines())
             output_lines.extend(str(stderr or "").splitlines())
 
-        succeeded = process.returncode == 0
-        runtime_summary = self._read_json_file(self._runtime_paths(config)["last_run"])
+        summary_path_text = str(initial_status.get("summaryPath") or "").strip()
+        runtime_summary = self._read_json_file(Path(summary_path_text)) if summary_path_text else {}
+        request_id = str(initial_status.get("taskId") or "")
+        summary_request_id = str(runtime_summary.get("requestId") or "")
+        if runtime_summary and summary_request_id != request_id:
+            runtime_summary = {}
+            output_lines.append(
+                "Manual automation summary was ignored because it belonged to a different run."
+            )
         runtime_summary = self._attach_complete_log(runtime_summary)
+
+        summary_succeeded = runtime_summary.get("succeeded")
+        succeeded = bool(summary_succeeded) if isinstance(summary_succeeded, bool) else process.returncode == 0
         command_output = str(runtime_summary.get("commandOutput") or "\n".join(output_lines))
         current_step = command_output.splitlines()[-1] if command_output else "Automation finished."
         status = {
-            **initial_status,
             **runtime_summary,
+            **initial_status,
             "running": False,
             "succeeded": succeeded,
             "exitCode": int(process.returncode or 0),

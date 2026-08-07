@@ -1,8 +1,279 @@
-# Delivery List Scanner 
+# Delivery List Scanner
 
-Current maintained release: **v0.228**. SQLite remains the active/default backend.
+Current maintained release: **v0.254**. SQLite remains the active/default backend.
 
-v0.228 repairs the Create Preset control center so it is centered inside the browser viewport and remains fully usable at common desktop and mobile resolutions.
+v0.254 restores stable manual expansion in Delivery List Management. Delivery-date groups stay collapsed until the user opens them, preserve that choice during background import checks, and no longer replay the flashing expansion animation.
+
+## Install v0.254
+
+1. Stop the scanner server and wait for any delivery-list automation run to finish.
+2. Extract the v0.254 changed-files ZIP directly into the current project folder, preserving the included folder structure.
+3. Keep the existing `data` folder, scanner database, configuration, logs, and backups.
+4. Restart the scanner server.
+5. Refresh the browser with `Ctrl+F5`.
+6. Open Delivery List Management and manually expand/collapse several delivery dates while a history check runs. The selected groups should remain stable without flashing.
+
+## v0.254 highlights
+
+- Removes automatic opening of changed delivery dates in Delivery List Management.
+- Restores manual expand/collapse behavior for each delivery-date group while keeping every stage visible inside the group.
+- Preserves the user's open/closed choices when recent-import data refreshes in the background.
+- Skips replacing identical Delivery List Management markup during repeated automation checks, preventing unnecessary redraws.
+- Removes the stage-table opening animation from Delivery List Management while retaining the existing visual treatment and route/stage information.
+- Keeps the v0.253 Airport Road consolidation, route-accurate previews, historical preview recovery, and exact print filters.
+- SQLite schema remains version 10; no migration is required.
+
+## v0.253 highlights
+
+- Restores the full Delivery List Management dropdown so unchanged and changed stages remain visible together.
+- Combines only Staging and Outbound into one Airport Road row while preserving Indian Trail, Greenville, CPU, DTC, and custom route stages.
+- Uses the outbound all-orders list as the authoritative preview source, then filters route-level previews by each order's actual route.
+- Prevents Greenville, CPU, and DTC orders from being grouped under Airport Road merely because their source stage is Outbound.
+- Recovers preview metadata and retained snapshots for historical or retired stage IDs instead of returning `Delivery list was not found`.
+- Expands newly-created stage previews with every current order so the preview does not report many recorded changes while showing only one retained snapshot.
+- Keeps preview and print eye/icon actions square and keeps exact route filters for Indian Trail, Greenville, CPU, and DTC.
+- SQLite schema remains version 10; no migration is required.
+
+## v0.252 highlights
+
+- Replaces Staging and Outbound rows in Delivery List Management with one Airport Road route row, alongside Indian Trail, Greenville, CPU, and DTC.
+- Shows only routes changed by the selected import and automatically expands delivery dates containing changes.
+- Keeps New reserved for a newly-created delivery list or route in the management view.
+- Marks every retained order inside a newly-created route as New in the item preview while preserving explicit Removed order snapshots.
+- Removes nested stage sections from the preview so each collapsed route opens directly to its changed orders and item details.
+- Uses one representative stage per route, preventing Staging/Outbound duplicate orders in the combined preview.
+- Opens route-level Print / Export actions with the exact route filter already selected.
+- Opens the delivery-date print action with Airport Road selected, which represents the complete Airport Road outbound delivery list across all routes.
+- Uses the Airport Outbound list as the print source so destination filters do not duplicate rows across scanner stages.
+- Makes every preview eye button a perfect square matching the print icon.
+- SQLite schema remains version 10; no migration is required.
+
+## v0.251 highlights
+
+- Allows Admin, Supervisor, and fully authorized Delivery List Management users to preview changes across every stage without being blocked by their ordinary scanner-stage assignment.
+- Keeps earlier automated and manual import runs visible while the newest run is loading, then merges the full durable day history instead of replacing it.
+- Uses stable run identity before timestamp/signature fallback so identical results from separate manual and automated runs remain distinct.
+- Rebuilds Delivery List Update Preview into collapsed Airport Road, Indian Trail, Greenville, CPU, and DTC route groups.
+- Automatically opens matching route groups only when the user searches or applies a change-type filter; the initial preview remains fully collapsed.
+- SQLite schema remains version 10; no migration is required.
+
+## v0.250 highlights
+
+- Fixes `name 'args' is not defined` during authoritative scanner reconciliation of changed or newly created delivery dates.
+- Passes `run_id` and `run_started_at` into `selective_sql_sync` as explicit parameters rather than relying on `main()` local state.
+- Preserves the stable automation-run identity on imported file history, notifications, and Recent Imports grouping.
+- Leaves successfully published workbooks untouched; only the failed scanner-import step needs to be rerun.
+- Preserves all v0.249 import-history, preview, change-total, superseded-order review, and manual-protection behavior.
+- SQLite schema remains version 10; no migration is required.
+
+## v0.249 highlights
+
+- Reflows the Selected Run summary into a compact two-column header with file, updated-piece, removed-piece, and status metrics instead of a tall vertical stack.
+- Shows positive changes and removed quantities independently in the Delivery List Management **Changes** column, including mixed updates such as `Updated 12 pcs` and `Removed 3 pcs`.
+- Displays update-preview buttons only on stages that currently contain saved new, updated, or removed rows.
+- Fixes the update-preview API fallback that called an undefined row helper, and returns readable JSON errors instead of an opaque browser `Failed to fetch` message.
+- Lets multi-stage previews load every successful stage even when one stage fails, while showing the failed stage as a concise warning.
+- Groups Automation Control Center history by raw run ID and raw timestamp instead of reparsing shortened display text, preventing year `2001` and duplicate/mis-grouped runs.
+- Adds the full year to visible run timestamps and polishes the history day, run, status, and result cards.
+- Preserves separate new-piece and updated-piece totals through scanner import normalization and durable import history.
+- Retains complete same-day import history, exact-key review approvals, manual protections, and SQLite schema version 10.
+
+## v0.248 highlights
+
+- Uses a stable automation run ID across the PowerShell runner, Python importer, database audit row, app notification, and browser grouping.
+- Keeps all same-day import runs, including repeated imports of the same delivery-date workbook, instead of collapsing them by date and file name.
+- Treats durable database history as the audit source and uses runtime/notification results only as matched run context or a fallback, preventing the newest run from appearing twice.
+- Loads every available current-day result across the paginated audit history and paginates the run tabs without an artificial 100-run display cutoff.
+- Shows polished daily run totals, selected-run metrics, complete file results, and clearer status treatment in the Recent Imports section.
+- Rebuilds Delivery List Update Preview with All/New/Updated/Removed filters, order/item search, prominent customer and stage context, and compact order details.
+- Records and displays exact before/after values for changed quantity, dimensions, customer, job, product, route, queue state, source ID, and barcode when those snapshots are available.
+- Preserves the v0.247 Superseded Order Review, exact-key approvals, simplified active totals, manual protections, and SQLite schema version 10.
+
+## v0.247 highlights
+
+- Reissues the complete v0.245-v0.246 Superseded Order Review file set so the runtime store always includes `sync_superseded_order_candidates`.
+- Adds a precise importer diagnostic showing the loaded `backend/store.py` path when an incomplete overlay is detected.
+- Stops the automation log from describing a failed review-queue sync as a successful sync.
+- Keeps successful workbook/scanner imports successful when only the optional review queue has a problem.
+- Shows a single active quantity in Delivery List Management, such as **129 pcs**, without duplicate A+W/active-total wording.
+- Avoids misleading `0 A+W + 0 manual = 121 active` logging when an unchanged-stage result does not return ownership counters.
+- Keeps all exact-key approval, Keep Both, Review Later, manual protection, raw date selection, and notification recovery behavior from v0.245-v0.246.
+
+- Uses A+W `AH_IDENT`/Header Identity as the primary relationship signal between an older order and a newer replacement candidate.
+- Requires the older candidate to be status 410 with item status 0 and no production batch, while the newer order must have an active production batch. These conditions only create a review; they never delete automatically.
+- Shows original and replacement items side by side with dimensions, quantities, statuses, batches, exact overlap evidence, and current scanner impact.
+- Supports **Approve old order removal**, **Keep both**, and **Review later**.
+- Approval removes only the exact A+W-owned order/item rows, preserves protected manual rows, records update-preview snapshots, increments affected stage revisions, and writes an audit event.
+- Approved exact keys are written to `data/superseded-source-exclusions.json` and merged with the eight historical Crystal-verified 8/3 exclusions on every SQL run. Keep Both, Review Later, and changed-evidence states publish preservation overrides so those bootstrap exclusions can be reversed locally.
+- A changed candidate fingerprint automatically returns the review to pending so an old decision cannot silently expand to new item keys.
+- Adds SQLite schema migration 10 and the matching Azure SQL compatibility table.
+
+## v0.244 highlights
+
+- Removes order-status `460`, item-status `460`, and production-batch requirements from delivery-list membership decisions.
+- Restores status `50`, `450`, `455`, internal-reject, not-yet-cut, and other raw date-matched rows instead of assuming they were removed from Crystal.
+- Keeps status and production-batch distributions in the automation log as diagnostics only.
+- Uses `verified-source-exclusions.json` for the eight exact 8/3/2026 order/item rows already confirmed absent from Crystal; no job/customer/dimension similarity rule is used.
+- Pauses all other automatic A+W source-row removals while still importing new rows, changed quantities/details, route changes, remake changes, and unprotected manual duplicates.
+- Allows exact Crystal-verified exclusions to be retired even while general removals are paused.
+- Prevents repeated drift imports by treating extra unverified source rows as retained rather than as an error.
+- Adds a focused SELECT-only `POOL_TEILE`, `LADELISTE`, `BW_LADELISTE`, and `TEMP_DELIV` schedule-membership probe.
+- Preserves protected manual orders and SQLite schema version 9; no database migration is required.
+
+## Install v0.237
+
+> **Historical only:** v0.237 production-status filtering is superseded by v0.244 and must not be used as the current delivery-list membership rule.
+
+1. Start from the maintained v0.236 project.
+2. Stop the scanner server and wait for any active automation run to finish.
+3. Extract the v0.237 changed-files ZIP directly into the current project folder, preserving the included folder structure.
+4. Preserve the existing `data` folder, automation configuration, and database files.
+5. Restart the scanner server and refresh the browser with `Ctrl+F5`.
+6. Run Query SQL, Export & Import for the affected delivery date. The browser controller automatically refreshes the updated PowerShell runner under `C:\DeliveryListAutomation\Scripts`.
+7. Confirm the automation log reports raw, report-eligible, and excluded line/remake counts before the workbook is rebuilt and imported.
+
+## v0.237 highlights
+
+- Reads A+W header status, item status, and all three header production-run fields alongside the delivery rows.
+- Uses verified report-eligibility defaults: order status `460`, item status `460`, and at least one active production batch.
+- Excludes removed scheduling records such as the eight 8/3/2026 duplicate remake lines whose old orders were status `410`, item status `0`, and no longer assigned to a production batch.
+- Keeps different order numbers independent; no deletion decision is based on matching job text, customer, dimensions, product, or quantity.
+- Logs every excluded order/item with status, production batches, remake flag, and the exact exclusion reason.
+- Adds a configurable mass-removal safety limit before an eligibility-filtered workbook can be published.
+- Includes the eligibility-rule version in the exporter hash so the first v0.237 run rebuilds and imports the corrected workbook even when A+W source records themselves have not changed.
+- Retains v0.236 protected manual orders and remake-source cleanup behavior.
+- Advances the application to v0.237 while SQLite schema version 9 remains unchanged.
+
+The verified defaults work with the current `SYSADM.BW_AUFTR_KOPF` / `BW_AUFTR_POS` mapping. They can be overridden later without another code change by adding this optional block under `SourceMapping` in the installed automation configuration:
+
+```json
+"DeliveryEligibility": {
+  "AllowedOrderStatuses": [460],
+  "AllowedItemStatuses": [460],
+  "RequireProductionBatch": true,
+  "MaxExcludedPercent": 50
+}
+```
+
+## Install v0.236
+
+1. Start from the maintained v0.235 project.
+2. Stop the scanner server and wait for any active automation run to finish.
+3. Extract the v0.236 changed-files ZIP directly into the current project folder, preserving the included folder structure.
+4. Preserve the existing `data` folder, automation configuration, and database files.
+5. Restart the scanner server so SQLite migration 9 can add the manual-order protection columns.
+6. Refresh the browser with `Ctrl+F5`.
+7. Run Query SQL, Export & Import for the affected delivery date. The browser controller automatically refreshes the updated runtime importer, safety helper, and PowerShell runner under `C:\DeliveryListAutomation\Scripts`.
+
+## v0.236 highlights
+
+- Adds **Protect from A+W import** to manual-order creation and enables it by default.
+- Adds the same protection toggle to the manual line-item editor for existing manual rows.
+- Keeps protected manual rows separate even when A+W later publishes the same order/item.
+- Continues retiring unprotected manual duplicates so A+W remains authoritative by default when protection is not selected.
+- Adds SQLite migration 9 plus Azure SQL compatibility columns for the new protection state.
+- Stops carrying stale source-provided `Remake`/`RM` labels forward after A+W no longer marks the row.
+- Preserves Rush/Remake labels created through the operator Priority Work workflow by checking their latest audit action.
+- Logs both SQL-classified remake line count and unique remake order count.
+- Logs each remake order/item and the raw A+W header flag used by the bitmask test.
+- Advances the application to v0.236 and SQLite schema version 9.
+
+## Install v0.234
+
+1. Start from the maintained v0.233 project.
+2. Stop the scanner server and wait for any active automation run to finish.
+3. Extract the v0.234 changed-files ZIP directly into the current project folder, preserving the included folder structure.
+4. Preserve the existing `data` folder, automation configuration, and database files.
+5. Restart the scanner server and refresh the browser with `Ctrl+F5`.
+6. Run Query SQL, Export & Import again for the requested date. The browser controller automatically refreshes the updated importer and safety helper under `C:\DeliveryListAutomation\Scripts`.
+
+## v0.234 highlights
+
+- Repairs `line_update_notices` immediately inside the import-safety runtime, so `snapshot_json` and Removed notice support no longer depend on `Import.InitializeStore` or a migration having run first.
+- Preserves existing notice IDs and per-user review receipts while rebuilding only the affected notice tables.
+- Makes SQL Export & Import process the selected canonical `Delivery List ...` workbook directly instead of calling a whole-folder import that can process duplicate files for the same date.
+- Makes Folder Import Only select and import one deterministic workbook per date.
+- Reports `schemaRepairApplied: true` in the normalized import result when the runtime repair was needed.
+- Advances the application to v0.234 and SQLite schema version 8.
+
+## Install v0.233
+
+1. Start from the maintained v0.232 project.
+2. Stop the scanner server and wait for any active automation run to finish.
+3. Extract the v0.233 changed-files ZIP directly into the current project folder, preserving the included folder structure.
+4. Preserve the existing `data` folder, automation configuration, and database files.
+5. Restart the scanner server. Startup creates a verified backup when needed and advances SQLite schema version 6 to 7.
+6. Refresh the browser with `Ctrl+F5`.
+7. Re-run Folder Import Only or Query SQL, Export & Import for the requested delivery date.
+
+## v0.233 highlights
+
+- Repairs `line_update_notices` when `snapshot_json` is missing even if the database migration ledger already says schema version 6 was installed.
+- Preserves existing line-update notices and per-user review receipts while rebuilding the table with New, Updated, and Removed change support.
+- Returns a failed automation status whenever any selected workbook fails instead of allowing skipped files to make the run appear successful.
+- Imports only the newest modified workbook when more than one source file resolves to the same delivery date, avoiding sequential overwrite behavior.
+- Retains v0.232 live-log startup repair and v0.231 authoritative A+W reconciliation.
+- Advances the application contract, visible version, cache keys, documentation, migration history, and focused tests to v0.233 / schema version 7.
+
+## Install v0.232
+
+1. Start from the maintained v0.231 project.
+2. Stop the scanner server. A running browser-started automation process should be ended before replacing files.
+3. Extract the v0.232 changed-files ZIP directly into the current project folder, preserving the included folder structure.
+4. Preserve the existing `data` folder, automation configuration, and database files.
+5. Restart the scanner server and refresh the browser with `Ctrl+F5`.
+6. Start one manual Query SQL, Export & Import run. The server now atomically refreshes the maintained runtime runner/import helpers under `C:\DeliveryListAutomation\Scripts` before launching PowerShell.
+7. Confirm the Status & Logs panel immediately shows a concrete log path and the line `PowerShell automation runner accepted the request.`
+
+## v0.232 highlights
+
+- Restores one installed PowerShell runtime directory for browser and scheduled automation instead of executing the project runner beside a different working/helper directory.
+- Atomically synchronizes the maintained runner, SQL importer, and import-safety helper before each browser-started run.
+- Supplies a known per-run log path before PowerShell reads configuration, so startup, parser, configuration, and permission failures are visible immediately.
+- Adds non-interactive PowerShell startup flags and records the exact runner path and synchronized runtime files in the live status payload.
+- Retains v0.231 authoritative manual reconciliation and scheduled scanner-row drift detection.
+- Advances the application contract, visible version, cache keys, documentation, and focused tests to v0.232. Schema version 6 is unchanged.
+
+## Install v0.231
+
+1. Start from the maintained v0.230 project.
+2. Stop the scanner server and automated delivery-list tasks.
+3. Extract the v0.231 changed-files ZIP directly into the current project folder, preserving the included folder structure.
+4. Preserve the existing `data` folder and database files.
+5. Restart the scanner server. No database migration is required; schema version 6 is unchanged.
+6. Re-run `automation/sql_delivery_export/Setup-DeliveryListSqlAutomation.bat` or copy the updated `Run-DeliveryListSqlAutomation.ps1` into `C:\DeliveryListAutomation\Scripts` so scheduled Windows tasks use the v0.231 runner.
+7. Restart the automation tasks and refresh the browser with `Ctrl+F5`.
+
+## v0.231 highlights
+
+- Forces every date selected in a browser-started Custom SQL Export & Import run through authoritative A+W reconciliation, even when the workbook hash is unchanged.
+- Makes the browser automation controller use the maintained project runner, preventing manual GUI runs from silently executing an older installed PowerShell copy.
+- Adds a source-row drift preflight for scheduled SQL synchronization. The verifier now compares active source-owned scanner rows with every generated stage instead of checking stage IDs only.
+- Detects removed lines, scanner-only rows, quantity/detail differences, missing stages, and obsolete optional/custom route stages before deciding that a workbook has no changes.
+- Reconciles an optional/custom route stage against an empty source set when the entire stage disappears from A+W, while preserving manual-only rows.
+- Retains Delivery List Update Preview snapshots for historical dates for one year; past-date previews no longer disappear immediately after the delivery date.
+- Advances the application contract, visible version, cache keys, documentation, and focused tests to v0.231. Schema version 6 is unchanged.
+
+## Install v0.230
+
+1. Start from the maintained v0.229 project.
+2. Stop the scanner server and automated delivery-list import tasks.
+3. Extract the v0.230 changed-files ZIP directly into the current project folder, preserving the included folder structure.
+4. Preserve the existing `data` folder and database files.
+5. Restart the scanner server. Startup upgrades SQLite schema version 5 to 6 and creates the maintained verified pre-upgrade backup before applying the migration.
+6. Restart the automation tasks and refresh the browser with `Ctrl+F5`.
+
+## v0.230 highlights
+
+- Reconciles every imported A+W stage against its current active source rows, including imports that contain only removals.
+- Deletes unreferenced removed lines and safely soft-deletes history-linked lines so removed work is no longer active or scannable without damaging scan, rack, bay, or machine history.
+- Retires active rack and bay assignments for source-removed lines while retaining their audit records.
+- Records removed-line snapshots in the import-update notice history so a physically deleted source row can still be reviewed later.
+- Shows removal-only quantities as `-N pcs` and mixed updates as separate `+N pcs` and `-N pcs` values in Delivery List Management.
+- Adds a Preview Changes action to every changed stage row while retaining the delivery-date-level preview action.
+- Adds New, Updated, and Removed sections and stronger visual hierarchy to Delivery List Update Preview.
+- Applies the same safe reconciliation wrapper to the maintained SQL and Crystal automatic import entry points.
+- Advances the application contract to v0.230 and SQLite schema version to 6.
 
 ## Install v0.228
 
@@ -494,3 +765,8 @@ After BLDR IT provides the Entra tenant ID, application/client ID, and client-se
 The release ZIP contains no database, SQL credential, SAP runtime, demo delivery list, or new audio binary. When upgrading, keep the existing `data` folder. Production startup never seeds demo delivery lists; existing data is preserved and upgraded in place only after a verified backup succeeds.
 
 Do not run the SQLite and Azure SQL versions as simultaneous writable production systems during a future cutover.
+
+
+## v0.236 Manual-order protection
+
+Manual orders can be marked **Protect from A+W import** when created or edited. Protected rows remain separate and active if A+W later publishes the same order/item. Unprotected manual duplicates may be retired by authoritative reconciliation. Source-provided remake markers now clear when A+W removes the flag, while operator-marked Priority Work remakes remain protected by their audit history. SQL automation logs include the exact remake order/items and raw header flags used for classification.

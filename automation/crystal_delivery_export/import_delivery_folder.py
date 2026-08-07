@@ -43,11 +43,16 @@ def main() -> int:
     sys.path.insert(0, str(project_root))
 
     from backend.config import load_config
+    from backend.import_safety import install_safe_delivery_import
     from backend.store import create_store
 
     config = load_config(project_root)
     store = create_store(config)
     store.initialize()
+    # Crystal automation must use the same history-safe authoritative reconciliation
+    # as the web server and SQL automation. Without this wrapper, a removed A+W row
+    # can survive when immutable scan history prevents a destructive replacement.
+    install_safe_delivery_import(store)
     result = store.import_delivery_folder(
         {
             "user": args.user,

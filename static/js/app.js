@@ -176,6 +176,9 @@ const state = {
   adminRoles: [],
   allPermissions: [],
   adminRecentImports: [],
+  supersededOrderReviews: [],
+  supersededReviewSummary: { pendingSupersededOrderReviews: 0, approvedSupersededOrderReviews: 0, keptSupersededOrderReviews: 0 },
+  supersededReviewFilter: "open",
   adminListSearchTimer: null,
   adminDeliveryListVisiblePastDays: ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS,
   rolePermissionOpenRoles: new Set(),
@@ -252,6 +255,8 @@ const state = {
   adminTodayImportDate: "",
   adminImportRunPage: 1,
   adminImportRunsPerPage: 5,
+  adminOpenDeliveryGroups: new Set(),
+  adminDeliveryListsNormalizedMarkup: "",
   pendingUpdateDates: new Map(),
   pendingUpdateDatesRequestId: 0,
   rejectCatalog: { reasons: [], locations: [] },
@@ -293,6 +298,8 @@ const actionHistoryUi = {
 // state, then call the original Admin renderer so the existing layout remains
 // authoritative instead of drawing a second replacement UI.
 let dlsAutomationLatestImportCheckedAt = "";
+let dlsAutomationActiveDetailRefreshPromise = null;
+let dlsAutomationActiveDetailRefreshListId = "";
 
 function dlsAutomationImportResultTime(entry = {}) {
   const text = String(
@@ -310,10 +317,26 @@ function dlsAutomationImportResultTime(entry = {}) {
 function dlsAutomationImportResultKey(entry = {}, index = 0) {
   const deliveryDate = String(entry.deliveryDate || "").trim();
   const sourceName = String(entry.sourceName || entry.fileName || "").trim().toLowerCase();
+  const runId = String(
+    entry.runId
+    || entry.requestId
+    || entry.taskId
+    || entry.importRunId
+    || "",
+  ).trim();
   const id = String(entry.id || entry.batchId || "").trim();
+  const timestamp = String(
+    entry.checkedAt
+    || entry.importedAt
+    || entry.updatedAt
+    || entry.completedAt
+    || entry.createdAt
+    || "",
+  ).trim();
 
-  if (deliveryDate || sourceName) return `${deliveryDate}|${sourceName}`;
-  if (id) return `id:${id}`;
+  if (runId) return `run:${runId}|${deliveryDate}|${sourceName}`;
+  if (id && !id.startsWith("-")) return `id:${id}`;
+  if (deliveryDate || sourceName || timestamp) return `${deliveryDate}|${sourceName}|${timestamp}`;
 
   return `unkeyed:${index}`;
 }
@@ -337,7 +360,7 @@ function dlsAutomationMergeRecentImports(currentImports = [], incomingImports = 
       String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || ""))
       || dlsAutomationImportResultTime(b) - dlsAutomationImportResultTime(a),
     )
-    .slice(0, 100);
+    .slice(0, 2000);
 }
 
 function dlsAutomationDateLabel(value) {
@@ -413,6 +436,7 @@ function deliveryCatalogRevisionKey(list = {}) {
     list.deliveryDate,
     list.stage,
     list.status,
+    list.revision,
     list.updatedAt,
     list.updated_at,
     list.updatedAtUtc,
@@ -421,6 +445,48 @@ function deliveryCatalogRevisionKey(list = {}) {
     list.totalQty,
     list.scannedQty,
   ].map((value) => String(value ?? "")).join("|");
+}
+
+/** Return whether the loaded scan rows no longer match the active catalog revision. */
+function dlsAutomationActiveDetailIsStale(list = {}) {
+  const activeListId = String(state.activeListId || "");
+  if (!activeListId || String(list.id || "") !== activeListId) return false;
+  if (String(state.meta?.id || "") !== activeListId) return false;
+
+  const catalogRevision = Number(list.revision || 0);
+  const loadedRevision = Number(state.meta?.revision || 0);
+  const catalogItemCount = Number(list.itemCount || 0);
+  const catalogTotalQty = Number(list.totalQty || 0);
+  const loadedItemCount = Array.isArray(state.items) ? state.items.length : 0;
+  const loadedTotalQty = (state.items || []).reduce((sum, item) => sum + Number(item.qty || 0), 0);
+
+  return catalogRevision !== loadedRevision
+    || catalogItemCount !== loadedItemCount
+    || catalogTotalQty !== loadedTotalQty;
+}
+
+/** Reload the active scan list after an external import changes its database revision. */
+function dlsAutomationRefreshActiveListDetail(listId) {
+  const cleanListId = String(listId || "").trim();
+  if (!state.backend || !cleanListId || String(state.activeListId || "") !== cleanListId) {
+    return Promise.resolve(false);
+  }
+  if (dlsAutomationActiveDetailRefreshPromise && dlsAutomationActiveDetailRefreshListId === cleanListId) {
+    return dlsAutomationActiveDetailRefreshPromise;
+  }
+
+  dlsAutomationActiveDetailRefreshListId = cleanListId;
+  dlsAutomationActiveDetailRefreshPromise = activateList(cleanListId, false)
+    .then(() => true)
+    .catch((error) => {
+      console.warn("The active delivery list could not be refreshed after import.", error);
+      return false;
+    })
+    .finally(() => {
+      dlsAutomationActiveDetailRefreshPromise = null;
+      dlsAutomationActiveDetailRefreshListId = "";
+    });
+  return dlsAutomationActiveDetailRefreshPromise;
 }
 
 /**
@@ -506,13 +572,28 @@ function dlsAutomationApplyImportSnapshot(detail = {}) {
     ? detail.latestImportResults
     : (Array.isArray(detail.recentImports) ? detail.recentImports : null);
   let changed = false;
+  let activeDetailNeedsRefresh = false;
+  const activeListId = String(state.activeListId || "");
 
   if (latestResults) {
-    state.adminRecentImports = latestResults.slice();
+    // Never replace today's import history with only the newest run. Manual and
+    // scheduled imports can finish minutes apart, and every run must remain visible.
+    state.adminRecentImports = dlsAutomationMergeRecentImports(
+      state.adminRecentImports,
+      latestResults,
+    );
+    state.adminTodayImportEntries = dlsAutomationMergeRecentImports(
+      state.adminTodayImportEntries,
+      latestResults,
+    );
+    state.adminTodayImportDate = todayKey();
+    state.adminTodayImportLoaded = false;
     changed = true;
   }
   if (Array.isArray(detail.lists)) {
     changed = dlsAutomationApplyDeliveryCatalog(detail.lists) || changed;
+    const refreshedActiveList = state.lists.find((list) => String(list.id || "") === activeListId);
+    activeDetailNeedsRefresh = Boolean(refreshedActiveList && dlsAutomationActiveDetailIsStale(refreshedActiveList));
   }
   if (detail.lastCheckedAt) {
     dlsAutomationLatestImportCheckedAt = String(detail.lastCheckedAt);
@@ -521,6 +602,12 @@ function dlsAutomationApplyImportSnapshot(detail = {}) {
 
   if (!changed) return;
   dlsAutomationRefreshVisibleListViews(detail.lastCheckedAt || dlsAutomationLatestImportCheckedAt);
+  if (latestResults && typeof refreshAdminTodayImportRuns === "function") {
+    // Refresh the durable database-backed history after the newest run is rendered.
+    // The immediate merge above prevents any older run from disappearing while this
+    // request is in flight.
+    window.setTimeout(() => refreshAdminTodayImportRuns({ render: true }), 0);
+  }
   document.dispatchEvent(new CustomEvent("dls:delivery-list-catalog-synced", {
     detail: {
       listCount: state.lists.length,
@@ -528,8 +615,12 @@ function dlsAutomationApplyImportSnapshot(detail = {}) {
       lastCheckedAt: dlsAutomationLatestImportCheckedAt,
       selectedDate: String(document.getElementById("deliveryDateSelect")?.value || ""),
       selectedListId: String(document.getElementById("deliveryStageSelect")?.value || state.activeListId || ""),
+      activeDetailNeedsRefresh,
     },
   }));
+  if (activeDetailNeedsRefresh) {
+    window.setTimeout(() => dlsAutomationRefreshActiveListDetail(activeListId), 0);
+  }
 }
 
 document.addEventListener("dls:delivery-list-data-refreshed", (event) => {
@@ -1063,6 +1154,7 @@ const els = {
   adminSummary: document.getElementById("adminSummary"),
   adminLastUpdated: document.getElementById("adminLastUpdated"),
   adminDeliveryLists: document.getElementById("adminDeliveryLists"),
+  supersededOrderReviewCount: document.getElementById("supersededOrderReviewCount"),
   adminModal: document.getElementById("adminModal"),
   adminModalBackdrop: document.getElementById("adminModalBackdrop"),
   adminModalTitle: document.getElementById("adminModalTitle"),
@@ -1776,6 +1868,9 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Logged out", "Sesión cerrada"],
   ["Main scanner access, scan visibility, undo, and reset controls.", "Acceso principal al escáner, visibilidad de escaneos, deshacer y controles de reinicio."],
   ["Manual adjustments and exception review/resolution.", "Ajustes manuales y revisión/resolución de excepciones."],
+  ["Protect from A+W import", "Proteger de la importación de A+W"],
+  ["Keep this manual order even if A+W later contains the same order and item.", "Conserve esta orden manual aunque A+W incluya después la misma orden y artículo."],
+  ["Keep this manual row separate when A+W publishes the same order/item.", "Mantenga esta fila manual separada cuando A+W publique la misma orden y artículo."],
   ["New", "Nuevo"],
   ["New Stage", "Nueva etapa"],
   ["No Updates", "Sin cambios"],
@@ -5101,14 +5196,43 @@ async function removeStation(name) {
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
 function applyBackendPayload(payload) {
-  state.meta = payload.meta;
-  state.activeListId = payload.meta.id;
-  state.items = cloneItems(payload.items || []);
+  const items = cloneItems(payload.items || []);
+  const computedTotalQty = pieceCount(items);
+  const computedManualItems = items.filter((item) => item.manualOnly || String(item.manualSource || "").trim());
+  const computedProtectedManualItems = computedManualItems.filter((item) => item.protectFromAwImport);
+  const computedRemakeItems = items.filter(isRemakeItem);
+  const computedManualRemakeItems = computedManualItems.filter(isRemakeItem);
+  const meta = {
+    ...(payload.meta || {}),
+    itemCount: items.length,
+    totalQty: computedTotalQty,
+    sourceTotalQty: Number(payload.meta?.sourceTotalQty ?? (computedTotalQty - pieceCount(computedManualItems))),
+    manualPieceQty: Number(payload.meta?.manualPieceQty ?? pieceCount(computedManualItems)),
+    manualLineCount: Number(payload.meta?.manualLineCount ?? computedManualItems.length),
+    protectedManualPieceQty: Number(payload.meta?.protectedManualPieceQty ?? pieceCount(computedProtectedManualItems)),
+    protectedManualLineCount: Number(payload.meta?.protectedManualLineCount ?? computedProtectedManualItems.length),
+    remakeLineCount: Number(payload.meta?.remakeLineCount ?? computedRemakeItems.length),
+    remakePieceQty: Number(payload.meta?.remakePieceQty ?? pieceCount(computedRemakeItems)),
+    sourceRemakePieceQty: Number(payload.meta?.sourceRemakePieceQty ?? (pieceCount(computedRemakeItems) - pieceCount(computedManualRemakeItems))),
+    manualRemakePieceQty: Number(payload.meta?.manualRemakePieceQty ?? pieceCount(computedManualRemakeItems)),
+  };
+
+  state.meta = meta;
+  state.activeListId = meta.id;
+  state.items = items;
   state.recent = payload.recent || [];
   state.errors = payload.errors || [];
   state.lastScan = payload.lastScan || state.recent[0] || null;
   state.selectedId = state.lastScan?.item?.id || state.selectedId;
-  renderStationOptions(payload.meta.scanner);
+
+  const catalogIndex = state.lists.findIndex((list) => String(list.id || "") === String(meta.id || ""));
+  if (catalogIndex >= 0) {
+    state.lists[catalogIndex] = {
+      ...state.lists[catalogIndex],
+      ...meta,
+    };
+  }
+  renderStationOptions(meta.scanner);
 }
 
 /**
@@ -6310,7 +6434,16 @@ function renderCounts() {
   if (els.countPartial) els.countPartial.textContent = `(${stats.partialItems})`;
   if (els.countComplete) els.countComplete.textContent = `(${stats.completeItems})`;
   if (els.countInternalRejects) els.countInternalRejects.textContent = `(${internalRejectCount})`;
-  if (els.countRemakes) els.countRemakes.textContent = `(${remakeAll})`;
+  const manualRemakeAll = pieceCount(remakeItems.filter((item) => item.manualOnly || String(item.manualSource || "").trim()));
+  const sourceRemakeAll = Math.max(remakeAll - manualRemakeAll, 0);
+  if (els.countRemakes) {
+    els.countRemakes.textContent = manualRemakeAll
+      ? `(${sourceRemakeAll} A+W + ${manualRemakeAll} manual)`
+      : `(${sourceRemakeAll})`;
+    els.countRemakes.title = manualRemakeAll
+      ? `${remakeAll} active remake pieces total: ${sourceRemakeAll} from A+W and ${manualRemakeAll} preserved manual`
+      : `${sourceRemakeAll} active A+W remake pieces`;
+  }
   if (els.countRushes) els.countRushes.textContent = `(${rushAll})`;
   document.querySelectorAll('[data-filter="remakes"]').forEach((button) => {
     button.classList.toggle("has-alert", Boolean(remakeOpen));
@@ -16411,7 +16544,7 @@ const PRINT_SYSTEM_DEFAULT_PRESET = Object.freeze({
   orientation: "portrait",
 });
 const PRINT_ROUTE_GROUPS = [
-  { value: "airport", label: "Airport" },
+  { value: "airport", label: "Airport Road" },
   { value: "indian_trail", label: "Indian Trail" },
   { value: "greenville", label: "Greenville" },
   { value: "cpu", label: "CPU" },
@@ -17837,7 +17970,7 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
   const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260805-v0.228", window.location.href).href;
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260806-v0.253", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
@@ -17966,11 +18099,12 @@ async function refreshPrintWorkspaceChoices(options = {}) {
 async function resetPrintFilters({ clearActivePreset = true } = {}) {
   const groups = listsByDeliveryDate();
   const requestedDate = state.printContext?.date || selectedDeliveryDate() || dashboardDateKey() || groups[0]?.date || "";
+  const requestedRoutes = normalizePrintRouteGroups(state.printContext?.initialRouteGroups || ["airport"]);
   if (els.printSearchInput) els.printSearchInput.value = "";
   if (els.printGlassSearch) els.printGlassSearch.value = "";
   state.printSelectedOrders = [];
   state.printSelectedItems = [];
-  setPrintRouteGroups(["airport"], { syncControls: false });
+  setPrintRouteGroups(requestedRoutes, { syncControls: false });
   state.printGlassTypes = [];
   state.printAllGlass = true;
   if (els.printDateFrom) els.printDateFrom.value = requestedDate;
@@ -17983,7 +18117,7 @@ async function resetPrintFilters({ clearActivePreset = true } = {}) {
   renderPrintQuickDateOptions(requestedDate);
   state.printPreviewZoom = 0.9;
   updatePrintOutputAction();
-  await renderPrintFilterChoices({ preserveSelections: false, captureControlSelections: false });
+  await renderPrintFilterChoices({ preserveSelections: true, captureControlSelections: false });
 }
 
 function printPresetUserToken() {
@@ -18100,11 +18234,23 @@ function currentPrintPreset() {
   };
 }
 
+/** Reuse the Print / Export color language inside Create Preset. */
+function printPresetChoiceVisualClass(name, value, label = value) {
+  const cleanName = String(name || "").trim().toLowerCase();
+  const cleanValue = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+  if (cleanName === "routes") return `is-route-${cleanValue}`;
+  if (cleanName === "statuses") return `is-status-${cleanValue}`;
+  if (cleanName === "attention") return `is-attention-${cleanValue}`;
+  if (cleanName === "glass") return `is-glass-${printGlassCategoryForLabel(label)}`;
+  return "";
+}
+
 function printPresetBuilderGroup(title, name, options, selectedValues, allLabel = "", help = "") {
   const selected = new Set(selectedValues || []);
   const allSelected = selected.size === 0;
+  const allChoiceClass = name === "statuses" ? "is-status-all" : name === "attention" ? "is-attention-all" : name === "glass" ? "is-glass-all" : "";
   const allChoice = allLabel
-    ? `<label class="print-preset-choice-v227 is-all"><input type="checkbox" data-preset-all="${escapeHtml(name)}" ${allSelected ? "checked" : ""}><span>${escapeHtml(allLabel)}</span></label>`
+    ? `<label class="print-preset-choice-v227 is-all ${allChoiceClass}"><input type="checkbox" data-preset-all="${escapeHtml(name)}" ${allSelected ? "checked" : ""}><span>${escapeHtml(allLabel)}</span></label>`
     : "";
   const glassSearch = name === "glass"
     ? `<label class="print-preset-glass-search-v227"><span class="visually-hidden">Search preset glass types</span><input type="search" data-preset-glass-search autocomplete="off" placeholder="Search glass types"></label>`
@@ -18116,7 +18262,7 @@ function printPresetBuilderGroup(title, name, options, selectedValues, allLabel 
         ${glassSearch}
         <div class="print-preset-choice-grid-v227">
           ${allChoice}
-          ${options.map(({ value, label }) => `<label class="print-preset-choice-v227" data-preset-search="${escapeHtml(`${value} ${label}`.toLowerCase())}"><input type="checkbox" data-preset-value="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("")}
+          ${options.map(({ value, label }) => `<label class="print-preset-choice-v227 ${escapeHtml(printPresetChoiceVisualClass(name, value, label))}" data-preset-search="${escapeHtml(`${value} ${label}`.toLowerCase())}"><input type="checkbox" data-preset-value="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("")}
           ${name === "glass" ? '<div class="print-preset-glass-empty-v206" data-preset-glass-empty hidden>No glass types match this search.</div>' : ""}
         </div>
       </div>
@@ -18483,7 +18629,8 @@ async function applyPrintPreset(name, { persist = true } = {}) {
 
 function openPrintOptions(context = {}) {
   const openId = ++state.printWorkspaceOpenId;
-  state.printContext = context;
+  const requestedRoutes = normalizePrintRouteGroups(context.initialRouteGroups || ["airport"]);
+  state.printContext = { ...context, initialRouteGroups: requestedRoutes };
   state.printPreviewResult = null;
   state.printPreviewRequestId += 1;
   state.printWorkspaceReady = false;
@@ -18494,9 +18641,10 @@ function openPrintOptions(context = {}) {
     return;
   }
 
-  // Commit the system default before exposing the panel. The route chip may be
-  // rendered later, but preview and print already have a real Airport selection.
-  setPrintRouteGroups(["airport"], { syncControls: false });
+  // Commit the requested management-route filter before exposing the panel.
+  // Header actions use Airport Road (all routes); route-row actions open with
+  // their exact Indian Trail, Greenville, CPU, or DTC filter already selected.
+  setPrintRouteGroups(requestedRoutes, { syncControls: false });
   state.printGlassTypes = [];
   state.printAllGlass = true;
   setPrintFilterLoadingState();
@@ -18516,10 +18664,10 @@ function openPrintOptions(context = {}) {
   const initialization = resetPrintFilters({ clearActivePreset: false })
     .then(async () => {
       if (openId !== state.printWorkspaceOpenId || els.printOptionsPanel?.hidden) return;
-      if (initialPreset !== PRINT_SYSTEM_DEFAULT_PRESET_NAME && availablePrintPresets()[initialPreset]) {
+      if (!context.initialRouteGroups && initialPreset !== PRINT_SYSTEM_DEFAULT_PRESET_NAME && availablePrintPresets()[initialPreset]) {
         await applyPrintPreset(initialPreset, { persist: false });
       } else {
-        setPrintRouteGroups(["airport"]);
+        setPrintRouteGroups(requestedRoutes);
         schedulePrintSelectionPreview(0);
       }
       state.printWorkspaceReady = true;
@@ -18584,7 +18732,7 @@ function setPrintOrientation(value, refresh = true) {
 
 /** Return the shared application stylesheet URL used by preview and popup printing. */
 function localPrintPackageStylesheetUrl() {
-  return new URL("static/css/styles.css?v=20260805-v0.228", window.location.href).href;
+  return new URL("static/css/styles.css?v=20260806-v0.253", window.location.href).href;
 }
 
 /** Return only printer-page overrides; all visual sheet styling comes from styles.css. */
@@ -18774,7 +18922,15 @@ async function refreshAdminPage() {
   requests.push(hasPermission("edit_delivery_lists") ? fetchJson("/api/admin/cross-date-scan-settings") : Promise.resolve(null));
   requests.push(hasPermission("manage_roles") ? fetchJson("/api/admin/roles") : Promise.resolve(null));
   const [summary, users, sessions, customerRules, customerEmails, bayScannerRules, bayAutoAssignSettings, crossDateScanSettings, roles] = await Promise.all(requests);
-  if (summary) state.adminSummary = summary;
+  if (summary) {
+    state.adminSummary = summary;
+    state.supersededReviewSummary = {
+      pendingSupersededOrderReviews: Number(summary.pendingSupersededOrderReviews || 0),
+      approvedSupersededOrderReviews: Number(summary.approvedSupersededOrderReviews || 0),
+      keptSupersededOrderReviews: Number(summary.keptSupersededOrderReviews || 0),
+    };
+    renderSupersededReviewCount();
+  }
   if (summary && els.adminSummary) {
     els.adminSummary.innerHTML = [
       miniStat("Active Delivery Lists", summary.activeDeliveryDates ?? summary.activeDeliveryLists ?? 0, `${summary.activeDeliveryLists ?? 0} active stages`),
@@ -18967,7 +19123,7 @@ function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false,
     ${summaryHtml}
     <div class="admin-delivery-edit-list">
       ${groups
-        .map((group, index) => {
+        .map((group) => {
           const totalQty = group.lists.reduce((sum, list) => sum + Number(list.totalQty ?? list.itemCount ?? 0), 0);
           const scannedQty = group.lists.reduce((sum, list) => sum + Number(list.scannedQty || 0), 0);
           const percent = totalQty ? Math.round((scannedQty / totalQty) * 100) : 0;
@@ -19066,6 +19222,31 @@ function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false,
   `;
 }
 
+/** Return the accessible inline eye icon used by delivery-list change previews. */
+function adminUpdatePreviewIconHtml() {
+  return `<svg class="admin-update-preview-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path d="M2.5 12c1.8-4.2 5.1-6.5 9.5-6.5s7.7 2.3 9.5 6.5c-1.8 4.2-5.1 6.5-9.5 6.5S4.3 16.2 2.5 12Z"></path>
+    <circle cx="12" cy="12" r="3.2"></circle>
+  </svg>`;
+}
+
+/** Classify one retained change snapshot by its actual item route first. */
+function deliveryUpdatePreviewLocationKey(item = {}) {
+  const route = inferredRoute(item);
+  if (route === "DTC") return "dtc";
+  if (route === "GNV") return "greenville";
+  if (route === "CPU") return "cpu";
+  if (route) return "airport";
+
+  // Older removal snapshots did not always retain ROUTE. Use the stage only as
+  // a legacy fallback; current outbound snapshots are classified by item route.
+  const stageText = `${item.stage || ""} ${item.scanner || ""}`.toLowerCase();
+  if (stageText.includes("dtc") || stageText.includes("deliver to customer")) return "dtc";
+  if (stageText.includes("greenville") || /\bgnv\b/.test(stageText)) return "greenville";
+  if (stageText.includes("customer pickup") || /\bcpu\b/.test(stageText)) return "cpu";
+  return "indian-trail";
+}
+
 /**
  * Purpose: Run the search admin delivery lists workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -19078,56 +19259,285 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
       ? [payload.list]
       : [];
   const primaryList = lists[0] || payload.list || {};
-  const items = payload.items || [];
-  const groups = [
-    ["new", "New Items", items.filter((item) => item.changeType === "new")],
-    ["updated", "Updated Items", items.filter((item) => item.changeType !== "new")],
-  ];
-  const stageNames = [...new Set(lists.map((list) => list.stage || list.label).filter(Boolean))];
-  const heading = stageNames.length > 1
-    ? `${stageNames.length} changed stages`
-    : stageNames[0] || primaryList.stage || primaryList.label || "Delivery List";
+  const items = Array.isArray(payload.items) ? payload.items : [];
   const deliveryDate = primaryList.deliveryDate || primaryList.delivery_date || "";
+  const totalPieces = items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+  const metricCards = [
+    ["all", items.length, "All"],
+    ["new", Number(payload.newCount || 0), "New"],
+    ["updated", Number(payload.updatedCount || 0), "Updated"],
+    ["removed", Number(payload.removedCount || 0), "Removed"],
+  ];
+  const expectedChangedCount = Number(payload.expectedChangedCount || items.length);
+  const previewIsIncomplete = expectedChangedCount > items.length;
+  const previewErrors = Array.isArray(payload.previewErrors) ? payload.previewErrors.filter(Boolean) : [];
+  const fieldDefinitions = [
+    ["qty", "Quantity"],
+    ["dimensions", "Dimensions"],
+    ["customer", "Customer"],
+    ["job", "Job"],
+    ["product", "Glass / Product"],
+    ["route", "Route"],
+    ["queueState", "Queue state"],
+    ["sourceId", "Source ID"],
+    ["barcode", "Barcode"],
+  ];
+  const supportedFields = new Set(fieldDefinitions.map(([key]) => key));
+  const changeLabels = {
+    new: "New",
+    updated: "Updated",
+    removed: "Removed",
+  };
+  const locationDefinitions = [
+    { key: "airport", label: "Airport Road", hint: "Airport Road and custom route orders" },
+    { key: "indian-trail", label: "Indian Trail", hint: "Indian Trail route orders" },
+    { key: "greenville", label: "Greenville", hint: "Greenville route orders" },
+    { key: "cpu", label: "CPU", hint: "Customer Pickup orders" },
+    { key: "dtc", label: "DTC", hint: "Deliver to Customer orders" },
+  ];
 
-  return `<section class="delivery-update-preview-v184">
-    <header><div><span>Latest import changes</span><h3>${escapeHtml(heading)}</h3><p>${escapeHtml(formatDisplayDate(deliveryDate))} · ${escapeHtml(items.length)} changed line${items.length === 1 ? "" : "s"}</p></div><div><b>${escapeHtml(payload.newCount || 0)}</b><small>New</small><b>${escapeHtml(payload.updatedCount || 0)}</b><small>Updated</small></div></header>
-    ${groups.map(([type, title, rows]) => `<details class="delivery-update-preview-group is-${type}" ${rows.length ? "open" : ""}><summary><span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(rows.length)} line${rows.length === 1 ? "" : "s"}</small></span><b>${escapeHtml(rows.reduce((sum, row) => sum + Number(row.qty || 0), 0))} pcs</b></summary><div class="delivery-update-preview-list">${rows.map((item) => `<article><span class="delivery-update-type">${type === "new" ? "NEW" : "UPDATED"}</span><div><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} · ${escapeHtml(item.job || item.product || "Glass item")}</strong><span>${escapeHtml(item.customer || "No customer")} · ${escapeHtml(item.dimensions || "No dimensions")} · Qty ${escapeHtml(item.qty || 0)}</span><small>${item.stage ? `${escapeHtml(item.stage)} · ` : ""}${escapeHtml(item.product || "No glass type")} · ${escapeHtml(routeLabel({ route: item.route }) || item.route || "No route")} · ${escapeHtml(manualEditProcessDisplayValue(item) || item.queueState || "Standard")}</small></div></article>`).join("") || `<div class="admin-empty">No ${escapeHtml(title.toLowerCase())} in the latest import.</div>`}</div></details>`).join("")}
+  const displayValue = (record, key) => {
+    const value = record && typeof record === "object" ? record[key] : "";
+    if (key === "route") return routeLabel({ route: value }) || value || "—";
+    if (key === "qty") return `${Number(value || 0)} pc${Number(value || 0) === 1 ? "" : "s"}`;
+    return String(value ?? "").trim() || "—";
+  };
+
+  const changedFieldsForItem = (item) => {
+    const explicit = Array.isArray(item.changedFields)
+      ? item.changedFields.filter((key) => supportedFields.has(String(key)))
+      : [];
+    if (explicit.length) return explicit;
+    const previous = item.previous && typeof item.previous === "object" ? item.previous : {};
+    if (!Object.keys(previous).length) return [];
+    return fieldDefinitions
+      .map(([key]) => key)
+      .filter((key) => displayValue(previous, key) !== displayValue(item, key));
+  };
+
+  const previewLocationKey = (item) => deliveryUpdatePreviewLocationKey(item);
+
+  const itemSearchText = (item) => [
+    item.order,
+    item.item,
+    item.customer,
+    item.job,
+    item.product,
+    item.dimensions,
+    item.route,
+    item.stage,
+    item.scanner,
+    item.barcode,
+    item.sourceId,
+  ].join(" ").toLowerCase();
+
+  const itemCardHtml = (item) => {
+    const type = ["new", "updated", "removed"].includes(String(item.changeType || "").toLowerCase())
+      ? String(item.changeType).toLowerCase()
+      : "updated";
+    const title = changeLabels[type];
+    const route = routeLabel({ route: item.route }) || item.route || "—";
+    const previous = item.previous && typeof item.previous === "object" ? item.previous : {};
+    const changedFields = type === "updated" ? changedFieldsForItem(item) : [];
+    const diffHtml = changedFields.length
+      ? `<div class="delivery-update-preview-diffs">
+          ${changedFields.map((key) => {
+            const label = fieldDefinitions.find(([fieldKey]) => fieldKey === key)?.[1] || key;
+            return `<span class="delivery-update-preview-diff">
+              <small>${escapeHtml(label)}</small>
+              <del>${escapeHtml(displayValue(previous, key))}</del>
+              <i aria-hidden="true">→</i>
+              <strong>${escapeHtml(displayValue(item, key))}</strong>
+            </span>`;
+          }).join("")}
+        </div>`
+      : "";
+    const searchText = itemSearchText(item);
+    return `<article class="delivery-update-preview-item is-${type}" data-preview-change-type="${type}" data-preview-search="${escapeHtml(searchText)}">
+      <header class="delivery-update-preview-item-heading">
+        <span class="delivery-update-type">${escapeHtml(title)}</span>
+        <div>
+          <strong>Order ${escapeHtml(item.order || "—")} · Item ${escapeHtml(item.item || "—")}</strong>
+          <span>${escapeHtml(item.customer || "No customer")}</span>
+        </div>
+        <b>${escapeHtml(Number(item.qty || 0))} pc${Number(item.qty || 0) === 1 ? "" : "s"}</b>
+      </header>
+      <div class="delivery-update-preview-order-details">
+        <span><small>Job</small><strong>${escapeHtml(item.job || "—")}</strong></span>
+        <span><small>Glass / Product</small><strong>${escapeHtml(item.product || "—")}</strong></span>
+        <span><small>Dimensions</small><strong>${escapeHtml(item.dimensions || "—")}</strong></span>
+        <span><small>Route</small><strong>${escapeHtml(route)}</strong></span>
+      </div>
+      ${diffHtml}
+    </article>`;
+  };
+
+  const locationHtml = locationDefinitions.map((location) => {
+    const locationItems = items
+      .filter((item) => previewLocationKey(item) === location.key)
+      .sort((a, b) => {
+        const typeOrder = { new: 0, updated: 1, removed: 2 };
+        return (typeOrder[a.changeType] ?? 3) - (typeOrder[b.changeType] ?? 3)
+          || String(a.stage || "").localeCompare(String(b.stage || ""))
+          || Number(a.order || 0) - Number(b.order || 0)
+          || Number(a.item || 0) - Number(b.item || 0);
+      });
+    if (!locationItems.length) return "";
+
+    const locationPieces = locationItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+    const typeCounts = {
+      new: locationItems.filter((item) => item.changeType === "new").length,
+      updated: locationItems.filter((item) => item.changeType === "updated").length,
+      removed: locationItems.filter((item) => item.changeType === "removed").length,
+    };
+    return `<details class="delivery-update-preview-location-group is-${location.key}" data-preview-group data-preview-location="${location.key}">
+      <summary>
+        <span class="delivery-update-preview-location-chevron" aria-hidden="true"></span>
+        <span class="delivery-update-preview-location-copy">
+          <strong>${escapeHtml(location.label)}</strong>
+          <small>${escapeHtml(location.hint)}</small>
+        </span>
+        <span class="delivery-update-preview-location-badges">
+          ${typeCounts.new ? `<b class="is-new">${escapeHtml(typeCounts.new)} new</b>` : ""}
+          ${typeCounts.updated ? `<b class="is-updated">${escapeHtml(typeCounts.updated)} updated</b>` : ""}
+          ${typeCounts.removed ? `<b class="is-removed">${escapeHtml(typeCounts.removed)} removed</b>` : ""}
+        </span>
+        <span class="delivery-update-preview-location-total"><b>${escapeHtml(locationItems.length)}</b><small>lines</small><b>${escapeHtml(locationPieces)}</b><small>pcs</small></span>
+      </summary>
+      <div class="delivery-update-preview-location-body">
+        <div class="delivery-update-preview-list">${locationItems.map(itemCardHtml).join("")}</div>
+      </div>
+    </details>`;
+  }).join("");
+
+  return `<section class="delivery-update-preview-v184 delivery-update-preview-v230 delivery-update-preview-v248 delivery-update-preview-v251 delivery-update-preview-v252" data-preview-filter="all">
+    <header class="delivery-update-preview-header-v230">
+      <div>
+        <span>Delivery list changes</span>
+        <h3>${escapeHtml(formatDisplayDate(deliveryDate))}</h3>
+        <p>${escapeHtml(items.length)} changed line${items.length === 1 ? "" : "s"} · ${escapeHtml(totalPieces)} piece${totalPieces === 1 ? "" : "s"}</p>
+      </div>
+      <div class="delivery-update-preview-metrics-v230">
+        ${metricCards.map(([type, value, label]) => `<span class="is-${type}"><b>${escapeHtml(value)}</b><small>${escapeHtml(label)}</small></span>`).join("")}
+      </div>
+    </header>
+    ${previewErrors.length
+      ? `<div class="delivery-update-preview-warning-v249"><strong>Some stages could not be loaded.</strong><span>${escapeHtml(previewErrors.join(" · "))}</span></div>`
+      : ""}
+    <div class="delivery-update-preview-toolbar-v248">
+      <div class="delivery-update-preview-filter-buttons" role="group" aria-label="Filter delivery-list changes">
+        ${metricCards.map(([type, value, label], index) => `<button type="button" data-preview-filter-button="${type}" aria-pressed="${index === 0 ? "true" : "false"}">${escapeHtml(label)} <b>${escapeHtml(value)}</b></button>`).join("")}
+      </div>
+      <label class="delivery-update-preview-search-v248">
+        <span>Find an order or item</span>
+        <input type="search" data-preview-search-input placeholder="Order, item, customer, job, product..." autocomplete="off">
+      </label>
+      <p data-preview-result-count>Showing ${escapeHtml(items.length)} of ${escapeHtml(items.length)} changes</p>
+    </div>
+    ${previewIsIncomplete ? `<div class="delivery-update-preview-guidance-v230 is-warning"><span aria-hidden="true"></span><p>${escapeHtml(expectedChangedCount)} changes were recorded, but only ${escapeHtml(items.length)} historical item snapshots are still available.</p></div>` : ""}
+    <div class="delivery-update-preview-groups-v230 delivery-update-preview-locations-v251">${locationHtml || '<div class="admin-empty">No item-level changes were recorded for this import.</div>'}</div>
   </section>`;
 }
 
-async function openDeliveryListUpdatePreview(listIds) {
+
+function initializeDeliveryListUpdatePreviewControls() {
+  const root = els.adminModalBody?.querySelector(".delivery-update-preview-v248");
+  if (!root) return;
+  const buttons = [...root.querySelectorAll("[data-preview-filter-button]")];
+  const searchInput = root.querySelector("[data-preview-search-input]");
+  const resultCount = root.querySelector("[data-preview-result-count]");
+  const rows = [...root.querySelectorAll("[data-preview-change-type]")];
+  const groups = [...root.querySelectorAll("[data-preview-group]")];
+  let selectedType = "all";
+
+  const apply = () => {
+    const query = String(searchInput?.value || "").trim().toLowerCase();
+    const activelyFiltering = Boolean(query) || selectedType !== "all";
+    let visibleCount = 0;
+    rows.forEach((row) => {
+      const typeMatch = selectedType === "all" || row.dataset.previewChangeType === selectedType;
+      const searchMatch = !query || String(row.dataset.previewSearch || "").includes(query);
+      row.hidden = !(typeMatch && searchMatch);
+      if (!row.hidden) visibleCount += 1;
+    });
+    groups.forEach((group) => {
+      group.hidden = !group.querySelector("[data-preview-change-type]:not([hidden])");
+      if (activelyFiltering && !group.hidden) group.open = true;
+    });
+    buttons.forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.previewFilterButton === selectedType));
+    });
+    if (resultCount) resultCount.textContent = `Showing ${visibleCount} of ${rows.length} changes`;
+  };
+
+  buttons.forEach((button) => button.addEventListener("click", () => {
+    selectedType = String(button.dataset.previewFilterButton || "all");
+    apply();
+  }));
+  searchInput?.addEventListener("input", apply);
+  apply();
+}
+
+async function openDeliveryListUpdatePreview(listIds, routeGroup = "") {
   const ids = [...new Set(String(listIds || "").split(",").map((value) => value.trim()).filter(Boolean))];
   if (!ids.length) throw new Error("No changed delivery-list stages were supplied for preview.");
 
   openAdminModal("deliveryUpdatePreview", {
     title: "Delivery List Update Preview",
     eyebrow: "Delivery List Management",
-    description: "Review the exact new and updated items from the selected recent import before printing.",
-    status: "Loading changes",
-    body: `<div class="admin-empty loading">Loading the newest changed items...</div>`,
+    description: "",
+    status: "Loading",
+    body: `<div class="admin-empty loading">Loading changes...</div>`,
   });
 
   try {
-    const payloads = await Promise.all(ids.map((listId) => (
+    const requests = await Promise.allSettled(ids.map((listId) => (
       fetchJson(`/api/admin/delivery-list-update-preview?listId=${encodeURIComponent(listId)}`)
     )));
+    const payloads = requests
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    const failedRequests = requests.filter((result) => result.status === "rejected");
+    if (!payloads.length) {
+      throw failedRequests[0]?.reason || new Error("No delivery-list changes could be loaded.");
+    }
     const lists = payloads.map((payload) => payload.list).filter(Boolean);
-    const items = payloads.flatMap((payload) => (
-      (payload.items || []).map((item) => ({
-        ...item,
-        stage: payload.list?.stage || payload.list?.label || "",
-        scanner: payload.list?.scanner || "",
-      }))
+    const allItems = payloads.flatMap((payload) => (
+      (payload.items || []).map((item) => {
+        const recordedType = String(item.changeType || "updated").toLowerCase();
+        const changeType = payload.stageCreated && recordedType !== "removed" ? "new" : recordedType;
+        return {
+          ...item,
+          changeType,
+          stage: payload.list?.stage || payload.list?.label || "",
+          scanner: payload.list?.scanner || "",
+        };
+      })
     ));
+    const normalizedRouteGroup = String(routeGroup || "").trim().replaceAll("_", "-");
+    const items = normalizedRouteGroup
+      ? allItems.filter((item) => deliveryUpdatePreviewLocationKey(item) === normalizedRouteGroup)
+      : allItems;
     const combined = {
       lists,
       list: lists[0] || {},
       items,
-      newCount: payloads.reduce((sum, payload) => sum + Number(payload.newCount || 0), 0),
-      updatedCount: payloads.reduce((sum, payload) => sum + Number(payload.updatedCount || 0), 0),
+      newCount: items.filter((item) => item.changeType === "new").length,
+      updatedCount: items.filter((item) => item.changeType === "updated").length,
+      removedCount: items.filter((item) => item.changeType === "removed").length,
+      removedPieceQty: payloads.reduce((sum, payload) => sum + Number(payload.removedPieceQty || 0), 0),
+      expectedChangedCount: normalizedRouteGroup
+        ? items.length
+        : payloads.reduce((sum, payload) => sum + Number(payload.expectedChangedCount || (payload.items || []).length), 0),
+      previewRouteGroup: normalizedRouteGroup,
+      previewSources: [...new Set(payloads.map((payload) => String(payload.previewSource || "notices")).filter(Boolean))],
+      previewErrors: failedRequests.map((result) => String(result.reason?.message || result.reason || "A stage preview could not be loaded.")),
     };
     if (els.adminModalBody) els.adminModalBody.innerHTML = deliveryListUpdatePreviewHtml(combined);
-    if (els.adminModalStatusText) els.adminModalStatusText.textContent = `${items.length} changed items across ${lists.length} stage${lists.length === 1 ? "" : "s"}`;
+    if (els.adminModalStatusText) {
+      els.adminModalStatusText.textContent = `${items.length} change${items.length === 1 ? "" : "s"}`;
+    }
+    initializeDeliveryListUpdatePreviewControls();
     applyLanguageToRoot(els.adminModalBody);
   } catch (error) {
     if (els.adminModalBody) els.adminModalBody.innerHTML = `<div class="admin-empty review">${escapeHtml(error.message)}</div>`;
@@ -19180,8 +19590,21 @@ function activeRecentImports(imports = state.adminRecentImports || []) {
         ...(Array.isArray(entry.reactivatedListIds) ? entry.reactivatedListIds : []),
       ];
 
+      const stageSummaryHasChanges = (row = {}) =>
+        Number(row.changedLineCount || 0) > 0 ||
+        Number(row.changedPieceQty || 0) > 0 ||
+        Number(row.addedPieceQty || 0) > 0 ||
+        Number(row.removedLineCount || 0) > 0 ||
+        Number(row.removedPieceQty || 0) > 0 ||
+        Boolean(row.created || row.reactivated);
+
+      // Keep a removal-only stage in Delivery List Management even when A+W
+      // removed its final active item. The delivery-list header and notice
+      // snapshots still exist, so the stage-level preview remains reviewable.
       let stageSummaries = Array.isArray(entry.stageSummaries)
-        ? entry.stageSummaries.filter((row) => row.listId && activeListIds.has(row.listId))
+        ? entry.stageSummaries.filter((row) => (
+            row.listId && (activeListIds.has(row.listId) || stageSummaryHasChanges(row))
+          ))
         : [];
 
       // A successful No Changes run intentionally does not rewrite the scanner
@@ -19205,10 +19628,13 @@ function activeRecentImports(imports = state.adminRecentImports || []) {
         }));
       }
 
+      const changedSummaryIds = new Set(
+        stageSummaries.filter(stageSummaryHasChanges).map((row) => row.listId),
+      );
       const listIds = [...new Set([
         ...suppliedListIds,
         ...stageSummaries.map((row) => row.listId),
-      ])].filter((listId) => activeListIds.has(listId));
+      ])].filter((listId) => activeListIds.has(listId) || changedSummaryIds.has(listId));
 
       return {
         ...entry,
@@ -19263,6 +19689,23 @@ function activeRecentImports(imports = state.adminRecentImports || []) {
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
+function normalizeAdminDeliveryListsMarkup(markup = "") {
+  return String(markup || "").replace(
+    /(<details\s+class="admin-import-date-group[^>]*?)\s+open(\s*>)/g,
+    "$1$2",
+  );
+}
+
+function rememberOpenAdminDeliveryGroups() {
+  if (!els.adminDeliveryLists) return;
+  els.adminDeliveryLists.querySelectorAll(".admin-import-date-group[data-admin-delivery-group-key]").forEach((details) => {
+    const key = String(details.dataset.adminDeliveryGroupKey || "");
+    if (!key) return;
+    if (details.open) state.adminOpenDeliveryGroups.add(key);
+    else state.adminOpenDeliveryGroups.delete(key);
+  });
+}
+
 function renderAdminDeliveryLists() {
   if (!els.adminDeliveryLists) return;
   const today = todayKey();
@@ -19273,7 +19716,18 @@ function renderAdminDeliveryLists() {
     state.adminImportRunPage = 1;
     state.adminSelectedImportRunKey = "";
   }
-  els.adminDeliveryLists.innerHTML = renderAdminImportRunBrowser(activeRecentImports());
+
+  // Delivery List Management refreshes while the automation controller checks
+  // for new runs. Preserve the user's manual open/closed choices and avoid
+  // replacing identical markup, which previously caused the list cards to flash.
+  rememberOpenAdminDeliveryGroups();
+  const markup = renderAdminImportRunBrowser(activeRecentImports());
+  const normalizedMarkup = normalizeAdminDeliveryListsMarkup(markup);
+  if (normalizedMarkup !== state.adminDeliveryListsNormalizedMarkup) {
+    els.adminDeliveryLists.innerHTML = markup;
+    state.adminDeliveryListsNormalizedMarkup = normalizedMarkup;
+  }
+
   if (!state.adminTodayImportLoaded) void refreshAdminTodayImportRuns({ render: true });
 }
 
@@ -19678,6 +20132,139 @@ function setBayModalSection(kind, section = "workspace") {
   if (section === "history") void loadBayModalActionHistory(kind);
 }
 
+function renderSupersededReviewCount() {
+  if (!els.supersededOrderReviewCount) return;
+  const count = Number(state.supersededReviewSummary?.pendingSupersededOrderReviews || 0);
+  els.supersededOrderReviewCount.textContent = String(count);
+  els.supersededOrderReviewCount.hidden = count <= 0;
+  els.supersededOrderReviewCount.closest("button")?.classList.toggle("has-pending-review", count > 0);
+}
+
+function supersededReviewStatusLabel(status = "") {
+  return ({ pending: "Needs review", review_later: "Review later", approved: "Removal approved", keep_both: "Keep both" })[status] || "Needs review";
+}
+
+function supersededReviewItemRows(items = []) {
+  if (!items.length) return `<tr><td colspan="6">No item evidence was returned.</td></tr>`;
+  return items.map((item) => {
+    const batches = [item.productionBatch1, item.productionBatch2, item.productionBatch3].map((value) => Number(value || 0)).join("/");
+    const dimensions = item.dimensions || `${Number(item.widthUnits || 0)} × ${Number(item.heightUnits || 0)} source units`;
+    return `<tr>
+      <td>${escapeHtml(item.itemNumber || "")}</td>
+      <td>${escapeHtml(item.product || item.job || "")}</td>
+      <td>${escapeHtml(dimensions)}</td>
+      <td>${escapeHtml(item.quantity ?? 0)}</td>
+      <td>${escapeHtml(`${item.orderStatus ?? 0}/${item.itemStatus ?? 0}`)}</td>
+      <td>${escapeHtml(batches)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function supersededOrderReviewCardHtml(review = {}) {
+  const impact = review.liveImpact || {};
+  const evidence = review.evidence || {};
+  const status = String(review.status || "pending");
+  const decisionCopy = review.decidedAt
+    ? `<small>Decision: ${escapeHtml(supersededReviewStatusLabel(status))} by ${escapeHtml(review.decidedBy || "unknown")} · ${escapeHtml(formatDisplayDate(review.decidedAt))}</small>`
+    : `<small>Detected ${escapeHtml(formatDisplayDate(review.lastSeenAt || review.detectedAt || ""))}</small>`;
+  return `<article class="superseded-review-card status-${escapeHtml(status)}" data-superseded-review-id="${escapeHtml(review.id)}">
+    <header class="superseded-review-card-header">
+      <div>
+        <span class="superseded-review-eyebrow">${escapeHtml(formatDisplayDate(review.deliveryDate))} · A+W identity ${escapeHtml(review.headerIdentity || "not available")}</span>
+        <strong>Order ${escapeHtml(review.originalOrderNumber)} → ${escapeHtml(review.replacementOrderNumber)}</strong>
+        ${decisionCopy}
+      </div>
+      <span class="superseded-review-status">${escapeHtml(supersededReviewStatusLabel(status))}</span>
+    </header>
+    <div class="superseded-review-evidence">
+      <span>Same A+W identity</span>
+      <span>${Number(evidence.exactItemOverlapCount || 0)} exact item match${Number(evidence.exactItemOverlapCount || 0) === 1 ? "" : "es"}</span>
+      <span>Old order 410 / item 0 / no batch</span>
+      <span>Replacement has active batch</span>
+    </div>
+    <div class="superseded-review-impact ${Number(impact.scannedQty || 0) > 0 ? "has-scans" : ""}">
+      <strong>Current scanner impact</strong>
+      <span>${Number(impact.activeLineCount || 0)} stage row${Number(impact.activeLineCount || 0) === 1 ? "" : "s"}, ${Number(impact.pieceQty || 0)} piece${Number(impact.pieceQty || 0) === 1 ? "" : "s"}, ${Number(impact.scannedQty || 0)} scanned</span>
+      ${impact.stages?.length ? `<small>${escapeHtml(impact.stages.join(" · "))}</small>` : `<small>The old rows are not currently active in the scanner.</small>`}
+    </div>
+    <div class="superseded-review-compare">
+      <section>
+        <h3>Original candidate · ${escapeHtml(review.originalOrderNumber)}</h3>
+        <table><thead><tr><th>Item</th><th>Product / Job</th><th>Dimensions</th><th>Qty</th><th>Status</th><th>Batches</th></tr></thead><tbody>${supersededReviewItemRows(review.originalItems)}</tbody></table>
+      </section>
+      <section>
+        <h3>Replacement candidate · ${escapeHtml(review.replacementOrderNumber)}</h3>
+        <table><thead><tr><th>Item</th><th>Product / Job</th><th>Dimensions</th><th>Qty</th><th>Status</th><th>Batches</th></tr></thead><tbody>${supersededReviewItemRows(review.replacementItems)}</tbody></table>
+      </section>
+    </div>
+    ${review.decisionReason ? `<p class="superseded-review-reason"><strong>Decision note:</strong> ${escapeHtml(review.decisionReason)}</p>` : ""}
+    <footer class="superseded-review-actions">
+      <button type="button" class="danger" data-superseded-decision="approve" data-review-id="${escapeHtml(review.id)}">Approve old order removal</button>
+      <button type="button" class="secondary" data-superseded-decision="keep_both" data-review-id="${escapeHtml(review.id)}">Keep both</button>
+      <button type="button" class="secondary" data-superseded-decision="review_later" data-review-id="${escapeHtml(review.id)}">Review later</button>
+    </footer>
+  </article>`;
+}
+
+function supersededOrderReviewModalHtml() {
+  const filter = state.supersededReviewFilter || "open";
+  const reviews = (state.supersededOrderReviews || []).filter((review) => {
+    if (filter === "open") return ["pending", "review_later"].includes(review.status);
+    if (filter === "all") return true;
+    return review.status === filter;
+  });
+  const summary = state.supersededReviewSummary || {};
+  return `<div class="superseded-review-shell">
+    <section class="superseded-review-hero">
+      <div><span>Safe local reconciliation</span><strong>Production status creates a review candidate—it never deletes a row.</strong><p>Approval stores exact delivery-date/order/item keys. Keep Both prevents the same unchanged pair from returning.</p></div>
+      <div class="superseded-review-kpis"><span><small>Needs review</small><strong>${Number(summary.pendingSupersededOrderReviews || 0)}</strong></span><span><small>Approved</small><strong>${Number(summary.approvedSupersededOrderReviews || 0)}</strong></span><span><small>Kept</small><strong>${Number(summary.keptSupersededOrderReviews || 0)}</strong></span></div>
+    </section>
+    <nav class="superseded-review-tabs" aria-label="Superseded-order review filters">
+      ${[["open", "Needs review"], ["approved", "Approved"], ["keep_both", "Keep both"], ["all", "All"]].map(([value, label]) => `<button type="button" class="${filter === value ? "is-active" : ""}" data-superseded-filter="${value}">${label}</button>`).join("")}
+    </nav>
+    <div class="superseded-review-list">${reviews.length ? reviews.map(supersededOrderReviewCardHtml).join("") : `<div class="admin-empty success"><strong>No matching reviews.</strong><span>The next automatic SQL window will add candidates when A+W shows a likely replacement pair.</span></div>`}</div>
+  </div>`;
+}
+
+async function loadSupersededOrderReviews() {
+  const payload = await fetchJson("/api/admin/superseded-order-reviews");
+  state.supersededOrderReviews = payload.reviews || [];
+  state.supersededReviewSummary = {
+    pendingSupersededOrderReviews: Number(payload.pendingSupersededOrderReviews || 0),
+    approvedSupersededOrderReviews: Number(payload.approvedSupersededOrderReviews || 0),
+    keptSupersededOrderReviews: Number(payload.keptSupersededOrderReviews || 0),
+  };
+  renderSupersededReviewCount();
+  return payload;
+}
+
+async function decideSupersededOrderReview(reviewId, action) {
+  const review = state.supersededOrderReviews.find((entry) => Number(entry.id) === Number(reviewId));
+  if (!review) return;
+  if (action === "approve") {
+    const impact = review.liveImpact || {};
+    const confirmed = await confirmWebAppAction({
+      title: `Remove old A+W order ${review.originalOrderNumber}?`,
+      message: `Only the exact item keys shown for ${formatDisplayDate(review.deliveryDate)} will be removed and suppressed from future imports.`,
+      details: `${Number(impact.activeLineCount || 0)} active stage row(s), ${Number(impact.pieceQty || 0)} piece(s), ${Number(impact.scannedQty || 0)} already scanned. Replacement order: ${review.replacementOrderNumber}.`,
+      confirmLabel: "Approve Exact Removal",
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
+  await fetchJson("/api/admin/superseded-order-reviews/decision", {
+    method: "POST",
+    body: JSON.stringify({ reviewId: Number(reviewId), action, ...requestContext() }),
+  });
+  await loadSupersededOrderReviews();
+  if (els.adminModalBody && els.adminModal?.dataset.kind === "supersededOrders") {
+    els.adminModalBody.innerHTML = supersededOrderReviewModalHtml();
+    applyLanguageToRoot(els.adminModalBody);
+  }
+  await loadDeliveryLists(state.activeListId);
+  renderAdminDeliveryLists();
+}
+
 const ADMIN_MODAL_PROFILES = {
   deliveryLists: {
     title: "All Delivery Lists",
@@ -19693,6 +20280,14 @@ const ADMIN_MODAL_PROFILES = {
     description: "Review delivery-list records and perform controlled list-level maintenance from one guided workspace.",
     context: "List maintenance",
     status: "Admin controlled",
+    group: "records",
+  },
+  supersededOrders: {
+    title: "Superseded Order Review",
+    eyebrow: "Delivery List Management",
+    description: "Compare locally detected A+W replacement candidates and approve only exact order/item removals.",
+    context: "Superseded-order review",
+    status: "Manual approval required",
     group: "records",
   },
   deliveryUpdatePreview: {
@@ -19981,6 +20576,9 @@ async function closeAdminModal() {
 function adminModalContent(kind) {
   if (kind === "rejectSettings") {
     return rejectSettingsModalHtml();
+  }
+  if (kind === "supersededOrders") {
+    return supersededOrderReviewModalHtml();
   }
   if (kind === "deliveryLists") {
     state.adminDeliveryListVisiblePastDays = ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS;
@@ -21563,6 +22161,7 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
             <label><span>Dimensions *</span><input name="dimensions" placeholder="72 x 36" required></label>
             <label><span>Process note</span><input name="processState" placeholder="Optional"></label>
             <label class="manual-order-only-toggle"><input name="manualOnly" type="checkbox"><span><strong>Manual scanning item only</strong><small>Use when this order cannot be scanned by barcode.</small></span></label>
+            <label class="manual-order-only-toggle"><input name="protectFromAwImport" type="checkbox" checked><span><strong>Protect from A+W import</strong><small>Keep this manual order even if A+W later contains the same order and item.</small></span></label>
           </div>
           <div class="manual-order-create-actions"><button type="submit">Add Order to Workflow</button><span id="manualOrderCreateStatus"></span></div>
         </form>
@@ -21790,20 +22389,17 @@ function renderImportHistory(imports) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function importHistoryRows(imports = []) {
-  const seenImportGroups = new Set();
+  // The selected run is already normalized and de-duplicated by run identity.
+  // Do not collapse rows by delivery date here: one run can legitimately contain
+  // multiple source results for the same date, and every result must remain visible.
   const rows = imports
     .slice()
     .sort((a, b) =>
       String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || "")) ||
       String(b.importedAt || "").localeCompare(String(a.importedAt || "")) ||
+      String(a.sourceName || a.fileName || "").localeCompare(String(b.sourceName || b.fileName || "")) ||
       String(a.stage || "").localeCompare(String(b.stage || "")),
-    )
-    .filter((entry) => {
-    const key = entry.deliveryDate || entry.sourceName || entry.fileName || entry.importedAt || "unknown";
-    if (seenImportGroups.has(key)) return false;
-    seenImportGroups.add(key);
-    return true;
-  }).slice(0, 30);
+    );
 
   if (!rows.length) {
     return `<div class="admin-empty">No import history yet. Imports from the temp folder or single files will appear here.</div>`;
@@ -21840,21 +22436,49 @@ function importHistoryRows(imports = []) {
    * Effects: May call the backend api, may update shared client state.
    * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
    */
-  const updatedQtyForRow = (row, list) =>
-    Number(row.totalQty ?? row.updatedQty ?? row.newQty ?? list?.totalQty ?? 0);
+  const updatedQtyForRow = (row, list) => {
+    const liveTotal = list?.totalQty;
+    if (liveTotal !== undefined && liveTotal !== null && liveTotal !== "") {
+      return Number(liveTotal || 0);
+    }
+    return Number(row.totalQty ?? row.updatedQty ?? row.newQty ?? 0);
+  };
 
   /**
    * Purpose: Run the changed qty for row workflow for the browser application.
    * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
    * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
    */
-  const changedQtyForRow = (row, list) => {
+  const quantityChangeForRow = (row, list) => {
     const updatedQty = updatedQtyForRow(row, list);
-    const explicitAddedQty = Number(row.addedPieceQty ?? row.addedQty ?? 0);
-    const explicitChangedQty = Number(row.changedPieceQty ?? row.changedQty ?? 0);
+    const removed = Number(row.removedPieceQty ?? row.removedQty ?? 0);
+    const changed = Number(row.changedPieceQty ?? row.changedQty ?? 0);
+    const newPieces = Number(row.newPieceQty ?? 0);
+    const added = Number(row.addedPieceQty ?? row.addedQty ?? 0);
+    const explicitUpdated = Number(row.updatedPieceQty ?? row.updatedQtyChange ?? 0);
+    const updated = row.created
+      ? updatedQty
+      : (newPieces + explicitUpdated) || added || Math.max(changed - removed, 0);
+    return { positive: updated, updated, removed };
+  };
 
-    if (row.created) return updatedQty;
-    return explicitAddedQty || explicitChangedQty || 0;
+  const changedQtyForRow = (row, list) => {
+    const change = quantityChangeForRow(row, list);
+    return change.positive + change.removed;
+  };
+
+  const quantityChangeHtmlForRow = (row, list) => {
+    const change = quantityChangeForRow(row, list);
+    if (change.updated && change.removed) {
+      return `<span class="qty-change is-mixed"><b>Updated ${escapeHtml(change.updated)} pcs</b><b>Removed ${escapeHtml(change.removed)} pcs</b></span>`;
+    }
+    if (change.removed) {
+      return `<span class="qty-change is-removed">Removed ${escapeHtml(change.removed)} pcs</span>`;
+    }
+    if (change.updated) {
+      return `<span class="qty-change">Updated ${escapeHtml(change.updated)} pcs</span>`;
+    }
+    return `<span class="qty-change is-zero">No changes</span>`;
   };
 
   /**
@@ -21866,6 +22490,7 @@ function importHistoryRows(imports = []) {
     const updatedQty = updatedQtyForRow(row, list);
     const explicitAddedQty = Number(row.addedPieceQty ?? row.addedQty ?? 0);
     const explicitChangedQty = Number(row.changedPieceQty ?? row.changedQty ?? 0);
+    const explicitRemovedQty = Number(row.removedPieceQty ?? row.removedQty ?? 0);
     const explicitOriginalQty = row.originalQty ?? row.originalPieceQty ?? row.previousQty ?? row.oldQty ?? row.beforeQty;
 
     if (row.created) return 0;
@@ -21887,7 +22512,7 @@ function importHistoryRows(imports = []) {
       return originalQty;
     }
 
-    return Math.max(updatedQty - explicitAddedQty, 0);
+    return Math.max(updatedQty - explicitAddedQty + explicitRemovedQty, 0);
   };
 
   /**
@@ -21901,7 +22526,9 @@ function importHistoryRows(imports = []) {
     const hasRecordedChanges =
       Number(row.changedLineCount || 0) > 0 ||
       Number(row.changedPieceQty || 0) > 0 ||
-      Number(row.addedPieceQty || 0) > 0;
+      Number(row.addedPieceQty || 0) > 0 ||
+      Number(row.removedLineCount || 0) > 0 ||
+      Number(row.removedPieceQty || 0) > 0;
 
     return Boolean(row.created) || (originalQty <= 0 && updatedQty > 0 && hasRecordedChanges);
   };
@@ -21940,7 +22567,16 @@ function importHistoryRows(imports = []) {
     row.created ||
     Number(row.changedLineCount || 0) ||
     Number(row.changedPieceQty || 0) ||
-    Number(row.addedPieceQty || 0);
+    Number(row.addedPieceQty || 0) ||
+    Number(row.removedLineCount || 0) ||
+    Number(row.removedPieceQty || 0);
+
+  const retainedPreviewCountForRow = (row, list) => {
+    const catalogCount = Number(list?.newItemCount || 0)
+      + Number(list?.updatedItemCount || 0)
+      + Number(list?.removedItemCount || 0);
+    return catalogCount || Number(row.latestPreviewCount || 0) || Number(row.changedLineCount || 0);
+  };
 
   /**
    * Purpose: Run the stage row key workflow for the browser application.
@@ -22001,40 +22637,35 @@ function importHistoryRows(imports = []) {
     return [...byStage.values()];
   };
 
-  /**
-   * Purpose: Run the stage sort for row workflow for the browser application.
-   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-   */
+  const managementStageDefinitions = {
+    airport: { key: "airport", label: "Airport Road", printRouteGroup: "airport", sort: 0 },
+    indian_trail: { key: "indian_trail", label: "Indian Trail", printRouteGroup: "indian_trail", sort: 1 },
+    greenville: { key: "greenville", label: "Greenville", printRouteGroup: "greenville", sort: 2 },
+    cpu: { key: "cpu", label: "CPU", printRouteGroup: "cpu", sort: 3 },
+    dtc: { key: "dtc", label: "DTC", printRouteGroup: "dtc", sort: 4 },
+  };
+
   const stageSortForRow = (row) => {
     const list = state.lists.find((item) => item.id === row.listId);
-
     return stageSort(list || { stage: stageNameForRow(row, list), scanner: row.stageProfile || "" });
   };
 
-  /**
-   * Purpose: Run the all stage rows for group workflow for the browser application.
-   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-   */
+  const isAirportSourceRow = (row, list) => {
+    const category = stageCategoryForImportRow(row, list);
+    const signal = `${row.listId || ""} ${stageNameForRow(row, list)} ${row.stageProfile || ""}`.toLowerCase();
+    return (category === "staged" || category === "outbound")
+      && (signal.includes("airport") || signal.includes("staging-airport") || signal.includes("outbound-airport"));
+  };
+
   const allStageRowsForGroup = (group, changedStageRows) => {
     const byStage = new Map();
-
-    /**
-     * Purpose: Create the add row workflow using the existing shared UI state.
-     * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-     * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-     */
     const addRow = (row) => {
       const key = stageRowKey(row);
-
       if (!key || byStage.has(key)) return;
-
       byStage.set(key, row);
     };
 
     changedStageRows.forEach(addRow);
-
     state.lists
       .filter((list) => String(list.deliveryDate || "") === String(group.deliveryDate || ""))
       .forEach((list) => {
@@ -22046,6 +22677,8 @@ function importHistoryRows(imports = []) {
           changedLineCount: 0,
           changedPieceQty: 0,
           addedPieceQty: 0,
+          removedLineCount: 0,
+          removedPieceQty: 0,
           created: false,
         });
       });
@@ -22053,27 +22686,144 @@ function importHistoryRows(imports = []) {
     return [...byStage.values()].sort((a, b) => {
       const sortDiff = stageSortForRow(a) - stageSortForRow(b);
       if (sortDiff) return sortDiff;
-
       const listA = state.lists.find((item) => item.id === a.listId);
       const listB = state.lists.find((item) => item.id === b.listId);
-
       return stageNameForRow(a, listA).localeCompare(stageNameForRow(b, listB));
     });
+  };
+
+  const outboundSourceForDate = (deliveryDate, stageRows = []) => {
+    const row = stageRows.find((candidate) => {
+      const list = state.lists.find((item) => item.id === candidate.listId);
+      return stageCategoryForImportRow(candidate, list) === "outbound" && isAirportSourceRow(candidate, list);
+    });
+    const list = state.lists.find((candidate) => (
+      String(candidate.deliveryDate || "") === String(deliveryDate || "")
+      && stageCategory(candidate) === "outbound"
+    ));
+    return { row: row || null, list: list || null };
+  };
+
+  /** Restore every stage row while collapsing only Staging/Outbound into Airport Road. */
+  const managementRowsForGroup = (group, changedStageRows) => {
+    const allRows = allStageRowsForGroup(group, changedStageRows);
+    const airportRows = allRows.filter((row) => {
+      const list = state.lists.find((item) => item.id === row.listId);
+      return isAirportSourceRow(row, list);
+    });
+    const nonAirportRows = allRows.filter((row) => {
+      const list = state.lists.find((item) => item.id === row.listId);
+      return !isAirportSourceRow(row, list);
+    });
+    const outboundSource = outboundSourceForDate(group.deliveryDate, allRows);
+
+    const buildRow = (rowsForDisplay, definition, fallbackRow = null) => {
+      const changedRows = rowsForDisplay.filter(hasStageChanges);
+      const representative = (changedRows.length ? changedRows : rowsForDisplay)
+        .slice()
+        .sort((a, b) => {
+          const listA = state.lists.find((item) => item.id === a.listId);
+          const listB = state.lists.find((item) => item.id === b.listId);
+          const categoryA = stageCategoryForImportRow(a, listA);
+          const categoryB = stageCategoryForImportRow(b, listB);
+          const airportPreferenceA = definition.key === "airport" && categoryA === "outbound" ? 1000000000 : 0;
+          const airportPreferenceB = definition.key === "airport" && categoryB === "outbound" ? 1000000000 : 0;
+          return (airportPreferenceB + stageRowPriority(b)) - (airportPreferenceA + stageRowPriority(a));
+        })[0] || fallbackRow;
+      if (!representative) return null;
+
+      const list = state.lists.find((item) => item.id === representative.listId);
+      const rowHasChanges = changedRows.length > 0;
+      const changeRow = changedRows
+        .slice()
+        .sort((a, b) => stageRowPriority(b) - stageRowPriority(a))[0] || representative;
+      const changeList = state.lists.find((item) => item.id === changeRow.listId);
+      const change = quantityChangeForRow(changeRow, changeList);
+      const routePreviewCount = rowHasChanges
+        ? Math.max(...changedRows.map((row) => {
+            const candidateList = state.lists.find((item) => item.id === row.listId);
+            return retainedPreviewCountForRow(row, candidateList);
+          }), 0)
+        : 0;
+      const authoritativePreviewCount = outboundSource.row
+        ? retainedPreviewCountForRow(outboundSource.row, outboundSource.list)
+        : 0;
+      // Route-level previews always read from the date's authoritative Outbound
+      // catalog when it exists. The route filter then selects Greenville, CPU,
+      // DTC, Indian Trail, or Airport orders by the item's actual route. This
+      // avoids stale/retired destination-stage IDs such as an old CPU list.
+      const previewSourceId = rowHasChanges
+        ? (outboundSource.list?.id
+            ? String(outboundSource.list.id)
+            : String(changeRow.listId || ""))
+        : "";
+      const printSourceId = outboundSource.list?.id
+        ? String(outboundSource.list.id)
+        : (list && Number(list.totalQty || 0) > 0 ? String(list.id) : "");
+
+      return {
+        ...definition,
+        representative,
+        list,
+        rowHasChanges,
+        previewListIds: previewSourceId ? [previewSourceId] : [],
+        previewCount: routePreviewCount || authoritativePreviewCount,
+        previewRouteGroup: definition.key === "airport" ? "" : definition.key.replaceAll("_", "-"),
+        printListIds: printSourceId ? [printSourceId] : [],
+        originalQty: originalQtyForRow(representative, list),
+        updatedQty: updatedQtyForRow(representative, list),
+        updatedPieceQty: change.updated,
+        removedPieceQty: change.removed,
+        isNew: rowHasChanges && isNewStageRow(changeRow, changeList),
+      };
+    };
+
+    const rows = [];
+    if (airportRows.length) {
+      const airportRow = buildRow(airportRows, managementStageDefinitions.airport);
+      if (airportRow) rows.push(airportRow);
+    }
+
+    for (const row of nonAirportRows) {
+      const list = state.lists.find((item) => item.id === row.listId);
+      const category = stageCategoryForImportRow(row, list);
+      let definition;
+      if (category === "received") definition = managementStageDefinitions.indian_trail;
+      else if (category === "greenville") definition = managementStageDefinitions.greenville;
+      else if (category === "pickup") definition = managementStageDefinitions.cpu;
+      else if (category === "dtc") definition = managementStageDefinitions.dtc;
+      else {
+        const label = stageNameForRow(row, list);
+        definition = {
+          key: `custom-${slugify(label || row.listId || "route")}`,
+          label,
+          printRouteGroup: "airport",
+          sort: 20 + stageSortForRow(row),
+        };
+      }
+      const managementRow = buildRow([row], definition, row);
+      if (managementRow) rows.push(managementRow);
+    }
+
+    return rows.sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label));
   };
 
   const groups = new Map();
 
   for (const entry of rows) {
-    const groupKey = entry.deliveryDate || entry.sourceName || entry.fileName || entry.importedAt || "unknown";
+    const groupKey = [
+      String(entry.deliveryDate || ""),
+      String(entry.sourceName || entry.fileName || ""),
+    ].join("|") || String(entry.importedAt || "unknown");
 
     if (!groups.has(groupKey)) {
       groups.set(groupKey, {
+        key: groupKey,
         deliveryDate: entry.deliveryDate || "",
         sourceName: entry.sourceName || entry.fileName || "Imported delivery list",
         importedAt: entry.importedAt || entry.updatedAt || entry.createdAt || "",
         entries: [],
         stageRows: [],
-        printableIds: new Set(),
       });
     }
 
@@ -22083,11 +22833,6 @@ function importHistoryRows(imports = []) {
     group.entries.push(entry);
     group.stageRows.push(...entryStageRows);
 
-    for (const row of entryStageRows) {
-      if (row.listId) {
-        group.printableIds.add(row.listId);
-      }
-    }
 
     if (entry.importedAt || entry.updatedAt || entry.createdAt) {
       group.importedAt = entry.importedAt || entry.updatedAt || entry.createdAt;
@@ -22100,6 +22845,7 @@ function importHistoryRows(imports = []) {
         .map((group, index) => {
           const changedStageRows = collapseDuplicateStageRows(group.stageRows.filter(hasStageChanges));
           const allStageRows = allStageRowsForGroup(group, changedStageRows);
+          const managementRows = managementRowsForGroup(group, changedStageRows);
           const stagingRows = allStageRows.filter((row) => {
             const list = state.lists.find((item) => item.id === row.listId);
             return isStagingRow(row, list);
@@ -22115,98 +22861,121 @@ function importHistoryRows(imports = []) {
             return sum + originalQtyForRow(row, list);
           }, 0);
 
-          const stagingChangedQty = changedStagingRows.reduce((sum, row) => {
+          const stagingPositiveQty = changedStagingRows.reduce((sum, row) => {
             const list = state.lists.find((item) => item.id === row.listId);
-            return sum + changedQtyForRow(row, list);
+            return sum + quantityChangeForRow(row, list).positive;
+          }, 0);
+
+          const stagingRemovedQty = changedStagingRows.reduce((sum, row) => {
+            const list = state.lists.find((item) => item.id === row.listId);
+            return sum + quantityChangeForRow(row, list).removed;
           }, 0);
 
           const stagingUpdatedQty = stagingRows.reduce((sum, row) => {
             const list = state.lists.find((item) => item.id === row.listId);
             return sum + updatedQtyForRow(row, list);
           }, 0);
-
-          const newStageRows = changedStageRows.filter((row) => {
-            const list = state.lists.find((item) => item.id === row.listId);
-            return isNewStageRow(row, list);
-          });
-
-          const updatedStageRows = changedStageRows.filter((row) => {
-            const list = state.lists.find((item) => item.id === row.listId);
-            return !isNewStageRow(row, list);
-          });
-
-          const hasNewStages = newStageRows.length > 0;
-          const hasUpdatedStages = updatedStageRows.length > 0;
-          const isBrandNewDeliveryList = hasNewStages && !hasUpdatedStages;
-
-          const newPrintableIds = [...new Set(newStageRows.map((row) => row.listId).filter(Boolean))];
-          const updatedPrintableIds = [...new Set(updatedStageRows.map((row) => row.listId).filter(Boolean))];
-          const printableIds = [...new Set([...updatedPrintableIds, ...newPrintableIds])];
-          const previewListIds = [...new Set(changedStageRows.map((row) => row.listId).filter(Boolean))];
-          const previewItemCount = previewListIds.reduce((sum, listId) => {
-            const list = state.lists.find((item) => item.id === listId);
-            return sum + Number(list?.newItemCount || 0) + Number(list?.updatedItemCount || 0);
-          }, 0) || changedStageRows.reduce((sum, row) => sum + Number(row.changedLineCount || 0), 0);
-          const printButtonLabel = isBrandNewDeliveryList
-            ? "Print / Export New Delivery List"
-            : hasNewStages && hasUpdatedStages
-              ? "Print / Export Changed Stages"
-              : "Print / Export Changed Stages";
-          const hasAnyChanges = hasNewStages || hasUpdatedStages;
+          const changedManagementRows = managementRows.filter((row) => row.rowHasChanges);
+          const newManagementRows = changedManagementRows.filter((row) => row.isNew);
+          const updatedManagementRows = changedManagementRows.filter((row) => !row.isNew);
+          const hasNewStages = newManagementRows.length > 0;
+          const hasUpdatedStages = updatedManagementRows.length > 0;
+          const isBrandNewDeliveryList = changedManagementRows.length > 0
+            && changedManagementRows.every((row) => row.isNew)
+            && changedManagementRows.some((row) => row.key === "airport");
+          const outboundSource = outboundSourceForDate(group.deliveryDate, allStageRows);
+          const printableIds = outboundSource.list?.id ? [String(outboundSource.list.id)] : [];
+          const fallbackPreviewIds = changedManagementRows
+            .flatMap((row) => row.previewListIds)
+            .filter(Boolean);
+          const previewListIds = outboundSource.list?.id
+            ? [String(outboundSource.list.id)]
+            : [...new Set(fallbackPreviewIds)];
+          const outboundPreviewCount = outboundSource.row
+            ? retainedPreviewCountForRow(outboundSource.row, outboundSource.list)
+            : 0;
+          const previewItemCount = outboundPreviewCount
+            || Math.max(...changedManagementRows.map((row) => Number(row.previewCount || 0)), 0);
+          const printButtonLabel = "Print / Export Airport Road Delivery List";
+          const hasAnyChanges = changedManagementRows.length > 0;
           const groupClass = !hasAnyChanges
             ? "is-no-update-batch"
             : isBrandNewDeliveryList
               ? "is-new-delivery-list"
               : hasNewStages && hasUpdatedStages
                 ? "is-mixed-batch"
-                : "is-updated-batch";
+                : hasNewStages
+                  ? "is-new-route-batch"
+                  : "is-updated-batch";
           const importedText = group.importedAt ? `Updated at: ${formatDateTime(group.importedAt)}` : "Updated at: --";
           const sourceFileText = group.sourceName ? `File: ${group.sourceName}` : "";
           const groupStatusHtml = hasAnyChanges
             ? `
               ${hasUpdatedStages ? `<span class="import-status-pill updated">Updated</span>` : ""}
-              ${isBrandNewDeliveryList ? `<span class="import-status-pill new">New</span>` : ""}
-              ${hasNewStages && hasUpdatedStages ? `<span class="import-status-pill new-stage">New Stage</span>` : ""}
+              ${isBrandNewDeliveryList ? `<span class="import-status-pill new">New Delivery List</span>` : ""}
+              ${hasNewStages && !isBrandNewDeliveryList ? `<span class="import-status-pill new-stage">New Stage</span>` : ""}
             `
             : `<span class="import-status-pill no-change">No Updates</span>`;
 
-          const stageHtml = allStageRows.length
-            ? allStageRows
-                .map((row) => {
-                  const list = state.lists.find((item) => item.id === row.listId);
-                  const stageName = stageNameForRow(row, list);
-                  const originalQty = originalQtyForRow(row, list);
-                  const changedQty = changedQtyForRow(row, list);
-                  const updatedQty = updatedQtyForRow(row, list);
-                  const rowHasChanges = hasStageChanges(row);
-                  const rowIsNew = rowHasChanges && isNewStageRow(row, list);
-                  const stageCategoryClass = `stage-row-${stageCategoryForImportRow(row, list)}`;
-                  const rowChangeClass = rowIsNew ? "is-new-row" : rowHasChanges ? "is-updated-row" : "is-unchanged-row";
-                  const rowClass = `${stageCategoryClass} ${rowChangeClass}`;
+          const stageHtml = managementRows.length
+            ? managementRows
+                .map((managementRow) => {
+                  const rowIsNew = managementRow.isNew;
+                  const rowHasChanges = managementRow.rowHasChanges;
+                  const routeClass = `route-row-${managementRow.key.replaceAll("_", "-")}`;
+                  const rowChangeClass = rowIsNew
+                    ? "is-new-row"
+                    : rowHasChanges
+                      ? "is-updated-row"
+                      : "is-unchanged-row";
                   const kindLabel = rowIsNew ? "New Stage" : rowHasChanges ? "Updated" : "No Updates";
                   const kindClass = rowIsNew ? "new-stage" : rowHasChanges ? "updated" : "no-change";
+                  const hasRetainedPreview = rowHasChanges
+                    && managementRow.previewListIds.length > 0
+                    && managementRow.previewCount > 0;
+                  const canPrintRoute = managementRow.printListIds.length > 0 && managementRow.updatedQty > 0;
+                  const printRouteLabel = canPrintRoute
+                    ? `Print / Export ${managementRow.label}`
+                    : "No active items are available to print";
+                  const changeHtml = !rowHasChanges
+                    ? `<span class="qty-change is-zero">No changes</span>`
+                    : rowIsNew
+                      ? `<span class="qty-change is-new">New ${escapeHtml(managementRow.updatedQty)} pcs</span>`
+                      : managementRow.updatedPieceQty && managementRow.removedPieceQty
+                        ? `<span class="qty-change is-mixed"><b>Updated ${escapeHtml(managementRow.updatedPieceQty)} pcs</b><b>Removed ${escapeHtml(managementRow.removedPieceQty)} pcs</b></span>`
+                        : managementRow.removedPieceQty
+                          ? `<span class="qty-change is-removed">Removed ${escapeHtml(managementRow.removedPieceQty)} pcs</span>`
+                          : managementRow.updatedPieceQty
+                            ? `<span class="qty-change">Updated ${escapeHtml(managementRow.updatedPieceQty)} pcs</span>`
+                            : `<span class="qty-change is-zero">No changes</span>`;
 
                   return `
-                    <tr class="${rowClass}">
-                      <td><span class="stage-pill-admin">${escapeHtml(stageName)}</span></td>
-                      <td><span class="qty-before">${escapeHtml(originalQty)} pcs</span></td>
-                      <td><span class="qty-change ${rowHasChanges ? "" : "is-zero"}">${rowHasChanges ? `+${escapeHtml(changedQty)} pcs` : "0 pcs"}</span></td>
-                      <td><strong>${escapeHtml(updatedQty)} pcs</strong></td>
+                    <tr class="${routeClass} ${rowChangeClass}">
+                      <td><span class="stage-pill-admin admin-import-route-pill">${escapeHtml(managementRow.label)}</span></td>
+                      <td><span class="qty-before">${escapeHtml(managementRow.originalQty)} pcs</span></td>
+                      <td>${changeHtml}</td>
+                      <td><strong>${escapeHtml(managementRow.updatedQty)} pcs</strong></td>
                       <td><span class="import-status-pill ${kindClass}">${escapeHtml(kindLabel)}</span></td>
                       <td>
-                        ${
-                          row.listId
+                        <span class="admin-import-stage-actions-v230">
+                          ${hasRetainedPreview
                             ? `<button
                                 type="button"
-                                class="admin-import-icon-button"
-                                data-print-lists="${escapeHtml(row.listId)}"
-                                data-print-date="${escapeHtml(group.deliveryDate)}"
-                                data-print-updated-only="${rowHasChanges && !rowIsNew ? "1" : ""}"
-                                aria-label="${rowIsNew ? "Print / Export New Stage" : rowHasChanges ? "Print / Export Stage" : "Print / Export Stage"}"
-                                title="${rowIsNew ? "Print / Export New Stage" : rowHasChanges ? "Print / Export Stage" : "Print / Export Stage"}"
-                              ><span class="admin-import-print-icon" aria-hidden="true"></span></button>`
-                            : ""
-                        }
+                                class="admin-import-icon-button admin-update-preview-button"
+                                data-admin-list-update-preview="${escapeHtml(managementRow.previewListIds.join(","))}"
+                                ${managementRow.previewRouteGroup ? `data-admin-preview-route-group="${escapeHtml(managementRow.previewRouteGroup)}"` : ""}
+                                aria-label="Preview ${managementRow.previewCount} new, updated, or removed order${managementRow.previewCount === 1 ? "" : "s"} for ${escapeHtml(managementRow.label)}"
+                                title="Preview ${escapeHtml(managementRow.label)} changes (${managementRow.previewCount} order${managementRow.previewCount === 1 ? "" : "s"})"
+                              >${adminUpdatePreviewIconHtml()}</button>`
+                            : ""}
+                          <button
+                            type="button"
+                            class="admin-import-icon-button"
+                            ${canPrintRoute ? `data-print-lists="${escapeHtml(managementRow.printListIds.join(","))}" data-print-date="${escapeHtml(group.deliveryDate)}" data-print-route-groups="${escapeHtml(managementRow.printRouteGroup)}"` : "disabled"}
+                            aria-label="${escapeHtml(printRouteLabel)}"
+                            title="${escapeHtml(printRouteLabel)}"
+                          ><span class="admin-import-print-icon" aria-hidden="true"></span></button>
+                        </span>
                       </td>
                     </tr>
                   `;
@@ -22214,12 +22983,18 @@ function importHistoryRows(imports = []) {
                 .join("")
             : `
               <tr>
-                <td colspan="6">No stages were found for this delivery date.</td>
+                <td colspan="6">No delivery-list stages are available.</td>
               </tr>
             `;
 
+          const groupOpen = state.adminOpenDeliveryGroups.has(group.key);
+
           return `
-            <details class="admin-import-date-group ${groupClass}">
+            <details
+              class="admin-import-date-group ${groupClass}"
+              data-admin-delivery-group-key="${escapeHtml(group.key)}"
+              ${groupOpen ? "open" : ""}
+            >
 <summary class="admin-import-date-summary">
   <span class="admin-import-expand-arrow" aria-hidden="true"></span>
   <span class="admin-import-date-main">
@@ -22239,21 +23014,29 @@ function importHistoryRows(imports = []) {
   <span class="admin-import-date-qty">
     <span class="admin-import-qty-flow">
       <span class="qty-before">${escapeHtml(stagingOriginalQty)} pcs</span>
-      <span class="qty-change ${stagingChangedQty ? "" : "is-zero"}">${stagingChangedQty ? `+${escapeHtml(stagingChangedQty)} pcs` : "0 pcs"}</span>
+      ${isBrandNewDeliveryList
+        ? `<span class="qty-change is-new">New ${escapeHtml(stagingUpdatedQty)} pcs</span>`
+        : stagingPositiveQty && stagingRemovedQty
+          ? `<span class="qty-change is-mixed"><b>Updated ${escapeHtml(stagingPositiveQty)} pcs</b><b>Removed ${escapeHtml(stagingRemovedQty)} pcs</b></span>`
+          : stagingRemovedQty
+            ? `<span class="qty-change is-removed">Removed ${escapeHtml(stagingRemovedQty)} pcs</span>`
+            : stagingPositiveQty
+              ? `<span class="qty-change">Updated ${escapeHtml(stagingPositiveQty)} pcs</span>`
+              : `<span class="qty-change is-zero">No changes</span>`}
       <strong>${escapeHtml(stagingUpdatedQty)} pcs</strong>
     </span>
   </span>
 
   <span class="admin-import-summary-actions">
     ${
-      previewListIds.length
+      hasAnyChanges && previewListIds.length
         ? `<button
             type="button"
             class="admin-import-icon-button admin-update-preview-button"
             data-admin-list-update-preview="${escapeHtml(previewListIds.join(","))}"
-            aria-label="Preview ${escapeHtml(previewItemCount)} new or updated item${previewItemCount === 1 ? "" : "s"}"
-            title="Preview ${escapeHtml(previewItemCount)} new or updated item${previewItemCount === 1 ? "" : "s"}"
-          ><span class="admin-update-preview-icon" aria-hidden="true"></span><b>${escapeHtml(previewItemCount)}</b></button>`
+            aria-label="Preview ${escapeHtml(previewItemCount)} new, updated, or removed item${previewItemCount === 1 ? "" : "s"}"
+            title="Preview ${escapeHtml(previewItemCount)} new, updated, or removed item${previewItemCount === 1 ? "" : "s"}"
+          >${adminUpdatePreviewIconHtml()}</button>`
         : ""
     }
     ${
@@ -22263,7 +23046,7 @@ function importHistoryRows(imports = []) {
             class="admin-import-icon-button"
             data-print-lists="${escapeHtml(printableIds.join(","))}"
             data-print-date="${escapeHtml(group.deliveryDate)}"
-            data-print-updated-only="${hasUpdatedStages && !isBrandNewDeliveryList ? "1" : ""}"
+            data-print-route-groups="airport"
             aria-label="${escapeHtml(printButtonLabel)}"
             title="${escapeHtml(printButtonLabel)}"
           ><span class="admin-import-print-icon" aria-hidden="true"></span></button>`
@@ -22276,10 +23059,10 @@ function importHistoryRows(imports = []) {
                 <table>
                   <thead>
                     <tr>
-                      <th>Stage</th>
+                      <th>Stage / Route</th>
                       <th>Original Qty</th>
-                      <th>Changed Qty</th>
-                      <th>Updated Qty</th>
+                      <th>Changes</th>
+                      <th>Current Qty</th>
                       <th>Status</th>
                       <th></th>
                     </tr>
@@ -25444,6 +26227,7 @@ function manualEditCollectRowData(row, lineItemId) {
     dimensions: value("dimensions"),
     job: value("job"),
     queueState: value("queueState"),
+    protectFromAwImport: Boolean(row?.querySelector('[data-edit-field="protectFromAwImport"]')?.checked),
   };
 
   for (const field of ["location", "route", "processState", "product"]) {
@@ -25465,6 +26249,7 @@ function manualEditOriginalRowData(row) {
 
 function manualEditComparableValue(field, value) {
   if (["qty", "scanned"].includes(field)) return Number(value || 0);
+  if (field === "protectFromAwImport") return Boolean(value);
   if (field === "item") {
     const text = String(value || "").trim();
     return /^\d+$/.test(text) ? text.padStart(3, "0") : text;
@@ -25493,6 +26278,7 @@ function manualEditChangedFields(row, data) {
     "dimensions",
     "job",
     "queueState",
+    "protectFromAwImport",
   ].filter((field) => (
     manualEditComparableValue(field, data[field]) !== manualEditComparableValue(field, original[field])
   ));
@@ -25542,6 +26328,7 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
               dimensions: item.dimensions || "",
               job: item.job || "",
               queueState: item.queueState || "",
+              protectFromAwImport: Boolean(item.protectFromAwImport),
             };
 
             return `
@@ -25662,6 +26449,13 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
                   </label>
 
                   <input data-edit-field="queueState" type="hidden" value="${escapeHtml(item.queueState || "")}">
+
+                  ${(item.manualOnly || item.manualSource) ? `
+                    <label class="manual-order-only-toggle manual-edit-protection-toggle">
+                      <input data-edit-field="protectFromAwImport" type="checkbox" ${item.protectFromAwImport ? "checked" : ""}>
+                      <span><strong>Protect from A+W import</strong><small>Keep this manual row separate when A+W publishes the same order/item.</small></span>
+                    </label>
+                  ` : `<input data-edit-field="protectFromAwImport" type="hidden" value="">`}
                   </div>
 
                   <div class="manual-edit-row-error" hidden aria-live="polite"></div>
@@ -25755,6 +26549,7 @@ async function saveManualLineItem(lineItemId, sourceButton = null) {
         dimensions: data.dimensions,
         job: data.job,
         queueState: data.queueState,
+        protectFromAwImport: Boolean(data.protectFromAwImport),
         location: data.location,
         locationDisplay: data.location,
       });
@@ -27295,6 +28090,7 @@ async function submitManualOrderForm(form) {
   data.listId = document.getElementById("manualEditModalStage")?.value || state.manualEditListId;
   data.qty = Number(data.qty || 0);
   data.manualOnly = form.elements.manualOnly.checked;
+  data.protectFromAwImport = form.elements.protectFromAwImport.checked;
   const status = document.getElementById("manualOrderCreateStatus");
   if (status) status.textContent = "Checking automatic import window...";
   const payload = await fetchJson("/api/admin/manual-order", { method: "POST", body: JSON.stringify(data) });
@@ -27314,7 +28110,14 @@ function importRunTime(entry = {}) {
 function importRunClassification(entries = []) {
   const running = entries.some((entry) => entry.running === true || ["running", "pending", "in_progress"].includes(String(entry.classification || entry.status || "").toLowerCase()));
   const failed = entries.some((entry) => String(entry.classification || entry.status || "").toLowerCase() === "failed" || (entry.errors || []).length);
-  const changed = entries.some((entry) => Number(entry.createdCount || 0) || Number(entry.updatedCount || 0) || Number(entry.changedPieceQty || 0) || Number(entry.addedPieceQty || 0));
+  const changed = entries.some((entry) =>
+    Number(entry.createdCount || 0)
+    || Number(entry.updatedCount || 0)
+    || Number(entry.changedPieceQty || 0)
+    || Number(entry.addedPieceQty || 0)
+    || Number(entry.removedLineCount || 0)
+    || Number(entry.removedPieceQty || 0)
+  );
   const created = entries.some((entry) => Number(entry.createdCount || 0));
   if (running) return { key: "running", label: "Running" };
   if (failed) return { key: "failed", label: "Failed" };
@@ -27338,6 +28141,8 @@ function importRunEntrySignature(entry = {}) {
     String(entry.classification || entry.status || ""),
     Number(entry.createdCount || 0),
     Number(entry.updatedCount || 0),
+    Number(entry.newPieceQty || 0),
+    Number(entry.updatedPieceQty || 0),
     Number(entry.changedPieceQty || 0),
     Number(entry.addedPieceQty || 0),
     Number(entry.removedPieceQty || 0),
@@ -27384,18 +28189,31 @@ function collapseDuplicateImportRunGroups(groups = []) {
 function adminImportRunGroups(imports = []) {
   const groups = new Map();
   const today = todayKey();
-  const pool = [...(imports || []), ...(state.adminTodayImportEntries || [])]
+  const sourceEntries = dlsAutomationMergeRecentImports(
+    state.adminTodayImportEntries || [],
+    imports || [],
+  );
+  const pool = [...sourceEntries]
     .filter((entry) => importRunLocalDate(entry) === today);
   pool.forEach((entry, index) => {
     const time = importRunTime(entry);
-    const base = String(entry.runId || entry.taskId || entry.batchId || entry.importBatchId || time || `run-${index}`);
-    const key = `${base}|${time}`;
+    const explicitRunId = String(
+      entry.runId
+      || entry.requestId
+      || entry.taskId
+      || entry.importBatchId
+      || ""
+    ).trim();
+    const legacyIdentity = String(entry.batchId || entry.id || time || `run-${index}`);
+    const key = explicitRunId ? `run:${explicitRunId}` : `legacy:${legacyIdentity}|${time}`;
     if (!groups.has(key)) groups.set(key, { key, time, entries: [] });
-    const duplicate = groups.get(key).entries.some((current) =>
+    const group = groups.get(key);
+    if (String(time || "").localeCompare(String(group.time || "")) > 0) group.time = time;
+    const duplicate = group.entries.some((current) =>
       String(current.deliveryDate || "") === String(entry.deliveryDate || "")
       && String(current.sourceName || current.fileName || "") === String(entry.sourceName || entry.fileName || "")
     );
-    if (!duplicate) groups.get(key).entries.push(entry);
+    if (!duplicate) group.entries.push(entry);
   });
   const collapsed = collapseDuplicateImportRunGroups([...groups.values()]);
   if (state.adminPinnedImportEntries.length) {
@@ -27403,26 +28221,107 @@ function adminImportRunGroups(imports = []) {
     const key = state.adminSelectedImportRunKey || `notification|${time}`;
     collapsed.push({ key, time, entries: state.adminPinnedImportEntries.slice(), pinned: true });
   }
-  return collapsed.sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).slice(0, 100);
+  return collapsed.sort((a, b) => String(b.time || "").localeCompare(String(a.time || "")));
 }
 
 async function refreshAdminTodayImportRuns({ render = true } = {}) {
   if (!state.backend) return;
+  const today = todayKey();
   try {
-    const payload = await fetchJson("/api/notifications/history?limit=100");
-    const today = todayKey();
-    const automationNotifications = (payload.notifications || []).filter((notification) => {
+    const [notificationPayload, firstHistoryPage] = await Promise.all([
+      fetchJson("/api/notifications/history?limit=500"),
+      fetchJson("/api/admin/delivery-automation/recent-imports?page=1&pageSize=2000"),
+    ]);
+    const historyPageCount = Math.max(Number(firstHistoryPage.totalPages || 1), 1);
+    const additionalHistoryPages = historyPageCount > 1
+      ? await Promise.all(
+          Array.from({ length: historyPageCount - 1 }, (_value, index) => (
+            fetchJson(`/api/admin/delivery-automation/recent-imports?page=${index + 2}&pageSize=2000`)
+          )),
+        )
+      : [];
+    const historyPayload = {
+      ...firstHistoryPage,
+      imports: [
+        ...(firstHistoryPage.imports || firstHistoryPage.recentImports || []),
+        ...additionalHistoryPages.flatMap((page) => page.imports || page.recentImports || []),
+      ],
+    };
+    const automationNotifications = (notificationPayload.notifications || []).filter((notification) => {
       const source = String(notification?.details?.source || "").toLowerCase();
-      const created = new Date(notification.createdAt || "");
-      if (source !== "sql-delivery-automation" || Number.isNaN(created.getTime())) return false;
+      const created = parseAutomationDateValue(notification.createdAt || notification?.details?.completedAt || "");
+      if (source !== "sql-delivery-automation" || !created) return false;
       const localKey = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}-${String(created.getDate()).padStart(2, "0")}`;
       return localKey === today;
     });
-    state.adminTodayImportEntries = automationNotifications.flatMap(importEntriesFromNotification);
+    const notificationEntries = automationNotifications.flatMap(importEntriesFromNotification);
+    const matchedNotificationIndexes = new Set();
+    const matchingNotificationIndex = (historyEntry) => {
+      const historyRunId = String(historyEntry.runId || "").trim();
+      const historyTime = parseAutomationDateValue(historyEntry.importedAt || historyEntry.checkedAt || "");
+      return notificationEntries.findIndex((notificationEntry) => {
+        const notificationRunId = String(notificationEntry.runId || "").trim();
+        if (String(notificationEntry.deliveryDate || "") !== String(historyEntry.deliveryDate || "")) return false;
+        const notificationSource = String(notificationEntry.sourceName || notificationEntry.fileName || "").trim().toLowerCase();
+        const historySource = String(historyEntry.sourceName || historyEntry.fileName || "").trim().toLowerCase();
+        const genericNotificationSource = [
+          "automation check",
+          "automation run completed",
+          "automation run failed",
+          "delivery-list automation run",
+        ].includes(notificationSource);
+        if (!genericNotificationSource && notificationSource && historySource && notificationSource !== historySource) return false;
+        if (historyRunId && notificationRunId && historyRunId === notificationRunId) return true;
+        const started = parseAutomationDateValue(notificationEntry.runStartedAt || notificationEntry.importedAt || "");
+        const completed = parseAutomationDateValue(notificationEntry.runCompletedAt || notificationEntry.importedAt || "");
+        if (!historyTime || (!started && !completed)) return false;
+        const startMs = (started || completed).getTime() - 2 * 60 * 1000;
+        const endMs = (completed || started).getTime() + 2 * 60 * 1000;
+        return historyTime.getTime() >= startMs && historyTime.getTime() <= endMs;
+      });
+    };
+    const historyEntries = (historyPayload.imports || historyPayload.recentImports || [])
+      .filter((entry) => importRunLocalDate(entry) === today)
+      .map((historyEntry) => {
+        const notificationIndex = matchingNotificationIndex(historyEntry);
+        if (notificationIndex < 0) return historyEntry;
+        matchedNotificationIndexes.add(notificationIndex);
+        const notificationEntry = notificationEntries[notificationIndex];
+        const historyRunId = String(historyEntry.runId || "").trim();
+        return {
+          ...historyEntry,
+          runId: !historyRunId || historyRunId.startsWith("import-")
+            ? notificationEntry.runId
+            : historyRunId,
+          runStartedAt: historyEntry.runStartedAt || notificationEntry.runStartedAt || "",
+          runCompletedAt: historyEntry.runCompletedAt || notificationEntry.runCompletedAt || "",
+        };
+      });
+    const unmatchedNotificationEntries = notificationEntries.filter(
+      (_entry, index) => !matchedNotificationIndexes.has(index),
+    );
+
+    // Durable database rows carry the detailed audit facts. Notifications add
+    // run identity and cover failures/results that did not reach the database.
+    state.adminTodayImportEntries = dlsAutomationMergeRecentImports(
+      state.adminTodayImportEntries || [],
+      [...historyEntries, ...unmatchedNotificationEntries],
+    );
+    state.adminRecentImports = dlsAutomationMergeRecentImports(
+      state.adminRecentImports || [],
+      state.adminTodayImportEntries,
+    );
     state.adminTodayImportDate = today;
     if (render && els.adminDeliveryLists && state.page === "admin") renderAdminDeliveryLists();
   } catch (error) {
     console.warn("Today's import runs could not be loaded:", error);
+    // Preserve every already-loaded run when the history endpoint is temporarily
+    // unavailable. Falling back must never replace the day with only the latest run.
+    state.adminTodayImportEntries = dlsAutomationMergeRecentImports(
+      state.adminTodayImportEntries || [],
+      activeRecentImports(state.adminRecentImports || []),
+    );
+    state.adminTodayImportDate = today;
   } finally {
     state.adminTodayImportLoaded = true;
   }
@@ -27461,14 +28360,39 @@ function renderAdminImportRunBrowser(imports = []) {
       <span>Runs ${pageStart + 1}-${Math.min(pageStart + pageSize, groups.length)} of ${groups.length} · Page ${state.adminImportRunPage} of ${totalPages}</span>
       <button type="button" data-admin-import-page="${state.adminImportRunPage + 1}" ${state.adminImportRunPage >= totalPages ? "disabled" : ""}>Next</button>
     </nav>` : "";
+  const changedDates = new Set(selected.entries.map((entry) => entry.deliveryDate).filter(Boolean)).size;
+  const updatedPieces = selected.entries.reduce((sum, entry) => {
+    const changed = Number(entry.changedPieceQty || 0);
+    const removed = Number(entry.removedPieceQty || 0);
+    const added = Number(entry.addedPieceQty || 0);
+    const newPieces = Number(entry.newPieceQty || 0);
+    const explicitUpdated = Number(entry.updatedPieceQty || 0);
+    return sum + ((newPieces + explicitUpdated) || added || Math.max(changed - removed, 0));
+  }, 0);
+  const removedPieces = selected.entries.reduce(
+    (sum, entry) => sum + Number(entry.removedPieceQty || 0),
+    0,
+  );
   return `
-    <section class="admin-import-run-browser" data-selected-run="${escapeHtml(selected.key)}">
-      <div class="admin-import-run-day-heading"><div><small>Today's automation runs</small><strong>${escapeHtml(formatDisplayDate(todayKey()))}</strong></div><span>Showing up to five runs per page</span></div>
+    <section class="admin-import-run-browser admin-import-run-browser-v248 admin-import-run-browser-v249" data-selected-run="${escapeHtml(selected.key)}">
+      <div class="admin-import-run-day-heading">
+        <div><small>Today's import activity</small><strong>${escapeHtml(formatDisplayDate(todayKey()))}</strong></div>
+        <div class="admin-import-run-day-stats"><span><b>${escapeHtml(groups.length)}</b> run${groups.length === 1 ? "" : "s"}</span><span><b>${escapeHtml(groups.reduce((sum, group) => sum + group.entries.length, 0))}</b> file result${groups.reduce((sum, group) => sum + group.entries.length, 0) === 1 ? "" : "s"}</span></div>
+      </div>
       <div class="admin-import-run-tabs" role="tablist" aria-label="Import run history">${tabs}</div>
       ${pager}
       <div class="admin-import-run-selected-header ${escapeHtml(status.key)}">
-        <div><small>Selected automation run</small><strong>${escapeHtml(selected.time ? formatDateTime(selected.time) : "Active delivery lists")}</strong></div>
-        <span>${escapeHtml(status.label)}</span>
+        <div class="admin-import-run-selected-copy">
+          <small>Selected run</small>
+          <strong>${escapeHtml(selected.time ? formatDateTime(selected.time) : "Active delivery lists")}</strong>
+          <span>${escapeHtml(changedDates)} delivery date${changedDates === 1 ? "" : "s"} processed</span>
+        </div>
+        <div class="admin-import-run-selected-metrics">
+          <span><b>${escapeHtml(selected.entries.length)}</b> files</span>
+          <span><b>${escapeHtml(updatedPieces)}</b> updated pcs</span>
+          <span class="is-removed"><b>${escapeHtml(removedPieces)}</b> removed pcs</span>
+          <em>${escapeHtml(status.label)}</em>
+        </div>
       </div>
       <div class="admin-import-run-details" role="tabpanel" aria-live="polite">${importHistoryRows(selected.entries)}</div>
     </section>`;
@@ -27498,6 +28422,12 @@ function selectImportRun(key) {
 function importEntriesFromNotification(notification) {
   const details = notification?.details || {};
   const completedAt = String(details.completedAt || notification?.createdAt || "");
+  const startedAt = String(details.startedAt || completedAt);
+  const notificationRunId = String(
+    details.requestId
+    || details.runId
+    || `${details.mode || "automation"}:${startedAt || completedAt || notification?.id || "run"}`
+  );
   const sourceEntries = Array.isArray(details.importResults) ? details.importResults : [];
   const entries = sourceEntries.map((entry, index) => {
     const resultTime = String(entry.checkedAt || entry.importedAt || entry.updatedAt || completedAt);
@@ -27507,7 +28437,9 @@ function importEntriesFromNotification(notification) {
       checkedAt: resultTime,
       importedAt: entry.importedAt || resultTime,
       updatedAt: entry.updatedAt || resultTime,
-      runId: entry.runId || entry.taskId || entry.batchId || entry.importBatchId || `notification-${notification.id || completedAt}`,
+      runId: entry.runId || notificationRunId,
+      runStartedAt: entry.runStartedAt || startedAt,
+      runCompletedAt: entry.runCompletedAt || completedAt,
       classification: entry.classification || (entry.errors?.length ? "failed" : ""),
     };
   });
@@ -27524,7 +28456,9 @@ function importEntriesFromNotification(notification) {
   if (!dates.length) {
     return [{
       id: `notification-${notification.id || "run"}-summary`,
-      runId: `notification-${notification.id || completedAt}`,
+      runId: notificationRunId,
+      runStartedAt: startedAt,
+      runCompletedAt: completedAt,
       deliveryDate: "",
       sourceName: failed ? "Automation run failed" : "Automation run completed",
       checkedAt: completedAt,
@@ -27537,7 +28471,9 @@ function importEntriesFromNotification(notification) {
   }
   return dates.map((deliveryDate, index) => ({
     id: `notification-${notification.id || "run"}-${index}`,
-    runId: `notification-${notification.id || completedAt}`,
+    runId: notificationRunId,
+    runStartedAt: startedAt,
+    runCompletedAt: completedAt,
     deliveryDate,
     sourceName: "Automation check",
     checkedAt: completedAt,
@@ -27604,6 +28540,20 @@ function parseAutomationDateValue(value, { dateOnlyAtNoon = false } = {}) {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
+  const displayStamp = text.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (displayStamp) {
+    const [, monthName, day, hour, minute, meridiem] = displayStamp;
+    const monthIndex = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+      .findIndex((name) => monthName.toLowerCase().startsWith(name));
+    if (monthIndex >= 0) {
+      let numericHour = Number(hour);
+      if (numericHour === 12) numericHour = 0;
+      if (meridiem.toUpperCase() === "PM") numericHour += 12;
+      const parsed = new Date(new Date().getFullYear(), monthIndex, Number(day), numericHour, Number(minute), 0);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+  }
+
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
@@ -27612,9 +28562,16 @@ function automationHistoryDayLabel(timestampText) {
   const text = String(timestampText || "").trim();
   const parsed = parseAutomationDateValue(text);
   if (parsed) {
-    return parsed.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+    return parsed.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   }
-  return text.split(",").slice(0, 1).join(",") || "Unknown date";
+  return text || "Unknown date";
+}
+
+function automationHistoryRunLabel(timestampText) {
+  const text = String(timestampText || "").trim();
+  const parsed = parseAutomationDateValue(text);
+  if (!parsed) return text || "Unknown run time";
+  return parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 function automationHistoryStatus(entries) {
@@ -27625,45 +28582,104 @@ function automationHistoryStatus(entries) {
 }
 
 function enhanceAutomationImportHistoryResults(results) {
-  if (!results || results.dataset.v139Grouped === "true") return;
+  if (!results || results.dataset.v249Grouped === "true") return;
   const entries = [...results.children].filter((child) => child.matches?.("details.import-history-entry"));
   if (!entries.length) return;
+
   const days = new Map();
-  entries.forEach((entry) => {
-    const timeText = entry.querySelector(".import-history-entry-meta strong")?.textContent?.trim() || "Unknown time";
-    const dayLabel = automationHistoryDayLabel(timeText);
-    if (!days.has(dayLabel)) days.set(dayLabel, new Map());
-    if (!days.get(dayLabel).has(timeText)) days.get(dayLabel).set(timeText, []);
-    days.get(dayLabel).get(timeText).push(entry);
+  entries.forEach((entry, index) => {
+    const rawTimestamp = String(
+      entry.dataset.historyTimestamp
+      || entry.querySelector(".import-history-entry-meta strong")?.textContent
+      || ""
+    ).trim();
+    const parsed = parseAutomationDateValue(rawTimestamp);
+    const dayKey = parsed
+      ? `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`
+      : `unknown-${rawTimestamp || index}`;
+    const runKey = String(entry.dataset.historyRunId || rawTimestamp || `run-${index}`);
+    if (!days.has(dayKey)) {
+      days.set(dayKey, {
+        label: automationHistoryDayLabel(rawTimestamp),
+        timestamp: parsed?.getTime() || 0,
+        runs: new Map(),
+      });
+    }
+    const day = days.get(dayKey);
+    if (!day.runs.has(runKey)) {
+      day.runs.set(runKey, {
+        label: automationHistoryRunLabel(rawTimestamp),
+        timestamp: parsed?.getTime() || 0,
+        entries: [],
+      });
+    }
+    day.runs.get(runKey).entries.push(entry);
   });
 
   const fragment = document.createDocumentFragment();
-  [...days.entries()].forEach(([dayLabel, runs]) => {
-    const dayEntries = [...runs.values()].flat();
-    const dayStatus = automationHistoryStatus(dayEntries);
-    const day = document.createElement("details");
-    day.className = `automation-history-day ${dayStatus.className}`;
-    day.innerHTML = `<summary><span class="automation-history-chevron" aria-hidden="true"></span><div><small>Automation day</small><strong>${escapeHtml(dayLabel)}</strong><span>${dayEntries.length} delivery-list result${dayEntries.length === 1 ? "" : "s"} across ${runs.size} run${runs.size === 1 ? "" : "s"}</span></div><b>${escapeHtml(dayStatus.label)}</b></summary><div class="automation-history-day-body"></div>`;
-    const dayBody = day.querySelector(".automation-history-day-body");
-    [...runs.entries()].forEach(([timeText, runEntries]) => {
-      const runStatus = automationHistoryStatus(runEntries);
-      const run = document.createElement("details");
-      run.className = `automation-history-run ${runStatus.className}`;
-      run.innerHTML = `<summary><span class="automation-history-chevron" aria-hidden="true"></span><div><small>Run time</small><strong>${escapeHtml(timeText)}</strong><span>${runEntries.length} delivery list${runEntries.length === 1 ? "" : "s"} checked</span></div><b>${escapeHtml(runStatus.label)}</b></summary><div class="automation-history-run-body"></div>`;
-      const runBody = run.querySelector(".automation-history-run-body");
-      runEntries.forEach((entry) => runBody.append(entry));
-      dayBody.append(run);
+  [...days.values()]
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .forEach((dayData, dayIndex) => {
+      const runValues = [...dayData.runs.values()].sort((a, b) => b.timestamp - a.timestamp);
+      const dayEntries = runValues.flatMap((run) => run.entries);
+      const dayStatus = automationHistoryStatus(dayEntries);
+      const dayDates = new Set(dayEntries.map((entry) => entry.dataset.historyDeliveryDate).filter(Boolean)).size;
+      const day = document.createElement("details");
+      day.className = `automation-history-day automation-history-day-v249 ${dayStatus.className}`;
+      day.open = dayIndex === 0;
+      day.innerHTML = `<summary>
+        <span class="automation-history-chevron" aria-hidden="true"></span>
+        <div class="automation-history-summary-copy">
+          <small>Import activity</small>
+          <strong>${escapeHtml(dayData.label)}</strong>
+          <span>${runValues.length} run${runValues.length === 1 ? "" : "s"} · ${dayEntries.length} file result${dayEntries.length === 1 ? "" : "s"} · ${dayDates} delivery date${dayDates === 1 ? "" : "s"}</span>
+        </div>
+        <b>${escapeHtml(dayStatus.label)}</b>
+      </summary><div class="automation-history-day-body"></div>`;
+      const dayBody = day.querySelector(".automation-history-day-body");
+
+      runValues.forEach((runData, runIndex) => {
+        const runStatus = automationHistoryStatus(runData.entries);
+        const runDates = new Set(runData.entries.map((entry) => entry.dataset.historyDeliveryDate).filter(Boolean)).size;
+        const updatedPieces = runData.entries.reduce(
+          (sum, entry) => sum + Number(entry.dataset.historyUpdatedPieces || 0),
+          0,
+        );
+        const removedPieces = runData.entries.reduce(
+          (sum, entry) => sum + Number(entry.dataset.historyRemovedPieces || 0),
+          0,
+        );
+        const run = document.createElement("details");
+        run.className = `automation-history-run automation-history-run-v249 ${runStatus.className}`;
+        run.open = dayIndex === 0 && runIndex === 0;
+        run.innerHTML = `<summary>
+          <span class="automation-history-chevron" aria-hidden="true"></span>
+          <div class="automation-history-summary-copy">
+            <small>Run time</small>
+            <strong>${escapeHtml(runData.label)}</strong>
+            <span>${runData.entries.length} file${runData.entries.length === 1 ? "" : "s"} · ${runDates} date${runDates === 1 ? "" : "s"}</span>
+          </div>
+          <span class="automation-history-run-metrics">
+            <i><b>${escapeHtml(updatedPieces)}</b> updated</i>
+            <i class="is-removed"><b>${escapeHtml(removedPieces)}</b> removed</i>
+            <em>${escapeHtml(runStatus.label)}</em>
+          </span>
+        </summary><div class="automation-history-run-body"></div>`;
+        const runBody = run.querySelector(".automation-history-run-body");
+        runData.entries.forEach((entry) => runBody.append(entry));
+        dayBody.append(run);
+      });
+      fragment.append(day);
     });
-    fragment.append(day);
-  });
+
   results.replaceChildren(fragment);
-  results.dataset.v139Grouped = "true";
+  results.dataset.v249Grouped = "true";
 }
 
 function initializeAutomationHistoryGrouping() {
   const regroup = (results) => {
     if (!results || ![...results.children].some((child) => child.matches?.("details.import-history-entry"))) return;
-    delete results.dataset.v139Grouped;
+    delete results.dataset.v249Grouped;
     window.queueMicrotask(() => enhanceAutomationImportHistoryResults(results));
   };
   const observer = new MutationObserver((mutations) => {
@@ -27776,7 +28792,10 @@ function wireV135OperationsEvents() {
     const updatePreview = event.target.closest("[data-admin-list-update-preview]");
     if (updatePreview) {
       event.preventDefault();
-      openDeliveryListUpdatePreview(updatePreview.dataset.adminListUpdatePreview).catch((error) => showInlineError(error.message, true));
+      openDeliveryListUpdatePreview(
+        updatePreview.dataset.adminListUpdatePreview,
+        updatePreview.dataset.adminPreviewRouteGroup || "",
+      ).catch((error) => showInlineError(error.message, true));
       return;
     }
     const rackHistoryClear = event.target.closest("[data-rack-history-clear]");
@@ -28194,6 +29213,21 @@ function wireEvents() {
   document.addEventListener("toggle", (event) => {
     const details = event.target.closest?.(".delivery-date-group, .admin-import-date-group");
     if (!details || details !== event.target) return;
+
+    if (details.classList.contains("admin-import-date-group")) {
+      const key = String(details.dataset.adminDeliveryGroupKey || "");
+      if (key) {
+        if (details.open) state.adminOpenDeliveryGroups.add(key);
+        else state.adminOpenDeliveryGroups.delete(key);
+      }
+      // Keep the cached data markup in sync with the user's manual toggle so a
+      // background history check does not redraw the unchanged management list.
+      state.adminDeliveryListsNormalizedMarkup = normalizeAdminDeliveryListsMarkup(
+        els.adminDeliveryLists?.innerHTML || "",
+      );
+      return;
+    }
+
     replayExpandableListAnimation(details);
   }, true);
 
@@ -29907,6 +30941,22 @@ function wireEvents() {
       showPage(pageButton.dataset.pageTarget);
       return;
     }
+    const supersededFilterButton = event.target.closest("[data-superseded-filter]");
+    if (supersededFilterButton) {
+      state.supersededReviewFilter = supersededFilterButton.dataset.supersededFilter || "open";
+      if (els.adminModalBody) els.adminModalBody.innerHTML = supersededOrderReviewModalHtml();
+      return;
+    }
+
+    const supersededDecisionButton = event.target.closest("[data-superseded-decision][data-review-id]");
+    if (supersededDecisionButton) {
+      decideSupersededOrderReview(
+        supersededDecisionButton.dataset.reviewId,
+        supersededDecisionButton.dataset.supersededDecision,
+      ).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
     const adminModalButton = event.target.closest("[data-admin-modal]");
     if (adminModalButton) {
       const modalKind = adminModalButton.dataset.adminModal || "";
@@ -29925,6 +30975,10 @@ function wireEvents() {
       } else if (modalKind === "customerEmails") {
         refreshCustomerEmailSettings(false)
           .then(() => openAdminModal("customerEmails"))
+          .catch((error) => showInlineError(error.message, true));
+      } else if (modalKind === "supersededOrders") {
+        loadSupersededOrderReviews()
+          .then(() => openAdminModal("supersededOrders"))
           .catch((error) => showInlineError(error.message, true));
       } else if (modalKind === "deliveryLists" || modalKind === "deliveryActions") {
         loadDeliveryLists(state.activeListId)
@@ -30587,9 +31641,13 @@ function wireEvents() {
       const firstList = state.lists.find((list) => list.id === listIds[0]);
       const date = printListsButton.dataset.printDate || firstList?.deliveryDate || selectedDeliveryDate();
       const updatedOnly = printListsButton.dataset.printUpdatedOnly === "1";
+      const initialRouteGroups = String(printListsButton.dataset.printRouteGroups || "airport")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
 
       if (listIds.length) {
-        openPrintOptions({ date, listIds, updatedOnly, fixedListIds: true });
+        openPrintOptions({ date, listIds, updatedOnly, fixedListIds: true, initialRouteGroups });
       }
 
       return;
@@ -30727,6 +31785,7 @@ init().catch((error) => {
     return parsed.toLocaleString([], {
       month: "short",
       day: "numeric",
+      year: "numeric",
       hour: "numeric",
       minute: "2-digit",
     });
@@ -30754,6 +31813,12 @@ init().catch((error) => {
 
   function publishDeliveryCatalog(lists, source = "poll", force = false) {
     if (!Array.isArray(lists)) return false;
+    const activeListId = String(state.activeListId || "");
+    const activeSummary = lists.find((item) => String(item.id || "") === activeListId);
+    if (activeSummary && dlsAutomationActiveDetailIsStale(activeSummary)) {
+      window.setTimeout(() => dlsAutomationRefreshActiveListDetail(activeListId), 0);
+    }
+
     const signature = deliveryCatalogSignature(lists);
     if (!force && signature === lastDeliveryCatalogSignature) return false;
     lastDeliveryCatalogSignature = signature;
@@ -30796,8 +31861,12 @@ init().catch((error) => {
         createdCount: Number(item.createdCount || 0),
         reactivatedCount: Number(item.reactivatedCount || 0),
         updatedCount: Number(item.updatedCount || 0),
+        newPieceQty: Number(item.newPieceQty || 0),
+        updatedPieceQty: Number(item.updatedPieceQty || 0),
         addedPieceQty: Number(item.addedPieceQty || 0),
         changedPieceQty: Number(item.changedPieceQty || 0),
+        removedLineCount: Number(item.removedLineCount || 0),
+        removedPieceQty: Number(item.removedPieceQty || 0),
         errors: Array.isArray(item.errors) ? item.errors : [],
       })),
     });
@@ -30824,6 +31893,13 @@ init().catch((error) => {
         catalogOnly: false,
       },
     }));
+
+    const activeListId = String(state.activeListId || "");
+    const activeDeliveryDate = String(state.meta?.deliveryDate || "");
+    const touchesActiveDate = results.some((item) => String(item.deliveryDate || "") === activeDeliveryDate);
+    if (activeListId && touchesActiveDate) {
+      window.setTimeout(() => dlsAutomationRefreshActiveListDetail(activeListId), 0);
+    }
     return true;
   }
 
@@ -30872,6 +31948,15 @@ init().catch((error) => {
       refreshDeliveryListCatalog(false);
       if (adminPageIsVisible()) refreshLatestImportResult(false);
     }, 10000);
+
+    const refreshVisibleActiveList = () => {
+      if (document.visibilityState === "hidden") return;
+      refreshDeliveryListCatalog(true);
+      const activeListId = String(state.activeListId || "");
+      if (activeListId) dlsAutomationRefreshActiveListDetail(activeListId);
+    };
+    window.addEventListener("focus", refreshVisibleActiveList);
+    document.addEventListener("visibilitychange", refreshVisibleActiveList);
   }
 
 
@@ -30950,12 +32035,16 @@ init().catch((error) => {
     const createdCount = Number(item.createdCount || 0);
     const reactivatedCount = Number(item.reactivatedCount || 0);
     const brandNewCount = Math.max(createdCount - reactivatedCount, 0);
+    const removedPieces = Number(item.removedPieceQty || 0);
+    const changedPieces = Number(item.changedPieceQty || 0);
+    const updatedPieces = (Number(item.newPieceQty || 0) + Number(item.updatedPieceQty || 0))
+      || Number(item.addedPieceQty || 0)
+      || Math.max(changedPieces - removedPieces, 0);
     if (brandNewCount) details.push(`${brandNewCount} new stage list${brandNewCount === 1 ? "" : "s"}`);
     if (reactivatedCount) details.push(`${reactivatedCount} restored stage list${reactivatedCount === 1 ? "" : "s"}`);
     if (Number(item.updatedCount || 0)) details.push(`${Number(item.updatedCount)} updated stage list${Number(item.updatedCount) === 1 ? "" : "s"}`);
-    if (Number(item.addedPieceQty || 0)) details.push(`${Number(item.addedPieceQty)} added piece${Number(item.addedPieceQty) === 1 ? "" : "s"}`);
-    if (Number(item.changedPieceQty || 0)) details.push(`${Number(item.changedPieceQty)} changed piece${Number(item.changedPieceQty) === 1 ? "" : "s"}`);
-    if (Number(item.removedPieceQty || 0)) details.push(`${Number(item.removedPieceQty)} removed source piece${Number(item.removedPieceQty) === 1 ? "" : "s"}`);
+    if (updatedPieces) details.push(`${updatedPieces} updated piece${updatedPieces === 1 ? "" : "s"}`);
+    if (removedPieces) details.push(`${removedPieces} removed piece${removedPieces === 1 ? "" : "s"}`);
     if (!details.length && Number(item.rowCount || 0)) details.push(`${Number(item.rowCount)} line item${Number(item.rowCount) === 1 ? "" : "s"}`);
     if (!details.length) details.push("No delivery-list line changes detected");
     return details.join(" · ");
@@ -30991,22 +32080,22 @@ init().catch((error) => {
 
   function stageSummaryMessage(stage = {}) {
     const parts = [];
-    const addedPieces = Number(stage.addedPieceQty || stage.newPieceQty || 0);
-    const updatedPieces = Number(stage.updatedPieceQty || 0);
+    const newPieces = Number(stage.newPieceQty || 0);
+    const addedPieces = Number(stage.addedPieceQty || 0);
+    const explicitUpdatedPieces = Number(stage.updatedPieceQty || 0);
     const changedPieces = Number(stage.changedPieceQty || 0);
     const changedLines = Number(stage.changedLineCount || 0);
     const removedLines = Number(stage.removedLineCount || 0);
     const removedPieces = Number(stage.removedPieceQty || 0);
+    const updatedPieces = (newPieces + explicitUpdatedPieces) || addedPieces || Math.max(changedPieces - removedPieces, 0);
     const totalQty = Number(stage.totalQty || 0);
 
     if (stage.reactivated) parts.push("Restored after deletion");
     else if (stage.created) parts.push("Entirely new stage");
-    if (addedPieces) parts.push(`${addedPieces} added piece${addedPieces === 1 ? "" : "s"}`);
     if (updatedPieces) parts.push(`${updatedPieces} updated piece${updatedPieces === 1 ? "" : "s"}`);
-    else if (changedPieces) parts.push(`${changedPieces} changed piece${changedPieces === 1 ? "" : "s"}`);
     if (changedLines) parts.push(`${changedLines} changed line${changedLines === 1 ? "" : "s"}`);
-    if (removedLines) parts.push(`${removedLines} removed source line${removedLines === 1 ? "" : "s"}`);
-    if (removedPieces) parts.push(`${removedPieces} removed source piece${removedPieces === 1 ? "" : "s"}`);
+    if (removedLines) parts.push(`${removedLines} removed line${removedLines === 1 ? "" : "s"}`);
+    if (removedPieces) parts.push(`${removedPieces} removed piece${removedPieces === 1 ? "" : "s"}`);
     if (!parts.length && totalQty) parts.push(`${totalQty} total piece${totalQty === 1 ? "" : "s"}`);
     if (!parts.length) parts.push("No stage changes detected");
     return parts.join(" · ");
@@ -31171,8 +32260,22 @@ init().catch((error) => {
     results.innerHTML = imports.map((item, index) => {
       const status = classificationDetails(item.classification);
       const sourceName = item.sourceName || `Delivery List ${item.deliveryDate || ""}`;
+      const historyTimestamp = String(item.runCompletedAt || item.importedAt || item.checkedAt || item.updatedAt || "");
+      const historyRunId = String(item.runId || item.requestId || item.batchId || item.id || historyTimestamp || `history-${index}`);
+      const removedPieces = Number(item.removedPieceQty || 0);
+      const changedPieces = Number(item.changedPieceQty || 0);
+      const updatedPieces = (Number(item.newPieceQty || 0) + Number(item.updatedPieceQty || 0))
+        || Number(item.addedPieceQty || 0)
+        || Math.max(changedPieces - removedPieces, 0);
       return `
-        <details class="import-history-entry automation-recent-import-row ${status.className}">
+        <details
+          class="import-history-entry automation-recent-import-row ${status.className}"
+          data-history-timestamp="${escapeHtml(historyTimestamp)}"
+          data-history-run-id="${escapeHtml(historyRunId)}"
+          data-history-delivery-date="${escapeHtml(item.deliveryDate || "")}"
+          data-history-updated-pieces="${escapeHtml(updatedPieces)}"
+          data-history-removed-pieces="${escapeHtml(removedPieces)}"
+        >
           <summary class="import-history-entry-summary">
             <span class="automation-recent-import-status">${escapeHtml(status.label)}</span>
             <span class="import-history-entry-copy">
@@ -31451,7 +32554,7 @@ init().catch((error) => {
           </details>
         </section>
 
-        <section class="delivery-automation-tab import-history-workspace" data-automation-panel="history" role="tabpanel">
+        <section class="delivery-automation-tab import-history-workspace import-history-workspace-v249" data-automation-panel="history" role="tabpanel">
           <div class="import-history-panel-heading">
             <div>
               <small>Delivery List Management</small>
@@ -31675,10 +32778,33 @@ init().catch((error) => {
       : formatTimestamp(last.completedAt);
 
     const modeLabel = ACTION_LABELS[dashboard.settings?.automationMode] || (dashboard.settings?.automationMode === "disabled" ? "Manual Only" : "Not configured");
+    const normalizedLastAction = last.action || ({
+      FolderImportOnly: "folder-import-only",
+      SqlExportOnly: "sql-export-only",
+      SqlExportAndImport: "sql-export-and-import",
+    }[last.runAction] || "");
+    const commandLabel = ACTION_LABELS[normalizedLastAction] || last.runAction || "No command";
+    const originLabel = last.runOrigin === "scheduled"
+      ? "Scheduled task"
+      : last.runOrigin === "manual" || last.taskId
+        ? "Manual request"
+        : "System run";
+    let rangeLabel = last.mode || last.rangeMode || "";
+    if (last.rangeMode === "one-date" && last.dateFrom) rangeLabel = `One date: ${last.dateFrom}`;
+    if (last.rangeMode === "custom" && last.dateFrom && last.dateTo) rangeLabel = `${last.dateFrom} through ${last.dateTo}`;
+    if (!last.rangeMode && last.mode === "Custom" && last.dateFrom) {
+      rangeLabel = last.dateTo && last.dateTo !== last.dateFrom
+        ? `${last.dateFrom} through ${last.dateTo}`
+        : `One date: ${last.dateFrom}`;
+    }
+    const commandDetail = [originLabel, rangeLabel].filter(Boolean).join(" - ");
+    const runtimeDetail = dashboard.runtimeSync?.ok === false
+      ? `Runtime sync warning: ${dashboard.runtimeSync.error || "installed files could not be refreshed."}`
+      : dashboard.configPath || "Runtime configuration was not found.";
     modal.querySelector("#automationStatusSummary").innerHTML = `
-      <article class="automation-status-card"><small>Runtime</small><strong>${dashboard.runtimeReady ? "Ready" : "Not installed"}</strong><span>${escapeHtml(dashboard.configPath || "Runtime configuration was not found.")}</span></article>
+      <article class="automation-status-card"><small>Runtime</small><strong>${dashboard.runtimeReady ? "Ready" : "Not installed"}</strong><span>${escapeHtml(runtimeDetail)}</span></article>
       <article class="automation-status-card"><small>Automatic mode</small><strong>${escapeHtml(modeLabel)}</strong><span>${dashboard.scheduleInstalled ? "Windows scheduled tasks are active." : "Manual commands are still available."}</span></article>
-      <article class="automation-status-card"><small>Last command</small><strong>${escapeHtml(last.action ? ACTION_LABELS[last.action] || last.action : "No command")}</strong><span>Started by ${escapeHtml(last.startedBy || last.createdBy || "system")}</span></article>`;
+      <article class="automation-status-card"><small>Last command</small><strong>${escapeHtml(commandLabel)}</strong><span>${escapeHtml(commandDetail)} · Started by ${escapeHtml(last.startedBy || last.createdBy || "system")}</span></article>`;
 
     const output = last.commandOutput || [last.stdout, last.stderr, last.error].filter(Boolean).join("\n\n");
     const logElement = modal.querySelector("#automationStatusLog");
