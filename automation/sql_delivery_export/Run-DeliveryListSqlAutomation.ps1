@@ -38,6 +38,7 @@ $script:ImportedDates = New-Object System.Collections.Generic.List[datetime]
 $script:ImportResults = @()
 $script:ResolvedAction = $RunAction
 $script:StartedAt = (Get-Date).ToUniversalTime().ToString("o")
+$script:RunId = $(if ([string]::IsNullOrWhiteSpace([string]$RequestId)) { "scheduled-$($script:StartedAt)" } else { [string]$RequestId })
 $script:SkipSummary = $false
 $script:LastRawDeliveryRowCount = 0
 $script:LastRawRemakeLineCount = 0
@@ -975,6 +976,7 @@ function Publish-AutomationNotification {
         mode = $RunMode
         succeeded = $Succeeded
         requestId = [string]$RequestId
+        runId = [string]$script:RunId
         startedAt = [string]$script:StartedAt
         checkedDates = $checkedDates
         publishedDates = $publishedDates
@@ -1317,6 +1319,7 @@ function Invoke-ScannerImport {
 
     $targetDates = @($Dates | Sort-Object -Unique)
     $forcedDates = @($ForceDates | Sort-Object -Unique)
+    Write-AutomationLog -Message ("Scanner project root for import: {0}" -f $projectRoot)
     $importerPath = Join-Path $PSScriptRoot "import_delivery_folder.py"
     $dateFrom = ($targetDates | Select-Object -First 1).ToString("yyyy-MM-dd")
     $dateTo = ($targetDates | Select-Object -Last 1).ToString("yyyy-MM-dd")
@@ -1338,7 +1341,7 @@ function Invoke-ScannerImport {
             "--date-from", $dateFrom,
             "--date-to", $dateTo,
             "--user", [string]$Config.Import.User,
-            "--run-id", $(if ([string]::IsNullOrWhiteSpace([string]$RequestId)) { "scheduled-$($script:StartedAt)" } else { [string]$RequestId }),
+            "--run-id", [string]$script:RunId,
             "--run-started-at", [string]$script:StartedAt,
             "--initialize-store", ([bool](Get-OptionalProperty -Object $Config.Import -Name "InitializeStore" -DefaultValue $true)).ToString().ToLowerInvariant(),
             "--result-path", $resultPath
@@ -1559,6 +1562,7 @@ function Write-LastRunSummary {
     $summary = [ordered]@{
         version = "v121"
         requestId = [string]$RequestId
+        runId = [string]$script:RunId
         runOrigin = $(if ([string]::IsNullOrWhiteSpace([string]$RequestId)) { "scheduled" } else { "manual" })
         startedAt = [string]$script:StartedAt
         mode = $RunMode
@@ -1597,6 +1601,27 @@ function Write-LastRunSummary {
     }
     finally {
         Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+    }
+
+    # Keep one immutable summary per completed run. last-run.json/web-gui-summary.json
+    # are intentionally overwritten, so they cannot serve as an accurate same-day
+    # audit trail by themselves.
+    try {
+        $historyFolder = Join-Path $Config.WorkingRoot "State\RunHistory"
+        [void](New-Item -ItemType Directory -Path $historyFolder -Force)
+        $historyStamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmssfff")
+        $historyPath = Join-Path $historyFolder ("run-{0}-{1}.json" -f $historyStamp, [guid]::NewGuid().ToString("N"))
+        $historyTemporaryPath = "{0}.tmp" -f $historyPath
+        try {
+            $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $historyTemporaryPath -Encoding UTF8
+            Move-Item -LiteralPath $historyTemporaryPath -Destination $historyPath -Force
+        }
+        finally {
+            Remove-Item -LiteralPath $historyTemporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+    catch {
+        Write-AutomationLog -Message ("Run history archive could not be written: {0}" -f $_.Exception.Message) -Level "WARN"
     }
 }
 

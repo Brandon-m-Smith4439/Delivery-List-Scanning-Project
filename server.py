@@ -1602,6 +1602,13 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(summary)
             return
 
+        if parsed.path == "/api/admin/superseded-order-reviews/summary":
+            user = self.require_any_permission("view_admin", "edit_delivery_lists")
+            if not user:
+                return
+            self.send_json(STORE.superseded_order_review_summary())
+            return
+
         if parsed.path == "/api/admin/superseded-order-reviews":
             user = self.require_any_permission("view_admin", "edit_delivery_lists")
             if not user:
@@ -2247,6 +2254,7 @@ class Handler(SimpleHTTPRequestHandler):
                         str(data.get("action") or ""),
                         user["username"],
                         str(data.get("reason") or ""),
+                        str(data.get("removeOrderNumber") or ""),
                     )
                 )
                 return

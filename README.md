@@ -1,17 +1,38 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.254**. SQLite remains the active/default backend.
+Current maintained release: **v0.257**. SQLite remains the active/default backend.
 
-v0.254 restores stable manual expansion in Delivery List Management. Delivery-date groups stay collapsed until the user opens them, preserve that choice during background import checks, and no longer replay the flashing expansion animation.
+v0.257 restores five-run paging without losing same-day history, records removals as first-class import changes, flattens item details inside the update preview, and lets an Admin choose either candidate order as the exact superseded-order removal target.
 
-## Install v0.254
+## Install v0.257
 
 1. Stop the scanner server and wait for any delivery-list automation run to finish.
-2. Extract the v0.254 changed-files ZIP directly into the current project folder, preserving the included folder structure.
+2. Extract the v0.257 changed-files ZIP directly into the current project folder, preserving the included folder structure.
 3. Keep the existing `data` folder, scanner database, configuration, logs, and backups.
-4. Restart the scanner server.
+4. Restart the scanner server so SQLite migration 11 is applied before the Admin page is used.
 5. Refresh the browser with `Ctrl+F5`.
-6. Open Delivery List Management and manually expand/collapse several delivery dates while a history check runs. The selected groups should remain stable without flashing.
+6. Run the next normal automatic/manual import. Existing same-day run history remains paged five at a time while all loaded runs stay available.
+
+## v0.257 highlights
+
+- Restores five-run paging in Today's Import Activity while preserving the complete loaded history for the day across Previous/Next pages.
+- Displays delivery-list quantity arithmetic as `original +added -removed current`; the red removal term appears only when pieces were removed.
+- Records new, updated, quantity-decreased, and removed source rows as durable item snapshots so run totals and Delivery List Update Preview do not depend on the current live row still existing.
+- Shows removed-piece totals in red in run tabs, the selected-run summary, delivery-list headers, and route/stage rows.
+- Calculates import-level added/removed totals from the canonical full-list stage instead of summing replicated Staging/Outbound/route copies, preventing the same physical glass from being counted multiple times.
+- Reorganizes preview details as Route → Glass Type → Order. Route/glass/order counts sit beside their headers; opening an order shows customer/job/route/glass once and then flat item rows with item number, size, quantity, and any field-level changes.
+- Keeps expanded preview groups inside the main modal scroll instead of creating a small vertical scrollbar per route.
+- Superseded Order Review now suggests the original candidate for removal but allows an Admin to select either candidate. The selected exact order/item keys are persisted and used for future source exclusions.
+- An approved superseded removal creates a durable import-history entry with accurate removed-line/piece totals, so it appears in Today's Import Activity instead of silently changing the active list.
+- SQLite schema advances to version 11 to persist the selected superseded-order removal target.
+
+## v0.255 highlights
+
+- Automatically repairs `sql-export.config.json` so `ProjectRoot` always points at the web-app instance that is currently running. This prevents automation from importing into an obsolete copied/renamed project database.
+- Performs a second source-row reconciliation check after each SQL import. A date is marked failed instead of successful if any expected A+W source row is still missing or mismatched in the scanner.
+- Delivery List Management now displays quantity arithmetic as **previous quantity + signed net change = current quantity**. Detail-only updates no longer appear as added-piece quantity.
+- New superseded-order candidates remain active, generate an in-app review notification, and update the red pending-review badge without requiring a full Admin-page reload.
+- SQLite schema remains version 10.
 
 ## v0.254 highlights
 

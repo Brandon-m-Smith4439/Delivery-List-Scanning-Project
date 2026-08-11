@@ -1753,6 +1753,70 @@ class BaseDeliveryStore:
         """
         raise NotImplementedError
 
+    def canonical_source_change_metrics(self, stage_summaries: list[dict[str, Any]]) -> dict[str, int]:
+        """Return one logical delivery-list change total instead of summing stage copies.
+
+        Staging and Outbound intentionally contain the full A+W delivery list, while
+        Indian Trail/Greenville/CPU/DTC/custom stages contain operational subsets.
+        Summing every stage therefore double-counts one physical piece several times.
+        The Airport staging copy is the canonical source-level comparison; Outbound is
+        the fallback for historical data that no longer has a staging row.
+        """
+        rows = [row for row in (stage_summaries or []) if isinstance(row, dict)]
+        if not rows:
+            return {
+                "newPieceQty": 0,
+                "updatedPieceQty": 0,
+                "addedPieceQty": 0,
+                "changedPieceQty": 0,
+                "removedLineCount": 0,
+                "removedPieceQty": 0,
+            }
+
+        def list_id(row: dict[str, Any]) -> str:
+            return str(row.get("listId") or "").strip().lower()
+
+        def stage_text(row: dict[str, Any]) -> str:
+            return f"{row.get('stage') or ''} {row.get('scanner') or row.get('stageProfile') or ''}".strip().lower()
+
+        preferred = next(
+            (row for row in rows if list_id(row).endswith("-staging-airport")),
+            None,
+        )
+        if preferred is None:
+            preferred = next(
+                (row for row in rows if "staging" in stage_text(row) and "airport" in stage_text(row)),
+                None,
+            )
+        if preferred is None:
+            preferred = next(
+                (row for row in rows if list_id(row).endswith("-outbound-airport")),
+                None,
+            )
+        if preferred is None:
+            preferred = next(
+                (row for row in rows if "outbound" in stage_text(row) and "airport" in stage_text(row)),
+                None,
+            )
+        if preferred is None:
+            preferred = max(
+                rows,
+                key=lambda row: (
+                    int(row.get("totalQty") or 0),
+                    int(row.get("originalQty") or 0),
+                    int(row.get("changedPieceQty") or 0),
+                ),
+            )
+
+        return {
+            "newPieceQty": int(preferred.get("newPieceQty") or 0),
+            "updatedPieceQty": int(preferred.get("updatedPieceQty") or 0),
+            "addedPieceQty": int(preferred.get("addedPieceQty") or 0),
+            "changedPieceQty": int(preferred.get("changedPieceQty") or 0),
+            "removedLineCount": int(preferred.get("removedLineCount") or 0),
+            "removedPieceQty": int(preferred.get("removedPieceQty") or 0),
+        }
+
     def import_delivery_list(self, data: dict[str, Any]) -> dict[str, Any]:
         """Purpose: Load delivery list for the delivery-list scanner workflow.
 
@@ -2354,6 +2418,8 @@ class BaseDeliveryStore:
         updated = 0
         reset_to_pending = 0
         system_approved = 0
+        newly_pending = 0
+        notification_id = 0
         with self.connect() as con:
             for candidate in normalized:
                 original_keys = {
@@ -2373,19 +2439,24 @@ class BaseDeliveryStore:
                     decided_at = str(existing["decided_at"] or "")
                     decided_by = str(existing["decided_by"] or "")
                     decision_reason = str(existing["decision_reason"] or "")
+                    approved_remove_order_no = str(row_value(existing, "approved_remove_order_no", "") or "").strip()
                     fingerprint_changed = str(existing["source_fingerprint"] or "") != candidate["sourceFingerprint"]
                     if fingerprint_changed:
                         status = "pending"
                         decided_at = ""
                         decided_by = ""
                         decision_reason = "Source evidence changed; review again."
+                        approved_remove_order_no = ""
                         reset_to_pending += 1
                     if verified_candidate and status == "pending":
                         status = "approved"
                         decided_at = now
                         decided_by = "system-v0.244"
                         decision_reason = "Migrated from the exact Crystal-verified v0.244 exclusions."
+                        approved_remove_order_no = candidate["originalOrderNumber"]
                         system_approved += 1
+                    elif fingerprint_changed:
+                        newly_pending += 1
                     con.execute(
                         """
                         UPDATE superseded_order_reviews
@@ -2393,7 +2464,7 @@ class BaseDeliveryStore:
                             replacement_order_no = ?, status = ?, confidence = ?, evidence_json = ?,
                             original_items_json = ?, replacement_items_json = ?, source_fingerprint = ?,
                             last_seen_at = ?, decided_at = ?, decided_by = ?, decision_reason = ?,
-                            active = 1, updated_at_utc = ?
+                            approved_remove_order_no = ?, active = 1, updated_at_utc = ?
                         WHERE candidate_key = ?
                         """,
                         (
@@ -2401,7 +2472,7 @@ class BaseDeliveryStore:
                             candidate["originalOrderNumber"], candidate["replacementOrderNumber"],
                             status, candidate["confidence"], evidence_json, original_json,
                             replacement_json, candidate["sourceFingerprint"], now, decided_at,
-                            decided_by, decision_reason, now, candidate["candidateKey"],
+                            decided_by, decision_reason, approved_remove_order_no, now, candidate["candidateKey"],
                         ),
                     )
                     updated += 1
@@ -2409,6 +2480,7 @@ class BaseDeliveryStore:
                     status = "approved" if verified_candidate else "pending"
                     decided_at = now if verified_candidate else ""
                     decided_by = "system-v0.244" if verified_candidate else ""
+                    approved_remove_order_no = candidate["originalOrderNumber"] if verified_candidate else ""
                     decision_reason = (
                         "Migrated from the exact Crystal-verified v0.244 exclusions."
                         if verified_candidate else ""
@@ -2420,21 +2492,50 @@ class BaseDeliveryStore:
                             replacement_order_no, status, confidence, evidence_json,
                             original_items_json, replacement_items_json, source_fingerprint,
                             detected_at, last_seen_at, decided_at, decided_by, decision_reason,
-                            active, created_at_utc, updated_at_utc
+                            approved_remove_order_no, active, created_at_utc, updated_at_utc
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                         """,
                         (
                             candidate["candidateKey"], candidate["deliveryDate"], candidate["headerIdentity"],
                             candidate["originalOrderNumber"], candidate["replacementOrderNumber"],
                             status, candidate["confidence"], evidence_json, original_json,
                             replacement_json, candidate["sourceFingerprint"], now, now, decided_at,
-                            decided_by, decision_reason, now, now,
+                            decided_by, decision_reason, approved_remove_order_no, now, now,
                         ),
                     )
                     inserted += 1
                     if verified_candidate:
                         system_approved += 1
+                    else:
+                        newly_pending += 1
+
+            if newly_pending > 0:
+                pending_row = con.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM superseded_order_reviews
+                    WHERE active = 1 AND status IN ('pending', 'review_later')
+                    """
+                ).fetchone()
+                pending_total = int(pending_row["count"] or 0) if pending_row else newly_pending
+                notification_id = self.create_app_notification(
+                    con,
+                    "superseded_order_review",
+                    "Superseded order review needed",
+                    (
+                        f"{newly_pending} possible superseded order group"
+                        f"{'s' if newly_pending != 1 else ''} need review. "
+                        "All source orders remain active until an Admin approves an exact removal."
+                    ),
+                    user or "sql-auto-import",
+                    {
+                        "source": "superseded-order-review",
+                        "newReviewCount": newly_pending,
+                        "pendingReviewCount": pending_total,
+                    },
+                    expires_in_hours=72,
+                )
             con.commit()
         self.write_superseded_order_exclusion_file()
         summary = self.superseded_order_review_summary()
@@ -2445,15 +2546,17 @@ class BaseDeliveryStore:
             "updatedCount": updated,
             "resetToPendingCount": reset_to_pending,
             "systemApprovedCount": system_approved,
+            "newlyPendingCount": newly_pending,
+            "notificationId": notification_id,
             "errors": errors,
             **summary,
         }
 
     def _superseded_review_live_impact(self, con: Any, delivery_date: str, order_no: str, item_numbers: list[str]) -> dict[str, Any]:
-        """Return current scanner-stage impact for one proposed original order."""
+        """Return current scanner-stage impact for one proposed candidate order."""
         clean_items = sorted({str(value or "").strip().zfill(3) for value in item_numbers if str(value or "").strip()})
         if not clean_items:
-            return {"activeLineCount": 0, "pieceQty": 0, "scannedQty": 0, "stageCount": 0, "stages": []}
+            return {"activeLineCount": 0, "pieceQty": 0, "scannedQty": 0, "stageCount": 0, "stages": [], "protectedLineCount": 0}
         placeholders = ",".join("?" for _ in clean_items)
         rows = con.execute(
             f"""
@@ -2488,7 +2591,7 @@ class BaseDeliveryStore:
         }
 
     def list_superseded_order_reviews(self, status: str = "", include_inactive: bool = False) -> dict[str, Any]:
-        """Return the local review queue with immutable evidence and live scanner impact."""
+        """Return the local review queue with evidence and impact for both candidates."""
         clean_status = str(status or "").strip().lower()
         allowed = {"pending", "approved", "keep_both", "review_later"}
         clauses = [] if include_inactive else ["active = 1"]
@@ -2526,12 +2629,22 @@ class BaseDeliveryStore:
                     replacement_items = json.loads(str(row["replacement_items_json"] or "[]"))
                 except Exception:
                     replacement_items = []
-                impact = self._superseded_review_live_impact(
+                original_impact = self._superseded_review_live_impact(
                     con,
                     str(row["delivery_date"] or ""),
                     str(row["original_order_no"] or ""),
                     [str(item.get("itemNumber") or "") for item in original_items if isinstance(item, dict)],
                 )
+                replacement_impact = self._superseded_review_live_impact(
+                    con,
+                    str(row["delivery_date"] or ""),
+                    str(row["replacement_order_no"] or ""),
+                    [str(item.get("itemNumber") or "") for item in replacement_items if isinstance(item, dict)],
+                )
+                approved_remove_order_no = str(row_value(row, "approved_remove_order_no", "") or "").strip()
+                if str(row["status"] or "") == "approved" and not approved_remove_order_no:
+                    # v0.245-v0.256 approvals always meant original-order removal.
+                    approved_remove_order_no = str(row["original_order_no"] or "")
                 reviews.append(
                     {
                         "id": int(row["id"]),
@@ -2540,6 +2653,7 @@ class BaseDeliveryStore:
                         "headerIdentity": str(row["header_identity"] or ""),
                         "originalOrderNumber": str(row["original_order_no"] or ""),
                         "replacementOrderNumber": str(row["replacement_order_no"] or ""),
+                        "approvedRemoveOrderNumber": approved_remove_order_no,
                         "status": str(row["status"] or "pending"),
                         "confidence": str(row["confidence"] or "high"),
                         "evidence": evidence if isinstance(evidence, dict) else {},
@@ -2552,7 +2666,9 @@ class BaseDeliveryStore:
                         "decidedBy": str(row["decided_by"] or ""),
                         "decisionReason": str(row["decision_reason"] or ""),
                         "active": bool(row["active"]),
-                        "liveImpact": impact,
+                        "originalImpact": original_impact,
+                        "replacementImpact": replacement_impact,
+                        "liveImpact": original_impact,
                     }
                 )
         return {"reviews": reviews, **self.superseded_order_review_summary()}
@@ -2573,12 +2689,13 @@ class BaseDeliveryStore:
         }
 
     def approved_superseded_order_exclusions(self) -> list[dict[str, Any]]:
-        """Return exact order/item exclusions activated by explicit approvals only."""
+        """Return exact order/item exclusions for the candidate explicitly selected for removal."""
         with self.connect() as con:
             rows = con.execute(
                 """
                 SELECT id, delivery_date, original_order_no, replacement_order_no,
-                       original_items_json, decided_by, decision_reason
+                       original_items_json, replacement_items_json, approved_remove_order_no,
+                       decided_by, decision_reason
                 FROM superseded_order_reviews
                 WHERE active = 1 AND status = 'approved'
                 ORDER BY delivery_date, original_order_no, id
@@ -2587,14 +2704,21 @@ class BaseDeliveryStore:
         entries: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
         for row in rows:
+            original_order = str(row["original_order_no"] or "").strip()
+            replacement_order = str(row["replacement_order_no"] or "").strip()
+            remove_order = str(row_value(row, "approved_remove_order_no", "") or "").strip() or original_order
+            if remove_order not in {original_order, replacement_order}:
+                remove_order = original_order
+            items_json = row["replacement_items_json"] if remove_order == replacement_order else row["original_items_json"]
+            kept_order = original_order if remove_order == replacement_order else replacement_order
             try:
-                items = json.loads(str(row["original_items_json"] or "[]"))
+                items = json.loads(str(items_json or "[]"))
             except Exception:
                 items = []
             for item in items if isinstance(items, list) else []:
                 if not isinstance(item, dict):
                     continue
-                order_no = str(item.get("orderNumber") or row["original_order_no"] or "").strip()
+                order_no = str(item.get("orderNumber") or remove_order or "").strip()
                 item_no = str(item.get("itemNumber") or "").strip().zfill(3)
                 delivery_date = str(row["delivery_date"] or "").strip()
                 key = (delivery_date, order_no, item_no)
@@ -2607,35 +2731,42 @@ class BaseDeliveryStore:
                         "orderNumber": order_no,
                         "itemNumber": item_no,
                         "reviewId": int(row["id"]),
-                        "replacementOrderNumber": str(row["replacement_order_no"] or ""),
+                        "replacementOrderNumber": replacement_order,
+                        "keptOrderNumber": kept_order,
                         "approvedBy": str(row["decided_by"] or ""),
                         "reason": str(row["decision_reason"] or "").strip()
-                        or f"Approved superseded order; replacement {row['replacement_order_no']}",
+                        or f"Approved superseded-order removal; kept order {kept_order}.",
                     }
                 )
         return entries
 
     def preserved_superseded_order_items(self) -> list[dict[str, Any]]:
-        """Return exact keys that must override older packaged exclusions.
+        """Return exact original keys that must override older bootstrap exclusions.
 
-        v0.244 shipped eight immutable bootstrap exclusions before the review
-        workspace existed. A later Keep Both, Review Later, or evidence-change
-        decision must be able to restore those rows. Publishing preservation
-        keys lets the exporter remove matching bootstrap exclusions locally.
+        Pending/Keep Both/Review Later always preserve the original candidate. An
+        approval that removes the replacement candidate must preserve the original
+        too, otherwise the eight v0.244 bootstrap exclusions could still suppress it.
         """
         with self.connect() as con:
             rows = con.execute(
                 """
                 SELECT id, delivery_date, original_order_no, replacement_order_no,
-                       status, original_items_json, decided_by, decision_reason
+                       status, original_items_json, approved_remove_order_no, decided_by, decision_reason
                 FROM superseded_order_reviews
-                WHERE active = 1 AND status <> 'approved'
+                WHERE active = 1
                 ORDER BY delivery_date, original_order_no, id
                 """
             ).fetchall()
         entries: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
         for row in rows:
+            status = str(row["status"] or "pending")
+            original_order = str(row["original_order_no"] or "").strip()
+            replacement_order = str(row["replacement_order_no"] or "").strip()
+            remove_order = str(row_value(row, "approved_remove_order_no", "") or "").strip() or original_order
+            preserve_original = status != "approved" or remove_order == replacement_order
+            if not preserve_original:
+                continue
             try:
                 items = json.loads(str(row["original_items_json"] or "[]"))
             except Exception:
@@ -2644,7 +2775,7 @@ class BaseDeliveryStore:
                 if not isinstance(item, dict):
                     continue
                 delivery_date = str(row["delivery_date"] or "").strip()
-                order_no = str(item.get("orderNumber") or row["original_order_no"] or "").strip()
+                order_no = str(item.get("orderNumber") or original_order or "").strip()
                 item_no = str(item.get("itemNumber") or "").strip().zfill(3)
                 key = (delivery_date, order_no, item_no)
                 if not all(key) or key in seen:
@@ -2656,11 +2787,11 @@ class BaseDeliveryStore:
                         "orderNumber": order_no,
                         "itemNumber": item_no,
                         "reviewId": int(row["id"]),
-                        "replacementOrderNumber": str(row["replacement_order_no"] or ""),
-                        "status": str(row["status"] or "pending"),
+                        "replacementOrderNumber": replacement_order,
+                        "status": status,
                         "decidedBy": str(row["decided_by"] or ""),
                         "reason": str(row["decision_reason"] or "").strip()
-                        or "Preserve this exact A+W row until an explicit removal approval exists.",
+                        or "Preserve this exact A+W row until an explicit removal approval targets it.",
                     }
                 )
         return entries
@@ -2670,7 +2801,7 @@ class BaseDeliveryStore:
         path = Path(self.config.root) / "data" / "superseded-source-exclusions.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "version": "v0.245",
+            "version": "v0.257",
             "generatedAt": now_iso(),
             "entries": self.approved_superseded_order_exclusions(),
             "preserveEntries": self.preserved_superseded_order_items(),
@@ -2685,14 +2816,14 @@ class BaseDeliveryStore:
         con: Any,
         review_id: int,
         delivery_date: str,
-        original_order: str,
-        original_items: list[dict[str, Any]],
+        remove_order: str,
+        remove_items: list[dict[str, Any]],
         user: str,
     ) -> dict[str, Any]:
-        """Remove exact approved A+W-owned rows now and create preview snapshots."""
-        item_numbers = sorted({str(item.get("itemNumber") or "").strip().zfill(3) for item in original_items if isinstance(item, dict)})
+        """Remove exact approved A+W-owned rows and return import-history summaries."""
+        item_numbers = sorted({str(item.get("itemNumber") or "").strip().zfill(3) for item in remove_items if isinstance(item, dict)})
         if not item_numbers:
-            return {"removedLineCount": 0, "removedPieceQty": 0, "affectedListIds": []}
+            return {"removedLineCount": 0, "removedPieceQty": 0, "affectedStageLineCount": 0, "affectedStagePieceQty": 0, "affectedListIds": [], "stageSummaries": []}
         placeholders = ",".join("?" for _ in item_numbers)
         rows = con.execute(
             f"""
@@ -2709,17 +2840,19 @@ class BaseDeliveryStore:
               AND COALESCE(li.protect_from_aw_import, 0) = 0
             ORDER BY li.list_id, li.item_no
             """,
-            [delivery_date, original_order, *item_numbers],
+            [delivery_date, remove_order, *item_numbers],
         ).fetchall()
         if not rows:
-            return {"removedLineCount": 0, "removedPieceQty": 0, "affectedListIds": []}
+            return {"removedLineCount": 0, "removedPieceQty": 0, "affectedStageLineCount": 0, "affectedStagePieceQty": 0, "affectedListIds": [], "stageSummaries": []}
         change_token = f"superseded-review-{review_id}-{int(time.time() * 1000)}"
         created_at = now_iso()
         affected: dict[str, dict[str, Any]] = {}
-        removed_piece_qty = 0
+        affected_stage_piece_qty = 0
         for row in rows:
             snapshot = {
-                "id": str(row["id"] or ""),
+                "changeType": "removed",
+                "changedAt": created_at,
+                "lineItemId": str(row["id"] or ""),
                 "listId": str(row["list_id"] or ""),
                 "deliveryDate": delivery_date,
                 "order": str(row["order_no"] or ""),
@@ -2751,20 +2884,33 @@ class BaseDeliveryStore:
                     json.dumps(snapshot, sort_keys=True, separators=(",", ":")), created_at,
                 ),
             )
-            removed_piece_qty += int(row["qty"] or 0)
-            affected.setdefault(
+            affected_stage_piece_qty += int(row["qty"] or 0)
+            details = affected.setdefault(
                 str(row["list_id"]),
-                {"stage": str(row["stage"] or ""), "scanner": str(row["scanner"] or ""), "lines": 0, "pieces": 0},
+                {
+                    "stage": str(row["stage"] or ""),
+                    "scanner": str(row["scanner"] or ""),
+                    "lines": 0,
+                    "pieces": 0,
+                    "changeItems": [],
+                },
             )
-            affected[str(row["list_id"])]["lines"] += 1
-            affected[str(row["list_id"])]["pieces"] += int(row["qty"] or 0)
+            details["lines"] += 1
+            details["pieces"] += int(row["qty"] or 0)
+            details["changeItems"].append(snapshot)
         line_ids = [str(row["id"]) for row in rows]
         delete_placeholders = ",".join("?" for _ in line_ids)
         con.execute(f"DELETE FROM line_items WHERE id IN ({delete_placeholders})", line_ids)
+        stage_summaries: list[dict[str, Any]] = []
         for list_id, details in affected.items():
             con.execute("UPDATE delivery_lists SET revision = revision + 1 WHERE id = ?", (list_id,))
+            total_row = con.execute(
+                "SELECT COALESCE(SUM(qty), 0) AS qty FROM line_items WHERE list_id = ? AND COALESCE(is_deleted, 0) = 0",
+                (list_id,),
+            ).fetchone()
+            current_qty = int(total_row["qty"] or 0) if total_row else 0
             reason = (
-                f"Approved superseded order {original_order}; removed {details['lines']} line(s) / "
+                f"Approved superseded order {remove_order}; removed {details['lines']} line(s) / "
                 f"{details['pieces']} piece(s) from this stage."
             )
             self.insert_event(
@@ -2774,12 +2920,36 @@ class BaseDeliveryStore:
             self.insert_audit(
                 con, "delivery_list", list_id, "approve_superseded_order_removal", user,
                 details["scanner"], reason,
-                {"reviewId": review_id, "deliveryDate": delivery_date, "originalOrder": original_order},
+                {"reviewId": review_id, "deliveryDate": delivery_date, "removedOrder": remove_order},
             )
+            stage_summaries.append(
+                {
+                    "listId": list_id,
+                    "stage": details["stage"],
+                    "scanner": details["scanner"],
+                    "created": False,
+                    "reactivated": False,
+                    "newPieceQty": 0,
+                    "updatedPieceQty": 0,
+                    "addedPieceQty": 0,
+                    "changedPieceQty": int(details["pieces"]),
+                    "changedLineCount": int(details["lines"]),
+                    "removedLineCount": int(details["lines"]),
+                    "removedPieceQty": int(details["pieces"]),
+                    "originalQty": current_qty + int(details["pieces"]),
+                    "totalQty": current_qty,
+                    "changeItems": details["changeItems"],
+                }
+            )
+        logical_metrics = self.canonical_source_change_metrics(stage_summaries)
         return {
-            "removedLineCount": len(rows),
-            "removedPieceQty": removed_piece_qty,
+            "removedLineCount": int(logical_metrics.get("removedLineCount") or 0),
+            "removedPieceQty": int(logical_metrics.get("removedPieceQty") or 0),
+            "affectedStageLineCount": len(rows),
+            "affectedStagePieceQty": affected_stage_piece_qty,
             "affectedListIds": sorted(affected),
+            "stageSummaries": stage_summaries,
+            "changeToken": change_token,
         }
 
     def decide_superseded_order_review(
@@ -2788,8 +2958,9 @@ class BaseDeliveryStore:
         action: str,
         user: str,
         reason: str = "",
+        remove_order_number: str = "",
     ) -> dict[str, Any]:
-        """Apply one explicit Admin decision and never infer a deletion from status alone."""
+        """Apply one explicit Admin decision; either candidate may be selected for removal."""
         clean_action = str(action or "").strip().lower().replace("-", "_")
         status_map = {
             "approve": "approved",
@@ -2809,14 +2980,33 @@ class BaseDeliveryStore:
             row = con.execute("SELECT * FROM superseded_order_reviews WHERE id = ?", (int(review_id),)).fetchone()
             if not row:
                 raise ValueError("Superseded-order review was not found.")
+            original_order = str(row["original_order_no"] or "").strip()
+            replacement_order = str(row["replacement_order_no"] or "").strip()
             try:
                 original_items = json.loads(str(row["original_items_json"] or "[]"))
             except Exception:
                 original_items = []
+            try:
+                replacement_items = json.loads(str(row["replacement_items_json"] or "[]"))
+            except Exception:
+                replacement_items = []
+            selected_remove_order = ""
+            selected_remove_items: list[dict[str, Any]] = []
+            kept_order = ""
+            if next_status == "approved":
+                selected_remove_order = str(remove_order_number or "").strip() or original_order
+                if selected_remove_order not in {original_order, replacement_order}:
+                    raise ValueError("Choose either candidate order as the superseded-order removal target.")
+                if selected_remove_order == replacement_order:
+                    selected_remove_items = [dict(item) for item in replacement_items if isinstance(item, dict)]
+                    kept_order = original_order
+                else:
+                    selected_remove_items = [dict(item) for item in original_items if isinstance(item, dict)]
+                    kept_order = replacement_order
             now = now_iso()
             if not clean_reason:
                 if next_status == "approved":
-                    clean_reason = f"Approved exact removal; replacement order {row['replacement_order_no']}."
+                    clean_reason = f"Approved exact removal of order {selected_remove_order}; kept order {kept_order}."
                 elif next_status == "keep_both":
                     clean_reason = "Both A+W orders are valid and should remain on the delivery list."
                 else:
@@ -2825,21 +3015,61 @@ class BaseDeliveryStore:
                 """
                 UPDATE superseded_order_reviews
                 SET status = ?, decided_at = ?, decided_by = ?, decision_reason = ?,
-                    active = 1, updated_at_utc = ?
+                    approved_remove_order_no = ?, active = 1, updated_at_utc = ?
                 WHERE id = ?
                 """,
-                (next_status, now, user, clean_reason, now, int(review_id)),
+                (next_status, now, user, clean_reason, selected_remove_order if next_status == "approved" else "", now, int(review_id)),
             )
-            removal = {"removedLineCount": 0, "removedPieceQty": 0, "affectedListIds": []}
+            removal = {"removedLineCount": 0, "removedPieceQty": 0, "affectedStageLineCount": 0, "affectedStagePieceQty": 0, "affectedListIds": [], "stageSummaries": []}
             if next_status == "approved":
                 removal = self._remove_approved_superseded_rows(
                     con,
                     int(review_id),
                     str(row["delivery_date"] or ""),
-                    str(row["original_order_no"] or ""),
-                    [dict(item) for item in original_items if isinstance(item, dict)],
+                    selected_remove_order,
+                    selected_remove_items,
                     user,
                 )
+                if int(removal.get("removedPieceQty") or 0) > 0:
+                    run_id = f"superseded-review-{review_id}-{int(time.time() * 1000)}"
+                    stage_summaries = list(removal.get("stageSummaries") or [])
+                    change_summary = {
+                        "sourceName": f"Superseded order review #{review_id}",
+                        "deliveryDate": str(row["delivery_date"] or ""),
+                        "runId": run_id,
+                        "runStartedAt": now,
+                        "createdCount": 0,
+                        "reactivatedCount": 0,
+                        "reactivatedListIds": [],
+                        "updatedCount": len(stage_summaries),
+                        "newPieceQty": 0,
+                        "updatedPieceQty": 0,
+                        "addedPieceQty": 0,
+                        "changedPieceQty": int(removal.get("removedPieceQty") or 0),
+                        "removedLineCount": int(removal.get("removedLineCount") or 0),
+                        "removedPieceQty": int(removal.get("removedPieceQty") or 0),
+                        "stages": stage_summaries,
+                        "changedListIds": list(removal.get("affectedListIds") or []),
+                        "supersededReviewId": int(review_id),
+                        "removedOrderNumber": selected_remove_order,
+                        "keptOrderNumber": kept_order,
+                    }
+                    con.execute(
+                        """
+                        INSERT INTO imports (
+                            delivery_date, source_name, row_count, total_qty, cpu_count, mirror_count,
+                            status, imported_by, imported_at, source_path, source_hash, import_kind, change_summary
+                        ) VALUES (?, ?, 0, 0, 0, 0, 'published', ?, ?, '', ?, 'superseded_review', ?)
+                        """,
+                        (
+                            str(row["delivery_date"] or ""),
+                            f"Superseded review: removed order {selected_remove_order}",
+                            user,
+                            now,
+                            f"superseded-review-{review_id}",
+                            json.dumps(change_summary, separators=(",", ":")),
+                        ),
+                    )
             self.insert_audit(
                 con,
                 "superseded_order_review",
@@ -2850,9 +3080,11 @@ class BaseDeliveryStore:
                 clean_reason,
                 {
                     "deliveryDate": str(row["delivery_date"] or ""),
-                    "originalOrder": str(row["original_order_no"] or ""),
-                    "replacementOrder": str(row["replacement_order_no"] or ""),
-                    **removal,
+                    "originalOrder": original_order,
+                    "replacementOrder": replacement_order,
+                    "removedOrder": selected_remove_order,
+                    "keptOrder": kept_order,
+                    **{key: value for key, value in removal.items() if key != "stageSummaries"},
                 },
             )
             con.commit()
@@ -2863,6 +3095,7 @@ class BaseDeliveryStore:
             "ok": True,
             "review": selected,
             "decision": next_status,
+            "approvedRemoveOrderNumber": selected_remove_order,
             "exclusionPath": str(exclusion_path),
             **removal,
             **self.superseded_order_review_summary(),
@@ -5481,6 +5714,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "addedPieceQty": 0,
             "changedPieceQty": 0,
             "changedLineCount": 0,
+            "removedLineCount": 0,
+            "removedPieceQty": 0,
+            "changeItems": [],
             "originalQty": 0,
             "totalQty": sum(int(item.get("qty") or 0) for item in items),
         }
@@ -5515,7 +5751,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 line_key = str(row["id"])
                 source_match_key = self.import_order_item_key(source_key, row["order_no"], row["item_no"])
                 previous_payload = {
+                    "lineItemId": line_key,
+                    "sourceId": source_key,
+                    "barcode": str(row["barcode"] or ""),
+                    "order": str(row["order_no"] or ""),
+                    "item": str(row["item_no"] or "").zfill(3),
                     "qty": int(row["qty"] or 0),
+                    "scannedQty": scanned_qty,
                     "dimensions": str(row["dimensions"] or ""),
                     "customer": str(row["customer"] or ""),
                     "route": str(row["route"] or ""),
@@ -5538,6 +5780,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "business_key": self.import_business_key(row),
                     "payload": previous_payload,
                     "scanned_qty": scanned_qty,
+                    "manual_only": manual_only,
+                    "manual_source": manual_source,
+                    "protect_from_aw_import": protect_from_aw_import,
+                    "source_owned": not bool(manual_source or manual_only or protect_from_aw_import),
                     "protected_manual": bool((manual_source or manual_only) and protect_from_aw_import),
                 }
                 if manual_source or manual_only:
@@ -5691,6 +5937,59 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     or pop_previous("order_item", f"{cloned['order_no']}-{str(cloned['item_no']).zfill(3)}")
                 )
 
+            def preview_snapshot_from_cloned(
+                cloned: dict[str, Any],
+                change_type: str,
+                previous_snapshot: dict[str, Any] | None = None,
+                changed_fields: list[str] | None = None,
+            ) -> dict[str, Any]:
+                """Build one durable import-preview snapshot without relying on the live row later."""
+                return {
+                    "changeType": change_type,
+                    "lineItemId": str(cloned.get("id") or ""),
+                    "listId": list_id,
+                    "deliveryDate": delivery_date,
+                    "order": str(cloned.get("order_no") or ""),
+                    "item": str(cloned.get("item_no") or "").zfill(3),
+                    "qty": int(cloned.get("qty") or 0),
+                    "scannedQty": int(cloned.get("scanned_qty") or 0),
+                    "dimensions": str(cloned.get("dimensions") or ""),
+                    "customer": str(cloned.get("customer") or ""),
+                    "job": str(cloned.get("job") or ""),
+                    "product": str(cloned.get("product") or ""),
+                    "route": str(cloned.get("route") or ""),
+                    "processState": str(cloned.get("process_state") or ""),
+                    "queueState": str(cloned.get("queue_state") or ""),
+                    "sourceId": str(cloned.get("source_id") or ""),
+                    "barcode": str(cloned.get("barcode") or ""),
+                    "previous": dict(previous_snapshot or {}),
+                    "changedFields": list(changed_fields or []),
+                }
+
+            def preview_snapshot_from_previous(record: dict[str, Any]) -> dict[str, Any]:
+                payload = dict(record.get("payload") or {})
+                return {
+                    "changeType": "removed",
+                    "lineItemId": str(record.get("id") or ""),
+                    "listId": list_id,
+                    "deliveryDate": delivery_date,
+                    "order": str(payload.get("order") or ""),
+                    "item": str(payload.get("item") or "").zfill(3),
+                    "qty": int(payload.get("qty") or 0),
+                    "scannedQty": int(record.get("scanned_qty") or 0),
+                    "dimensions": str(payload.get("dimensions") or ""),
+                    "customer": str(payload.get("customer") or ""),
+                    "job": str(payload.get("job") or ""),
+                    "product": str(payload.get("product") or ""),
+                    "route": str(payload.get("route") or ""),
+                    "processState": str(payload.get("process_state") or ""),
+                    "queueState": str(payload.get("queue_state") or ""),
+                    "sourceId": str(record.get("source_id") or payload.get("sourceId") or ""),
+                    "barcode": str(payload.get("barcode") or ""),
+                    "previous": {},
+                    "changedFields": [],
+                }
+
             for cloned in cloned_items:
                 previous_record = match_previous(cloned) if existing else None
                 previous = previous_record["payload"] if previous_record else None
@@ -5726,6 +6025,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     summary["addedPieceQty"] += int(cloned["qty"] or 0)
                     summary["changedPieceQty"] += int(cloned["qty"] or 0)
                     summary["changedLineCount"] += 1
+                    summary["changeItems"].append(preview_snapshot_from_cloned(cloned, "new"))
                 elif existing:
                     current = {
                         "qty": int(cloned["qty"] or 0),
@@ -5749,11 +6049,67 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         state_text = cloned_priority_state
                         next_state = state_text if re.search(r"\bUpdated Line\b", state_text, flags=re.IGNORECASE) else " ".join(part for part in [state_text, "Updated Line"] if part).strip()
                         con.execute("UPDATE line_items SET process_state = ? WHERE id = ?", (next_state, cloned["id"]))
-                        qty_delta = max(int(cloned["qty"] or 0) - int(previous.get("qty") or 0), 0)
+                        raw_qty_delta = int(cloned["qty"] or 0) - int(previous.get("qty") or 0)
+                        if raw_qty_delta > 0:
+                            summary["addedPieceQty"] += raw_qty_delta
+                        elif raw_qty_delta < 0:
+                            summary["removedPieceQty"] += abs(raw_qty_delta)
                         summary["updatedPieceQty"] += int(cloned["qty"] or 0)
-                        summary["addedPieceQty"] += qty_delta
-                        summary["changedPieceQty"] += int(cloned["qty"] or 0)
+                        summary["changedPieceQty"] += max(int(cloned["qty"] or 0), int(previous.get("qty") or 0))
                         summary["changedLineCount"] += 1
+                        previous_display = {
+                            "qty": int(previous.get("qty") or 0),
+                            "dimensions": str(previous.get("dimensions") or ""),
+                            "customer": str(previous.get("customer") or ""),
+                            "job": str(previous.get("job") or ""),
+                            "product": str(previous.get("product") or ""),
+                            "route": str(previous.get("route") or ""),
+                            "queueState": str(previous.get("queue_state") or ""),
+                            "sourceId": str(previous.get("sourceId") or ""),
+                            "barcode": str(previous.get("barcode") or ""),
+                            "processState": str(previous.get("process_state") or ""),
+                        }
+                        current_display = {
+                            "qty": int(cloned.get("qty") or 0),
+                            "dimensions": str(cloned.get("dimensions") or ""),
+                            "customer": str(cloned.get("customer") or ""),
+                            "job": str(cloned.get("job") or ""),
+                            "product": str(cloned.get("product") or ""),
+                            "route": str(cloned.get("route") or ""),
+                            "queueState": str(cloned.get("queue_state") or ""),
+                            "sourceId": str(cloned.get("source_id") or ""),
+                            "barcode": str(cloned.get("barcode") or ""),
+                            "processState": str(cloned_priority_state or ""),
+                        }
+                        changed_fields = [
+                            key for key in current_display
+                            if previous_display.get(key) != current_display.get(key)
+                        ]
+                        summary["changeItems"].append(
+                            preview_snapshot_from_cloned(cloned, "updated", previous_display, changed_fields)
+                        )
+
+            if not existing:
+                summary["changeItems"] = [
+                    preview_snapshot_from_cloned(cloned, "new")
+                    for cloned in cloned_items
+                    if not int(cloned.get("manual_only") or 0)
+                ]
+
+            if existing:
+                removed_source_records = [
+                    record
+                    for record in previous_by_id.values()
+                    if record.get("source_owned") and record["id"] not in used_previous_ids
+                ]
+                for removed_record in removed_source_records:
+                    removed_snapshot = preview_snapshot_from_previous(removed_record)
+                    removed_qty = int(removed_snapshot.get("qty") or 0)
+                    summary["removedLineCount"] += 1
+                    summary["removedPieceQty"] += removed_qty
+                    summary["changedPieceQty"] += removed_qty
+                    summary["changedLineCount"] += 1
+                    summary["changeItems"].append(removed_snapshot)
             for preserved_rack in preserved_rack_items:
                 cloned = cloned_by_key.get(preserved_rack["source_id"]) or cloned_by_key.get(preserved_rack["order_item_key"])
                 if not cloned:
@@ -9074,6 +9430,35 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         {"sourceName": source_name, "sourceHash": source_hash, "summary": summary},
                     )
 
+            notice_created_at = now_iso()
+            notice_token = f"import-{int(import_cur.lastrowid or 0)}-{int(time.time() * 1000)}"
+            for stage_summary in stage_summaries:
+                for change_item in stage_summary.get("changeItems") or []:
+                    if not isinstance(change_item, dict):
+                        continue
+                    change_type = str(change_item.get("changeType") or "updated").lower()
+                    if change_type not in {"new", "updated", "removed"}:
+                        continue
+                    line_item_id = str(change_item.get("lineItemId") or "").strip()
+                    stage_list_id = str(stage_summary.get("listId") or change_item.get("listId") or "").strip()
+                    if not line_item_id or not stage_list_id:
+                        continue
+                    snapshot = dict(change_item)
+                    snapshot["changedAt"] = notice_created_at
+                    con.execute(
+                        """
+                        INSERT OR IGNORE INTO line_update_notices (
+                            line_item_id, list_id, delivery_date, change_type, change_token,
+                            source_hash, snapshot_json, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            line_item_id, stage_list_id, delivery_date, change_type, notice_token,
+                            source_hash, json.dumps(snapshot, sort_keys=True, separators=(",", ":")), notice_created_at,
+                        ),
+                    )
+
+            logical_change_metrics = self.canonical_source_change_metrics(stage_summaries)
             change_summary = {
                 "sourceName": source_name,
                 "deliveryDate": delivery_date,
@@ -9094,12 +9479,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         or summary.get("removedPieceQty")
                     )
                 ),
-                "newPieceQty": sum(int(summary.get("newPieceQty") or 0) for summary in stage_summaries),
-                "updatedPieceQty": sum(int(summary.get("updatedPieceQty") or 0) for summary in stage_summaries),
-                "addedPieceQty": sum(int(summary["addedPieceQty"] or 0) for summary in stage_summaries),
-                "changedPieceQty": sum(int(summary["changedPieceQty"] or 0) for summary in stage_summaries),
-                "removedLineCount": sum(int(summary.get("removedLineCount") or 0) for summary in stage_summaries),
-                "removedPieceQty": sum(int(summary.get("removedPieceQty") or 0) for summary in stage_summaries),
+                **logical_change_metrics,
                 "stages": stage_summaries,
                 "changedListIds": changed_list_ids,
             }
@@ -9133,12 +9513,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "updatedCount": updated_count,
             "changedListIds": changed_list_ids,
             "stageSummaries": stage_summaries,
-            "newPieceQty": sum(int(summary.get("newPieceQty") or 0) for summary in stage_summaries),
-            "updatedPieceQty": sum(int(summary.get("updatedPieceQty") or 0) for summary in stage_summaries),
-            "addedPieceQty": sum(int(summary["addedPieceQty"] or 0) for summary in stage_summaries),
-            "changedPieceQty": sum(int(summary["changedPieceQty"] or 0) for summary in stage_summaries),
-            "removedLineCount": sum(int(summary.get("removedLineCount") or 0) for summary in stage_summaries),
-            "removedPieceQty": sum(int(summary.get("removedPieceQty") or 0) for summary in stage_summaries),
+            **self.canonical_source_change_metrics(stage_summaries),
             "printCandidates": self.print_candidates_from_payload(payload, changed_list_ids, source_name, stage_summaries),
         }
 

@@ -132,6 +132,28 @@ class DeliveryAutomationController:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(payload, dict):
             raise ValueError("Automation configuration is not a JSON object")
+
+        # The SQL automation configuration can outlive a renamed/copied web-app
+        # folder. Scheduled tasks then keep importing into the obsolete project
+        # database even though the browser is running this project. Keep the
+        # automation's ProjectRoot pinned to the server instance that owns this
+        # controller so scanner verification, Superseded Order Review, printing,
+        # and the Scan page all read and write the same store.
+        configured_root = str(payload.get("ProjectRoot") or "").strip()
+        current_root = str(self.project_root)
+        configured_key = configured_root.replace("\\", "/").rstrip("/").lower()
+        current_key = current_root.replace("\\", "/").rstrip("/").lower()
+        if configured_key != current_key:
+            payload["ProjectRoot"] = current_root
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+            self._runtime_sync_status = {
+                **self._runtime_sync_status,
+                "projectRootRepaired": True,
+                "previousProjectRoot": configured_root,
+                "projectRoot": current_root,
+            }
         return payload
 
     def _write_config(self, payload: dict[str, Any]) -> None:
@@ -162,6 +184,7 @@ class DeliveryAutomationController:
             "gui_summary": working_root / "State" / "web-gui-summary.json",
             "run_lock": working_root / "State" / "run.lock",
             "logs_dir": working_root / "Logs",
+            "run_history_dir": working_root / "State" / "RunHistory",
             "last_import_result": working_root / "State" / "last-import-result.json",
         }
 
@@ -488,6 +511,144 @@ class DeliveryAutomationController:
             )
         return items
 
+    def _archived_automation_import_items(self, maximum_runs: int = 2000) -> list[dict[str, Any]]:
+        """Read immutable PowerShell run summaries so same-day history cannot disappear.
+
+        The scanner database remains the detailed audit source. RunHistory fills the
+        gap for unchanged checks, failures, and runs that happened while an older
+        ProjectRoot was still configured.
+        """
+        config = self._read_config(required=False)
+        if not config:
+            return []
+        history_dir = self._runtime_paths(config)["run_history_dir"]
+        if not history_dir.is_dir():
+            return []
+
+        try:
+            files = sorted(
+                (path for path in history_dir.glob("run-*.json") if path.is_file()),
+                key=lambda path: path.name,
+                reverse=True,
+            )[:max(1, min(int(maximum_runs or 2000), 10000))]
+        except OSError:
+            return []
+
+        labels = {
+            "new": "New",
+            "updated": "Updated",
+            "new_updated": "New + Updated",
+            "failed": "Failed",
+            "no_changes": "No Changes",
+        }
+        archived: list[dict[str, Any]] = []
+        for run_index, path in enumerate(files):
+            summary = self._read_json_file(path)
+            if not summary:
+                continue
+            completed_at = str(summary.get("completedAt") or summary.get("startedAt") or "")
+            started_at = str(summary.get("startedAt") or completed_at)
+            run_id = str(
+                summary.get("runId")
+                or summary.get("requestId")
+                or f"{str(summary.get('runOrigin') or 'automation')}:{started_at or completed_at}"
+            )
+            imported_by = str(
+                summary.get("startedBy")
+                or summary.get("createdBy")
+                or "sql-auto-import"
+            )
+            raw_results = [
+                item for item in (summary.get("importResults") or [])
+                if isinstance(item, dict)
+            ]
+            if not raw_results:
+                failed = summary.get("succeeded") is False
+                checked_dates = [str(value) for value in (summary.get("checkedDates") or []) if value]
+                raw_results = [
+                    {
+                        "classification": "failed" if failed else "no_changes",
+                        "fileName": f"Delivery List {value[5:7]}-{value[8:10]}-{value[:4]}.xlsx" if len(value) >= 10 else "Automation check",
+                        "deliveryDate": value,
+                        "reason": str(summary.get("error") or summary.get("message") or "") if failed else "",
+                        "errors": [str(summary.get("error") or summary.get("message") or "Automation failed")] if failed else [],
+                    }
+                    for value in checked_dates
+                ]
+            if not raw_results and summary.get("succeeded") is False:
+                raw_results = [{
+                    "classification": "failed",
+                    "fileName": "Delivery-list automation run",
+                    "deliveryDate": str(summary.get("dateFrom") or ""),
+                    "reason": str(summary.get("error") or summary.get("message") or "Automation failed"),
+                    "errors": [str(summary.get("error") or summary.get("message") or "Automation failed")],
+                }]
+
+            for item_index, item in enumerate(raw_results):
+                classification = str(item.get("classification") or "no_changes").lower()
+                if classification not in labels:
+                    classification = "no_changes"
+                list_ids = [
+                    str(value)
+                    for value in (item.get("listIds") or item.get("changedListIds") or [])
+                    if value
+                ]
+                raw_changed_list_ids = item.get("changedListIds")
+                if raw_changed_list_ids is None and classification != "no_changes":
+                    raw_changed_list_ids = item.get("listIds") or []
+                changed_list_ids = [str(value) for value in (raw_changed_list_ids or []) if value]
+                archived.append({
+                    "id": -1000000 - (run_index * 1000) - item_index,
+                    "batchId": -1000000 - (run_index * 1000) - item_index,
+                    "runId": str(item.get("runId") or run_id),
+                    "runStartedAt": str(item.get("runStartedAt") or started_at),
+                    "runCompletedAt": completed_at,
+                    "deliveryDate": str(item.get("deliveryDate") or "").strip(),
+                    "sourceName": str(item.get("fileName") or item.get("sourceName") or "Automation check").strip(),
+                    "rowCount": int(item.get("rowCount") or 0),
+                    "totalQty": int(item.get("totalQty") or 0),
+                    "status": "failed" if classification == "failed" else "automation_archive",
+                    "importedBy": imported_by,
+                    "importedAt": completed_at,
+                    "checkedAt": completed_at,
+                    "updatedAt": completed_at,
+                    "sourcePath": str(item.get("sourcePath") or ""),
+                    "importKind": "automation_archive",
+                    "classification": classification,
+                    "classificationLabel": labels[classification],
+                    "createdCount": int(item.get("createdCount") or 0),
+                    "reactivatedCount": int(item.get("reactivatedCount") or 0),
+                    "updatedCount": int(item.get("updatedCount") or 0),
+                    "newPieceQty": int(item.get("newPieceQty") or 0),
+                    "addedPieceQty": int(item.get("addedPieceQty") or 0),
+                    "updatedPieceQty": int(item.get("updatedPieceQty") or 0),
+                    "changedPieceQty": int(item.get("changedPieceQty") or 0),
+                    "removedLineCount": int(item.get("removedLineCount") or 0),
+                    "removedPieceQty": int(item.get("removedPieceQty") or 0),
+                    "duplicateManualLineCount": int(item.get("duplicateManualLineCount") or 0),
+                    "duplicateManualPieceQty": int(item.get("duplicateManualPieceQty") or 0),
+                    "listIds": list_ids,
+                    "changedListIds": changed_list_ids,
+                    "reactivatedListIds": [
+                        str(value) for value in (item.get("reactivatedListIds") or []) if value
+                    ],
+                    "stageSummaries": [
+                        {
+                            **dict(value),
+                            "importedAt": completed_at,
+                            "checkedAt": completed_at,
+                            "updatedAt": completed_at,
+                        }
+                        for value in (item.get("stageSummaries") or item.get("stages") or [])
+                        if isinstance(value, dict)
+                    ],
+                    "reason": str(item.get("reason") or ""),
+                    "errors": [str(value) for value in (item.get("errors") or [])],
+                    "changeSummary": item,
+                    "historySource": "run_archive",
+                })
+        return archived
+
     def _latest_automation_import_items(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Normalize the newest import-capable manual or scheduled run.
 
@@ -748,6 +909,8 @@ class DeliveryAutomationController:
 
         database_items = self._database_import_history_items()
         latest_items, latest_summary = self._latest_automation_import_items()
+        archived_items = self._archived_automation_import_items()
+        runtime_items = [*latest_items, *archived_items]
 
         def parsed_timestamp(value: Any) -> datetime | None:
             """Return an aware UTC timestamp so mixed local/UTC history can be compared safely."""
@@ -787,7 +950,7 @@ class DeliveryAutomationController:
         database_by_signature: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
         for database_item in database_items:
             database_by_signature.setdefault(import_signature(database_item), []).append(database_item)
-        for latest_item in latest_items:
+        for latest_item in runtime_items:
             candidates = database_by_signature.get(import_signature(latest_item), [])
             latest_run_id = str(latest_item.get("runId") or "").strip()
             meaningful_latest_run_id = latest_run_id and not latest_run_id.startswith("import-")
@@ -833,9 +996,42 @@ class DeliveryAutomationController:
                 unmatched_latest.append(latest_item)
 
         merged = unmatched_latest + database_items
+
+        # Runtime summaries, immutable archives, and database rows can all
+        # describe the same file result. Canonicalize by run start + date + file
+        # before rendering. This preserves distinct runs while eliminating the
+        # 9:30:36 / 9:30:38 double-card pattern from one execution.
+        deduplicated: dict[tuple[str, str, str], dict[str, Any]] = {}
+        unkeyed: list[dict[str, Any]] = []
+        for item in merged:
+            started_at = str(item.get("runStartedAt") or "").strip()
+            run_id = str(item.get("runId") or "").strip()
+            source_name = str(item.get("sourceName") or "").strip().lower()
+            delivery_date = str(item.get("deliveryDate") or "").strip()
+            run_identity = started_at or (run_id if run_id and not run_id.startswith("import-") else "")
+            if not run_identity:
+                unkeyed.append(item)
+                continue
+            key = (run_identity, delivery_date, source_name)
+            current = deduplicated.get(key)
+            if current is None:
+                deduplicated[key] = item
+                continue
+            current_is_database = int(current.get("id") or 0) > 0
+            incoming_is_database = int(item.get("id") or 0) > 0
+            if incoming_is_database and not current_is_database:
+                deduplicated[key] = item
+                continue
+            if incoming_is_database == current_is_database:
+                current_detail = len(current.get("stageSummaries") or []) + len(current.get("changedListIds") or [])
+                incoming_detail = len(item.get("stageSummaries") or []) + len(item.get("changedListIds") or [])
+                if incoming_detail > current_detail:
+                    deduplicated[key] = item
+
+        merged = [*deduplicated.values(), *unkeyed]
         merged.sort(
             key=lambda item: (
-                str(item.get("importedAt") or ""),
+                str(item.get("runStartedAt") or item.get("importedAt") or ""),
                 int(item.get("id") or 0),
             ),
             reverse=True,

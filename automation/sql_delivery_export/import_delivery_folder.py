@@ -916,7 +916,6 @@ def selective_sql_sync(
                     f"importing delivery date {delivery_date}",
                 )
                 date_files = [imported_file]
-                files.extend(date_files)
                 existing_ids = current_list_ids(store)
                 missing_after = expected_ids.difference(existing_ids)
                 if missing_after:
@@ -924,6 +923,29 @@ def selective_sql_sync(
                         f"Scanner import did not recreate {len(missing_after)} expected stage list(s) "
                         f"for {delivery_date}: {', '.join(sorted(missing_after))}"
                     )
+
+                # A successful stage creation is not enough: verify every A+W
+                # source row expected for this date is now represented in the
+                # scanner. This prevents a delta-only/partial import from being
+                # reported as successful while Print / Export and the Scan page
+                # expose only the newly changed orders. Extra retained source rows
+                # remain allowed while unverified removals are paused.
+                post_import_drift, post_import_drift_ids = scanner_stage_drift(
+                    store,
+                    delivery_date,
+                    expected_definitions,
+                    allow_source_removals=allow_source_removals,
+                    verified_excluded_order_items=date_verified_keys,
+                )
+                if post_import_drift:
+                    raise RuntimeError(
+                        "Scanner reconciliation completed but source-row coverage is still incomplete or mismatched "
+                        f"for {delivery_date}: {', '.join(post_import_drift_ids)}. "
+                        "The run is marked failed so a partial delivery list cannot be silently published to operators."
+                    )
+
+                imported_file["sourceCoverageVerified"] = True
+                files.extend(date_files)
                 if missing_before:
                     recovered_dates.add(delivery_date)
                 for row in date_files:
@@ -1062,8 +1084,9 @@ def main() -> int:
                 loaded_store_path = str(getattr(backend_store_module, "__file__", "unknown backend/store.py"))
                 raise RuntimeError(
                     "The installed backend/store.py does not provide "
-                    "sync_superseded_order_candidates. Extract the complete v0.248 package over the "
-                    f"project folder. Loaded store module: {loaded_store_path}"
+                    "sync_superseded_order_candidates. The automation ProjectRoot may point at an older "
+                    "scanner copy. Restart the v0.257 web app so it can repair ProjectRoot, then rerun the date. "
+                    f"Loaded store module: {loaded_store_path}"
                 )
             candidate_sync = run_with_database_retry(
                 lambda: sync_candidate_reviews(

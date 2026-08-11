@@ -9966,3 +9966,602 @@ button.custom-select-trigger:hover:not(:disabled),
   overflow: auto;
   animation: none !important;
 }
+
+/* ========================================================================== */
+/* 20. v0.255 Import quantity integrity and superseded-review attention        */
+/* ========================================================================== */
+
+/* Quantity cells are arithmetic now: previous quantity, signed net change,
+   current quantity. Updated order details remain available in the preview and
+   no longer masquerade as newly-added piece quantity. */
+.admin-import-qty-flow .qty-change.is-added,
+.admin-import-stage-wrap td .qty-change.is-added {
+  border-color: #9fd6af;
+  background: #eaf8ef;
+  color: #146b31;
+  font-weight: 950;
+}
+
+.admin-import-qty-flow .qty-change.is-removed,
+.admin-import-stage-wrap td .qty-change.is-removed {
+  border-color: #e8b6bd;
+  background: #fff0f1;
+  color: #9f1f31;
+  font-weight: 950;
+}
+
+/* Keep the pending-review count unmistakable without making the entire Admin
+   header noisy. The count floats at the button corner like a notification badge. */
+.superseded-review-open .superseded-review-count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 22px;
+  height: 22px;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 10px rgba(120, 18, 35, 0.28);
+  z-index: 2;
+}
+
+/* ========================================================================== */
+/* 22. v0.256 complete same-day run history and hierarchical update preview   */
+/* ========================================================================== */
+
+.admin-import-run-browser-v256 .admin-import-run-tabs {
+  padding-bottom: 10px;
+  scroll-snap-type: x proximity;
+}
+
+.admin-import-run-browser-v256 .admin-import-run-tab {
+  scroll-snap-align: start;
+}
+
+.delivery-update-preview-v256 .delivery-update-preview-location-body {
+  padding: 12px;
+  overflow: visible;
+}
+
+.delivery-update-preview-v256 .delivery-update-preview-location-body > .delivery-update-preview-list,
+.delivery-update-preview-v256 .delivery-update-preview-glass-list-v256 {
+  display: grid;
+  gap: 10px;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+}
+
+.delivery-update-preview-glass-group-v256,
+.delivery-update-preview-order-group-v256 {
+  overflow: hidden;
+  border: 1px solid #d3deeb;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.delivery-update-preview-glass-group-v256 > summary,
+.delivery-update-preview-order-group-v256 > summary {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 16px minmax(160px, 1fr) minmax(0, auto) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.delivery-update-preview-glass-group-v256 > summary::-webkit-details-marker,
+.delivery-update-preview-order-group-v256 > summary::-webkit-details-marker,
+.delivery-update-preview-item-v256 > summary::-webkit-details-marker {
+  display: none;
+}
+
+.delivery-update-preview-glass-group-v256 > summary {
+  background: linear-gradient(180deg, #fbfdff 0%, #f2f6fb 100%);
+  box-shadow: inset 4px 0 0 #6f8fb6;
+}
+
+.delivery-update-preview-order-group-v256 > summary {
+  min-height: 50px;
+  background: #fff;
+  box-shadow: inset 3px 0 0 #a8bfd9;
+}
+
+.delivery-update-preview-glass-group-v256 > summary:hover,
+.delivery-update-preview-order-group-v256 > summary:hover,
+.delivery-update-preview-item-v256 > summary:hover {
+  background: #f3f7fc;
+}
+
+.delivery-update-preview-nested-chevron,
+.delivery-update-preview-item-chevron {
+  width: 9px;
+  height: 9px;
+  justify-self: center;
+  border-right: 2px solid #5a7190;
+  border-bottom: 2px solid #5a7190;
+  transform: rotate(-45deg);
+  transition: transform 150ms ease;
+}
+
+.delivery-update-preview-glass-group-v256[open] > summary .delivery-update-preview-nested-chevron,
+.delivery-update-preview-order-group-v256[open] > summary .delivery-update-preview-nested-chevron,
+.delivery-update-preview-item-v256[open] > summary .delivery-update-preview-item-chevron {
+  transform: rotate(45deg);
+}
+
+.delivery-update-preview-glass-copy-v256,
+.delivery-update-preview-order-copy-v256 {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.delivery-update-preview-glass-copy-v256 strong,
+.delivery-update-preview-order-copy-v256 strong {
+  color: var(--navy-dark);
+  font-size: 13px;
+  font-weight: 950;
+  overflow-wrap: anywhere;
+}
+
+.delivery-update-preview-glass-copy-v256 small,
+.delivery-update-preview-order-copy-v256 small {
+  color: #66768c;
+  font-size: 10px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.delivery-update-preview-nested-total-v256 {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px 5px;
+  align-items: baseline;
+  min-width: 76px;
+  border-left: 1px solid #d8e2ee;
+  padding-left: 10px;
+}
+
+.delivery-update-preview-nested-total-v256 b {
+  color: var(--navy-dark);
+  font-size: 12px;
+  font-weight: 950;
+  text-align: right;
+}
+
+.delivery-update-preview-nested-total-v256 small {
+  color: #6d7a8d;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.delivery-update-preview-glass-body-v256,
+.delivery-update-preview-order-body-v256 {
+  display: grid;
+  gap: 9px;
+  border-top: 1px solid #dde6f0;
+  background: #f7f9fc;
+  padding: 9px;
+}
+
+.delivery-update-preview-order-body-v256 {
+  background: #eef3f8;
+}
+
+.delivery-update-preview-v256 .delivery-update-preview-item-v256 {
+  padding: 0;
+  gap: 0;
+}
+
+.delivery-update-preview-v256 .delivery-update-preview-item-v256 > .delivery-update-preview-item-heading {
+  grid-template-columns: 16px auto minmax(0, 1fr) auto;
+  min-height: 52px;
+  padding: 9px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.delivery-update-preview-item-body-v256 {
+  display: grid;
+  gap: 9px;
+  border-top: 1px solid #e0e7f0;
+  padding: 10px;
+}
+
+@media (max-width: 760px) {
+  .delivery-update-preview-glass-group-v256 > summary,
+  .delivery-update-preview-order-group-v256 > summary {
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+  }
+
+  .delivery-update-preview-glass-group-v256 > summary .delivery-update-preview-location-badges,
+  .delivery-update-preview-order-group-v256 > summary .delivery-update-preview-location-badges {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
+  }
+
+  .delivery-update-preview-nested-total-v256 {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .delivery-update-preview-v256 .delivery-update-preview-item-v256 > .delivery-update-preview-item-heading {
+    grid-template-columns: 16px auto minmax(0, 1fr);
+  }
+
+  .delivery-update-preview-v256 .delivery-update-preview-item-heading > b {
+    grid-column: 3;
+    justify-self: start;
+  }
+}
+
+/* ========================================================================== */
+/* 23. v0.257 five-run paging, exact removals, and flatter preview hierarchy  */
+/* ========================================================================== */
+
+/* Keep the familiar five-run desktop page. All same-day runs remain in state
+   and the pager moves through them instead of turning the row into a long rail. */
+.admin-import-run-browser-v257 .admin-import-run-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  overflow: visible;
+  padding: 3px 2px 4px;
+  scroll-snap-type: none;
+}
+
+.admin-import-run-browser-v257 .admin-import-run-tab {
+  width: 100%;
+  min-width: 0;
+  scroll-snap-align: none;
+}
+
+.admin-import-run-tab-meta-v257 {
+  width: 100%;
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.admin-import-run-tab-meta-v257 b,
+.admin-import-run-tab.has-removals .admin-import-run-tab-meta-v257 b {
+  color: #a52334 !important;
+  font-size: 9px;
+  font-weight: 950;
+}
+
+.admin-import-run-tab.has-removals {
+  box-shadow: inset 0 -3px 0 rgba(175, 34, 53, 0.15) !important;
+}
+
+.admin-import-run-selected-header.has-removals {
+  border-color: #e2b8c0;
+}
+
+.admin-import-run-selected-metrics span.is-removed.has-value {
+  border-color: #e2aeb8;
+  background: #fff0f2;
+  color: #9f1f31;
+}
+
+.admin-import-run-selected-metrics span.is-removed.has-value b {
+  color: #9f1f31;
+}
+
+/* Arithmetic quantity flow: 121 +12 -1 132. Signed change pills use the same
+   dimensions and typography as the before/current quantities. */
+.qty-change-set-v257 {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.admin-import-qty-flow .qty-change-set-v257 .qty-change,
+.admin-import-stage-wrap td:nth-child(3) .qty-change-set-v257 .qty-change,
+.admin-import-date-qty .qty-change-set-v257 .qty-change {
+  min-width: 54px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 1.15;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.admin-import-stage-wrap tr.has-removals {
+  background: linear-gradient(90deg, rgba(255, 239, 242, 0.72) 0%, rgba(255, 255, 255, 0) 34%);
+}
+
+.import-status-pill.removed,
+.admin-import-row-status-v257 .import-status-pill.removed {
+  border-color: #e5b1ba;
+  background: #fff0f2;
+  color: #a32033;
+}
+
+/* Counts live immediately to the right of Route / Glass / Order headers. */
+.delivery-update-preview-v257 .delivery-update-preview-location-group > summary,
+.delivery-update-preview-v257 .delivery-update-preview-glass-group-v257 > summary,
+.delivery-update-preview-v257 .delivery-update-preview-order-group-v257 > summary {
+  grid-template-columns: 18px minmax(180px, 1fr) auto auto;
+}
+
+.delivery-update-preview-heading-counts-v257 {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.delivery-update-preview-heading-counts-v257 > span {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #d4dfeb;
+  border-radius: 999px;
+  background: #f7f9fc;
+  color: #65758b;
+  padding: 3px 8px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.delivery-update-preview-heading-counts-v257 b {
+  color: #1d385b;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+/* Order-level information stays visible after one click. Individual items are
+   flat rows—there is no third dropdown just to reveal dimensions and quantity. */
+.delivery-update-preview-order-body-v257 {
+  gap: 10px;
+  background: #f5f8fc;
+  padding: 11px;
+}
+
+.delivery-update-preview-order-meta-v257 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.delivery-update-preview-order-meta-v257 > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  border: 1px solid #d8e2ee;
+  border-radius: 9px;
+  background: #fff;
+  padding: 8px 9px;
+}
+
+.delivery-update-preview-order-meta-v257 small {
+  color: #74839a;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.delivery-update-preview-order-meta-v257 strong {
+  min-width: 0;
+  color: #213d61;
+  font-size: 11px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.delivery-update-preview-item-list-v257 {
+  display: grid;
+  gap: 7px;
+}
+
+.delivery-update-preview-item-row-v257 {
+  overflow: hidden;
+  border: 1px solid #d6e0ec;
+  border-left-width: 4px;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.delivery-update-preview-item-row-v257.is-new { border-left-color: #49a568; }
+.delivery-update-preview-item-row-v257.is-updated { border-left-color: #3979bf; }
+.delivery-update-preview-item-row-v257.is-removed {
+  border-color: #e7bdc4;
+  border-left-color: #b92d42;
+  background: #fff8f9;
+}
+
+.delivery-update-preview-item-main-v257 {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+}
+
+.delivery-update-preview-item-number-v257 {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.delivery-update-preview-item-number-v257 strong {
+  color: #1b3558;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.delivery-update-preview-item-number-v257 small {
+  color: #65768d;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.delivery-update-preview-item-qty-v257 {
+  min-width: 54px;
+  display: inline-flex;
+  justify-content: center;
+  border: 1px solid #cad8e8;
+  border-radius: 999px;
+  background: #f6f9fd;
+  color: #24476f;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.delivery-update-preview-item-diffs-v257 {
+  border-top: 1px solid #e3e9f1;
+  background: #fbfcfe;
+  padding: 8px 10px;
+}
+
+/* The route/glass/order trees grow with the modal. The modal owns vertical
+   scrolling, so expanded routes never create a cramped internal scroll pane. */
+.delivery-update-preview-v257 .delivery-update-preview-location-body,
+.delivery-update-preview-v257 .delivery-update-preview-location-body > .delivery-update-preview-list,
+.delivery-update-preview-v257 .delivery-update-preview-glass-list-v256,
+.delivery-update-preview-v257 .delivery-update-preview-glass-body-v256,
+.delivery-update-preview-v257 .delivery-update-preview-order-body-v257 {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+/* Explicit candidate choice for superseded-order approval. */
+.superseded-review-impact-grid-v257,
+.superseded-review-removal-choice-v257 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.superseded-review-impact-option-v257,
+.superseded-review-removal-choice-v257 label {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #d5dfeb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 9px 10px;
+}
+
+.superseded-review-impact-option-v257 small,
+.superseded-review-impact-option-v257 em,
+.superseded-review-removal-choice-v257 label small {
+  color: #687a91;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.superseded-review-removal-choice-v257 > div {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 2px;
+}
+
+.superseded-review-removal-choice-v257 label {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  cursor: pointer;
+}
+
+.superseded-review-removal-choice-v257 label:has(input:checked) {
+  border-color: #4b78b5;
+  background: #eef5ff;
+  box-shadow: inset 0 0 0 1px rgba(43, 98, 170, 0.08);
+}
+
+.superseded-review-removal-choice-v257 input {
+  margin-top: 3px;
+}
+
+.superseded-review-removal-choice-v257 label span {
+  display: grid;
+  gap: 2px;
+}
+
+@media (max-width: 980px) {
+  .admin-import-run-browser-v257 .admin-import-run-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .delivery-update-preview-order-meta-v257 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .admin-import-run-browser-v257 .admin-import-run-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .delivery-update-preview-v257 .delivery-update-preview-location-group > summary,
+  .delivery-update-preview-v257 .delivery-update-preview-glass-group-v257 > summary,
+  .delivery-update-preview-v257 .delivery-update-preview-order-group-v257 > summary {
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+  }
+
+  .delivery-update-preview-heading-counts-v257 {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .delivery-update-preview-v257 .delivery-update-preview-location-badges {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
+  }
+
+  .delivery-update-preview-order-meta-v257,
+  .superseded-review-impact-grid-v257,
+  .superseded-review-removal-choice-v257 {
+    grid-template-columns: 1fr;
+  }
+
+  .superseded-review-removal-choice-v257 > div {
+    grid-column: 1;
+  }
+}
+
+/* v0.257 removal emphasis in Automation Control Center import history. */
+.import-history-entry-status-stack-v257 {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.import-history-removed-v257 {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid #e6b0ba;
+  border-radius: 999px;
+  background: #fff0f2;
+  color: #9f1f31;
+  padding: 2px 7px;
+  font-size: 9px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.import-history-entry.has-removals {
+  border-color: #e3b9c0 !important;
+  box-shadow: inset 4px 0 0 #b82f43;
+}

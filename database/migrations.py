@@ -88,6 +88,12 @@ MIGRATIONS = (
         "Locally detected A+W superseded-order candidates, explicit admin decisions, exact-key exclusions, and durable evidence snapshots; v245-r1",
         "_migration_010_v245_superseded_order_review",
     ),
+    Migration(
+        11,
+        "v257_superseded_remove_choice",
+        "Persist the exact candidate order selected for removal while preserving legacy original-order approvals; v257-r1",
+        "_migration_011_v257_superseded_remove_choice",
+    ),
 )
 
 
@@ -565,6 +571,21 @@ def _migration_010_v245_superseded_order_review(connection: Any) -> None:
         CREATE INDEX IF NOT EXISTS idx_superseded_order_reviews_orders
             ON superseded_order_reviews(delivery_date, original_order_no, replacement_order_no);
         """
+    )
+
+
+def _migration_011_v257_superseded_remove_choice(connection: Any) -> None:
+    """Persist which candidate order an Admin explicitly chose to remove.
+
+    Existing v0.245-v0.256 approvals left this value blank. Runtime logic treats
+    those legacy approvals as original-order removals, preserving their exact
+    historical behavior while all new approvals record the selected candidate.
+    """
+    _ensure_column(
+        connection,
+        "superseded_order_reviews",
+        "approved_remove_order_no",
+        "TEXT NOT NULL DEFAULT ''",
     )
 
 

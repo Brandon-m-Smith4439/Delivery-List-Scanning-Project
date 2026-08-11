@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "254"
-CURRENT_SCHEMA_VERSION = 10
+APPLICATION_VERSION = "257"
+CURRENT_SCHEMA_VERSION = 11
 
 TABLE_DESCRIPTIONS = {
     "schema_migrations": "Installed numbered database migrations and checksums.",
@@ -83,7 +83,7 @@ REQUIRED_COLUMNS = {
         "id", "candidate_key", "delivery_date", "original_order_no", "replacement_order_no",
         "status", "evidence_json", "original_items_json", "replacement_items_json",
         "source_fingerprint", "detected_at", "last_seen_at", "decided_at", "decided_by",
-        "decision_reason", "active", "created_at_utc", "updated_at_utc",
+        "decision_reason", "approved_remove_order_no", "active", "created_at_utc", "updated_at_utc",
     },
 }
 

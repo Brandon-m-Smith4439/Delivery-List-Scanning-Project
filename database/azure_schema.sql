@@ -850,6 +850,7 @@ BEGIN
         decided_at nvarchar(64) NOT NULL DEFAULT (N''),
         decided_by nvarchar(255) NOT NULL DEFAULT (N''),
         decision_reason nvarchar(1000) NOT NULL DEFAULT (N''),
+        approved_remove_order_no nvarchar(120) NOT NULL DEFAULT (N''),
         active int NOT NULL DEFAULT (1),
         created_at_utc nvarchar(64) NOT NULL DEFAULT (N''),
         updated_at_utc nvarchar(64) NOT NULL DEFAULT (N''),
@@ -860,6 +861,15 @@ BEGIN
         CONSTRAINT ck_superseded_order_reviews_original_json_v245 CHECK (ISJSON(original_items_json) = 1),
         CONSTRAINT ck_superseded_order_reviews_replacement_json_v245 CHECK (ISJSON(replacement_items_json) = 1)
     );
+END;
+GO
+
+-- v0.257: Admin may choose either candidate order as the exact removal target.
+IF COL_LENGTH(N'dbo.superseded_order_reviews', N'approved_remove_order_no') IS NULL
+BEGIN
+    ALTER TABLE dbo.superseded_order_reviews
+        ADD approved_remove_order_no nvarchar(120) NOT NULL
+            CONSTRAINT df_superseded_order_reviews_remove_order_v257 DEFAULT (N'');
 END;
 GO
 

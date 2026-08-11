@@ -317,6 +317,7 @@ function dlsAutomationImportResultTime(entry = {}) {
 function dlsAutomationImportResultKey(entry = {}, index = 0) {
   const deliveryDate = String(entry.deliveryDate || "").trim();
   const sourceName = String(entry.sourceName || entry.fileName || "").trim().toLowerCase();
+  const runStartedAt = String(entry.runStartedAt || entry.startedAt || "").trim();
   const runId = String(
     entry.runId
     || entry.requestId
@@ -334,6 +335,11 @@ function dlsAutomationImportResultKey(entry = {}, index = 0) {
     || "",
   ).trim();
 
+  // One automation run can be represented twice: once by its durable database
+  // rows and once by its completion notification. They share the same start time
+  // even when older scheduled-run IDs used different prefixes, so start time is
+  // the safest cross-source identity for one file result.
+  if (runStartedAt) return `started:${runStartedAt}|${deliveryDate}|${sourceName}`;
   if (runId) return `run:${runId}|${deliveryDate}|${sourceName}`;
   if (id && !id.startsWith("-")) return `id:${id}`;
   if (deliveryDate || sourceName || timestamp) return `${deliveryDate}|${sourceName}|${timestamp}`;
@@ -19283,11 +19289,7 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     ["barcode", "Barcode"],
   ];
   const supportedFields = new Set(fieldDefinitions.map(([key]) => key));
-  const changeLabels = {
-    new: "New",
-    updated: "Updated",
-    removed: "Removed",
-  };
+  const changeLabels = { new: "New", updated: "Updated", removed: "Removed" };
   const locationDefinitions = [
     { key: "airport", label: "Airport Road", hint: "Airport Road and custom route orders" },
     { key: "indian-trail", label: "Indian Trail", hint: "Indian Trail route orders" },
@@ -19302,7 +19304,6 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     if (key === "qty") return `${Number(value || 0)} pc${Number(value || 0) === 1 ? "" : "s"}`;
     return String(value ?? "").trim() || "—";
   };
-
   const changedFieldsForItem = (item) => {
     const explicit = Array.isArray(item.changedFields)
       ? item.changedFields.filter((key) => supportedFields.has(String(key)))
@@ -19310,37 +19311,45 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     if (explicit.length) return explicit;
     const previous = item.previous && typeof item.previous === "object" ? item.previous : {};
     if (!Object.keys(previous).length) return [];
-    return fieldDefinitions
-      .map(([key]) => key)
-      .filter((key) => displayValue(previous, key) !== displayValue(item, key));
+    return fieldDefinitions.map(([key]) => key).filter((key) => displayValue(previous, key) !== displayValue(item, key));
   };
-
   const previewLocationKey = (item) => deliveryUpdatePreviewLocationKey(item);
-
+  const previewGlassType = (item) => String(item.glassType || item.product || "").trim() || "Other Glass";
+  const previewOrderKey = (item) => String(item.order || "Unknown order").trim() || "Unknown order";
+  const changeTypeForItem = (item) => {
+    const value = String(item.changeType || "").toLowerCase();
+    return ["new", "updated", "removed"].includes(value) ? value : "updated";
+  };
+  const countTypes = (rows) => ({
+    new: rows.filter((item) => changeTypeForItem(item) === "new").length,
+    updated: rows.filter((item) => changeTypeForItem(item) === "updated").length,
+    removed: rows.filter((item) => changeTypeForItem(item) === "removed").length,
+  });
+  const typeBadgeHtml = (counts) => `
+    ${counts.new ? `<b class="is-new">${escapeHtml(counts.new)} new</b>` : ""}
+    ${counts.updated ? `<b class="is-updated">${escapeHtml(counts.updated)} updated</b>` : ""}
+    ${counts.removed ? `<b class="is-removed">${escapeHtml(counts.removed)} removed</b>` : ""}`;
+  const headingCountHtml = (lineCount, pieces, lineLabel = "lines") => `
+    <span class="delivery-update-preview-heading-counts-v257">
+      <span><b>${escapeHtml(lineCount)}</b> ${escapeHtml(lineLabel)}</span>
+      <span><b>${escapeHtml(pieces)}</b> pcs</span>
+    </span>`;
+  const commonOrderValue = (rows, key) => {
+    const values = [...new Set(rows.map((item) => String(item?.[key] || "").trim()).filter(Boolean))];
+    return values.length === 1 ? values[0] : values.length > 1 ? "Multiple" : "—";
+  };
   const itemSearchText = (item) => [
-    item.order,
-    item.item,
-    item.customer,
-    item.job,
-    item.product,
-    item.dimensions,
-    item.route,
-    item.stage,
-    item.scanner,
-    item.barcode,
-    item.sourceId,
+    item.order, item.item, item.customer, item.job, item.product, item.dimensions,
+    item.route, item.stage, item.scanner, item.barcode, item.sourceId,
   ].join(" ").toLowerCase();
 
-  const itemCardHtml = (item) => {
-    const type = ["new", "updated", "removed"].includes(String(item.changeType || "").toLowerCase())
-      ? String(item.changeType).toLowerCase()
-      : "updated";
+  const itemRowHtml = (item) => {
+    const type = changeTypeForItem(item);
     const title = changeLabels[type];
-    const route = routeLabel({ route: item.route }) || item.route || "—";
     const previous = item.previous && typeof item.previous === "object" ? item.previous : {};
     const changedFields = type === "updated" ? changedFieldsForItem(item) : [];
     const diffHtml = changedFields.length
-      ? `<div class="delivery-update-preview-diffs">
+      ? `<div class="delivery-update-preview-diffs delivery-update-preview-item-diffs-v257">
           ${changedFields.map((key) => {
             const label = fieldDefinitions.find(([fieldKey]) => fieldKey === key)?.[1] || key;
             return `<span class="delivery-update-preview-diff">
@@ -19352,93 +19361,112 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
           }).join("")}
         </div>`
       : "";
-    const searchText = itemSearchText(item);
-    return `<article class="delivery-update-preview-item is-${type}" data-preview-change-type="${type}" data-preview-search="${escapeHtml(searchText)}">
-      <header class="delivery-update-preview-item-heading">
+    return `<article class="delivery-update-preview-item-row-v257 is-${type}" data-preview-change-type="${type}" data-preview-search="${escapeHtml(itemSearchText(item))}">
+      <div class="delivery-update-preview-item-main-v257">
         <span class="delivery-update-type">${escapeHtml(title)}</span>
-        <div>
-          <strong>Order ${escapeHtml(item.order || "—")} · Item ${escapeHtml(item.item || "—")}</strong>
-          <span>${escapeHtml(item.customer || "No customer")}</span>
-        </div>
-        <b>${escapeHtml(Number(item.qty || 0))} pc${Number(item.qty || 0) === 1 ? "" : "s"}</b>
-      </header>
-      <div class="delivery-update-preview-order-details">
-        <span><small>Job</small><strong>${escapeHtml(item.job || "—")}</strong></span>
-        <span><small>Glass / Product</small><strong>${escapeHtml(item.product || "—")}</strong></span>
-        <span><small>Dimensions</small><strong>${escapeHtml(item.dimensions || "—")}</strong></span>
-        <span><small>Route</small><strong>${escapeHtml(route)}</strong></span>
+        <span class="delivery-update-preview-item-number-v257"><strong>Item ${escapeHtml(item.item || "—")}</strong><small>${escapeHtml(item.dimensions || "No dimensions")}</small></span>
+        <b class="delivery-update-preview-item-qty-v257">${escapeHtml(Number(item.qty || 0))} pc${Number(item.qty || 0) === 1 ? "" : "s"}</b>
       </div>
       ${diffHtml}
     </article>`;
   };
 
+  const orderGroupHtml = (order, orderItems) => {
+    const sortedItems = orderItems.slice().sort((a, b) => (
+      Number(a.item || 0) - Number(b.item || 0) || String(a.item || "").localeCompare(String(b.item || ""))
+    ));
+    const counts = countTypes(sortedItems);
+    const pieces = sortedItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+    const customer = commonOrderValue(sortedItems, "customer");
+    const job = commonOrderValue(sortedItems, "job");
+    const route = routeLabel({ route: commonOrderValue(sortedItems, "route") }) || commonOrderValue(sortedItems, "route");
+    const glass = previewGlassType(sortedItems[0] || {});
+    return `<details class="delivery-update-preview-order-group-v256 delivery-update-preview-order-group-v257" data-preview-container="order">
+      <summary>
+        <span class="delivery-update-preview-nested-chevron" aria-hidden="true"></span>
+        <span class="delivery-update-preview-order-copy-v256"><strong>Order ${escapeHtml(order)}</strong><small>${escapeHtml(customer)}</small></span>
+        ${headingCountHtml(sortedItems.length, pieces)}
+        <span class="delivery-update-preview-location-badges">${typeBadgeHtml(counts)}</span>
+      </summary>
+      <div class="delivery-update-preview-order-body-v256 delivery-update-preview-order-body-v257">
+        <div class="delivery-update-preview-order-meta-v257">
+          <span><small>Customer</small><strong>${escapeHtml(customer)}</strong></span>
+          <span><small>Job</small><strong>${escapeHtml(job)}</strong></span>
+          <span><small>Route</small><strong>${escapeHtml(route || "—")}</strong></span>
+          <span><small>Glass / Product</small><strong>${escapeHtml(glass)}</strong></span>
+        </div>
+        <div class="delivery-update-preview-item-list-v257">${sortedItems.map(itemRowHtml).join("")}</div>
+      </div>
+    </details>`;
+  };
+
+  const glassGroupHtml = (glassType, glassItems) => {
+    const orders = new Map();
+    glassItems.forEach((item) => {
+      const order = previewOrderKey(item);
+      if (!orders.has(order)) orders.set(order, []);
+      orders.get(order).push(item);
+    });
+    const orderedOrders = [...orders.entries()].sort(([a], [b]) => (
+      Number(a || 0) - Number(b || 0) || String(a).localeCompare(String(b))
+    ));
+    const counts = countTypes(glassItems);
+    const pieces = glassItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+    return `<details class="delivery-update-preview-glass-group-v256 delivery-update-preview-glass-group-v257" data-preview-container="glass">
+      <summary>
+        <span class="delivery-update-preview-nested-chevron" aria-hidden="true"></span>
+        <span class="delivery-update-preview-glass-copy-v256"><strong>${escapeHtml(glassType)}</strong><small>${escapeHtml(orderedOrders.length)} order${orderedOrders.length === 1 ? "" : "s"}</small></span>
+        ${headingCountHtml(glassItems.length, pieces)}
+        <span class="delivery-update-preview-location-badges">${typeBadgeHtml(counts)}</span>
+      </summary>
+      <div class="delivery-update-preview-glass-body-v256">${orderedOrders.map(([order, rows]) => orderGroupHtml(order, rows)).join("")}</div>
+    </details>`;
+  };
+
   const locationHtml = locationDefinitions.map((location) => {
     const locationItems = items
       .filter((item) => previewLocationKey(item) === location.key)
-      .sort((a, b) => {
-        const typeOrder = { new: 0, updated: 1, removed: 2 };
-        return (typeOrder[a.changeType] ?? 3) - (typeOrder[b.changeType] ?? 3)
-          || String(a.stage || "").localeCompare(String(b.stage || ""))
-          || Number(a.order || 0) - Number(b.order || 0)
-          || Number(a.item || 0) - Number(b.item || 0);
-      });
+      .sort((a, b) => (
+        previewGlassType(a).localeCompare(previewGlassType(b))
+        || Number(a.order || 0) - Number(b.order || 0)
+        || Number(a.item || 0) - Number(b.item || 0)
+      ));
     if (!locationItems.length) return "";
-
+    const glasses = new Map();
+    locationItems.forEach((item) => {
+      const glassType = previewGlassType(item);
+      if (!glasses.has(glassType)) glasses.set(glassType, []);
+      glasses.get(glassType).push(item);
+    });
+    const orderedGlassTypes = [...glasses.entries()].sort(([a], [b]) => a.localeCompare(b));
     const locationPieces = locationItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
-    const typeCounts = {
-      new: locationItems.filter((item) => item.changeType === "new").length,
-      updated: locationItems.filter((item) => item.changeType === "updated").length,
-      removed: locationItems.filter((item) => item.changeType === "removed").length,
-    };
-    return `<details class="delivery-update-preview-location-group is-${location.key}" data-preview-group data-preview-location="${location.key}">
+    const typeCounts = countTypes(locationItems);
+    return `<details class="delivery-update-preview-location-group is-${location.key} delivery-update-preview-location-group-v257" data-preview-group data-preview-container="route" data-preview-location="${location.key}">
       <summary>
         <span class="delivery-update-preview-location-chevron" aria-hidden="true"></span>
-        <span class="delivery-update-preview-location-copy">
-          <strong>${escapeHtml(location.label)}</strong>
-          <small>${escapeHtml(location.hint)}</small>
-        </span>
-        <span class="delivery-update-preview-location-badges">
-          ${typeCounts.new ? `<b class="is-new">${escapeHtml(typeCounts.new)} new</b>` : ""}
-          ${typeCounts.updated ? `<b class="is-updated">${escapeHtml(typeCounts.updated)} updated</b>` : ""}
-          ${typeCounts.removed ? `<b class="is-removed">${escapeHtml(typeCounts.removed)} removed</b>` : ""}
-        </span>
-        <span class="delivery-update-preview-location-total"><b>${escapeHtml(locationItems.length)}</b><small>lines</small><b>${escapeHtml(locationPieces)}</b><small>pcs</small></span>
+        <span class="delivery-update-preview-location-copy"><strong>${escapeHtml(location.label)}</strong><small>${escapeHtml(location.hint)}</small></span>
+        ${headingCountHtml(locationItems.length, locationPieces)}
+        <span class="delivery-update-preview-location-badges">${typeBadgeHtml(typeCounts)}</span>
       </summary>
-      <div class="delivery-update-preview-location-body">
-        <div class="delivery-update-preview-list">${locationItems.map(itemCardHtml).join("")}</div>
-      </div>
+      <div class="delivery-update-preview-location-body"><div class="delivery-update-preview-glass-list-v256">${orderedGlassTypes.map(([glassType, rows]) => glassGroupHtml(glassType, rows)).join("")}</div></div>
     </details>`;
   }).join("");
 
-  return `<section class="delivery-update-preview-v184 delivery-update-preview-v230 delivery-update-preview-v248 delivery-update-preview-v251 delivery-update-preview-v252" data-preview-filter="all">
+  return `<section class="delivery-update-preview-v184 delivery-update-preview-v230 delivery-update-preview-v248 delivery-update-preview-v251 delivery-update-preview-v252 delivery-update-preview-v256 delivery-update-preview-v257" data-preview-filter="all">
     <header class="delivery-update-preview-header-v230">
-      <div>
-        <span>Delivery list changes</span>
-        <h3>${escapeHtml(formatDisplayDate(deliveryDate))}</h3>
-        <p>${escapeHtml(items.length)} changed line${items.length === 1 ? "" : "s"} · ${escapeHtml(totalPieces)} piece${totalPieces === 1 ? "" : "s"}</p>
-      </div>
-      <div class="delivery-update-preview-metrics-v230">
-        ${metricCards.map(([type, value, label]) => `<span class="is-${type}"><b>${escapeHtml(value)}</b><small>${escapeHtml(label)}</small></span>`).join("")}
-      </div>
+      <div><span>Delivery list changes</span><h3>${escapeHtml(formatDisplayDate(deliveryDate))}</h3><p>${escapeHtml(items.length)} changed item${items.length === 1 ? "" : "s"} · ${escapeHtml(totalPieces)} piece${totalPieces === 1 ? "" : "s"}</p></div>
+      <div class="delivery-update-preview-metrics-v230">${metricCards.map(([type, value, label]) => `<span class="is-${type}"><b>${escapeHtml(value)}</b><small>${escapeHtml(label)}</small></span>`).join("")}</div>
     </header>
-    ${previewErrors.length
-      ? `<div class="delivery-update-preview-warning-v249"><strong>Some stages could not be loaded.</strong><span>${escapeHtml(previewErrors.join(" · "))}</span></div>`
-      : ""}
+    ${previewErrors.length ? `<div class="delivery-update-preview-warning-v249"><strong>Some stages could not be loaded.</strong><span>${escapeHtml(previewErrors.join(" · "))}</span></div>` : ""}
     <div class="delivery-update-preview-toolbar-v248">
-      <div class="delivery-update-preview-filter-buttons" role="group" aria-label="Filter delivery-list changes">
-        ${metricCards.map(([type, value, label], index) => `<button type="button" data-preview-filter-button="${type}" aria-pressed="${index === 0 ? "true" : "false"}">${escapeHtml(label)} <b>${escapeHtml(value)}</b></button>`).join("")}
-      </div>
-      <label class="delivery-update-preview-search-v248">
-        <span>Find an order or item</span>
-        <input type="search" data-preview-search-input placeholder="Order, item, customer, job, product..." autocomplete="off">
-      </label>
+      <div class="delivery-update-preview-filter-buttons" role="group" aria-label="Filter delivery-list changes">${metricCards.map(([type, value, label], index) => `<button type="button" data-preview-filter-button="${type}" aria-pressed="${index === 0 ? "true" : "false"}">${escapeHtml(label)} <b>${escapeHtml(value)}</b></button>`).join("")}</div>
+      <label class="delivery-update-preview-search-v248"><span>Find an order or item</span><input type="search" data-preview-search-input placeholder="Order, item, customer, job, glass type..." autocomplete="off"></label>
       <p data-preview-result-count>Showing ${escapeHtml(items.length)} of ${escapeHtml(items.length)} changes</p>
     </div>
     ${previewIsIncomplete ? `<div class="delivery-update-preview-guidance-v230 is-warning"><span aria-hidden="true"></span><p>${escapeHtml(expectedChangedCount)} changes were recorded, but only ${escapeHtml(items.length)} historical item snapshots are still available.</p></div>` : ""}
     <div class="delivery-update-preview-groups-v230 delivery-update-preview-locations-v251">${locationHtml || '<div class="admin-empty">No item-level changes were recorded for this import.</div>'}</div>
   </section>`;
 }
-
 
 function initializeDeliveryListUpdatePreviewControls() {
   const root = els.adminModalBody?.querySelector(".delivery-update-preview-v248");
@@ -19447,7 +19475,7 @@ function initializeDeliveryListUpdatePreviewControls() {
   const searchInput = root.querySelector("[data-preview-search-input]");
   const resultCount = root.querySelector("[data-preview-result-count]");
   const rows = [...root.querySelectorAll("[data-preview-change-type]")];
-  const groups = [...root.querySelectorAll("[data-preview-group]")];
+  const containers = [...root.querySelectorAll("[data-preview-container]")];
   let selectedType = "all";
 
   const apply = () => {
@@ -19460,10 +19488,22 @@ function initializeDeliveryListUpdatePreviewControls() {
       row.hidden = !(typeMatch && searchMatch);
       if (!row.hidden) visibleCount += 1;
     });
-    groups.forEach((group) => {
-      group.hidden = !group.querySelector("[data-preview-change-type]:not([hidden])");
-      if (activelyFiltering && !group.hidden) group.open = true;
+
+    // Process Item -> Order -> Glass -> Route so each parent can decide whether
+    // any matching descendant remains. Filtering opens only the matching path;
+    // normal viewing keeps every dropdown collapsed until the user chooses it.
+    [...containers].reverse().forEach((container) => {
+      const visibleChild = container.querySelector("[data-preview-change-type]:not([hidden])");
+      container.hidden = !visibleChild;
+      if (activelyFiltering && !container.hidden) container.open = true;
     });
+    if (!activelyFiltering) {
+      containers.forEach((container) => {
+        if (container.dataset.previewContainer !== "route") return;
+        container.hidden = !container.querySelector("[data-preview-change-type]:not([hidden])");
+      });
+    }
+
     buttons.forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.previewFilterButton === selectedType));
     });
@@ -19477,6 +19517,7 @@ function initializeDeliveryListUpdatePreviewControls() {
   searchInput?.addEventListener("input", apply);
   apply();
 }
+
 
 async function openDeliveryListUpdatePreview(listIds, routeGroup = "") {
   const ids = [...new Set(String(listIds || "").split(",").map((value) => value.trim()).filter(Boolean))];
@@ -20140,6 +20181,21 @@ function renderSupersededReviewCount() {
   els.supersededOrderReviewCount.closest("button")?.classList.toggle("has-pending-review", count > 0);
 }
 
+async function refreshSupersededReviewSummary() {
+  if (!state.backend || !hasAnyPermission(["view_admin", "edit_delivery_lists"])) return;
+  try {
+    const summary = await fetchJson("/api/admin/superseded-order-reviews/summary");
+    state.supersededReviewSummary = {
+      pendingSupersededOrderReviews: Number(summary.pendingSupersededOrderReviews || 0),
+      approvedSupersededOrderReviews: Number(summary.approvedSupersededOrderReviews || 0),
+      keptSupersededOrderReviews: Number(summary.keptSupersededOrderReviews || 0),
+    };
+    renderSupersededReviewCount();
+  } catch {
+    // Keep the previous count visible; the next import/admin refresh retries.
+  }
+}
+
 function supersededReviewStatusLabel(status = "") {
   return ({ pending: "Needs review", review_later: "Review later", approved: "Removal approved", keep_both: "Keep both" })[status] || "Needs review";
 }
@@ -20161,17 +20217,26 @@ function supersededReviewItemRows(items = []) {
 }
 
 function supersededOrderReviewCardHtml(review = {}) {
-  const impact = review.liveImpact || {};
+  const originalImpact = review.originalImpact || review.liveImpact || {};
+  const replacementImpact = review.replacementImpact || {};
   const evidence = review.evidence || {};
   const status = String(review.status || "pending");
+  const suggestedOrder = String(review.originalOrderNumber || "");
+  const approvedRemoveOrder = String(review.approvedRemoveOrderNumber || "");
+  const selectedRemoveOrder = approvedRemoveOrder || suggestedOrder;
   const decisionCopy = review.decidedAt
-    ? `<small>Decision: ${escapeHtml(supersededReviewStatusLabel(status))} by ${escapeHtml(review.decidedBy || "unknown")} · ${escapeHtml(formatDisplayDate(review.decidedAt))}</small>`
+    ? `<small>Decision: ${escapeHtml(supersededReviewStatusLabel(status))}${approvedRemoveOrder ? ` · removed order ${escapeHtml(approvedRemoveOrder)}` : ""} by ${escapeHtml(review.decidedBy || "unknown")} · ${escapeHtml(formatDisplayDate(review.decidedAt))}</small>`
     : `<small>Detected ${escapeHtml(formatDisplayDate(review.lastSeenAt || review.detectedAt || ""))}</small>`;
+  const impactMarkup = (label, orderNumber, impact) => `<span class="superseded-review-impact-option-v257">
+    <small>${escapeHtml(label)}</small>
+    <strong>Order ${escapeHtml(orderNumber)}</strong>
+    <em>${Number(impact.activeLineCount || 0)} rows · ${Number(impact.pieceQty || 0)} pcs · ${Number(impact.scannedQty || 0)} scanned</em>
+  </span>`;
   return `<article class="superseded-review-card status-${escapeHtml(status)}" data-superseded-review-id="${escapeHtml(review.id)}">
     <header class="superseded-review-card-header">
       <div>
         <span class="superseded-review-eyebrow">${escapeHtml(formatDisplayDate(review.deliveryDate))} · A+W identity ${escapeHtml(review.headerIdentity || "not available")}</span>
-        <strong>Order ${escapeHtml(review.originalOrderNumber)} → ${escapeHtml(review.replacementOrderNumber)}</strong>
+        <strong>Order ${escapeHtml(review.originalOrderNumber)} ↔ ${escapeHtml(review.replacementOrderNumber)}</strong>
         ${decisionCopy}
       </div>
       <span class="superseded-review-status">${escapeHtml(supersededReviewStatusLabel(status))}</span>
@@ -20179,13 +20244,15 @@ function supersededOrderReviewCardHtml(review = {}) {
     <div class="superseded-review-evidence">
       <span>Same A+W identity</span>
       <span>${Number(evidence.exactItemOverlapCount || 0)} exact item match${Number(evidence.exactItemOverlapCount || 0) === 1 ? "" : "es"}</span>
-      <span>Old order 410 / item 0 / no batch</span>
-      <span>Replacement has active batch</span>
+      <span>Suggested removal: order ${escapeHtml(suggestedOrder)}</span>
+      <span>Suggestion only — Admin chooses which order is removed</span>
     </div>
-    <div class="superseded-review-impact ${Number(impact.scannedQty || 0) > 0 ? "has-scans" : ""}">
+    <div class="superseded-review-impact ${Number(originalImpact.scannedQty || 0) + Number(replacementImpact.scannedQty || 0) > 0 ? "has-scans" : ""}">
       <strong>Current scanner impact</strong>
-      <span>${Number(impact.activeLineCount || 0)} stage row${Number(impact.activeLineCount || 0) === 1 ? "" : "s"}, ${Number(impact.pieceQty || 0)} piece${Number(impact.pieceQty || 0) === 1 ? "" : "s"}, ${Number(impact.scannedQty || 0)} scanned</span>
-      ${impact.stages?.length ? `<small>${escapeHtml(impact.stages.join(" · "))}</small>` : `<small>The old rows are not currently active in the scanner.</small>`}
+      <div class="superseded-review-impact-grid-v257">
+        ${impactMarkup("Original candidate", review.originalOrderNumber, originalImpact)}
+        ${impactMarkup("Replacement candidate", review.replacementOrderNumber, replacementImpact)}
+      </div>
     </div>
     <div class="superseded-review-compare">
       <section>
@@ -20197,9 +20264,20 @@ function supersededOrderReviewCardHtml(review = {}) {
         <table><thead><tr><th>Item</th><th>Product / Job</th><th>Dimensions</th><th>Qty</th><th>Status</th><th>Batches</th></tr></thead><tbody>${supersededReviewItemRows(review.replacementItems)}</tbody></table>
       </section>
     </div>
+    <div class="superseded-review-removal-choice-v257" role="radiogroup" aria-label="Choose which candidate order to remove">
+      <div><strong>Choose the order to remove</strong><small>The first choice is suggested from the A+W evidence, but either candidate may be retained.</small></div>
+      <label class="${selectedRemoveOrder === String(review.originalOrderNumber) ? "is-selected" : ""}">
+        <input type="radio" name="superseded-remove-${escapeHtml(review.id)}" value="${escapeHtml(review.originalOrderNumber)}" ${selectedRemoveOrder === String(review.originalOrderNumber) ? "checked" : ""}>
+        <span><strong>Remove order ${escapeHtml(review.originalOrderNumber)}</strong><small>Suggested · keep ${escapeHtml(review.replacementOrderNumber)}</small></span>
+      </label>
+      <label class="${selectedRemoveOrder === String(review.replacementOrderNumber) ? "is-selected" : ""}">
+        <input type="radio" name="superseded-remove-${escapeHtml(review.id)}" value="${escapeHtml(review.replacementOrderNumber)}" ${selectedRemoveOrder === String(review.replacementOrderNumber) ? "checked" : ""}>
+        <span><strong>Remove order ${escapeHtml(review.replacementOrderNumber)}</strong><small>Keep ${escapeHtml(review.originalOrderNumber)}</small></span>
+      </label>
+    </div>
     ${review.decisionReason ? `<p class="superseded-review-reason"><strong>Decision note:</strong> ${escapeHtml(review.decisionReason)}</p>` : ""}
     <footer class="superseded-review-actions">
-      <button type="button" class="danger" data-superseded-decision="approve" data-review-id="${escapeHtml(review.id)}">Approve old order removal</button>
+      <button type="button" class="danger" data-superseded-decision="approve" data-review-id="${escapeHtml(review.id)}">Approve selected removal</button>
       <button type="button" class="secondary" data-superseded-decision="keep_both" data-review-id="${escapeHtml(review.id)}">Keep both</button>
       <button type="button" class="secondary" data-superseded-decision="review_later" data-review-id="${escapeHtml(review.id)}">Review later</button>
     </footer>
@@ -20241,20 +20319,28 @@ async function loadSupersededOrderReviews() {
 async function decideSupersededOrderReview(reviewId, action) {
   const review = state.supersededOrderReviews.find((entry) => Number(entry.id) === Number(reviewId));
   if (!review) return;
+  let removeOrderNumber = "";
   if (action === "approve") {
-    const impact = review.liveImpact || {};
+    const selected = els.adminModalBody?.querySelector(`input[name="superseded-remove-${CSS.escape(String(reviewId))}"]:checked`);
+    removeOrderNumber = String(selected?.value || review.originalOrderNumber || "").trim();
+    const validOrders = [String(review.originalOrderNumber || ""), String(review.replacementOrderNumber || "")];
+    if (!validOrders.includes(removeOrderNumber)) throw new Error("Choose which candidate order should be removed.");
+    const removeOriginal = removeOrderNumber === String(review.originalOrderNumber || "");
+    const impact = removeOriginal ? (review.originalImpact || review.liveImpact || {}) : (review.replacementImpact || {});
+    const keepOrderNumber = removeOriginal ? review.replacementOrderNumber : review.originalOrderNumber;
+    const suggested = removeOriginal ? " This is the suggested removal." : " This overrides the suggested removal.";
     const confirmed = await confirmWebAppAction({
-      title: `Remove old A+W order ${review.originalOrderNumber}?`,
-      message: `Only the exact item keys shown for ${formatDisplayDate(review.deliveryDate)} will be removed and suppressed from future imports.`,
-      details: `${Number(impact.activeLineCount || 0)} active stage row(s), ${Number(impact.pieceQty || 0)} piece(s), ${Number(impact.scannedQty || 0)} already scanned. Replacement order: ${review.replacementOrderNumber}.`,
-      confirmLabel: "Approve Exact Removal",
+      title: `Remove A+W order ${removeOrderNumber}?`,
+      message: `Only the exact item keys shown for order ${removeOrderNumber} on ${formatDisplayDate(review.deliveryDate)} will be removed and suppressed from future imports.${suggested}`,
+      details: `${Number(impact.activeLineCount || 0)} active stage row(s), ${Number(impact.pieceQty || 0)} piece(s), ${Number(impact.scannedQty || 0)} already scanned. Order ${keepOrderNumber} will be retained.`,
+      confirmLabel: `Remove Order ${removeOrderNumber}`,
       danger: true,
     });
     if (!confirmed) return;
   }
   await fetchJson("/api/admin/superseded-order-reviews/decision", {
     method: "POST",
-    body: JSON.stringify({ reviewId: Number(reviewId), action, ...requestContext() }),
+    body: JSON.stringify({ reviewId: Number(reviewId), action, removeOrderNumber, ...requestContext() }),
   });
   await loadSupersededOrderReviews();
   if (els.adminModalBody && els.adminModal?.dataset.kind === "supersededOrders") {
@@ -20262,6 +20348,8 @@ async function decideSupersededOrderReview(reviewId, action) {
     applyLanguageToRoot(els.adminModalBody);
   }
   await loadDeliveryLists(state.activeListId);
+  state.adminTodayImportLoaded = false;
+  await refreshAdminTodayImportRuns({ render: false });
   renderAdminDeliveryLists();
 }
 
@@ -22437,11 +22525,19 @@ function importHistoryRows(imports = []) {
    * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
    */
   const updatedQtyForRow = (row, list) => {
+    // Delivery List Management describes the selected import event. Prefer the
+    // post-import quantity saved with that event before falling back to the live
+    // catalog. Using the live total first could display only a later route/delta
+    // list and turn a valid 111 + 9 = 120 import into 111 + 9 = 9.
+    const importedTotal = row.totalQty ?? row.updatedQty ?? row.newQty;
+    if (importedTotal !== undefined && importedTotal !== null && importedTotal !== "") {
+      return Number(importedTotal || 0);
+    }
     const liveTotal = list?.totalQty;
     if (liveTotal !== undefined && liveTotal !== null && liveTotal !== "") {
       return Number(liveTotal || 0);
     }
-    return Number(row.totalQty ?? row.updatedQty ?? row.newQty ?? 0);
+    return 0;
   };
 
   /**
@@ -22465,6 +22561,20 @@ function importHistoryRows(imports = []) {
   const changedQtyForRow = (row, list) => {
     const change = quantityChangeForRow(row, list);
     return change.positive + change.removed;
+  };
+
+  const netQuantityDeltaHtml = (delta) => {
+    const value = Number(delta || 0);
+    if (value > 0) return `<span class="qty-change is-added">+${escapeHtml(value)}</span>`;
+    if (value < 0) return `<span class="qty-change is-removed">${escapeHtml(value)}</span>`;
+    return `<span class="qty-change is-zero">0</span>`;
+  };
+
+  const quantityFlowChangesHtml = (addedQty, removedQty) => {
+    const added = Math.max(Number(addedQty || 0), 0);
+    const removed = Math.max(Number(removedQty || 0), 0);
+    if (!added && !removed) return `<span class="qty-change is-zero">0</span>`;
+    return `<span class="qty-change-set-v257">${added ? `<span class="qty-change is-added">+${escapeHtml(added)}</span>` : ""}${removed ? `<span class="qty-change is-removed">-${escapeHtml(removed)}</span>` : ""}</span>`;
   };
 
   const quantityChangeHtmlForRow = (row, list) => {
@@ -22772,6 +22882,12 @@ function importHistoryRows(imports = []) {
         printListIds: printSourceId ? [printSourceId] : [],
         originalQty: originalQtyForRow(representative, list),
         updatedQty: updatedQtyForRow(representative, list),
+        addedPieceQty: (() => {
+          const originalQty = originalQtyForRow(representative, list);
+          const updatedQty = updatedQtyForRow(representative, list);
+          const recordedAdded = Number(changeRow.addedPieceQty ?? changeRow.addedQty ?? 0);
+          return recordedAdded || Math.max(updatedQty + Number(change.removed || 0) - originalQty, 0);
+        })(),
         updatedPieceQty: change.updated,
         removedPieceQty: change.removed,
         isNew: rowHasChanges && isNewStageRow(changeRow, changeList),
@@ -22861,25 +22977,20 @@ function importHistoryRows(imports = []) {
             return sum + originalQtyForRow(row, list);
           }, 0);
 
-          const stagingPositiveQty = changedStagingRows.reduce((sum, row) => {
-            const list = state.lists.find((item) => item.id === row.listId);
-            return sum + quantityChangeForRow(row, list).positive;
-          }, 0);
-
-          const stagingRemovedQty = changedStagingRows.reduce((sum, row) => {
-            const list = state.lists.find((item) => item.id === row.listId);
-            return sum + quantityChangeForRow(row, list).removed;
-          }, 0);
-
           const stagingUpdatedQty = stagingRows.reduce((sum, row) => {
             const list = state.lists.find((item) => item.id === row.listId);
             return sum + updatedQtyForRow(row, list);
           }, 0);
+          const stagingRemovedQty = stagingRows.reduce((sum, row) => sum + Number(row.removedPieceQty || 0), 0);
+          const stagingRecordedAddedQty = stagingRows.reduce((sum, row) => sum + Number(row.addedPieceQty || 0), 0);
+          const stagingAddedQty = stagingRecordedAddedQty || Math.max(stagingUpdatedQty + stagingRemovedQty - stagingOriginalQty, 0);
           const changedManagementRows = managementRows.filter((row) => row.rowHasChanges);
           const newManagementRows = changedManagementRows.filter((row) => row.isNew);
           const updatedManagementRows = changedManagementRows.filter((row) => !row.isNew);
           const hasNewStages = newManagementRows.length > 0;
           const hasUpdatedStages = updatedManagementRows.length > 0;
+          const removedManagementRows = changedManagementRows.filter((row) => Number(row.removedPieceQty || 0) > 0);
+          const hasRemovedPieces = removedManagementRows.length > 0;
           const isBrandNewDeliveryList = changedManagementRows.length > 0
             && changedManagementRows.every((row) => row.isNew)
             && changedManagementRows.some((row) => row.key === "airport");
@@ -22912,6 +23023,7 @@ function importHistoryRows(imports = []) {
           const groupStatusHtml = hasAnyChanges
             ? `
               ${hasUpdatedStages ? `<span class="import-status-pill updated">Updated</span>` : ""}
+              ${hasRemovedPieces ? `<span class="import-status-pill removed">Removed</span>` : ""}
               ${isBrandNewDeliveryList ? `<span class="import-status-pill new">New Delivery List</span>` : ""}
               ${hasNewStages && !isBrandNewDeliveryList ? `<span class="import-status-pill new-stage">New Stage</span>` : ""}
             `
@@ -22937,25 +23049,16 @@ function importHistoryRows(imports = []) {
                   const printRouteLabel = canPrintRoute
                     ? `Print / Export ${managementRow.label}`
                     : "No active items are available to print";
-                  const changeHtml = !rowHasChanges
-                    ? `<span class="qty-change is-zero">No changes</span>`
-                    : rowIsNew
-                      ? `<span class="qty-change is-new">New ${escapeHtml(managementRow.updatedQty)} pcs</span>`
-                      : managementRow.updatedPieceQty && managementRow.removedPieceQty
-                        ? `<span class="qty-change is-mixed"><b>Updated ${escapeHtml(managementRow.updatedPieceQty)} pcs</b><b>Removed ${escapeHtml(managementRow.removedPieceQty)} pcs</b></span>`
-                        : managementRow.removedPieceQty
-                          ? `<span class="qty-change is-removed">Removed ${escapeHtml(managementRow.removedPieceQty)} pcs</span>`
-                          : managementRow.updatedPieceQty
-                            ? `<span class="qty-change">Updated ${escapeHtml(managementRow.updatedPieceQty)} pcs</span>`
-                            : `<span class="qty-change is-zero">No changes</span>`;
+                  const changeHtml = quantityFlowChangesHtml(managementRow.addedPieceQty, managementRow.removedPieceQty);
+                  const rowStatusHtml = `${rowHasChanges && !rowIsNew ? `<span class="import-status-pill updated">Updated</span>` : ""}${Number(managementRow.removedPieceQty || 0) ? `<span class="import-status-pill removed">Removed</span>` : ""}${rowIsNew ? `<span class="import-status-pill new-stage">New Stage</span>` : ""}${!rowHasChanges ? `<span class="import-status-pill no-change">No Updates</span>` : ""}`;
 
                   return `
-                    <tr class="${routeClass} ${rowChangeClass}">
+                    <tr class="${routeClass} ${rowChangeClass} ${Number(managementRow.removedPieceQty || 0) ? "has-removals" : ""}">
                       <td><span class="stage-pill-admin admin-import-route-pill">${escapeHtml(managementRow.label)}</span></td>
                       <td><span class="qty-before">${escapeHtml(managementRow.originalQty)} pcs</span></td>
                       <td>${changeHtml}</td>
                       <td><strong>${escapeHtml(managementRow.updatedQty)} pcs</strong></td>
-                      <td><span class="import-status-pill ${kindClass}">${escapeHtml(kindLabel)}</span></td>
+                      <td><span class="admin-import-row-status-v257">${rowStatusHtml}</span></td>
                       <td>
                         <span class="admin-import-stage-actions-v230">
                           ${hasRetainedPreview
@@ -23014,15 +23117,7 @@ function importHistoryRows(imports = []) {
   <span class="admin-import-date-qty">
     <span class="admin-import-qty-flow">
       <span class="qty-before">${escapeHtml(stagingOriginalQty)} pcs</span>
-      ${isBrandNewDeliveryList
-        ? `<span class="qty-change is-new">New ${escapeHtml(stagingUpdatedQty)} pcs</span>`
-        : stagingPositiveQty && stagingRemovedQty
-          ? `<span class="qty-change is-mixed"><b>Updated ${escapeHtml(stagingPositiveQty)} pcs</b><b>Removed ${escapeHtml(stagingRemovedQty)} pcs</b></span>`
-          : stagingRemovedQty
-            ? `<span class="qty-change is-removed">Removed ${escapeHtml(stagingRemovedQty)} pcs</span>`
-            : stagingPositiveQty
-              ? `<span class="qty-change">Updated ${escapeHtml(stagingPositiveQty)} pcs</span>`
-              : `<span class="qty-change is-zero">No changes</span>`}
+      ${quantityFlowChangesHtml(stagingAddedQty, stagingRemovedQty)}
       <strong>${escapeHtml(stagingUpdatedQty)} pcs</strong>
     </span>
   </span>
@@ -28195,8 +28290,10 @@ function adminImportRunGroups(imports = []) {
   );
   const pool = [...sourceEntries]
     .filter((entry) => importRunLocalDate(entry) === today);
+
   pool.forEach((entry, index) => {
-    const time = importRunTime(entry);
+    const startedAt = String(entry.runStartedAt || entry.startedAt || "").trim();
+    const completedAt = importRunTime(entry);
     const explicitRunId = String(
       entry.runId
       || entry.requestId
@@ -28204,22 +28301,41 @@ function adminImportRunGroups(imports = []) {
       || entry.importBatchId
       || ""
     ).trim();
-    const legacyIdentity = String(entry.batchId || entry.id || time || `run-${index}`);
-    const key = explicitRunId ? `run:${explicitRunId}` : `legacy:${legacyIdentity}|${time}`;
-    if (!groups.has(key)) groups.set(key, { key, time, entries: [] });
+    const legacyIdentity = String(entry.batchId || entry.id || completedAt || `run-${index}`);
+
+    // runStartedAt is shared by every file result plus the notification for one
+    // automation execution. Using it before runId prevents one scheduled run from
+    // appearing twice at its per-file import time and its completion time.
+    const key = startedAt
+      ? `started:${startedAt}`
+      : explicitRunId
+        ? `run:${explicitRunId}`
+        : `legacy:${legacyIdentity}|${completedAt}`;
+    const displayTime = startedAt || completedAt;
+
+    if (!groups.has(key)) groups.set(key, { key, time: displayTime, entries: [] });
     const group = groups.get(key);
-    if (String(time || "").localeCompare(String(group.time || "")) > 0) group.time = time;
-    const duplicate = group.entries.some((current) =>
-      String(current.deliveryDate || "") === String(entry.deliveryDate || "")
-      && String(current.sourceName || current.fileName || "") === String(entry.sourceName || entry.fileName || "")
-    );
-    if (!duplicate) group.entries.push(entry);
+    if (!group.time && displayTime) group.time = displayTime;
+
+    const entryKey = dlsAutomationImportResultKey(entry, index);
+    const existingIndex = group.entries.findIndex((current, currentIndex) => (
+      dlsAutomationImportResultKey(current, currentIndex) === entryKey
+    ));
+    if (existingIndex < 0) {
+      group.entries.push(entry);
+    } else if (dlsAutomationImportResultTime(entry) >= dlsAutomationImportResultTime(group.entries[existingIndex])) {
+      group.entries[existingIndex] = entry;
+    }
   });
+
   const collapsed = collapseDuplicateImportRunGroups([...groups.values()]);
   if (state.adminPinnedImportEntries.length) {
-    const time = importRunTime(state.adminPinnedImportEntries[0]);
-    const key = state.adminSelectedImportRunKey || `notification|${time}`;
-    collapsed.push({ key, time, entries: state.adminPinnedImportEntries.slice(), pinned: true });
+    const startedAt = String(state.adminPinnedImportEntries[0]?.runStartedAt || "").trim();
+    const time = startedAt || importRunTime(state.adminPinnedImportEntries[0]);
+    const key = state.adminSelectedImportRunKey || (startedAt ? `started:${startedAt}` : `notification|${time}`);
+    if (!collapsed.some((group) => group.key === key)) {
+      collapsed.push({ key, time, entries: state.adminPinnedImportEntries.slice(), pinned: true });
+    }
   }
   return collapsed.sort((a, b) => String(b.time || "").localeCompare(String(a.time || "")));
 }
@@ -28259,7 +28375,8 @@ async function refreshAdminTodayImportRuns({ render = true } = {}) {
     const matchingNotificationIndex = (historyEntry) => {
       const historyRunId = String(historyEntry.runId || "").trim();
       const historyTime = parseAutomationDateValue(historyEntry.importedAt || historyEntry.checkedAt || "");
-      return notificationEntries.findIndex((notificationEntry) => {
+      return notificationEntries.findIndex((notificationEntry, notificationIndex) => {
+        if (matchedNotificationIndexes.has(notificationIndex)) return false;
         const notificationRunId = String(notificationEntry.runId || "").trim();
         if (String(notificationEntry.deliveryDate || "") !== String(historyEntry.deliveryDate || "")) return false;
         const notificationSource = String(notificationEntry.sourceName || notificationEntry.fileName || "").trim().toLowerCase();
@@ -28346,11 +28463,12 @@ function renderAdminImportRunBrowser(imports = []) {
   const tabs = visibleGroups.map((group) => {
     const status = importRunClassification(group.entries);
     const dateCount = new Set(group.entries.map((entry) => entry.deliveryDate).filter(Boolean)).size;
+    const removedPieces = group.entries.reduce((sum, entry) => sum + Number(entry.removedPieceQty || 0), 0);
     return `
-      <button type="button" class="admin-import-run-tab ${group.key === selected.key ? "is-active" : ""} ${escapeHtml(status.key)}" data-admin-import-run="${escapeHtml(group.key)}" role="tab" aria-selected="${group.key === selected.key ? "true" : "false"}" tabindex="${group.key === selected.key ? "0" : "-1"}">
+      <button type="button" class="admin-import-run-tab ${group.key === selected.key ? "is-active" : ""} ${escapeHtml(status.key)} ${removedPieces ? "has-removals" : ""}" data-admin-import-run="${escapeHtml(group.key)}" role="tab" aria-selected="${group.key === selected.key ? "true" : "false"}" tabindex="${group.key === selected.key ? "0" : "-1"}">
         <span>${escapeHtml(group.time ? formatDateTime(group.time) : "Active lists")}</span>
         <strong>${escapeHtml(status.label)}</strong>
-        <small>${escapeHtml(dateCount || group.entries.length)} date${(dateCount || group.entries.length) === 1 ? "" : "s"}</small>
+        <small class="admin-import-run-tab-meta-v257"><span>${escapeHtml(dateCount || group.entries.length)} date${(dateCount || group.entries.length) === 1 ? "" : "s"}</span>${removedPieces ? `<b>-${escapeHtml(removedPieces)} removed</b>` : ""}</small>
       </button>`;
   }).join("");
   const status = importRunClassification(selected.entries);
@@ -28369,19 +28487,17 @@ function renderAdminImportRunBrowser(imports = []) {
     const explicitUpdated = Number(entry.updatedPieceQty || 0);
     return sum + ((newPieces + explicitUpdated) || added || Math.max(changed - removed, 0));
   }, 0);
-  const removedPieces = selected.entries.reduce(
-    (sum, entry) => sum + Number(entry.removedPieceQty || 0),
-    0,
-  );
+  const removedPieces = selected.entries.reduce((sum, entry) => sum + Number(entry.removedPieceQty || 0), 0);
+  const fileResultCount = groups.reduce((sum, group) => sum + group.entries.length, 0);
   return `
-    <section class="admin-import-run-browser admin-import-run-browser-v248 admin-import-run-browser-v249" data-selected-run="${escapeHtml(selected.key)}">
+    <section class="admin-import-run-browser admin-import-run-browser-v248 admin-import-run-browser-v249 admin-import-run-browser-v256 admin-import-run-browser-v257" data-selected-run="${escapeHtml(selected.key)}">
       <div class="admin-import-run-day-heading">
         <div><small>Today's import activity</small><strong>${escapeHtml(formatDisplayDate(todayKey()))}</strong></div>
-        <div class="admin-import-run-day-stats"><span><b>${escapeHtml(groups.length)}</b> run${groups.length === 1 ? "" : "s"}</span><span><b>${escapeHtml(groups.reduce((sum, group) => sum + group.entries.length, 0))}</b> file result${groups.reduce((sum, group) => sum + group.entries.length, 0) === 1 ? "" : "s"}</span></div>
+        <div class="admin-import-run-day-stats"><span><b>${escapeHtml(groups.length)}</b> run${groups.length === 1 ? "" : "s"}</span><span><b>${escapeHtml(fileResultCount)}</b> file result${fileResultCount === 1 ? "" : "s"}</span></div>
       </div>
       <div class="admin-import-run-tabs" role="tablist" aria-label="Import run history">${tabs}</div>
       ${pager}
-      <div class="admin-import-run-selected-header ${escapeHtml(status.key)}">
+      <div class="admin-import-run-selected-header ${escapeHtml(status.key)} ${removedPieces ? "has-removals" : ""}">
         <div class="admin-import-run-selected-copy">
           <small>Selected run</small>
           <strong>${escapeHtml(selected.time ? formatDateTime(selected.time) : "Active delivery lists")}</strong>
@@ -28390,7 +28506,7 @@ function renderAdminImportRunBrowser(imports = []) {
         <div class="admin-import-run-selected-metrics">
           <span><b>${escapeHtml(selected.entries.length)}</b> files</span>
           <span><b>${escapeHtml(updatedPieces)}</b> updated pcs</span>
-          <span class="is-removed"><b>${escapeHtml(removedPieces)}</b> removed pcs</span>
+          <span class="is-removed ${removedPieces ? "has-value" : ""}"><b>${escapeHtml(removedPieces)}</b> removed pcs</span>
           <em>${escapeHtml(status.label)}</em>
         </div>
       </div>
@@ -31900,6 +32016,9 @@ init().catch((error) => {
     if (activeListId && touchesActiveDate) {
       window.setTimeout(() => dlsAutomationRefreshActiveListDetail(activeListId), 0);
     }
+    if (adminPageIsVisible()) {
+      window.setTimeout(() => refreshSupersededReviewSummary(), 0);
+    }
     return true;
   }
 
@@ -32269,7 +32388,7 @@ init().catch((error) => {
         || Math.max(changedPieces - removedPieces, 0);
       return `
         <details
-          class="import-history-entry automation-recent-import-row ${status.className}"
+          class="import-history-entry automation-recent-import-row ${status.className} ${removedPieces ? "has-removals" : ""}"
           data-history-timestamp="${escapeHtml(historyTimestamp)}"
           data-history-run-id="${escapeHtml(historyRunId)}"
           data-history-delivery-date="${escapeHtml(item.deliveryDate || "")}"
@@ -32277,7 +32396,10 @@ init().catch((error) => {
           data-history-removed-pieces="${escapeHtml(removedPieces)}"
         >
           <summary class="import-history-entry-summary">
-            <span class="automation-recent-import-status">${escapeHtml(status.label)}</span>
+            <span class="import-history-entry-status-stack-v257">
+              <span class="automation-recent-import-status">${escapeHtml(status.label)}</span>
+              ${removedPieces ? `<span class="import-history-removed-v257">-${escapeHtml(removedPieces)} removed pc${removedPieces === 1 ? "" : "s"}</span>` : ""}
+            </span>
             <span class="import-history-entry-copy">
               <strong>${escapeHtml(formatDeliveryDate(item.deliveryDate))}</strong>
               <span>${escapeHtml(sourceName)}</span>

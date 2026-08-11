@@ -1,5 +1,41 @@
 # Delivery List Scanner Changelog
 
+## v0.257 - Five-Run Paging, Exact Removal History, and Selectable Superseded Removal
+
+- Restored five-run pagination in Today's Import Activity while retaining every loaded same-day run across the pager.
+- Added separate positive and red negative quantity pills so management totals read like `121 +12 -1 132`, with the no-removal form remaining `121 +12 133`.
+- Added durable per-item import snapshots for new, updated, quantity-decreased, and removed A+W-owned rows, including removal notices after the live row is gone.
+- Made removed-piece totals flow through stage summaries, import history, selected-run metrics, and preview records instead of being inferred from current rows.
+- Based import-level added/removed totals on the canonical full-list stage instead of summing replicated operational stage copies, preventing logical pieces from being double- or triple-counted.
+- Reworked Delivery List Update Preview to Route → Glass Type → Order dropdowns with header counts on the right and flat item rows inside each expanded order.
+- Removed item-level dropdowns; order-level customer, job, route, and glass/product details are shown once above item number, size, quantity, and before/after changes.
+- Kept preview content on the main modal scrollbar rather than route-level vertical scroll areas.
+- Added explicit Admin selection of either superseded candidate as the removal target; the original candidate remains a suggestion only.
+- Persisted the selected superseded removal order in SQLite migration 11 and mirrored the compatibility column in the Azure schema definition.
+- Approved superseded removals now create their own import-history record so red removal totals remain auditable in Today's Import Activity.
+- Updated maintained application references and cache keys to v0.257. SQLite schema is now version 11.
+
+## v0.256 - Complete Same-Day Import History and Hierarchical Update Preview
+
+- Canonicalized one automation execution by its shared run start timestamp so the same run no longer appears twice a few seconds apart when database and completion-notification timestamps differ.
+- Prevented one notification file result from being reused to identify multiple database imports, preserving distinct same-day runs.
+- Removed the five-run browser page from Today's Import Activity and now exposes every loaded run for the current day in the existing horizontal run strip.
+- Added immutable `State\RunHistory` JSON summaries for every completed PowerShell run and included those archives in the Automation Control Center history source, preventing later runs from overwriting the only runtime copy.
+- Added an explicit shared PowerShell `runId` to scheduled summaries and notifications so future database, runtime, archive, and notification records use the same identity.
+- Rebuilt Delivery List Update Preview hierarchy as route → glass type → order → item, with all dropdowns collapsed initially and filter/search-aware path expansion.
+- Removed the small route-content vertical scrollbar so the preview uses the main GUI/modal scrollbar as expanded groups grow.
+- Updated maintained application references and cache keys to v0.256. SQLite schema remains version 10.
+
+## v0.255 - Import Integrity, Full-List Reconciliation, and Superseded Review Alerts
+
+- Fixed stale automation `ProjectRoot` configuration. The running web app now repairs the installed automation config to its own project root so scheduled/manual SQL imports write to the same scanner database used by the browser.
+- Added post-import source coverage verification. Automation can no longer report success when only changed/new rows were imported; every expected A+W row must be present after reconciliation.
+- Changed Delivery List Management quantity presentation to arithmetic totals such as `111 +9 120`, using the import event's saved post-import total rather than a potentially unrelated live route total.
+- Detail-only item updates no longer inflate the middle quantity cell. The middle value is the signed net piece change.
+- Added in-app notification creation for newly pending superseded-order reviews. Source rows remain active until an exact Admin approval is made.
+- Strengthened the existing Superseded Order Review red badge and refresh it after new automation results are received.
+- Updated maintained application references and cache keys to v0.255. SQLite schema remains version 10.
+
 ## v0.254 - Stable Manual Delivery List Expansion
 
 - Removed automatic opening of changed delivery-date groups in Delivery List Management.
