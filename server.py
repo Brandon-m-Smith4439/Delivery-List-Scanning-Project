@@ -1352,6 +1352,33 @@ class Handler(SimpleHTTPRequestHandler):
             return None
         return user
 
+    def user_can_preview_delivery_update(self, user: dict, list_id: str) -> bool:
+        """Allow privileged Admin review across every delivery-list stage.
+
+        Delivery List Management is an administrative reconciliation workspace.
+        Admins, supervisors, and users explicitly granted the complete update-review
+        permission set must be able to inspect changes for Airport, Indian Trail,
+        Greenville, CPU, and DTC even when their ordinary scanner stage assignment
+        is narrower. Other users continue to respect their assigned stage access.
+        """
+        roles = {str(role).strip().lower() for role in (user.get("roles") or [])}
+        if roles.intersection({"admin", "supervisor"}):
+            return True
+
+        granted = {
+            canonical_permission_name(str(permission))
+            for permission in (user.get("permissions") or [])
+        }
+        administrative_review_permissions = {
+            canonical_permission_name("view_admin"),
+            canonical_permission_name("edit_delivery_lists"),
+            canonical_permission_name("preview_delivery_updates"),
+        }
+        if administrative_review_permissions.issubset(granted):
+            return True
+
+        return STORE.user_can_access_list(user, list_id)
+
     def require_confirmation_text(self, data: dict, required_text: str) -> bool:
         """Purpose: Run the require confirmation text workflow for the delivery-list scanner.
 
@@ -1575,6 +1602,26 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(summary)
             return
 
+        if parsed.path == "/api/admin/superseded-order-reviews/summary":
+            user = self.require_any_permission("view_admin", "edit_delivery_lists")
+            if not user:
+                return
+            self.send_json(STORE.superseded_order_review_summary())
+            return
+
+        if parsed.path == "/api/admin/superseded-order-reviews":
+            user = self.require_any_permission("view_admin", "edit_delivery_lists")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            self.send_json(
+                STORE.list_superseded_order_reviews(
+                    status=params.get("status", [""])[0],
+                    include_inactive=params.get("includeInactive", ["0"])[0] in {"1", "true", "yes"},
+                )
+            )
+            return
+
         if parsed.path == "/api/admin/users":
             if not self.require_permission("manage_users"):
                 return
@@ -1648,10 +1695,19 @@ class Handler(SimpleHTTPRequestHandler):
             if not list_id:
                 self.send_json({"error": "listId is required"}, HTTPStatus.BAD_REQUEST)
                 return
-            if not STORE.user_can_access_list(user, list_id):
+            if not self.user_can_preview_delivery_update(user, list_id):
                 self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
                 return
-            self.send_json(STORE.get_delivery_list_update_preview(list_id))
+            try:
+                self.send_json(STORE.get_delivery_list_update_preview(list_id))
+            except (KeyError, ValueError) as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            except Exception as exc:
+                traceback.print_exc()
+                self.send_json(
+                    {"error": f"Unable to load the delivery-list update preview: {exc}"},
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
             return
 
         if parsed.path == "/api/admin/line-items/search":
@@ -2184,6 +2240,21 @@ class Handler(SimpleHTTPRequestHandler):
                         str(data.get("kind") or ""),
                         int(data.get("id") or 0),
                         user["username"],
+                    )
+                )
+                return
+
+            if parsed.path == "/api/admin/superseded-order-reviews/decision":
+                user = self.require_permission("edit_delivery_lists")
+                if not user:
+                    return
+                self.send_json(
+                    STORE.decide_superseded_order_review(
+                        int(data.get("reviewId") or data.get("id") or 0),
+                        str(data.get("action") or ""),
+                        user["username"],
+                        str(data.get("reason") or ""),
+                        str(data.get("removeOrderNumber") or ""),
                     )
                 )
                 return

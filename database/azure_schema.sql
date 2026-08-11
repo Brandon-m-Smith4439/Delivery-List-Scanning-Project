@@ -45,7 +45,8 @@ BEGIN
         queue_state nvarchar(300) NOT NULL DEFAULT (N''),
         suggested_bay nvarchar(120) NOT NULL DEFAULT (N''),
         priority_delivery_date nvarchar(32) NOT NULL DEFAULT (N''),
-        priority_direct_to_truck int NOT NULL DEFAULT (0)
+        priority_direct_to_truck int NOT NULL DEFAULT (0),
+        protect_from_aw_import int NOT NULL DEFAULT (0)
     );
     CREATE INDEX idx_line_items_list_id ON dbo.line_items(list_id);
     CREATE INDEX idx_line_items_order_item ON dbo.line_items(order_no, item_no);
@@ -726,4 +727,164 @@ BEGIN
     SET NOCOUNT ON;
     THROW 50003, 'machine_events is append-only; write a reversal event instead.', 1;
 END;
+GO
+
+-- v0.230: Preserve import-preview details for source rows removed by A+W.
+IF OBJECT_ID(N'dbo.line_update_notices', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.line_update_notices (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        line_item_id nvarchar(320) NOT NULL,
+        list_id nvarchar(256) NOT NULL,
+        delivery_date nvarchar(32) NOT NULL,
+        change_type nvarchar(40) NOT NULL,
+        change_token nvarchar(160) NOT NULL,
+        source_hash nvarchar(160) NOT NULL DEFAULT (N''),
+        snapshot_json nvarchar(max) NOT NULL DEFAULT (N'{}'),
+        created_at nvarchar(64) NOT NULL,
+        CONSTRAINT ck_line_update_notices_change_type_v230
+            CHECK (change_type IN (N'new', N'updated', N'removed')),
+        CONSTRAINT ck_line_update_notices_snapshot_json_v230
+            CHECK (ISJSON(snapshot_json) = 1),
+        CONSTRAINT uq_line_update_notices_token_v230
+            UNIQUE (line_item_id, change_type, change_token)
+    );
+END;
+GO
+
+IF COL_LENGTH(N'dbo.line_update_notices', N'snapshot_json') IS NULL
+BEGIN
+    ALTER TABLE dbo.line_update_notices
+        ADD snapshot_json nvarchar(max) NOT NULL
+            CONSTRAINT df_line_update_notices_snapshot_json_v230 DEFAULT (N'{}');
+END;
+GO
+
+DECLARE @line_update_change_constraint sysname;
+SELECT TOP (1) @line_update_change_constraint = cc.name
+FROM sys.check_constraints cc
+WHERE cc.parent_object_id = OBJECT_ID(N'dbo.line_update_notices')
+  AND cc.definition LIKE N'%change_type%';
+IF @line_update_change_constraint IS NOT NULL
+BEGIN
+    EXEC(N'ALTER TABLE dbo.line_update_notices DROP CONSTRAINT ['
+        + REPLACE(@line_update_change_constraint, N']', N']]') + N']');
+END;
+IF OBJECT_ID(N'dbo.ck_line_update_notices_change_type_v230', N'C') IS NULL
+BEGIN
+    ALTER TABLE dbo.line_update_notices WITH CHECK
+        ADD CONSTRAINT ck_line_update_notices_change_type_v230
+        CHECK (change_type IN (N'new', N'updated', N'removed'));
+END;
+GO
+
+IF OBJECT_ID(N'dbo.line_update_receipts', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.line_update_receipts (
+        notice_id bigint NOT NULL,
+        user_id bigint NOT NULL,
+        seen_at nvarchar(64) NOT NULL,
+        CONSTRAINT pk_line_update_receipts PRIMARY KEY (notice_id, user_id),
+        CONSTRAINT fk_line_update_receipts_notice
+            FOREIGN KEY (notice_id) REFERENCES dbo.line_update_notices(id) ON DELETE CASCADE,
+        CONSTRAINT fk_line_update_receipts_user
+            FOREIGN KEY (user_id) REFERENCES dbo.users(id) ON DELETE CASCADE
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.line_update_notices')
+      AND name = N'idx_line_update_notices_list_date'
+)
+    CREATE INDEX idx_line_update_notices_list_date
+        ON dbo.line_update_notices(list_id, delivery_date, created_at DESC, id DESC);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.line_update_receipts')
+      AND name = N'idx_line_update_receipts_user'
+)
+    CREATE INDEX idx_line_update_receipts_user
+        ON dbo.line_update_receipts(user_id, notice_id);
+GO
+
+
+-- v0.236: Explicitly protect selected manual orders from authoritative A+W replacement.
+IF COL_LENGTH(N'dbo.line_items', N'protect_from_aw_import') IS NULL
+BEGIN
+    ALTER TABLE dbo.line_items
+        ADD protect_from_aw_import int NOT NULL
+            CONSTRAINT df_line_items_protect_from_aw_import_v236 DEFAULT (0);
+END;
+GO
+
+IF OBJECT_ID(N'dbo.manual_delivery_entries', N'U') IS NOT NULL
+   AND COL_LENGTH(N'dbo.manual_delivery_entries', N'protect_from_aw_import') IS NULL
+BEGIN
+    ALTER TABLE dbo.manual_delivery_entries
+        ADD protect_from_aw_import int NOT NULL
+            CONSTRAINT df_manual_delivery_entries_protect_from_aw_import_v236 DEFAULT (0);
+END;
+GO
+
+
+-- v0.245: Local/Admin superseded-order review decisions and exact-key evidence.
+IF OBJECT_ID(N'dbo.superseded_order_reviews', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.superseded_order_reviews (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        candidate_key nvarchar(500) NOT NULL UNIQUE,
+        delivery_date nvarchar(32) NOT NULL,
+        header_identity nvarchar(160) NOT NULL DEFAULT (N''),
+        original_order_no nvarchar(120) NOT NULL,
+        replacement_order_no nvarchar(120) NOT NULL,
+        status nvarchar(40) NOT NULL DEFAULT (N'pending'),
+        confidence nvarchar(40) NOT NULL DEFAULT (N'high'),
+        evidence_json nvarchar(max) NOT NULL DEFAULT (N'{}'),
+        original_items_json nvarchar(max) NOT NULL DEFAULT (N'[]'),
+        replacement_items_json nvarchar(max) NOT NULL DEFAULT (N'[]'),
+        source_fingerprint nvarchar(160) NOT NULL DEFAULT (N''),
+        detected_at nvarchar(64) NOT NULL,
+        last_seen_at nvarchar(64) NOT NULL,
+        decided_at nvarchar(64) NOT NULL DEFAULT (N''),
+        decided_by nvarchar(255) NOT NULL DEFAULT (N''),
+        decision_reason nvarchar(1000) NOT NULL DEFAULT (N''),
+        approved_remove_order_no nvarchar(120) NOT NULL DEFAULT (N''),
+        active int NOT NULL DEFAULT (1),
+        created_at_utc nvarchar(64) NOT NULL DEFAULT (N''),
+        updated_at_utc nvarchar(64) NOT NULL DEFAULT (N''),
+        CONSTRAINT ck_superseded_order_reviews_status_v245
+            CHECK (status IN (N'pending', N'approved', N'keep_both', N'review_later')),
+        CONSTRAINT ck_superseded_order_reviews_active_v245 CHECK (active IN (0, 1)),
+        CONSTRAINT ck_superseded_order_reviews_evidence_json_v245 CHECK (ISJSON(evidence_json) = 1),
+        CONSTRAINT ck_superseded_order_reviews_original_json_v245 CHECK (ISJSON(original_items_json) = 1),
+        CONSTRAINT ck_superseded_order_reviews_replacement_json_v245 CHECK (ISJSON(replacement_items_json) = 1)
+    );
+END;
+GO
+
+-- v0.257: Admin may choose either candidate order as the exact removal target.
+IF COL_LENGTH(N'dbo.superseded_order_reviews', N'approved_remove_order_no') IS NULL
+BEGIN
+    ALTER TABLE dbo.superseded_order_reviews
+        ADD approved_remove_order_no nvarchar(120) NOT NULL
+            CONSTRAINT df_superseded_order_reviews_remove_order_v257 DEFAULT (N'');
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.superseded_order_reviews')
+      AND name = N'idx_superseded_order_reviews_status_date'
+)
+    CREATE INDEX idx_superseded_order_reviews_status_date
+        ON dbo.superseded_order_reviews(status, active, delivery_date DESC, last_seen_at DESC, id DESC);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.superseded_order_reviews')
+      AND name = N'idx_superseded_order_reviews_orders'
+)
+    CREATE INDEX idx_superseded_order_reviews_orders
+        ON dbo.superseded_order_reviews(delivery_date, original_order_no, replacement_order_no);
 GO

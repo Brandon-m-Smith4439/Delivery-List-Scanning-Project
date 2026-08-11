@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "approvedBy": "admin",
+      "deliveryDate": "2026-08-10",
+      "itemNumber": "001",
+      "keptOrderNumber": "237047",
+      "orderNumber": "237030",
+      "reason": "Approved exact removal; replacement order 237047.",
+      "replacementOrderNumber": "237047",
+      "reviewId": 1
+    }
+  ],
+  "generatedAt": "2026-08-11T15:30:39+00:00",
+  "preserveEntries": [],
+  "version": "v0.257"
+}

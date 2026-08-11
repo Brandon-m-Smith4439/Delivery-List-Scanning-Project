@@ -3,11 +3,10 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "273"
-# Schema version 5 matches the maintained migration registry (definitions 1 through 5).
-# Frontend-only releases must advance APPLICATION_VERSION without changing this value.
-# Backend reporting changes without a maintained migration follow the same rule.
-CURRENT_SCHEMA_VERSION = 5
+APPLICATION_VERSION = "302"
+# Schema version 11 matches the maintained migration registry. Frontend-only
+# releases advance APPLICATION_VERSION without changing the schema version.
+CURRENT_SCHEMA_VERSION = 11
 
 TABLE_DESCRIPTIONS = {
     "schema_migrations": "Installed numbered database migrations and checksums.",
@@ -43,7 +42,7 @@ TABLE_DESCRIPTIONS = {
     "email_outbox": "Queued and delivered customer notifications.",
     "app_notifications": "Multi-user in-app notices.",
     "app_notification_receipts": "Per-user notification acknowledgements.",
-    "line_update_notices": "Per-user-visible new and updated delivery-list line events.",
+    "line_update_notices": "Per-user-visible new, updated, and removed delivery-list line events with immutable display snapshots.",
     "line_update_receipts": "Per-user review acknowledgements for line update events.",
     "machines": "Production machines available for future scanner integration.",
     "scanners": "Physical scanner devices and optional machine association.",
@@ -53,6 +52,7 @@ TABLE_DESCRIPTIONS = {
     "reject_events": "Append-only internal reject history and process resets.",
     "packing_list_prints": "Immutable snapshots of rack packing lists when printed.",
     "manual_delivery_entries": "Audit inventory of orders manually added to delivery lists.",
+    "superseded_order_reviews": "Admin-reviewed A+W order replacement candidates and exact removal decisions.",
 }
 
 REQUIRED_COLUMNS = {
@@ -60,7 +60,7 @@ REQUIRED_COLUMNS = {
     "delivery_lists": {"id", "delivery_date", "stage", "status", "is_deleted", "created_at_utc", "updated_at_utc"},
     "line_items": {
         "id", "list_id", "source_id", "barcode", "order_no", "item_no", "qty", "scanned_qty",
-        "manual_only", "manual_source", "internal_reject_count", "last_reject_reason",
+        "manual_only", "manual_source", "protect_from_aw_import", "internal_reject_count", "last_reject_reason",
         "last_reject_location", "last_rejected_at", "is_deleted", "created_at_utc", "updated_at_utc",
     },
     "scan_events": {"id", "list_id", "line_item_id", "barcode", "event_type", "qty_delta", "created_at"},
@@ -75,12 +75,18 @@ REQUIRED_COLUMNS = {
     "bay_assignments": {"id", "delivery_list_id", "line_item_id", "bay_id", "assigned_qty", "status", "is_deleted"},
     "machines": {"id", "machine_code", "display_name", "machine_type", "active", "metadata_json"},
     "scanners": {"id", "scanner_code", "display_name", "machine_id", "active", "metadata_json"},
-    "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "created_at"},
+    "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "snapshot_json", "created_at"},
     "line_update_receipts": {"notice_id", "user_id", "seen_at"},
     "machine_events": {"id", "machine_id", "scanner_id", "line_item_id", "event_type", "event_status", "qty", "barcode", "order_no", "item_no", "metadata_json", "created_at_utc"},
     "reject_events": {"id", "delivery_date", "order_no", "item_no", "qty", "reason_label", "location_label", "rejected_at", "rejected_by"},
     "packing_list_prints": {"id", "rack_code", "delivery_date", "printed_at", "printed_by", "snapshot_json"},
-    "manual_delivery_entries": {"id", "delivery_date", "order_no", "item_no", "route", "manual_only", "created_at"},
+    "manual_delivery_entries": {"id", "delivery_date", "order_no", "item_no", "route", "manual_only", "protect_from_aw_import", "created_at"},
+    "superseded_order_reviews": {
+        "id", "candidate_key", "delivery_date", "original_order_no", "replacement_order_no",
+        "status", "evidence_json", "original_items_json", "replacement_items_json",
+        "source_fingerprint", "detected_at", "last_seen_at", "decided_at", "decided_by",
+        "decision_reason", "approved_remove_order_no", "active", "created_at_utc", "updated_at_utc",
+    },
 }
 
 TEXT_BUSINESS_IDENTIFIERS = {
@@ -93,6 +99,7 @@ TEXT_BUSINESS_IDENTIFIERS = {
     "reject_events": {"order_no", "item_no", "delivery_date"},
     "packing_list_prints": {"rack_code", "delivery_date"},
     "manual_delivery_entries": {"order_no", "item_no", "delivery_date", "route"},
+    "superseded_order_reviews": {"candidate_key", "delivery_date", "original_order_no", "replacement_order_no", "status", "source_fingerprint"},
     "machine_events": {"barcode", "order_no", "item_no"},
 }
 
@@ -135,6 +142,8 @@ INDEX_DESCRIPTIONS = {
     "idx_machine_events_machine_time": "Machine event timeline.",
     "idx_machine_events_scanner_time": "Scanner event timeline.",
     "idx_machine_events_order_item": "Production lookup by order and item.",
+    "idx_superseded_order_reviews_status_date": "Pending superseded-order review queue by status and delivery date.",
+    "idx_superseded_order_reviews_orders": "Superseded-order review lookup by original and replacement order.",
 }
 
 JSON_COLUMNS = {
@@ -148,6 +157,8 @@ JSON_COLUMNS = {
     "reject_events": {"affected_list_ids_json"},
     "packing_list_prints": {"snapshot_json"},
     "manual_delivery_entries": {"target_list_ids_json"},
+    "line_update_notices": {"snapshot_json"},
+    "superseded_order_reviews": {"evidence_json", "original_items_json", "replacement_items_json"},
 }
 
 TIMESTAMP_COLUMNS = {
@@ -167,4 +178,5 @@ TIMESTAMP_COLUMNS = {
     "packing_list_prints": {"printed_at"},
     "manual_delivery_entries": {"created_at"},
     "machine_events": {"created_at_utc"},
+    "superseded_order_reviews": {"detected_at", "last_seen_at", "decided_at", "created_at_utc", "updated_at_utc"},
 }

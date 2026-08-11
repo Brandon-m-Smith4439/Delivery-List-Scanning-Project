@@ -58,7 +58,70 @@ MIGRATIONS = (
         "Thirty-day active action-history retention with immutable logical archive storage and timestamp indexes; v192-r1",
         "_migration_005_v192_action_history_archive",
     ),
+    Migration(
+        6,
+        "v230_removed_import_lines",
+        "Authoritative A+W removals with snapshot-backed new, updated, and removed delivery-list preview notices; v230-r1",
+        "_migration_006_v230_removed_import_lines",
+    ),
+    Migration(
+        7,
+        "v233_repair_removed_import_notice_schema",
+        "Repair databases whose v230 migration ledger exists without the snapshot-backed removed-line notice columns; v233-r1",
+        "_migration_007_v233_repair_removed_import_notice_schema",
+    ),
+    Migration(
+        8,
+        "v234_authoritative_import_schema_guard",
+        "Revalidate and rebuild snapshot-backed removed-line notices before authoritative automation imports; v234-r1",
+        "_migration_008_v234_authoritative_import_schema_guard",
+    ),
+    Migration(
+        9,
+        "v236_protected_manual_orders",
+        "Explicit per-line and manual-entry protection from authoritative A+W replacement or retirement; v236-r1",
+        "_migration_009_v236_protected_manual_orders",
+    ),
+    Migration(
+        10,
+        "v245_superseded_order_review",
+        "Locally detected A+W superseded-order candidates, explicit admin decisions, exact-key exclusions, and durable evidence snapshots; v245-r1",
+        "_migration_010_v245_superseded_order_review",
+    ),
+    Migration(
+        11,
+        "v257_superseded_remove_choice",
+        "Persist the exact candidate order selected for removal while preserving legacy original-order approvals; v257-r1",
+        "_migration_011_v257_superseded_remove_choice",
+    ),
 )
+
+
+def validate_migration_registry() -> None:
+    """Require one maintained migration definition for every schema version.
+
+    Changed-files deployments can otherwise update ``database.contract`` without
+    replacing ``database.migrations``. That leaves the application expecting a
+    schema version that the installed migration registry cannot reach. Fail
+    before opening a migration transaction and report the exact missing entries.
+    """
+    defined_versions = [migration.version for migration in MIGRATIONS]
+    expected_versions = list(range(1, CURRENT_SCHEMA_VERSION + 1))
+    duplicate_versions = sorted(
+        {version for version in defined_versions if defined_versions.count(version) > 1}
+    )
+    missing_versions = sorted(set(expected_versions) - set(defined_versions))
+    unexpected_versions = sorted(
+        version for version in set(defined_versions) if version > CURRENT_SCHEMA_VERSION
+    )
+    if duplicate_versions or missing_versions or unexpected_versions:
+        raise MigrationError(
+            "SQLite migration registry does not match the application contract. "
+            f"Expected definitions={expected_versions}; defined={defined_versions}; "
+            f"missing={missing_versions}; duplicates={duplicate_versions}; "
+            f"unexpected={unexpected_versions}. Reapply the complete maintained "
+            "changed-files package before starting the scanner."
+        )
 
 
 def utc_now() -> str:
@@ -311,8 +374,224 @@ def _migration_005_v192_action_history_archive(connection: Any) -> None:
     )
 
 
+def _migration_006_v230_removed_import_lines(connection: Any) -> None:
+    """Allow removed-line notices and preserve their display snapshot after deletion."""
+    connection.executescript(
+        """
+        CREATE TABLE line_update_notices_v230 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            line_item_id TEXT NOT NULL,
+            list_id TEXT NOT NULL,
+            delivery_date TEXT NOT NULL,
+            change_type TEXT NOT NULL CHECK (change_type IN ('new', 'updated', 'removed')),
+            change_token TEXT NOT NULL,
+            source_hash TEXT NOT NULL DEFAULT '',
+            snapshot_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(snapshot_json)),
+            created_at TEXT NOT NULL,
+            UNIQUE(line_item_id, change_type, change_token)
+        );
+
+        INSERT INTO line_update_notices_v230 (
+            id, line_item_id, list_id, delivery_date, change_type,
+            change_token, source_hash, snapshot_json, created_at
+        )
+        SELECT id, line_item_id, list_id, delivery_date, change_type,
+               change_token, source_hash, '{}', created_at
+        FROM line_update_notices;
+
+        CREATE TABLE line_update_receipts_v230 (
+            notice_id INTEGER NOT NULL REFERENCES line_update_notices_v230(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            seen_at TEXT NOT NULL,
+            PRIMARY KEY (notice_id, user_id)
+        );
+
+        INSERT INTO line_update_receipts_v230 (notice_id, user_id, seen_at)
+        SELECT notice_id, user_id, seen_at
+        FROM line_update_receipts;
+
+        DROP TABLE line_update_receipts;
+        DROP TABLE line_update_notices;
+        ALTER TABLE line_update_notices_v230 RENAME TO line_update_notices;
+        ALTER TABLE line_update_receipts_v230 RENAME TO line_update_receipts;
+
+        CREATE INDEX idx_line_update_notices_list_date
+            ON line_update_notices(list_id, delivery_date, created_at DESC, id DESC);
+        CREATE INDEX idx_line_update_receipts_user
+            ON line_update_receipts(user_id, notice_id);
+        """
+    )
+
+
+
+def _migration_007_v233_repair_removed_import_notice_schema(connection: Any) -> None:
+    """Repair an incomplete v230 notice schema without losing review history.
+
+    A small number of deployed databases recorded migration 6 while retaining
+    the older v120 ``line_update_notices`` table.  The importer then attempted
+    to write ``snapshot_json`` and failed before any A+W reconciliation could
+    complete.  Migration 7 deliberately rebuilds the two notice tables from
+    their current contents, so it repairs both the missing JSON column and the
+    older change-type constraint that rejected ``removed`` notices.
+    """
+    _ensure_column(
+        connection,
+        "line_update_notices",
+        "snapshot_json",
+        "TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(snapshot_json))",
+    )
+
+    connection.executescript(
+        """
+        DROP TABLE IF EXISTS line_update_receipts_v233;
+        DROP TABLE IF EXISTS line_update_notices_v233;
+
+        CREATE TABLE line_update_notices_v233 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            line_item_id TEXT NOT NULL,
+            list_id TEXT NOT NULL,
+            delivery_date TEXT NOT NULL,
+            change_type TEXT NOT NULL CHECK (change_type IN ('new', 'updated', 'removed')),
+            change_token TEXT NOT NULL,
+            source_hash TEXT NOT NULL DEFAULT '',
+            snapshot_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(snapshot_json)),
+            created_at TEXT NOT NULL,
+            UNIQUE(line_item_id, change_type, change_token)
+        );
+
+        INSERT INTO line_update_notices_v233 (
+            id, line_item_id, list_id, delivery_date, change_type,
+            change_token, source_hash, snapshot_json, created_at
+        )
+        SELECT
+            id,
+            line_item_id,
+            list_id,
+            delivery_date,
+            CASE
+                WHEN lower(change_type) IN ('new', 'updated', 'removed') THEN lower(change_type)
+                ELSE 'updated'
+            END,
+            change_token,
+            COALESCE(source_hash, ''),
+            CASE WHEN json_valid(snapshot_json) THEN snapshot_json ELSE '{}' END,
+            created_at
+        FROM line_update_notices;
+
+        CREATE TABLE line_update_receipts_v233 (
+            notice_id INTEGER NOT NULL REFERENCES line_update_notices_v233(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            seen_at TEXT NOT NULL,
+            PRIMARY KEY (notice_id, user_id)
+        );
+
+        INSERT INTO line_update_receipts_v233 (notice_id, user_id, seen_at)
+        SELECT receipt.notice_id, receipt.user_id, receipt.seen_at
+        FROM line_update_receipts receipt
+        JOIN line_update_notices_v233 notice ON notice.id = receipt.notice_id;
+
+        DROP TABLE line_update_receipts;
+        DROP TABLE line_update_notices;
+        ALTER TABLE line_update_notices_v233 RENAME TO line_update_notices;
+        ALTER TABLE line_update_receipts_v233 RENAME TO line_update_receipts;
+
+        CREATE INDEX idx_line_update_notices_list_date
+            ON line_update_notices(list_id, delivery_date, created_at DESC, id DESC);
+        CREATE INDEX idx_line_update_receipts_user
+            ON line_update_receipts(user_id, notice_id);
+        """
+    )
+
+
+def _migration_008_v234_authoritative_import_schema_guard(connection: Any) -> None:
+    """Reapply the canonical notice-table shape as an idempotent schema guard.
+
+    Runtime automation now repairs this schema even when store initialization is
+    disabled. This numbered migration provides the same guarantee during normal
+    application startup and advances the verified schema ledger to version 8.
+    """
+    _migration_007_v233_repair_removed_import_notice_schema(connection)
+
+def _migration_009_v236_protected_manual_orders(connection: Any) -> None:
+    """Add an explicit operator-controlled A+W import protection flag.
+
+    The flag is copied to each workflow-stage line for a manual order. A protected
+    manual line is never consumed as the matching A+W source row and is never
+    retired as a duplicate during authoritative reconciliation.
+    """
+    _ensure_column(
+        connection,
+        "line_items",
+        "protect_from_aw_import",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (protect_from_aw_import IN (0, 1))",
+    )
+    _ensure_column(
+        connection,
+        "manual_delivery_entries",
+        "protect_from_aw_import",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (protect_from_aw_import IN (0, 1))",
+    )
+
+
+def _migration_010_v245_superseded_order_review(connection: Any) -> None:
+    """Create the local-only superseded-order review queue.
+
+    Detection is advisory. Only an explicit Admin decision can activate exact
+    A+W order/item exclusions, so production statuses never become a broad
+    deletion rule.
+    """
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS superseded_order_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_key TEXT NOT NULL UNIQUE,
+            delivery_date TEXT NOT NULL,
+            header_identity TEXT NOT NULL DEFAULT '',
+            original_order_no TEXT NOT NULL,
+            replacement_order_no TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'approved', 'keep_both', 'review_later')),
+            confidence TEXT NOT NULL DEFAULT 'high',
+            evidence_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(evidence_json)),
+            original_items_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(original_items_json)),
+            replacement_items_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(replacement_items_json)),
+            source_fingerprint TEXT NOT NULL DEFAULT '',
+            detected_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            decided_at TEXT NOT NULL DEFAULT '',
+            decided_by TEXT NOT NULL DEFAULT '',
+            decision_reason TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+            created_at_utc TEXT NOT NULL DEFAULT '',
+            updated_at_utc TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_superseded_order_reviews_status_date
+            ON superseded_order_reviews(status, active, delivery_date DESC, last_seen_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_superseded_order_reviews_orders
+            ON superseded_order_reviews(delivery_date, original_order_no, replacement_order_no);
+        """
+    )
+
+
+def _migration_011_v257_superseded_remove_choice(connection: Any) -> None:
+    """Persist which candidate order an Admin explicitly chose to remove.
+
+    Existing v0.245-v0.256 approvals left this value blank. Runtime logic treats
+    those legacy approvals as original-order removals, preserving their exact
+    historical behavior while all new approvals record the selected candidate.
+    """
+    _ensure_column(
+        connection,
+        "superseded_order_reviews",
+        "approved_remove_order_no",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+
+
 def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:
     """Handle run sqlite migrations for the maintained Delivery List Scanner workflow."""
+    validate_migration_registry()
     ensure_migration_table(connection)
     baseline_legacy_v096(connection, owner)
     validate_installed_checksums(connection)
@@ -356,8 +635,19 @@ def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:
         applied.append(migration.version)
         installed[migration.version] = {"checksum": migration.checksum}
     validate_installed_checksums(connection)
-    if max(installed_migrations(connection), default=0) != CURRENT_SCHEMA_VERSION:
-        raise MigrationError("Database did not reach the expected schema version")
+    final_installed = installed_migrations(connection)
+    installed_versions = sorted(final_installed)
+    expected_versions = list(range(1, CURRENT_SCHEMA_VERSION + 1))
+    missing_versions = sorted(set(expected_versions) - set(installed_versions))
+    unexpected_versions = sorted(set(installed_versions) - set(expected_versions))
+    if missing_versions or unexpected_versions:
+        defined_versions = [migration.version for migration in MIGRATIONS]
+        raise MigrationError(
+            "Database did not reach the expected schema version. "
+            f"Expected={CURRENT_SCHEMA_VERSION}; installed={installed_versions}; "
+            f"defined={defined_versions}; missing={missing_versions}; "
+            f"unexpected={unexpected_versions}."
+        )
     return applied
 
 

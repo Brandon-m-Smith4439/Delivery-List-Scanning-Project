@@ -26,20 +26,20 @@ body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):i
   position: relative !important;
   isolation: isolate !important;
   min-width: 0 !important;
-  min-height: 38px !important;
+  min-height: var(--app-primary-min-height, 38px) !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   gap: var(--app-primary-gap, 8px) !important;
   overflow: hidden !important;
-  padding: 7px 15px !important;
+  padding: var(--app-primary-padding, 7px 15px) !important;
   border: 1px solid var(--shared-primary-border) !important;
   border-bottom-color: #03204a !important;
   border-radius: var(--app-primary-radius, 10px) !important;
   background: linear-gradient(180deg, var(--shared-primary-top) 0%, var(--shared-primary-mid) 46%, var(--shared-primary-bottom) 100%) !important;
   color: #fff !important;
   font-family: inherit !important;
-  font-size: 13px !important;
+  font-size: var(--app-primary-font-size, 13px) !important;
   font-weight: 850 !important;
   line-height: 1.1 !important;
   letter-spacing: .01em !important;
@@ -231,6 +231,7 @@ body :is(
   .print-preset-hero-v240,
   .operations-modal-heading,
   .statistics-chart-modal-header-v0256,
+  .statistics-chart-modal-header-v0253,
   .admin-control-center-header,
   .admin-modal-panel > .section-heading,
   .delivery-automation-header,
@@ -256,6 +257,7 @@ body :is(
   .print-preset-hero-v240,
   .operations-modal-heading,
   .statistics-chart-modal-header-v0256,
+  .statistics-chart-modal-header-v0253,
   .admin-control-center-header,
   .admin-modal-panel > .section-heading,
   .delivery-automation-header,
@@ -274,6 +276,7 @@ body :is(
   .print-preset-hero-v240,
   .operations-modal-heading,
   .statistics-chart-modal-header-v0256,
+  .statistics-chart-modal-header-v0253,
   .admin-control-center-header,
   .admin-modal-panel > .section-heading,
   .delivery-automation-header,
@@ -303,8 +306,8 @@ body button:is(.automation-update-toast-close, .line-update-review-close, .old-b
   }
 
   body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *) {
-    min-height: 38px !important;
-    padding: 7px 13px !important;
+    min-height: var(--app-primary-min-height, 38px) !important;
+    padding: var(--app-primary-padding, 7px 13px) !important;
   }
 }
 
@@ -314,8 +317,6 @@ body button:is(.automation-update-toast-close, .line-update-review-close, .old-b
     transition: none !important;
   }
 }
-
-
 /* v0.272 Standalone popup close placement ------------------------------------
    Direct-child X controls in confirmation/utility dialogs belong in the upper
    right corner. The shared X component keeps its geometry; these variables

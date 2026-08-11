@@ -1,20 +1,20 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.273**. SQLite remains the active/default backend.
+Current maintained release: **v0.302**. SQLite remains the active/default backend.
 
-v0.273 tightens Packing List History, fixes snapshot-preview layering and action layout, changes Glass Cart to an A-frame cart visual, and restores a tiny direct Edit Bays shortcut on each physical Bay Map group.
+v0.302 merges the maintained Main workspace with Website Version 2. It keeps Main's statistics, printing, rack, scan, and Bay Map improvements while adding Website 2's authoritative SQL-import reconciliation, complete import history, superseded-order review, and exact-key removal safeguards.
 
-## Install v0.273
+## Install v0.302
 
 1. Stop the Delivery List Scanner if it is running.
-2. Extract the v0.273 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project` and replace the included files.
+2. Extract the v0.302 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project` and replace the included files.
 3. Preserve the existing `data` folder and database files.
 4. Start the scanner normally.
-5. Hard-refresh the browser (`Ctrl+F5`) once so the v0.273 CSS/JavaScript cache keys are loaded.
+5. Hard-refresh the browser (`Ctrl+F5`) once so the v0.302 CSS/JavaScript cache keys are loaded.
 
-No database migration is required. `CURRENT_SCHEMA_VERSION` remains **5**. This release changes rack-history, rack-set icon presentation, and Bay Map UI only.
+On first start, the numbered migration runner upgrades schema version 5 databases through schema version **11** without deleting operational data. Keep the existing `data` folder in place and retain a verified database backup before replacing program files.
 
-## v0.273 highlights
+## v0.302 highlights
 
 - Collapsed the oversized Packing List History page-count strip into one compact line such as **1-5 of 5 print days · 6 snapshots**.
 - Forced **Preview** and **Print Snapshot** to remain beside each other on each snapshot row.
@@ -22,7 +22,11 @@ No database migration is required. `CURRENT_SCHEMA_VERSION` remains **5**. This 
 - Removed the redundant footer **Close** button from Snapshot Preview while retaining the top-right X and Escape/backdrop close behavior.
 - Replaced the generic Glass Cart visual with a recognizable **A-frame glass cart** icon while retaining the existing saved `glasscart` value for compatibility.
 - Restored a very small pencil shortcut in the top-right of each physical Bay Map group; clicking it opens that exact group in the maintained Edit Bays GUI.
-- Advanced `APPLICATION_VERSION` to 273 while preserving `CURRENT_SCHEMA_VERSION = 5`; no migration or database reset is included.
+- Preserved Main's Packing List History, statistics workspace, formatted print/export, rack visuals, scan review, and Bay Map improvements.
+- Added authoritative import reconciliation that retires removed source rows logically while keeping their audit history.
+- Added complete same-day import history, route-accurate update preview, source exclusions, and exact added/removed piece totals.
+- Added administrator review for likely superseded A+W orders, including selectable exact-order removal and durable decision history.
+- Advanced `APPLICATION_VERSION` to 302 and `CURRENT_SCHEMA_VERSION` to 11; migrations are additive and do not reset the production database.
 
 ## v0.269 highlights
 
