@@ -406,6 +406,15 @@ class DeliveryAutomationController:
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    def _normalize_import_change_summary(self, value: Any) -> dict[str, Any]:
+        """Normalize legacy stage-copy totals through the scanner data layer."""
+        parsed = self._parse_change_summary(value)
+        store = self.scanner_store
+        normalizer = getattr(store, "normalize_import_change_summary", None)
+        if callable(normalizer):
+            return normalizer(parsed)
+        return parsed
+
     def _database_import_history_items(self, maximum_rows: int = 5000) -> list[dict[str, Any]]:
         """Read normalized import-audit rows from the scanner database."""
         store = self.scanner_store
@@ -431,10 +440,13 @@ class DeliveryAutomationController:
 
         items: list[dict[str, Any]] = []
         for row in rows:
-            change = self._parse_change_summary(self._row_value(row, "change_summary", "changeSummary"))
+            change = self._normalize_import_change_summary(
+                self._row_value(row, "change_summary", "changeSummary")
+            )
             created_count = int(change.get("createdCount") or 0)
             reactivated_count = int(change.get("reactivatedCount") or 0)
             updated_count = int(change.get("updatedCount") or 0)
+            new_delivery_list = bool(change.get("newDeliveryList"))
             changed_list_ids = [str(value) for value in (change.get("changedListIds") or []) if value]
             stage_summaries = [
                 dict(value)
@@ -450,11 +462,11 @@ class DeliveryAutomationController:
             status = str(self._row_value(row, "status", default="published") or "published")
             if status.lower() not in {"published", "success", "completed"}:
                 classification = "failed"
-            elif created_count and updated_count:
+            elif new_delivery_list and updated_count:
                 classification = "new_updated"
-            elif created_count:
+            elif new_delivery_list:
                 classification = "new"
-            elif updated_count or changed_list_ids:
+            elif created_count or reactivated_count or updated_count or changed_list_ids:
                 classification = "updated"
             else:
                 classification = "no_changes"
@@ -489,6 +501,7 @@ class DeliveryAutomationController:
                     "classification": classification,
                     "classificationLabel": labels[classification],
                     "createdCount": created_count,
+                    "newDeliveryList": new_delivery_list,
                     "reactivatedCount": reactivated_count,
                     "updatedCount": updated_count,
                     "newPieceQty": int(change.get("newPieceQty") or 0),
@@ -585,9 +598,27 @@ class DeliveryAutomationController:
                 }]
 
             for item_index, item in enumerate(raw_results):
+                item = self._normalize_import_change_summary(item)
                 classification = str(item.get("classification") or "no_changes").lower()
                 if classification not in labels:
                     classification = "no_changes"
+                has_changes = any(
+                    int(item.get(key) or 0)
+                    for key in (
+                        "createdCount", "reactivatedCount", "updatedCount",
+                        "newPieceQty", "addedPieceQty", "updatedPieceQty",
+                        "changedPieceQty", "removedLineCount", "removedPieceQty",
+                    )
+                )
+                if classification != "failed":
+                    if item.get("newDeliveryList") and int(item.get("updatedCount") or 0):
+                        classification = "new_updated"
+                    elif item.get("newDeliveryList"):
+                        classification = "new"
+                    elif has_changes:
+                        classification = "updated"
+                    else:
+                        classification = "no_changes"
                 list_ids = [
                     str(value)
                     for value in (item.get("listIds") or item.get("changedListIds") or [])
@@ -617,6 +648,7 @@ class DeliveryAutomationController:
                     "classification": classification,
                     "classificationLabel": labels[classification],
                     "createdCount": int(item.get("createdCount") or 0),
+                    "newDeliveryList": bool(item.get("newDeliveryList")),
                     "reactivatedCount": int(item.get("reactivatedCount") or 0),
                     "updatedCount": int(item.get("updatedCount") or 0),
                     "newPieceQty": int(item.get("newPieceQty") or 0),
@@ -742,9 +774,27 @@ class DeliveryAutomationController:
         )
         items: list[dict[str, Any]] = []
         for index, item in enumerate(raw_results):
+            item = self._normalize_import_change_summary(item)
             classification = str(item.get("classification") or "no_changes").lower()
             if classification not in labels:
                 classification = "no_changes"
+            has_changes = any(
+                int(item.get(key) or 0)
+                for key in (
+                    "createdCount", "reactivatedCount", "updatedCount",
+                    "newPieceQty", "addedPieceQty", "updatedPieceQty",
+                    "changedPieceQty", "removedLineCount", "removedPieceQty",
+                )
+            )
+            if classification != "failed":
+                if item.get("newDeliveryList") and int(item.get("updatedCount") or 0):
+                    classification = "new_updated"
+                elif item.get("newDeliveryList"):
+                    classification = "new"
+                elif has_changes:
+                    classification = "updated"
+                else:
+                    classification = "no_changes"
             list_ids = [
                 str(value)
                 for value in (item.get("listIds") or item.get("changedListIds") or [])
@@ -775,6 +825,7 @@ class DeliveryAutomationController:
                     "classification": classification,
                     "classificationLabel": labels[classification],
                     "createdCount": int(item.get("createdCount") or 0),
+                    "newDeliveryList": bool(item.get("newDeliveryList")),
                     "reactivatedCount": int(item.get("reactivatedCount") or 0),
                     "updatedCount": int(item.get("updatedCount") or 0),
                     "newPieceQty": int(item.get("newPieceQty") or 0),

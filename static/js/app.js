@@ -275,6 +275,7 @@ const state = {
   adminImportRunPage: 1,
   adminImportRunsPerPage: 5,
   adminOpenDeliveryGroups: new Set(),
+  adminImportPreviewContexts: new Map(),
   adminDeliveryListsNormalizedMarkup: "",
   pendingUpdateDates: new Map(),
   pendingUpdateStages: new Map(),
@@ -367,17 +368,78 @@ function dlsAutomationImportResultKey(entry = {}, index = 0) {
   return `unkeyed:${index}`;
 }
 
+/** Normalize historical import totals that counted each operational stage copy. */
+function normalizeImportResultMetrics(entry = {}) {
+  const stageSummaries = (Array.isArray(entry.stageSummaries)
+    ? entry.stageSummaries
+    : Array.isArray(entry.stages)
+      ? entry.stages
+      : []).filter((row) => row && typeof row === "object");
+  if (!stageSummaries.length) return { ...entry };
+
+  const listId = (row) => String(row.listId || "").trim().toLowerCase();
+  const stageText = (row) => `${row.stage || ""} ${row.scanner || row.stageProfile || ""}`.trim().toLowerCase();
+  const preferred = stageSummaries.find((row) => listId(row).endsWith("-staging-airport"))
+    || stageSummaries.find((row) => stageText(row).includes("staging") && stageText(row).includes("airport"))
+    || stageSummaries.find((row) => listId(row).endsWith("-outbound-airport"))
+    || stageSummaries.find((row) => stageText(row).includes("outbound") && stageText(row).includes("airport"))
+    || stageSummaries.slice().sort((a, b) => (
+      Number(b.totalQty || b.originalQty || b.changedPieceQty || 0)
+      - Number(a.totalQty || a.originalQty || a.changedPieceQty || 0)
+    ))[0];
+
+  const changedStages = stageSummaries.filter((row) =>
+    Boolean(row.created || row.reactivated)
+    || Number(row.changedLineCount || 0)
+    || Number(row.changedPieceQty || 0)
+    || Number(row.removedLineCount || 0)
+    || Number(row.removedPieceQty || 0),
+  );
+  const createdStages = stageSummaries.filter((row) => Boolean(row.created));
+  const createdStaging = createdStages.some((row) => (
+    listId(row).endsWith("-staging-airport")
+    || (stageText(row).includes("staging") && stageText(row).includes("airport"))
+  ));
+  const createdOutbound = createdStages.some((row) => (
+    listId(row).endsWith("-outbound-airport")
+    || (stageText(row).includes("outbound") && stageText(row).includes("airport"))
+  ));
+  const inferredNewDeliveryList = changedStages.length > 0
+    && createdStages.length === changedStages.length
+    && createdStaging
+    && createdOutbound;
+
+  return {
+    ...entry,
+    stageSummaries,
+    newDeliveryList: Object.prototype.hasOwnProperty.call(entry, "newDeliveryList")
+      ? Boolean(entry.newDeliveryList)
+      : inferredNewDeliveryList,
+    createdCount: createdStages.length,
+    reactivatedCount: stageSummaries.filter((row) => Boolean(row.reactivated)).length,
+    newPieceQty: Number(preferred?.newPieceQty || 0),
+    updatedPieceQty: Number(preferred?.updatedPieceQty || 0),
+    addedPieceQty: Number(preferred?.addedPieceQty || 0),
+    changedPieceQty: Number(preferred?.changedPieceQty || 0),
+    removedLineCount: Number(preferred?.removedLineCount || 0),
+    removedPieceQty: Number(preferred?.removedPieceQty || 0),
+    changedLineCount: Number(preferred?.changedLineCount || 0),
+  };
+}
+
 function dlsAutomationMergeRecentImports(currentImports = [], incomingImports = []) {
   const merged = new Map();
 
   [...incomingImports, ...currentImports].forEach((entry, index) => {
     if (!entry || typeof entry !== "object") return;
 
-    const key = dlsAutomationImportResultKey(entry, index);
+    const normalizedEntry = normalizeImportResultMetrics(entry);
+
+    const key = dlsAutomationImportResultKey(normalizedEntry, index);
     const existing = merged.get(key);
 
-    if (!existing || dlsAutomationImportResultTime(entry) >= dlsAutomationImportResultTime(existing)) {
-      merged.set(key, entry);
+    if (!existing || dlsAutomationImportResultTime(normalizedEntry) >= dlsAutomationImportResultTime(existing)) {
+      merged.set(key, normalizedEntry);
     }
   });
 
@@ -600,10 +662,9 @@ function dlsAutomationApplyDeliveryCatalog(refreshedLists) {
       : String(selectedDateLists[0]?.id || "");
     if (desiredListId) stageSelect.value = desiredListId;
 
-    const activeStillExists = state.lists.some(
-      (item) => String(item.id || "") === String(state.activeListId || "")
-    );
-    if (!activeStillExists && desiredListId) state.activeListId = desiredListId;
+    if (desiredListId && String(state.activeListId || "") !== desiredListId) {
+      state.activeListId = desiredListId;
+    }
   }
   return true;
 }
@@ -614,7 +675,8 @@ function dlsAutomationApplyImportSnapshot(detail = {}) {
     : (Array.isArray(detail.recentImports) ? detail.recentImports : null);
   let changed = false;
   let activeDetailNeedsRefresh = false;
-  const activeListId = String(state.activeListId || "");
+  const previousActiveListId = String(state.activeListId || "");
+  let detailRefreshListId = previousActiveListId;
 
   if (latestResults) {
     // Never replace today's import history with only the newest run. Manual and
@@ -633,8 +695,12 @@ function dlsAutomationApplyImportSnapshot(detail = {}) {
   }
   if (Array.isArray(detail.lists)) {
     changed = dlsAutomationApplyDeliveryCatalog(detail.lists) || changed;
-    const refreshedActiveList = state.lists.find((list) => String(list.id || "") === activeListId);
-    activeDetailNeedsRefresh = Boolean(refreshedActiveList && dlsAutomationActiveDetailIsStale(refreshedActiveList));
+    detailRefreshListId = String(state.activeListId || "");
+    const refreshedActiveList = state.lists.find((list) => String(list.id || "") === detailRefreshListId);
+    activeDetailNeedsRefresh = Boolean(
+      refreshedActiveList
+      && (detailRefreshListId !== previousActiveListId || dlsAutomationActiveDetailIsStale(refreshedActiveList))
+    );
   }
   if (detail.lastCheckedAt) {
     dlsAutomationLatestImportCheckedAt = String(detail.lastCheckedAt);
@@ -660,7 +726,7 @@ function dlsAutomationApplyImportSnapshot(detail = {}) {
     },
   }));
   if (activeDetailNeedsRefresh) {
-    window.setTimeout(() => dlsAutomationRefreshActiveListDetail(activeListId), 0);
+    window.setTimeout(() => dlsAutomationRefreshActiveListDetail(detailRefreshListId), 0);
   }
 }
 
@@ -4837,7 +4903,13 @@ function stageSort(list) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function selectedDeliveryDate() {
-  return state.meta?.deliveryDate || state.lists.find((list) => list.id === state.activeListId)?.deliveryDate || state.lists[0]?.deliveryDate || "";
+  const activeDate = state.lists.find((list) => list.id === state.activeListId)?.deliveryDate || "";
+  if (activeDate) return activeDate;
+  const detailDate = String(state.meta?.deliveryDate || "");
+  if (detailDate && state.lists.some((list) => String(list.deliveryDate || "") === detailDate)) {
+    return detailDate;
+  }
+  return state.lists[0]?.deliveryDate || "";
 }
 
 /**
@@ -19416,7 +19488,7 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
   const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260811-v0.302", window.location.href).href;
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260811-v0.303", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
@@ -20296,8 +20368,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260811-v0.302", window.location.href).href,
-    new URL("static/css/print.css?v=20260811-v0.302", window.location.href).href,
+    new URL("static/css/styles.css?v=20260811-v0.303", window.location.href).href,
+    new URL("static/css/print.css?v=20260811-v0.303", window.location.href).href,
   ];
 }
 
@@ -21270,10 +21342,10 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
   const deliveryDate = primaryList.deliveryDate || primaryList.delivery_date || "";
   const totalPieces = items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
   const metricCards = [
-    ["all", items.length, "All"],
-    ["new", Number(payload.newCount || 0), "New"],
-    ["updated", Number(payload.updatedCount || 0), "Updated"],
-    ["removed", Number(payload.removedCount || 0), "Removed"],
+    ["all", items.length, "All rows"],
+    ["new", Number(payload.newCount || 0), "New rows"],
+    ["updated", Number(payload.updatedCount || 0), "Updated rows"],
+    ["removed", Number(payload.removedCount || 0), "Removed rows"],
   ];
   const expectedChangedCount = Number(payload.expectedChangedCount || items.length);
   const previewIsIncomplete = expectedChangedCount > items.length;
@@ -21520,7 +21592,43 @@ function initializeDeliveryListUpdatePreviewControls() {
 }
 
 
-async function openDeliveryListUpdatePreview(listIds, routeGroup = "") {
+function importPreviewPayloadsFromContext(contextKey, listIds) {
+  const entries = state.adminImportPreviewContexts.get(String(contextKey || "")) || [];
+  if (!entries.length) return [];
+  const ids = new Set(listIds);
+  const summaries = entries.flatMap((entry) => (
+    Array.isArray(entry.stageSummaries)
+      ? entry.stageSummaries
+      : Array.isArray(entry.stages)
+        ? entry.stages
+        : []
+  ));
+
+  return [...ids].flatMap((listId) => {
+    const stage = summaries.find((row) => String(row?.listId || "") === listId);
+    if (!stage) return [];
+    const items = Array.isArray(stage.changeItems)
+      ? stage.changeItems.filter((item) => item && typeof item === "object")
+      : [];
+    if (!items.length && Number(stage.changedLineCount || 0) > 0) return [];
+    const list = state.lists.find((row) => String(row.id || "") === listId) || {
+      id: listId,
+      deliveryDate: entries[0]?.deliveryDate || "",
+      stage: stage.stage || stage.label || "Historical stage",
+      scanner: stage.scanner || stage.stageProfile || "",
+    };
+    return [{
+      list,
+      items,
+      stageCreated: Boolean(stage.created || stage.stageCreated),
+      expectedChangedCount: Number(stage.changedLineCount || items.length),
+      removedPieceQty: Number(stage.removedPieceQty || 0),
+      previewSource: "selected-import-run",
+    }];
+  });
+}
+
+async function openDeliveryListUpdatePreview(listIds, routeGroup = "", contextKey = "") {
   const ids = [...new Set(String(listIds || "").split(",").map((value) => value.trim()).filter(Boolean))];
   if (!ids.length) throw new Error("No changed delivery-list stages were supplied for preview.");
 
@@ -21533,13 +21641,17 @@ async function openDeliveryListUpdatePreview(listIds, routeGroup = "") {
   });
 
   try {
-    const requests = await Promise.allSettled(ids.map((listId) => (
-      fetchJson(`/api/admin/delivery-list-update-preview?listId=${encodeURIComponent(listId)}`)
-    )));
-    const payloads = requests
-      .filter((result) => result.status === "fulfilled")
-      .map((result) => result.value);
-    const failedRequests = requests.filter((result) => result.status === "rejected");
+    let payloads = importPreviewPayloadsFromContext(contextKey, ids);
+    let failedRequests = [];
+    if (!payloads.length) {
+      const requests = await Promise.allSettled(ids.map((listId) => (
+        fetchJson(`/api/admin/delivery-list-update-preview?listId=${encodeURIComponent(listId)}`)
+      )));
+      payloads = requests
+        .filter((result) => result.status === "fulfilled")
+        .map((result) => result.value);
+      failedRequests = requests.filter((result) => result.status === "rejected");
+    }
     if (!payloads.length) {
       throw failedRequests[0]?.reason || new Error("No delivery-list changes could be loaded.");
     }
@@ -24730,6 +24842,7 @@ function renderImportHistory(imports) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function importHistoryRows(imports = []) {
+  state.adminImportPreviewContexts.clear();
   // The selected run is already normalized and de-duplicated by run identity.
   // Do not collapse rows by delivery date here: one run can legitimately contain
   // multiple source results for the same date, and every result must remain visible.
@@ -24827,7 +24940,7 @@ function importHistoryRows(imports = []) {
     const added = Math.max(Number(addedQty || 0), 0);
     const removed = Math.max(Number(removedQty || 0), 0);
     if (!added && !removed) return `<span class="qty-change is-zero">0</span>`;
-    return `<span class="qty-change-set-v257">${added ? `<span class="qty-change is-added">+${escapeHtml(added)}</span>` : ""}${removed ? `<span class="qty-change is-removed">-${escapeHtml(removed)}</span>` : ""}</span>`;
+    return `<span class="qty-change-set-v257">${added ? `<span class="qty-change is-added">+${escapeHtml(added)} pcs</span>` : ""}${removed ? `<span class="qty-change is-removed">-${escapeHtml(removed)} pcs</span>` : ""}</span>`;
   };
 
   const quantityChangeHtmlForRow = (row, list) => {
@@ -25212,6 +25325,8 @@ function importHistoryRows(imports = []) {
     <div class="admin-import-date-list">
       ${[...groups.values()]
         .map((group, index) => {
+          const previewContextKey = `${group.key}|${group.importedAt || ""}|${index}`;
+          state.adminImportPreviewContexts.set(previewContextKey, group.entries.slice());
           const changedStageRows = collapseDuplicateStageRows(group.stageRows.filter(hasStageChanges));
           const allStageRows = allStageRowsForGroup(group, changedStageRows);
           const managementRows = managementRowsForGroup(group, changedStageRows);
@@ -25319,9 +25434,10 @@ function importHistoryRows(imports = []) {
                                 type="button"
                                 class="admin-import-icon-button admin-update-preview-button"
                                 data-admin-list-update-preview="${escapeHtml(managementRow.previewListIds.join(","))}"
+                                data-admin-preview-context="${escapeHtml(previewContextKey)}"
                                 ${managementRow.previewRouteGroup ? `data-admin-preview-route-group="${escapeHtml(managementRow.previewRouteGroup)}"` : ""}
-                                aria-label="Preview ${managementRow.previewCount} new, updated, or removed order${managementRow.previewCount === 1 ? "" : "s"} for ${escapeHtml(managementRow.label)}"
-                                title="Preview ${escapeHtml(managementRow.label)} changes (${managementRow.previewCount} order${managementRow.previewCount === 1 ? "" : "s"})"
+                                aria-label="Preview ${managementRow.previewCount} changed row${managementRow.previewCount === 1 ? "" : "s"} for ${escapeHtml(managementRow.label)}"
+                                title="Preview ${escapeHtml(managementRow.label)} changes (${managementRow.previewCount} row${managementRow.previewCount === 1 ? "" : "s"})"
                               >${adminUpdatePreviewIconHtml()}</button>`
                             : ""}
                           <button
@@ -25382,8 +25498,9 @@ function importHistoryRows(imports = []) {
             type="button"
             class="admin-import-icon-button admin-update-preview-button"
             data-admin-list-update-preview="${escapeHtml(previewListIds.join(","))}"
-            aria-label="Preview ${escapeHtml(previewItemCount)} new, updated, or removed item${previewItemCount === 1 ? "" : "s"}"
-            title="Preview ${escapeHtml(previewItemCount)} new, updated, or removed item${previewItemCount === 1 ? "" : "s"}"
+            data-admin-preview-context="${escapeHtml(previewContextKey)}"
+            aria-label="Preview ${escapeHtml(previewItemCount)} changed row${previewItemCount === 1 ? "" : "s"}"
+            title="Preview ${escapeHtml(previewItemCount)} changed row${previewItemCount === 1 ? "" : "s"}"
           >${adminUpdatePreviewIconHtml()}</button>`
         : ""
     }
@@ -30630,10 +30747,10 @@ function importRunClassification(entries = []) {
     || Number(entry.removedLineCount || 0)
     || Number(entry.removedPieceQty || 0)
   );
-  const created = entries.some((entry) => Number(entry.createdCount || 0));
+  const newDeliveryList = entries.some((entry) => Boolean(entry.newDeliveryList));
   if (running) return { key: "running", label: "Running" };
   if (failed) return { key: "failed", label: "Failed" };
-  if (created && changed) return { key: "new-updated", label: "New / Updated" };
+  if (newDeliveryList) return { key: "new", label: "New" };
   if (changed) return { key: "updated", label: "Updated" };
   return { key: "unchanged", label: "No Changes" };
 }
@@ -31330,6 +31447,7 @@ function wireV135OperationsEvents() {
       openDeliveryListUpdatePreview(
         updatePreview.dataset.adminListUpdatePreview,
         updatePreview.dataset.adminPreviewRouteGroup || "",
+        updatePreview.dataset.adminPreviewContext || "",
       ).catch((error) => showInlineError(error.message, true));
       return;
     }

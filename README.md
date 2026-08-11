@@ -1,18 +1,27 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.302**. SQLite remains the active/default backend.
+Current maintained release: **v0.303**. SQLite remains the active/default backend.
 
-v0.302 merges the maintained Main workspace with Website Version 2. It keeps Main's statistics, printing, rack, scan, and Bay Map improvements while adding Website 2's authoritative SQL-import reconciliation, complete import history, superseded-order review, and exact-key removal safeguards.
+v0.303 corrects delivery-date/stage selection after a list is restored or replaced and makes import history consistently report physical pieces instead of summing the same rows across operational stage copies.
 
-## Install v0.302
+## Install v0.303
 
 1. Stop the Delivery List Scanner if it is running.
-2. Extract the v0.302 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project` and replace the included files.
+2. Extract the v0.303 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project` and replace the included files.
 3. Preserve the existing `data` folder and database files.
 4. Start the scanner normally.
-5. Hard-refresh the browser (`Ctrl+F5`) once so the v0.302 CSS/JavaScript cache keys are loaded.
+5. Hard-refresh the browser (`Ctrl+F5`) once so the v0.303 CSS/JavaScript cache keys are loaded.
 
 On first start, the numbered migration runner upgrades schema version 5 databases through schema version **11** without deleting operational data. Keep the existing `data` folder in place and retain a verified database backup before replacing program files.
+
+## v0.303 highlights
+
+- Kept the selected delivery date synchronized with the active delivery-list catalog so removed or restored lists cannot leave the Scan date selector blank.
+- Refreshes the replacement active list immediately when an import changes which list is active, restoring the correct stages without a page reload.
+- Counts import changes from the canonical physical list copy rather than adding Staging, Outbound, and destination-stage copies together.
+- Distinguishes changed rows from physical piece quantities in import previews and treats restored or newly added route stages as updates rather than brand-new delivery dates.
+- Preserves all route rules; Indian Trail rows remain Indian Trail unless an explicit source route or configured customer route rule says otherwise.
+- Advanced `APPLICATION_VERSION` to 303 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
 ## v0.302 highlights
 

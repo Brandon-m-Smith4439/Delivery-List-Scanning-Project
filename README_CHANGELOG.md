@@ -1,5 +1,15 @@
 # Delivery List Scanner Changelog
 
+## v0.303 - Delivery Date Recovery and Accurate Import Quantities
+
+- Prevented stale deleted-list metadata from blanking the Scan delivery-date selector after imports, restores, and catalog refreshes.
+- Refreshes the newly selected active-list detail whenever an import replaces an inactive or unavailable list.
+- Normalized current and historical import summaries against the canonical Staging copy, with Outbound as the fallback, so one physical piece is counted once.
+- Separated changed-row labels from piece totals in Delivery List Update Preview and import-history actions.
+- Added durable new-date classification so restored lists and new route stages are reported as updates while truly new delivery dates remain New.
+- Added isolated SQLite regression tests for Indian Trail-only routing, update quantities, restored stages, foreign keys, integrity checks, and historical stage-copy normalization.
+- Advanced `APPLICATION_VERSION` to 303 while preserving SQLite schema version 11.
+
 ## v0.302 - Main and Website 2 Integration, Exact Removal History, and Import Review
 
 - Restored five-run pagination in Today's Import Activity while retaining every loaded same-day run across the pager.

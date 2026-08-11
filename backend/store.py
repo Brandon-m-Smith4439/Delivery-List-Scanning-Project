@@ -1898,6 +1898,63 @@ class BaseDeliveryStore:
             "removedPieceQty": int(preferred.get("removedPieceQty") or 0),
         }
 
+    def normalize_import_change_summary(self, change_summary: dict[str, Any] | None) -> dict[str, Any]:
+        """Return import history with physical-piece totals and durable classification.
+
+        Older scanner releases summed Staging, Outbound, and destination-stage
+        copies into the import-level piece totals. The stage summaries retain the
+        correct facts, so normalize those historical records when they are read.
+        A delivery date is considered new only when every created stage belongs to
+        a genuinely new date; restored stages and new route stages are updates.
+        """
+        normalized = dict(change_summary or {})
+        stages = [
+            dict(row)
+            for row in (normalized.get("stages") or normalized.get("stageSummaries") or [])
+            if isinstance(row, dict)
+        ]
+        if not stages:
+            return normalized
+
+        normalized.update(self.canonical_source_change_metrics(stages))
+        normalized["stages"] = stages
+
+        created_stages = [row for row in stages if bool(row.get("created"))]
+        changed_stages = [
+            row
+            for row in stages
+            if bool(row.get("created") or row.get("reactivated"))
+            or int(row.get("changedLineCount") or 0)
+            or int(row.get("changedPieceQty") or 0)
+            or int(row.get("removedLineCount") or 0)
+            or int(row.get("removedPieceQty") or 0)
+        ]
+        created_ids = {str(row.get("listId") or "").strip().lower() for row in created_stages}
+        created_stage_text = {
+            f"{row.get('stage') or ''} {row.get('scanner') or row.get('stageProfile') or ''}".strip().lower()
+            for row in created_stages
+        }
+        created_staging = any(value.endswith("-staging-airport") for value in created_ids) or any(
+            "staging" in value and "airport" in value for value in created_stage_text
+        )
+        created_outbound = any(value.endswith("-outbound-airport") for value in created_ids) or any(
+            "outbound" in value and "airport" in value for value in created_stage_text
+        )
+        inferred_new_date = (
+            bool(changed_stages)
+            and len(created_stages) == len(changed_stages)
+            and created_staging
+            and created_outbound
+        )
+        normalized["newDeliveryList"] = bool(
+            normalized.get("newDeliveryList", inferred_new_date)
+        )
+        normalized["createdCount"] = len(created_stages)
+        normalized["reactivatedCount"] = sum(
+            1 for row in stages if bool(row.get("reactivated"))
+        )
+        return normalized
+
     def import_delivery_list(self, data: dict[str, Any]) -> dict[str, Any]:
         """Purpose: Load delivery list for the delivery-list scanner workflow.
 
@@ -9592,12 +9649,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 (delivery_date,),
             ).fetchall()
-            active_existing_list_ids = {
-                row["id"]
-                for row in existing_list_rows
-                if row["id"] in definition_id_set
-                and str(row["status"] or "").strip().lower() == "active"
+            existing_definition_ids = {
+                row["id"] for row in existing_list_rows if row["id"] in definition_id_set
             }
+            new_delivery_list = not existing_list_rows
             reactivated_list_ids = {
                 row["id"]
                 for row in existing_list_rows
@@ -9763,7 +9818,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "deliveryDate": delivery_date,
                 "runId": run_id,
                 "runStartedAt": run_started_at,
-                "createdCount": sum(1 for summary in stage_summaries if summary["created"] or summary.get("reactivated")),
+                "newDeliveryList": new_delivery_list,
+                "createdCount": sum(1 for summary in stage_summaries if summary["created"]),
                 "reactivatedCount": sum(1 for summary in stage_summaries if summary.get("reactivated")),
                 "reactivatedListIds": [summary["listId"] for summary in stage_summaries if summary.get("reactivated")],
                 "updatedCount": sum(
@@ -9787,7 +9843,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             # This lets newly-added customer email rules catch the next import even when the list file is unchanged.
             self.send_customer_manifests_for_import(con, payload, user)
             con.commit()
-        created_count = sum(1 for definition in definitions if definition[0] not in active_existing_list_ids)
+        created_count = sum(1 for definition in definitions if definition[0] not in existing_definition_ids)
         reactivated_count = sum(1 for definition in definitions if definition[0] in reactivated_list_ids)
         updated_count = sum(
             1
@@ -9807,6 +9863,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "importId": int(import_cur.lastrowid or 0),
             "importedCount": len(definitions),
             "createdCount": created_count,
+            "newDeliveryList": new_delivery_list,
             "reactivatedCount": reactivated_count,
             "reactivatedListIds": sorted(reactivated_list_ids),
             "updatedCount": updated_count,
@@ -10002,6 +10059,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "rowCount": preview["rowCount"],
                     "totalQty": preview["totalQty"],
                     "createdCount": result["createdCount"],
+                    "newDeliveryList": bool(result.get("newDeliveryList")),
                     "reactivatedCount": result.get("reactivatedCount", 0),
                     "updatedCount": result["updatedCount"],
                     "listIds": result["changedListIds"],
@@ -10019,7 +10077,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "reason": "No updates" if same_active_file else "No delivery-list line changes detected",
                     })
                     continue
-                if result["createdCount"]:
+                if result.get("newDeliveryList"):
                     imported_files.append(file_result)
                 else:
                     updated_files.append(file_result)
@@ -12184,6 +12242,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     change_summary = json.loads(row["change_summary"] or "{}")
                 except Exception:
                     change_summary = {}
+                change_summary = self.normalize_import_change_summary(change_summary)
                 stage_summaries = change_summary.get("stages") if isinstance(change_summary, dict) else []
                 changed_list_ids = change_summary.get("changedListIds") if isinstance(change_summary, dict) else []
 
@@ -12224,6 +12283,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "importedBy": row["imported_by"],
                         "importedAt": row["imported_at"],
                         "createdCount": change_summary.get("createdCount", 0) if isinstance(change_summary, dict) else 0,
+                        "newDeliveryList": bool(change_summary.get("newDeliveryList")) if isinstance(change_summary, dict) else False,
                         "updatedCount": change_summary.get("updatedCount", 0) if isinstance(change_summary, dict) else 0,
                         "newPieceQty": change_summary.get("newPieceQty", 0) if isinstance(change_summary, dict) else 0,
                         "updatedPieceQty": change_summary.get("updatedPieceQty", 0) if isinstance(change_summary, dict) else 0,
