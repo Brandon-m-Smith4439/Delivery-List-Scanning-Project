@@ -1,17 +1,66 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.262**. SQLite remains the active/default backend.
+Current maintained release: **v0.273**. SQLite remains the active/default backend.
 
-v0.262 consolidates breakage reporting into readable machine, glass-type, and reject-reason views. Statistics now supports the same polished custom date-range calendar pattern used by Print / Export, while breakage charts switch units without duplicating datasets.
+v0.273 tightens Packing List History, fixes snapshot-preview layering and action layout, changes Glass Cart to an A-frame cart visual, and restores a tiny direct Edit Bays shortcut on each physical Bay Map group.
 
-## Install v0.262
+## Install v0.273
 
-1. Back up the current project folder before replacing files.
-2. Extract the v0.262 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project` and replace the included files.
-3. Restart the Delivery List Scanner.
-4. Refresh the browser with `Ctrl+F5`.
+1. Stop the Delivery List Scanner if it is running.
+2. Extract the v0.273 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project` and replace the included files.
+3. Preserve the existing `data` folder and database files.
+4. Start the scanner normally.
+5. Hard-refresh the browser (`Ctrl+F5`) once so the v0.273 CSS/JavaScript cache keys are loaded.
 
-No database migration is required. `CURRENT_SCHEMA_VERSION` remains **5**. This release reads existing reject reason/machine fields and the existing administrator-managed glass-cost lookup data.
+No database migration is required. `CURRENT_SCHEMA_VERSION` remains **5**. This release changes rack-history, rack-set icon presentation, and Bay Map UI only.
+
+## v0.273 highlights
+
+- Collapsed the oversized Packing List History page-count strip into one compact line such as **1-5 of 5 print days · 6 snapshots**.
+- Forced **Preview** and **Print Snapshot** to remain beside each other on each snapshot row.
+- Raised the snapshot preview into a dedicated top-level visual layer so it always appears above Packing List History.
+- Removed the redundant footer **Close** button from Snapshot Preview while retaining the top-right X and Escape/backdrop close behavior.
+- Replaced the generic Glass Cart visual with a recognizable **A-frame glass cart** icon while retaining the existing saved `glasscart` value for compatibility.
+- Restored a very small pencil shortcut in the top-right of each physical Bay Map group; clicking it opens that exact group in the maintained Edit Bays GUI.
+- Advanced `APPLICATION_VERSION` to 273 while preserving `CURRENT_SCHEMA_VERSION = 5`; no migration or database reset is included.
+
+## v0.269 highlights
+
+- Reworded Scan update messaging to distinguish a **New stage** from a **Delivery list updated** with **new orders**; Scan attention filtering now says **New Orders** instead of describing orders as updated.
+- Strengthened the always-visible Scan review bar with a clearer border, accent, and NEW STAGE / NEW ORDERS label so pending review work is harder to miss.
+- Set the Scan new-order/stage review popup to **10 seconds** with matching countdown/progress timing.
+- Preserved the most recent rack on a scan line after that rack is cleared/scanned out, displaying the former rack as a muted **prior** location while active rack/bay/received locations still take precedence.
+- Standardized shared blue buttons at a consistent **13px** font size and a slightly shorter **38px** minimum height; the Manual Scan Submit button now uses the shared primary-button component.
+- Added a rack-set icon library and editable icon color when creating or editing a rack set. Selections persist through existing `system_metadata` and appear on Rack Overview cards and Rack Manager group headers.
+- Added a visible **20-second** Old Bay review countdown and matching timeout progress bar.
+- Advanced `APPLICATION_VERSION` to 269 while preserving `CURRENT_SCHEMA_VERSION = 5`; no migration or database reset is included.
+
+## v0.266 highlights
+
+- Made New/Updated flags authoritative to the newest update batch for each stage so superseded unreviewed notices no longer keep stale `!` markers or review notifications visible.
+- Changed Staging/Outbound review to acknowledge the same current update batch across every active route/stage for that delivery date, while IT, CPU, DTC, and Greenville remain stage-specific and per-user.
+- Reduced the New/Updated review notification lifetime from 15 seconds to 7.5 seconds.
+- Kept Stage and Delivery Date popup menus aligned to their compact trigger width so `!` indicators do not cause oversized dropdowns.
+- Increased Scan panel Station, Stage, and Delivery Date value text slightly while expanding the label budget for Indian Trail and review-marked dates.
+- Advanced `APPLICATION_VERSION` to 266 while preserving `CURRENT_SCHEMA_VERSION = 5`; no migration or database reset is included.
+
+## v0.265 highlights
+
+- Expanded the Scan header label budget so Indian Trail and delivery dates with review markers remain fully visible.
+- Added per-user `!` review markers to the Stage selector as well as the Delivery Date selector.
+- Changed date marker aggregation to de-duplicate the same order/item copied across multiple stages.
+- Made Airport Rd review order-aware: reviewing Staging or Outbound marks the exact reviewed update occurrence read across downstream copies of those same order/items for that user.
+- Kept Indian Trail, CPU, DTC, and Greenville review independent so reviewing one route does not clear another route.
+- Moved each Bay Map grouped-set Edit icon to the top-right corner of the group header.
+- Advanced `APPLICATION_VERSION` to 265 while preserving `CURRENT_SCHEMA_VERSION = 5`; no migration or database reset is included.
+
+## v0.263 highlights
+
+- Restored readable Statistics typography after the prior compact pass made labels, controls, table text, legends, and chart details too small.
+- Reorganized breakage tables into clearer accountability blocks for machine/glass/reason review.
+- Grouped pieces, SQFT, cost, and reject count together instead of spreading them across many narrow columns.
+- Improved coverage/status presentation and selected-row drilldowns while preserving custom ranges and breakage controls.
+- Advanced `APPLICATION_VERSION` to 263 while preserving `CURRENT_SCHEMA_VERSION = 5`; no database migration or database change is included.
 
 ## v0.262 highlights
 

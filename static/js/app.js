@@ -44,7 +44,7 @@ const SCAN_FILTER_LABELS = Object.freeze({
   "internal-rejects": "Internal Rejects",
   remakes: "Remakes",
   rushes: "Rushes",
-  updated: "New/Updated",
+  updated: "New Orders",
   errors: "Errors",
   "indian-trail-route": "Indian Trail",
   "cpu-route": "CPU",
@@ -117,6 +117,11 @@ const state = {
   rackManagerSelectedCode: "",
   rackManagerEditingRackCode: "",
   rackManagerEditingSetLabel: "",
+  expandedRackManagerGroups: new Set(),
+  packingHistoryPage: 1,
+  packingHistoryDaysPerPage: 25,
+  packingHistoryQuery: "",
+  packingHistorySearchTimer: null,
   rackStatusFilter: "all",
   rackSort: "code-asc",
   printContext: null,
@@ -267,6 +272,7 @@ const state = {
   adminImportRunPage: 1,
   adminImportRunsPerPage: 5,
   pendingUpdateDates: new Map(),
+  pendingUpdateStages: new Map(),
   pendingUpdateDatesRequestId: 0,
   rejectCatalog: { reasons: [], locations: [] },
   rejectHistory: [],
@@ -567,16 +573,10 @@ document.addEventListener("dls:delivery-list-data-refreshed", (event) => {
   window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 250);
 });
 
-document.addEventListener("dls:user-line-updates-reviewed", (event) => {
-  const reviewedListId = String(event.detail?.listId || "");
-  const reviewedList = state.lists.find((list) => String(list.id || "") === reviewedListId);
-  const reviewedDate = String(reviewedList?.deliveryDate || "");
-  if (reviewedDate) {
-    state.pendingUpdateDates.delete(reviewedDate);
-    renderDeliveryListSelect();
-    syncAllCustomSelects();
-  }
-  window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 220);
+document.addEventListener("dls:user-line-updates-reviewed", () => {
+  // v0.265: stage/date markers are authoritative per user. Do not hide an entire
+  // date optimistically because route-specific stages may still need review.
+  window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 120);
 });
 
 document.addEventListener("dls:open-internal-reject-notification", () => {
@@ -1679,6 +1679,18 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Machine breakage overview", "Resumen de roturas por máquina"],
   ["Glass type breakage overview", "Resumen de roturas por tipo de vidrio"],
   ["Reject reasons by machine", "Motivos de rechazo por máquina"],
+  ["Breakage detail", "Detalle de roturas"],
+  ["Machine breakage accountability", "Responsabilidad de roturas por máquina"],
+  ["Glass type breakage accountability", "Responsabilidad de roturas por tipo de vidrio"],
+  ["Breakage totals", "Totales de roturas"],
+  ["Reject reasons", "Motivos de rechazo"],
+  ["Frequency", "Frecuencia"],
+  ["Coverage", "Cobertura"],
+  ["Complete", "Completo"],
+  ["occurrences", "incidencias"],
+  ["Occurrence count is separated from material impact so recurring causes are easy to spot.", "La frecuencia se separa del impacto del material para detectar fácilmente las causas recurrentes."],
+  ["Compare pieces, SQFT, cost, glass types, and recurring reject reasons for every machine.", "Compare piezas, pies cuadrados, costo, tipos de vidrio y motivos de rechazo recurrentes para cada máquina."],
+  ["Compare total material impact for each glass type, then see the machines and reasons behind it.", "Compare el impacto total del material por tipo de vidrio y luego vea las máquinas y los motivos relacionados."],
   ["Chart unit", "Unidad de gráfica"],
   ["Square feet", "Pies cuadrados"],
   ["Occurrences", "Incidencias"],
@@ -2327,6 +2339,22 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Rack ID (A-Z)", "ID de rack (A-Z)"],
   ["Rack ID (Z-A)", "ID de rack (Z-A)"],
   ["Rack Manager", "Administrador de racks"],
+  ["Add Individual Rack", "Agregar rack individual"],
+  ["Add individual rack", "Agregar rack individual"],
+  ["Edit individual rack", "Editar rack individual"],
+  ["Rack Configuration", "Configuración de racks"],
+  ["Rack identity", "Identidad del rack"],
+  ["Rack set / type", "Conjunto / tipo de rack"],
+  ["Display name", "Nombre visible"],
+  ["Live Preview", "Vista previa"],
+  ["Set Preview", "Vista previa del conjunto"],
+  ["Set identity", "Identidad del conjunto"],
+  ["Code suffix", "Sufijo del código"],
+  ["Numbering", "Numeración"],
+  ["Visual identity", "Identidad visual"],
+  ["Create Rack", "Crear rack"],
+  ["Save Rack", "Guardar rack"],
+  ["Create Rack Set", "Crear conjunto de racks"],
   ["Rack name", "Nombre del rack"],
   ["Rack set / type", "Conjunto / tipo de rack"],
   ["Rack type", "Tipo de rack"],
@@ -3716,6 +3744,16 @@ function customSelectSelectedText(select) {
   return option?.textContent?.trim() || select.getAttribute("placeholder") || "Choose an option";
 }
 
+function customSelectUpdateIndicatorTitle(select, option, indicatorCount) {
+  const countText = indicatorCount || "Unreviewed";
+  const lineText = indicatorCount === 1 ? "line" : "lines";
+  if (select?.id === "deliveryStageSelect") {
+    const stageLabel = String(option?.textContent || "this stage").trim() || "this stage";
+    return `${countText} new or updated ${lineText} need review in ${stageLabel}`;
+  }
+  return `${countText} new or updated ${lineText} need review on this delivery date`;
+}
+
 /**
  * Purpose: Run the sync custom select workflow for the browser application.
  * Effects: Updates visible dom state, may update shared client state.
@@ -3748,7 +3786,7 @@ function syncCustomSelect(select) {
     indicator.className = `custom-select-value-indicator${indicatorKind ? ` is-${indicatorKind}` : ""}`;
     indicator.textContent = indicatorKind === "new" ? "!" : "";
     indicator.title = indicatorKind === "new"
-      ? `${indicatorCount || "Unreviewed"} new or updated line${indicatorCount === 1 ? "" : "s"} on this delivery date`
+      ? customSelectUpdateIndicatorTitle(select, option, indicatorCount)
       : "";
   }
 
@@ -3795,9 +3833,19 @@ function positionCustomSelectMenu() {
     0,
   );
   const contentWidth = Math.min(420, Math.max(210, longestOptionLength * 7.2 + 58));
-  const preferredWidth = Math.max(rect.width, contentWidth);
-  const maxWidth = Math.max(210, window.innerWidth - viewportPadding * 2);
-  const menuWidth = Math.min(preferredWidth, maxWidth);
+  const isScanDateSelect = select.id === "deliveryDateSelect";
+  const isScanStageSelect = select.id === "deliveryStageSelect";
+  const isScanContextSelect = isScanDateSelect || isScanStageSelect;
+  // The stage menu should follow its trigger exactly; the date menu needs a
+  // little extra width so Monday-Friday headers remain readable on one line.
+  const preferredWidth = isScanDateSelect
+    ? Math.max(rect.width, 244)
+    : isScanStageSelect
+      ? rect.width
+      : Math.max(rect.width, contentWidth);
+  const minimumWidth = isScanDateSelect ? Math.max(rect.width, 220) : (isScanStageSelect ? rect.width : 210);
+  const availableWidth = Math.max(160, window.innerWidth - viewportPadding * 2);
+  const menuWidth = Math.min(Math.max(preferredWidth, Math.min(minimumWidth, availableWidth)), availableWidth);
 
   menu.style.width = `${menuWidth}px`;
   menu.style.left = `${Math.min(Math.max(rect.left, viewportPadding), window.innerWidth - menuWidth - viewportPadding)}px`;
@@ -3941,7 +3989,7 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     indicator.hidden = !indicatorKind;
     indicator.textContent = indicatorKind === "new" ? "!" : "";
     indicator.title = indicatorKind === "new"
-      ? `${indicatorCount || "Unreviewed"} new or updated line${indicatorCount === 1 ? "" : "s"} on this delivery date`
+      ? customSelectUpdateIndicatorTitle(select, row.option, indicatorCount)
       : "";
 
     button.append(label, indicator, check);
@@ -4025,7 +4073,8 @@ function openCustomSelect(select) {
 
   const menu = document.createElement("div");
   const timedConfirmationShell = select.closest("[data-timed-scan-confirmation]");
-  menu.className = `custom-select-menu${timedConfirmationShell ? " is-timed-confirmation-menu" : ""}`;
+  const scanContextMenu = select.id === "deliveryDateSelect" || select.id === "deliveryStageSelect";
+  menu.className = `custom-select-menu${timedConfirmationShell ? " is-timed-confirmation-menu" : ""}${scanContextMenu ? " is-scan-context-menu" : ""}`;
   menu._timedConfirmationShell = timedConfirmationShell || null;
   timedConfirmationShell?._setCustomSelectOpen?.(true);
   menu.id = `${select.id || `customSelect${Date.now()}`}Menu`;
@@ -4639,7 +4688,7 @@ function deliveryBusinessWeekLabel(value) {
       : key === deliveryDateKey(next)
         ? "Next Week"
         : "Week";
-  const range = `${formatNumericDeliveryDate(start)}–${formatNumericDeliveryDate(end)}`;
+  const range = `${formatNumericDeliveryDate(start)} - ${formatNumericDeliveryDate(end)}`;
   return `${prefix} · ${range}`;
 }
 
@@ -5537,6 +5586,9 @@ async function activateList(listId, navigate = true) {
   if (lineFlags) {
     window.DLSLineUpdates?.applyPayload?.(lineFlags, listId, { prompt: navigate, render: false });
   }
+  if (changingDate) {
+    window.setTimeout(() => refreshPendingUpdateDates({ force: false }).catch(() => {}), 40);
+  }
   if (navigate || document.activeElement === els.scanInput) els.scanInput?.focus();
 }
 
@@ -6377,12 +6429,38 @@ function locationLabel(item) {
   if (item?.received === true || Number(item?.receivedQty || 0) > 0) return "Received";
   const stageText = `${state.meta?.stage || ""} ${state.meta?.scanner || ""}`.toLowerCase();
   const rackCode = String(item.rackCode || "").trim().toUpperCase();
-  if (stageText.includes("indian trail")) return item.bayCode ? `Bay ${item.bayCode}` : "";
+  if (stageText.includes("indian trail") && item.bayCode) return `Bay ${item.bayCode}`;
   if (rackCode === "T" || /^T\d+$/i.test(rackCode) || /truck|no rack/i.test(`${item.rackName || ""} ${item.rackType || ""}`)) {
     return rackCode === "T" ? "Truck" : `Truck ${rackCode.replace(/^T/i, "")}`;
   }
   if (rackCode) return rackCode;
+
+  // v0.269: once a rack assignment is cleared, keep the most recent transport
+  // rack visible as history. The row renderer gives this fallback a muted style
+  // so operators can distinguish prior transportation from the current location.
+  const previousRackCode = String(item.lastRackCode || "").trim().toUpperCase();
+  if (previousRackCode === "T" || /^T\d+$/i.test(previousRackCode) || /truck|no rack/i.test(`${item.lastRackName || ""} ${item.lastRackType || ""}`)) {
+    return previousRackCode === "T" ? "Truck" : `Truck ${previousRackCode.replace(/^T/i, "")}`;
+  }
+  if (previousRackCode) return previousRackCode;
   return "";
+}
+
+function rackHistoryLocationLabel(item) {
+  const previousRackCode = String(item?.lastRackCode || "").trim().toUpperCase();
+  if (!previousRackCode) return "";
+  if (previousRackCode === "T" || /^T\d+$/i.test(previousRackCode) || /truck|no rack/i.test(`${item?.lastRackName || ""} ${item?.lastRackType || ""}`)) {
+    return previousRackCode === "T" ? "Truck" : `Truck ${previousRackCode.replace(/^T/i, "")}`;
+  }
+  return previousRackCode;
+}
+
+function locationIsRackHistory(item) {
+  return Boolean(
+    item
+    && !String(item.rackCode || "").trim()
+    && String(item.lastRackCode || "").trim()
+  );
 }
 
 /**
@@ -6480,8 +6558,25 @@ function locationBadgeClass(location) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function rackLocationDropdown(item, currentLocation = "") {
+  const historical = locationIsRackHistory(item);
+  const historyLocation = historical ? rackHistoryLocationLabel(item) : "";
+  const historyTitle = historyLocation
+    ? `Previously transported in ${String(item.lastRackName || item.lastRackCode || historyLocation).trim()}`
+    : "";
+  const historyBadge = historyLocation
+    ? `<span class="${escapeHtml(locationBadgeClass(historyLocation))} is-rack-history" title="${escapeHtml(historyTitle)}">${escapeHtml(historyLocation)}</span>`
+    : "";
+
   if (!itemCanShowRackLocationDropdown(item)) {
-    return currentLocation ? `<span class="${escapeHtml(locationBadgeClass(currentLocation))}">${escapeHtml(currentLocation)}</span>` : "";
+    if (!currentLocation && !historyBadge) return "";
+    const currentIsHistory = Boolean(historyLocation && String(currentLocation || "") === historyLocation);
+    const currentBadge = currentLocation && !currentIsHistory
+      ? `<span class="${escapeHtml(locationBadgeClass(currentLocation))}">${escapeHtml(currentLocation)}</span>`
+      : "";
+    if (currentBadge && historyBadge) {
+      return `<span class="location-history-stack-v269">${currentBadge}${historyBadge}</span>`;
+    }
+    return currentBadge || historyBadge;
   }
 
   const currentRackCode = String(item.rackCode || "").trim().toUpperCase() === "T" ? "T" : String(item.rackCode || "").trim();
@@ -6493,15 +6588,17 @@ function rackLocationDropdown(item, currentLocation = "") {
   const assignableRacks = (state.racks || []).filter((rack) => !rackIsLockedForLineAssignment(rack));
   const rackOptions = groupedRackOptionsHtml(assignableRacks, currentRackCode);
 
-  return `
+  const control = `
     <label class="line-rack-location-control" title="Supervisor/Admin rack recovery assignment">
       <span>Rack</span>
       <select data-line-rack-select="${escapeHtml(item.id)}" ${rackOptions ? "" : "disabled"}>
         <option value="">${rackOptions ? "No rack" : "Loading racks..."}</option>
         ${rackOptions}
       </select>
-    </label>
-  `;
+    </label>`;
+  return historyBadge
+    ? `<span class="location-history-stack-v269 is-editable">${control}${historyBadge}</span>`
+    : control;
 }
 
 /**
@@ -6636,7 +6733,7 @@ function renderCounts() {
   if (els.countUpdated) els.countUpdated.textContent = `(${updatedCount})`;
   updateScanFilterGlanceBadge(els.scanFilterRemakeBadge, remakeAll, "remake pieces");
   updateScanFilterGlanceBadge(els.scanFilterRushBadge, rushAll, "rush pieces");
-  updateScanFilterGlanceBadge(els.scanFilterUpdatedBadge, updatedCount, "new or updated pieces");
+  updateScanFilterGlanceBadge(els.scanFilterUpdatedBadge, updatedCount, "new-order pieces");
   updateScanFilterGlanceBadge(els.scanFilterRejectBadge, internalRejectCount, "internal reject pieces");
   if (els.countErrors) els.countErrors.textContent = `(${stats.errorCount})`;
 
@@ -6907,6 +7004,178 @@ function rackGroupLabel(rack) {
   return rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks";
 }
 
+const RACK_SET_ICON_LIBRARY = [
+  ["rack", "Rack"],
+  ["truck", "Truck"],
+  ["steel", "Steel"],
+  ["wood", "Wood"],
+  ["aluminum", "Aluminum"],
+  ["showers", "Shower"],
+  ["mirror", "Mirror"],
+  ["spacer", "Spacer"],
+  ["coral", "Glass bay"],
+  ["glasscart", "A-frame glass cart"],
+  ["pallet", "Pallet"],
+  ["dolly", "Dolly"],
+  ["crate", "Crate"],
+  ["warehouse", "Warehouse"],
+];
+
+const RACK_SET_COLOR_PALETTE = [
+  "#176d72", "#245f9f", "#6b4fa1", "#a5532a", "#2f7d4a",
+  "#8a3d67", "#3b6f91", "#8a6a20", "#3f5f4b", "#744d86",
+];
+
+function rackSetExplicitVisual(value) {
+  const label = String(value || "Racks").trim();
+  const rack = (state.racks || []).find((entry) => rackGroupLabel(entry) === label && (entry.setIcon || entry.setColor));
+  return {
+    icon: String(rack?.setIcon || "").trim().toLowerCase(),
+    color: String(rack?.setColor || "").trim().toLowerCase(),
+  };
+}
+
+function rackSetVisualColor(value) {
+  return rackSetExplicitVisual(value).color || "";
+}
+
+function nextRackSetVisualColor() {
+  const groups = new Set((state.racks || []).map((rack) => rackGroupLabel(rack)));
+  return RACK_SET_COLOR_PALETTE[groups.size % RACK_SET_COLOR_PALETTE.length];
+}
+
+function rackSetIconLibraryHtml(selected = "rack", inputId = "rackSetModalIcon") {
+  const current = String(selected || "rack").trim().toLowerCase();
+  return `
+    <input id="${escapeHtml(inputId)}" type="hidden" value="${escapeHtml(current)}">
+    <div class="rack-set-icon-library-v269" role="list" aria-label="Rack set icon library">
+      ${RACK_SET_ICON_LIBRARY.map(([value, label]) => `
+        <button type="button" class="rack-set-icon-choice-v269 ${current === value ? "is-selected" : ""}" data-rack-set-icon-choice="${escapeHtml(value)}" data-rack-set-icon-target="${escapeHtml(inputId)}" aria-pressed="${current === value ? "true" : "false"}">
+          <span class="rack-set-icon-choice-art-v271" aria-hidden="true">
+            <span class="rack-set-visual-icon-v269" data-rack-icon="${escapeHtml(value)}"></span>
+          </span>
+          <small>${escapeHtml(label)}</small>
+        </button>`).join("")}
+    </div>`;
+}
+
+/** Render a quick color palette plus the native custom-color picker. */
+function rackSetColorPickerHtml(selectedColor = "#176d72") {
+  const current = String(selectedColor || "#176d72").trim().toLowerCase();
+  return `
+    <div class="rack-set-color-picker-v271">
+      <div class="rack-set-color-palette-v271" role="list" aria-label="Suggested rack set colors">
+        ${RACK_SET_COLOR_PALETTE.map((color) => `
+          <button
+            type="button"
+            class="rack-set-color-choice-v271 ${current === color.toLowerCase() ? "is-selected" : ""}"
+            data-rack-set-color-choice="${escapeHtml(color)}"
+            aria-label="Use color ${escapeHtml(color.toUpperCase())}"
+            aria-pressed="${current === color.toLowerCase() ? "true" : "false"}"
+            style="--rack-set-choice-color:${escapeHtml(color)}"
+          ><span aria-hidden="true"></span></button>`).join("")}
+      </div>
+      <label class="rack-set-custom-color-v271">
+        <span>Custom color</span>
+        <span class="rack-set-color-control-v269">
+          <input id="rackSetModalColor" type="color" value="${escapeHtml(current)}" aria-label="Custom rack set icon color">
+          <output data-rack-set-color-output>${escapeHtml(current.toUpperCase())}</output>
+        </span>
+      </label>
+    </div>`;
+}
+
+function setRackSetVisualChoice(button) {
+  const targetId = String(button?.dataset?.rackSetIconTarget || "").trim();
+  const value = String(button?.dataset?.rackSetIconChoice || "rack").trim().toLowerCase();
+  const input = targetId ? document.getElementById(targetId) : null;
+  if (!input) return;
+  input.value = value;
+  const library = button.closest(".rack-set-icon-library-v269");
+  library?.querySelectorAll("[data-rack-set-icon-choice]").forEach((choice) => {
+    const selected = choice === button;
+    choice.classList.toggle("is-selected", selected);
+    choice.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+}
+
+
+/** Return the maintained rack-set choices used by the individual-rack editor. */
+function rackSetFormChoices(selected = "") {
+  const current = String(selected || "").trim();
+  const labels = [...new Set((state.racks || []).map((rack) => rackGroupLabel(rack)).filter(Boolean))];
+  if (current && !labels.includes(current)) labels.push(current);
+  if (!labels.length) labels.push("Steel", "Wood", "Truck", "Aluminum", "Other");
+  return labels.sort((a, b) => {
+    if (a === "Truck") return 1;
+    if (b === "Truck") return -1;
+    return String(a).localeCompare(String(b));
+  });
+}
+
+/** Keep the polished individual-rack preview synchronized with the form values. */
+function syncRackFormPreview() {
+  const form = document.getElementById("rackFormModal");
+  if (!form) return;
+  const code = String(document.getElementById("rackModalCode")?.value || "New rack").trim() || "New rack";
+  const name = String(document.getElementById("rackModalName")?.value || "Rack display name").trim() || "Rack display name";
+  const type = String(document.getElementById("rackModalType")?.value || "Racks").trim() || "Racks";
+  const codeNode = form.querySelector("[data-rack-form-preview-code]");
+  const nameNode = form.querySelector("[data-rack-form-preview-name]");
+  const typeNode = form.querySelector("[data-rack-form-preview-type]");
+  const icon = form.querySelector("[data-rack-form-preview-icon]");
+  if (codeNode) codeNode.textContent = code;
+  if (nameNode) nameNode.textContent = name;
+  if (typeNode) typeNode.textContent = type;
+  if (icon) {
+    icon.dataset.rackIcon = rackSetVisualIcon(type);
+    icon.style.setProperty("--rack-set-icon-color", rackSetVisualColor(type) || "#176d72");
+  }
+}
+
+/** Keep the rack-set range and visual preview synchronized while the user types. */
+function syncRackSetFormPreview() {
+  const form = document.getElementById("rackSetFormModal");
+  if (!form) return;
+  const prefix = String(document.getElementById("rackSetModalPrefix")?.value || "S").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8) || "S";
+  const name = String(document.getElementById("rackSetModalName")?.value || "New rack set").trim() || "New rack set";
+  const count = Math.max(1, Math.min(Number(document.getElementById("rackSetModalCount")?.value || 1), 100));
+  const start = Math.max(1, Math.min(Number(document.getElementById("rackSetModalStart")?.value || 1), 999));
+  const iconValue = String(document.getElementById("rackSetModalIcon")?.value || "rack").trim().toLowerCase();
+  const color = String(document.getElementById("rackSetModalColor")?.value || "#176d72").trim();
+  const firstCode = prefix.length <= 3 ? `R${start}${prefix}` : `${prefix}${start}`;
+  const lastNumber = start + count - 1;
+  const lastCode = prefix.length <= 3 ? `R${lastNumber}${prefix}` : `${prefix}${lastNumber}`;
+  const nameNode = form.querySelector("[data-rack-set-preview-name]");
+  const rangeNode = form.querySelector("[data-rack-set-preview-range]");
+  const countNode = form.querySelector("[data-rack-set-preview-count]");
+  const icon = form.querySelector("[data-rack-set-preview-icon]");
+  if (nameNode) nameNode.textContent = name;
+  if (rangeNode) rangeNode.textContent = count === 1 ? firstCode : `${firstCode} - ${lastCode}`;
+  if (countNode) countNode.textContent = `${count} rack${count === 1 ? "" : "s"}`;
+  if (icon) {
+    icon.dataset.rackIcon = iconValue;
+    icon.style.setProperty("--rack-set-icon-color", color);
+  }
+  form.style.setProperty("--rack-set-icon-color", color);
+  form.querySelectorAll(".rack-set-icon-choice-v269 .rack-set-visual-icon-v269").forEach((choiceIcon) => {
+    choiceIcon.style.setProperty("--rack-set-icon-color", color);
+  });
+  form.querySelectorAll("[data-rack-set-color-choice]").forEach((choice) => {
+    const selected = String(choice.dataset.rackSetColorChoice || "").toLowerCase() === color.toLowerCase();
+    choice.classList.toggle("is-selected", selected);
+    choice.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+  const colorOutput = form.querySelector("[data-rack-set-color-output]");
+  if (colorOutput) colorOutput.textContent = color.toUpperCase();
+}
+
+/** Return from either add-rack workflow to the maintained Edit Racks workspace. */
+function returnToRackManager() {
+  state.rackModal = null;
+  openAdminModal("racks");
+}
+
 /**
  * Return the stable color hue shared by one rack set card and its rack-detail GUI.
  * Known material groups keep intentional colors; custom sets receive a restrained,
@@ -6935,6 +7204,8 @@ function rackSetVisualHue(value) {
 
 /** Return the maintained icon family for a rack set or individual rack. */
 function rackSetVisualIcon(value) {
+  const explicit = rackSetExplicitVisual(value).icon;
+  if (explicit) return explicit;
   const label = String(value || "Racks").trim().toLowerCase();
   if (/truck/.test(label)) return "truck";
   if (/coral/.test(label)) return "coral";
@@ -6959,6 +7230,9 @@ function applyRackOperationsVisual(rack) {
   els.operationsModal.dataset.rackSet = rackSet;
   els.operationsModal.dataset.rackIcon = rackSetVisualIcon(rackSet);
   els.operationsModal.style.setProperty("--rack-set-hue", String(rackSetVisualHue(rackSet)));
+  const setColor = rackSetVisualColor(rackSet);
+  if (setColor) els.operationsModal.style.setProperty("--rack-set-icon-color", setColor);
+  else els.operationsModal.style.removeProperty("--rack-set-icon-color");
 }
 
 /** Apply the audited records treatment to the shared Racks History GUI. */
@@ -6975,6 +7249,7 @@ function clearRackOperationsVisual() {
   delete els.operationsModal.dataset.rackSet;
   delete els.operationsModal.dataset.rackIcon;
   els.operationsModal.style.removeProperty("--rack-set-hue");
+  els.operationsModal.style.removeProperty("--rack-set-icon-color");
 }
 
 /**
@@ -7541,9 +7816,11 @@ function renderRacksPage() {
     const setClass = slugify(label || "rack-set") || "rack-set";
     const setHue = rackSetVisualHue(label);
     const setIcon = rackSetVisualIcon(label);
+    const setColor = rackSetVisualColor(label);
+    const visualStyle = `--rack-set-hue:${setHue}${setColor ? `;--rack-set-icon-color:${setColor}` : ""}`;
 
     return `
-      <button type="button" class="rack-set-card ${escapeHtml(setClass)} ${selected ? "is-selected" : ""}" data-rack-set-select="${escapeHtml(label)}" data-rack-icon="${escapeHtml(setIcon)}" style="--rack-set-hue:${escapeHtml(setHue)}">
+      <button type="button" class="rack-set-card ${escapeHtml(setClass)} ${selected ? "is-selected" : ""}" data-rack-set-select="${escapeHtml(label)}" data-rack-icon="${escapeHtml(setIcon)}" style="${escapeHtml(visualStyle)}">
         <span class="rack-set-icon" data-rack-icon="${escapeHtml(setIcon)}" aria-hidden="true"></span>
         <span class="rack-set-copy">
           <strong>${escapeHtml(label)}</strong>
@@ -8033,20 +8310,23 @@ async function printSelectedRackPackingSlip(rackCode = state.selectedRackCode, d
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function saveRackDefinition() {
+  const rackCode = document.getElementById("rackModalCode")?.value || "";
   const payload = await fetchJson("/api/racks", {
     method: "POST",
     body: JSON.stringify({
       oldRackCode: document.getElementById("rackModalOldCode")?.value || "",
-      rackCode: document.getElementById("rackModalCode")?.value || "",
+      rackCode,
       name: document.getElementById("rackModalName")?.value || "",
       type: document.getElementById("rackModalType")?.value || "Steel",
     }),
   });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
+  state.rackManagerSelectedCode = rackCode;
   renderRacksPage();
-  closeAdminModal();
-  showSaveConfirmation("The rack definition was saved.");
+  renderScanRackTools();
+  returnToRackManager();
+  showSaveConfirmation(`Rack ${rackCode || "definition"} was saved.`);
 }
 
 /**
@@ -8117,21 +8397,28 @@ async function deleteRackDefinition(rackCode = state.selectedRackCode) {
   if (!rackCode) return;
   const confirmed = await confirmWebAppAction({
     title: "Delete rack?",
-    message: `Delete <strong>${escapeHtml(rackCode)}</strong>? Only empty racks can be deleted.`,
+    message: `Delete empty rack <strong>${escapeHtml(rackCode)}</strong>?`,
+    details: "Rack history stays in scan and audit history. Only the empty rack definition is removed from active use.",
     confirmLabel: "Delete Rack",
-    requiredText: "DELETE RACK",
-    requiredTextLabel: "Type this exact phrase to delete the rack",
   });
   if (!confirmed) return;
+
   const payload = await fetchJson("/api/racks/delete", { method: "POST", body: JSON.stringify({ rackCode }) });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   if (state.selectedRackOverviewCode === rackCode) state.selectedRackOverviewCode = "";
+  if (state.rackManagerSelectedCode === rackCode) state.rackManagerSelectedCode = "";
+  if (state.rackManagerEditingRackCode === rackCode) state.rackManagerEditingRackCode = "";
   renderRacksPage();
   renderScanRackTools();
-  if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
+
+  if (els.adminModal?.dataset.kind === "rackForm") {
+    returnToRackManager();
+  } else if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
     els.adminModalBody.innerHTML = adminModalContent("racks");
   }
+
+  showSaveConfirmation(`Rack ${rackCode} was deleted.`);
   playAppSound("destructive_action", { force: true });
 }
 
@@ -8151,13 +8438,15 @@ async function createRackSet() {
       type: nameRoot,
       count: document.getElementById("rackSetModalCount")?.value || 10,
       start: document.getElementById("rackSetModalStart")?.value || 1,
+      setIcon: document.getElementById("rackSetModalIcon")?.value || "rack",
+      setColor: document.getElementById("rackSetModalColor")?.value || nextRackSetVisualColor(),
     }),
   });
   state.racks = payload.racks || [];
   state.rackSummary = payload.summary || null;
   renderRacksPage();
   renderScanRackTools();
-  closeAdminModal();
+  returnToRackManager();
   showSaveConfirmation(`Created ${payload.created?.length || 0} rack(s).`);
 }
 
@@ -8170,7 +8459,8 @@ function openRackForm(rackCode = "", defaults = {}) {
   const existingRack = state.racks.find((item) => item.code === rackCode);
   const rack = existingRack ? { ...existingRack, oldCode: existingRack.code } : { ...defaults };
   state.rackModal = { rack };
-  openAdminModal("rackForm");
+  openAdminModal("rackForm", { title: existingRack ? "Edit Rack" : "Add Individual Rack" });
+  syncRackFormPreview();
 }
 
 /**
@@ -8179,16 +8469,25 @@ function openRackForm(rackCode = "", defaults = {}) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function openRackSetForm(label = "") {
+  if (label) {
+    openAdminModal("racks");
+    openRackManagerSetEdit(label);
+    return;
+  }
   const racks = state.racks.filter((rack) => (rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks") === label);
+  const explicit = rackSetExplicitVisual(label);
   state.rackModal = {
     set: {
       name: label && label !== "Truck" ? label : "",
       prefix: "",
       count: racks.length || 10,
       start: 1,
+      icon: explicit.icon || (label ? rackSetVisualIcon(label) : "rack"),
+      color: explicit.color || (label ? "#176d72" : nextRackSetVisualColor()),
     },
   };
-  openAdminModal("rackSetForm");
+  openAdminModal("rackSetForm", { title: label ? "Rack Set" : "Add Rack Set" });
+  syncRackSetFormPreview();
 }
 
 /**
@@ -8197,25 +8496,41 @@ function openRackSetForm(label = "") {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function deleteRackSet(label) {
-  const racks = state.racks.filter((rack) => (rack.code === "T" || /truck/i.test(rack.type || "") ? "Truck" : rack.type || "Racks") === label);
-  const deletable = racks.filter((rack) => rack.code !== "T");
-  if (!deletable.length) return;
+  const racks = state.racks.filter((rack) => rackGroupLabel(rack) === label && rack.code !== "T");
+  if (!racks.length) return;
+
+  const occupied = racks.filter((rack) => Number(rack.qty || 0) > 0);
+  if (occupied.length) {
+    showFloatingNotice(
+      `${label} cannot be deleted until ${occupied.length} rack${occupied.length === 1 ? " is" : "s are"} empty.`,
+      "notice",
+    );
+    return;
+  }
+
   const confirmed = await confirmWebAppAction({
     title: "Delete rack set?",
-    message: `Delete <strong>${escapeHtml(deletable.length)}</strong> rack${deletable.length === 1 ? "" : "s"} in <strong>${escapeHtml(label)}</strong>?`,
-    details: "Only empty racks can be deleted.",
+    message: `Delete <strong>${escapeHtml(label)}</strong> and its <strong>${escapeHtml(racks.length)}</strong> empty rack${racks.length === 1 ? "" : "s"}?`,
+    details: "Historical rack scans remain available. The active rack definitions and this set's visual identity are removed.",
     confirmLabel: "Delete Rack Set",
   });
   if (!confirmed) return;
-  for (const rack of deletable) {
-    await fetchJson("/api/racks/delete", { method: "POST", body: JSON.stringify({ rackCode: rack.code }) });
-  }
-  await ensureRacksLoaded();
+
+  const payload = await fetchJson("/api/racks/delete", {
+    method: "POST",
+    body: JSON.stringify({ rackCodes: racks.map((rack) => rack.code) }),
+  });
+
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  state.rackManagerEditingSetLabel = "";
+  if (state.selectedRackSetLabel === label) state.selectedRackSetLabel = "";
   renderRacksPage();
   renderScanRackTools();
   if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".rack-manager-shell")) {
     els.adminModalBody.innerHTML = adminModalContent("racks");
   }
+  showSaveConfirmation(`${label} rack set was deleted.`);
   playAppSound("destructive_action", { force: true });
 }
 
@@ -8629,7 +8944,10 @@ function renderDeliveryListSelect() {
      */
     const stageLists = (groups.find((group) => group.date === activeDate)?.lists || state.lists).filter((list) => list.deliveryDate === activeDate);
     els.deliveryStageSelect.innerHTML = stageLists
-      .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(scanStageLabel(list))}</option>`)
+      .map((list) => {
+        const pendingCount = Math.max(Number(state.pendingUpdateStages.get(String(list.id || "")) || 0), 0);
+        return `<option value="${escapeHtml(list.id)}" data-custom-indicator="${pendingCount ? "new" : ""}" data-custom-indicator-count="${pendingCount}">${escapeHtml(scanStageLabel(list))}</option>`;
+      })
       .join("");
     els.deliveryStageSelect.value = state.activeListId;
   }
@@ -8650,8 +8968,9 @@ function renderDeliveryListSelect() {
 
 /**
  * Return one representative list per delivery date for the date-selector review marker.
- * Staging owns the operator review workflow when available; otherwise the first accessible
- * stage is used. This prevents duplicate stage notices from keeping a date icon visible.
+ * Airport Rd Staging owns the broad order-update scope when available; otherwise the
+ * first accessible stage is used. The Stage selector is refreshed separately for the
+ * active delivery date so route-specific review markers remain independent.
  */
 function pendingUpdateMarkerLists(lists = state.lists) {
   const byDate = new Map();
@@ -8663,18 +8982,21 @@ function pendingUpdateMarkerLists(lists = state.lists) {
   });
   return [...byDate.values()].map((dateLists) =>
     dateLists.find((list) => /staging/i.test(`${list.stage || ""} ${list.scanner || ""}`))
+    || dateLists.find((list) => /outbound/i.test(`${list.stage || ""} ${list.scanner || ""}`))
     || dateLists.find((list) => String(list.id || "") === String(state.activeListId || ""))
     || dateLists[0]
   ).filter(Boolean);
 }
 
 /**
- * Refresh the per-user delivery-date markers shown in the Scan page date selector.
- * Uses the maintained line-flags endpoint so one user's review never clears another user's icon.
+ * Refresh per-user Scan page update markers for both delivery dates and stages.
+ * Date markers use one broad representative stage per date to avoid duplicate API
+ * work, while every stage on the active date is checked for its own ! indicator.
  */
 async function refreshPendingUpdateDates({ force = false } = {}) {
   if (!state.backend || !Array.isArray(state.lists) || !state.lists.length) {
     state.pendingUpdateDates = new Map();
+    state.pendingUpdateStages = new Map();
     renderDeliveryListSelect();
     syncAllCustomSelects();
     return;
@@ -8685,28 +9007,57 @@ async function refreshPendingUpdateDates({ force = false } = {}) {
   }
 
   const requestId = ++state.pendingUpdateDatesRequestId;
-  const dateCounts = new Map();
-  const lists = pendingUpdateMarkerLists();
+  const activeDate = String(selectedDeliveryDate() || "").trim();
+  const representativeLists = pendingUpdateMarkerLists();
+  const representativeIds = new Set(representativeLists.map((list) => String(list.id || "")));
+  const activeDateLists = state.lists.filter((list) => String(list.deliveryDate || "") === activeDate);
+  const listsById = new Map();
+  [...representativeLists, ...activeDateLists].forEach((list) => {
+    const listId = String(list?.id || "").trim();
+    if (listId) listsById.set(listId, list);
+  });
+
+  const stageCounts = new Map();
+  const dateItemKeys = new Map();
+  const lists = [...listsById.values()];
   let cursor = 0;
   const worker = async () => {
     while (cursor < lists.length) {
       const list = lists[cursor++];
+      const listId = String(list?.id || "").trim();
+      const deliveryDate = String(list?.deliveryDate || "").trim();
+      if (!listId || !deliveryDate) continue;
       try {
-        const flags = await window.DLSLineUpdates.loadAndApply(list.id, {
+        const flags = await window.DLSLineUpdates.loadAndApply(listId, {
           force,
           prompt: false,
           render: false,
         });
         const pending = Math.max(Number(flags?.pendingLineCount || 0), 0);
-        if (pending) dateCounts.set(list.deliveryDate, (dateCounts.get(list.deliveryDate) || 0) + pending);
+        if (deliveryDate === activeDate && pending) stageCounts.set(listId, pending);
+        if (!representativeIds.has(listId)) continue;
+        if (!dateItemKeys.has(deliveryDate)) dateItemKeys.set(deliveryDate, new Set());
+        (flags?.items || []).forEach((item) => {
+          if (!item?.hasUnseenUpdate) return;
+          const order = String(item.order || "").trim();
+          const itemNo = String(item.item || "").trim();
+          const fallback = String(item.lineItemId || "").trim();
+          dateItemKeys.get(deliveryDate).add(order || itemNo ? `${order}|${itemNo}` : `${listId}|${fallback}`);
+        });
       } catch {
-        // A single inaccessible or stale stage must not block the remaining date markers.
+        // A single inaccessible or stale stage must not block the remaining markers.
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(5, lists.length) }, worker));
   if (requestId !== state.pendingUpdateDatesRequestId) return;
-  state.pendingUpdateDates = dateCounts;
+
+  state.pendingUpdateStages = stageCounts;
+  state.pendingUpdateDates = new Map(
+    [...dateItemKeys.entries()]
+      .map(([date, keys]) => [date, keys.size])
+      .filter(([, count]) => count > 0),
+  );
   renderDeliveryListSelect();
   syncAllCustomSelects();
 }
@@ -10112,11 +10463,13 @@ function statisticsChartSelectionHtml(dataset, entries, total) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function statisticsBarChartHtml(dataset, entries) {
-  // v0.260: reduce main-chart geometry by about one third so more rows remain
-  // visible while preserving readable labels and click targets.
-  const width = 900;
-  const labelWidth = 160;
-  const valueWidth = 76;
+  // v0.264: reserve the left label area from the longest visible category instead
+  // of clipping labels to a fixed character count. Typical datasets stay compact,
+  // while long machine/glass names receive enough room to remain fully readable.
+  const longestLabelLength = Math.max(...entries.map((entry) => String(entry.label || "").length), 0);
+  const labelWidth = Math.min(Math.max(170, Math.ceil(longestLabelLength * 7.2) + 28), 420);
+  const valueWidth = 82;
+  const width = Math.max(920, labelWidth + valueWidth + 520);
   const top = 30;
   const bottom = 34;
   const rowHeight = 28;
@@ -10143,7 +10496,7 @@ function statisticsBarChartHtml(dataset, entries) {
     return `
       <g class="statistics-chart-svg-entry ${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}">
         <title>${escapeHtml(aria)}</title>
-        <text x="${labelWidth - 9}" y="${y + 14}" text-anchor="end" class="statistics-chart-category-label">${escapeHtml(truncateChartLabel(entry.label, 22))}</text>
+        <text x="${labelWidth - 10}" y="${y + 14}" text-anchor="end" class="statistics-chart-category-label">${escapeHtml(entry.label)}</text>
         <rect x="${labelWidth}" y="${y + 3}" width="${plotWidth}" height="16" rx="5" class="statistics-chart-bar-rail"></rect>
         <rect x="${labelWidth}" y="${y + 3}" width="${barWidth}" height="16" rx="5" class="statistics-chart-bar-value" style="--chart-color:${chartEntryColor(index)}"></rect>
         <text x="${width - valueWidth + 8}" y="${y + 14}" class="statistics-chart-value-label">${escapeHtml(statisticsFormatChartValue(dataset, value))}</text>
@@ -10153,7 +10506,7 @@ function statisticsBarChartHtml(dataset, entries) {
 
   return `
     <div class="statistics-chart-svg-viewport statistics-chart-bar-viewport">
-      <svg class="statistics-chart-svg statistics-chart-bar-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(dataset.title)} bar chart">
+      <svg class="statistics-chart-svg statistics-chart-bar-svg" style="min-width:${width}px" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(dataset.title)} bar chart">
         <text x="${labelWidth}" y="18" class="statistics-chart-axis-title">Category</text>
         <text x="${width - valueWidth + 9}" y="18" class="statistics-chart-axis-title">Value</text>
         ${ticks}
@@ -10184,6 +10537,10 @@ function statisticsDonutChartHtml(dataset, entries, total) {
   const size = 280;
   const center = size / 2;
   const radius = 84;
+  const centerRadius = 58;
+  const totalText = statisticsFormatChartValue(dataset, total);
+  const estimatedCharacterWidth = Math.max(totalText.length * 0.62, 1);
+  const totalFontSize = Math.max(14, Math.min(30, Math.floor((centerRadius * 1.72) / estimatedCharacterWidth)));
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
   const slices = entries.map((entry, index) => {
@@ -10231,8 +10588,8 @@ function statisticsDonutChartHtml(dataset, entries, total) {
         <svg class="statistics-chart-svg statistics-chart-donut-svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="${escapeHtml(dataset.title)} donut chart">
           <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="#e8eef7" stroke-width="50"></circle>
           ${slices}
-          <circle cx="${center}" cy="${center}" r="54" class="statistics-chart-donut-center"></circle>
-          <text x="${center}" y="${center - 1}" text-anchor="middle" class="statistics-chart-donut-total">${escapeHtml(statisticsFormatChartValue(dataset, total))}</text>
+          <circle cx="${center}" cy="${center}" r="${centerRadius}" class="statistics-chart-donut-center"></circle>
+          <text x="${center}" y="${center - 2}" text-anchor="middle" class="statistics-chart-donut-total" style="font-size:${totalFontSize}px">${escapeHtml(totalText)}</text>
           <text x="${center}" y="${center + 16}" text-anchor="middle" class="statistics-chart-donut-caption">Displayed total</text>
         </svg>
       </div>
@@ -10305,50 +10662,98 @@ function statisticsLineChartHtml(dataset, entries) {
  */
 function statisticsDataTableHtml(dataset, entries, total) {
   if (dataset?.isBreakageDetail) {
-    const summaryLabels = (items, key, formatter) => (items || []).slice(0, 3).map((item) => `${item[key] || "Unknown"} (${formatter(item)})`).join(" · ") || "—";
+    const measureLabels = { sqft: "SQFT", pieces: "Pieces", estimatedCost: "Cost" };
+    const activeMeasure = measureLabels[dataset.breakageMeasure] || "SQFT";
+    const detailListHtml = (items, key, formatter, emptyText) => {
+      const values = Array.isArray(items) ? items : [];
+      if (!values.length) return `<div class="statistics-breakage-detail-list-v0263"><span><b>${escapeHtml(emptyText)}</b></span></div>`;
+      const visible = values.slice(0, 3).map((item) => `
+        <span>
+          <b title="${escapeHtml(item[key] || "Unknown")}">${escapeHtml(item[key] || "Unknown")}</b>
+          <small>${escapeHtml(formatter(item))}</small>
+        </span>`).join("");
+      const more = values.length > 3 ? `<span class="is-more">+${values.length - 3} more in row drilldown</span>` : "";
+      return `<div class="statistics-breakage-detail-list-v0263">${visible}${more}</div>`;
+    };
+    const totalsHtml = (entry, includeRejects = true) => `
+      <div class="statistics-breakage-metrics-v0263">
+        <span><small>Pieces</small><strong>${escapeHtml(Number(entry.pieces || 0).toLocaleString())}</strong></span>
+        <span><small>SQFT</small><strong>${escapeHtml(statisticsFormatChartValue({ format: "sqft" }, entry.sqft || 0))}</strong></span>
+        <span><small>Cost</small><strong>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, entry.estimatedCost || 0))}</strong></span>
+        ${includeRejects ? `<span><small>Rejects</small><strong>${escapeHtml(Number(entry.eventCount || 0).toLocaleString())}</strong></span>` : ""}
+      </div>`;
+    const coverageHtml = (entry) => {
+      const warnings = [];
+      const unpriced = Number(entry.unpricedPieces || 0);
+      const missingDimensions = Number(entry.missingDimensionPieces || 0);
+      if (unpriced > 0) warnings.push(`<span>${escapeHtml(unpriced)} unpriced</span>`);
+      if (missingDimensions > 0) warnings.push(`<span>${escapeHtml(missingDimensions)} missing dims</span>`);
+      if (!warnings.length) warnings.push('<span class="is-complete">Complete</span>');
+      return `<div class="statistics-breakage-coverage-v0263">${warnings.join("")}</div>`;
+    };
+    const tableHeaderHtml = (title, subtitle, unit = "") => `
+      <div class="statistics-breakage-table-header-v0263">
+        <div><span>Breakage detail</span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(subtitle)}</small></div>
+        ${unit ? `<span class="statistics-breakage-table-unit-v0263">Chart ranking: ${escapeHtml(unit)}</span>` : ""}
+      </div>`;
 
     if (dataset.breakageKind === "reason") {
       const rows = entries.map((entry, index) => `
         <tr class="${entry.label === state.homeChartSelectedLabel ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0">
           <td><span class="statistics-table-rank-v0258">${index + 1}</span></td>
-          <td><strong>${escapeHtml(entry.machine || "Unknown machine")}</strong></td>
+          <td><div class="statistics-breakage-table-primary-v0263"><strong>${escapeHtml(entry.machine || "Unknown machine")}</strong><small>Machine / location</small></div></td>
           <td><span class="statistics-reason-pill-v0262">${escapeHtml(entry.reason || "Unspecified reason")}</span></td>
-          <td><b>${escapeHtml(Number(entry.eventCount || 0).toLocaleString())}</b></td>
-          <td>${escapeHtml(Number(entry.pieces || 0).toLocaleString())}</td>
-          <td>${escapeHtml(statisticsFormatChartValue({ format: "sqft" }, entry.sqft || 0))}</td>
-          <td>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, entry.estimatedCost || 0))}</td>
-          <td>${escapeHtml(summaryLabels(entry.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs`))}</td>
+          <td><div class="statistics-breakage-frequency-v0263"><strong>${escapeHtml(Number(entry.eventCount || 0).toLocaleString())}</strong><small>occurrences</small></div></td>
+          <td>${totalsHtml(entry, false)}</td>
+          <td>${detailListHtml(entry.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`, "No glass detail")}</td>
         </tr>`).join("");
-      return `<div class="statistics-data-table-shell-v0258"><table class="statistics-data-table-v0258 is-breakage-v0260 is-reasons-v0262"><thead><tr><th>Rank</th><th>Machine</th><th>Reason</th><th>Occurrences</th><th>Pieces</th><th>SQFT</th><th>Cost</th><th>Glass types</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      return `
+        <div class="statistics-breakage-table-wrap-v0263">
+          ${tableHeaderHtml("Reject reasons by machine", "Occurrence count is separated from material impact so recurring causes are easy to spot.")}
+          <div class="statistics-data-table-shell-v0258">
+            <table class="statistics-data-table-v0258 is-breakage-v0260 is-reasons-v0262">
+              <thead><tr><th>Rank</th><th>Machine</th><th>Reject reason</th><th>Frequency</th><th>Breakage totals</th><th>Glass types</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>`;
     }
 
     const machineMode = dataset.breakageKind === "machine";
     const rows = entries.map((entry, index) => {
       const selected = entry.label === state.homeChartSelectedLabel;
-      const coverage = statisticsBreakageCoverageDetail(entry).replace(/^\s*·\s*/, "") || "Complete";
       const related = machineMode
-        ? summaryLabels(entry.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs`)
-        : summaryLabels(entry.machines, "machine", (item) => `${Number(item.pieces || 0)} pcs`);
-      const reasons = summaryLabels(entry.reasons, "reason", (item) => `${Number(item.eventCount || 0)}×`);
+        ? detailListHtml(entry.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`, "No glass detail")
+        : detailListHtml(entry.machines, "machine", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`, "External / no machine attribution");
+      const reasons = detailListHtml(entry.reasons, "reason", (item) => `${Number(item.eventCount || 0)}× · ${Number(item.pieces || 0)} pcs`, "No reject reasons recorded");
       return `
         <tr class="${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0">
           <td><span class="statistics-table-rank-v0258">${index + 1}</span></td>
-          <td><span class="statistics-table-category-v0258"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span></td>
-          <td><b>${escapeHtml(Number(entry.pieces || 0).toLocaleString())}</b></td>
-          <td><b>${escapeHtml(statisticsFormatChartValue({ format: "sqft" }, entry.sqft || 0))}</b></td>
-          <td><b>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, entry.estimatedCost || 0))}</b></td>
-          <td>${escapeHtml(Number(entry.eventCount || 0).toLocaleString())}</td>
-          <td>${escapeHtml(related)}</td>
-          <td>${escapeHtml(reasons)}</td>
-          <td>${escapeHtml(coverage)}</td>
+          <td>
+            <div class="statistics-breakage-table-primary-v0263">
+              <span class="statistics-table-category-v0258"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span>
+              <small>${machineMode ? "Machine / location" : "Glass type"}</small>
+            </div>
+          </td>
+          <td>${totalsHtml(entry, true)}</td>
+          <td>${related}</td>
+          <td>${reasons}</td>
+          <td>${coverageHtml(entry)}</td>
         </tr>`;
     }).join("");
+    const tableTitle = machineMode ? "Machine breakage accountability" : "Glass type breakage accountability";
+    const tableSubtitle = machineMode
+      ? "Compare pieces, SQFT, cost, glass types, and recurring reject reasons for every machine."
+      : "Compare total material impact for each glass type, then see the machines and reasons behind it.";
     return `
-      <div class="statistics-data-table-shell-v0258">
-        <table class="statistics-data-table-v0258 is-breakage-v0260 is-combined-v0262">
-          <thead><tr><th>Rank</th><th>${machineMode ? "Machine / location" : "Glass type"}</th><th>Pieces</th><th>SQFT</th><th>Cost</th><th>Rejects</th><th>${machineMode ? "Glass broken" : "Machines"}</th><th>Top reasons</th><th>Coverage</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
+      <div class="statistics-breakage-table-wrap-v0263">
+        ${tableHeaderHtml(tableTitle, tableSubtitle, activeMeasure)}
+        <div class="statistics-data-table-shell-v0258">
+          <table class="statistics-data-table-v0258 is-breakage-v0260 is-combined-v0262">
+            <thead><tr><th>Rank</th><th>${machineMode ? "Machine / location" : "Glass type"}</th><th>Breakage totals</th><th>${machineMode ? "Glass broken" : "Machines"}</th><th>Reject reasons</th><th>Coverage</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
       </div>`;
   }
 
@@ -14169,7 +14574,7 @@ function renderBaySection(section) {
           ${blocked ? `<em class="blocked">${escapeHtml(blocked)} blocked</em>` : ""}
           ${attention ? `<em>${escapeHtml(attention)} attention</em>` : ""}
         </span>
-        <button class="bay-section-edit-btn" type="button" data-bay-editor-open="${escapeHtml(section.label)}" data-permission-any="manage_bay_layout">Edit</button>
+        ${hasPermission("manage_bay_layout") ? `<button type="button" class="bay-section-edit-btn bay-section-edit-btn-v273" data-bay-editor-open="${escapeHtml(section.label)}" title="Edit ${escapeHtml(section.label)}" aria-label="Edit ${escapeHtml(section.label)} bay group"></button>` : ""}
         ${state.bayEditMode ? `<span class="bay-column-controls"><button type="button" data-bay-col-action="dec" data-bay-section="${escapeHtml(section.label)}">-</button><b>${cols} col</b><button type="button" data-bay-col-action="inc" data-bay-section="${escapeHtml(section.label)}">+</button></span>` : ""}
       </summary>
       <div class="physical-slot-grid physical-slot-grid-v17" style="--bay-section-cols:${cols}">
@@ -14737,6 +15142,7 @@ function closeOldBayReviewNotice() {
   const notice = document.getElementById("oldBayReviewNotice");
   if (!notice) return;
   window.clearTimeout(notice._hideTimer);
+  window.clearInterval(notice._countdownTimer);
   notice.classList.add("is-hiding");
   window.setTimeout(() => notice.remove(), 220);
 }
@@ -14753,6 +15159,7 @@ function showOldBayReviewNotice(count) {
     <div>
       <strong>Old bay review needed</strong>
       <span>You have ${escapeHtml(count)} old order${count === 1 ? "" : "s"} that need review.</span>
+      <small class="old-bay-review-time-v269" data-old-bay-review-time>Closes in 20s</small>
     </div>
     <button type="button" data-old-bay-review>Review</button>
     <button type="button" class="old-bay-review-dismiss gui-close-button" data-old-bay-dismiss aria-label="Dismiss old bay notice">&times;</button>
@@ -14768,7 +15175,14 @@ function showOldBayReviewNotice(count) {
     }
   });
   notice.querySelector("[data-old-bay-dismiss]")?.addEventListener("click", closeOldBayReviewNotice);
-  notice._hideTimer = window.setTimeout(closeOldBayReviewNotice, 11000);
+  const openedAt = Date.now();
+  const timeoutMs = 20000;
+  notice._countdownTimer = window.setInterval(() => {
+    const remaining = Math.max(0, Math.ceil((timeoutMs - (Date.now() - openedAt)) / 1000));
+    const timer = notice.querySelector("[data-old-bay-review-time]");
+    if (timer) timer.textContent = remaining ? `Closes in ${remaining}s` : "Closing...";
+  }, 1000);
+  notice._hideTimer = window.setTimeout(closeOldBayReviewNotice, timeoutMs);
 }
 
 async function loadStaleBayOrders(includeSnoozed = false, claimAlert = false) {
@@ -18863,7 +19277,7 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
   const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260807-v0.262", window.location.href).href;
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260810-v0.268", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
@@ -19735,8 +20149,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260807-v0.262", window.location.href).href,
-    new URL("static/css/print.css?v=20260807-v0.262", window.location.href).href,
+    new URL("static/css/styles.css?v=20260810-v0.268", window.location.href).href,
+    new URL("static/css/print.css?v=20260810-v0.268", window.location.href).href,
   ];
 }
 
@@ -19813,7 +20227,7 @@ function launchLocalPrintPackage(preview) {
  * Excel handles the resulting workbook without a server round trip.
  */
 const PRINT_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260807-v0.262";
+const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260810-v0.268";
 
 function printExportFileStem(preview = {}) {
   const route = printSheetRouteLabel().replace(/\s*\|\s*/g, "-");
@@ -20203,7 +20617,7 @@ function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "por
 </cp:coreProperties>` });
   entries.push({ name: "docProps/app.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>Delivery List Scanner</Application><AppVersion>0.262</AppVersion><Company>Builders FirstSource</Company>
+  <Application>Delivery List Scanner</Application><AppVersion>0.268</AppVersion><Company>Builders FirstSource</Company>
   <TitlesOfParts><vt:vector size="${sheetRecords.length}" baseType="lpstr">${sheetRecords.map(({ name }) => `<vt:lpstr>${xlsxXmlEscape(name)}</vt:lpstr>`).join("")}</vt:vector></TitlesOfParts>
 </Properties>` });
 
@@ -21491,7 +21905,7 @@ function openAdminModal(kind, options = null) {
   delete els.adminModal.dataset.customView;
   applyAdminModalProfile(kind, options);
   els.adminModal.dataset.kind = kind;
-  const actionHistoryEnabled = !["deliveryUpdatePreview", "recentScans"].includes(kind);
+  const actionHistoryEnabled = !["deliveryUpdatePreview", "recentScans", "rackForm", "rackSetForm"].includes(kind);
   if (els.adminModalSectionTabs) els.adminModalSectionTabs.hidden = !actionHistoryEnabled;
   els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
   applyLanguageToRoot(els.adminModal);
@@ -22208,6 +22622,18 @@ function rackManagerSetEditHtml() {
         <input id="rackManagerSetNameRootInput" type="text" autocomplete="off" value="${escapeHtml(nameRoot || label)}" placeholder="Example: Rack Steel">
       </label>
 
+      <div class="rack-set-visual-field-v269" style="--rack-set-icon-color:${escapeHtml(rackSetVisualColor(label) || "#176d72")}">
+        <span>Set icon</span>
+        ${rackSetIconLibraryHtml(rackSetVisualIcon(label), "rackManagerSetIconInput")}
+      </div>
+      <label class="rack-set-color-field-v269">
+        <span>Icon color</span>
+        <span class="rack-set-color-control-v269">
+          <input id="rackManagerSetColorInput" type="color" value="${escapeHtml(rackSetVisualColor(label) || "#176d72")}" aria-label="Rack set icon color">
+          <output data-rack-set-color-output>${escapeHtml(rackSetVisualColor(label) || "#176d72")}</output>
+        </span>
+      </label>
+
       <div class="rack-manager-set-actions">
         <button type="button" class="secondary" data-rack-manager-set-cancel>Cancel</button>
         <button type="submit">Save Set</button>
@@ -22308,6 +22734,8 @@ async function saveRackSetQuickEdit() {
   const oldLabel = state.rackManagerEditingSetLabel || "";
   const newType = String(document.getElementById("rackManagerSetTypeInput")?.value || oldLabel).trim() || oldLabel;
   const nameRoot = String(document.getElementById("rackManagerSetNameRootInput")?.value || newType).trim() || newType;
+  const setIcon = String(document.getElementById("rackManagerSetIconInput")?.value || rackSetVisualIcon(oldLabel) || "rack").trim();
+  const setColor = String(document.getElementById("rackManagerSetColorInput")?.value || rackSetVisualColor(oldLabel) || "#176d72").trim();
   /**
    * Purpose: Run the racks workflow for the browser application.
    * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -22335,6 +22763,9 @@ async function saveRackSetQuickEdit() {
         rackCode: rack.code,
         name: nextName,
         type: nextType,
+        setIcon,
+        setColor,
+        visualSourceType: oldLabel,
       }),
     });
   }
@@ -22407,22 +22838,30 @@ function rackManagerModalHtml() {
             ? sortedGroups
                 .map(([label, racks]) => {
                   const totalQty = racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
-                  const deletableCount = racks.filter((rack) => rack.code !== "T" && Number(rack.qty || 0) === 0).length;
+                  const setRacks = racks.filter((rack) => rack.code !== "T");
+                  const emptyRackCount = setRacks.filter((rack) => Number(rack.qty || 0) === 0).length;
+                  const canDeleteSet = setRacks.length > 0 && emptyRackCount === setRacks.length;
 
+                  const expanded = state.expandedRackManagerGroups.has(label);
                   return `
-                    <section class="rack-manager-group">
-                      <header>
-                        <span class="rack-manager-group-icon" data-rack-icon="${escapeHtml(rackSetVisualIcon(label))}" aria-hidden="true"></span>
-                        <div>
+                    <details class="rack-manager-group rack-manager-group-v272" data-rack-manager-group="${escapeHtml(label)}" ${expanded ? "open" : ""}>
+                      <summary class="rack-manager-group-summary-v272">
+                        <span class="rack-manager-group-icon rack-set-visual-icon-v269" data-rack-icon="${escapeHtml(rackSetVisualIcon(label))}" style="--rack-set-icon-color:${escapeHtml(rackSetVisualColor(label) || "#176d72")}" aria-hidden="true"></span>
+                        <div class="rack-manager-group-copy-v272">
                           <h3>${escapeHtml(label)}</h3>
                           <span>${escapeHtml(racks.length)} rack${racks.length === 1 ? "" : "s"} | ${escapeHtml(totalQty)} pcs</span>
                         </div>
+                        <span class="rack-manager-expand-hint-v272" aria-hidden="true">
+                          <i></i>
+                          <b class="rack-manager-expand-closed-v272">View racks</b>
+                          <b class="rack-manager-expand-open-v272">Hide racks</b>
+                        </span>
                         <div class="rack-manager-group-actions">
                           <button type="button" class="icon-only icon-plus" data-rack-manager-add-to-set="${escapeHtml(label)}" title="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}" aria-label="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}"></button>
                           <button type="button" class="icon-only icon-pencil" data-rack-set-edit="${escapeHtml(label)}" title="Edit ${escapeHtml(label)} set" aria-label="Edit ${escapeHtml(label)} set"></button>
-                          <button type="button" class="icon-only icon-trash danger" data-rack-set-delete="${escapeHtml(label)}" ${deletableCount ? "" : "disabled"} title="Delete empty racks in ${escapeHtml(label)}" aria-label="Delete empty racks in ${escapeHtml(label)}"></button>
+                          <button type="button" class="icon-only icon-trash danger" data-rack-set-delete="${escapeHtml(label)}" ${canDeleteSet ? "" : "disabled"} title="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `Clear all ${escapeHtml(label)} racks before deleting this set`}" aria-label="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `${escapeHtml(label)} rack set cannot be deleted until every rack is empty`}"></button>
                         </div>
-                      </header>
+                      </summary>
 
                       <div class="rack-manager-rows">
                         ${racks
@@ -22452,7 +22891,7 @@ function rackManagerModalHtml() {
                           })
                           .join("")}
                       </div>
-                    </section>
+                    </details>
                   `;
                 })
                 .join("")
@@ -22470,18 +22909,82 @@ function rackManagerModalHtml() {
  */
 function rackFormModalHtml() {
   const rack = state.rackModal?.rack || {};
+  const isEditing = Boolean(rack.oldCode || rack.code);
+  const availableSets = rackSetFormChoices("");
+  const selectedType = String(rack.type || availableSets[0] || "Steel");
+  const typeChoices = rackSetFormChoices(selectedType);
+  const visualIcon = rackSetVisualIcon(selectedType);
+  const visualColor = rackSetVisualColor(selectedType) || "#176d72";
   return `
-    <form id="rackFormModal" class="admin-form rack-modal-form">
+    <form id="rackFormModal" class="admin-form rack-modal-form rack-config-form-v270 rack-individual-form-v270">
       <input id="rackModalOldCode" type="hidden" value="${escapeHtml(rack.oldCode || rack.code || "")}">
-      <label><span>Rack code</span><input id="rackModalCode" type="text" autocomplete="off" value="${escapeHtml(rack.code || "")}" ${rack.code === "T" ? "readonly" : ""} placeholder="R11S"></label>
-      <label><span>Rack name</span><input id="rackModalName" type="text" autocomplete="off" value="${escapeHtml(rack.name || "")}" placeholder="Rack 11 Steel"></label>
-      <label>
-        <span>Rack type</span>
-        <select id="rackModalType">
-          ${["Steel", "Wood", "Truck", "Aluminum", "Other"].map((type) => `<option ${String(rack.type || "Steel") === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
-        </select>
-      </label>
-      <footer class="modal-actions">${rack.code && rack.code !== "T" ? `<button type="button" class="danger" data-rack-delete="${escapeHtml(rack.code)}">Delete Rack</button>` : ""}<button type="submit">Confirm</button></footer>
+
+      <div class="rack-config-form-nav-v270">
+        <button type="button" class="rack-config-back-v270" data-rack-form-back>
+          <span aria-hidden="true"></span>
+          <strong>Edit Racks</strong>
+        </button>
+        <span>${isEditing ? "Rack editor" : "New rack"}</span>
+      </div>
+
+
+      <div class="rack-config-layout-v270">
+        <div class="rack-config-fields-v270">
+          <section class="rack-config-section-v270">
+            <header>
+              <span class="rack-config-step-v270">1</span>
+              <div><strong>Rack identity</strong><small>Use a short code operators can recognize quickly.</small></div>
+            </header>
+            <div class="rack-config-field-grid-v270">
+              <label>
+                <span>Rack code</span>
+                <input id="rackModalCode" type="text" autocomplete="off" required value="${escapeHtml(rack.code || "")}" ${rack.code === "T" ? "readonly" : ""} placeholder="R11S">
+                <small>Scanner-facing identifier, for example R11S.</small>
+              </label>
+              <label>
+                <span>Display name</span>
+                <input id="rackModalName" type="text" autocomplete="off" value="${escapeHtml(rack.name || "")}" placeholder="Rack 11 Steel">
+                <small>Friendly name shown throughout the webapp.</small>
+              </label>
+            </div>
+          </section>
+
+          <section class="rack-config-section-v270">
+            <header>
+              <span class="rack-config-step-v270">2</span>
+              <div><strong>Rack set</strong><small>Choose the group that controls where this rack is organized.</small></div>
+            </header>
+            <label class="rack-config-wide-field-v270">
+              <span>Rack set / type</span>
+              <select id="rackModalType">
+                ${typeChoices.map((type) => `<option value="${escapeHtml(type)}" ${selectedType === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
+              </select>
+              <small>Rack sets are managed from the Edit Racks workspace.</small>
+            </label>
+          </section>
+
+          <div class="rack-config-tip-v270">
+            <span aria-hidden="true"></span>
+            <div><strong>Keep rack codes unique</strong><p>The rack code is the operational identity used by scanners and rack history. The display name can be more descriptive.</p></div>
+          </div>
+        </div>
+
+        <aside class="rack-config-preview-v270" aria-label="Rack preview">
+          <small>Live Preview</small>
+          <span class="rack-config-preview-icon-v270 rack-set-visual-icon-v269" data-rack-form-preview-icon data-rack-icon="${escapeHtml(visualIcon)}" style="--rack-set-icon-color:${escapeHtml(visualColor)}" aria-hidden="true"></span>
+          <strong data-rack-form-preview-code>${escapeHtml(rack.code || "New rack")}</strong>
+          <span data-rack-form-preview-name>${escapeHtml(rack.name || "Rack display name")}</span>
+          <div class="rack-config-preview-meta-v270"><small>Rack set</small><b data-rack-form-preview-type>${escapeHtml(selectedType)}</b></div>
+        </aside>
+      </div>
+
+      <footer class="modal-actions rack-config-actions-v270">
+        <div>${rack.code && rack.code !== "T" ? `<button type="button" class="danger" data-rack-delete="${escapeHtml(rack.code)}">Delete Rack</button>` : ""}</div>
+        <div>
+          <button type="button" class="app-primary-button" data-rack-form-back>Cancel</button>
+          <button class="app-primary-button" type="submit">${isEditing ? "Save Rack" : "Create Rack"}</button>
+        </div>
+      </footer>
     </form>
   `;
 }
@@ -22493,13 +22996,96 @@ function rackFormModalHtml() {
  */
 function rackSetFormModalHtml() {
   const set = state.rackModal?.set || {};
+  const setColor = String(set.color || nextRackSetVisualColor());
+  const count = Math.max(1, Number(set.count || 10));
+  const start = Math.max(1, Number(set.start || 1));
+  const prefix = String(set.prefix || "S").replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "S";
+  const lastNumber = start + count - 1;
+  const firstCode = prefix.length <= 3 ? `R${start}${prefix}` : `${prefix}${start}`;
+  const lastCode = prefix.length <= 3 ? `R${lastNumber}${prefix}` : `${prefix}${lastNumber}`;
   return `
-    <form id="rackSetFormModal" class="admin-form rack-modal-form">
-      <label><span>Set suffix</span><input id="rackSetModalPrefix" type="text" autocomplete="off" value="${escapeHtml(set.prefix || "")}" placeholder="S"></label>
-      <label><span>Set name</span><input id="rackSetModalName" type="text" autocomplete="off" value="${escapeHtml(set.name || "")}" placeholder="Steel"></label>
-      <label><span>Rack count</span><input id="rackSetModalCount" type="number" min="1" max="100" value="${escapeHtml(set.count || 10)}"></label>
-      <label><span>Starting rack number</span><input id="rackSetModalStart" type="number" min="1" max="999" value="${escapeHtml(set.start || 1)}"></label>
-      <footer class="modal-actions"><button type="submit">Confirm</button></footer>
+    <form id="rackSetFormModal" class="admin-form rack-modal-form rack-config-form-v270 rack-set-form-v269 rack-set-form-v270" style="--rack-set-icon-color:${escapeHtml(setColor)}">
+      <div class="rack-config-form-nav-v270">
+        <button type="button" class="rack-config-back-v270" data-rack-form-back>
+          <span aria-hidden="true"></span>
+          <strong>Edit Racks</strong>
+        </button>
+        <span>New rack set</span>
+      </div>
+
+
+      <div class="rack-config-layout-v270 rack-set-config-layout-v270">
+        <div class="rack-config-fields-v270">
+          <section class="rack-config-section-v270">
+            <header>
+              <span class="rack-config-step-v270">1</span>
+              <div><strong>Set identity</strong><small>Name the group and choose the suffix used in generated rack codes.</small></div>
+            </header>
+            <div class="rack-config-field-grid-v270">
+              <label>
+                <span>Set name</span>
+                <input id="rackSetModalName" type="text" autocomplete="off" required value="${escapeHtml(set.name || "")}" placeholder="Steel">
+                <small>Shown as the rack-set heading throughout the app.</small>
+              </label>
+              <label>
+                <span>Code suffix</span>
+                <input id="rackSetModalPrefix" type="text" autocomplete="off" required value="${escapeHtml(set.prefix || "")}" placeholder="S" maxlength="8">
+                <small>Example: suffix S creates codes such as R1S and R2S.</small>
+              </label>
+            </div>
+          </section>
+
+          <section class="rack-config-section-v270">
+            <header>
+              <span class="rack-config-step-v270">2</span>
+              <div><strong>Numbering</strong><small>Choose how many racks to create and where numbering begins.</small></div>
+            </header>
+            <div class="rack-config-field-grid-v270">
+              <label>
+                <span>Rack count</span>
+                <input id="rackSetModalCount" type="number" min="1" max="100" value="${escapeHtml(set.count || 10)}">
+                <small>Create between 1 and 100 racks in this set.</small>
+              </label>
+              <label>
+                <span>Starting number</span>
+                <input id="rackSetModalStart" type="number" min="1" max="999" value="${escapeHtml(set.start || 1)}">
+                <small>Useful when extending an existing numbering sequence.</small>
+              </label>
+            </div>
+          </section>
+        </div>
+
+        <aside class="rack-config-preview-v270 rack-set-preview-v270" aria-label="Rack set preview">
+          <small>Set Preview</small>
+          <span class="rack-config-preview-icon-v270 rack-set-visual-icon-v269" data-rack-set-preview-icon data-rack-icon="${escapeHtml(set.icon || "rack")}" style="--rack-set-icon-color:${escapeHtml(setColor)}" aria-hidden="true"></span>
+          <strong data-rack-set-preview-name>${escapeHtml(set.name || "New rack set")}</strong>
+          <span data-rack-set-preview-range>${escapeHtml(count === 1 ? firstCode : `${firstCode} - ${lastCode}`)}</span>
+          <div class="rack-config-preview-meta-v270"><small>Will create</small><b data-rack-set-preview-count>${escapeHtml(count)} rack${count === 1 ? "" : "s"}</b></div>
+        </aside>
+      </div>
+
+      <section class="rack-config-section-v270 rack-set-visual-section-v270" style="--rack-set-icon-color:${escapeHtml(setColor)}">
+        <header>
+          <span class="rack-config-step-v270">3</span>
+          <div><strong>Visual identity</strong><small>Pick an icon and color so this rack set is easy to recognize at a glance.</small></div>
+        </header>
+        <div class="rack-set-visual-field-v269">
+          <span>Set icon</span>
+          ${rackSetIconLibraryHtml(set.icon || "rack", "rackSetModalIcon")}
+        </div>
+        <div class="rack-set-color-field-v269">
+          <span>Icon color</span>
+          ${rackSetColorPickerHtml(setColor)}
+        </div>
+      </section>
+
+      <footer class="modal-actions rack-config-actions-v270">
+        <div></div>
+        <div>
+          <button type="button" class="app-primary-button" data-rack-form-back>Cancel</button>
+          <button class="app-primary-button" type="submit">Create Rack Set</button>
+        </div>
+      </footer>
     </form>
   `;
 }
@@ -27944,42 +28530,184 @@ async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode)
   }
 }
 
-function packingHistoryGroups(history = []) {
+const PACKING_HISTORY_DAYS_PER_PAGE = 25;
+
+function packingHistoryGroups(history = state.packingListHistory, query = state.packingHistoryQuery) {
+  const cleanQuery = String(query || "").trim().toLowerCase();
   const groups = new Map();
-  for (const row of history) {
+  for (const row of Array.isArray(history) ? history : []) {
+    const searchText = [row.rack_code, row.rack_name, row.delivery_date, row.printed_by, row.printed_at]
+      .join(" ")
+      .toLowerCase();
+    if (cleanQuery && !searchText.includes(cleanQuery)) continue;
     const day = String(row.printed_at || row.printedAt || "").slice(0, 10) || "Unknown date";
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(row);
   }
-  return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a));
+  return [...groups.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([date, rows]) => ({
+      date,
+      rows: rows.slice().sort((a, b) => String(b.printed_at || "").localeCompare(String(a.printed_at || ""))),
+    }));
+}
+
+function packingHistoryWeekGroups(dayGroups = []) {
+  const weeks = new Map();
+  for (const dayGroup of dayGroups) {
+    const weekStart = deliveryBusinessWeekStart(dayGroup.date);
+    const weekKey = weekStart ? deliveryDateKey(weekStart) : "unknown";
+    if (!weeks.has(weekKey)) weeks.set(weekKey, []);
+    weeks.get(weekKey).push(dayGroup);
+  }
+  return [...weeks.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([weekKey, days]) => ({
+      weekKey,
+      label: weekKey === "unknown" ? "Unknown print date" : deliveryBusinessWeekLabel(weekKey),
+      days: days.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))),
+    }));
+}
+
+function packingHistoryRowHtml(row) {
+  return `
+    <article class="packing-history-row packing-history-row-v272" data-packing-history-search="${escapeHtml([row.rack_code, row.rack_name, row.delivery_date, row.printed_by, row.printed_at].join(" ").toLowerCase())}">
+      <div class="packing-history-rack-v272"><strong>${escapeHtml(row.rack_name || row.rack_code)}</strong><span>${escapeHtml(row.rack_code)}</span></div>
+      <div><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Mixed")}</strong></div>
+      <div><small>Printed</small><strong>${escapeHtml(formatDateTime(row.printed_at))}</strong></div>
+      <div><small>Contents</small><strong>${escapeHtml(row.piece_qty)} pcs · ${escapeHtml(row.line_count)} lines</strong></div>
+      <div><small>Printed by</small><strong>${escapeHtml(row.printed_by || "system")}</strong></div>
+      <div class="packing-history-row-actions-v272">
+        <button type="button" class="secondary" data-packing-history-preview="${escapeHtml(row.id)}">Preview</button>
+        <button type="button" class="app-primary-button" data-packing-history-print="${escapeHtml(row.id)}">Print Snapshot</button>
+      </div>
+    </article>`;
 }
 
 function packingHistoryModalHtml(history = state.packingListHistory) {
-  const groups = packingHistoryGroups(history);
+  const dayGroups = packingHistoryGroups(history);
+  const daysPerPage = Math.max(Number(state.packingHistoryDaysPerPage || PACKING_HISTORY_DAYS_PER_PAGE), 1);
+  const totalDays = dayGroups.length;
+  const totalPages = Math.max(Math.ceil(totalDays / daysPerPage), 1);
+  state.packingHistoryPage = Math.min(Math.max(Number(state.packingHistoryPage || 1), 1), totalPages);
+  const pageStartIndex = (state.packingHistoryPage - 1) * daysPerPage;
+  const pageDays = dayGroups.slice(pageStartIndex, pageStartIndex + daysPerPage);
+  const weeks = packingHistoryWeekGroups(pageDays);
+  const visibleSnapshotCount = pageDays.reduce((sum, group) => sum + group.rows.length, 0);
+  const startDay = totalDays ? pageStartIndex + 1 : 0;
+  const endDay = totalDays ? Math.min(pageStartIndex + pageDays.length, totalDays) : 0;
+
   return `
-    <section class="packing-history-shell packing-history-shell-v184" data-rack-history-panel="packing">
-      <div class="packing-history-intro">
-        <div><strong>Previously printed packing lists</strong><span>Each record is an immutable snapshot of what was on the rack at print time.</span></div>
-        <label class="search-box"><span class="search-icon"></span><input id="packingHistorySearch" type="search" autocomplete="off" placeholder="Search rack, date, or user..."></label>
+    <section class="packing-history-shell packing-history-shell-v184 packing-history-shell-v272" data-rack-history-panel="packing">
+      <div class="packing-history-intro packing-history-intro-v272">
+        <div><strong>Previously printed packing lists</strong><span>Snapshots are grouped by print week. Expand a week to review its historical rack contents.</span></div>
+        <label class="search-box"><span class="search-icon"></span><input id="packingHistorySearch" type="search" autocomplete="off" value="${escapeHtml(state.packingHistoryQuery || "")}" placeholder="Search rack, date, or user..."></label>
       </div>
-      <div class="packing-history-groups packing-history-groups-v184" id="packingHistoryGroups">
-        ${groups.length ? groups.map(([day, rows]) => `
-          <details class="packing-history-day" open>
-            <summary><strong>${escapeHtml(day === "Unknown date" ? day : formatDisplayDate(day))}</strong><span>${escapeHtml(rows.length)} print${rows.length === 1 ? "" : "s"}</span></summary>
-            <div>
-              ${rows.map((row) => `
-                <article class="packing-history-row" data-packing-history-search="${escapeHtml([row.rack_code, row.rack_name, row.delivery_date, row.printed_by, row.printed_at].join(" ").toLowerCase())}">
-                  <div><strong>${escapeHtml(row.rack_name || row.rack_code)}</strong><span>${escapeHtml(row.rack_code)}</span></div>
-                  <div><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Mixed")}</strong></div>
-                  <div><small>Printed</small><strong>${escapeHtml(formatDateTime(row.printed_at))}</strong></div>
-                  <div><small>Contents</small><strong>${escapeHtml(row.piece_qty)} pcs · ${escapeHtml(row.line_count)} lines</strong></div>
-                  <div><small>Printed by</small><strong>${escapeHtml(row.printed_by || "system")}</strong></div>
-                  <button type="button" data-packing-history-print="${escapeHtml(row.id)}">Open Snapshot</button>
-                </article>`).join("")}
-            </div>
-          </details>`).join("") : `<div class="admin-empty">No packing lists have been printed since v135 history tracking was installed.</div>`}
+      <div class="packing-history-page-summary-v272">
+        <span class="packing-history-page-summary-copy-v273">
+          ${totalDays ? `<b>${escapeHtml(startDay)}-${escapeHtml(endDay)} of ${escapeHtml(totalDays)}</b> print days <i aria-hidden="true">&middot;</i> ` : ""}
+          <b>${escapeHtml(visibleSnapshotCount)}</b> snapshot${visibleSnapshotCount === 1 ? "" : "s"}${totalDays ? "" : " found"}
+        </span>
       </div>
+      <div class="packing-history-groups packing-history-groups-v184 packing-history-groups-v272" id="packingHistoryGroups">
+        ${weeks.length ? weeks.map((week) => {
+          const weekSnapshots = week.days.reduce((sum, day) => sum + day.rows.length, 0);
+          return `
+            <details class="packing-history-week-v272">
+              <summary>
+                <span class="packing-history-week-chevron-v272" aria-hidden="true"></span>
+                <div><strong>${escapeHtml(week.label)}</strong><span>${escapeHtml(week.days.length)} day${week.days.length === 1 ? "" : "s"} · ${escapeHtml(weekSnapshots)} snapshot${weekSnapshots === 1 ? "" : "s"}</span></div>
+                <span class="packing-history-week-action-v272"><b class="is-closed">View snapshots</b><b class="is-open">Hide snapshots</b></span>
+              </summary>
+              <div class="packing-history-week-body-v272">
+                ${week.days.map((day) => `
+                  <section class="packing-history-day-v272">
+                    <header><strong>${escapeHtml(day.date === "Unknown date" ? day.date : formatDisplayDate(day.date))}</strong><span>${escapeHtml(day.rows.length)} print${day.rows.length === 1 ? "" : "s"}</span></header>
+                    <div class="packing-history-day-rows-v272">${day.rows.map(packingHistoryRowHtml).join("")}</div>
+                  </section>`).join("")}
+              </div>
+            </details>`;
+        }).join("") : `<div class="admin-empty">${state.packingHistoryQuery ? "No packing-list snapshots match this search." : "No packing lists have been printed since history tracking was installed."}</div>`}
+      </div>
+      <footer class="packing-history-pagination-v272" ${totalDays <= daysPerPage ? "hidden" : ""}>
+        <button type="button" class="secondary" data-packing-history-page="${Math.max(state.packingHistoryPage - 1, 1)}" ${state.packingHistoryPage <= 1 ? "disabled" : ""}>Previous</button>
+        <strong>Page ${escapeHtml(state.packingHistoryPage)} of ${escapeHtml(totalPages)}</strong>
+        <button type="button" class="secondary" data-packing-history-page="${Math.min(state.packingHistoryPage + 1, totalPages)}" ${state.packingHistoryPage >= totalPages ? "disabled" : ""}>Next</button>
+      </footer>
     </section>`;
+}
+
+function renderPackingHistoryPanel({ focusSearch = false } = {}) {
+  const panel = document.querySelector('[data-rack-history-panel="packing"]');
+  if (!panel) return;
+  panel.outerHTML = packingHistoryModalHtml();
+  setRackHistoryView(state.rackHistoryView || "packing");
+  applyLanguageToRoot(document.querySelector('[data-rack-history-panel="packing"]'));
+  if (focusSearch) {
+    const search = document.getElementById("packingHistorySearch");
+    search?.focus();
+    const length = String(search?.value || "").length;
+    search?.setSelectionRange?.(length, length);
+  }
+}
+
+function filterPackingHistoryRows(query = "") {
+  state.packingHistoryQuery = String(query || "");
+  state.packingHistoryPage = 1;
+  renderPackingHistoryPanel({ focusSearch: true });
+}
+
+async function openPackingHistoryPreview(historyId) {
+  const cleanId = Number(historyId || 0);
+  if (!cleanId) return;
+  document.querySelector(".packing-snapshot-preview-backdrop-v272")?.remove();
+
+  const response = await fetch(`/api/racks/packing-history/${encodeURIComponent(cleanId)}/print`, { cache: "no-store" });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Snapshot preview failed: ${response.status}`);
+  }
+  let markup = await response.text();
+  markup = markup
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<\/head>/i, "<style>button{display:none!important}body{margin:16px!important}.packing-sheet{page-break-after:auto!important}</style></head>");
+
+  const shell = document.createElement("div");
+  shell.className = "packing-snapshot-preview-backdrop-v272";
+  shell.innerHTML = `
+    <section class="packing-snapshot-preview-dialog-v272" role="dialog" aria-modal="true" aria-labelledby="packingSnapshotPreviewTitle">
+      <header>
+        <div><small>Packing List History</small><h2 id="packingSnapshotPreviewTitle">Snapshot Preview</h2><p>Exact saved rack contents from the original packing-list print.</p></div>
+        <button type="button" class="gui-close-button" data-packing-preview-close aria-label="Close snapshot preview">&times;</button>
+      </header>
+      <div class="packing-snapshot-preview-frame-v272"><iframe title="Historical packing list snapshot" sandbox=""></iframe></div>
+      <footer>
+        <button type="button" class="app-primary-button" data-packing-preview-print="${escapeHtml(cleanId)}">Print Snapshot</button>
+      </footer>
+    </section>`;
+  const close = () => {
+    document.removeEventListener("keydown", keyHandler);
+    shell.remove();
+    document.body.classList.remove("modal-scroll-locked");
+    updateModalScrollLock();
+  };
+  const keyHandler = (event) => {
+    if (event.key === "Escape") close();
+  };
+  shell.addEventListener("click", (event) => {
+    if (event.target === shell || event.target.closest("[data-packing-preview-close]")) {
+      close();
+      return;
+    }
+    const printButton = event.target.closest("[data-packing-preview-print]");
+    if (printButton) launchManagedPrint(`/api/racks/packing-history/${encodeURIComponent(printButton.dataset.packingPreviewPrint)}/print`);
+  });
+  document.addEventListener("keydown", keyHandler);
+  document.body.appendChild(shell);
+  document.body.classList.add("modal-scroll-locked");
+  const frame = shell.querySelector("iframe");
+  if (frame) frame.srcdoc = markup;
+  shell.querySelector("[data-packing-preview-close]")?.focus();
 }
 
 function rackHistoryDefaultFilters() {
@@ -28241,8 +28969,11 @@ function setRackHistoryView(view = "packing") {
 
 async function openRacksHistoryModal() {
   await ensureRacksLoaded();
-  const packingPayload = await fetchJson("/api/racks/packing-history?limit=500");
+  const packingPayload = await fetchJson("/api/racks/packing-history?limit=1000");
   state.packingListHistory = packingPayload.history || [];
+  state.packingHistoryPage = 1;
+  state.packingHistoryDaysPerPage = PACKING_HISTORY_DAYS_PER_PAGE;
+  state.packingHistoryQuery = "";
   state.rackHistoryEvents = [];
   state.rackHistoryFilters = rackHistoryDefaultFilters();
   state.rackHistoryPage = 1;
@@ -29514,8 +30245,23 @@ function wireV135OperationsEvents() {
         .catch((error) => showInlineError(error.message, true));
       return;
     }
+    const historyPreview = event.target.closest("[data-packing-history-preview]");
+    if (historyPreview) {
+      event.preventDefault();
+      openPackingHistoryPreview(historyPreview.dataset.packingHistoryPreview).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const packingHistoryPage = event.target.closest("[data-packing-history-page]");
+    if (packingHistoryPage && !packingHistoryPage.disabled) {
+      event.preventDefault();
+      state.packingHistoryPage = Math.max(Number(packingHistoryPage.dataset.packingHistoryPage || 1), 1);
+      renderPackingHistoryPanel();
+      document.querySelector('[data-rack-history-panel="packing"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     const historyPrint = event.target.closest("[data-packing-history-print]");
     if (historyPrint) {
+      event.preventDefault();
       launchManagedPrint(`/api/racks/packing-history/${encodeURIComponent(historyPrint.dataset.packingHistoryPrint)}/print`);
       return;
     }
@@ -29575,7 +30321,12 @@ function wireV135OperationsEvents() {
   });
 
   document.addEventListener("input", (event) => {
-    if (event.target.matches("#packingHistorySearch")) filterPackingHistoryRows(event.target.value);
+    if (event.target.matches("#packingHistorySearch")) {
+      state.packingHistoryQuery = event.target.value;
+      state.packingHistoryPage = 1;
+      window.clearTimeout(state.packingHistorySearchTimer);
+      state.packingHistorySearchTimer = window.setTimeout(() => filterPackingHistoryRows(state.packingHistoryQuery), 180);
+    }
     const rackHistoryFilter = event.target.closest?.("[data-rack-history-filter]");
     if (rackHistoryFilter && rackHistoryFilter.dataset.rackHistoryFilter === "query") {
       state.rackHistoryFilters.query = rackHistoryFilter.value;
@@ -29610,6 +30361,23 @@ function wireV135OperationsEvents() {
     if (event.key !== "Enter" || !event.target.matches("#rejectOrderInput, #rejectItemInput")) return;
     event.preventDefault();
     previewRejectMatch().catch((error) => showInlineError(error.message, true));
+  });
+
+  document.addEventListener("input", (event) => {
+    const colorInput = event.target.closest?.("#rackSetModalColor, #rackManagerSetColorInput");
+    if (colorInput) {
+      const output = colorInput.closest(".rack-set-color-control-v269")?.querySelector("[data-rack-set-color-output]");
+      if (output) output.textContent = String(colorInput.value || "").toUpperCase();
+      const form = colorInput.closest("form");
+      form?.querySelectorAll(".rack-set-visual-icon-v269").forEach((icon) => icon.style.setProperty("--rack-set-icon-color", colorInput.value));
+    }
+    if (event.target.closest?.("#rackFormModal")) syncRackFormPreview();
+    if (event.target.closest?.("#rackSetFormModal")) syncRackSetFormPreview();
+  });
+
+  document.addEventListener("change", (event) => {
+    if (event.target.closest?.("#rackFormModal")) syncRackFormPreview();
+    if (event.target.closest?.("#rackSetFormModal")) syncRackSetFormPreview();
   });
 
   document.addEventListener("submit", (event) => {
@@ -29865,6 +30633,15 @@ function wirePrintPresetEvents() {
  */
 function wireEvents() {
   if (state.eventsWired) return;
+
+  document.addEventListener("toggle", (event) => {
+    const group = event.target.closest?.("[data-rack-manager-group]");
+    if (!group || event.target !== group) return;
+    const label = String(group.dataset.rackManagerGroup || "");
+    if (!label) return;
+    if (group.open) state.expandedRackManagerGroups.add(label);
+    else state.expandedRackManagerGroups.delete(label);
+  }, true);
 
   document.addEventListener("pointerdown", () => void unlockAppSounds(), { capture: true, once: true });
   document.addEventListener("keydown", () => void unlockAppSounds(), { capture: true, once: true });
@@ -30929,7 +31706,10 @@ function wireEvents() {
 
   els.rackCreateOpenBtn?.addEventListener("click", () => openRackForm(""));
   els.rackSetCreateOpenBtn?.addEventListener("click", () => openRackSetForm(""));
-  els.rackEditOpenBtn?.addEventListener("click", () => openAdminModal("racks"));
+  els.rackEditOpenBtn?.addEventListener("click", () => {
+    state.expandedRackManagerGroups.clear();
+    openAdminModal("racks");
+  });
 
   els.folderImportBtn?.addEventListener("click", () => {
     importTempDeliveryFolder().catch((error) => showInlineError(error.message, true));
@@ -31749,6 +32529,30 @@ function wireEvents() {
       addStationFromInput()
         .then(() => openAdminModal("stations"))
         .catch((error) => showInlineError(error.message));
+      return;
+    }
+
+    const rackSetColorChoice = event.target.closest("[data-rack-set-color-choice]");
+    if (rackSetColorChoice) {
+      event.preventDefault();
+      const colorInput = document.getElementById("rackSetModalColor");
+      if (colorInput) colorInput.value = String(rackSetColorChoice.dataset.rackSetColorChoice || "#176d72");
+      syncRackSetFormPreview();
+      return;
+    }
+
+    const rackSetIconChoice = event.target.closest("[data-rack-set-icon-choice]");
+    if (rackSetIconChoice) {
+      event.preventDefault();
+      setRackSetVisualChoice(rackSetIconChoice);
+      syncRackSetFormPreview();
+      return;
+    }
+
+    const rackFormBackButton = event.target.closest("[data-rack-form-back]");
+    if (rackFormBackButton && els.adminModal?.contains(rackFormBackButton)) {
+      event.preventDefault();
+      returnToRackManager();
       return;
     }
 
@@ -33675,7 +34479,7 @@ init().catch((error) => {
   const FLAGS_ENDPOINT = "/api/operations/line-flags";
   const UPDATE_ACK_ENDPOINT = "/api/operations/line-flags/acknowledge";
   const POLL_MS = 10000;
-  const UPDATE_PROMPT_TIMEOUT_MS = 15000;
+  const UPDATE_PROMPT_TIMEOUT_MS = 10000;
 
   let host = null;
   let button = null;
@@ -34052,6 +34856,9 @@ init().catch((error) => {
       pendingLineCount: Number(payload?.pendingLineCount || items.filter((item) => item.hasUnseenUpdate).length || 0),
       newLineCount: Number(payload?.newLineCount || items.filter((item) => item.userUpdateState === "new").length || 0),
       updatedLineCount: Number(payload?.updatedLineCount || items.filter((item) => item.userUpdateState === "updated").length || 0),
+      totalLineCount: Number(payload?.totalLineCount || items.length || 0),
+      listRevision: Number(payload?.listRevision || items[0]?.listRevision || 1),
+      isNewStage: Boolean(payload?.isNewStage),
       noticeIds: [...new Set(noticeIds)],
       signature: [...new Set(noticeIds)].join(","),
       items,
@@ -34120,6 +34927,44 @@ init().catch((error) => {
     };
   }
 
+  function updateReviewCopy(flags = currentFlags) {
+    const activeList = (state.lists || []).find((list) => String(list.id || "") === String(flags?.listId || ""));
+    const fallbackItem = flags?.items?.[0] || {};
+    const stageName = activeList
+      ? scanStageLabel(activeList)
+      : scanStageLabel({ stage: fallbackItem.stage || state.meta?.stage || "", scanner: fallbackItem.scanner || state.meta?.scanner || "" });
+    const count = Math.max(Number(flags?.pendingLineCount || 0), 0);
+    const newOrders = Math.max(Number(flags?.newLineCount || 0), 0);
+    if (flags?.isNewStage) {
+      return {
+        kind: "new-stage",
+        eyebrow: "New stage",
+        title: "New stage added",
+        summary: `${stageName} · ${count} order${count === 1 ? "" : "s"} to review`,
+        body: "Review the orders, then mark this stage reviewed.",
+        reviewLabel: "Review Orders",
+      };
+    }
+    if (newOrders > 0) {
+      return {
+        kind: "new-orders",
+        eyebrow: "Delivery list updated",
+        title: `${newOrders} new order${newOrders === 1 ? "" : "s"} added`,
+        summary: `${newOrders} new order${newOrders === 1 ? "" : "s"} added`,
+        body: "Review the new orders, then mark reviewed.",
+        reviewLabel: "Review Orders",
+      };
+    }
+    return {
+      kind: "list-changed",
+      eyebrow: "Delivery list updated",
+      title: "Delivery list changed",
+      summary: `Delivery list updated · ${count} change${count === 1 ? "" : "s"} to review`,
+      body: "Review the changes, then mark reviewed.",
+      reviewLabel: "Review Changes",
+    };
+  }
+
   function renderReviewControl(flags = currentFlags) {
     const elements = reviewControlElements();
     const activeListId = String(state?.activeListId || "");
@@ -34131,14 +34976,11 @@ init().catch((error) => {
 
     const updatedFilterActive = Boolean(state?.activeFilters?.has?.("updated"));
     const reviewComplete = reviewedSignatureByList.get(flags.listId) === flags.signature && Boolean(flags.signature);
-    const parts = [];
-    if (flags.newLineCount) parts.push(`${flags.newLineCount} new`);
-    if (flags.updatedLineCount) parts.push(`${flags.updatedLineCount} updated`);
-    if (elements.summary) {
-      elements.summary.textContent = `${parts.join(" · ") || `${flags.pendingLineCount} changed`} line${flags.pendingLineCount === 1 ? "" : "s"} for your account`;
-    }
+    const copy = updateReviewCopy(flags);
+    elements.control.dataset.updateKind = copy.kind;
+    if (elements.summary) elements.summary.textContent = copy.summary;
     if (elements.review) {
-      elements.review.textContent = updatedFilterActive ? "Updates Shown" : "Review Updates";
+      elements.review.textContent = updatedFilterActive ? "Review Open" : copy.reviewLabel;
       elements.review.disabled = updatedFilterActive;
       elements.review.onclick = () => reviewUpdates(flags);
     }
@@ -34147,8 +34989,8 @@ init().catch((error) => {
       elements.acknowledge.disabled = !updatedFilterActive || !reviewComplete;
       elements.acknowledge.textContent = "Mark Reviewed";
       elements.acknowledge.title = reviewComplete
-        ? "Clear the displayed New/Updated status for your account"
-        : "Use Review Updates first so the changed lines are displayed";
+        ? "Mark the displayed delivery-list changes reviewed for your account"
+        : "Review the new delivery-list work first";
       elements.acknowledge.onclick = () => acknowledgeUpdates(flags);
     }
     elements.control.classList.toggle("is-reviewing", updatedFilterActive);
@@ -34173,17 +35015,18 @@ init().catch((error) => {
     shell.id = "lineUpdateReviewPromptV135";
     shell.className = "line-update-review-prompt-shell";
     const initialSeconds = Math.ceil(UPDATE_PROMPT_TIMEOUT_MS / 1000);
+    const copy = updateReviewCopy(flags);
     shell.innerHTML = `
-      <section class="line-update-review-prompt" role="status" aria-live="polite" aria-labelledby="lineUpdatePromptTitle">
+      <section class="line-update-review-prompt is-${escapeHtml(copy.kind)}" role="status" aria-live="polite" aria-labelledby="lineUpdatePromptTitle">
         <button class="line-update-review-close gui-close-button" type="button" aria-label="Close">×</button>
         <span class="line-update-review-icon" aria-hidden="true">!</span>
         <div class="line-update-review-prompt-copy">
-          <small>Delivery list updated</small>
-          <h2 id="lineUpdatePromptTitle">${flags.pendingLineCount} changed line${flags.pendingLineCount === 1 ? "" : "s"} need review</h2>
-          <p>${flags.newLineCount ? `${flags.newLineCount} new` : ""}${flags.newLineCount && flags.updatedLineCount ? " · " : ""}${flags.updatedLineCount ? `${flags.updatedLineCount} updated` : ""}. Review them now, then mark the displayed changes reviewed.</p>
+          <small>${escapeHtml(copy.eyebrow)}</small>
+          <h2 id="lineUpdatePromptTitle">${escapeHtml(copy.title)}</h2>
+          <p>${escapeHtml(copy.body)}</p>
           <span class="line-update-review-time" data-update-prompt-time>Closes in ${initialSeconds}s</span>
         </div>
-        <button class="line-update-review-primary app-primary-button" type="button">Review now</button>
+        <button class="line-update-review-primary app-primary-button" type="button">${escapeHtml(copy.reviewLabel)}</button>
       </section>`;
     document.body.append(shell);
     shell.querySelector(".line-update-review-close")?.addEventListener("click", closeUpdatePrompt);
@@ -34202,6 +35045,19 @@ init().catch((error) => {
     currentPromptTimer = window.setTimeout(closeUpdatePrompt, UPDATE_PROMPT_TIMEOUT_MS);
   }
 
+  function nudgeUpdateReviewRowsIntoView() {
+    // v0.264: after Review Updates is clicked, move the page only far enough to
+    // expose the highlighted rows. Keep the review controls (especially Mark
+    // Reviewed) on-screen instead of jumping the whole list panel to the top.
+    window.requestAnimationFrame(() => {
+      const control = document.getElementById("scanUpdateReviewControl");
+      if (!control || control.hidden) return;
+      const rect = control.getBoundingClientRect();
+      const nudge = Math.min(120, Math.max(0, rect.top - 72));
+      if (nudge > 8) window.scrollBy({ top: nudge, left: 0, behavior: "smooth" });
+    });
+  }
+
   function reviewUpdates(flags = currentFlags) {
     if (!flags?.signature) return;
     if (typeof state === "object") {
@@ -34211,13 +35067,13 @@ init().catch((error) => {
     reviewedSignatureByList.set(flags.listId, flags.signature);
     if (typeof renderScanPage === "function") renderScanPage();
     renderReviewControl(flags);
-    document.getElementById("listPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    nudgeUpdateReviewRowsIntoView();
   }
 
   async function acknowledgeUpdates(flags = currentFlags) {
     if (!flags?.listId || !flags?.signature) return;
     if (reviewedSignatureByList.get(flags.listId) !== flags.signature) {
-      if (typeof showFloatingNotice === "function") showFloatingNotice("Review the updated lines before marking them reviewed.", "notice");
+      if (typeof showFloatingNotice === "function") showFloatingNotice("Review the delivery-list changes before marking them reviewed.", "notice");
       return;
     }
     const buttonElement = document.getElementById("scanUpdateMarkReviewedBtn");
@@ -34226,24 +35082,38 @@ init().catch((error) => {
       buttonElement.textContent = "Saving...";
     }
     try {
-      await jsonFetch(UPDATE_ACK_ENDPOINT, {
+      const acknowledgement = await jsonFetch(UPDATE_ACK_ENDPOINT, {
         method: "POST",
         body: JSON.stringify({ listId: flags.listId, noticeIds: flags.noticeIds }),
       });
-      flagsByList.delete(flags.listId);
-      reviewedSignatureByList.delete(flags.listId);
+      const affectedListIds = Array.isArray(acknowledgement?.acknowledgedListIds)
+        ? acknowledgement.acknowledgedListIds.map((value) => String(value || "")).filter(Boolean)
+        : [flags.listId];
+      affectedListIds.forEach((listId) => {
+        flagsByList.delete(listId);
+        reviewedSignatureByList.delete(listId);
+      });
       const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
       if (refreshed.pendingLineCount > 0) {
-        throw new Error("New updates arrived while you were reviewing. Review the latest changes before clearing them.");
+        throw new Error("New delivery-list changes arrived while you were reviewing. Review the latest changes before clearing them.");
       }
       if (typeof state === "object") {
         state.activeFilters?.delete?.("updated");
         state.pageIndex = 1;
       }
       if (typeof renderScanPage === "function") renderScanPage();
-      if (typeof showSaveConfirmation === "function") showSaveConfirmation("The new and updated status is cleared for your account on this list.");
+      if (typeof showSaveConfirmation === "function") {
+        const broadReview = acknowledgement?.reviewScope === "airport-delivery-date-batch";
+        showSaveConfirmation(
+          broadReview
+            ? "This delivery date is marked reviewed for your account."
+            : "This stage is marked reviewed for your account."
+        );
+      }
       renderReviewControl(refreshed);
-      document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", { detail: { listId: flags.listId } }));
+      document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", {
+        detail: { listId: flags.listId, acknowledgedListIds: affectedListIds },
+      }));
     } catch (error) {
       if (buttonElement) {
         buttonElement.disabled = false;

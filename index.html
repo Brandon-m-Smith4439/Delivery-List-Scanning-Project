@@ -12,17 +12,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260807-v0.262">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260807-v0.262">
-    <link rel="stylesheet" href="static/css/home.css?v=20260807-v0.262">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260807-v0.262">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260807-v0.262">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260807-v0.262">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260807-v0.262">
-    <link rel="stylesheet" href="static/css/print.css?v=20260807-v0.262">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260811-v0.273">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260811-v0.273">
+    <link rel="stylesheet" href="static/css/home.css?v=20260811-v0.273">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260811-v0.273">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260811-v0.273">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260811-v0.273">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260811-v0.273">
+    <link rel="stylesheet" href="static/css/print.css?v=20260811-v0.273">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260811-v0.273">
     <link rel="stylesheet" href="static/css/shell.css?v=20260731-v0.192">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260807-v0.262">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260811-v0.273">
 </head>
 <body data-page="home" data-mobile-view="scan">
   <!-- SECTION: Authentication and password reset -->
@@ -529,7 +529,7 @@
                       <button class="tab priority-tab" data-filter="remakes" type="button">Remakes <span id="countRemakes">(0)</span></button>
                       <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">(0)</span></button>
                       <button class="tab priority-tab internal-reject-filter" data-filter="internal-rejects" type="button">Internal Rejects <span id="countInternalRejects">(0)</span></button>
-                      <button class="tab" data-filter="updated" type="button">New/Updated <span id="countUpdated">(0)</span></button>
+                      <button class="tab" data-filter="updated" type="button">New Orders <span id="countUpdated">(0)</span></button>
                       <button class="tab" data-filter="errors" type="button">Errors <span id="countErrors">(0)</span></button>
                     </div>
                   </section>
@@ -567,7 +567,7 @@
 
             <div class="scan-update-review-control" id="scanUpdateReviewControl" hidden aria-live="polite">
               <span class="scan-update-review-icon" aria-hidden="true"></span>
-              <span class="scan-update-review-copy" id="scanUpdateReviewSummary">New or updated lines are ready to review.</span>
+              <span class="scan-update-review-copy" id="scanUpdateReviewSummary">New orders are ready to review.</span>
               <span class="scan-update-review-actions">
                 <button class="scan-update-review-button" id="scanUpdateReviewBtn" type="button">Review Updates</button>
                 <button class="scan-update-reviewed-button app-primary-button" id="scanUpdateMarkReviewedBtn" type="button" disabled>Mark Reviewed</button>
@@ -731,7 +731,7 @@
                   <span>Item Nr.</span>
                   <input id="manualItemInput" type="text" inputmode="numeric" autocomplete="off" placeholder="003" required>
                 </label>
-                <button type="submit">Submit</button>
+                <button class="app-primary-button" type="submit">Submit</button>
               </div>
             </form>
 
@@ -1545,13 +1545,13 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.262">
+        <span class="footer-version-v0163" aria-label="Application version 0.273">
           <small>Version</small>
-          <strong>0.262</strong>
+          <strong>0.273</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
-          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.262&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
+          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.273&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
           title="Report a Delivery List Scanner bug"
         >
           <span class="footer-bug-icon-v0163" aria-hidden="true"></span>
@@ -1880,6 +1880,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260807-v0.262"></script>
+  <script src="static/js/app.js?v=20260811-v0.273"></script>
 </body>
 </html>

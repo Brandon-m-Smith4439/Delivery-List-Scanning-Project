@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "262"
+APPLICATION_VERSION = "273"
 # Schema version 5 matches the maintained migration registry (definitions 1 through 5).
 # Frontend-only releases must advance APPLICATION_VERSION without changing this value.
 # Backend reporting changes without a maintained migration follow the same rule.

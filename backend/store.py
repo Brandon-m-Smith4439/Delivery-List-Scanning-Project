@@ -273,6 +273,11 @@ DEFAULT_BAY_AUTO_ASSIGN_SETTINGS = {
 }
 DEFAULT_RACK_DESTINATION_OVERRIDE_MINUTES = 15
 RACK_DESTINATION_OVERRIDE_METADATA_KEY = "rack_destination_override_minutes"
+RACK_SET_VISUALS_METADATA_KEY = "rack_set_visuals_v1"
+RACK_SET_VISUAL_ICONS = {
+    "rack", "truck", "steel", "wood", "aluminum", "coral", "lr", "rr",
+    "showers", "mirror", "framed-mirror", "bfs-mirror", "crl", "spacer",
+}
 DEFAULT_CROSS_DATE_SCAN_MODE = "auto_unique"
 DEFAULT_CROSS_DATE_SCAN_PAST_DAYS = 7
 DEFAULT_CROSS_DATE_SCAN_FUTURE_DAYS = 30
@@ -3695,6 +3700,60 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             (key, value, now_iso()),
         )
 
+    def rack_set_visuals(self, con: Any) -> dict[str, dict[str, str]]:
+        """Return admin-selected rack-set icon/color preferences from existing metadata."""
+        raw = self.system_metadata_value(con, RACK_SET_VISUALS_METADATA_KEY)
+        try:
+            payload = json.loads(raw) if raw else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+        if not isinstance(payload, dict):
+            return {}
+        result: dict[str, dict[str, str]] = {}
+        for key, value in payload.items():
+            if not isinstance(value, dict):
+                continue
+            icon = str(value.get("icon") or "").strip().lower()
+            color = str(value.get("color") or "").strip().lower()
+            if icon not in RACK_SET_VISUAL_ICONS:
+                icon = ""
+            if color and not re.fullmatch(r"#[0-9a-f]{6}", color):
+                color = ""
+            if icon or color:
+                result[str(key or "").strip().lower()] = {"icon": icon, "color": color}
+        return result
+
+    def save_rack_set_visual(
+        self,
+        con: Any,
+        rack_type: str,
+        icon: Any = "",
+        color: Any = "",
+        old_rack_type: str = "",
+    ) -> dict[str, str]:
+        """Persist one rack-set visual without introducing a schema migration."""
+        label = str(rack_type or "").strip()
+        if not label:
+            return {"icon": "", "color": ""}
+        clean_icon = str(icon or "").strip().lower()
+        if clean_icon not in RACK_SET_VISUAL_ICONS:
+            clean_icon = "rack"
+        clean_color = str(color or "").strip().lower()
+        if not re.fullmatch(r"#[0-9a-f]{6}", clean_color):
+            clean_color = "#176d72"
+        visuals = self.rack_set_visuals(con)
+        old_key = str(old_rack_type or "").strip().lower()
+        new_key = label.lower()
+        if old_key and old_key != new_key:
+            visuals.pop(old_key, None)
+        visuals[new_key] = {"icon": clean_icon, "color": clean_color}
+        self.set_system_metadata_value(
+            con,
+            RACK_SET_VISUALS_METADATA_KEY,
+            json.dumps(visuals, sort_keys=True, separators=(",", ":")),
+        )
+        return visuals[new_key]
+
     def ensure_rack_destination_override_columns(self, con: Any) -> None:
         """Ensure existing databases can retain a temporary rack override window."""
         self.ensure_column(con, "racks", "destination_override_until", "TEXT NOT NULL DEFAULT ''")
@@ -5709,6 +5768,45 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (list_id,),
             ).fetchall()
             rack_by_item = {row["target_id"]: row for row in rack_rows}
+            rack_history_rows = con.execute(
+                """
+                WITH rack_history AS (
+                    SELECT target.id AS target_id,
+                           r.rack_code,
+                           r.display_name AS rack_name,
+                           r.rack_type,
+                           ri.status AS rack_item_status,
+                           ri.added_at,
+                           ri.removed_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY target.id
+                               ORDER BY CASE WHEN ri.status = 'Active' THEN 0 ELSE 1 END,
+                                        CASE WHEN COALESCE(ri.removed_at, '') <> '' THEN ri.removed_at ELSE ri.added_at END DESC,
+                                        ri.id DESC
+                           ) AS history_rank
+                    FROM rack_items ri
+                    JOIN racks r ON r.id = ri.rack_id
+                    JOIN line_items src ON src.id = ri.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src.list_id
+                    JOIN line_items target
+                      ON (
+                        target.id = src.id
+                        OR (src.source_id <> '' AND target.source_id = src.source_id)
+                        OR (target.order_no = src.order_no AND target.item_no = src.item_no)
+                      )
+                    JOIN delivery_lists target_dl
+                      ON target_dl.id = target.list_id
+                     AND target_dl.delivery_date = src_dl.delivery_date
+                    WHERE target.list_id = ?
+                      AND r.active = 1
+                )
+                SELECT target_id, rack_code, rack_name, rack_type, rack_item_status, added_at, removed_at
+                FROM rack_history
+                WHERE history_rank = 1
+                """,
+                (list_id,),
+            ).fetchall()
+            rack_history_by_item = {row["target_id"]: row for row in rack_history_rows}
             bay_rows = con.execute(
                 """
                 SELECT ba.line_item_id, b.bay_code
@@ -5721,10 +5819,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             bay_by_item = {row["line_item_id"]: row["bay_code"] for row in bay_rows}
             for item in items:
                 rack = rack_by_item.get(item["id"])
+                rack_history = rack_history_by_item.get(item["id"])
                 if rack:
                     item["rackCode"] = rack["rack_code"]
                     item["rackName"] = rack["rack_name"] or rack["rack_code"]
                     item["rackType"] = rack["rack_type"]
+                if rack_history:
+                    item["lastRackCode"] = str(rack_history["rack_code"] or "")
+                    item["lastRackName"] = str(rack_history["rack_name"] or rack_history["rack_code"] or "")
+                    item["lastRackType"] = str(rack_history["rack_type"] or "")
+                    item["lastRackItemStatus"] = str(rack_history["rack_item_status"] or "")
+                    item["lastRackAddedAt"] = str(rack_history["added_at"] or "")
+                    item["lastRackRemovedAt"] = str(rack_history["removed_at"] or "")
+                else:
+                    item["lastRackCode"] = ""
+                    item["lastRackName"] = ""
+                    item["lastRackType"] = ""
+                    item["lastRackItemStatus"] = ""
+                    item["lastRackAddedAt"] = ""
+                    item["lastRackRemovedAt"] = ""
                 if item["id"] in bay_by_item:
                     item["bayCode"] = bay_by_item[item["id"]]
 
@@ -12919,6 +13032,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         with self.connect() as con:
             self.seed_racks(con)
             racks = [self.rack_from_row(con, row) for row in con.execute("SELECT * FROM racks WHERE active = 1 ORDER BY sort_order, rack_code").fetchall()]
+            visuals = self.rack_set_visuals(con)
+            for rack in racks:
+                set_label = "Truck" if str(rack.get("code") or "").upper().startswith("T") or "truck" in str(rack.get("type") or "").lower() else str(rack.get("type") or "Racks")
+                visual = visuals.get(set_label.strip().lower(), {})
+                rack["setIcon"] = str(visual.get("icon") or "")
+                rack["setColor"] = str(visual.get("color") or "")
             return {"racks": racks, "summary": self.rack_summary(con)}
 
     def get_rack_by_code(self, con: sqlite3.Connection, code: str) -> sqlite3.Row:
@@ -13752,9 +13871,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
         """
         code = normalize_rack_code(str(data.get("rackCode") or data.get("code") or ""))
-        old_code = normalize_rack_code(str(data.get("oldRackCode") or data.get("oldCode") or code))
+        old_code_value = str(data.get("oldRackCode") or data.get("oldCode") or "").strip()
+        old_code = normalize_rack_code(old_code_value) if old_code_value else ""
         name = str(data.get("name") or data.get("displayName") or code).strip()[:80]
         rack_type = str(data.get("type") or data.get("rackType") or "Steel").strip()[:40]
+        visual_icon = str(data.get("setIcon") or data.get("visualIcon") or "").strip().lower()
+        visual_color = str(data.get("setColor") or data.get("visualColor") or "").strip().lower()
+        visual_source_type = str(data.get("visualSourceType") or "").strip()[:40]
         if not code:
             raise ValueError("Rack code is required")
         with self.connect() as con:
@@ -13772,13 +13895,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     (code, name, rack_type, now_iso(), existing["id"]),
                 )
             else:
-                conflict = con.execute("SELECT id FROM racks WHERE rack_code = ?", (code,)).fetchone()
+                conflict = con.execute("SELECT id, active FROM racks WHERE rack_code = ?", (code,)).fetchone()
+                if conflict and int(row_value(conflict, "active", 0) or 0):
+                    raise ValueError(f"Rack code {code} already exists. Choose a different rack code.")
                 if conflict:
-                    con.execute("UPDATE racks SET display_name = ?, rack_type = ?, active = 1, updated_at = ? WHERE rack_code = ?", (name, rack_type, now_iso(), code))
+                    # Reusing a previously deleted empty code creates a clean operational rack
+                    # while preserving historical rack_items/audit records by their original IDs.
+                    con.execute(
+                        """
+                        UPDATE racks
+                        SET display_name = ?, rack_type = ?, status = 'Open', active = 1,
+                            destination = '', completed_at = NULL, departed_at = NULL,
+                            returned_at = NULL, updated_at = ?
+                        WHERE rack_code = ?
+                        """,
+                        (name, rack_type, now_iso(), code),
+                    )
                 else:
                     sort_order = con.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM racks").fetchone()[0]
                     con.execute("INSERT INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at) VALUES (?, ?, ?, 'Open', 1, ?, ?)", (code, name, rack_type, sort_order, now_iso()))
-            self.insert_audit(con, "rack", code, "upsert_rack", user, old_code if old_code != code else "", "", {"name": name, "type": rack_type, "oldCode": old_code})
+            if visual_icon or visual_color:
+                self.save_rack_set_visual(con, rack_type, visual_icon or "rack", visual_color or "#176d72", visual_source_type)
+            self.insert_audit(con, "rack", code, "upsert_rack", user, old_code if old_code != code else "", "", {"name": name, "type": rack_type, "oldCode": old_code, "setIcon": visual_icon, "setColor": visual_color})
             con.commit()
         payload = self.get_racks()
         payload["rack"] = next((rack for rack in payload.get("racks", []) if rack.get("code") == code), None)
@@ -13795,48 +13933,139 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         name_root = str(data.get("nameRoot") or rack_type or prefix or "Rack").strip()[:60]
         count = max(1, min(int(data.get("count") or 1), 100))
         start = max(1, min(int(data.get("start") or 1), 999))
+        visual_icon = str(data.get("setIcon") or data.get("visualIcon") or "rack").strip().lower()
+        visual_color = str(data.get("setColor") or data.get("visualColor") or "#176d72").strip().lower()
         if not prefix:
             raise ValueError("Rack set prefix is required")
         created_codes: list[str] = []
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             sort_order = int(con.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM racks").fetchone()[0] or 1)
-            for offset in range(count):
+            target_codes = [
+                f"R{start + offset}{prefix}" if len(prefix) <= 3 else f"{prefix}{start + offset}"
+                for offset in range(count)
+            ]
+            placeholders = ",".join("?" for _ in target_codes)
+            active_conflicts = con.execute(
+                f"SELECT rack_code FROM racks WHERE active = 1 AND rack_code IN ({placeholders}) ORDER BY rack_code",
+                target_codes,
+            ).fetchall()
+            if active_conflicts:
+                conflict_codes = ", ".join(str(row["rack_code"]) for row in active_conflicts[:5])
+                suffix = "..." if len(active_conflicts) > 5 else ""
+                raise ValueError(f"Rack code(s) already exist: {conflict_codes}{suffix}. Choose a different suffix or starting number.")
+
+            for offset, code in enumerate(target_codes):
                 number = start + offset
-                code = f"R{number}{prefix}" if len(prefix) <= 3 else f"{prefix}{number}"
                 display = f"{name_root} {number}"
                 existing = con.execute("SELECT id FROM racks WHERE rack_code = ?", (code,)).fetchone()
                 if existing:
-                    con.execute("UPDATE racks SET display_name = ?, rack_type = ?, active = 1, updated_at = ? WHERE rack_code = ?", (display, rack_type, now_iso(), code))
+                    con.execute(
+                        """
+                        UPDATE racks
+                        SET display_name = ?, rack_type = ?, status = 'Open', active = 1,
+                            destination = '', completed_at = NULL, departed_at = NULL,
+                            returned_at = NULL, sort_order = ?, updated_at = ?
+                        WHERE rack_code = ?
+                        """,
+                        (display, rack_type, sort_order + offset, now_iso(), code),
+                    )
                 else:
                     con.execute(
                         "INSERT INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at) VALUES (?, ?, ?, 'Open', 1, ?, ?)",
                         (code, display, rack_type, sort_order + offset, now_iso()),
                     )
                 created_codes.append(code)
-            self.insert_audit(con, "rack", ",".join(created_codes), "create_rack_set", user, "", "", {"prefix": prefix, "type": rack_type, "count": count, "start": start})
+            visual = self.save_rack_set_visual(con, rack_type, visual_icon, visual_color)
+            self.insert_audit(con, "rack", ",".join(created_codes), "create_rack_set", user, "", "", {"prefix": prefix, "type": rack_type, "count": count, "start": start, "setIcon": visual.get("icon", ""), "setColor": visual.get("color", "")})
             con.commit()
         payload = self.get_racks()
         payload["created"] = created_codes
         return payload
 
     def delete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
-        """Purpose: Remove rack for the delivery-list scanner workflow.
+        """Remove one empty rack or an explicitly supplied empty rack set atomically.
 
-        Effects: This function reads or changes database records.
-        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        Rack history is retained by deactivating rack definitions instead of deleting
+        rows. A rack-set request uses the existing endpoint with ``rackCodes`` so the
+        server can validate every rack before changing any of them.
         """
-        code = normalize_rack_code(str(data.get("rackCode") or ""))
-        if code == "T":
+        raw_codes = data.get("rackCodes") or [data.get("rackCode") or ""]
+        if isinstance(raw_codes, str):
+            raw_codes = [raw_codes]
+        codes = list(
+            dict.fromkeys(
+                normalize_rack_code(str(value or ""))
+                for value in (raw_codes or [])
+                if str(value or "").strip()
+            )
+        )
+        if not codes:
+            raise ValueError("Rack code is required")
+        if "T" in codes:
             raise ValueError("Truck cannot be deleted")
+
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            rack = self.get_rack_by_code(con, code)
-            active = con.execute("SELECT COUNT(*) FROM rack_items WHERE rack_id = ? AND status = 'Active'", (rack["id"],)).fetchone()[0]
-            if active:
-                raise ValueError("Clear or move the rack contents before deleting this rack")
-            con.execute("UPDATE racks SET active = 0, updated_at = ? WHERE id = ?", (now_iso(), rack["id"]))
-            self.insert_audit(con, "rack", rack["rack_code"], "delete_rack", user, "", "", {})
+            racks = [self.get_rack_by_code(con, code) for code in codes]
+            blocked_codes: list[str] = []
+            for rack in racks:
+                active = con.execute(
+                    "SELECT COUNT(*) FROM rack_items WHERE rack_id = ? AND status = 'Active' AND COALESCE(qty, 0) > 0",
+                    (rack["id"],),
+                ).fetchone()[0]
+                if active:
+                    blocked_codes.append(str(rack["rack_code"]))
+            if blocked_codes:
+                blocked = ", ".join(blocked_codes[:5])
+                suffix = "..." if len(blocked_codes) > 5 else ""
+                raise ValueError(f"Clear or move rack contents before deleting: {blocked}{suffix}")
+
+            deleted_at = now_iso()
+            affected_types: set[str] = set()
+            for rack in racks:
+                # Zero-quantity Active rows are stale bookkeeping, not rack contents.
+                # Retire them so otherwise empty newly-created/reused racks can be deleted.
+                con.execute(
+                    """
+                    UPDATE rack_items
+                    SET status = 'Removed', removed_by = ?, removed_at = ?,
+                        reason = CASE WHEN COALESCE(reason, '') = '' THEN 'Rack definition deleted' ELSE reason END
+                    WHERE rack_id = ? AND status = 'Active' AND COALESCE(qty, 0) <= 0
+                    """,
+                    (user, deleted_at, rack["id"]),
+                )
+                rack_type = str(rack["rack_type"] or "").strip()
+                if rack_type and rack_type.lower() != "truck":
+                    affected_types.add(rack_type)
+                con.execute("UPDATE racks SET active = 0, updated_at = ? WHERE id = ?", (deleted_at, rack["id"]))
+                self.insert_audit(
+                    con,
+                    "rack",
+                    rack["rack_code"],
+                    "delete_rack",
+                    user,
+                    "",
+                    "",
+                    {"rackType": rack_type, "batchSize": len(racks)},
+                )
+
+            visuals = self.rack_set_visuals(con)
+            visuals_changed = False
+            for rack_type in affected_types:
+                remaining = con.execute(
+                    "SELECT COUNT(*) FROM racks WHERE active = 1 AND lower(COALESCE(rack_type, '')) = lower(?)",
+                    (rack_type,),
+                ).fetchone()[0]
+                if not remaining and visuals.pop(rack_type.lower(), None) is not None:
+                    visuals_changed = True
+            if visuals_changed:
+                self.set_system_metadata_value(
+                    con,
+                    RACK_SET_VISUALS_METADATA_KEY,
+                    json.dumps(visuals, sort_keys=True, separators=(",", ":")),
+                )
+
             con.commit()
         return self.get_racks()
 

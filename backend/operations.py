@@ -93,14 +93,26 @@ class OperationsFeatureService:
         )
 
     def line_flags(self, list_id: str, username: str) -> dict[str, Any]:
-        """Return per-user update flags plus the latest reject details for one list."""
+        """Return current per-user update flags plus reject details for one list.
+
+        Only the newest import/update batch for the selected stage is eligible for
+        New/Updated review. Automatic imports share source-hash/timestamp batch
+        identity across changed lines; manual entries additionally use their shared
+        change token. Older unreviewed notices are superseded by the current state.
+        """
         self._require_sqlite()
         clean_list_id = clean_text(list_id, 255)
         with self.store.connect() as con:
             user_id = self._user_id(con, username)
             rows = con.execute(
                 """
-                WITH reject_ranked AS (
+                WITH latest_update_batch AS (
+                    SELECT source_hash, created_at, change_token
+                    FROM line_update_notices
+                    WHERE list_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                ), reject_ranked AS (
                     SELECT re.*,
                            ROW_NUMBER() OVER (
                                PARTITION BY re.delivery_date, re.order_no, re.item_no
@@ -115,6 +127,12 @@ class OperationsFeatureService:
                     FROM reject_events re
                 )
                 SELECT li.id,
+                       li.order_no,
+                       li.item_no,
+                       dl.delivery_date,
+                       dl.stage,
+                       dl.scanner,
+                       dl.revision AS list_revision,
                        COALESCE(li.manual_only, 0) AS manual_only,
                        COALESCE(li.manual_source, '') AS manual_source,
                        COALESCE(rr.reject_piece_count, li.internal_reject_count, 0) AS internal_reject_count,
@@ -138,16 +156,23 @@ class OperationsFeatureService:
                  AND rr.order_no = li.order_no
                  AND rr.item_no = li.item_no
                  AND rr.reject_rank = 1
+                LEFT JOIN latest_update_batch lub ON 1 = 1
                 LEFT JOIN line_update_notices n
                   ON n.line_item_id = li.id
                  AND n.list_id = li.list_id
+                 AND n.source_hash = lub.source_hash
+                 AND n.created_at = lub.created_at
+                 AND (
+                     lower(COALESCE(lub.source_hash, '')) <> 'manual-entry'
+                     OR n.change_token = lub.change_token
+                 )
                 LEFT JOIN line_update_receipts r
                   ON r.notice_id = n.id
                  AND r.user_id = ?
                 WHERE li.list_id = ?
                 ORDER BY li.id, n.id
                 """,
-                (user_id, clean_list_id),
+                (clean_list_id, user_id, clean_list_id),
             ).fetchall()
 
         items: dict[str, dict[str, Any]] = {}
@@ -158,6 +183,12 @@ class OperationsFeatureService:
                 item_id,
                 {
                     "lineItemId": item_id,
+                    "order": str(row["order_no"] or ""),
+                    "item": str(row["item_no"] or ""),
+                    "deliveryDate": str(row["delivery_date"] or ""),
+                    "stage": str(row["stage"] or ""),
+                    "scanner": str(row["scanner"] or ""),
+                    "listRevision": int(row["list_revision"] or 1),
                     "manualOnly": bool(row["manual_only"]),
                     "manualSource": str(row["manual_source"] or ""),
                     "internalRejectCount": int(row["internal_reject_count"] or 0),
@@ -186,18 +217,58 @@ class OperationsFeatureService:
                     target["userUpdateState"] = change_type
 
         values = list(items.values())
+        pending_line_count = sum(1 for item in values if item["hasUnseenUpdate"])
+        new_line_count = sum(1 for item in values if item["userUpdateState"] == "new")
+        updated_line_count = sum(1 for item in values if item["userUpdateState"] == "updated")
+        list_revision = int(values[0].get("listRevision") or 1) if values else 1
+        # A newly created stage presents its entire first-revision line population as
+        # new. Existing stages that receive additional orders remain delivery-list
+        # updates; this distinction keeps operator wording accurate and concise.
+        is_new_stage = bool(
+            values
+            and pending_line_count > 0
+            and updated_line_count == 0
+            and new_line_count == len(values)
+            and list_revision <= 1
+        )
         return {
             "ok": True,
             "listId": clean_list_id,
-            "pendingLineCount": sum(1 for item in values if item["hasUnseenUpdate"]),
-            "newLineCount": sum(1 for item in values if item["userUpdateState"] == "new"),
-            "updatedLineCount": sum(1 for item in values if item["userUpdateState"] == "updated"),
+            "pendingLineCount": pending_line_count,
+            "newLineCount": new_line_count,
+            "updatedLineCount": updated_line_count,
+            "totalLineCount": len(values),
+            "listRevision": list_revision,
+            "isNewStage": is_new_stage,
             "noticeIds": sorted(set(notice_ids)),
             "items": values,
         }
 
+    @staticmethod
+    def _airport_review_scope(stage: Any, scanner: Any) -> bool:
+        """Return True for the shared Airport Rd staging/outbound review scope.
+
+        Staging and Outbound are the complete Airport Rd view for a delivery date.
+        Reviewing either one therefore owns the full current update batch across
+        downstream routes. Route-specific stages remain independent when reviewed
+        directly so Indian Trail, CPU, DTC, or Greenville cannot clear one another.
+        """
+        stage_text = clean_text(stage, 120).lower()
+        scanner_text = clean_text(scanner, 120).lower()
+        return (
+            scanner_text == "airport rd"
+            or stage_text.startswith("staging")
+            or stage_text.startswith("outbound")
+        )
+
     def acknowledge_line_updates(self, list_id: str, notice_ids: list[Any], username: str) -> dict[str, Any]:
-        """Mark only the explicitly reviewed notices read for one user and list."""
+        """Mark reviewed updates read for one user using the maintained stage scope.
+
+        Staging/Outbound are the complete Airport Rd view, so reviewing the current
+        import/update batch there acknowledges that same occurrence across every
+        active route/stage on the delivery date. Indian Trail, CPU, DTC, and
+        Greenville remain stage-specific. Receipts stay per-user.
+        """
         self._require_sqlite()
         clean_list_id = clean_text(list_id, 255)
         requested_ids = sorted({as_int(value) for value in (notice_ids or []) if as_int(value) > 0})
@@ -209,13 +280,20 @@ class OperationsFeatureService:
         with self.store.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             user_id = self._user_id(con, username)
+            selected_list = con.execute(
+                "SELECT id, delivery_date, stage, scanner FROM delivery_lists WHERE id = ? AND status = 'active'",
+                (clean_list_id,),
+            ).fetchone()
+            if not selected_list:
+                raise ValueError("The selected delivery-list stage was not found")
+
             placeholders = ",".join("?" for _ in requested_ids)
             rows = con.execute(
                 f"""
-                SELECT id
-                FROM line_update_notices
-                WHERE list_id = ? AND id IN ({placeholders})
-                ORDER BY id
+                SELECT n.id, n.change_token, n.delivery_date, n.source_hash, n.created_at
+                FROM line_update_notices n
+                WHERE n.list_id = ? AND n.id IN ({placeholders})
+                ORDER BY n.id
                 """,
                 [clean_list_id, *requested_ids],
             ).fetchall()
@@ -224,13 +302,58 @@ class OperationsFeatureService:
                 raise ValueError(
                     "The reviewed updates changed before they could be saved. Refresh the list and review the latest updates."
                 )
+
+            target_ids = list(valid_ids)
+            target_list_ids = {clean_list_id}
+            airport_scope = self._airport_review_scope(selected_list["stage"], selected_list["scanner"])
+            if airport_scope:
+                # Staging/Outbound contain the complete delivery-date population. The
+                # import safety layer generates a different change token per automatic
+                # line/list, so the authoritative batch key is source hash + created-at.
+                # Manual-entry notices share one change token as an additional guard.
+                review_batches = {
+                    (
+                        str(row["delivery_date"] or selected_list["delivery_date"] or ""),
+                        str(row["source_hash"] or ""),
+                        str(row["created_at"] or ""),
+                        str(row["change_token"] or "") if str(row["source_hash"] or "").lower() == "manual-entry" else "",
+                    )
+                    for row in rows
+                    if str(row["created_at"] or "").strip()
+                }
+                propagated_ids: set[int] = set()
+                for delivery_date, source_hash, created_at, manual_change_token in review_batches:
+                    params: list[Any] = [delivery_date, source_hash, created_at]
+                    manual_clause = ""
+                    if manual_change_token:
+                        manual_clause = " AND n.change_token = ?"
+                        params.append(manual_change_token)
+                    matches = con.execute(
+                        f"""
+                        SELECT n.id, n.list_id
+                        FROM line_update_notices n
+                        JOIN delivery_lists dl ON dl.id = n.list_id
+                        WHERE dl.status = 'active'
+                          AND n.delivery_date = ?
+                          AND n.source_hash = ?
+                          AND n.created_at = ?
+                          {manual_clause}
+                        """,
+                        params,
+                    ).fetchall()
+                    for match in matches:
+                        propagated_ids.add(int(match["id"]))
+                        target_list_ids.add(str(match["list_id"] or ""))
+                if propagated_ids:
+                    target_ids = sorted(propagated_ids)
+
             seen_at = utc_now()
             con.executemany(
                 """
                 INSERT OR IGNORE INTO line_update_receipts (notice_id, user_id, seen_at)
                 VALUES (?, ?, ?)
                 """,
-                [(notice_id, user_id, seen_at) for notice_id in valid_ids],
+                [(notice_id, user_id, seen_at) for notice_id in target_ids],
             )
             self._audit(
                 con,
@@ -238,10 +361,25 @@ class OperationsFeatureService:
                 clean_list_id,
                 "acknowledge_line_updates",
                 username,
-                {"noticeIds": valid_ids, "seenAt": seen_at},
+                {
+                    "requestedNoticeIds": valid_ids,
+                    "acknowledgedNoticeIds": target_ids,
+                    "acknowledgedListIds": sorted(value for value in target_list_ids if value),
+                    "scope": "airport-delivery-date-batch" if airport_scope else "selected-stage",
+                    "seenAt": seen_at,
+                },
             )
             con.commit()
-        return self.line_flags(clean_list_id, username)
+
+        result = self.line_flags(clean_list_id, username)
+        result.update(
+            {
+                "reviewScope": "airport-delivery-date-batch" if airport_scope else "selected-stage",
+                "acknowledgedNoticeIds": target_ids,
+                "acknowledgedListIds": sorted(value for value in target_list_ids if value),
+            }
+        )
+        return result
 
     def reject_catalog(self) -> dict[str, Any]:
         self._require_sqlite()

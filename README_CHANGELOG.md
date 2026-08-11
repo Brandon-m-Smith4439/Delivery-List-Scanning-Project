@@ -1,3 +1,123 @@
+## v0.273 - Packing Snapshot Layout and Bay Edit Shortcut
+
+- Replaced the tall Packing List History page summary with a single compact status line that reports the visible print-day range and snapshot count without pushing weekly groups down the modal.
+- Kept Preview and Print Snapshot side-by-side on each historical packing-list row, including protection against shared button rules that would otherwise stretch them vertically.
+- Raised the in-app snapshot preview above the Operations/Packing List History GUI with an explicit top-level stacking layer.
+- Removed the redundant footer Close button from Snapshot Preview; the top-right X, Escape key, and backdrop continue to close the preview.
+- Changed the existing Glass Cart rack-set visual to an A-frame glass cart silhouette without changing the persisted icon key.
+- Reintroduced a deliberately tiny physical Bay Map group pencil in the top-right. It opens the exact group in the maintained Edit Bays GUI and leaves Edit Bays as the single editing workflow.
+- Advanced application revision to 273 while retaining database schema version 5; no migration is included.
+
+## v0.272 - Rack Manager Collapse and Packing Snapshot History
+
+- Anchors shared standalone-popup X controls in the top-right, including rack delete/confirmation dialogs.
+- Makes every Edit Racks rack set initially collapsed with a clear View racks / Hide racks affordance while preserving expansion state during the open manager session.
+- Keeps rack-set visual-identity icons fully contained inside their tiles and adds Glass cart, Pallet, Dolly, Crate, and Warehouse icon choices.
+- Rebuilds Packing List History into initially collapsed Monday-Friday business-week groups.
+- Limits Packing List History to 25 distinct print days per page and keeps the Operations modal body as the single vertical scroll owner so historical content is not clipped inside nested panes.
+- Adds Preview and Print Snapshot actions for every historical packing-list record; Preview displays the exact saved packing-list HTML without triggering the browser print dialog.
+- Keeps database schema version 5; this release does not add a migration.
+
+## v0.271 - Rack Visual Selection and Delete Reliability
+
+- Reworked Add Rack Set visual identity controls so icon tiles use neutral white surfaces and the selected rack-set color is applied to the icon itself instead of hiding every icon inside a blue button.
+- Added a quick color-swatch palette plus the native custom color picker; choosing either updates the icon library and live set preview immediately.
+- Applied the maintained shared blue `app-primary-button` format to Cancel in both Add Rack Set and Add Individual Rack workflows.
+- Removed the redundant Rack Configuration hero/subsection from both rack creation workflows; the modal title, numbered sections, and live preview now carry the hierarchy without repeating the same introduction.
+- Made empty-rack deletion predictable: a deleted/reused rack code can be created cleanly, stale zero-quantity rack-item rows no longer block deletion, and the rack form returns to Edit Racks after a successful delete.
+- Made rack-set deletion all-or-nothing from the UI: the set trash action is enabled only when every rack in that set is empty, then removes the full set and its orphaned visual metadata while preserving rack/audit history.
+- Prevented Add Rack Set from silently overwriting active rack codes. Conflicting generated codes now produce a clear error so a supposedly new set cannot accidentally adopt an existing rack's contents/lifecycle.
+- Removed the internal vertical scrollbar from grouped rack sets in Edit Racks; all racks in each group are laid out and the main Admin modal owns scrolling.
+- Removed the grouped-set pencil from the physical Bay Map. Bay editing remains available through the maintained Edit Bays workflow.
+- Application revision is 271. Database schema remains version 5; no migration was added.
+
+## v0.270 - Guided Rack Creation Workspaces
+
+- Rebuilt the **Add Individual Rack** GUI into a polished Rack Manager form with clearly grouped rack identity and rack-set fields, helper copy, and a live visual preview.
+- Rebuilt the **Add Rack Set** GUI into Set Identity, Numbering, and Visual Identity sections with a live preview of generated rack codes and rack count.
+- Preserved the existing rack-set icon/color library and reused it in the new creation preview rather than creating a second visual system.
+- Individual-rack creation now lists the rack sets that actually exist in the maintained Rack Manager, including custom sets.
+- Added a top **Edit Racks** return control and footer **Cancel** button to both creation screens. Both return to the Rack Manager without closing the Admin workspace.
+- Saving an individual rack or creating a rack set now returns to **Edit Racks** automatically so users can immediately see and continue managing the result.
+- Kept all rack APIs and persistence behavior unchanged.
+- Advanced `APPLICATION_VERSION` to 270 while preserving `CURRENT_SCHEMA_VERSION = 5`; no migration, database reset, or schema change is included.
+
+## v0.269 - Scan Update Clarity, Rack Transport History, and Rack Set Visuals
+
+- Reworded Scan-page review messaging so it says **New stage** when a stage is newly introduced and **Delivery list updated** / **new orders** when an existing list receives added orders. Removed the misleading "updated orders" phrasing from the Scan review prompt/header and changed the Scan attention label to **New Orders**.
+- Made the Scan review header bar harder to overlook with a stronger accent, visible REVIEW / NEW STAGE / NEW ORDERS badge, and concise review copy.
+- Increased the Scan review notification duration to exactly 10 seconds and synchronized its countdown/progress animation to the same duration.
+- Preserved the most recent rack assignment after rack contents are cleared or scanned out. Scan-table Location now shows that former rack in a muted gray prior-history style unless a current rack, bay, or received state supersedes it.
+- Standardized the shared blue primary-button component to a 13px font and a 38px minimum height, and applied it to the Manual Scan Submit button.
+- Added a rack-set visual library with selectable icons and color input for new/existing rack sets. Rack-set visuals are persisted in existing `system_metadata` and reused on Rack Overview and Rack Manager group headers.
+- Added a 20-second Old Bay review notification countdown/progress timer.
+- Preserved `CURRENT_SCHEMA_VERSION = 5` and advanced only `APPLICATION_VERSION` to 269. No migration or database reset is included.
+
+## v0.268 - Compact Stage Selector and Bay Edit Icon Polish
+
+- Reduced the Scan-panel Stage selector and popup from the oversized v0.267 footprint while preserving full Indian Trail readability.
+- Reserved explicit right-side space for the Stage review marker and arrow instead of letting them overlap the selected stage text.
+- Locked selected and menu-row New/Updated `!` markers to a true 18px circle so shared dropdown sizing cannot stretch them into an oval.
+- Preserved the wider Delivery Date menu used for complete business-week range headers.
+- Reduced the grouped Bay Map edit-pencil artwork by roughly 25% without reducing the existing click target or changing its top-right placement.
+- Preserved `CURRENT_SCHEMA_VERSION = 5` and advanced only `APPLICATION_VERSION` to 268. No migration or database change is included.
+
+## v0.267 - Scan Selector Alignment and Delivery Week Readability
+
+- Fixed the Stage dropdown selected-row layout so the checkmark, optional update `!`, and stage label stay on one horizontal row.
+- Increased the selected Stage footprint and stopped the update marker from consuming extra text padding, preventing marked stages from looking compressed.
+- Kept Stage popup width equal to its trigger while allowing the Delivery Date popup to open slightly wider for complete business-week headers.
+- Changed business-week range copy to the explicit `M/D/YYYY - M/D/YYYY` format requested for This Week, Last Week, Next Week, and older week groups.
+- Preserved `CURRENT_SCHEMA_VERSION = 5` and advanced only `APPLICATION_VERSION` to 267. No migration or database change is included.
+
+## v0.266 - Update Review Synchronization and Scan Selector Polish
+
+- Changed per-user New/Updated flags to use only the newest update batch for each delivery-list stage, preventing superseded historical notices from disagreeing with the rows that are actually New/Updated now.
+- Made Staging and Outbound authoritative review scopes: marking either stage reviewed acknowledges that same current update batch across all active route/stage copies for the delivery date.
+- Kept Indian Trail, CPU, DTC, and Greenville review isolated to the selected stage so route-specific review never clears unrelated routes.
+- Preserved occurrence-bound safety so a newer update that arrives while a user is reviewing cannot be cleared by the earlier review action.
+- Reduced the New/Updated review prompt from 15 seconds to 7.5 seconds, including the visible countdown/progress timing.
+- Constrained Scan Date/Stage custom-select popup menus to their trigger width so review indicators cannot create oversized Stage dropdowns.
+- Increased Station, Stage, and Delivery Date value typography slightly and expanded their selector footprint so Indian Trail and marked dates remain fully legible.
+- Advanced `APPLICATION_VERSION` to 266 while preserving `CURRENT_SCHEMA_VERSION = 5`; no migration, database reset, or schema-contract change is included.
+
+## v0.265 - Scan Stage Review Scope and Bay Group Header Polish
+
+- Expanded the Scan panel context selector layout so the full Indian Trail stage label remains visible and delivery dates retain readable text when a review `!` marker is present.
+- Positioned update indicators independently from selected-value text and the dropdown arrow so the indicator no longer consumes label width or creates clipping inside the compact scanner header.
+- Added the same per-user `!` review indicator to Stage options that already exists on delivery dates.
+- Changed delivery-date marker aggregation to de-duplicate the same delivery-date/order/item across stage copies while retaining exact per-stage pending counts for the Stage selector.
+- Added order-aware Airport Rd review propagation: marking Staging or Outbound updates reviewed acknowledges the exact reviewed change-token/order/item notices across every active stage copy of those items for that user.
+- Kept Indian Trail, CPU, DTC, and Greenville reviews stage-specific so reviewing one route cannot clear pending updates on another route.
+- Preserved per-user review ownership through `line_update_receipts`; one user's review does not clear another user's date or stage indicators.
+- Invalidated all affected client-side update caches after an Airport Rd review so downstream Stage selector markers refresh immediately from the authoritative backend state.
+- Moved the Bay Map grouped-set Edit icon from the bottom-right to the top-right of each physical bay group header while preserving the existing Edit Bays workflow and permissions.
+- Advanced `APPLICATION_VERSION` to 265 while preserving `CURRENT_SCHEMA_VERSION = 5`; no migration, database reset, or schema-contract change is included.
+
+## v0.264 - Statistics Chart Visibility and Scan Review Polish
+
+- Removed the internal vertical scrollbar from the main Statistics table so the default Top 10 view stays in normal page flow; wide accountability tables retain horizontal scrolling only when required.
+- Reduced table spacing slightly without shrinking the restored v0.263 typography.
+- Updated bar-chart geometry to reserve left-side space from the longest visible category and render the full category label instead of truncating it.
+- Added adaptive donut-center sizing so long totals and currency values remain fully inside the center and do not overlap the ring.
+- Expanded usable text space in the Scan panel date/stage selectors while preserving the compact centered header layout and right-side dropdown arrow.
+- Replaced the Review Updates full-panel jump with a controlled maximum 120px downward nudge that keeps the Mark Reviewed control visible while exposing highlighted rows.
+- Advanced `APPLICATION_VERSION` to 264 while keeping `CURRENT_SCHEMA_VERSION = 5`; no database migration, reset, or schema-contract change is included.
+
+## v0.263 - Statistics Readability and Breakage Table Hierarchy
+
+- Restored chart/control/table typography that had been reduced too aggressively during the dense Statistics pass.
+- Returned main chart titles, filter inputs, axis/category labels, donut values, legends, KPI text, table text, and selected-row details to a normal readable scale.
+- Kept compact chart geometry where useful while increasing legend/table breathing room to prevent the larger text from feeling crowded.
+- Reorganized machine and glass breakage tables around six clear columns instead of nine narrow columns.
+- Added a grouped Breakage totals block showing Pieces, SQFT, Cost, and Rejects together for each machine/glass row.
+- Replaced compressed inline glass/machine/reason summaries with stacked readable detail rows and explicit additional-detail indicators.
+- Added clear Complete / unpriced / missing-dimension coverage pills.
+- Reworked Reject reasons by machine so frequency is visually prominent and separate from material-impact totals.
+- Added a contextual breakage-table heading that explains the view and current chart-ranking unit.
+- Preserved custom dates, external-remake logic, chart unit switching, drilldowns, PDF output, Top 10 / Show more data, and all existing breakage calculations.
+- Kept `CURRENT_SCHEMA_VERSION = 5` unchanged and advanced only `APPLICATION_VERSION` to 263. No database migration is included.
+
 ## v0.262 - Combined Breakage Accountability and Custom Statistics Range
 
 - Combined machine breakage piece, SQFT, and cost datasets into one machine accountability view with a live Chart Unit selector.

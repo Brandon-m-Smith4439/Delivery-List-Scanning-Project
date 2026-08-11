@@ -4189,3 +4189,1142 @@ body .operations-modal-panel[data-rack-icon="history"] .operations-modal-visual-
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* v0.269 Rack-set visual library ------------------------------------------------
+   New rack sets can choose a maintained icon and icon color. The same visual
+   is reused on Rack Overview cards and Rack Manager group headers so custom
+   sets stay recognizable everywhere without changing individual rack icons. */
+body .rack-set-card .rack-set-icon {
+  color: var(--rack-set-icon-color, hsl(var(--rack-set-hue, 211) 47% 38%)) !important;
+}
+
+.rack-set-visual-field-v269 {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rack-set-visual-field-v269 > span:first-child,
+.rack-set-color-field-v269 > span:first-child {
+  color: #314660;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.rack-set-icon-library-v269 {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(74px, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+button.rack-set-icon-choice-v269 {
+  min-width: 0;
+  min-height: 66px;
+  display: grid;
+  grid-template-rows: 34px auto;
+  place-items: center;
+  gap: 3px;
+  border: 1px solid #cbd8e7;
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #29415f;
+  padding: 6px 5px;
+  cursor: pointer;
+  transition: border-color 130ms ease, background 130ms ease, box-shadow 130ms ease, transform 130ms ease;
+}
+
+button.rack-set-icon-choice-v269:hover,
+button.rack-set-icon-choice-v269:focus-visible {
+  border-color: #5d91c8;
+  background: #eef6ff;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(19, 92, 255, 0.10);
+}
+
+button.rack-set-icon-choice-v269.is-selected {
+  border-color: #0f5797;
+  background: #e7f2ff;
+  box-shadow: inset 0 0 0 1px #0f5797;
+}
+
+button.rack-set-icon-choice-v269 small {
+  max-width: 100%;
+  overflow: hidden;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rack-set-visual-icon-v269 {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 32px;
+  color: var(--rack-set-icon-color);
+}
+
+.rack-set-visual-icon-v269::before {
+  content: "";
+  width: 25px;
+  height: 25px;
+  display: block;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2 4h6v15H2V4Zm2 2v4h2V6H4Zm0 6v5h2v-5H4Zm6-8h6v15h-6V4Zm2 2v4h2V6h-2Zm0 6v5h2v-5h-2Zm6-8h4v15h-4V4Zm2 2v4h1V6h-1Zm0 6v5h1v-5h-1Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2 4h6v15H2V4Zm2 2v4h2V6H4Zm0 6v5h2v-5H4Zm6-8h6v15h-6V4Zm2 2v4h2V6h-2Zm0 6v5h2v-5h-2Zm6-8h4v15h-4V4Zm2 2v4h1V6h-1Zm0 6v5h1v-5h-1Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="truck"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 6h11v8h2l2-3h3v6h-1a3 3 0 0 1-6 0H9a3 3 0 0 1-6 0H2V7l1-1Zm3 9a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm11 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 6h11v8h2l2-3h3v6h-1a3 3 0 0 1-6 0H9a3 3 0 0 1-6 0H2V7l1-1Zm3 9a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm11 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="steel"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 4h16v4h-5v8h5v4H4v-4h5V8H4V4Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 4h16v4h-5v8h5v4H4v-4h5V8H4V4Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="wood"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7h18v5H3V7Zm2 7h4v2h6v-2h4v4H5v-4Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7h18v5H3V7Zm2 7h4v2h6v-2h4v4H5v-4Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="aluminum"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 5h16v3H4V5Zm0 5h16v4H4v-4Zm0 6h16v3H4v-3Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 5h16v3H4V5Zm0 5h16v4H4v-4Zm0 6h16v3H4v-3Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="showers"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8 5a6 6 0 0 1 6 6v1h3v2H4v-2h8v-1a4 4 0 0 0-8 0H2a6 6 0 0 1 6-6Zm2 10h2v3h-2v-3Zm4 0h2v5h-2v-5Zm-8 0h2v5H6v-5Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8 5a6 6 0 0 1 6 6v1h3v2H4v-2h8v-1a4 4 0 0 0-8 0H2a6 6 0 0 1 6-6Zm2 10h2v3h-2v-3Zm4 0h2v5h-2v-5Zm-8 0h2v5H6v-5Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="mirror"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 4h14v16H5V4Zm2 2v12h10V6H7Zm2 2h6v2H9V8Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 4h14v16H5V4Zm2 2v12h10V6H7Zm2 2h6v2H9V8Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="spacer"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7h18v2H3V7Zm2 4h14v2H5v-2Zm-2 4h18v2H3v-2Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7h18v2H3V7Zm2 4h14v2H5v-2Zm-2 4h18v2H3v-2Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="coral"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 4h2v13h12V4h2v16H4V4Zm4 2h2v9H8V6Zm4-2h2v11h-2V4Zm4 3h2v8h-2V7Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 4h2v13h12V4h2v16H4V4Zm4 2h2v9H8V6Zm4-2h2v11h-2V4Zm4 3h2v8h-2V7Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-color-field-v269 {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+}
+
+.rack-set-color-control-v269 {
+  width: min(100%, 230px);
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #cbd8e7;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 5px 9px;
+}
+
+.rack-set-color-control-v269 input[type="color"] {
+  width: 46px;
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.rack-set-color-control-v269 output {
+  color: #243a55;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+
+.rack-manager-group-icon.rack-set-visual-icon-v269 {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+  border: 1px solid color-mix(in srgb, var(--rack-set-icon-color) 32%, #cbd8e7);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--rack-set-icon-color) 10%, #fff);
+}
+
+.rack-manager-group-icon.rack-set-visual-icon-v269::before {
+  width: 25px;
+  height: 25px;
+}
+
+@media (max-width: 760px) {
+  .rack-set-icon-library-v269 {
+    grid-template-columns: repeat(3, minmax(72px, 1fr));
+  }
+}
+
+@media (max-width: 440px) {
+  .rack-set-icon-library-v269 {
+    grid-template-columns: repeat(2, minmax(72px, 1fr));
+  }
+}
+
+
+/* v0.270 Guided rack creation forms -------------------------------------------
+   The add-rack and add-rack-set screens now behave like focused configuration
+   workspaces rather than bare forms. Keep their visual ownership here so the
+   shared Admin modal and primary-button system remain reusable elsewhere. */
+#adminModal[data-kind="rackForm"] #adminModalBody,
+#adminModal[data-kind="rackSetForm"] #adminModalBody {
+  padding: 18px;
+}
+
+#adminModal[data-kind="rackForm"] .rack-config-form-v270,
+#adminModal[data-kind="rackSetForm"] .rack-config-form-v270 {
+  display: block;
+  width: min(100%, 1060px);
+  margin: 0 auto;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.rack-config-form-nav-v270 {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #61748a;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .02em;
+}
+
+.rack-config-back-v270 {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: #214b75;
+  padding: 0 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rack-config-back-v270:hover,
+.rack-config-back-v270:focus-visible {
+  color: #0d5ca6;
+  outline: none;
+}
+
+.rack-config-back-v270 > span {
+  width: 17px;
+  height: 17px;
+  display: block;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m10 6-6 6 6 6 1.4-1.4L7.8 13H20v-2H7.8l3.6-3.6L10 6Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m10 6-6 6 6 6 1.4-1.4L7.8 13H20v-2H7.8l3.6-3.6L10 6Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+
+
+
+
+
+
+
+
+
+.rack-config-layout-v270 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  align-items: start;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.rack-config-fields-v270 {
+  display: grid;
+  gap: 12px;
+}
+
+.rack-config-section-v270 {
+  min-width: 0;
+  display: grid;
+  gap: 13px;
+  border: 1px solid #c8d7e4;
+  border-radius: 16px;
+  background: #fff;
+  padding: 16px;
+  box-shadow: 0 7px 18px rgba(18, 47, 80, .045);
+}
+
+.rack-config-section-v270 > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rack-config-section-v270 > header > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.rack-config-section-v270 > header strong {
+  color: #173d65;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.rack-config-section-v270 > header small {
+  color: #6a7d91;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.rack-config-step-v270 {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  border-radius: 9px;
+  background: #e8f1fa;
+  color: #174f7d;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.rack-config-field-grid-v270 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.rack-config-form-v270 label,
+.rack-config-wide-field-v270 {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: #39516d;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.rack-config-form-v270 label > small,
+.rack-config-wide-field-v270 > small {
+  color: #7a8b9d;
+  font-size: 9.5px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.rack-config-form-v270 :is(input[type="text"], input[type="number"], select) {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #bdcede;
+  border-radius: 10px;
+  background: #fbfdff;
+  color: #102f52;
+  padding: 0 11px;
+  font-size: 13px;
+  font-weight: 800;
+  outline: none;
+  transition: border-color 130ms ease, box-shadow 130ms ease, background 130ms ease;
+}
+
+.rack-config-form-v270 :is(input[type="text"], input[type="number"], select):focus {
+  border-color: #3e82bd;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(19, 92, 255, .10);
+}
+
+.rack-config-tip-v270 {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #cbdceb;
+  border-radius: 14px;
+  background: #f4f9fd;
+  padding: 12px 14px;
+}
+
+.rack-config-tip-v270 > span {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #e1eef9;
+  color: #245f91;
+}
+
+.rack-config-tip-v270 > span::before {
+  content: "i";
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.rack-config-tip-v270 strong {
+  color: #284e70;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.rack-config-tip-v270 p {
+  margin: 2px 0 0;
+  color: #6b7f92;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.rack-config-preview-v270 {
+  position: sticky;
+  top: 4px;
+  min-height: 250px;
+  display: grid;
+  grid-template-rows: auto auto auto auto 1fr;
+  justify-items: center;
+  align-content: start;
+  gap: 8px;
+  border: 1px solid #bcd0dd;
+  border-radius: 17px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(23, 109, 114, .13), transparent 40%),
+    linear-gradient(180deg, #fff 0%, #f1f7f9 100%);
+  padding: 18px;
+  text-align: center;
+  box-shadow: 0 9px 22px rgba(18, 47, 80, .06);
+}
+
+.rack-config-preview-v270 > small {
+  color: #657a8e;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.rack-config-preview-icon-v270.rack-set-visual-icon-v269 {
+  width: 64px;
+  height: 64px;
+  margin: 7px 0 4px;
+  border: 1px solid color-mix(in srgb, var(--rack-set-icon-color) 28%, #cbd8e7);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--rack-set-icon-color) 9%, #fff);
+}
+
+.rack-config-preview-icon-v270.rack-set-visual-icon-v269::before {
+  width: 36px;
+  height: 36px;
+}
+
+.rack-config-preview-v270 > strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: #0b3158;
+  font-size: 20px;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.rack-config-preview-v270 > span:not(.rack-config-preview-icon-v270) {
+  max-width: 100%;
+  color: #61778c;
+  font-size: 11px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.rack-config-preview-meta-v270 {
+  width: 100%;
+  align-self: end;
+  display: grid;
+  gap: 2px;
+  border-top: 1px solid #d9e3eb;
+  margin-top: 10px;
+  padding-top: 12px;
+}
+
+.rack-config-preview-meta-v270 small {
+  color: #73869a;
+  font-size: 9px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.rack-config-preview-meta-v270 b {
+  color: #224c6f;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.rack-set-visual-section-v270 {
+  margin-top: 12px;
+}
+
+.rack-set-visual-section-v270 .rack-set-icon-library-v269 {
+  grid-template-columns: repeat(5, minmax(84px, 1fr));
+}
+
+.rack-config-actions-v270 {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between !important;
+  gap: 12px;
+  border-top: 1px solid #d4e0e8;
+  margin-top: 14px !important;
+  padding-top: 14px;
+}
+
+.rack-config-actions-v270 > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rack-config-actions-v270 button {
+  min-width: 116px;
+}
+
+@media (max-width: 840px) {
+  .rack-config-layout-v270 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rack-config-preview-v270 {
+    position: static;
+    min-height: 210px;
+  }
+}
+
+@media (max-width: 620px) {
+  #adminModal[data-kind="rackForm"] #adminModalBody,
+  #adminModal[data-kind="rackSetForm"] #adminModalBody {
+    padding: 11px;
+  }
+
+  .rack-config-field-grid-v270 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rack-set-visual-section-v270 .rack-set-icon-library-v269 {
+    grid-template-columns: repeat(3, minmax(72px, 1fr));
+  }
+
+  .rack-config-actions-v270 {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rack-config-actions-v270 > div {
+    width: 100%;
+  }
+
+  .rack-config-actions-v270 > div:last-child {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+
+/* v0.271 Rack creation visual controls and Rack Manager flow -----------------
+   Keep icon choices neutral so the icon itself carries the selected rack-set
+   color. Rack groups expand naturally in Edit Racks; the modal owns scrolling. */
+#adminModal[data-kind="rackSetForm"] button.rack-set-icon-choice-v269 {
+  min-height: 74px !important;
+  border: 1px solid #c9d7e4 !important;
+  background: #ffffff !important;
+  color: #314a66 !important;
+  box-shadow: 0 3px 10px rgba(22, 51, 82, .045) !important;
+}
+
+#adminModal[data-kind="rackSetForm"] button.rack-set-icon-choice-v269:hover,
+#adminModal[data-kind="rackSetForm"] button.rack-set-icon-choice-v269:focus-visible {
+  border-color: color-mix(in srgb, var(--rack-set-icon-color, #176d72) 48%, #aebfd0) !important;
+  background: #f8fbfd !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rack-set-icon-color, #176d72) 12%, transparent) !important;
+}
+
+#adminModal[data-kind="rackSetForm"] button.rack-set-icon-choice-v269.is-selected {
+  border-color: var(--rack-set-icon-color, #176d72) !important;
+  background: color-mix(in srgb, var(--rack-set-icon-color, #176d72) 7%, #fff) !important;
+  box-shadow: inset 0 0 0 1px var(--rack-set-icon-color, #176d72), 0 4px 12px rgba(22, 51, 82, .06) !important;
+}
+
+.rack-set-icon-choice-art-v271 {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--rack-set-icon-color, #176d72) 24%, #d7e1ea);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--rack-set-icon-color, #176d72) 7%, #fff);
+}
+
+.rack-set-icon-choice-art-v271 .rack-set-visual-icon-v269 {
+  color: var(--rack-set-icon-color, #176d72);
+}
+
+.rack-set-color-picker-v271 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 14px;
+  align-items: end;
+}
+
+.rack-set-color-palette-v271 {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(34px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+#adminModal[data-kind="rackSetForm"] button.rack-set-color-choice-v271 {
+  width: 100% !important;
+  min-width: 34px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 1px solid #c8d5e2 !important;
+  border-radius: 11px !important;
+  background: #fff !important;
+  padding: 4px !important;
+  box-shadow: none !important;
+}
+
+#adminModal[data-kind="rackSetForm"] button.rack-set-color-choice-v271 > span {
+  width: 25px;
+  height: 25px;
+  display: block;
+  border: 2px solid rgba(255, 255, 255, .92);
+  border-radius: 50%;
+  background: var(--rack-set-choice-color);
+  box-shadow: 0 0 0 1px rgba(32, 52, 75, .16);
+}
+
+#adminModal[data-kind="rackSetForm"] button.rack-set-color-choice-v271:hover,
+#adminModal[data-kind="rackSetForm"] button.rack-set-color-choice-v271:focus-visible {
+  border-color: var(--rack-set-choice-color) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rack-set-choice-color) 14%, transparent) !important;
+}
+
+#adminModal[data-kind="rackSetForm"] button.rack-set-color-choice-v271.is-selected {
+  border-color: var(--rack-set-choice-color) !important;
+  background: color-mix(in srgb, var(--rack-set-choice-color) 8%, #fff) !important;
+  box-shadow: inset 0 0 0 1px var(--rack-set-choice-color) !important;
+}
+
+.rack-set-custom-color-v271 {
+  display: grid;
+  gap: 6px;
+}
+
+.rack-set-custom-color-v271 > span:first-child {
+  color: #596f86;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.rack-set-custom-color-v271 .rack-set-color-control-v269 {
+  width: 100%;
+  min-height: 40px;
+  background: #fff;
+}
+
+.rack-config-form-nav-v270 + .rack-config-layout-v270 {
+  margin-top: 4px;
+}
+
+.rack-config-form-nav-v270 + .rack-config-layout-v270 + .rack-set-visual-section-v270,
+.rack-set-config-layout-v270 + .rack-set-visual-section-v270 {
+  margin-top: 12px;
+}
+
+#adminModal[data-kind="racks"] .rack-manager-rows {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+@media (max-width: 780px) {
+  .rack-set-color-picker-v271 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rack-set-color-palette-v271 {
+    grid-template-columns: repeat(5, minmax(38px, 1fr));
+  }
+}
+
+
+/* v0.272 Rack Manager collapse, icon containment, and packing-history clarity --
+   Rack sets begin collapsed so the manager stays scannable. Packing history
+   uses the modal body as the only vertical scroll owner, avoiding clipped
+   nested history panes. */
+#adminModal[data-kind="racks"] details.rack-manager-group-v272 {
+  overflow: hidden;
+}
+
+#adminModal[data-kind="racks"] .rack-manager-group-summary-v272 {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 15px;
+  border-bottom: 0;
+  background: linear-gradient(180deg, #f9fcfd 0%, #edf5f7 100%);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+#adminModal[data-kind="racks"] .rack-manager-group-summary-v272::-webkit-details-marker {
+  display: none;
+}
+
+#adminModal[data-kind="racks"] details.rack-manager-group-v272[open] > .rack-manager-group-summary-v272 {
+  border-bottom: 1px solid #dce6ed;
+  background: linear-gradient(180deg, #f5fafb 0%, #e9f3f5 100%);
+}
+
+.rack-manager-group-copy-v272 {
+  min-width: 0;
+}
+
+.rack-manager-group-copy-v272 > span {
+  color: #60768c !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+}
+
+.rack-manager-expand-hint-v272 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 94px;
+  color: #315778 !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  white-space: nowrap;
+}
+
+.rack-manager-expand-hint-v272 i {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 50%;
+  background: #dbeaf4;
+  position: relative;
+}
+
+.rack-manager-expand-hint-v272 i::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  background: #245a83;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m7 9 5 5 5-5 1.5 1.5L12 17 5.5 10.5 7 9Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m7 9 5 5 5-5 1.5 1.5L12 17 5.5 10.5 7 9Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 140ms ease;
+}
+
+.rack-manager-expand-open-v272 { display: none; }
+details.rack-manager-group-v272[open] .rack-manager-expand-closed-v272 { display: none; }
+details.rack-manager-group-v272[open] .rack-manager-expand-open-v272 { display: inline; }
+details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before { transform: rotate(180deg); }
+
+#adminModal[data-kind="racks"] details.rack-manager-group-v272 > .rack-manager-rows {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+/* The v0.271 artwork is 40px tall, so reserve a real 44px icon row instead of
+   squeezing it into the old 34px grid track. This keeps every icon inside its tile. */
+#adminModal[data-kind="rackSetForm"] button.rack-set-icon-choice-v269 {
+  min-height: 82px !important;
+  grid-template-rows: 44px minmax(12px, auto) !important;
+  align-content: center !important;
+  overflow: hidden !important;
+  padding: 8px 5px 7px !important;
+}
+
+#adminModal[data-kind="rackSetForm"] .rack-set-icon-choice-art-v271 {
+  box-sizing: border-box;
+  align-self: center;
+  margin: 0;
+  overflow: hidden;
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="glasscart"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 2h2l5.45 13H21v2h-2.2a3 3 0 0 1-5.6 0h-2.4a3 3 0 0 1-5.6 0H3v-2h2.55L11 2Zm1 5.25L8.75 15h6.5L12 7.25ZM7.5 17.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 2h2l5.45 13H21v2h-2.2a3 3 0 0 1-5.6 0h-2.4a3 3 0 0 1-5.6 0H3v-2h2.55L11 2Zm1 5.25L8.75 15h6.5L12 7.25ZM7.5 17.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="pallet"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7h18v3H3V7Zm1 5h4v4h8v-4h4v6H4v-6Zm-1 8h18v2H3v-2Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7h18v3H3V7Zm1 5h4v4h8v-4h4v6H4v-6Zm-1 8h18v2H3v-2Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="dolly"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8 3h3v12h7v2H9V5H8V3Zm2 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm8-9h3v6h-3V9Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8 3h3v12h7v2H9V5H8V3Zm2 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm8-9h3v6h-3V9Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="crate"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5h18v15H3V5Zm3 3v2h12V8H6Zm0 5v4h3v-4H6Zm5 0v4h7v-4h-7Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5h18v15H3V5Zm3 3v2h12V8H6Zm0 5v4h3v-4H6Zm5 0v4h7v-4h-7Z'/%3E%3C/svg%3E");
+}
+
+.rack-set-visual-icon-v269[data-rack-icon="warehouse"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m2 9 10-6 10 6v12H2V9Zm3 2v7h3v-5h8v5h3v-7l-7-4.2L5 11Zm5 4v3h4v-3h-4Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m2 9 10-6 10 6v12H2V9Zm3 2v7h3v-5h8v5h3v-7l-7-4.2L5 11Zm5 4v3h4v-3h-4Z'/%3E%3C/svg%3E");
+}
+
+/* Packing-list history: one scroll owner, weekly collapse, 25 print days/page. */
+#operationsModal[data-kind="rack-history"] #operationsModalBody,
+#operationsModal[data-kind="rack-history"] .rack-history-control-center,
+#operationsModal[data-kind="rack-history"] .packing-history-shell-v272,
+#operationsModal[data-kind="rack-history"] .packing-history-groups-v272,
+#operationsModal[data-kind="rack-history"] .packing-history-week-v272,
+#operationsModal[data-kind="rack-history"] .packing-history-week-body-v272 {
+  min-height: 0;
+  max-height: none !important;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-shell-v272,
+#operationsModal[data-kind="rack-history"] .packing-history-groups-v272,
+#operationsModal[data-kind="rack-history"] .packing-history-week-v272,
+#operationsModal[data-kind="rack-history"] .packing-history-week-body-v272,
+#operationsModal[data-kind="rack-history"] .packing-history-day-rows-v272 {
+  overflow: visible !important;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-shell-v272 {
+  width: 100%;
+  display: grid;
+  gap: 12px;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-intro-v272 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 340px);
+  gap: 14px;
+  align-items: center;
+  padding: 17px 18px;
+  border: 1px solid #cbd9e8;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.packing-history-page-summary-v272 {
+  min-height: 38px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid #d5e1eb;
+  border-radius: 11px;
+  background: #f8fbfd;
+  color: #526b82;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.packing-history-page-summary-v272 strong { color: #173d65; }
+
+.packing-history-groups-v272 {
+  display: grid;
+  gap: 10px;
+}
+
+.packing-history-week-v272 {
+  border: 1px solid #cbd9e8;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(20, 48, 84, .045);
+}
+
+.packing-history-week-v272 > summary {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+  background: linear-gradient(180deg, #f9fcfd 0%, #eef5f8 100%);
+}
+
+.packing-history-week-v272 > summary::-webkit-details-marker { display: none; }
+.packing-history-week-v272 > summary div { min-width: 0; display: grid; gap: 2px; }
+.packing-history-week-v272 > summary strong { color: #123a61; font-size: 14px; }
+.packing-history-week-v272 > summary span { color: #61788f; font-size: 11px; font-weight: 800; }
+
+.packing-history-week-chevron-v272 {
+  width: 22px;
+  height: 22px;
+  display: block;
+  border-radius: 50%;
+  background: #dceaf4;
+  position: relative;
+}
+
+.packing-history-week-chevron-v272::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  background: #205982;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m7 9 5 5 5-5 1.5 1.5L12 17 5.5 10.5 7 9Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m7 9 5 5 5-5 1.5 1.5L12 17 5.5 10.5 7 9Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 140ms ease;
+}
+
+.packing-history-week-v272[open] .packing-history-week-chevron-v272::before { transform: rotate(180deg); }
+.packing-history-week-action-v272 { white-space: nowrap; }
+.packing-history-week-action-v272 .is-open { display: none; }
+.packing-history-week-v272[open] .packing-history-week-action-v272 .is-closed { display: none; }
+.packing-history-week-v272[open] .packing-history-week-action-v272 .is-open { display: inline; }
+
+.packing-history-week-body-v272 {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid #dce6ed;
+  background: #f7fafc;
+}
+
+.packing-history-day-v272 {
+  display: grid;
+  gap: 8px;
+}
+
+.packing-history-day-v272 > header {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 7px;
+  color: #294760;
+}
+
+.packing-history-day-v272 > header strong { font-size: 13px; }
+.packing-history-day-v272 > header span { color: #6a7e91; font-size: 11px; font-weight: 800; }
+.packing-history-day-rows-v272 { display: grid; gap: 8px; }
+
+#operationsModal[data-kind="rack-history"] .packing-history-row-v272 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) minmax(105px, .72fr) minmax(145px, .95fr) minmax(120px, .8fr) minmax(105px, .72fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid #d8e3ee;
+  border-radius: 11px;
+  background: #fff;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-row-v272 > div { min-width: 0; }
+#operationsModal[data-kind="rack-history"] .packing-history-row-v272 small { display: block; color: #708397; font-size: 10px; font-weight: 800; }
+#operationsModal[data-kind="rack-history"] .packing-history-row-v272 strong { display: block; min-width: 0; color: #1d3b5a; font-size: 12px; overflow-wrap: anywhere; }
+.packing-history-rack-v272 strong { font-size: 13px !important; }
+.packing-history-rack-v272 span { color: #6a7d91; font-size: 11px; font-weight: 800; }
+
+.packing-history-row-actions-v272 {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.packing-history-row-actions-v272 button { min-height: 36px !important; white-space: nowrap; }
+
+.packing-history-pagination-v272 {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 2px;
+}
+.packing-history-pagination-v272[hidden] { display: none !important; }
+.packing-history-pagination-v272 strong { color: #3c566f; font-size: 12px; }
+
+.packing-snapshot-preview-backdrop-v272 {
+  position: fixed;
+  inset: 0;
+  z-index: 5200;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(3, 17, 37, .64);
+  backdrop-filter: blur(3px);
+}
+
+.packing-snapshot-preview-dialog-v272 {
+  width: min(1120px, calc(100vw - 36px));
+  height: min(820px, calc(100vh - 36px));
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid #9fb2c7;
+  border-radius: 18px;
+  background: #f4f7fb;
+  box-shadow: 0 30px 90px rgba(3, 18, 39, .38);
+}
+
+.packing-snapshot-preview-dialog-v272 > header {
+  position: relative;
+  min-height: 88px;
+  padding: 17px 82px 16px 20px;
+  border-bottom: 1px solid #123b66;
+  background: linear-gradient(118deg, #12375f 0%, #1d5a8e 100%);
+  color: #fff;
+}
+.packing-snapshot-preview-dialog-v272 > header small { color: rgba(255,255,255,.76); font-weight: 900; text-transform: uppercase; letter-spacing: .07em; }
+.packing-snapshot-preview-dialog-v272 > header h2 { margin: 2px 0 3px; color: #fff; font-size: 22px; }
+.packing-snapshot-preview-dialog-v272 > header p { margin: 0; color: rgba(255,255,255,.82); font-size: 12px; font-weight: 700; }
+.packing-snapshot-preview-dialog-v272 > header > .gui-close-button {
+  --gui-close-position: absolute;
+  --gui-close-top: 18px;
+  --gui-close-right: 18px;
+  --gui-close-left: auto;
+  --gui-close-bottom: auto;
+  --gui-close-z-index: 3;
+}
+
+.packing-snapshot-preview-frame-v272 {
+  min-height: 0;
+  padding: 12px;
+  overflow: hidden;
+}
+.packing-snapshot-preview-frame-v272 iframe {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 1px solid #c6d3e1;
+  border-radius: 12px;
+  background: #fff;
+}
+.packing-snapshot-preview-dialog-v272 > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 12px 16px 15px;
+  border-top: 1px solid #d2dde8;
+  background: #fff;
+}
+
+@media (max-width: 1040px) {
+  #operationsModal[data-kind="rack-history"] .packing-history-row-v272 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .packing-history-row-actions-v272 { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+@media (max-width: 760px) {
+  #adminModal[data-kind="racks"] .rack-manager-group-summary-v272 {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+  }
+  .rack-manager-expand-hint-v272 { display: none; }
+  .rack-manager-group-actions { grid-column: 1 / -1; justify-self: end; }
+  #operationsModal[data-kind="rack-history"] .packing-history-intro-v272 { grid-template-columns: minmax(0, 1fr); }
+  #operationsModal[data-kind="rack-history"] .packing-history-row-v272 { grid-template-columns: minmax(0, 1fr); }
+  .packing-history-row-actions-v272 { grid-column: auto; }
+  .packing-history-page-summary-v272 { align-items: flex-start; flex-direction: column; }
+  .packing-snapshot-preview-backdrop-v272 { padding: 8px; }
+  .packing-snapshot-preview-dialog-v272 { width: calc(100vw - 16px); height: calc(100vh - 16px); }
+}
+
+
+/* v0.273 Packing-history density, action alignment, and preview layering -------
+   Keep history summaries compact, keep row actions together, and guarantee the
+   snapshot viewer sits above the Operations modal rather than inside its stack. */
+.packing-history-page-summary-v272 {
+  min-height: 0 !important;
+  height: auto !important;
+  justify-content: flex-start !important;
+  padding: 5px 9px !important;
+  line-height: 1.15 !important;
+}
+
+.packing-history-page-summary-copy-v273 {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: #526b82;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.packing-history-page-summary-copy-v273 b {
+  color: #173d65;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.packing-history-page-summary-copy-v273 i {
+  color: #9aabba;
+  font-style: normal;
+}
+
+.packing-history-row-actions-v272 {
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 7px !important;
+  width: auto !important;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-row-actions-v272 > button {
+  width: auto !important;
+  min-width: max-content !important;
+  flex: 0 0 auto !important;
+}
+
+.packing-snapshot-preview-backdrop-v272 {
+  z-index: 20000 !important;
+  isolation: isolate;
+}
+
+.packing-snapshot-preview-dialog-v272 > footer {
+  min-height: 58px;
+}
+
+@media (max-width: 760px) {
+  .packing-history-page-summary-v272 {
+    align-items: center !important;
+    flex-direction: row !important;
+  }
+
+  .packing-history-row-actions-v272 {
+    justify-content: flex-start !important;
+  }
+}

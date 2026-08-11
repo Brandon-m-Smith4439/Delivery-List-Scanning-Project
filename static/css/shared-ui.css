@@ -26,20 +26,20 @@ body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):i
   position: relative !important;
   isolation: isolate !important;
   min-width: 0 !important;
-  min-height: var(--app-primary-min-height, 42px) !important;
+  min-height: 38px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   gap: var(--app-primary-gap, 8px) !important;
   overflow: hidden !important;
-  padding: var(--app-primary-padding, 9px 17px) !important;
+  padding: 7px 15px !important;
   border: 1px solid var(--shared-primary-border) !important;
   border-bottom-color: #03204a !important;
   border-radius: var(--app-primary-radius, 10px) !important;
   background: linear-gradient(180deg, var(--shared-primary-top) 0%, var(--shared-primary-mid) 46%, var(--shared-primary-bottom) 100%) !important;
   color: #fff !important;
   font-family: inherit !important;
-  font-size: var(--app-primary-font-size, 13px) !important;
+  font-size: 13px !important;
   font-weight: 850 !important;
   line-height: 1.1 !important;
   letter-spacing: .01em !important;
@@ -109,9 +109,9 @@ body button.app-primary-button.app-icon-primary:is(#_sharedPrimaryA, *):is(#_sha
   width: var(--app-icon-primary-width, 48px) !important;
   min-width: var(--app-icon-primary-width, 48px) !important;
   max-width: var(--app-icon-primary-width, 48px) !important;
-  height: var(--app-icon-primary-height, 46px) !important;
-  min-height: var(--app-icon-primary-height, 46px) !important;
-  max-height: var(--app-icon-primary-height, 46px) !important;
+  height: var(--app-icon-primary-height, 42px) !important;
+  min-height: var(--app-icon-primary-height, 42px) !important;
+  max-height: var(--app-icon-primary-height, 42px) !important;
   padding: var(--app-icon-primary-padding, 4px) !important;
   gap: var(--app-icon-primary-gap, 1px) !important;
 }
@@ -303,8 +303,8 @@ body button:is(.automation-update-toast-close, .line-update-review-close, .old-b
   }
 
   body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *) {
-    min-height: 40px !important;
-    padding: 8px 14px !important;
+    min-height: 38px !important;
+    padding: 7px 13px !important;
   }
 }
 
@@ -313,4 +313,38 @@ body button:is(.automation-update-toast-close, .line-update-review-close, .old-b
   body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *) {
     transition: none !important;
   }
+}
+
+
+/* v0.272 Standalone popup close placement ------------------------------------
+   Direct-child X controls in confirmation/utility dialogs belong in the upper
+   right corner. The shared X component keeps its geometry; these variables
+   only establish a consistent popup anchor. */
+body :is(
+  .action-confirm-dialog,
+  .action-prompt-dialog,
+  .user-deactivate-dialog,
+  .rack-destination-dialog,
+  .rack-transfer-dialog,
+  .outbound-override-dialog,
+  .cross-date-scan-dialog
+) {
+  position: relative !important;
+}
+
+body :is(
+  .action-confirm-dialog,
+  .action-prompt-dialog,
+  .user-deactivate-dialog,
+  .rack-destination-dialog,
+  .rack-transfer-dialog,
+  .outbound-override-dialog,
+  .cross-date-scan-dialog
+) > button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *) {
+  --gui-close-position: absolute;
+  --gui-close-top: 14px;
+  --gui-close-right: 14px;
+  --gui-close-bottom: auto;
+  --gui-close-left: auto;
+  --gui-close-z-index: 5;
 }

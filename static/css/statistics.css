@@ -119,7 +119,7 @@
 
 .statistics-page-eyebrow-v0258 {
   color: rgba(255, 255, 255, 0.72);
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 950;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -214,7 +214,7 @@
   display: grid;
   gap: 4px;
   color: #445b75;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
 }
 
@@ -275,7 +275,7 @@
   color: #12365f;
   padding: 0 10px;
   font: inherit;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 850;
   box-shadow: inset 0 1px 2px rgba(8, 38, 90, 0.03);
 }
@@ -415,7 +415,7 @@
 .statistics-section-heading-v0258 p {
   margin-top: 2px;
   color: var(--statistics-muted);
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 800;
 }
 
@@ -659,7 +659,7 @@
 
 .statistics-analytics-title-v0258 > div > span {
   color: #2a649a;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 950;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -673,7 +673,7 @@
 
 .statistics-analytics-title-v0258 h2 {
   color: #0b2d5a;
-  font-size: 14px;
+  font-size: 21px;
   font-weight: 950;
   letter-spacing: -0.02em;
 }
@@ -681,7 +681,7 @@
 .statistics-analytics-title-v0258 p {
   max-width: 820px;
   color: var(--statistics-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   line-height: 1.35;
 }
@@ -704,7 +704,7 @@
   background: #ffffff;
   color: #21496f;
   padding: 0 9px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
   white-space: nowrap;
 }
@@ -885,7 +885,7 @@
   min-width: 0;
   overflow: hidden;
   color: #66788d;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 850;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -902,7 +902,7 @@
   min-width: 0;
   overflow: hidden;
   color: #0b2d5a;
-  font-size: 18px;
+  font-size: 21px;
   font-weight: 950;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -917,7 +917,7 @@
   background: #f8fbff;
   padding: 0 16px;
   color: #53677f;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 850;
 }
 
@@ -984,12 +984,12 @@
 }
 
 .statistics-chart-axis-label {
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 .statistics-chart-axis-title {
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 950;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -997,7 +997,7 @@
 
 .statistics-chart-category-label,
 .statistics-chart-value-label {
-  font-size: 8px;
+  font-size: 13px;
   font-weight: 900;
 }
 
@@ -1076,7 +1076,7 @@
 }
 
 .statistics-chart-line-label {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 850;
 }
 
@@ -1106,13 +1106,13 @@
 
 .statistics-chart-donut-total {
   fill: #0b2d5a;
-  font-size: 22px;
+  font-size: 30px;
   font-weight: 950;
 }
 
 .statistics-chart-donut-caption {
   fill: #65738b;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.045em;
   text-transform: uppercase;
@@ -1140,7 +1140,7 @@
 
 .statistics-chart-svg-legend-row {
   width: 100%;
-  min-height: 28px;
+  min-height: 36px;
   display: grid;
   grid-template-columns: 9px minmax(0, 1fr) auto;
   gap: 6px;
@@ -1148,7 +1148,7 @@
   border: 1px solid #e0e8f4;
   border-radius: 8px;
   background: #f9fbfe;
-  padding: 4px 6px;
+  padding: 5px 8px;
   color: #0b2d5a;
   text-align: left;
 }
@@ -1174,12 +1174,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 850;
 }
 
 .statistics-chart-svg-legend-row strong {
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 950;
   white-space: nowrap;
 }
@@ -1187,13 +1187,14 @@
 .statistics-chart-svg-legend-row strong small {
   margin-left: 4px;
   color: #65738b;
-  font-size: 7px;
+  font-size: 10px;
 }
 
 .statistics-data-table-shell-v0258 {
   min-width: 0;
-  max-height: 390px;
-  overflow: auto;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
   border: 1px solid #d6e1ee;
   border-radius: 14px;
   background: #ffffff;
@@ -1204,7 +1205,7 @@
   min-width: 650px;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .statistics-data-table-v0258 th {
@@ -1213,17 +1214,17 @@
   z-index: 2;
   background: #edf4fb;
   color: #21496f;
-  padding: 4px 6px;
+  padding: 8px 10px;
   border-bottom: 1px solid #cbd9e8;
   text-align: left;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 950;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .statistics-data-table-v0258 td {
-  padding: 4px 6px;
+  padding: 8px 10px;
   border-bottom: 1px solid #e5ecf4;
   color: #53677f;
   font-weight: 750;
@@ -1239,7 +1240,7 @@
 
 .statistics-data-table-v0258 td b {
   color: #0b2d5a;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 950;
 }
 
@@ -1252,7 +1253,7 @@
   border-radius: 5px;
   background: #f4f8fc;
   color: #2a649a;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 950;
 }
 
@@ -1332,13 +1333,13 @@
 .statistics-chart-selection-v0258 strong,
 .statistics-chart-selection-v0258 b {
   color: #0b2d5a;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 950;
 }
 
 .statistics-chart-selection-v0258 small {
   color: #526078;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
 }
 
@@ -1402,7 +1403,7 @@
   --app-primary-padding: 5px 12px;
   --app-primary-radius: 8px;
   min-width: 142px !important;
-  font-size: 9px !important;
+  font-size: 11px !important;
 }
 
 .statistics-support-grid-v0258 {
@@ -1890,18 +1891,18 @@
 
 .statistics-remake-toggle-v0262 > span:last-child strong {
   color: #173e68;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .statistics-remake-toggle-v0262 > span:last-child small {
   color: #6b7f94;
-  font-size: 7px;
+  font-size: 9px;
 }
 
-/* Combined breakage tables deliberately show all accountability measures at
-   once. The chart itself stays single-measure to avoid four competing scales. */
+/* v0.263 breakage tables group the four core totals into one visual block
+   so users can compare machines/glass without scanning nine narrow columns. */
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 {
-  min-width: 1110px;
+  min-width: 1080px;
   table-layout: fixed;
 }
 
@@ -1909,64 +1910,240 @@
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td,
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 th,
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td {
-  padding: 5px 6px;
-  font-size: 8px;
-  line-height: 1.3;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 th:nth-child(1),
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(1) {
-  width: 44px;
+  width: 54px;
 }
 
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 th:nth-child(2),
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(2) {
-  width: 160px;
+  width: 175px;
 }
 
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 th:nth-child(3),
-.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(3),
+.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(3) {
+  width: 310px;
+}
+
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 th:nth-child(4),
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(4),
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 th:nth-child(5),
-.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(5),
+.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(5) {
+  width: 210px;
+}
+
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 th:nth-child(6),
 .statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(6) {
-  width: 82px;
-  white-space: nowrap;
-}
-
-.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 th:nth-child(7),
-.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(7),
-.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 th:nth-child(8),
-.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(8) {
-  width: 195px;
-}
-
-.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 th:nth-child(9),
-.statistics-data-table-v0258.is-breakage-v0260.is-combined-v0262 td:nth-child(9) {
   width: 120px;
 }
 
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 {
-  min-width: 900px;
+  min-width: 1020px;
   table-layout: fixed;
 }
 
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 th:nth-child(1),
-.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(1) { width: 44px; }
+.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(1) { width: 54px; }
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 th:nth-child(2),
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(2) { width: 155px; }
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 th:nth-child(3),
-.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(3) { width: 190px; }
+.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(3) { width: 210px; }
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 th:nth-child(4),
-.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(4),
+.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(4) { width: 120px; }
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 th:nth-child(5),
-.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(5),
+.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(5) { width: 285px; }
 .statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 th:nth-child(6),
-.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(6),
-.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 th:nth-child(7),
-.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(7) { width: 82px; }
+.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262 td:nth-child(6) { width: 200px; }
+
+.statistics-breakage-table-header-v0263 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #c7d7e8;
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5fb 100%);
+  padding: 11px 13px;
+}
+
+.statistics-breakage-table-header-v0263 > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.statistics-breakage-table-header-v0263 span {
+  color: #52708d;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.statistics-breakage-table-header-v0263 strong {
+  color: #0b2d5a;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.statistics-breakage-table-header-v0263 small {
+  color: #65788d;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.statistics-breakage-table-unit-v0263 {
+  flex: 0 0 auto;
+  border: 1px solid #9fbedb;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1f5688 !important;
+  padding: 5px 9px;
+  font-size: 10px !important;
+  white-space: nowrap;
+}
+
+.statistics-breakage-table-wrap-v0263 .statistics-data-table-shell-v0258 {
+  border-radius: 0 0 14px 14px;
+}
+
+.statistics-breakage-table-primary-v0263 {
+  display: grid;
+  gap: 5px;
+}
+
+.statistics-breakage-table-primary-v0263 small {
+  color: #73859a;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.statistics-breakage-metrics-v0263 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.statistics-breakage-metrics-v0263 > span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  border: 1px solid #d3dfeb;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 5px 7px;
+}
+
+.statistics-breakage-metrics-v0263 small {
+  color: #6b7d91;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.statistics-breakage-metrics-v0263 strong {
+  overflow: hidden;
+  color: #12365f;
+  font-size: 12px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statistics-breakage-detail-list-v0263 {
+  display: grid;
+  gap: 5px;
+}
+
+.statistics-breakage-detail-list-v0263 > span {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  border-bottom: 1px solid #edf1f5;
+  padding-bottom: 4px;
+}
+
+.statistics-breakage-detail-list-v0263 > span:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.statistics-breakage-detail-list-v0263 b {
+  overflow: hidden;
+  color: #244c74;
+  font-size: 10px !important;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statistics-breakage-detail-list-v0263 small {
+  color: #6a7d91;
+  font-size: 9px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.statistics-breakage-detail-list-v0263 .is-more {
+  display: block;
+  border: 0;
+  color: #2d6698;
+  padding: 0;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.statistics-breakage-coverage-v0263 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.statistics-breakage-coverage-v0263 span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  border: 1px solid #d4b36d;
+  border-radius: 999px;
+  background: #fff8e8;
+  color: #7c5815;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.statistics-breakage-coverage-v0263 span.is-complete {
+  border-color: #9ac9ad;
+  background: #eff9f2;
+  color: #2e7047;
+}
+
+.statistics-breakage-frequency-v0263 {
+  display: grid;
+  gap: 2px;
+}
+
+.statistics-breakage-frequency-v0263 strong {
+  color: #0b2d5a;
+  font-size: 19px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.statistics-breakage-frequency-v0263 small {
+  color: #687b90;
+  font-size: 9px;
+  font-weight: 850;
+}
 
 .statistics-reason-pill-v0262 {
   display: inline-flex;
@@ -1979,7 +2156,7 @@
   background: #f2f7fc;
   color: #214f7a;
   padding: 2px 6px;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 900;
   white-space: nowrap;
 }
@@ -2000,7 +2177,7 @@
 
 .statistics-breakage-selection-summary-v0262 > span {
   color: #5f7287;
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 950;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -2009,7 +2186,7 @@
 .statistics-breakage-selection-summary-v0262 > strong {
   overflow: hidden;
   color: #0d345f;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 950;
   text-overflow: ellipsis;
 }
@@ -2026,7 +2203,7 @@
   background: #ffffff;
   color: #274f78;
   padding: 2px 6px;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 900;
 }
 
@@ -2052,7 +2229,7 @@
 .statistics-breakage-drill-grid-v0262 h4 {
   margin: 0 0 4px;
   color: #173e68;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 950;
 }
 
@@ -2070,7 +2247,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   color: #52687e;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 800;
 }
 
@@ -2127,4 +2304,33 @@
   .statistics-remake-toggle-v0262 {
     width: 100%;
   }
+}
+
+
+/* ========================================================================== */
+/* v0.264 chart visibility and no-nested-table-scroll ownership               */
+/* ========================================================================== */
+/* Keep the default top-10 table as part of the page flow instead of creating
+   a second vertical scrollbar inside the analytics card. Show More can extend
+   the page naturally while horizontal overflow remains available for wide
+   accountability tables. */
+.statistics-chart-canvas-v0258 .statistics-data-table-shell-v0258 {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.statistics-chart-bar-viewport {
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+/* Center totals adapt in JavaScript to the formatted value length; these are
+   readable fallbacks that keep both the number and caption inside the donut. */
+.statistics-chart-donut-total {
+  font-size: 30px;
+}
+
+.statistics-chart-donut-caption {
+  font-size: 11px;
 }
