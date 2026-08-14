@@ -2334,3 +2334,96 @@
 .statistics-chart-donut-caption {
   font-size: 11px;
 }
+
+/* ========================================================================== */
+/* v0.304 compact-device Statistics                                           */
+/* ========================================================================== */
+@media (max-width: 760px) {
+  .statistics-page-v0258 {
+    gap: 10px !important;
+    padding-bottom: 20px !important;
+  }
+
+  .statistics-command-header-v0258,
+  .statistics-command-identity-v0258,
+  .statistics-page-actions-v0258,
+  .statistics-filter-deck-v0258,
+  .statistics-support-grid-v0258,
+  .statistics-chart-workspace-v0258,
+  .statistics-chart-kpis-v0258,
+  .statistics-breakage-drill-grid-v0262 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .statistics-command-header-v0258 {
+    padding: 14px !important;
+    border-radius: 13px !important;
+  }
+
+  .statistics-command-identity-v0258 {
+    grid-template-columns: 42px minmax(0, 1fr) !important;
+  }
+
+  .statistics-command-icon-v0258 {
+    width: 42px !important;
+    height: 42px !important;
+    border-radius: 11px !important;
+  }
+
+  .statistics-command-copy-v0258 h1 {
+    font-size: 25px !important;
+  }
+
+  .statistics-command-copy-v0258 > p {
+    font-size: 12px !important;
+  }
+
+  .statistics-page-actions-v0258 {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .statistics-page-actions-v0258 :is(button, select, input),
+  .statistics-control-v0258 :is(select, input) {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 44px !important;
+  }
+
+  .statistics-overview-kpis,
+  .statistics-priority-grid-v0258,
+  .statistics-chart-kpis-v0258 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .statistics-chart-shell-v0258,
+  .statistics-chart-canvas-v0258,
+  .statistics-data-table-shell-v0258 {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .statistics-data-table-shell-v0258,
+  .statistics-chart-bar-viewport {
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .statistics-date-calendar-v0262 {
+    inset: 6px !important;
+    width: auto !important;
+    max-height: calc(100vh - 12px) !important;
+    overflow-y: auto !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .statistics-overview-kpis,
+  .statistics-priority-grid-v0258,
+  .statistics-chart-kpis-v0258 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

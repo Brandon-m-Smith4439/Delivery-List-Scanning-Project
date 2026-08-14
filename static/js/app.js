@@ -160,8 +160,10 @@ const state = {
   manageItemsQuery: "",
   manageItemsFilter: "all",
   manageItemsSelectedId: "",
+  manageItemsSelectedIds: new Set(),
   bayEditorSelectedGroup: "",
   bayEditorSelectedBay: "",
+  bayEditorSelectedBayCodes: new Set(),
   adminCustomerRouteRules: [],
   customerEmailSettings: { contacts: [], cc: [], outbox: [] },
   bayScannerSettings: { manualRules: [], barcodeRules: [], destinationOverrideMinutes: 15 },
@@ -191,7 +193,7 @@ const state = {
   rolePermissionOpenRoles: new Set(),
   rolePermissionOpenCategories: new Set(),
   rolePermissionScrollTop: 0,
-  manualEditLookups: { products: [], routes: [], processes: [], glassCosts: [] },
+  manualEditLookups: { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] },
   lookupManagerActiveType: "product",
   lookupManagerSearch: "",
   manualEditDirty: false,
@@ -904,6 +906,7 @@ const els = {
   refreshPageBtn: document.getElementById("refreshPageBtn"),
   fullscreenToggleBtn: document.getElementById("fullscreenToggleBtn"),
   appHeader: document.querySelector(".app-header"),
+  appFooter: document.querySelector(".desktop-footer"),
   bayAutoAssignOverview: document.getElementById("bayAutoAssignOverview"),
 
   homePage: document.getElementById("homePage"),
@@ -4462,6 +4465,15 @@ function initCustomSelectSystem() {
   window.addEventListener("resize", () => customSelectUi.openSelect && positionCustomSelectMenu());
   document.addEventListener("scroll", (event) => {
     if (!customSelectUi.openSelect || customSelectUi.menu?.contains(event.target)) return;
+    // Date and Stage live inside the sticky Scan panel. Closing their menu on
+    // every document scroll made the Stage control appear unclickable after the
+    // panel became sticky. Keep those two context menus open and follow the
+    // trigger instead; other custom selects retain the normal close-on-scroll
+    // behavior.
+    if (["deliveryDateSelect", "deliveryStageSelect"].includes(customSelectUi.openSelect.id)) {
+      window.requestAnimationFrame(positionCustomSelectMenu);
+      return;
+    }
     closeCustomSelect(false);
   }, true);
 
@@ -7042,6 +7054,103 @@ function glassTypeLabel(item) {
   return String(item.product || item.job || item.suggestedBay || "Other Glass").trim() || "Other Glass";
 }
 
+// v0.312: Glass colors are centrally owned by Lookup Manager. Any component
+// that needs exact glass-type colors should use these helpers instead of
+// inventing a page-local palette, so one administrator choice can be reused.
+function normalizeGlassVisualColor(value) {
+  const text = String(value || "").trim().toUpperCase();
+  return /^#[0-9A-F]{6}$/.test(text) ? text : "";
+}
+
+function glassVisualFallbackColor(label, usedColors = new Set()) {
+  const text = String(label || "Other Glass").trim().toUpperCase() || "OTHER GLASS";
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+
+  const hslToHex = (hue, saturation = 64, lightness = 44) => {
+    const s = saturation / 100;
+    const l = lightness / 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (hue < 60) [r, g, b] = [c, x, 0];
+    else if (hue < 120) [r, g, b] = [x, c, 0];
+    else if (hue < 180) [r, g, b] = [0, c, x];
+    else if (hue < 240) [r, g, b] = [0, x, c];
+    else if (hue < 300) [r, g, b] = [x, 0, c];
+    else [r, g, b] = [c, 0, x];
+    const channel = (value) => Math.round((value + m) * 255).toString(16).padStart(2, "0");
+    return `#${channel(r)}${channel(g)}${channel(b)}`.toUpperCase();
+  };
+
+  let hue = Math.round((hash * 137.508) % 360);
+  let color = hslToHex(hue);
+  let guard = 0;
+  while (usedColors.has(color) && guard < 360) {
+    hue = (hue + 37) % 360;
+    color = hslToHex(hue);
+    guard += 1;
+  }
+  return color;
+}
+
+function buildGlassVisualColorMap(extraLabels = []) {
+  const rows = Array.isArray(state.manualEditLookups?.glassColors) ? state.manualEditLookups.glassColors : [];
+  const costs = Array.isArray(state.manualEditLookups?.glassCosts) ? state.manualEditLookups.glassCosts : [];
+  const labels = new Map();
+  [...rows, ...costs].forEach((item) => {
+    const label = String(item?.value || item?.label || "").trim();
+    if (label) labels.set(label.toLowerCase(), label);
+  });
+  (extraLabels || []).forEach((value) => {
+    const label = String(value || "").trim();
+    if (label) labels.set(label.toLowerCase(), label);
+  });
+
+  const overrides = new Map();
+  rows.forEach((item) => {
+    const key = String(item?.value || item?.label || "").trim().toLowerCase();
+    const color = normalizeGlassVisualColor(item?.color);
+    if (key && color) overrides.set(key, color);
+  });
+
+  const used = new Set([...overrides.values()]);
+  const result = new Map();
+  [...labels.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([key, label]) => {
+    const configured = overrides.get(key);
+    const color = configured || glassVisualFallbackColor(label, used);
+    result.set(key, color);
+    if (!configured) used.add(color);
+  });
+  return result;
+}
+
+function glassVisualColor(label, extraLabels = []) {
+  const clean = String(label || "Other Glass").trim() || "Other Glass";
+  return buildGlassVisualColorMap([...(extraLabels || []), clean]).get(clean.toLowerCase())
+    || glassVisualFallbackColor(clean);
+}
+
+function glassVisualCssVariables(label, colorMap = null) {
+  const clean = String(label || "Other Glass").trim() || "Other Glass";
+  const color = normalizeGlassVisualColor(colorMap?.get?.(clean.toLowerCase())) || glassVisualColor(clean);
+  const red = Number.parseInt(color.slice(1, 3), 16);
+  const green = Number.parseInt(color.slice(3, 5), 16);
+  const blue = Number.parseInt(color.slice(5, 7), 16);
+  return [
+    `--glass-type-color:${color}`,
+    `--glass-type-border:rgba(${red},${green},${blue},.38)`,
+    `--glass-type-soft:rgba(${red},${green},${blue},.10)`,
+    `--glass-type-ring:rgba(${red},${green},${blue},.16)`,
+  ].join(";");
+}
+
 /**
  * Purpose: Render the render item row workflow using the existing shared UI state.
  * Effects: Updates visible dom state, may update shared client state.
@@ -7324,6 +7433,103 @@ function rackSetFormChoices(selected = "") {
   });
 }
 
+/** Normalize a rack code exactly enough for client-side duplicate checks. */
+function rackDraftCode(value = "") {
+  let text = String(value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (text.startsWith("RACK")) text = text.slice(4);
+  if (text === "TRUCK" || text === "NORACK") return "T";
+  return text;
+}
+
+/** Validate an individual rack before the API request so duplicate identity is obvious. */
+function rackFormDraftValidation() {
+  const code = rackDraftCode(document.getElementById("rackModalCode")?.value || "");
+  const oldCode = rackDraftCode(document.getElementById("rackModalOldCode")?.value || "");
+  const requestedName = String(document.getElementById("rackModalName")?.value || "").trim();
+  const effectiveName = requestedName || code;
+  if (!code) return { ok: false, message: "Enter a rack code." };
+
+  const codeConflict = (state.racks || []).find((rack) => (
+    rackDraftCode(rack.code) === code && rackDraftCode(rack.code) !== oldCode
+  ));
+  if (codeConflict) {
+    return { ok: false, message: `Rack code ${code} already exists.` };
+  }
+
+  if (effectiveName) {
+    const nameKey = effectiveName.toLowerCase();
+    const nameConflict = (state.racks || []).find((rack) => (
+      rackDraftCode(rack.code) !== oldCode
+      && String(rack.name || rack.code || "").trim().toLowerCase() === nameKey
+    ));
+    if (nameConflict) {
+      return { ok: false, message: `Rack name “${effectiveName}” is already used by ${nameConflict.code}.` };
+    }
+  }
+  return { ok: true, message: "Rack code and name are available." };
+}
+
+/** Validate rack-set identity and generated codes before sending the create request. */
+function rackSetDraftValidation() {
+  const name = String(document.getElementById("rackSetModalName")?.value || "").trim();
+  const prefix = String(document.getElementById("rackSetModalPrefix")?.value || "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toUpperCase()
+    .slice(0, 8);
+  const count = Math.max(1, Math.min(Number(document.getElementById("rackSetModalCount")?.value || 1), 100));
+  const start = Math.max(1, Math.min(Number(document.getElementById("rackSetModalStart")?.value || 1), 999));
+  if (!name) return { ok: false, message: "Enter a rack-set name.", targetCodes: [] };
+  if (!prefix) return { ok: false, message: "Enter a code suffix.", targetCodes: [] };
+
+  const existingSet = (state.racks || []).find((rack) => (
+    rackGroupLabel(rack).trim().toLowerCase() === name.toLowerCase()
+  ));
+  if (existingSet) {
+    return { ok: false, message: `${name} already exists. Add an individual rack to that set instead.`, targetCodes: [] };
+  }
+
+  const targetCodes = Array.from({ length: count }, (_, offset) => {
+    const number = start + offset;
+    return prefix.length <= 3 ? `R${number}${prefix}` : `${prefix}${number}`;
+  });
+  const activeCodes = new Set((state.racks || []).map((rack) => rackDraftCode(rack.code)));
+  const conflicts = targetCodes.filter((code) => activeCodes.has(rackDraftCode(code)));
+  if (conflicts.length) {
+    const shown = conflicts.slice(0, 4).join(", ");
+    return {
+      ok: false,
+      message: `${shown}${conflicts.length > 4 ? ", …" : ""} already exist. Change the suffix or starting number.`,
+      targetCodes,
+    };
+  }
+  return { ok: true, message: `${targetCodes.length} rack code${targetCodes.length === 1 ? " is" : "s are"} available.`, targetCodes };
+}
+
+function rackFormExistingSetRacksHtml(type = "", currentCode = "") {
+  const cleanType = String(type || "").trim().toLowerCase();
+  const cleanCurrent = rackDraftCode(currentCode);
+  const racks = (state.racks || [])
+    .filter((rack) => rackGroupLabel(rack).trim().toLowerCase() === cleanType)
+    .slice()
+    .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true }));
+  if (!racks.length) return `<span class="rack-set-existing-empty-v308">No racks exist in this set yet.</span>`;
+  return racks.map((rack) => {
+    const current = rackDraftCode(rack.code) === cleanCurrent;
+    return `<span class="rack-set-existing-rack-v308 ${current ? "is-current" : ""}"><b>${escapeHtml(rack.code)}</b><small>${escapeHtml(rack.name || rack.type || "Rack")}</small><i class="${escapeHtml(rackStatusClassName(rack))}">${escapeHtml(rackStatusLabel(rack))}</i></span>`;
+  }).join("");
+}
+
+function syncRackDraftValidation(form, validation, selector) {
+  const target = form?.querySelector(selector);
+  if (target) {
+    target.textContent = validation.message;
+    target.classList.toggle("is-error", !validation.ok);
+    target.classList.toggle("is-ready", validation.ok);
+  }
+  const submit = form?.querySelector('button[type="submit"]');
+  if (submit) submit.disabled = !validation.ok;
+}
+
 /** Keep the polished individual-rack preview synchronized with the form values. */
 function syncRackFormPreview() {
   const form = document.getElementById("rackFormModal");
@@ -7338,10 +7544,13 @@ function syncRackFormPreview() {
   if (codeNode) codeNode.textContent = code;
   if (nameNode) nameNode.textContent = name;
   if (typeNode) typeNode.textContent = type;
+  const existingRackHost = form.querySelector("[data-rack-form-existing-racks]");
+  if (existingRackHost) existingRackHost.innerHTML = rackFormExistingSetRacksHtml(type, document.getElementById("rackModalOldCode")?.value || code);
   if (icon) {
     icon.dataset.rackIcon = rackSetVisualIcon(type);
     icon.style.setProperty("--rack-set-icon-color", rackSetVisualColor(type) || "#176d72");
   }
+  syncRackDraftValidation(form, rackFormDraftValidation(), "[data-rack-form-validation]");
 }
 
 /** Keep the rack-set range and visual preview synchronized while the user types. */
@@ -7379,6 +7588,7 @@ function syncRackSetFormPreview() {
   });
   const colorOutput = form.querySelector("[data-rack-set-color-output]");
   if (colorOutput) colorOutput.textContent = color.toUpperCase();
+  syncRackDraftValidation(form, rackSetDraftValidation(), "[data-rack-set-validation]");
 }
 
 /** Return from either add-rack workflow to the maintained Edit Racks workspace. */
@@ -7557,7 +7767,7 @@ function rackStatusLabel(rack) {
   if (rackIsReceived(rack)) return "Received";
   if (status === "in transit") return "On the way";
   if (status === "closed" || status === "complete" || status === "completed") return "Complete";
-  if (qty > 0) return "Open";
+  if (qty > 0) return "Incomplete";
   return "Empty";
 }
 
@@ -7623,8 +7833,8 @@ function rackDestinationClass(value) {
 function rackVisualClass(rack) {
   if (rackIsReceived(rack)) return "is-received";
   const status = String(rack.status || "").toLowerCase();
-  if (status === "in transit") return "is-in-transit";
-  if (status === "closed") return "is-complete";
+  if (status === "in transit" || status === "on the way") return "is-in-transit";
+  if (status === "closed" || status === "complete" || status === "completed") return "is-complete";
   if (Number(rack.qty || 0) > 0) return "has-items";
   return "is-empty";
 }
@@ -7721,7 +7931,7 @@ function renderRacksPage() {
           <strong>${escapeHtml(itemLabel)} <span>${escapeHtml(item.customer || "")}</span></strong>
           <small>${escapeHtml(item.job || item.product || "")}</small>
           <small>${escapeHtml(item.product || item.job || "")} | ${escapeHtml(item.dimensions || "")} | Qty ${escapeHtml(item.rackQty || 1)}</small>
-          <small class="rack-scan-time">${escapeHtml(item.deliveryLabel || "")}${item.rackAddedAt ? ` | Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}` : ""}</small>
+          <small class="rack-scan-time">${escapeHtml(item.deliveryDate ? formatNumericDeliveryDate(item.deliveryDate) : item.deliveryLabel || "")}${item.rackAddedAt ? ` | Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}` : ""}</small>
         </div>
         ${hasPermission("manage_racks") ? `
           <div class="rack-item-actions">
@@ -7932,6 +8142,7 @@ function renderRacksPage() {
         role="button"
         aria-label="View ${escapeHtml(isTruck ? "Truck" : rack.code)} details"
       >
+        <div class="rack-board-state-v307 ${escapeHtml(statusClass)}"><i aria-hidden="true"></i><strong>${escapeHtml(statusText)}</strong></div>
         ${destinationPill}
         <div class="rack-board-card-main">
           <strong>${escapeHtml(isTruck ? "Truck" : rack.code)}</strong>
@@ -7940,7 +8151,6 @@ function renderRacksPage() {
 
         <div class="rack-board-card-meta">
           <b>${escapeHtml(rack.qty || 0)} pcs</b>
-          <small class="rack-status-badge ${escapeHtml(statusClass)}">${escapeHtml(statusText)}</small>
           ${rack.departedAt ? `<time class="rack-departure-time">Outbound ${escapeHtml(formatDateTime(rack.departedAt))}</time>` : ""}
           ${
             rackIsReceived(rack) && hasPermission("scan_racks")
@@ -7965,7 +8175,10 @@ function renderRacksPage() {
   const renderRackBoardGroup = ([label, racks]) => {
     const totalQty = racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
     const activeCount = racks.filter((rack) => Number(rack.qty || 0) > 0).length;
-    const completeCount = racks.filter((rack) => String(rack.status || "").toLowerCase() === "closed").length;
+    const completeCount = racks.filter((rack) => {
+      const status = String(rack.status || "").trim().toLowerCase();
+      return status === "closed" || status === "complete" || status === "completed";
+    }).length;
 
     return `
       <section class="rack-board-group" data-rack-group="${escapeHtml(label)}">
@@ -8023,7 +8236,10 @@ function renderRacksPage() {
     const selected = label === selectedGroupLabel;
     const totalQty = racks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
     const activeCount = racks.filter((rack) => Number(rack.qty || 0) > 0).length;
-    const completeCount = racks.filter((rack) => String(rack.status || "").toLowerCase() === "closed").length;
+    const completeCount = racks.filter((rack) => {
+      const status = String(rack.status || "").trim().toLowerCase();
+      return status === "closed" || status === "complete" || status === "completed";
+    }).length;
     const setClass = slugify(label || "rack-set") || "rack-set";
     const setHue = rackSetVisualHue(label);
     const setIcon = rackSetVisualIcon(label);
@@ -8079,7 +8295,7 @@ function renderRacksPage() {
             <span>Status</span>
             <select data-rack-status-filter>
               <option value="all" ${state.rackStatusFilter === "all" ? "selected" : ""}>All</option>
-              <option value="open" ${state.rackStatusFilter === "open" ? "selected" : ""}>Open</option>
+              <option value="open" ${state.rackStatusFilter === "open" ? "selected" : ""}>Incomplete</option>
               <option value="complete" ${state.rackStatusFilter === "complete" ? "selected" : ""}>Complete</option>
               <option value="in-transit" ${state.rackStatusFilter === "in-transit" ? "selected" : ""}>On the way</option>
               <option value="received" ${state.rackStatusFilter === "received" ? "selected" : ""}>Received</option>
@@ -8521,7 +8737,9 @@ async function printSelectedRackPackingSlip(rackCode = state.selectedRackCode, d
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function saveRackDefinition() {
-  const rackCode = document.getElementById("rackModalCode")?.value || "";
+  const validation = rackFormDraftValidation();
+  if (!validation.ok) throw new Error(validation.message);
+  const rackCode = rackDraftCode(document.getElementById("rackModalCode")?.value || "");
   const payload = await fetchJson("/api/racks", {
     method: "POST",
     body: JSON.stringify({
@@ -8639,8 +8857,13 @@ async function deleteRackDefinition(rackCode = state.selectedRackCode) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function createRackSet() {
-  const prefix = document.getElementById("rackSetModalPrefix")?.value || "";
-  const nameRoot = document.getElementById("rackSetModalName")?.value || prefix || "Rack";
+  const validation = rackSetDraftValidation();
+  if (!validation.ok) throw new Error(validation.message);
+  const prefix = String(document.getElementById("rackSetModalPrefix")?.value || "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toUpperCase()
+    .slice(0, 8);
+  const nameRoot = String(document.getElementById("rackSetModalName")?.value || prefix || "Rack").trim();
   const payload = await fetchJson("/api/racks/create-set", {
     method: "POST",
     body: JSON.stringify({
@@ -8759,19 +8982,31 @@ function renderMobileCards() {
       <span>${state.items.length} items</span>
     </div>
     ${pageRows
-      .slice(0, 12)
       .map((item) => {
         const status = itemStatus(item);
         const selected = item.id === state.selectedId;
-        const mark = status === "complete" ? "&#10003;" : routeLabel(item) || "-";
+        const scanned = Math.max(Number(item.scanned || 0), 0);
+        const quantity = Math.max(Number(item.qty || 0), 0);
+        const scanStateLabel = status === "complete" ? "Complete" : status === "partial" ? "Partially scanned" : "Not scanned";
+        const route = routeLabel(item) || "Indian Trail";
         return `
-          <article class="mobile-list-card ${selected ? "is-selected" : ""}" data-id="${escapeHtml(item.id)}">
-            <span><small>Order #</small><b>${escapeHtml(item.order)}</b></span>
-            <span><small>Item #</small><b>${escapeHtml(item.item)}</b></span>
-            <span><small>Qty</small><b><span class="qty-pill ${status}" title="${escapeHtml(item.scanned)} scanned of ${escapeHtml(item.qty)}">${escapeHtml(item.qty)}</span></b></span>
-            <span class="dims"><small>Dimensions</small><b>${escapeHtml(item.dimensions)}</b></span>
-            <span class="card-status">${mark}</span>
-            <span class="card-customer">${escapeHtml(item.customer)}</span>
+          <article class="mobile-list-card ${selected ? "is-selected" : ""} is-${escapeHtml(status)}" data-id="${escapeHtml(item.id)}" data-scan-state="${escapeHtml(status)}">
+            <header class="mobile-card-heading">
+              <span class="mobile-card-job"><small>Job Nr.</small><b>${escapeHtml(item.job || item.product || "Not provided")}</b></span>
+              <span class="mobile-card-scan-state ${escapeHtml(status)}" aria-label="${escapeHtml(`${scanStateLabel}: ${scanned} of ${quantity} pieces scanned`)}">
+                <i aria-hidden="true"></i><b>${escapeHtml(scanned)}/${escapeHtml(quantity)}</b><small>${escapeHtml(scanStateLabel)}</small>
+              </span>
+            </header>
+            <div class="mobile-card-fields">
+              <span><small>Order Nr.</small><b>${escapeHtml(item.order)}</b></span>
+              <span><small>Item Nr.</small><b>${escapeHtml(item.item)}</b></span>
+              <span><small>Quantity</small><b>${escapeHtml(quantity)}</b></span>
+              <span class="dims"><small>Dimensions</small><b>${escapeHtml(item.dimensions || "-")}</b></span>
+            </div>
+            <footer class="mobile-card-footer">
+              <span class="card-customer">${escapeHtml(item.customer || "No customer")}</span>
+              <span class="card-route">${escapeHtml(route)}</span>
+            </footer>
           </article>
         `;
       })
@@ -9090,16 +9325,16 @@ function recentScansModalHtml() {
                         : `<strong>${escapeHtml(eventLabel)}</strong><span>No line item attached</span>`;
                       return `
                         <tr class="${scanEntryRowClass(entry)}">
-                          <td><span class="scan-event-badge event-${escapeHtml(eventType || "activity")}">${escapeHtml(eventLabel)}</span></td>
-                          <td><strong>${escapeHtml(sourceLabel)}</strong>${!["import", "update"].includes(eventType) && entry.raw && entry.raw !== entry.barcode ? `<small>Raw: ${escapeHtml(entry.raw)}</small>` : ""}</td>
-                          <td><div class="all-scans-item-cell">${jobOrderItem}</div></td>
-                          <td>${quantity}</td>
-                          ${stagingView ? `<td>${allScansRackControl(item)}</td>` : ""}
-                          <td>${item ? escapeHtml(item.customer || "-") : "-"}</td>
-                          <td><div class="all-scans-detail-cell">${scanEntryFullDetail(entry) || `<span>${escapeHtml(scanEntryCompactMessage(entry) || "No additional details")}</span>`}</div></td>
-                          <td><strong>${escapeHtml(entry.user || "System")}</strong><span>${escapeHtml(entry.station || "No station")}</span></td>
-                          <td>${Number.isNaN(time.getTime()) ? "" : time.toLocaleString()}</td>
-                          <td><span class="check-dot ${entry.ok ? "" : "error"}" role="img" title="${entry.ok ? "Successful" : "Needs review"}" aria-label="${entry.ok ? "Successful" : "Needs review"}"></span></td>
+                          <td data-label="Event"><span class="scan-event-badge event-${escapeHtml(eventType || "activity")}">${escapeHtml(eventLabel)}</span></td>
+                          <td data-label="Barcode / Source"><strong>${escapeHtml(sourceLabel)}</strong>${!["import", "update"].includes(eventType) && entry.raw && entry.raw !== entry.barcode ? `<small>Raw: ${escapeHtml(entry.raw)}</small>` : ""}</td>
+                          <td data-label="Order / Item / Job Nr."><div class="all-scans-item-cell">${jobOrderItem}</div></td>
+                          <td data-label="Quantity">${quantity}</td>
+                          ${stagingView ? `<td data-label="Rack">${allScansRackControl(item)}</td>` : ""}
+                          <td data-label="Customer">${item ? escapeHtml(item.customer || "-") : "-"}</td>
+                          <td data-label="Full details"><div class="all-scans-detail-cell">${scanEntryFullDetail(entry) || `<span>${escapeHtml(scanEntryCompactMessage(entry) || "No additional details")}</span>`}</div></td>
+                          <td data-label="User / Station"><strong>${escapeHtml(entry.user || "System")}</strong><span>${escapeHtml(entry.station || "No station")}</span></td>
+                          <td data-label="Date & Time">${Number.isNaN(time.getTime()) ? "" : time.toLocaleString()}</td>
+                          <td data-label="Check"><span class="check-dot ${entry.ok ? "" : "error"}" role="img" title="${entry.ok ? "Successful" : "Needs review"}" aria-label="${entry.ok ? "Successful" : "Needs review"}"></span></td>
                         </tr>
                       `;
                     })
@@ -11681,6 +11916,83 @@ function renderHome() {
   applyPermissionUi();
 }
 
+/** Reset every application-level scroll owner after changing pages.
+ *
+ * Chrome/Edge scroll anchoring can retain a few pixels from the previous page
+ * when the newly-visible page has a different height. On the Racks page that
+ * placed the top edge of the heading actions underneath the sticky app header,
+ * making the upper part of Racks History/Edit Racks appear visible but not
+ * clickable. Reset after visibility changes, then confirm again next paint.
+ */
+function resetPageScrollPosition() {
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  const main = document.querySelector(".app > main");
+  if (main) {
+    main.scrollTop = 0;
+    main.scrollLeft = 0;
+  }
+}
+
+/** Keep Rack heading actions clear of the sticky shell after async page renders.
+ *
+ * Racks refreshes after page visibility changes. Chrome can restore/anchor a few
+ * pixels after that asynchronous DOM replacement, which lets the transparent
+ * portion of the sticky header sit over the upper edge of the two action buttons.
+ * Re-check the actual geometry after the rack data paint instead of assuming the
+ * initial page-switch scroll reset is still authoritative.
+ */
+function stabilizeRackHeadingActions() {
+  if (state.page !== "racks") return;
+  const heading = document.querySelector("#racksPage > .page-heading");
+  const appHeader = els.appHeader || document.querySelector(".app-header");
+  if (!heading || !appHeader || heading.getClientRects().length === 0) return;
+
+  const headerBottom = Math.ceil(appHeader.getBoundingClientRect().bottom || 0);
+  const headingTop = Math.floor(heading.getBoundingClientRect().top || 0);
+  const desiredTop = headerBottom + 8;
+  if (headingTop < desiredTop) {
+    const delta = desiredTop - headingTop;
+    window.scrollBy({ top: -delta, left: 0, behavior: "auto" });
+    document.documentElement.scrollTop = Math.max(0, document.documentElement.scrollTop - delta);
+    document.body.scrollTop = Math.max(0, document.body.scrollTop - delta);
+  }
+}
+
+function scheduleRackHeadingStabilization() {
+  if (state.page !== "racks") return;
+  window.requestAnimationFrame(() => {
+    stabilizeRackHeadingActions();
+    window.setTimeout(stabilizeRackHeadingActions, 80);
+    window.setTimeout(stabilizeRackHeadingActions, 260);
+  });
+}
+
+/**
+ * Capture clicks that land inside the visible Rack action rectangles even if a
+ * stale transparent shell layer wins normal hit testing. This is intentionally
+ * limited to the two Rack Overview heading actions and only runs on the Racks page.
+ */
+function forwardRackHeadingActionClick(event) {
+  if (state.page !== "racks" || event.defaultPrevented) return;
+  if (event.target?.closest?.("#rackPackingHistoryBtn, #rackEditOpenBtn")) return;
+
+  const buttons = [els.rackPackingHistoryBtn, els.rackEditOpenBtn].filter(Boolean);
+  for (const button of buttons) {
+    if (button.disabled || button.getClientRects().length === 0) continue;
+    const rect = button.getBoundingClientRect();
+    const inside = event.clientX >= rect.left && event.clientX <= rect.right
+      && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    if (!inside) continue;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    button.click();
+    return;
+  }
+}
+
 /**
  * Purpose: Open the show page workflow using the existing shared UI state.
  * Effects: Updates visible dom state.
@@ -11700,9 +12012,12 @@ function showPage(page) {
   state.page = page;
   document.body.dataset.page = page;
   syncSidebarState({ closeMobile: true });
-  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   document.querySelectorAll(".page-view").forEach((view) => {
     view.hidden = view.id !== `${page === "bays" ? "bayMap" : page}Page`;
+  });
+  resetPageScrollPosition();
+  requestAnimationFrame(() => {
+    if (state.page === page) resetPageScrollPosition();
   });
   if (page === "bays") scheduleBayScannerStickyUpdateV155();
   else resetBayScannerStickyV155();
@@ -11714,7 +12029,11 @@ function showPage(page) {
   if (page === "home") renderHome();
   if (page === "statistics") renderStatisticsPage();
   if (page === "scan") renderScanPage();
-  if (page === "racks") refreshRacksPage().catch((error) => showInlineError(error.message, true));
+  if (page === "racks") {
+    refreshRacksPage()
+      .then(() => scheduleRackHeadingStabilization())
+      .catch((error) => showInlineError(error.message, true));
+  }
   // Reject history is refreshed on every page entry, replacing the old manual Refresh button.
   if (page === "rejects") refreshRejectPage().catch((error) => showInlineError(error.message, true));
   if (page === "bays") {
@@ -13001,9 +13320,26 @@ function showSaveConfirmation(message = "Your changes are now active.", details 
 }
 
 /**
- * Purpose: Run the rush notification is blocked workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Decide whether one application notification is a real operator Rush alert.
+ * Effects: None.
+ * Flow: Rejects import, review, and automation notices before they can enter the full-screen production-priority queue.
+ */
+function isRushPopupNotification(notification) {
+  const type = String(notification?.type || "").trim().toLowerCase();
+  const details = notification?.details || {};
+  const source = String(details.source || "").trim().toLowerCase();
+  const createdBy = String(notification?.createdBy || details.submittedBy || "").trim().toLowerCase();
+
+  if (type !== "rush") return false;
+  if (["sql-delivery-automation", "superseded-order-review", "delivery-import"].includes(source)) return false;
+  if (createdBy.startsWith("sql-auto") || createdBy.includes("automation")) return false;
+  return true;
+}
+
+/**
+ * Purpose: Determine whether a Rush popup can interrupt the current Scan workflow.
+ * Effects: None.
+ * Flow: Keeps only explicit operator Rush submissions in the production-priority queue.
  */
 function rushNotificationIsBlocked() {
   return Boolean(
@@ -13146,7 +13482,7 @@ async function acknowledgeRushAndOpen(notification, button) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function showRushAlert(notification) {
-  if (!notification || rushNotificationIsBlocked()) return false;
+  if (!isRushPopupNotification(notification) || rushNotificationIsBlocked()) return false;
   const notificationId = Number(notification.id || 0);
   const details = notification.details || {};
   const spanish = state.language === "es";
@@ -13253,6 +13589,7 @@ async function pollUserNotifications() {
       const notificationId = Number(notification.id || 0);
       if (!notificationId || knownIds.has(notificationId)) continue;
       knownIds.add(notificationId);
+      if (!isRushPopupNotification(notification)) continue;
       state.notificationQueue.push(notification);
     }
     presentNextUserNotification();
@@ -13504,10 +13841,10 @@ function renderGlobalSearchResults(results) {
 /**
  * Purpose: Build the date-aware Indian Trail API suffix used by every Bay Map route request.
  * Effects: None; this is the single date-selection source for the summary and in-transit manifest.
- * Flow: Uses today's delivery date when present, otherwise the dashboard fallback date, and returns one encoded query string.
+ * Flow: Always uses today's delivery date so route progress never absorbs future/past in-transit work.
  */
 function indianTrailDateQuery() {
-  const deliveryDate = dashboardDateKey();
+  const deliveryDate = todayKey();
   return deliveryDate ? `?deliveryDate=${encodeURIComponent(deliveryDate)}` : "";
 }
 
@@ -13584,7 +13921,7 @@ function renderBayRouteFlow(summary) {
   if (!els.bayFlowPanel) return;
   state.bayRouteSummary = summary || null;
 
-  const key = dashboardDateKey();
+  const key = todayKey();
   const dayLists = state.lists.filter((list) => list.deliveryDate === key);
   const outbound = dayLists.find((list) => stageCategory(list) === "outbound");
   const inbound = dayLists.find((list) => stageCategory(list) === "received") || state.lists.find((list) => list.id === summary?.activeInboundListId);
@@ -13723,6 +14060,7 @@ function transitManifestRowHtml(item) {
 
   return `
     <tr>
+      <td>${escapeHtml(item.deliveryDate ? formatNumericDeliveryDate(item.deliveryDate) : "-")}</td>
       <td>${escapeHtml(jobText)}</td>
       <td><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>${flags.length ? `<span class="transit-flags">${flags.map((flag) => `<i>${escapeHtml(flag)}</i>`).join("")}</span>` : ""}</td>
       <td>${escapeHtml(item.qty)}</td>
@@ -13892,12 +14230,17 @@ function transitManifestRackGroups(payload) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function transitRackIconClass(rack) {
+  const code = String(rack?.code || "").toUpperCase();
   const text = `${rack?.type || ""} ${rack?.name || ""} ${rack?.code || ""}`;
-  if (String(rack?.code || "").toUpperCase() === "T" || /truck/i.test(text)) return "truck";
-  if (/wood/i.test(text)) return "wood";
-  if (/coral/i.test(text)) return "coral";
-  if (/unassigned|needs transportation/i.test(text)) return "unassigned";
-  return "steel";
+  if (code === "UNASSIGNED" || /unassigned|needs transportation/i.test(text)) return "warehouse";
+  if (code === "T" || /truck/i.test(text)) return "truck";
+  return rackSetVisualIcon(rack?.type || rack?.name || rack?.code || "Rack");
+}
+
+/** Keep the in-transit rack marker on the same saved rack-set color as Rack Overview. */
+function transitRackIconStyle(rack) {
+  const color = rackSetVisualColor(rack?.type || rack?.name || rack?.code || "Rack") || "#176d72";
+  return `--rack-set-icon-color:${color}`;
 }
 
 /**
@@ -13908,7 +14251,14 @@ function transitRackIconClass(rack) {
 function transitManifestHtml(payload) {
   const rackGroups = transitManifestRackGroups(payload);
   const manifestRows = transitManifestSourceRows(payload);
-  const dateLabel = payload.deliveryDate ? formatDisplayDate(payload.deliveryDate) : "Current Indian Trail list";
+  const deliveryDates = Array.isArray(payload.deliveryDates) ? payload.deliveryDates.filter(Boolean) : [];
+  const dateLabel = payload.deliveryDate
+    ? formatDisplayDate(payload.deliveryDate)
+    : deliveryDates.length === 1
+      ? formatDisplayDate(deliveryDates[0])
+      : deliveryDates.length > 1
+        ? `All in-transit dates · ${deliveryDates.length} delivery dates`
+        : "All in-transit dates";
   const glassGroupCount = rackGroups.reduce((sum, rack) => sum + rack.glassTypes.length, 0);
   const jobCount = new Set(manifestRows.map((item) => String(item.job || item.product || item.order || "No Job Nr.").trim() || "No Job Nr.")).size;
   const rackCards = rackGroups.length
@@ -13916,7 +14266,7 @@ function transitManifestHtml(payload) {
         .map((rack) => `
           <details class="transit-rack-card transit-rack-group-card ${rack.code === "UNASSIGNED" ? "needs-method" : ""}">
             <summary class="transit-rack-head transit-rack-group-head">
-              <span class="rack-set-icon transit-rack-icon ${escapeHtml(transitRackIconClass(rack))}" aria-hidden="true"></span>
+              <span class="rack-set-visual-icon-v269 transit-rack-icon" data-rack-icon="${escapeHtml(transitRackIconClass(rack))}" style="${escapeHtml(transitRackIconStyle(rack))}" aria-hidden="true"></span>
               <div>
                 <strong>${escapeHtml(transitRackDisplayName(rack))}</strong>
                 <small>${escapeHtml(rack.name && rack.name !== rack.code ? rack.name : rack.type || "Transportation method")}</small>
@@ -13939,7 +14289,7 @@ function transitManifestHtml(payload) {
                     </summary>
                     <div class="transit-table-wrap">
                       <table class="transit-table transit-glass-table">
-                        <thead><tr><th>Job Nr.</th><th>Order / Item</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Outbound / Received</th></tr></thead>
+                        <thead><tr><th>Delivery</th><th>Job Nr.</th><th>Order / Item</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Outbound / Received</th></tr></thead>
                         <tbody>${glass.items.map(transitManifestRowHtml).join("")}</tbody>
                       </table>
                     </div>
@@ -13962,7 +14312,6 @@ function transitManifestHtml(payload) {
           <span>${escapeHtml(dateLabel)} | grouped by rack, then glass type</span>
         </div>
         <div class="transit-manifest-header-actions">
-          <button class="scan-sound-test-progress-button" type="button" data-progress-sound-test="transit">Test 100% sound</button>
           <button class="modal-close-x gui-close-button transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
         </div>
       </header>
@@ -14002,7 +14351,10 @@ async function openInTransitManifest() {
   document.body.appendChild(shell);
   document.body.classList.add("modal-scroll-locked");
   try {
-    const payload = await fetchJson(`/api/indian-trail/in-transit${indianTrailDateQuery()}`);
+    // The manifest is intentionally all-date. Route progress/counts continue to
+    // use indianTrailDateQuery() through /summary so only today's delivery date
+    // changes the Outbound and Indian Trail progress meters.
+    const payload = await fetchJson("/api/indian-trail/in-transit");
     shell.innerHTML = transitManifestHtml(payload);
   } catch (error) {
     shell.querySelector(".transit-empty")?.remove();
@@ -14081,6 +14433,20 @@ function bayHasErrorState(bay) {
     ]),
   ].join(" ").toLowerCase();
   return /error|exception|conflict|needs\s*check|bad|scanblocked|blockedall|blocked\s+for\s+all/.test(haystack);
+}
+
+/** Return the operational reasons that make one physical bay need attention. */
+function bayAttentionReasons(bay) {
+  const reasons = [];
+  if (bayHasErrorState(bay)) reasons.push("Error / exception");
+  if (Number(bay?.staleDays || 0) > 10) reasons.push(`${Number(bay.staleDays)} days old`);
+  if (bayStatusKind(bay) === "picking") reasons.push("Picking / SDI");
+  return reasons;
+}
+
+/** Keep group and individual-bay attention indicators on one shared rule. */
+function bayNeedsAttention(bay) {
+  return bayAttentionReasons(bay).length > 0;
 }
 
 /**
@@ -14559,22 +14925,34 @@ function selectedBayJobItemsHtml(detail) {
   }
   return `
     <div class="selected-bay-job-detail-grid">
-      ${items
-        .map((item) => `
-          <div class="selected-bay-job-item ${item.complete ? "is-complete" : "is-missing"}">
-            <span class="selected-bay-job-item-status" aria-hidden="true">${item.complete ? "&#10003;" : "!"}</span>
+      ${items.map((item) => {
+        const locatedElsewhere = Number(item.locatedQty ?? item.inBayQty ?? 0) > 0 && !item.isInSelectedBay;
+        const preassignedElsewhere = String(item.bayStatus || "") === "PreAssigned" && !item.isInSelectedBay;
+        const location = item.bayCode
+          ? [item.bayGroup, item.bayDisplay || item.bayCode].filter(Boolean).join(" · ")
+          : "Not currently assigned to a bay";
+        const statusLabel = item.isInSelectedBay
+          ? "In this bay"
+          : locatedElsewhere
+            ? "In another bay"
+            : preassignedElsewhere
+              ? "Preassigned elsewhere"
+              : `${escapeHtml(item.missingQty)} missing`;
+        const cardState = item.isInSelectedBay ? "is-complete" : locatedElsewhere ? "is-other-bay" : "is-missing";
+        const icon = item.isInSelectedBay ? "&#10003;" : locatedElsewhere ? "&#8599;" : "!";
+        return `
+          <div class="selected-bay-job-item ${cardState}">
+            <span class="selected-bay-job-item-status" aria-hidden="true">${icon}</span>
             <div>
               <strong>Order ${escapeHtml(item.order)} / Item ${escapeHtml(item.item)}</strong>
               <span>${escapeHtml(item.product || "Glass item")} ${item.dimensions ? `| ${escapeHtml(item.dimensions)}` : ""}</span>
-              ${item.scannedIntoBayAt ? `<time>Scanned into bay ${escapeHtml(formatDateTime(item.scannedIntoBayAt))}</time>` : `<time>Not scanned into this bay yet</time>`}
+              <time>${escapeHtml(location)}</time>
             </div>
-            <b>${escapeHtml(item.inBayQty)}/${escapeHtml(item.qty)}</b>
-            <small>${item.complete ? "In bay" : `${escapeHtml(item.missingQty)} missing`}</small>
-          </div>
-        `)
-        .join("")}
-    </div>
-  `;
+            <b>${escapeHtml(item.locatedQty ?? item.inBayQty ?? 0)}/${escapeHtml(item.qty)}</b>
+            <small>${statusLabel}</small>
+          </div>`;
+      }).join("")}
+    </div>`;
 }
 
 /**
@@ -14595,6 +14973,9 @@ function renderBaySlotButton(bay, mode = "physical") {
   const abbreviation = statusAbbreviation(status, bay);
   const kind = bayCategoryKind(bay);
   const statusKind = bayStatusKind(bay);
+  const attentionReasons = bayAttentionReasons(bay);
+  const needsAttention = attentionReasons.length > 0;
+  const attentionLabel = needsAttention ? `Needs attention: ${attentionReasons.join(", ")}` : "";
   const label = bay.displayName || bay.bayCode;
   const assignedQty = assignments.reduce((sum, item) => sum + Number(item.assignedQty || item.qty || 0), 0) || Number(bay.assignedQty || 0);
   const capacity = Number(bay.capacityQty || 0);
@@ -14625,7 +15006,10 @@ function renderBaySlotButton(bay, mode = "physical") {
       ${ribbons}
       <span class="bay-slot-head">
         <strong class="bay-code">${escapeHtml(label)}</strong>
-        <span class="bay-state status-${escapeHtml(statusKind)}">${escapeHtml(abbreviation || statusKind.toUpperCase())}</span>
+        <span class="bay-slot-head-status-v310">
+          ${needsAttention ? `<span class="bay-slot-attention-v310" title="${escapeHtml(attentionLabel)}" aria-label="${escapeHtml(attentionLabel)}">!</span>` : ""}
+          <span class="bay-state status-${escapeHtml(statusKind)}">${escapeHtml(abbreviation || statusKind.toUpperCase())}</span>
+        </span>
       </span>
       <span class="bay-slot-main-row">
         <span class="bay-slot-order">${escapeHtml(orderLine)}</span>
@@ -14764,26 +15148,31 @@ function renderBaySection(section) {
   const dimmed = !visible && filtersActive;
   const operationalBays = section.bays.filter((bay) => bayCategoryKind(bay) !== "spacer");
   const occupied = operationalBays.filter((bay) => ["occupied", "preassigned", "picking"].includes(bayStatusKind(bay))).length;
-  const attention = operationalBays.filter((bay) => bayHasErrorState(bay) || Number(bay.staleDays || 0) > 10 || bayStatusKind(bay) === "picking").length;
+  const attention = operationalBays.filter((bay) => bayNeedsAttention(bay)).length;
   const available = operationalBays.filter((bay) => bayStatusKind(bay) === "available").length;
   const blocked = operationalBays.filter((bay) => bayPolicyKind(bay) === "blocked").length;
   const totalBays = operationalBays.length;
+  const utilizationRatio = totalBays ? Math.min(Math.max(occupied / totalBays, 0), 1) : 0;
+  const utilizationHue = Math.round(120 * (1 - utilizationRatio));
   const groupPolicy = bayGroupPolicySummary(section);
+  const groupPolicyLabel = {
+    auto: "AUTO",
+    manual: "MAN",
+    mixed: "MIX",
+    blocked: "BLK",
+    empty: "--",
+  }[groupPolicy.kind] || String(groupPolicy.label || "").toUpperCase();
   const open = Boolean(filtersActive) || !state.collapsedBaySections.has(section.label);
   const cols = Math.max(1, Math.min(Number(state.bayGroupColumns[section.label] || 1), 2));
   return `
     <details ${open ? "open" : ""} class="physical-bay-section physical-bay-section-v17 type-${escapeHtml(section.kind)} cols-${cols} policy-${escapeHtml(groupPolicy.kind)} ${state.bayEditMode ? "is-editing" : ""} ${dimmed ? "is-dimmed" : ""}" data-bay-drop-section="${escapeHtml(section.label)}" data-bay-drop-category="${escapeHtml(section.kind)}">
       <summary ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""} data-bay-group-drag="${escapeHtml(section.label)}">
+        <span class="bay-section-policy-v310 policy-${escapeHtml(groupPolicy.kind)}" title="${escapeHtml(groupPolicy.detail)}" aria-label="${escapeHtml(groupPolicy.label)}: ${escapeHtml(groupPolicy.detail)}">${escapeHtml(groupPolicyLabel)}</span>
         <span class="bay-section-title"><strong>${escapeHtml(section.label)}</strong><small>${escapeHtml(bayCategoryLabel(section.kind))}</small></span>
-        <span class="bay-section-status status-${escapeHtml(groupPolicy.kind)}">
-          <strong>${escapeHtml(groupPolicy.label)}</strong>
-          <small>${escapeHtml(groupPolicy.detail)}</small>
-        </span>
-        <span class="bay-section-counts" aria-label="${escapeHtml(occupied)} occupied of ${escapeHtml(totalBays)} bays; ${escapeHtml(available)} open">
-          <b>${escapeHtml(occupied)}/${escapeHtml(totalBays)}</b>
-          <i>${escapeHtml(available)} open</i>
+        <span class="bay-section-counts" aria-label="${escapeHtml(occupied)} occupied of ${escapeHtml(totalBays)} bays" style="--bay-group-utilization-hue:${escapeHtml(utilizationHue)};--bay-group-utilization-percent:${escapeHtml(Math.round(utilizationRatio * 100))}%">
+          <b class="bay-section-occupancy-v312" title="${escapeHtml(occupied)} occupied · ${escapeHtml(Math.max(totalBays - occupied, 0))} available · ${escapeHtml(totalBays)} total"><strong>${escapeHtml(occupied)}</strong><span>/${escapeHtml(totalBays)}</span></b>
           ${blocked ? `<em class="blocked">${escapeHtml(blocked)} blocked</em>` : ""}
-          ${attention ? `<em>${escapeHtml(attention)} attention</em>` : ""}
+          ${attention ? `<em class="bay-section-attention-v309" title="${escapeHtml(attention)} bay${attention === 1 ? "" : "s"} need attention" aria-label="${escapeHtml(attention)} bay${attention === 1 ? "" : "s"} need attention"><span class="bay-section-attention-mark-v309" aria-hidden="true">!</span><span>${escapeHtml(attention)}</span></em>` : ""}
         </span>
         ${hasPermission("manage_bay_layout") ? `<button type="button" class="bay-section-edit-btn bay-section-edit-btn-v273" data-bay-editor-open="${escapeHtml(section.label)}" title="Edit ${escapeHtml(section.label)}" aria-label="Edit ${escapeHtml(section.label)} bay group"></button>` : ""}
         ${state.bayEditMode ? `<span class="bay-column-controls"><button type="button" data-bay-col-action="dec" data-bay-section="${escapeHtml(section.label)}">-</button><b>${cols} col</b><button type="button" data-bay-col-action="inc" data-bay-section="${escapeHtml(section.label)}">+</button></span>` : ""}
@@ -15184,9 +15573,10 @@ function renderBaySidePanels() {
       }));
       const firstAssignment = assignments[0];
       const requiredQty = jobGroups.reduce((sum, group) => sum + Number(group.detail?.requiredQty || group.totalQty || 0), 0);
-      const inBayQty = jobGroups.reduce((sum, group) => sum + Number(group.detail?.inBayQty ?? group.scannedQty ?? 0), 0);
+      const locatedQty = jobGroups.reduce((sum, group) => sum + Number(group.detail?.locatedQty ?? group.detail?.inBayQty ?? group.scannedQty ?? 0), 0);
+      const selectedBayQty = jobGroups.reduce((sum, group) => sum + Number(group.detail?.selectedBayQty ?? group.detail?.inBayQty ?? group.scannedQty ?? 0), 0);
       const completedJobCount = jobGroups.filter((group) => group.detail ? group.detail.complete : Number(group.scannedQty || 0) >= Number(group.totalQty || 0)).length;
-      const fulfillmentPercent = requiredQty ? Math.min((inBayQty / requiredQty) * 100, 100) : 0;
+      const fulfillmentPercent = requiredQty ? Math.min((selectedBayQty / requiredQty) * 100, 100) : 0;
       const policyKind = bayPolicyKind(bay);
       const statusKind = bayStatusKind(bay);
       const policyLabel = policyKind === "manual" ? "Man" : policyKind === "blocked" ? "Blocked" : "Auto";
@@ -15212,11 +15602,11 @@ function renderBaySidePanels() {
           <div class="selected-bay-metric-row selected-bay-metric-row-v28">
             <span><small>Category</small><strong>${escapeHtml(bayCategoryLabel(bayCategoryKind(bay)))}</strong></span>
             <span><small>${jobGroups.length === 1 ? "Job" : "Jobs"}</small><strong>${escapeHtml(completedJobCount)}/${escapeHtml(jobGroups.length)}</strong></span>
-            <span><small>Fulfillment</small><strong>${escapeHtml(inBayQty)}/${escapeHtml(requiredQty)}</strong></span>
+            <span><small>In this bay</small><strong>${escapeHtml(selectedBayQty)}/${escapeHtml(requiredQty)}</strong></span>
             <span><small>Primary Job</small><strong>${firstAssignment ? escapeHtml(assignmentJobLabel(firstAssignment)) : "None"}</strong></span>
           </div>
 
-          <div class="capacity-meter selected-capacity-meter fulfillment-meter" title="${escapeHtml(inBayQty)} of ${escapeHtml(requiredQty)} required pieces are in this bay"><span style="width:${fulfillmentPercent}%"></span></div>
+          <div class="capacity-meter selected-capacity-meter fulfillment-meter" title="${escapeHtml(selectedBayQty)} of ${escapeHtml(requiredQty)} required pieces are in this bay; ${escapeHtml(locatedQty)} are located across all bays"><span style="width:${fulfillmentPercent}%"></span></div>
 
           <div class="selected-bay-primary-actions selected-bay-primary-actions-v28">
             <button type="button" data-bay-action="scan-here">Use For Scanner</button>
@@ -15240,7 +15630,8 @@ function renderBaySidePanels() {
                       const first = group.assignments[0];
                       const detail = group.detail;
                       const jobRequiredQty = Number(detail?.requiredQty || group.totalQty || 0);
-                      const jobInBayQty = Number(detail?.inBayQty ?? group.scannedQty ?? 0);
+                      const jobLocatedQty = Number(detail?.locatedQty ?? detail?.inBayQty ?? group.scannedQty ?? 0);
+                      const jobSelectedBayQty = Number(detail?.selectedBayQty ?? detail?.inBayQty ?? group.scannedQty ?? 0);
                       const missingCount = Number(detail?.missingItems?.length || 0);
                       return `
                       <details class="selected-bay-job-card selected-bay-job-details" data-assignment-id="${escapeHtml(first.id)}">
@@ -15252,15 +15643,15 @@ function renderBaySidePanels() {
                             </div>
                             <span>${escapeHtml(group.customer || "No customer listed")}</span>
                             <small>${escapeHtml(group.itemCount)} assigned line${group.itemCount === 1 ? "" : "s"} | ${escapeHtml(group.orderLine)}</small>
-                            <small>Fulfillment ${escapeHtml(jobInBayQty)}/${escapeHtml(jobRequiredQty)} | ${missingCount ? `${escapeHtml(missingCount)} order item${missingCount === 1 ? "" : "s"} missing` : "Job complete"}</small>
+                            <small>This bay ${escapeHtml(jobSelectedBayQty)}/${escapeHtml(jobRequiredQty)} · Located ${escapeHtml(jobLocatedQty)}/${escapeHtml(jobRequiredQty)} | ${missingCount ? `${escapeHtml(missingCount)} order item${missingCount === 1 ? "" : "s"} missing` : "Job complete"}</small>
                             ${detail?.lastScannedIntoBayAt ? `<time>Last scanned into bay ${escapeHtml(formatDateTime(detail.lastScannedIntoBayAt))}</time>` : ""}
                           </div>
                           <span class="selected-bay-job-open"><b>View orders</b><i aria-hidden="true"></i></span>
                         </summary>
                         <div class="selected-bay-job-expanded">
                           <div class="selected-bay-job-fulfillment">
-                            <strong>${escapeHtml(jobInBayQty)}/${escapeHtml(jobRequiredQty)} pieces in bay</strong>
-                            <span>${missingCount ? `${escapeHtml(missingCount)} order item${missingCount === 1 ? "" : "s"} still missing` : "All required order items are present"}</span>
+                            <strong>${escapeHtml(jobSelectedBayQty)}/${escapeHtml(jobRequiredQty)} pieces in this bay</strong>
+                            <span>${escapeHtml(jobLocatedQty)}/${escapeHtml(jobRequiredQty)} located across all bays · ${missingCount ? `${escapeHtml(missingCount)} order item${missingCount === 1 ? "" : "s"} still missing` : "All required order items are located"}</span>
                           </div>
                           ${bay.jobDetailsLoading
                             ? `<div class="selected-bay-job-empty-detail">Loading complete job and missing-item details...</div>`
@@ -15564,7 +15955,7 @@ function renderStaleBayPanel(orders) {
     const urgency = daysOld >= 30 ? "is-critical" : daysOld >= 14 ? "is-warning" : "is-attention";
     const checked = state.staleBaySelectedIds.has(assignmentId) ? "checked" : "";
     return `
-      <article class="stale-bay-order stale-bay-order-v105 ${urgency}" data-stale-assignment-row="${escapeHtml(assignmentId)}">
+      <article class="stale-bay-order stale-bay-order-v105 ${urgency} ${checked ? "is-selected" : ""}" data-stale-assignment-row="${escapeHtml(assignmentId)}">
         <label class="stale-bay-select-control-v105" title="Select row">
           <input type="checkbox" data-stale-select="${escapeHtml(assignmentId)}" ${checked}>
           <span aria-hidden="true"></span>
@@ -15890,6 +16281,7 @@ function resetBayScannerStickyV155() {
   panel.style.removeProperty("--bay-scanner-fixed-top-v155");
   panel.style.removeProperty("--bay-scanner-fixed-left-v156");
   panel.style.removeProperty("--bay-scanner-fixed-width-v156");
+  panel.style.removeProperty("--bay-scanner-fixed-max-height-v319");
   anchor.style.removeProperty("height");
 }
 
@@ -15924,11 +16316,19 @@ function updateBayScannerStickyV155() {
   const fixedLeft = Math.max(5, Math.round(anchorRect.left));
   const availableWidth = Math.max(1, Math.floor(window.innerWidth - fixedLeft - 5));
   const fixedWidth = Math.max(1, Math.min(Math.round(anchorRect.width), availableWidth));
+  const footerRect = els.appFooter?.getBoundingClientRect();
+  const fixedMaxHeight = Math.max(1, Math.floor(window.innerHeight - fixedTop - 5));
+  const visiblePanelHeight = Math.min(placeholderHeight, fixedMaxHeight);
+  const footerBoundTop = footerRect?.top < window.innerHeight
+    ? Math.floor(footerRect.top - visiblePanelHeight - 8)
+    : fixedTop;
+  const boundedTop = Math.min(fixedTop, footerBoundTop);
   anchor.style.height = `${Math.ceil(placeholderHeight)}px`;
   panel.classList.add("is-fixed-v155");
-  panel.style.setProperty("--bay-scanner-fixed-top-v155", `${fixedTop}px`);
+  panel.style.setProperty("--bay-scanner-fixed-top-v155", `${boundedTop}px`);
   panel.style.setProperty("--bay-scanner-fixed-left-v156", `${fixedLeft}px`);
   panel.style.setProperty("--bay-scanner-fixed-width-v156", `${fixedWidth}px`);
+  panel.style.setProperty("--bay-scanner-fixed-max-height-v319", `${fixedMaxHeight}px`);
 }
 
 /** Coalesce scroll, resize, fullscreen, and content-size updates into one paint. */
@@ -16249,31 +16649,63 @@ function assignmentById(assignmentId) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function bayAssignmentRows() {
-  const rows = [];
+  const groups = new Map();
   for (const bay of state.bays || []) {
-    const groups = groupAssignmentsByJob(bay.assignments || []);
-    for (const group of groups) {
-      const assignment = group.assignments[0];
-      rows.push({ bay, assignment, assignments: group.assignments, jobKey: group.key, jobLabel: group.label, itemCount: group.itemCount, totalQty: group.totalQty, orderLine: group.orderLine });
+    for (const assignment of bay.assignments || []) {
+      const jobKey = assignmentJobKey(assignment);
+      const key = `${assignment.deliveryListId || ""}::${jobKey}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          jobKey,
+          jobLabel: assignmentJobLabel(assignment),
+          customer: assignment.customer || "",
+          entries: [],
+        });
+      }
+      const group = groups.get(key);
+      group.entries.push({ bay, assignment });
+      if (!group.customer && assignment.customer) group.customer = assignment.customer;
     }
   }
-  return rows.sort((a, b) => `${a.bay.displayName || a.bay.bayCode}`.localeCompare(`${b.bay.displayName || b.bay.bayCode}`) || `${a.jobLabel}`.localeCompare(`${b.jobLabel}`));
+  return [...groups.values()]
+    .map((group) => {
+      const entries = group.entries
+        .slice()
+        .sort((left, right) => `${left.assignment.order || ""}`.localeCompare(`${right.assignment.order || ""}`, undefined, { numeric: true })
+          || `${left.assignment.item || ""}`.localeCompare(`${right.assignment.item || ""}`, undefined, { numeric: true }));
+      const first = entries[0] || { bay: {}, assignment: {} };
+      const assignments = entries.map((entry) => entry.assignment);
+      return {
+        ...group,
+        entries,
+        bay: first.bay,
+        assignment: first.assignment,
+        assignments,
+        itemCount: assignments.length,
+        totalQty: assignments.reduce((sum, item) => sum + Number(item.assignedQty || item.qty || 0), 0),
+        orderLine: assignments.map((item) => `${item.order}-${item.item}`).join(", "),
+      };
+    })
+    .sort((left, right) => `${left.jobLabel}`.localeCompare(`${right.jobLabel}`, undefined, { numeric: true })
+      || `${left.customer}`.localeCompare(`${right.customer}`));
 }
 
-/**
- * Purpose: Run the selected manage item workflow for the browser application.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
+function manageBayLocationLabel(bay = {}) {
+  const group = String(bay.mapSection || "").trim();
+  const bayLabel = String(bay.displayName || bay.bayCode || "Unassigned bay").trim();
+  if (group && group.toLowerCase() !== bayLabel.toLowerCase()) return `${group} · ${bayLabel}`;
+  return bayLabel;
+}
+
 function manageItemMatchesFilter(row) {
   const filter = String(state.manageItemsFilter || "all");
   if (filter === "all") return true;
-  const assignment = row?.assignment || {};
-  const status = String(assignment.status || "").toLowerCase();
-  if (filter === "preassigned") return status === "preassigned";
-  if (filter === "assigned") return !["preassigned", "cleared", "cancelled"].includes(status);
-  if (filter === "rush") return isRushItem(assignment) && !isRemakeItem(assignment);
-  if (filter === "needs-review") return /blocked|hold|needs|error|review/.test(`${status} ${assignment.reason || ""}`.toLowerCase());
+  const assignments = row?.assignments || [];
+  if (filter === "preassigned") return assignments.some((assignment) => String(assignment.status || "").toLowerCase() === "preassigned");
+  if (filter === "assigned") return assignments.some((assignment) => !["preassigned", "cleared", "cancelled"].includes(String(assignment.status || "").toLowerCase()));
+  if (filter === "rush") return assignments.some((assignment) => isRushItem(assignment) && !isRemakeItem(assignment));
+  if (filter === "needs-review") return assignments.some((assignment) => /blocked|hold|needs|error|review/.test(`${assignment.status || ""} ${assignment.reason || ""}`.toLowerCase()));
   return true;
 }
 
@@ -16282,16 +16714,91 @@ function filteredManageItemRows() {
   return bayAssignmentRows().filter((row) => {
     if (!manageItemMatchesFilter(row)) return false;
     if (!query) return true;
-    const { bay, assignment } = row;
-    return [bay.bayCode, bay.displayName, bay.mapSection, assignment.order, assignment.item, assignment.customer, assignment.product, assignment.job, assignment.dimensions, assignment.status]
-      .join(" ").toLowerCase().includes(query);
+    const searchable = [row.jobLabel, row.customer];
+    for (const { bay, assignment } of row.entries || []) {
+      searchable.push(
+        bay.bayCode,
+        bay.displayName,
+        bay.mapSection,
+        assignment.order,
+        assignment.item,
+        assignment.customer,
+        assignment.product,
+        assignment.job,
+        assignment.dimensions,
+        assignment.status,
+      );
+    }
+    return searchable.join(" ").toLowerCase().includes(query);
   });
 }
 
-function selectedManageItem() {
+function manageItemsSelectionSet() {
+  if (!(state.manageItemsSelectedIds instanceof Set)) state.manageItemsSelectedIds = new Set();
+  return state.manageItemsSelectedIds;
+}
+
+function manageVisibleEntries(rows = filteredManageItemRows()) {
+  return rows.flatMap((row) => row.entries || []);
+}
+
+function pruneManageItemsSelection(rows = filteredManageItemRows()) {
+  const allowed = new Set(manageVisibleEntries(rows).map(({ assignment }) => String(assignment.id || "")).filter(Boolean));
+  const selectedIds = manageItemsSelectionSet();
+  for (const id of [...selectedIds]) {
+    if (!allowed.has(String(id))) selectedIds.delete(String(id));
+  }
+  if (state.manageItemsSelectedId && !allowed.has(String(state.manageItemsSelectedId))) state.manageItemsSelectedId = "";
+  return selectedIds;
+}
+
+function selectedManageEntries(rows = filteredManageItemRows()) {
+  const selectedIds = pruneManageItemsSelection(rows);
+  return manageVisibleEntries(rows).filter(({ assignment }) => selectedIds.has(String(assignment.id || "")));
+}
+
+function selectedManageItem(rows = filteredManageItemRows()) {
+  if (!rows.length) return null;
+  const focusedId = String(state.manageItemsSelectedId || "");
+  const focused = rows.find((row) => (row.entries || []).some(({ assignment }) => String(assignment.id || "") === focusedId));
+  return focused || rows[0] || null;
+}
+
+function setManageItemsVisibleSelection(selectAll) {
   const rows = filteredManageItemRows();
-  if (!state.manageItemsSelectedId && rows.length) state.manageItemsSelectedId = String(rows[0].assignment.id || "");
-  return rows.find(({ assignment }) => String(assignment.id) === String(state.manageItemsSelectedId)) || rows[0] || null;
+  const selectedIds = manageItemsSelectionSet();
+  for (const { assignment } of manageVisibleEntries(rows)) {
+    const id = String(assignment.id || "");
+    if (!id) continue;
+    if (selectAll) selectedIds.add(id);
+    else selectedIds.delete(id);
+  }
+  if (selectAll && !state.manageItemsSelectedId) state.manageItemsSelectedId = String(manageVisibleEntries(rows)[0]?.assignment?.id || "");
+  renderManageItemsPanel();
+}
+
+function toggleManageItemSelection(assignmentId) {
+  const id = String(assignmentId || "");
+  if (!id) return;
+  const selectedIds = manageItemsSelectionSet();
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  state.manageItemsSelectedId = id;
+  renderManageItemsPanel();
+}
+
+function setManageGroupSelection(groupKey, selected) {
+  const row = filteredManageItemRows().find((candidate) => String(candidate.key || "") === String(groupKey || ""));
+  if (!row) return;
+  const selectedIds = manageItemsSelectionSet();
+  for (const { assignment } of row.entries || []) {
+    const id = String(assignment.id || "");
+    if (!id) continue;
+    if (selected) selectedIds.add(id);
+    else selectedIds.delete(id);
+  }
+  if (selected && row.entries?.[0]?.assignment?.id) state.manageItemsSelectedId = String(row.entries[0].assignment.id);
+  renderManageItemsPanel();
 }
 
 /**
@@ -16320,67 +16827,143 @@ function bayOptionGroups(selectedValue = "") {
 function renderManageItemsPanel() {
   if (!els.manageItemsPanel) return;
   const rows = filteredManageItemRows();
-  if (!rows.some(({ assignment }) => String(assignment.id) === String(state.manageItemsSelectedId))) {
-    state.manageItemsSelectedId = rows[0]?.assignment.id ? String(rows[0].assignment.id) : "";
-  }
-  const selected = selectedManageItem();
+  const selectedIds = pruneManageItemsSelection(rows);
+  const selectedEntries = selectedManageEntries(rows);
+  const focused = selectedManageItem(rows);
 
   if (els.manageItemsSearch && els.manageItemsSearch.value !== state.manageItemsQuery) els.manageItemsSearch.value = state.manageItemsQuery;
   if (els.manageItemsFilter) els.manageItemsFilter.value = state.manageItemsFilter || "all";
+
   if (els.manageItemsList) {
-    els.manageItemsList.innerHTML = rows.length
-      ? rows.map(({ bay, assignment, jobLabel, itemCount, totalQty, orderLine }) => `
-          <button type="button" class="manage-item-row ${String(assignment.id) === String(state.manageItemsSelectedId) ? "is-active" : ""}" data-manage-assignment-id="${escapeHtml(assignment.id)}">
-            <span><strong>${escapeHtml(jobLabel)}</strong><small>${escapeHtml(itemCount)} item${itemCount === 1 ? "" : "s"} / Qty ${escapeHtml(totalQty)} - ${escapeHtml(assignment.customer || "No customer")}</small><small>${escapeHtml(orderLine)}</small></span>
-            <em>${escapeHtml(bay.displayName || bay.bayCode)}</em>
-          </button>
-        `).join("")
-      : `<div class="manage-items-empty"><strong>No bay items found.</strong><span>Adjust the search or filters and try again.</span></div>`;
+    const visibleCount = manageVisibleEntries(rows).length;
+    const listMarkup = rows.map((row) => {
+      const ids = (row.entries || []).map(({ assignment }) => String(assignment.id || "")).filter(Boolean);
+      const selectedCount = ids.filter((id) => selectedIds.has(id)).length;
+      const allSelected = ids.length > 0 && selectedCount === ids.length;
+      const partiallySelected = selectedCount > 0 && !allSelected;
+      const active = (row.entries || []).some(({ assignment }) => String(assignment.id || "") === String(state.manageItemsSelectedId || ""));
+      const locations = [...new Set((row.entries || []).map(({ bay }) => manageBayLocationLabel(bay)).filter(Boolean))];
+      const locationSummary = locations.length === 1 ? locations[0] : `${locations.length} bay locations`;
+      return `
+        <article class="manage-item-job-card ${active ? "is-active" : ""} ${allSelected ? "is-selected" : ""} ${partiallySelected ? "is-partial" : ""}" data-manage-group-card="${escapeHtml(row.key)}">
+          <div class="manage-item-job-head" data-manage-group-select="${escapeHtml(row.key)}" role="button" tabindex="0" aria-label="Select all items for ${escapeHtml(row.jobLabel)}">
+            <label class="manage-item-select-box" title="Select all items in this job">
+              <input type="checkbox" data-manage-group-checkbox="${escapeHtml(row.key)}" ${allSelected ? "checked" : ""}>
+              <span aria-hidden="true"></span>
+            </label>
+            <div class="manage-item-job-identity">
+              <small>Job Nr.</small>
+              <strong>${escapeHtml(row.jobLabel)}</strong>
+              <span>${escapeHtml(row.customer || "No customer listed")}</span>
+            </div>
+            <div class="manage-item-job-summary">
+              <b>${escapeHtml(row.itemCount)} item${row.itemCount === 1 ? "" : "s"} · Qty ${escapeHtml(row.totalQty)}</b>
+              <small>${escapeHtml(locationSummary)}</small>
+            </div>
+          </div>
+          <div class="manage-item-exact-list">
+            ${(row.entries || []).map(({ bay, assignment }) => {
+              const id = String(assignment.id || "");
+              const checked = selectedIds.has(id);
+              const status = String(assignment.status || "Assigned");
+              return `
+                <div class="manage-item-exact-row ${checked ? "is-selected" : ""}" data-manage-item-select="${escapeHtml(id)}" role="button" tabindex="0" aria-label="Select Order ${escapeHtml(assignment.order)} Item ${escapeHtml(assignment.item)}">
+                  <label class="manage-item-select-box" title="Select this exact item">
+                    <input type="checkbox" data-manage-item-checkbox="${escapeHtml(id)}" ${checked ? "checked" : ""}>
+                    <span aria-hidden="true"></span>
+                  </label>
+                  <div class="manage-item-exact-identity">
+                    <strong>Order ${escapeHtml(assignment.order)} · Item ${escapeHtml(assignment.item)}</strong>
+                    <span>${escapeHtml(assignment.product || "Glass item")}${assignment.dimensions ? ` · ${escapeHtml(assignment.dimensions)}` : ""}</span>
+                  </div>
+                  <div class="manage-item-location">
+                    <small>Current location</small>
+                    <strong>${escapeHtml(manageBayLocationLabel(bay))}</strong>
+                  </div>
+                  <span class="manage-item-status status-${escapeHtml(String(status).toLowerCase())}">${escapeHtml(status)}</span>
+                </div>`;
+            }).join("")}
+          </div>
+        </article>`;
+    }).join("");
+
+    els.manageItemsList.innerHTML = `
+      <div class="manage-items-selection-toolbar">
+        <span><strong>${escapeHtml(selectedEntries.length)} selected</strong><small>${escapeHtml(visibleCount)} visible item${visibleCount === 1 ? "" : "s"}</small></span>
+        <div>
+          <button type="button" data-manage-selection-action="all" ${visibleCount ? "" : "disabled"}>Select All</button>
+          <button type="button" data-manage-selection-action="clear" ${selectedEntries.length ? "" : "disabled"}>Clear Selection</button>
+        </div>
+      </div>
+      ${rows.length ? listMarkup : `<div class="manage-items-empty"><strong>No bay items found.</strong><span>Adjust the search or filters and try again.</span></div>`}`;
   }
+
   if (els.manageItemsTargetBay) {
-    const currentBay = selected?.bay?.bayCode || state.selectedBayCode || "";
+    const currentBay = selectedEntries[0]?.bay?.bayCode || focused?.bay?.bayCode || state.selectedBayCode || "";
     const selectedValue = els.manageItemsTargetBay.value || currentBay;
     els.manageItemsTargetBay.innerHTML = bayOptionGroups(selectedValue);
     if (selectedValue) els.manageItemsTargetBay.value = selectedValue;
   }
+
   if (els.manageItemsSelected) {
-    if (!selected) {
-      els.manageItemsSelected.innerHTML = `<div class="manage-items-empty"><strong>Select an item</strong><span>All active bay assignments will appear on the left.</span></div>`;
-    } else {
-      const { bay, assignment } = selected;
-      const groupAssignments = selected.assignments || [assignment];
+    if (!selectedEntries.length) {
       els.manageItemsSelected.innerHTML = `
-        <article class="manage-selected-card status-${escapeHtml(bayStatusKind(bay))}">
-          <div>
-            <span class="bay-page-eyebrow">Selected Job Nr.</span>
-            <h3>${escapeHtml(selected.jobLabel || assignmentJobLabel(assignment))}</h3>
-            <p>${escapeHtml(assignment.customer || "No customer listed")}</p>
+        <div class="manage-items-empty manage-items-empty-selection">
+          <strong>Select a job or exact item</strong>
+          <span>Click a job card to select all of its items, or click an exact item row to move only that piece to another bay.</span>
+        </div>`;
+    } else {
+      const totalQty = selectedEntries.reduce((sum, { assignment }) => sum + Number(assignment.assignedQty || assignment.qty || 0), 0);
+      const jobs = new Set(selectedEntries.map(({ assignment }) => assignmentJobLabel(assignment)));
+      const locations = new Set(selectedEntries.map(({ bay }) => manageBayLocationLabel(bay)));
+      els.manageItemsSelected.innerHTML = `
+        <article class="manage-selected-card manage-selected-card-v318">
+          <div class="manage-selected-overview">
+            <span class="bay-page-eyebrow">Manual item management</span>
+            <h3>${escapeHtml(selectedEntries.length)} selected item${selectedEntries.length === 1 ? "" : "s"}</h3>
+            <p>Exact-item moves are supported. Sibling items from the same order can remain in different grouped bay sets.</p>
           </div>
           <div class="manage-selected-stats">
-            ${miniStat("Current Bay", bay.displayName || bay.bayCode)}
-            ${miniStat("Items", groupAssignments.length)}
-            ${miniStat("Total Qty", selected.totalQty || groupAssignments.reduce((sum, item) => sum + Number(item.assignedQty || item.qty || 0), 0))}
-            ${miniStat("Status", assignment.status || bay.status || "Assigned")}
+            ${miniStat("Jobs", jobs.size)}
+            ${miniStat("Items", selectedEntries.length)}
+            ${miniStat("Total Qty", totalQty)}
+            ${miniStat("Locations", locations.size)}
           </div>
-          <small>${escapeHtml((selected.orderLine || groupAssignments.map((item) => `${item.order}-${item.item}`).join(", ")) || "No item list")}</small>
-        </article>
-      `;
+          <div class="manage-selected-item-list">
+            ${selectedEntries.map(({ bay, assignment }) => `
+              <div class="manage-selected-item-line">
+                <span><strong>Order ${escapeHtml(assignment.order)} · Item ${escapeHtml(assignment.item)}</strong><small>${escapeHtml(assignment.product || "Glass item")}${assignment.dimensions ? ` · ${escapeHtml(assignment.dimensions)}` : ""}</small></span>
+                <span><small>Current bay</small><b>${escapeHtml(manageBayLocationLabel(bay))}</b></span>
+              </div>`).join("")}
+          </div>
+        </article>`;
     }
   }
+
+  const actionCount = selectedEntries.length;
+  if (els.manageItemsMoveBtn) {
+    els.manageItemsMoveBtn.disabled = !actionCount;
+    els.manageItemsMoveBtn.textContent = actionCount === 1 ? "Move Item" : `Move ${actionCount} Items`;
+  }
+  if (els.manageItemsClearBtn) {
+    els.manageItemsClearBtn.disabled = !actionCount;
+    els.manageItemsClearBtn.textContent = actionCount === 1 ? "Clear Item" : `Clear ${actionCount} Items`;
+  }
+  if (els.manageItemsSdiBtn) els.manageItemsSdiBtn.disabled = actionCount !== 1;
   if (els.manageItemsStatus) {
-    els.manageItemsStatus.textContent = selected ? `Ready to manage ${selected.jobLabel || `${selected.assignment.order}-${selected.assignment.item}`}.` : "Select an item to begin.";
+    els.manageItemsStatus.textContent = actionCount
+      ? `${actionCount} exact item${actionCount === 1 ? " is" : "s are"} selected. Choose a destination bay for a manual move.`
+      : "Select a job or exact item to begin.";
   }
 }
 
-/**
- * Purpose: Open the open manage items panel workflow using the existing shared UI state.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
 function openManageItemsPanel(assignmentId = "") {
   if (!els.manageItemsPanel || !els.manageItemsBackdrop) return;
-  if (assignmentId) state.manageItemsSelectedId = String(assignmentId);
-  else if (selectedBayAssignment()?.id) state.manageItemsSelectedId = String(selectedBayAssignment().id);
+  const selectedIds = manageItemsSelectionSet();
+  selectedIds.clear();
+  const initialId = String(assignmentId || selectedBayAssignment()?.id || "");
+  state.manageItemsSelectedId = initialId;
+  if (initialId) selectedIds.add(initialId);
   renderManageItemsPanel();
   els.manageItemsPanel.hidden = false;
   setBayModalSection("manage", "workspace");
@@ -16390,67 +16973,57 @@ function openManageItemsPanel(assignmentId = "") {
   els.manageItemsSearch?.focus();
 }
 
-/**
- * Purpose: Close the close manage items panel workflow using the existing shared UI state.
- * Effects: Updates visible dom state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
 function closeManageItemsPanel() {
   if (els.manageItemsPanel) els.manageItemsPanel.hidden = true;
   if (els.manageItemsBackdrop) els.manageItemsBackdrop.hidden = true;
   updateModalScrollLock();
 }
 
-/**
- * Purpose: Run the move managed item workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
 async function moveManagedItem() {
-  const selected = selectedManageItem();
+  const rows = filteredManageItemRows();
+  const selectedEntries = selectedManageEntries(rows);
   const targetBay = els.manageItemsTargetBay?.value || "";
   const reason = els.manageItemsReason?.value || "Managed from Bay Map";
-  if (!selected?.assignment?.id) throw new Error("Select a job to move.");
+  if (!selectedEntries.length) throw new Error("Select one or more exact items to move.");
   if (!targetBay) throw new Error("Select a destination bay.");
-  const groupAssignments = selected.assignments || [selected.assignment];
-  for (const assignment of groupAssignments) {
+  for (const { assignment } of selectedEntries) {
     await fetchJson("/api/indian-trail/move", {
       method: "POST",
       body: JSON.stringify({ assignmentId: assignment.id, newBayCode: targetBay, reason, ...requestContext() }),
     });
   }
   await refreshBayMapPage();
-  if (els.manageItemsStatus) els.manageItemsStatus.textContent = `Moved ${selected.jobLabel || `${selected.assignment.order}-${selected.assignment.item}`} to ${targetBay}.`;
+  const count = selectedEntries.length;
+  if (els.manageItemsStatus) els.manageItemsStatus.textContent = `Moved ${count} item${count === 1 ? "" : "s"} to ${targetBay}.`;
   renderManageItemsPanel();
   void loadBayModalActionHistory("manage");
 }
 
-/**
- * Purpose: Remove the clear managed item workflow using the existing shared UI state.
- * Effects: May update shared client state.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
 async function clearManagedItem() {
-  const selected = selectedManageItem();
+  const rows = filteredManageItemRows();
+  const selectedEntries = selectedManageEntries(rows);
   const reason = els.manageItemsReason?.value || "Cleared from Manage Items";
-  if (!selected?.assignment?.id) throw new Error("Select a job to clear.");
-  const groupAssignments = selected.assignments || [selected.assignment];
-  const label = selected.jobLabel || `${selected.assignment.order}-${selected.assignment.item}`;
+  if (!selectedEntries.length) throw new Error("Select one or more exact items to clear.");
+  const count = selectedEntries.length;
+  const preview = selectedEntries.slice(0, 3).map(({ assignment }) => `${assignment.order}-${assignment.item}`).join(", ");
+  const extra = Math.max(count - 3, 0);
   const confirmed = await confirmWebAppAction({
-    title: "Clear job from bay?",
-    message: `Clear <strong>${escapeHtml(label)}</strong> from <strong>${escapeHtml(selected.bay.displayName || selected.bay.bayCode)}</strong>?`,
-    details: `${groupAssignments.length} item${groupAssignments.length === 1 ? "" : "s"} will be removed from the bay assignment.`,
-    confirmLabel: "Clear Job",
+    title: count === 1 ? "Clear item from bay?" : `Clear ${count} items from bays?`,
+    message: `Clear <strong>${escapeHtml(preview)}${extra ? ` +${extra} more` : ""}</strong> from their current physical bay assignment${count === 1 ? "" : "s"}?`,
+    details: "Only the selected exact items will be cleared. Unselected sibling items stay in their current bays.",
+    confirmLabel: count === 1 ? "Clear Item" : `Clear ${count} Items`,
   });
   if (!confirmed) return;
-  for (const assignment of groupAssignments) {
+  for (const { assignment } of selectedEntries) {
     await fetchJson("/api/indian-trail/clear-assignment", {
       method: "POST",
       body: JSON.stringify({ assignmentId: assignment.id, reason, ...requestContext() }),
     });
   }
+  manageItemsSelectionSet().clear();
+  state.manageItemsSelectedId = "";
   await refreshBayMapPage();
-  if (els.manageItemsStatus) els.manageItemsStatus.textContent = `Cleared ${label}.`;
+  if (els.manageItemsStatus) els.manageItemsStatus.textContent = `Cleared ${count} exact item${count === 1 ? "" : "s"}.`;
   renderManageItemsPanel();
   void loadBayModalActionHistory("manage");
   playAppSound("destructive_action", { force: true });
@@ -16527,6 +17100,64 @@ function bayEditorStatusFromPolicy(policy) {
   return "Available";
 }
 
+/** Return selected bay codes that still belong to the currently open grouped set. */
+function bayEditorSelectedCodesForGroup(group = bayEditorSelectedGroupObject()) {
+  if (!(state.bayEditorSelectedBayCodes instanceof Set)) state.bayEditorSelectedBayCodes = new Set();
+  const allowed = new Set((group?.bays || []).map((bay) => String(bay.bayCode || "")));
+  for (const code of [...state.bayEditorSelectedBayCodes]) {
+    if (!allowed.has(code)) state.bayEditorSelectedBayCodes.delete(code);
+  }
+  return [...state.bayEditorSelectedBayCodes];
+}
+
+/** Keep Edit Bays multi-select count, row emphasis, and selection actions synchronized. */
+function syncBayEditorBulkSelectionUi() {
+  const group = bayEditorSelectedGroupObject();
+  const selectedCodes = bayEditorSelectedCodesForGroup(group);
+  const selectedSet = new Set(selectedCodes);
+  const total = group?.bays?.length || 0;
+  els.bayEditorBayList?.querySelectorAll("[data-editor-bay-code]").forEach((row) => {
+    const code = String(row.dataset.editorBayCode || "");
+    const selected = selectedSet.has(code);
+    row.classList.toggle("is-selected", selected);
+    row.setAttribute("aria-selected", selected ? "true" : "false");
+    const checkbox = row.querySelector("[data-bay-editor-select]");
+    if (checkbox) checkbox.checked = selected;
+  });
+  const count = els.bayEditorBayList?.querySelector("[data-bay-editor-selected-count]");
+  if (count) count.textContent = `${selectedCodes.length} selected`;
+  const selectAllButton = els.bayEditorBayList?.querySelector('[data-bay-editor-selection-action="all"]');
+  if (selectAllButton) selectAllButton.disabled = total === 0 || selectedCodes.length === total;
+  const clearButton = els.bayEditorBayList?.querySelector('[data-bay-editor-selection-action="clear"]');
+  if (clearButton) clearButton.disabled = selectedCodes.length === 0;
+  const applyButton = els.bayEditorBayList?.querySelector('[data-bay-editor-action="save-selected"]');
+  if (applyButton) applyButton.disabled = selectedCodes.length === 0 || els.bayEditorPanel?.getAttribute("aria-busy") === "true";
+}
+
+/** Select or clear every bay in the currently open grouped set. */
+function setBayEditorGroupSelection(selectAll) {
+  const group = bayEditorSelectedGroupObject();
+  if (!(state.bayEditorSelectedBayCodes instanceof Set)) state.bayEditorSelectedBayCodes = new Set();
+  state.bayEditorSelectedBayCodes.clear();
+  if (selectAll) {
+    for (const bay of group?.bays || []) {
+      const bayCode = String(bay.bayCode || "");
+      if (bayCode) state.bayEditorSelectedBayCodes.add(bayCode);
+    }
+  }
+  syncBayEditorBulkSelectionUi();
+}
+
+/** Toggle one bay for bulk editing when its row surface is clicked. */
+function toggleBayEditorRowSelection(bayCode) {
+  const code = String(bayCode || "");
+  if (!code) return;
+  if (!(state.bayEditorSelectedBayCodes instanceof Set)) state.bayEditorSelectedBayCodes = new Set();
+  if (state.bayEditorSelectedBayCodes.has(code)) state.bayEditorSelectedBayCodes.delete(code);
+  else state.bayEditorSelectedBayCodes.add(code);
+  syncBayEditorBulkSelectionUi();
+}
+
 /**
  * Purpose: Render the render bay editor panel workflow using the existing shared UI state.
  * Effects: Updates visible dom state, may update shared client state.
@@ -16583,9 +17214,13 @@ function renderBayEditorPanel() {
           <label><span>New bay prefix</span><input id="bayEditorAddPrefixInput" type="text" value="${escapeHtml(selectedGroup.label)}"></label>
         </div>
         <div class="bay-editor-actions">
-          <button type="button" data-bay-editor-action="save-group">Save Group</button>
-          <button type="button" data-bay-editor-action="add-bays">Add Bays To Group</button>
+          <button type="button" class="app-primary-button" data-bay-editor-action="save-group">Save Group</button>
+          <button type="button" class="app-primary-button" data-bay-editor-action="add-bays">Add Bays To Group</button>
           <button type="button" class="danger" data-bay-editor-action="delete-group">Delete Group</button>
+        </div>
+        <div class="bay-editor-progress" data-bay-editor-progress hidden aria-live="polite">
+          <div class="bay-editor-progress-copy"><strong data-bay-editor-progress-label>Updating bay group...</strong><span data-bay-editor-progress-count>0 / 0</span></div>
+          <div class="bay-editor-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i data-bay-editor-progress-bar></i></div>
         </div>
       </div>
     `;
@@ -16593,13 +17228,34 @@ function renderBayEditorPanel() {
 
   if (els.bayEditorBayList) {
     const bays = selectedGroup.bays.slice().sort((a, b) => Number(a.sortOrder || a.layoutRow || 9999) - Number(b.sortOrder || b.layoutRow || 9999) || String(a.displayName || a.bayCode).localeCompare(String(b.displayName || b.bayCode)));
+    const selectedCodes = new Set(bayEditorSelectedCodesForGroup(selectedGroup));
     els.bayEditorBayList.innerHTML = `
-      <div class="bay-editor-bay-heading">
-        <div><strong>Individual Bays</strong><span>Edit names, capacity, behavior, or remove empty bays.</span></div>
+      <div class="bay-editor-bay-heading bay-editor-bay-heading-v316 bay-editor-bay-heading-v317">
+        <div><strong>Individual Bays</strong><span>Click a bay row to select it, then apply shared settings to every selected bay.</span></div>
+        <div class="bay-editor-selection-actions-v317" aria-label="Bay selection actions">
+          <button type="button" class="app-primary-button bay-editor-selection-button-v317" data-bay-editor-selection-action="all">Select All</button>
+          <button type="button" class="app-primary-button bay-editor-selection-button-v317 is-clear" data-bay-editor-selection-action="clear" ${selectedCodes.size ? "" : "disabled"}>Clear All</button>
+        </div>
         <span>${escapeHtml(bays.length)} bay${bays.length === 1 ? "" : "s"}</span>
       </div>
-      ${bays.map((bay) => bayEditorBayRowMarkup(bay)).join("")}
+      <section class="bay-editor-bulk-tools-v316" aria-label="Bulk edit selected bays">
+        <div class="bay-editor-bulk-copy-v316">
+          <strong>Bulk edit selected bays</strong>
+          <span data-bay-editor-selected-count>${escapeHtml(selectedCodes.size)} selected</span>
+        </div>
+        <label><span>Category</span><input id="bayEditorBulkCategoryInput" type="text" placeholder="Keep current"></label>
+        <label><span>Capacity</span><input id="bayEditorBulkCapacityInput" type="number" min="0" placeholder="Keep current"></label>
+        <label><span>Assign behavior</span><select id="bayEditorBulkPolicyInput">
+          <option value="">Keep current</option>
+          <option value="auto">Auto assign</option>
+          <option value="manual">Manual only</option>
+          <option value="blocked">Blocked</option>
+        </select></label>
+        <button type="button" class="app-primary-button" data-bay-editor-action="save-selected" ${selectedCodes.size ? "" : "disabled"}>Apply To Selected</button>
+      </section>
+      ${bays.map((bay) => bayEditorBayRowMarkup(bay, selectedCodes.has(String(bay.bayCode || "")))).join("")}
     `;
+    syncBayEditorBulkSelectionUi();
   }
 }
 
@@ -16625,7 +17281,7 @@ function bayEditorNewGroupFormMarkup(standalone = true) {
         <label><span>Map column</span><input id="bayEditorNewGroupColInput" type="number" min="1" max="7" value="1"></label>
       </div>
       <div class="bay-editor-actions">
-        <button type="button" data-bay-editor-action="create-group">Create Group</button>
+        <button type="button" class="app-primary-button" data-bay-editor-action="create-group">Create Group</button>
       </div>
     </div>
   `;
@@ -16636,14 +17292,20 @@ function bayEditorNewGroupFormMarkup(standalone = true) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function bayEditorBayRowMarkup(bay) {
+function bayEditorBayRowMarkup(bay, selected = false) {
   const policy = bayPolicyKind(bay);
   const assigned = (bay.assignments || []).length;
   return `
-    <article class="bay-editor-bay-row" data-editor-bay-code="${escapeHtml(bay.bayCode)}">
-      <div class="bay-editor-bay-summary">
-        <strong>${escapeHtml(bay.displayName || bay.bayCode)}</strong>
-        <span>${escapeHtml(bay.bayCode)}${assigned ? ` / ${escapeHtml(assigned)} assigned job${assigned === 1 ? "" : "s"}` : " / empty"}</span>
+    <article class="bay-editor-bay-row bay-editor-bay-row-v317 ${selected ? "is-selected" : ""}" data-editor-bay-code="${escapeHtml(bay.bayCode)}" data-bay-editor-select-row="${escapeHtml(bay.bayCode)}" aria-selected="${selected ? "true" : "false"}">
+      <div class="bay-editor-bay-summary bay-editor-bay-summary-v316">
+        <label class="bay-editor-row-select-v316" title="Select ${escapeHtml(bay.displayName || bay.bayCode)} for bulk editing">
+          <input type="checkbox" data-bay-editor-select="${escapeHtml(bay.bayCode)}" ${selected ? "checked" : ""}>
+          <span aria-hidden="true"></span>
+        </label>
+        <div>
+          <strong>${escapeHtml(bay.displayName || bay.bayCode)}</strong>
+          <span>${escapeHtml(bay.bayCode)}${assigned ? ` / ${escapeHtml(assigned)} assigned job${assigned === 1 ? "" : "s"}` : " / empty"}</span>
+        </div>
       </div>
       <label><span>Name</span><input data-editor-field="displayName" type="text" value="${escapeHtml(bay.displayName || bay.bayCode)}"></label>
       <label><span>Group</span><input data-editor-field="mapSection" type="text" value="${escapeHtml(bay.mapSection || "")}"></label>
@@ -16655,7 +17317,7 @@ function bayEditorBayRowMarkup(bay) {
         <option value="blocked" ${policy === "blocked" ? "selected" : ""}>Blocked</option>
       </select></label>
       <div class="bay-editor-row-actions">
-        <button type="button" data-bay-editor-action="save-bay" data-bay-code="${escapeHtml(bay.bayCode)}">Save</button>
+        <button type="button" class="app-primary-button" data-bay-editor-action="save-bay" data-bay-code="${escapeHtml(bay.bayCode)}">Save</button>
         <button type="button" class="danger" data-bay-editor-action="delete-bay" data-bay-code="${escapeHtml(bay.bayCode)}">Delete</button>
       </div>
     </article>
@@ -16669,6 +17331,7 @@ function bayEditorBayRowMarkup(bay) {
  */
 function openBayEditorPanel(groupLabel = "") {
   if (!els.bayEditorPanel || !els.bayEditorBackdrop) return;
+  state.bayEditorSelectedBayCodes?.clear?.();
   state.bayEditorSelectedGroup = groupLabel || state.bayEditorSelectedGroup || bayPhysicalSections()[0]?.label || "";
   renderBayEditorPanel();
   els.bayEditorPanel.hidden = false;
@@ -16684,6 +17347,7 @@ function openBayEditorPanel(groupLabel = "") {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function closeBayEditorPanel() {
+  state.bayEditorSelectedBayCodes?.clear?.();
   if (els.bayEditorPanel) els.bayEditorPanel.hidden = true;
   if (els.bayEditorBackdrop) els.bayEditorBackdrop.hidden = true;
   updateModalScrollLock();
@@ -16706,6 +17370,29 @@ async function refreshBayEditorAfter(payload) {
  * Effects: May call the backend api.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function setBayEditorProgress({ active = false, label = "", current = 0, total = 0 } = {}) {
+  const host = els.bayEditorGroupForm?.querySelector("[data-bay-editor-progress]");
+  if (!host) return;
+  const safeTotal = Math.max(Number(total || 0), 0);
+  const safeCurrent = Math.max(0, Math.min(Number(current || 0), safeTotal || Number(current || 0)));
+  const percent = safeTotal > 0 ? Math.round((safeCurrent / safeTotal) * 100) : 0;
+  host.hidden = !active;
+  host.querySelector("[data-bay-editor-progress-label]")?.replaceChildren(document.createTextNode(label || "Updating bay group..."));
+  host.querySelector("[data-bay-editor-progress-count]")?.replaceChildren(document.createTextNode(safeTotal ? `${safeCurrent} / ${safeTotal}` : "Working..."));
+  const track = host.querySelector(".bay-editor-progress-track");
+  const bar = host.querySelector("[data-bay-editor-progress-bar]");
+  if (track) track.setAttribute("aria-valuenow", String(percent));
+  if (bar) bar.style.width = `${percent}%`;
+  els.bayEditorPanel?.toggleAttribute("aria-busy", active);
+  els.bayEditorPanel?.querySelectorAll("[data-bay-editor-action]").forEach((button) => {
+    button.disabled = active;
+  });
+  els.bayEditorPanel?.querySelectorAll("[data-bay-editor-select], [data-bay-editor-selection-action]").forEach((control) => {
+    control.disabled = active;
+  });
+  if (!active) syncBayEditorBulkSelectionUi();
+}
+
 async function saveBayEditorGroup() {
   const group = bayEditorSelectedGroupObject();
   if (!group) throw new Error("Select a bay group first.");
@@ -16715,30 +17402,49 @@ async function saveBayEditorGroup() {
   const row = Number(document.getElementById("bayEditorGroupRowInput")?.value || group.row || 1);
   const col = Number(document.getElementById("bayEditorGroupColInput")?.value || group.col || 1);
 
-  for (const bay of group.bays) {
-    await fetchJson("/api/indian-trail/layout", {
-      method: "POST",
-      body: JSON.stringify({
-        bayCode: bay.bayCode,
-        displayName: bay.displayName || bay.bayCode,
-        mapSection: groupName,
-        bayCategory: category,
-        layoutRow: row,
-        layoutCol: col,
-        capacityQty: bay.capacityQty || 0,
-        active: bay.active !== false,
-        ...requestContext(),
-      }),
-    });
-    await fetchJson("/api/indian-trail/bay-status", {
-      method: "POST",
-      body: JSON.stringify({ bayCode: bay.bayCode, status: bayEditorStatusFromPolicy(policy), reason: "Updated from Edit Bays", ...requestContext() }),
-    });
+  const totalBays = group.bays.length;
+  setBayEditorProgress({ active: true, label: `Preparing ${groupName}...`, current: 0, total: totalBays });
+  try {
+    for (const [index, bay] of group.bays.entries()) {
+      const currentNumber = index + 1;
+      setBayEditorProgress({
+        active: true,
+        label: `Updating ${bay.displayName || bay.bayCode} · bay ${currentNumber} of ${totalBays}`,
+        current: index,
+        total: totalBays,
+      });
+      await fetchJson("/api/indian-trail/layout", {
+        method: "POST",
+        body: JSON.stringify({
+          bayCode: bay.bayCode,
+          displayName: bay.displayName || bay.bayCode,
+          mapSection: groupName,
+          bayCategory: category,
+          layoutRow: row,
+          layoutCol: col,
+          capacityQty: bay.capacityQty || 0,
+          active: bay.active !== false,
+          ...requestContext(),
+        }),
+      });
+      await fetchJson("/api/indian-trail/bay-status", {
+        method: "POST",
+        body: JSON.stringify({ bayCode: bay.bayCode, status: bayEditorStatusFromPolicy(policy), reason: "Updated from Edit Bays", ...requestContext() }),
+      });
+      setBayEditorProgress({
+        active: true,
+        label: `Updated ${bay.displayName || bay.bayCode}`,
+        current: currentNumber,
+        total: totalBays,
+      });
+    }
+    state.bayEditorSelectedGroup = groupName;
+    await refreshBayMapPage();
+    renderBayEditorPanel();
+    showSaveConfirmation(`Bay group ${groupName} was saved.`);
+  } finally {
+    setBayEditorProgress({ active: false });
   }
-  state.bayEditorSelectedGroup = groupName;
-  await refreshBayMapPage();
-  renderBayEditorPanel();
-  showSaveConfirmation(`Bay group ${groupName} was saved.`);
 }
 
 /**
@@ -16847,10 +17553,88 @@ async function saveBayEditorBay(bayCode) {
 }
 
 /**
- * Purpose: Remove the delete bay editor bay workflow using the existing shared UI state.
- * Effects: May call the backend api.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Purpose: Apply shared settings to multiple selected bays in the current grouped set.
+ * Effects: Writes only the bulk fields the operator explicitly chose and reports bay-by-bay progress.
+ * Flow: Preserves each bay's untouched settings, updates selected rows sequentially, then refreshes the Bay Map.
  */
+async function saveBayEditorSelectedBays() {
+  const group = bayEditorSelectedGroupObject();
+  if (!group) throw new Error("Select a bay group first.");
+  const selectedCodes = bayEditorSelectedCodesForGroup(group);
+  if (!selectedCodes.length) throw new Error("Select at least one bay to bulk edit.");
+
+  const categoryInput = document.getElementById("bayEditorBulkCategoryInput")?.value.trim() || "";
+  const capacityText = document.getElementById("bayEditorBulkCapacityInput")?.value.trim() || "";
+  const policy = document.getElementById("bayEditorBulkPolicyInput")?.value || "";
+  const hasCapacity = capacityText !== "";
+  const parsedCapacity = Number(capacityText);
+  if (hasCapacity && !Number.isFinite(parsedCapacity)) throw new Error("Enter a valid capacity before applying bulk changes.");
+  const capacity = hasCapacity ? Math.max(parsedCapacity, 0) : null;
+  if (!categoryInput && !hasCapacity && !policy) {
+    throw new Error("Choose at least one bulk setting before applying changes.");
+  }
+
+  const bayByCode = new Map((group.bays || []).map((bay) => [String(bay.bayCode || ""), bay]));
+  setBayEditorProgress({ active: true, label: `Preparing ${selectedCodes.length} selected bays...`, current: 0, total: selectedCodes.length });
+  try {
+    for (const [index, bayCode] of selectedCodes.entries()) {
+      const bay = bayByCode.get(bayCode);
+      if (!bay) continue;
+      const currentNumber = index + 1;
+      setBayEditorProgress({
+        active: true,
+        label: `Updating ${bay.displayName || bay.bayCode} · bay ${currentNumber} of ${selectedCodes.length}`,
+        current: index,
+        total: selectedCodes.length,
+      });
+
+      if (categoryInput || hasCapacity) {
+        await fetchJson("/api/indian-trail/layout", {
+          method: "POST",
+          body: JSON.stringify({
+            bayCode: bay.bayCode,
+            displayName: bay.displayName || bay.bayCode,
+            mapSection: bay.mapSection || group.label || "Unmapped",
+            bayCategory: categoryInput || bay.bayCategory || group.kind || "Standard",
+            layoutRow: bay.layoutRow || group.row || 1,
+            layoutCol: bay.layoutCol || group.col || 1,
+            capacityQty: hasCapacity ? capacity : Number(bay.capacityQty || 0),
+            active: bay.active !== false,
+            ...requestContext(),
+          }),
+        });
+      }
+
+      if (policy) {
+        await fetchJson("/api/indian-trail/bay-status", {
+          method: "POST",
+          body: JSON.stringify({
+            bayCode: bay.bayCode,
+            status: bayEditorStatusFromPolicy(policy),
+            reason: "Bulk updated from Edit Bays",
+            ...requestContext(),
+          }),
+        });
+      }
+
+      setBayEditorProgress({
+        active: true,
+        label: `Updated ${bay.displayName || bay.bayCode}`,
+        current: currentNumber,
+        total: selectedCodes.length,
+      });
+    }
+
+    state.bayEditorSelectedBayCodes.clear();
+    await refreshBayMapPage();
+    renderBayEditorPanel();
+    showSaveConfirmation(`Updated ${selectedCodes.length} selected bay${selectedCodes.length === 1 ? "" : "s"}.`);
+  } finally {
+    setBayEditorProgress({ active: false });
+  }
+}
+
+/** Delete one empty bay from the maintained physical layout. */
 async function deleteBayEditorBay(bayCode) {
   const confirmed = await confirmWebAppAction({
     title: "Delete bay?",
@@ -16897,17 +17681,17 @@ function renderBayAllScansPage(payload) {
         const check = bayScanCheckFeedbackV150(event);
         return `
           <tr class="scan-status-${check.key}">
-            <td class="bay-all-scans-check-v159"><span class="bay-scan-check-v150 is-${check.key}" aria-label="${escapeHtml(check.label)}" title="${escapeHtml(check.label)}"><span aria-hidden="true">${escapeHtml(check.icon)}</span></span></td>
-            <td><span class="bay-all-scans-action-v159 is-${check.key}">${escapeHtml(action)}</span></td>
-            <td><strong class="bay-all-scans-order-v159">${escapeHtml(event.order || "-")}</strong></td>
-            <td><span class="bay-all-scans-item-v159">${escapeHtml(event.item || "-")}</span></td>
-            <td title="${escapeHtml(event.job || "")}">${escapeHtml(event.job || "-")}</td>
-            <td><strong class="bay-current-location-cell bay-all-scans-location-v159">${escapeHtml(currentBay)}</strong></td>
-            <td title="${escapeHtml(event.customer || "")}">${escapeHtml(event.customer || "-")}</td>
-            <td title="${escapeHtml(event.reason || "")}"><span class="bay-all-scans-detail-v159">${escapeHtml(event.reason || "No additional details")}</span></td>
-            <td><span class="bay-all-scans-user-v159">${escapeHtml(event.user || "-")}</span></td>
-            <td><time class="bay-all-scans-time-v159">${escapeHtml(time)}</time></td>
-            <td>${bayEventMoveControlHtml(event)}</td>
+            <td class="bay-all-scans-check-v159" data-label="Check"><span class="bay-scan-check-v150 is-${check.key}" aria-label="${escapeHtml(check.label)}" title="${escapeHtml(check.label)}"><span aria-hidden="true">${escapeHtml(check.icon)}</span></span></td>
+            <td data-label="Action"><span class="bay-all-scans-action-v159 is-${check.key}">${escapeHtml(action)}</span></td>
+            <td data-label="Order"><strong class="bay-all-scans-order-v159">${escapeHtml(event.order || "-")}</strong></td>
+            <td data-label="Item"><span class="bay-all-scans-item-v159">${escapeHtml(event.item || "-")}</span></td>
+            <td data-label="Job Nr." title="${escapeHtml(event.job || "")}">${escapeHtml(event.job || "-")}</td>
+            <td data-label="Current Bay"><strong class="bay-current-location-cell bay-all-scans-location-v159">${escapeHtml(currentBay)}</strong></td>
+            <td data-label="Customer" title="${escapeHtml(event.customer || "")}">${escapeHtml(event.customer || "-")}</td>
+            <td data-label="Details" title="${escapeHtml(event.reason || "")}"><span class="bay-all-scans-detail-v159">${escapeHtml(event.reason || "No additional details")}</span></td>
+            <td data-label="User"><span class="bay-all-scans-user-v159">${escapeHtml(event.user || "-")}</span></td>
+            <td data-label="Time"><time class="bay-all-scans-time-v159">${escapeHtml(time)}</time></td>
+            <td data-label="Change Location">${bayEventMoveControlHtml(event)}</td>
           </tr>
         `;
       }).join("")
@@ -16920,29 +17704,19 @@ function renderBayAllScansPage(payload) {
   const lastRecord = Math.min(page * pageSize, total);
 
   openAdminModal("custom", {
-    title: "All Bay Scans",
+    title: "Physical bay scan history",
+    eyebrow: "Indian Trail activity archive",
+    description: "Review recent movements and correct a current bay without changing the read-only scanner activity cards.",
     body: `
       <div class="full-scans-modal bay-full-scans-modal bay-full-scans-modal-v159">
-        <header class="bay-all-scans-hero-v159">
-          <div class="bay-all-scans-title-v159">
-            <span class="bay-all-scans-title-icon-v159" aria-hidden="true"></span>
-            <div>
-              <small>Indian Trail activity archive</small>
-              <h3>Physical bay scan history</h3>
-              <p>Review recent movements and correct a current bay without changing the read-only scanner activity cards.</p>
-            </div>
-          </div>
-          <div class="bay-all-scans-summary-v159" aria-label="Bay scan history summary">
+        <div class="bay-all-scans-topline-v317">
+          <p class="bay-all-scans-guidance-v317"><strong>Location corrections:</strong> Use Change Location only when the physical piece is currently assigned to the wrong bay.</p>
+          <div class="bay-all-scans-summary-strip-v316" aria-label="Bay scan history summary">
             <span><small>Retained</small><strong>7 days</strong></span>
             <span><small>Total scans</small><strong>${escapeHtml(total)}</strong></span>
-            <span><small>Current page</small><strong>${escapeHtml(page)} of ${escapeHtml(totalPages)}</strong></span>
+            <span><small>Page</small><strong>${escapeHtml(page)} / ${escapeHtml(totalPages)}</strong></span>
           </div>
-        </header>
-
-        <section class="bay-all-scans-guidance-v159">
-          <span class="bay-all-scans-guidance-icon-v159" aria-hidden="true"></span>
-          <div><strong>Location corrections belong here</strong><small>Use Change Location only when the physical piece is currently assigned to the wrong bay.</small></div>
-        </section>
+        </div>
 
         <div class="admin-table full-scans-table bay-full-scans-table-v159">
           <table>
@@ -16982,15 +17756,12 @@ async function openBayAllScansModal(page = 1) {
   const requestId = Number(state.bayAllScansRequestId || 0) + 1;
   state.bayAllScansRequestId = requestId;
   openAdminModal("custom", {
-    title: "All Bay Scans",
+    title: "Physical bay scan history",
+    eyebrow: "Indian Trail activity archive",
+    description: "Review recent movements and correct a current bay without changing the read-only scanner activity cards.",
     body: `
       <div class="full-scans-modal bay-full-scans-modal bay-full-scans-modal-v159 is-loading">
-        <header class="bay-all-scans-hero-v159">
-          <div class="bay-all-scans-title-v159">
-            <span class="bay-all-scans-title-icon-v159" aria-hidden="true"></span>
-            <div><small>Indian Trail activity archive</small><h3>Loading physical bay history</h3><p>Retrieving page ${requestedPage} with no more than 25 scans.</p></div>
-          </div>
-        </header>
+        <div class="bay-all-scans-loading-note-v316">Retrieving page ${requestedPage} with no more than 25 scans.</div>
         <div class="bay-all-scans-loading-v159" role="status" aria-live="polite">
           <span class="bay-all-scans-spinner-v159" aria-hidden="true"></span>
           <div><strong>Loading retained scans</strong><small>Only the requested page is being downloaded.</small></div>
@@ -17008,7 +17779,9 @@ async function openBayAllScansModal(page = 1) {
   } catch (error) {
     if (requestId !== state.bayAllScansRequestId) return;
     openAdminModal("custom", {
-      title: "All Bay Scans",
+      title: "Physical bay scan history",
+      eyebrow: "Indian Trail activity archive",
+      description: "Review recent movements and correct a current bay without changing the read-only scanner activity cards.",
       body: `
         <div class="bay-all-scans-error-v159" role="alert">
           <span aria-hidden="true">!</span>
@@ -17291,24 +18064,51 @@ function renderSdiCurrentList() {
     const panelId = `sdi-current-group-${dateIndex}-${groupIndex}`;
     const completeGroup = allGroups.find((candidate) => String(candidate.key || "") === key) || group;
     const itemIds = (completeGroup.items || []).map((item) => String(item.lineItemId || "")).filter(Boolean).join("|");
+    const priorityDate = group.deliveryDate ? formatNumericDeliveryDate(group.deliveryDate) : "No priority date";
+    const originalDate = group.originalDeliveryDate ? formatNumericDeliveryDate(group.originalDeliveryDate) : "Not recorded";
+    const markedAt = group.markedAt ? formatDateTime(group.markedAt) : "Legacy mark / time unavailable";
     return `
       <article class="sdi-current-group ${expanded ? "is-expanded" : ""}">
         <button type="button" class="sdi-current-group-toggle" data-sdi-current-group="${escapeHtml(key)}" aria-expanded="${expanded}" aria-controls="${panelId}">
           <span class="sdi-current-job"><strong>${escapeHtml(group.job || "Unknown job")}</strong><small>${escapeHtml(group.customer || "No customer")}</small></span>
-          <span class="sdi-current-summary"><b>${group.items.length} Rush item${group.items.length === 1 ? "" : "s"}</b><small>Priority handling</small></span>
+          <span class="sdi-current-summary"><b>${group.items.length} Rush item${group.items.length === 1 ? "" : "s"}</b><small>New delivery ${escapeHtml(priorityDate)}</small></span>
+          <span class="sdi-current-mark-summary"><b>Marked ${escapeHtml(markedAt)}</b><small>${group.markedBy ? `by ${escapeHtml(group.markedBy)}` : "Priority work"}</small></span>
           <span class="sdi-current-chevron" aria-hidden="true">⌄</span>
         </button>
         <div class="sdi-current-group-items" id="${panelId}" ${expanded ? "" : "hidden"}>
+          <div class="sdi-current-priority-facts">
+            <span><small>Original delivery</small><strong>${escapeHtml(originalDate)}</strong></span>
+            <span><small>Priority delivery</small><strong>${escapeHtml(priorityDate)}</strong></span>
+            <span><small>Marked</small><strong>${escapeHtml(markedAt)}</strong></span>
+            <span><small>Marked by</small><strong>${escapeHtml(group.markedBy || "Not recorded")}</strong></span>
+          </div>
           <div class="sdi-current-group-actions">
             <button type="button" data-sdi-edit-group="${escapeHtml(itemIds)}" data-sdi-edit-lookup="${escapeHtml(group.job || group.items[0]?.order || "")}">Edit order</button>
             <button type="button" class="is-danger" data-sdi-clear-group="${escapeHtml(itemIds)}" data-sdi-clear-label="${escapeHtml(group.job || group.items[0]?.order || "order")}">Remove order</button>
           </div>
-          ${group.items.map((item) => `
-            <div class="sdi-current-item">
-              <span><strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong><small>${escapeHtml(item.product || "Glass item")} ${item.bayDisplay ? `· ${escapeHtml(item.bayDisplay)}` : "· Not in bay"}</small></span>
-              <span class="sdi-current-item-type is-rush">Rush</span>
-              <span class="sdi-current-item-actions"><button type="button" data-sdi-edit-line-item="${escapeHtml(item.lineItemId)}" data-sdi-edit-lookup="${escapeHtml(group.job || `${item.order}-${item.item}`)}">Edit</button><button type="button" class="is-danger" data-sdi-clear-line-item="${escapeHtml(item.lineItemId)}">Remove</button></span>
-            </div>`).join("")}
+          <div class="sdi-current-priority-items">
+            ${group.items.map((item) => {
+              const itemPriorityDate = item.priorityDeliveryDate || item.deliveryDate || "";
+              const previousDate = item.priorityPreviousDeliveryDate || item.deliveryDate || "";
+              const bayLabel = item.bayDisplay || item.bayCode || "Not in bay";
+              return `
+                <article class="sdi-current-item sdi-current-item-v318">
+                  <div class="sdi-current-item-identity">
+                    <span><strong>Order ${escapeHtml(item.order)} · Item ${escapeHtml(item.item)}</strong><small>${escapeHtml(item.product || "Glass item")}${item.dimensions ? ` · ${escapeHtml(item.dimensions)}` : ""}</small></span>
+                    <span class="sdi-current-item-type is-rush">Rush</span>
+                  </div>
+                  <div class="sdi-current-item-facts">
+                    <span><small>Bay</small><strong>${escapeHtml(bayLabel)}</strong></span>
+                    <span><small>Original date</small><strong>${escapeHtml(formatNumericDeliveryDate(item.deliveryDate || previousDate))}</strong></span>
+                    <span><small>New date</small><strong>${escapeHtml(formatNumericDeliveryDate(itemPriorityDate))}</strong></span>
+                    <span><small>Marked</small><strong>${escapeHtml(item.priorityMarkedAt ? formatDateTime(item.priorityMarkedAt) : markedAt)}</strong></span>
+                    ${item.priorityDirectToTruck ? `<span><small>Handling</small><strong>Direct to truck</strong></span>` : ""}
+                  </div>
+                  ${item.priorityReason ? `<p class="sdi-current-item-reason"><strong>Reason:</strong> ${escapeHtml(item.priorityReason)}</p>` : ""}
+                  <span class="sdi-current-item-actions"><button type="button" data-sdi-edit-line-item="${escapeHtml(item.lineItemId)}" data-sdi-edit-lookup="${escapeHtml(group.job || `${item.order}-${item.item}`)}">Edit</button><button type="button" class="is-danger" data-sdi-clear-line-item="${escapeHtml(item.lineItemId)}">Remove</button></span>
+                </article>`;
+            }).join("")}
+          </div>
         </div>
       </article>`;
   };
@@ -17326,7 +18126,7 @@ function renderSdiCurrentList() {
         const expanded = state.sdiExpandedCurrentDates.has(dateKey);
         const datePanelId = `sdi-current-date-${dateIndex}`;
         const dateItems = currentPriorityItems(dateGroups);
-        const dateLabel = dateKey === "undated" ? "No priority date" : formatDisplayDate(dateKey);
+        const dateLabel = dateKey === "undated" ? "No priority date" : formatNumericDeliveryDate(dateKey);
         return `<article class="sdi-current-date-group ${expanded ? "is-expanded" : ""}"><button type="button" class="sdi-current-date-toggle" data-sdi-current-date="${escapeHtml(dateKey)}" aria-expanded="${expanded}" aria-controls="${datePanelId}"><span><small>Priority date</small><strong>${escapeHtml(dateLabel)}</strong></span><span><b>${dateItems.length} Rush item${dateItems.length === 1 ? "" : "s"}</b><small>Needs priority handling</small></span><i aria-hidden="true">⌄</i></button><div class="sdi-current-date-body" id="${datePanelId}" ${expanded ? "" : "hidden"}>${dateGroups.map((group, groupIndex) => renderJobGroup(group, groupIndex, dateIndex)).join("")}</div></article>`;
       }).join("") : `<span class="admin-empty">${allGroups.length ? "No Rush work matches the current filter." : "No current Rush items."}</span>`}
     </div>`;
@@ -19488,7 +20288,7 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
   const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260811-v0.303", window.location.href).href;
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260812-v0.310", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
@@ -19871,6 +20671,7 @@ function adoptManualEditLookups(payload = {}) {
     routes: Array.isArray(payload.routes) ? payload.routes : [],
     processes: Array.isArray(payload.processes) ? payload.processes : [],
     glassCosts: Array.isArray(payload.glassCosts) ? payload.glassCosts : [],
+    glassColors: Array.isArray(payload.glassColors) ? payload.glassColors : [],
   };
   state.manualEditLookupsLoaded = true;
   return state.manualEditLookups;
@@ -20368,8 +21169,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260811-v0.303", window.location.href).href,
-    new URL("static/css/print.css?v=20260811-v0.303", window.location.href).href,
+    new URL("static/css/styles.css?v=20260812-v0.310", window.location.href).href,
+    new URL("static/css/print.css?v=20260812-v0.310", window.location.href).href,
   ];
 }
 
@@ -21341,12 +22142,6 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
   const items = Array.isArray(payload.items) ? payload.items : [];
   const deliveryDate = primaryList.deliveryDate || primaryList.delivery_date || "";
   const totalPieces = items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
-  const metricCards = [
-    ["all", items.length, "All rows"],
-    ["new", Number(payload.newCount || 0), "New rows"],
-    ["updated", Number(payload.updatedCount || 0), "Updated rows"],
-    ["removed", Number(payload.removedCount || 0), "Removed rows"],
-  ];
   const expectedChangedCount = Number(payload.expectedChangedCount || items.length);
   const previewIsIncomplete = expectedChangedCount > items.length;
   const previewErrors = Array.isArray(payload.previewErrors) ? payload.previewErrors.filter(Boolean) : [];
@@ -21364,11 +22159,11 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
   const supportedFields = new Set(fieldDefinitions.map(([key]) => key));
   const changeLabels = { new: "New", updated: "Updated", removed: "Removed" };
   const locationDefinitions = [
-    { key: "airport", label: "Airport Road", hint: "Airport Road and custom route orders" },
-    { key: "indian-trail", label: "Indian Trail", hint: "Indian Trail route orders" },
-    { key: "greenville", label: "Greenville", hint: "Greenville route orders" },
-    { key: "cpu", label: "CPU", hint: "Customer Pickup orders" },
-    { key: "dtc", label: "DTC", hint: "Deliver to Customer orders" },
+    { key: "airport", label: "Airport Road" },
+    { key: "indian-trail", label: "Indian Trail" },
+    { key: "greenville", label: "Greenville" },
+    { key: "cpu", label: "CPU" },
+    { key: "dtc", label: "DTC" },
   ];
 
   const displayValue = (record, key) => {
@@ -21402,27 +22197,24 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     ${counts.new ? `<b class="is-new">${escapeHtml(counts.new)} new</b>` : ""}
     ${counts.updated ? `<b class="is-updated">${escapeHtml(counts.updated)} updated</b>` : ""}
     ${counts.removed ? `<b class="is-removed">${escapeHtml(counts.removed)} removed</b>` : ""}`;
-  const headingCountHtml = (lineCount, pieces, lineLabel = "lines") => `
-    <span class="delivery-update-preview-heading-counts-v257">
-      <span><b>${escapeHtml(lineCount)}</b> ${escapeHtml(lineLabel)}</span>
-      <span><b>${escapeHtml(pieces)}</b> pcs</span>
-    </span>`;
   const commonOrderValue = (rows, key) => {
     const values = [...new Set(rows.map((item) => String(item?.[key] || "").trim()).filter(Boolean))];
     return values.length === 1 ? values[0] : values.length > 1 ? "Multiple" : "—";
   };
-  const itemSearchText = (item) => [
-    item.order, item.item, item.customer, item.job, item.product, item.dimensions,
-    item.route, item.stage, item.scanner, item.barcode, item.sourceId,
-  ].join(" ").toLowerCase();
+
+  // Resolve exact product colors through the shared Lookup Manager palette.
+  // Unconfigured glass still receives a stable, distinct fallback color.
+  const exactGlassColorMap = buildGlassVisualColorMap(items.map(previewGlassType));
 
   const itemRowHtml = (item) => {
     const type = changeTypeForItem(item);
     const title = changeLabels[type];
     const previous = item.previous && typeof item.previous === "object" ? item.previous : {};
     const changedFields = type === "updated" ? changedFieldsForItem(item) : [];
+    const glassType = previewGlassType(item);
+    const glassColorStyle = glassVisualCssVariables(glassType, exactGlassColorMap);
     const diffHtml = changedFields.length
-      ? `<div class="delivery-update-preview-diffs delivery-update-preview-item-diffs-v257">
+      ? `<div class="delivery-update-preview-diffs delivery-update-preview-item-diffs-v257 delivery-update-preview-item-diffs-v311">
           ${changedFields.map((key) => {
             const label = fieldDefinitions.find(([fieldKey]) => fieldKey === key)?.[1] || key;
             return `<span class="delivery-update-preview-diff">
@@ -21434,11 +22226,13 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
           }).join("")}
         </div>`
       : "";
-    return `<article class="delivery-update-preview-item-row-v257 is-${type}" data-preview-change-type="${type}" data-preview-search="${escapeHtml(itemSearchText(item))}">
-      <div class="delivery-update-preview-item-main-v257">
-        <span class="delivery-update-type">${escapeHtml(title)}</span>
-        <span class="delivery-update-preview-item-number-v257"><strong>Item ${escapeHtml(item.item || "—")}</strong><small>${escapeHtml(item.dimensions || "No dimensions")}</small></span>
-        <b class="delivery-update-preview-item-qty-v257">${escapeHtml(Number(item.qty || 0))} pc${Number(item.qty || 0) === 1 ? "" : "s"}</b>
+    return `<article class="delivery-update-preview-item-row-v257 delivery-update-preview-item-row-v311 is-${type}" data-preview-change-type="${type}" data-preview-glass-type="${escapeHtml(glassType)}" style="${escapeHtml(glassColorStyle)}">
+      <div class="delivery-update-preview-item-main-v311">
+        <span class="delivery-update-preview-item-number-v311"><small>Item</small><strong>${escapeHtml(item.item || "—")}</strong></span>
+        <span class="delivery-update-preview-item-glass-v311"><i aria-hidden="true"></i><small>Glass Type</small><strong>${escapeHtml(glassType)}</strong></span>
+        <span class="delivery-update-preview-item-size-v311"><small>Glass Size</small><strong>${escapeHtml(item.dimensions || "No dimensions")}</strong></span>
+        <span class="delivery-update-preview-item-qty-v311"><small>QTY</small><strong>${escapeHtml(Number(item.qty || 0))}</strong></span>
+        <span class="delivery-update-preview-item-change-v311 is-${type}">${escapeHtml(title)}</span>
       </div>
       ${diffHtml}
     </article>`;
@@ -21453,29 +22247,37 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     const customer = commonOrderValue(sortedItems, "customer");
     const job = commonOrderValue(sortedItems, "job");
     const route = routeLabel({ route: commonOrderValue(sortedItems, "route") }) || commonOrderValue(sortedItems, "route");
-    const glass = previewGlassType(sortedItems[0] || {});
-    return `<details class="delivery-update-preview-order-group-v256 delivery-update-preview-order-group-v257" data-preview-container="order">
-      <summary>
-        <span class="delivery-update-preview-nested-chevron" aria-hidden="true"></span>
-        <span class="delivery-update-preview-order-copy-v256"><strong>Order ${escapeHtml(order)}</strong><small>${escapeHtml(customer)}</small></span>
-        ${headingCountHtml(sortedItems.length, pieces)}
-        <span class="delivery-update-preview-location-badges">${typeBadgeHtml(counts)}</span>
-      </summary>
-      <div class="delivery-update-preview-order-body-v256 delivery-update-preview-order-body-v257">
-        <div class="delivery-update-preview-order-meta-v257">
-          <span><small>Customer</small><strong>${escapeHtml(customer)}</strong></span>
-          <span><small>Job</small><strong>${escapeHtml(job)}</strong></span>
-          <span><small>Route</small><strong>${escapeHtml(route || "—")}</strong></span>
-          <span><small>Glass / Product</small><strong>${escapeHtml(glass)}</strong></span>
+    return `<section class="delivery-update-preview-order-block-v308 delivery-update-preview-order-block-v311">
+      <header class="delivery-update-preview-order-header-v311">
+        <div class="delivery-update-preview-order-identity-v311">
+          <span><small>Order Nr.</small><strong>${escapeHtml(order)}</strong></span>
+          <span><small>Job Nr.</small><strong>${escapeHtml(job)}</strong></span>
         </div>
-        <div class="delivery-update-preview-item-list-v257">${sortedItems.map(itemRowHtml).join("")}</div>
+        <div class="delivery-update-preview-order-totals-v311">
+          <strong>${escapeHtml(sortedItems.length)} line${sortedItems.length === 1 ? "" : "s"}</strong>
+          <span>${escapeHtml(pieces)} QTY</span>
+          <span class="delivery-update-preview-order-change-v311">${typeBadgeHtml(counts) || "No change label"}</span>
+        </div>
+      </header>
+      <div class="delivery-update-preview-order-meta-v311 delivery-update-preview-order-meta-v313">
+        <span><small>Customer</small><strong>${escapeHtml(customer)}</strong></span>
+        <span><small>Route</small><strong>${escapeHtml(route || "—")}</strong></span>
       </div>
-    </details>`;
+      <div class="delivery-update-preview-item-list-v311">${sortedItems.map(itemRowHtml).join("")}</div>
+    </section>`;
   };
 
-  const glassGroupHtml = (glassType, glassItems) => {
+  const locationHtml = locationDefinitions.map((location) => {
+    const locationItems = items
+      .filter((item) => previewLocationKey(item) === location.key)
+      .sort((a, b) => (
+        Number(a.order || 0) - Number(b.order || 0)
+        || String(a.order || "").localeCompare(String(b.order || ""))
+        || Number(a.item || 0) - Number(b.item || 0)
+      ));
+    if (!locationItems.length) return "";
     const orders = new Map();
-    glassItems.forEach((item) => {
+    locationItems.forEach((item) => {
       const order = previewOrderKey(item);
       if (!orders.has(order)) orders.set(order, []);
       orders.get(order).push(item);
@@ -21483,112 +22285,34 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     const orderedOrders = [...orders.entries()].sort(([a], [b]) => (
       Number(a || 0) - Number(b || 0) || String(a).localeCompare(String(b))
     ));
-    const counts = countTypes(glassItems);
-    const pieces = glassItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
-    return `<details class="delivery-update-preview-glass-group-v256 delivery-update-preview-glass-group-v257" data-preview-container="glass">
-      <summary>
-        <span class="delivery-update-preview-nested-chevron" aria-hidden="true"></span>
-        <span class="delivery-update-preview-glass-copy-v256"><strong>${escapeHtml(glassType)}</strong><small>${escapeHtml(orderedOrders.length)} order${orderedOrders.length === 1 ? "" : "s"}</small></span>
-        ${headingCountHtml(glassItems.length, pieces)}
-        <span class="delivery-update-preview-location-badges">${typeBadgeHtml(counts)}</span>
-      </summary>
-      <div class="delivery-update-preview-glass-body-v256">${orderedOrders.map(([order, rows]) => orderGroupHtml(order, rows)).join("")}</div>
-    </details>`;
-  };
-
-  const locationHtml = locationDefinitions.map((location) => {
-    const locationItems = items
-      .filter((item) => previewLocationKey(item) === location.key)
-      .sort((a, b) => (
-        previewGlassType(a).localeCompare(previewGlassType(b))
-        || Number(a.order || 0) - Number(b.order || 0)
-        || Number(a.item || 0) - Number(b.item || 0)
-      ));
-    if (!locationItems.length) return "";
-    const glasses = new Map();
-    locationItems.forEach((item) => {
-      const glassType = previewGlassType(item);
-      if (!glasses.has(glassType)) glasses.set(glassType, []);
-      glasses.get(glassType).push(item);
-    });
-    const orderedGlassTypes = [...glasses.entries()].sort(([a], [b]) => a.localeCompare(b));
     const locationPieces = locationItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
     const typeCounts = countTypes(locationItems);
-    return `<details class="delivery-update-preview-location-group is-${location.key} delivery-update-preview-location-group-v257" data-preview-group data-preview-container="route" data-preview-location="${location.key}">
+    const changeKinds = ["new", "updated", "removed"].filter((type) => typeCounts[type] > 0);
+    const changeWord = changeKinds.length === 1 ? changeLabels[changeKinds[0]] : "Changed";
+    const selectedRoute = String(payload.previewRouteGroup || "").trim();
+    const routeStartsOpen = Boolean(selectedRoute && selectedRoute !== "airport" && selectedRoute === location.key);
+    return `<details class="delivery-update-preview-location-group is-${location.key} delivery-update-preview-location-group-v257 delivery-update-preview-location-group-v311" data-preview-location="${location.key}" ${routeStartsOpen ? "open" : ""}>
       <summary>
         <span class="delivery-update-preview-location-chevron" aria-hidden="true"></span>
-        <span class="delivery-update-preview-location-copy"><strong>${escapeHtml(location.label)}</strong><small>${escapeHtml(location.hint)}</small></span>
-        ${headingCountHtml(locationItems.length, locationPieces)}
-        <span class="delivery-update-preview-location-badges">${typeBadgeHtml(typeCounts)}</span>
+        <span class="delivery-update-preview-location-title-v308"><strong>${escapeHtml(location.label)}</strong><b>${escapeHtml(locationItems.length)} ${escapeHtml(changeWord)} Lines <i aria-hidden="true">|</i> ${escapeHtml(locationPieces)} ${escapeHtml(changeWord)} QTY</b></span>
       </summary>
-      <div class="delivery-update-preview-location-body"><div class="delivery-update-preview-glass-list-v256">${orderedGlassTypes.map(([glassType, rows]) => glassGroupHtml(glassType, rows)).join("")}</div></div>
+      <div class="delivery-update-preview-location-body delivery-update-preview-location-body-v311"><div class="delivery-update-preview-order-list-v311">${orderedOrders.map(([order, rows]) => orderGroupHtml(order, rows)).join("")}</div></div>
     </details>`;
   }).join("");
 
-  return `<section class="delivery-update-preview-v184 delivery-update-preview-v230 delivery-update-preview-v248 delivery-update-preview-v251 delivery-update-preview-v252 delivery-update-preview-v256 delivery-update-preview-v257" data-preview-filter="all">
-    <header class="delivery-update-preview-header-v230">
-      <div><span>Delivery list changes</span><h3>${escapeHtml(formatDisplayDate(deliveryDate))}</h3><p>${escapeHtml(items.length)} changed item${items.length === 1 ? "" : "s"} · ${escapeHtml(totalPieces)} piece${totalPieces === 1 ? "" : "s"}</p></div>
-      <div class="delivery-update-preview-metrics-v230">${metricCards.map(([type, value, label]) => `<span class="is-${type}"><b>${escapeHtml(value)}</b><small>${escapeHtml(label)}</small></span>`).join("")}</div>
+  return `<section class="delivery-update-preview-v184 delivery-update-preview-v230 delivery-update-preview-v248 delivery-update-preview-v251 delivery-update-preview-v257 delivery-update-preview-v311 delivery-update-preview-v313">
+    <header class="delivery-update-preview-header-v230 delivery-update-preview-header-v313">
+      <div><span>Delivery list changes</span><h3>${escapeHtml(formatDisplayDate(deliveryDate))}</h3><p>${escapeHtml(items.length)} changed line${items.length === 1 ? "" : "s"} · ${escapeHtml(totalPieces)} QTY</p></div>
     </header>
     ${previewErrors.length ? `<div class="delivery-update-preview-warning-v249"><strong>Some stages could not be loaded.</strong><span>${escapeHtml(previewErrors.join(" · "))}</span></div>` : ""}
-    <div class="delivery-update-preview-toolbar-v248">
-      <div class="delivery-update-preview-filter-buttons" role="group" aria-label="Filter delivery-list changes">${metricCards.map(([type, value, label], index) => `<button type="button" data-preview-filter-button="${type}" aria-pressed="${index === 0 ? "true" : "false"}">${escapeHtml(label)} <b>${escapeHtml(value)}</b></button>`).join("")}</div>
-      <label class="delivery-update-preview-search-v248"><span>Find an order or item</span><input type="search" data-preview-search-input placeholder="Order, item, customer, job, glass type..." autocomplete="off"></label>
-      <p data-preview-result-count>Showing ${escapeHtml(items.length)} of ${escapeHtml(items.length)} changes</p>
-    </div>
     ${previewIsIncomplete ? `<div class="delivery-update-preview-guidance-v230 is-warning"><span aria-hidden="true"></span><p>${escapeHtml(expectedChangedCount)} changes were recorded, but only ${escapeHtml(items.length)} historical item snapshots are still available.</p></div>` : ""}
     <div class="delivery-update-preview-groups-v230 delivery-update-preview-locations-v251">${locationHtml || '<div class="admin-empty">No item-level changes were recorded for this import.</div>'}</div>
   </section>`;
 }
 
+/** The v0.313 preview intentionally has no filter/search controls. */
 function initializeDeliveryListUpdatePreviewControls() {
-  const root = els.adminModalBody?.querySelector(".delivery-update-preview-v248");
-  if (!root) return;
-  const buttons = [...root.querySelectorAll("[data-preview-filter-button]")];
-  const searchInput = root.querySelector("[data-preview-search-input]");
-  const resultCount = root.querySelector("[data-preview-result-count]");
-  const rows = [...root.querySelectorAll("[data-preview-change-type]")];
-  const containers = [...root.querySelectorAll("[data-preview-container]")];
-  let selectedType = "all";
-
-  const apply = () => {
-    const query = String(searchInput?.value || "").trim().toLowerCase();
-    const activelyFiltering = Boolean(query) || selectedType !== "all";
-    let visibleCount = 0;
-    rows.forEach((row) => {
-      const typeMatch = selectedType === "all" || row.dataset.previewChangeType === selectedType;
-      const searchMatch = !query || String(row.dataset.previewSearch || "").includes(query);
-      row.hidden = !(typeMatch && searchMatch);
-      if (!row.hidden) visibleCount += 1;
-    });
-
-    // Process Item -> Order -> Glass -> Route so each parent can decide whether
-    // any matching descendant remains. Filtering opens only the matching path;
-    // normal viewing keeps every dropdown collapsed until the user chooses it.
-    [...containers].reverse().forEach((container) => {
-      const visibleChild = container.querySelector("[data-preview-change-type]:not([hidden])");
-      container.hidden = !visibleChild;
-      if (activelyFiltering && !container.hidden) container.open = true;
-    });
-    if (!activelyFiltering) {
-      containers.forEach((container) => {
-        if (container.dataset.previewContainer !== "route") return;
-        container.hidden = !container.querySelector("[data-preview-change-type]:not([hidden])");
-      });
-    }
-
-    buttons.forEach((button) => {
-      button.setAttribute("aria-pressed", String(button.dataset.previewFilterButton === selectedType));
-    });
-    if (resultCount) resultCount.textContent = `Showing ${visibleCount} of ${rows.length} changes`;
-  };
-
-  buttons.forEach((button) => button.addEventListener("click", () => {
-    selectedType = String(button.dataset.previewFilterButton || "all");
-    apply();
-  }));
-  searchInput?.addEventListener("input", apply);
-  apply();
+  // Route disclosure is handled natively by the remaining <details> groups.
 }
 
 
@@ -21641,6 +22365,7 @@ async function openDeliveryListUpdatePreview(listIds, routeGroup = "", contextKe
   });
 
   try {
+    await ensurePrintProductLookupLibrary();
     let payloads = importPreviewPayloadsFromContext(contextKey, ids);
     let failedRequests = [];
     if (!payloads.length) {
@@ -21906,6 +22631,68 @@ function actionHistoryDateTime(value = "") {
 
 function actionHistoryDetail(event = {}) {
   const payload = event.payload || {};
+  const action = String(event.action || "").toLowerCase();
+  const job = String(payload.job || "").trim();
+  const order = String(payload.order || "").trim();
+  const item = String(payload.item || "").trim();
+  const itemRef = order ? `Order ${order}${item ? ` / Item ${item}` : ""}` : "";
+  const jobRef = job ? `Job ${job}` : "";
+  const workRef = [jobRef, itemRef].filter(Boolean).join(" · ");
+  const bayLabel = (group, display, code) => [group, display || code].filter(Boolean).join(" · ");
+
+  if (action === "snooze_stale_bay" && Array.isArray(payload.assignments)) {
+    const assignments = payload.assignments;
+    const first = assignments[0] || {};
+    const firstRef = [first.job ? `Job ${first.job}` : "", first.order ? `Order ${first.order}${first.item ? ` / Item ${first.item}` : ""}` : ""].filter(Boolean).join(" · ");
+    const firstBay = bayLabel(first.bayGroup, first.bayDisplay, first.bayCode);
+    const more = assignments.length > 1 ? ` · +${assignments.length - 1} more row${assignments.length === 2 ? "" : "s"}` : "";
+    return `${firstRef || "Old bay assignment"}${firstBay ? ` · ${firstBay}` : ""}${more} · Snoozed ${payload.days || 1} day${Number(payload.days || 1) === 1 ? "" : "s"}`;
+  }
+  if (action === "move_bay") {
+    const from = bayLabel(payload.oldBayGroup, payload.oldBayDisplay, payload.oldBayCode);
+    const to = bayLabel(payload.newBayGroup, payload.newBayDisplay, payload.newBayCode);
+    return `${workRef || "Bay item"}${from || to ? ` · ${from || "Unknown bay"} → ${to || "Unknown bay"}` : ""}${payload.assignedQty ? ` · Qty ${payload.assignedQty}` : ""}`;
+  }
+  if (["assign_bay", "clear_bay_assignment", "restore_bay_assignment"].includes(action)) {
+    const location = bayLabel(payload.bayGroup, payload.bayDisplay, payload.bayCode);
+    const verb = action === "assign_bay" ? "Assigned" : action === "restore_bay_assignment" ? "Restored" : "Cleared";
+    return `${workRef || "Bay item"}${location ? ` · ${verb} ${location}` : ` · ${verb}`}${payload.assignedQty ? ` · Qty ${payload.assignedQty}` : ""}`;
+  }
+  if (["mark_rush_sdi", "change_priority_delivery_date", "clear_rush_priority", "clear_rush_remake_sdi"].includes(action)) {
+    const newDate = payload.priorityDeliveryDate || payload.deliveryDate || "";
+    const previousDate = payload.previousDeliveryDate || payload.previousPriorityDeliveryDate || "";
+    const dateText = action === "change_priority_delivery_date"
+      ? `${previousDate ? formatNumericDeliveryDate(previousDate) : "Previous date unknown"} → ${newDate ? formatNumericDeliveryDate(newDate) : "No priority date"}`
+      : newDate ? `Delivery ${formatNumericDeliveryDate(newDate)}` : "";
+    return `${workRef || payload.lookup || "Priority work"}${dateText ? ` · ${dateText}` : ""}${event.reason ? ` · ${event.reason}` : ""}`;
+  }
+  if (action === "update_bay_layout") {
+    const changes = [];
+    if (payload.previousDisplayName !== undefined && payload.displayName !== undefined && payload.previousDisplayName !== payload.displayName) changes.push(`name ${payload.previousDisplayName || payload.bayCode} → ${payload.displayName}`);
+    if (payload.previousMapSection !== undefined && payload.mapSection !== undefined && payload.previousMapSection !== payload.mapSection) changes.push(`group ${payload.previousMapSection || "Unmapped"} → ${payload.mapSection || "Unmapped"}`);
+    if (payload.previousBayCategory !== undefined && payload.bayCategory !== undefined && payload.previousBayCategory !== payload.bayCategory) changes.push(`category ${payload.previousBayCategory || "None"} → ${payload.bayCategory || "None"}`);
+    if (payload.previousCapacityQty !== undefined && payload.capacityQty !== undefined && Number(payload.previousCapacityQty) !== Number(payload.capacityQty)) changes.push(`capacity ${payload.previousCapacityQty} → ${payload.capacityQty}`);
+    return `Bay ${payload.bayCode || event.entityId || ""}${changes.length ? ` · ${changes.join(" · ")}` : " · Layout/settings updated"}`;
+  }
+  if (action.startsWith("set_bay_")) {
+    const location = bayLabel(payload.bayGroup, payload.displayName, payload.bayCode || event.entityId);
+    const previousStatus = payload.previousStatus ? actionHistoryLabel(payload.previousStatus) : "Previous policy";
+    const status = payload.status ? actionHistoryLabel(payload.status) : actionHistoryLabel(action.replace("set_bay_", ""));
+    return `${location || `Bay ${event.entityId || ""}`} · ${previousStatus} → ${status}${event.reason ? ` · ${event.reason}` : ""}`;
+  }
+  if (action.startsWith("bay_check_")) {
+    const location = bayLabel(payload.bayGroup, payload.displayName, payload.bayCode || event.entityId);
+    const result = payload.checkResult || action.replace("bay_check_", "");
+    return `${location || `Bay ${event.entityId || ""}`} · Check: ${actionHistoryLabel(result)}${event.reason ? ` · ${event.reason}` : ""}`;
+  }
+  if (action === "clear_bay") {
+    const location = bayLabel(payload.bayGroup, payload.displayName, payload.bayCode || event.entityId);
+    const assignments = Array.isArray(payload.assignments) ? payload.assignments : [];
+    const first = assignments[0] || {};
+    const firstRef = [first.job ? `Job ${first.job}` : "", first.order ? `Order ${first.order}${first.item ? ` / Item ${first.item}` : ""}` : ""].filter(Boolean).join(" · ");
+    const count = Number(payload.clearedAssignments || assignments.length || 0);
+    return `${location || `Bay ${event.entityId || ""}`} · Cleared ${count} assignment${count === 1 ? "" : "s"}${firstRef ? ` · ${firstRef}${count > 1 ? ` +${count - 1} more` : ""}` : ""}`;
+  }
   if (Array.isArray(payload.changedFields) && payload.changedFields.length) {
     return `Changed ${payload.changedFields.map((field) => actionHistoryLabel(field)).join(", ")}`;
   }
@@ -22644,7 +23431,10 @@ function adminModalProfile(kind, options = null) {
     group: "configuration",
   };
   const profile = { ...fallback, ...(ADMIN_MODAL_PROFILES[kind] || {}) };
-  if (options?.title) profile.title = options.title;
+  for (const key of ["title", "eyebrow", "description", "context", "status", "group"]) {
+    if (options?.[key] !== undefined && options?.[key] !== null) profile[key] = options[key];
+  }
+  if (options?.showStatus !== undefined) profile.showStatus = Boolean(options.showStatus);
   return profile;
 }
 
@@ -22905,6 +23695,7 @@ function lookupBucketForType(type) {
   if (clean === "route") return "routes";
   if (clean === "process") return "processes";
   if (clean === "glass_cost") return "glassCosts";
+  if (clean === "glass_color") return "glassColors";
   return "products";
 }
 
@@ -22935,6 +23726,18 @@ function lookupEditorMeta(type) {
       labelPlaceholder: "1.83",
       example: "3/8 Clear → $1.83 / SQFT",
       className: "glass-costs",
+    };
+  }
+  if (clean === "glass_color") {
+    return {
+      type: "glass_color",
+      title: "Glass color",
+      explanation: "Controls the exact glass-type color used by Delivery List Update Preview and provides one reusable visual palette for future glass-aware interfaces.",
+      valueLabel: "Glass type",
+      valuePlaceholder: "3/8 Clear",
+      labelPlaceholder: "#2F80ED",
+      example: "3/8 Clear → Visual color",
+      className: "glass-colors",
     };
   }
   if (clean === "route") {
@@ -22982,6 +23785,8 @@ function lookupListHtml(type, items = []) {
   const meta = lookupEditorMeta(type);
   const visibleItems = items;
   const isGlassCost = meta.type === "glass_cost";
+  const isGlassColor = meta.type === "glass_color";
+  const visualColorMap = isGlassColor ? buildGlassVisualColorMap(items.map((item) => item.value || item.label)) : null;
 
   return `
     <section class="lookup-manager-list lookup-library ${escapeHtml(meta.className)}">
@@ -22997,7 +23802,7 @@ function lookupListHtml(type, items = []) {
       <div class="lookup-library-search">
         <label class="search-box">
           <span class="search-icon" aria-hidden="true"></span>
-          <input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="${isGlassCost ? "Search glass types or costs..." : "Search saved values, labels, categories, or match terms..."}">
+          <input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="${isGlassCost ? "Search glass types or costs..." : isGlassColor ? "Search glass types or colors..." : "Search saved values, labels, categories, or match terms..."}">
         </label>
       </div>
 
@@ -23010,8 +23815,11 @@ function lookupListHtml(type, items = []) {
                   const rate = hasRate ? Number(item.rate) : 0;
                   const costText = hasRate ? `$${rate.toFixed(2)} / SQFT` : "Cost not configured";
                   const sourceLabel = String(item.source || "manual");
+                  const glassColor = isGlassColor
+                    ? (normalizeGlassVisualColor(item.color) || visualColorMap.get(String(item.value || item.label || "").trim().toLowerCase()) || glassVisualFallbackColor(item.value || item.label))
+                    : "";
                   return `
-                  <article class="lookup-row" data-lookup-row data-lookup-search="${escapeHtml([item.label, item.value, item.category, item.matchTerms, sourceLabel, isGlassCost ? costText : ""].join(" ").toLowerCase())}">
+                  <article class="lookup-row" data-lookup-row data-lookup-search="${escapeHtml([item.label, item.value, item.category, item.matchTerms, sourceLabel, isGlassCost ? costText : "", isGlassColor ? glassColor : ""].join(" ").toLowerCase())}">
                     <div class="lookup-row-main">
                       <span class="lookup-row-heading">
                         <strong>${escapeHtml(item.label || item.value)}</strong>
@@ -23019,9 +23827,11 @@ function lookupListHtml(type, items = []) {
                       </span>
                       ${isGlassCost
                         ? `<span><b>Cost per SQFT:</b> ${escapeHtml(costText)}</span>${!hasRate ? "<small>Add a cost so breakage dollars can be calculated for this glass.</small>" : ""}`
-                        : `<span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
-                           ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
-                           ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`}
+                        : isGlassColor
+                          ? `<span class="lookup-glass-color-row-v312"><i style="--lookup-glass-color:${escapeHtml(glassColor)}" aria-hidden="true"></i><b>${escapeHtml(glassColor)}</b><small>${normalizeGlassVisualColor(item.color) ? "Custom color" : "Automatic default"}</small></span>`
+                          : `<span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
+                             ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
+                             ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`}
                     </div>
                     <button
                       type="button"
@@ -23045,8 +23855,8 @@ function lookupListHtml(type, items = []) {
  * Flow: Builds guided type tabs, a contextual editor with a live preview, and one focused searchable library instead of three competing columns.
  */
 function lookupManagerModalHtml() {
-  const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [] };
-  const supportedTypes = ["product", "route", "process", "glass_cost"];
+  const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] };
+  const supportedTypes = ["product", "route", "process", "glass_cost", "glass_color"];
   const activeType = supportedTypes.includes(state.lookupManagerActiveType)
     ? state.lookupManagerActiveType
     : "product";
@@ -23056,12 +23866,15 @@ function lookupManagerModalHtml() {
   const processCount = (lookups.processes || []).length;
   const glassCostCount = (lookups.glassCosts || []).filter((item) => item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate))).length;
   const glassCostTotal = (lookups.glassCosts || []).length;
+  const glassColorTotal = (lookups.glassColors || []).length;
   const isGlassCost = activeType === "glass_cost";
+  const isGlassColor = activeType === "glass_color";
   const tabs = [
     ["product", "Products", productCount],
     ["route", "Routes", routeCount],
     ["process", "Process states", processCount],
     ["glass_cost", "Glass costs", glassCostTotal],
+    ["glass_color", "Glass colors", glassColorTotal],
   ];
 
   return `
@@ -23069,13 +23882,14 @@ function lookupManagerModalHtml() {
       <section class="lookup-manager-hero">
         <div>
           <span class="lookup-hero-label">Lookup Manager</span>
-          <strong>Maintain editing choices and Statistics material costs</strong>
-          <span>Choose one library, review what each field controls, and save updates in one place. Glass costs feed breakage-dollar reporting immediately.</span>
+          <strong>Maintain editing choices, glass costs, and glass colors</strong>
+          <span>Choose one library and save updates in one place. Glass costs feed breakage reporting, while Glass Colors controls exact product colors used by preview interfaces.</span>
         </div>
         <div class="lookup-manager-kpis">
           ${miniStat("Products", productCount)}
           ${miniStat("Routes", routeCount)}
           ${miniStat("Priced glass", `${glassCostCount}/${glassCostTotal}`)}
+          ${miniStat("Glass colors", glassColorTotal)}
         </div>
       </section>
 
@@ -23105,13 +23919,19 @@ function lookupManagerModalHtml() {
               <label>
                 <span>${escapeHtml(meta.valueLabel)}</span>
                 <input id="lookupValueInput" type="text" autocomplete="off" placeholder="${escapeHtml(meta.valuePlaceholder)}">
-                <small>${isGlassCost ? "Use the glass/product wording that should match imported delivery-list data." : "This is the exact value saved to the delivery-list item."}</small>
+                <small>${isGlassCost || isGlassColor ? "Use the exact glass/product wording that should match imported delivery-list data." : "This is the exact value saved to the delivery-list item."}</small>
               </label>
               ${isGlassCost ? `
                 <label>
                   <span>Cost per SQFT</span>
                   <input id="lookupCostInput" type="number" min="0" step="0.01" inputmode="decimal" autocomplete="off" placeholder="1.83">
                   <small>Material-only cost used for reject and breakage reporting.</small>
+                </label>
+              ` : isGlassColor ? `
+                <label class="lookup-glass-color-field-v312">
+                  <span>Visual color</span>
+                  <span class="lookup-glass-color-picker-v312"><input id="lookupColorInput" type="color" value="${escapeHtml(glassVisualColor(meta.example.split(" → ")[0]))}"><b data-lookup-color-value>${escapeHtml(glassVisualColor(meta.example.split(" → ")[0]))}</b></span>
+                  <small>Used for this exact glass type anywhere the shared glass palette is applied.</small>
                 </label>
               ` : `
                 <label>
@@ -23140,14 +23960,14 @@ function lookupManagerModalHtml() {
               <div>
                 <small>Preview before saving</small>
                 <strong data-lookup-preview-label>${escapeHtml(meta.example.split(" → ")[1])}</strong>
-                <span><b>${isGlassCost ? "Glass type" : "Saved value"}:</b> <em data-lookup-preview-value>${escapeHtml(meta.example.split(" → ")[0])}</em></span>
+                <span><b>${isGlassCost || isGlassColor ? "Glass type" : "Saved value"}:</b> <em data-lookup-preview-value>${escapeHtml(meta.example.split(" → ")[0])}</em></span>
                 <p data-lookup-preview-note>${escapeHtml(meta.explanation)}</p>
               </div>
             </aside>
 
             <footer class="lookup-form-actions">
               <button type="button" class="secondary" data-lookup-clear-form>Clear form</button>
-              <button type="submit">${isGlassCost ? "Save glass cost" : "Save lookup"}</button>
+              <button type="submit">${isGlassCost ? "Save glass cost" : isGlassColor ? "Save glass color" : "Save lookup"}</button>
             </footer>
           </form>
         </section>
@@ -23169,6 +23989,8 @@ function syncLookupManagerFormGuidance() {
   const value = document.getElementById("lookupValueInput")?.value.trim() || meta.example.split(" → ")[0];
   const label = document.getElementById("lookupLabelInput")?.value.trim() || value || meta.example.split(" → ")[1];
   const costInput = document.getElementById("lookupCostInput");
+  const colorInput = document.getElementById("lookupColorInput");
+  const colorValue = document.querySelector("[data-lookup-color-value]");
   const routeFields = document.querySelector("[data-lookup-route-fields]");
   const previewValue = document.querySelector("[data-lookup-preview-value]");
   const previewLabel = document.querySelector("[data-lookup-preview-label]");
@@ -23180,6 +24002,10 @@ function syncLookupManagerFormGuidance() {
     if (type === "glass_cost") {
       const rate = Number(costInput?.value);
       previewLabel.textContent = Number.isFinite(rate) && costInput?.value !== "" ? `$${rate.toFixed(2)} / SQFT` : "Cost not configured";
+    } else if (type === "glass_color") {
+      const color = normalizeGlassVisualColor(colorInput?.value) || glassVisualColor(value);
+      previewLabel.innerHTML = `<span class="lookup-glass-color-preview-v312"><i style="--lookup-glass-color:${escapeHtml(color)}"></i>${escapeHtml(color)}</span>`;
+      if (colorValue) colorValue.textContent = color;
     } else {
       previewLabel.textContent = label;
     }
@@ -23206,7 +24032,7 @@ function renderLookupManagerModal() {
  * Flow: Finds the requested row by type/value, activates the matching tab, re-renders once, then fills and focuses the editor for an upsert save.
  */
 function useLookupInEditor(type, value) {
-  const cleanType = ["product", "route", "process", "glass_cost"].includes(type) ? type : "product";
+  const cleanType = ["product", "route", "process", "glass_cost", "glass_color"].includes(type) ? type : "product";
   const item = lookupItemsForType(cleanType).find((entry) => String(entry.value || "") === String(value || ""));
   if (!item) return;
 
@@ -23217,11 +24043,13 @@ function useLookupInEditor(type, value) {
   const categoryInput = document.getElementById("lookupCategoryInput");
   const matchInput = document.getElementById("lookupMatchTermsInput");
   const costInput = document.getElementById("lookupCostInput");
+  const colorInput = document.getElementById("lookupColorInput");
   if (valueInput) valueInput.value = item.value || "";
   if (labelInput) labelInput.value = item.label || item.value || "";
   if (categoryInput) categoryInput.value = item.category || "";
   if (matchInput) matchInput.value = item.matchTerms || "";
   if (costInput) costInput.value = item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate)) ? String(item.rate) : "";
+  if (colorInput) colorInput.value = normalizeGlassVisualColor(item.color) || glassVisualColor(item.value || item.label);
   syncLookupManagerFormGuidance();
   valueInput?.focus();
   valueInput?.select();
@@ -23237,6 +24065,8 @@ function clearLookupManagerForm() {
     const input = document.getElementById(id);
     if (input) input.value = "";
   });
+  const colorInput = document.getElementById("lookupColorInput");
+  if (colorInput) colorInput.value = glassVisualColor(lookupEditorMeta("glass_color").example.split(" → ")[0]);
   syncLookupManagerFormGuidance();
   document.getElementById("lookupValueInput")?.focus();
 }
@@ -23288,9 +24118,10 @@ async function saveManualEditLookup() {
   const category = document.getElementById("lookupCategoryInput")?.value.trim() || "";
   const matchTerms = document.getElementById("lookupMatchTermsInput")?.value.trim() || "";
   const costText = document.getElementById("lookupCostInput")?.value.trim() || "";
+  const colorText = document.getElementById("lookupColorInput")?.value.trim() || "";
 
   if (!value) {
-    throw new Error(type === "glass_cost" ? "Glass type is required." : "Lookup value is required.");
+    throw new Error(["glass_cost", "glass_color"].includes(type) ? "Glass type is required." : "Lookup value is required.");
   }
 
   const request = { type, value, label, category, matchTerms };
@@ -23300,6 +24131,10 @@ async function saveManualEditLookup() {
       throw new Error("Enter a valid glass cost per SQFT.");
     }
     request.rate = rate;
+  } else if (type === "glass_color") {
+    const color = normalizeGlassVisualColor(colorText);
+    if (!color) throw new Error("Choose a valid glass color.");
+    request.color = color;
   }
 
   const payload = await fetchJson("/api/admin/manual-edit-lookups", {
@@ -23317,7 +24152,9 @@ async function saveManualEditLookup() {
   renderLookupManagerModal();
   showSaveConfirmation(type === "glass_cost"
     ? `${value} material cost was saved to the Lookup Manager.`
-    : `${label || value} was saved to the Lookup Manager.`);
+    : type === "glass_color"
+      ? `${value} visual color was saved to the Lookup Manager.`
+      : `${label || value} was saved to the Lookup Manager.`);
 }
 
 /**
@@ -23589,8 +24426,8 @@ function rackManagerModalHtml() {
   }
 
   const sortedGroups = [...groups.entries()].sort(([a], [b]) => {
-    if (a === "Truck") return 1;
-    if (b === "Truck") return -1;
+    if (a === "Truck") return -1;
+    if (b === "Truck") return 1;
     const order = { Steel: 1, Wood: 2, Coral: 3 };
     return (order[a] || 50) - (order[b] || 50) || a.localeCompare(b);
   });
@@ -23664,6 +24501,7 @@ function rackManagerModalHtml() {
                             const legacyTruck = rack.code === "T";
                             const canDelete = !legacyTruck && qty === 0;
                             const status = rackStatusLabel(rack);
+                            const statusClass = rackStatusClassName(rack);
 
                             const isEditing = state.rackManagerEditingRackCode === rack.code;
 
@@ -23673,7 +24511,7 @@ function rackManagerModalHtml() {
                                   <strong>${escapeHtml(legacyTruck ? "Truck / No Rack" : rack.code)}</strong>
                                   <span>${escapeHtml(rack.name || rack.type || "")}</span>
                                 </div>
-                                <span class="rack-status-badge ${escapeHtml(status.toLowerCase())}">${escapeHtml(status)}</span>
+                                <span class="rack-status-badge ${escapeHtml(statusClass)}">${escapeHtml(status)}</span>
                                 <b>${escapeHtml(qty)} pcs</b>
                                 <button type="button" class="icon-only icon-pencil" data-rack-edit="${escapeHtml(rack.code)}" title="Edit rack" aria-label="Edit ${escapeHtml(rack.code)}"></button>
                                 <button type="button" class="icon-only icon-trash danger" data-rack-delete="${escapeHtml(rack.code)}" ${canDelete ? "" : "disabled"} title="Delete empty rack" aria-label="Delete ${escapeHtml(rack.code)}"></button>
@@ -23752,12 +24590,17 @@ function rackFormModalHtml() {
               </select>
               <small>Rack sets are managed from the Edit Racks workspace.</small>
             </label>
+            <div class="rack-set-existing-v308">
+              <div><strong>Existing racks in this set</strong><small>Use this list to avoid duplicate or confusing rack identities.</small></div>
+              <div class="rack-set-existing-list-v308" data-rack-form-existing-racks>${rackFormExistingSetRacksHtml(selectedType, rack.oldCode || rack.code || "")}</div>
+            </div>
           </section>
 
           <div class="rack-config-tip-v270">
             <span aria-hidden="true"></span>
-            <div><strong>Keep rack codes unique</strong><p>The rack code is the operational identity used by scanners and rack history. The display name can be more descriptive.</p></div>
+            <div><strong>Keep rack identity unique</strong><p>Rack codes and display names must both be unique so operators never have to guess which rack a scan belongs to.</p></div>
           </div>
+          <div class="rack-draft-validation-v307" data-rack-form-validation aria-live="polite"></div>
         </div>
 
         <aside class="rack-config-preview-v270" aria-label="Rack preview">
@@ -23844,6 +24687,7 @@ function rackSetFormModalHtml() {
               </label>
             </div>
           </section>
+          <div class="rack-draft-validation-v307" data-rack-set-validation aria-live="polite"></div>
         </div>
 
         <aside class="rack-config-preview-v270 rack-set-preview-v270" aria-label="Rack set preview">
@@ -29369,8 +30213,15 @@ function rackDetailsModalHtml(rack) {
         </details>`;
     }).join("");
 
+  const statusLabel = rackStatusLabel(rack);
+  const statusClass = rackStatusClassName(rack);
+  const destinationText = rack.destination ? ` · ${rackDestinationLabel(rack.destination)}` : "";
   return `
-    <section class="rack-details-modal-shell rack-details-modal-v184 ${escapeHtml(rackStatusClassName(rack))}">
+    <section class="rack-details-modal-shell rack-details-modal-v184 ${escapeHtml(statusClass)}">
+      <div class="rack-details-status-banner-v308 ${escapeHtml(statusClass)}">
+        <span aria-hidden="true"></span>
+        <div><small>Rack status</small><strong>${escapeHtml(statusLabel)}</strong><p>${escapeHtml(Number(rack.qty || 0))} pieces${escapeHtml(destinationText)}</p></div>
+      </div>
       <div class="rack-details-modal-list" aria-label="Assigned rack pieces">${itemHtml || `<div class="admin-empty">No pieces are assigned.</div>`}</div>
     </section>`;
 }
@@ -31353,6 +32204,7 @@ function initializeAutomationHistoryGrouping() {
 }
 
 function wireV135OperationsEvents() {
+  document.addEventListener("click", forwardRackHeadingActionClick, true);
   els.operationsModalClose?.addEventListener("click", closeOperationsModal);
   els.operationsModalBackdrop?.addEventListener("click", closeOperationsModal);
   els.rackPackingHistoryBtn?.addEventListener("click", () => openRacksHistoryModal().catch((error) => showInlineError(error.message, true)));
@@ -33018,12 +33870,20 @@ function wireEvents() {
     }
     if (event.target.closest("#rackFormModal")) {
       event.preventDefault();
-      saveRackDefinition().catch((error) => showInlineError(error.message, true));
+      const form = event.target.closest("#rackFormModal");
+      saveRackDefinition().catch((error) => {
+        syncRackDraftValidation(form, { ok: false, message: error.message }, "[data-rack-form-validation]");
+        showInlineError(error.message, true);
+      });
       return;
     }
     if (event.target.closest("#rackSetFormModal")) {
       event.preventDefault();
-      createRackSet().catch((error) => showInlineError(error.message, true));
+      const form = event.target.closest("#rackSetFormModal");
+      createRackSet().catch((error) => {
+        syncRackDraftValidation(form, { ok: false, message: error.message }, "[data-rack-set-validation]");
+        showInlineError(error.message, true);
+      });
       return;
     }
     if (event.target.closest("#rackManagerQuickEditForm")) {
@@ -33407,6 +34267,7 @@ function wireEvents() {
   els.bayEditorBackdrop?.addEventListener("click", () => closeBayEditorPanel());
   els.bayEditorNewGroupBtn?.addEventListener("click", () => {
     state.bayEditorSelectedGroup = "__new__";
+    state.bayEditorSelectedBayCodes?.clear?.();
     renderBayEditorPanel();
     setTimeout(() => document.getElementById("bayEditorNewGroupNameInput")?.focus(), 0);
   });
@@ -33414,9 +34275,34 @@ function wireEvents() {
     const row = event.target.closest("[data-bay-editor-group]");
     if (!row) return;
     state.bayEditorSelectedGroup = row.dataset.bayEditorGroup || "";
+    state.bayEditorSelectedBayCodes?.clear?.();
     renderBayEditorPanel();
   });
+  els.bayEditorPanel?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest("[data-bay-editor-select]");
+    if (!checkbox) return;
+    if (!(state.bayEditorSelectedBayCodes instanceof Set)) state.bayEditorSelectedBayCodes = new Set();
+    const bayCode = String(checkbox.dataset.bayEditorSelect || "");
+    if (checkbox.checked) state.bayEditorSelectedBayCodes.add(bayCode);
+    else state.bayEditorSelectedBayCodes.delete(bayCode);
+    syncBayEditorBulkSelectionUi();
+  });
   els.bayEditorPanel?.addEventListener("click", (event) => {
+    const selectionAction = event.target.closest("[data-bay-editor-selection-action]");
+    if (selectionAction) {
+      event.preventDefault();
+      setBayEditorGroupSelection(selectionAction.dataset.bayEditorSelectionAction === "all");
+      return;
+    }
+
+    const selectableRow = event.target.closest("[data-bay-editor-select-row]");
+    const interactiveTarget = event.target.closest("input, select, textarea, button, a, label");
+    if (selectableRow && !interactiveTarget) {
+      event.preventDefault();
+      toggleBayEditorRowSelection(selectableRow.dataset.bayEditorSelectRow || selectableRow.dataset.editorBayCode || "");
+      return;
+    }
+
     const actionButton = event.target.closest("[data-bay-editor-action]");
     if (!actionButton) return;
     event.preventDefault();
@@ -33427,6 +34313,7 @@ function wireEvents() {
       action === "create-group" ? createBayEditorGroup :
       action === "add-bays" ? addBaysToEditorGroup :
       action === "delete-group" ? deleteBayEditorGroup :
+      action === "save-selected" ? saveBayEditorSelectedBays :
       action === "save-bay" ? () => saveBayEditorBay(bayCode) :
       action === "delete-bay" ? () => deleteBayEditorBay(bayCode) : null;
     if (runner) runner().catch((error) => showInlineError(error.message, true));
@@ -33440,23 +34327,74 @@ function wireEvents() {
     state.manageItemsFilter = els.manageItemsFilter.value || "all";
     renderManageItemsPanel();
   });
+  els.manageItemsList?.addEventListener("change", (event) => {
+    const itemCheckbox = event.target.closest("[data-manage-item-checkbox]");
+    if (itemCheckbox) {
+      const id = String(itemCheckbox.dataset.manageItemCheckbox || "");
+      const selectedIds = manageItemsSelectionSet();
+      if (itemCheckbox.checked) selectedIds.add(id);
+      else selectedIds.delete(id);
+      state.manageItemsSelectedId = id;
+      renderManageItemsPanel();
+      return;
+    }
+    const groupCheckbox = event.target.closest("[data-manage-group-checkbox]");
+    if (groupCheckbox) setManageGroupSelection(groupCheckbox.dataset.manageGroupCheckbox || "", groupCheckbox.checked);
+  });
   els.manageItemsList?.addEventListener("click", (event) => {
-    const row = event.target.closest("[data-manage-assignment-id]");
-    if (!row) return;
-    state.manageItemsSelectedId = row.dataset.manageAssignmentId || "";
-    renderManageItemsPanel();
+    const selectionAction = event.target.closest("[data-manage-selection-action]");
+    if (selectionAction) {
+      event.preventDefault();
+      setManageItemsVisibleSelection(selectionAction.dataset.manageSelectionAction === "all");
+      return;
+    }
+    if (event.target.closest("input, select, textarea, button, a, label")) return;
+    const itemRow = event.target.closest("[data-manage-item-select]");
+    if (itemRow) {
+      event.preventDefault();
+      toggleManageItemSelection(itemRow.dataset.manageItemSelect || "");
+      return;
+    }
+    const groupCard = event.target.closest("[data-manage-group-card]");
+    if (groupCard) {
+      event.preventDefault();
+      const groupKey = groupCard.dataset.manageGroupCard || "";
+      const row = filteredManageItemRows().find((candidate) => String(candidate.key || "") === groupKey);
+      const ids = (row?.entries || []).map(({ assignment }) => String(assignment.id || "")).filter(Boolean);
+      const selectedIds = manageItemsSelectionSet();
+      const select = !ids.length || !ids.every((id) => selectedIds.has(id));
+      setManageGroupSelection(groupKey, select);
+    }
+  });
+  els.manageItemsList?.addEventListener("keydown", (event) => {
+    if (!["Enter", " "].includes(event.key)) return;
+    const itemRow = event.target.closest("[data-manage-item-select]");
+    if (itemRow) {
+      event.preventDefault();
+      toggleManageItemSelection(itemRow.dataset.manageItemSelect || "");
+      return;
+    }
+    const groupHeader = event.target.closest("[data-manage-group-select]");
+    if (groupHeader) {
+      event.preventDefault();
+      const groupKey = groupHeader.dataset.manageGroupSelect || "";
+      const row = filteredManageItemRows().find((candidate) => String(candidate.key || "") === groupKey);
+      const ids = (row?.entries || []).map(({ assignment }) => String(assignment.id || "")).filter(Boolean);
+      const selectedIds = manageItemsSelectionSet();
+      setManageGroupSelection(groupKey, !ids.every((id) => selectedIds.has(id)));
+    }
   });
   els.manageItemsMoveBtn?.addEventListener("click", () => moveManagedItem().catch((error) => showInlineError(error.message, true)));
   els.manageItemsClearBtn?.addEventListener("click", () => clearManagedItem().catch((error) => showInlineError(error.message, true)));
   els.manageItemsScannerBtn?.addEventListener("click", () => useManagedBayForScanner());
   els.manageItemsSdiBtn?.addEventListener("click", () => {
-    const selected = selectedManageItem();
-    if (!selected?.assignment?.id) {
-      showInlineError("Select an item before opening Rush.", false);
+    const selectedEntries = selectedManageEntries();
+    if (selectedEntries.length !== 1) {
+      showInlineError("Select one exact item before opening Rush.", false);
       return;
     }
     closeManageItemsPanel();
-    openSdiPanel(selected.assignment.id);
+    openSdiPanel(selectedEntries[0].assignment.id);
   });
   els.staleBayCloseBtn?.addEventListener("click", () => closeStaleBayPanel());
   els.staleBayOkBtn?.addEventListener("click", () => closeStaleBayPanel());
@@ -33503,11 +34441,21 @@ function wireEvents() {
     updateStaleBaySelectionControls(filteredStaleBayOrders());
   });
   els.staleBayList?.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-stale-snooze]");
-    if (!target) return;
-    const assignmentId = target.dataset.staleSnooze;
-    const days = Number(els.staleBayList.querySelector(`[data-stale-days="${CSS.escape(String(assignmentId))}"]`)?.value || 1);
-    snoozeStaleBayOrders([assignmentId], days).catch((error) => showInlineError(error.message, true));
+    const snoozeButton = event.target.closest("[data-stale-snooze]");
+    if (snoozeButton) {
+      const assignmentId = snoozeButton.dataset.staleSnooze;
+      const days = Number(els.staleBayList.querySelector(`[data-stale-days="${CSS.escape(String(assignmentId))}"]`)?.value || 1);
+      snoozeStaleBayOrders([assignmentId], days).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("input, select, textarea, button, a, label")) return;
+    const row = event.target.closest("[data-stale-assignment-row]");
+    if (!row) return;
+    const assignmentId = String(row.dataset.staleAssignmentRow || "");
+    if (!assignmentId) return;
+    if (state.staleBaySelectedIds.has(assignmentId)) state.staleBaySelectedIds.delete(assignmentId);
+    else state.staleBaySelectedIds.add(assignmentId);
+    renderStaleBayPanel(state.staleBayOrders);
   });
   els.sdiOrderInput?.addEventListener("input", () => {
     window.clearTimeout(state.sdiLookupTimer);
@@ -34525,12 +35473,6 @@ function wireEvents() {
     if (bayAction && !els.bayActionButtons?.contains(bayAction)) {
       runBayAction(bayAction.dataset.bayAction).catch((error) => showInlineError(error.message, true));
       return;
-    }
-    const navButton = event.target.closest("[data-mobile-target]");
-    if (navButton) {
-      showPage("scan");
-      document.body.dataset.mobileView = navButton.dataset.mobileTarget;
-      document.querySelectorAll("[data-mobile-target]").forEach((button) => button.classList.toggle("is-active", button === navButton));
     }
   });
 }
@@ -36451,7 +37393,12 @@ init().catch((error) => {
       affectedListIds.forEach((listId) => {
         flagsByList.delete(listId);
         reviewedSignatureByList.delete(listId);
+        state?.pendingUpdateStages?.delete?.(listId);
       });
+      // Clear affected Stage ! markers immediately, then let the authoritative
+      // refresh below rebuild any marker that still belongs to this user.
+      if (typeof renderDeliveryListSelect === "function") renderDeliveryListSelect();
+      if (typeof syncAllCustomSelects === "function") syncAllCustomSelects();
       const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
       if (refreshed.pendingLineCount > 0) {
         throw new Error("New delivery-list changes arrived while you were reviewing. Review the latest changes before clearing them.");
@@ -36462,7 +37409,7 @@ init().catch((error) => {
       }
       if (typeof renderScanPage === "function") renderScanPage();
       if (typeof showSaveConfirmation === "function") {
-        const broadReview = acknowledgement?.reviewScope === "airport-delivery-date-batch";
+        const broadReview = acknowledgement?.reviewScope === "airport-delivery-date";
         showSaveConfirmation(
           broadReview
             ? "This delivery date is marked reviewed for your account."

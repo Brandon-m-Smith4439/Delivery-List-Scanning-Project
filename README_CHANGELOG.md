@@ -1,5 +1,168 @@
 # Delivery List Scanner Changelog
 
+## v0.319 - Manage Items Readability and Bay Scanner Footer Boundary
+
+- Rebalanced the Manage Bay Items workspace to give the left-side job/order list more room and prevent exact-item details from becoming tiny or clipped.
+- Reflowed exact-item rows into a two-line card layout that preserves complete item identity, glass/product/size, grouped bay location, and status information.
+- Made the custom fixed Bay Map scanner footer-aware so it moves upward with the page boundary and stops before the desktop footer instead of overlapping it.
+- Changed the Bay Scanner in-transit piece count to full white text for better operational contrast.
+- Verified the shared action-history renderer already surfaces Job Nr., Order Nr., and Item Nr. for the requested Old Bays, Rush, Edit Bays, and Manage Items actions when those values exist in the audit payload; no redundant history path was added.
+- Advanced `APPLICATION_VERSION` to 319 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.318 - Bay Operations, Exact-Item Management, and Priority Work Clarity
+
+- Added the restrained outline-circle visual treatment to the Old Bay Control Center and Bay Map scanner-panel headers.
+- Made Old Bays order cards selectable from their full non-interactive surface while preserving normal controls and checkbox behavior.
+- Reworked Current Priority Work to keep expanded Rush details above surrounding outlines and expose original/new delivery dates, marked time/user, bay, item, product/size, direct-to-truck handling, and reason.
+- Added grouped bay-set names to Manage Bay Items locations and introduced whole-job/exact-item multi-selection with Select All and Clear Selection.
+- Changed Manage Bay Items move/clear actions to operate on exact selected assignment IDs so sibling items may be manually split across different bays.
+- Expanded Selected Bay job details to show each sibling item's actual current bay/group, including items located outside the selected bay.
+- Enriched bay assignment, bay-policy, Old Bays, Rush, and layout audit payloads and action-history summaries with specific job/order/item/location/date context.
+- Chunked Priority Work audit metadata lookups to remain safe on large delivery days.
+- Advanced `APPLICATION_VERSION` to 318 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.317 - All-Date Transit Count and Bay Selection Polish
+
+- Changed the Bay Map **Pieces On The Way** figure to use the same all-date physical in-transit manifest as the In-Transit GUI, so a departed Indian Trail rack contributes even when its delivery date is not today.
+- Preserved today's Outbound sent, Indian Trail received, and route progress totals as date-specific values; added explicit date-specific in-transit fields for diagnostics without exposing them as the all-date headline count.
+- Replaced the Edit Bays Select All checkbox with compact **Select All** and **Clear All** buttons and made each bay row's non-form surface toggle selection for faster multi-bay editing.
+- Kept per-bay checkboxes synchronized with row selection, selected counts, and the Apply To Selected action.
+- Merged Location Corrections guidance into a compact top line and forced the All Bay Scans content grid to size rows to their content, preventing the guidance block from ballooning when scan history is sparse.
+- Advanced `APPLICATION_VERSION` to 317 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.316 - Physical In-Transit Counts, Bay Bulk Editing, and Scan Archive Compaction
+
+- Rebased Indian Trail in-transit totals on active physical rack assignments once a rack has departed, so pieces remain counted even if the staging/source delivery-list copy is later superseded, made inactive, or soft-deleted by a delivery-list update.
+- Deduplicated equivalent Order Nr./Item Nr./rack assignments by keeping the largest live quantity for one physical rack, then subtracts Indian Trail received quantity once per physical item before allocating the remainder across departed racks.
+- Added Select All and per-bay selection to Edit Bays with bulk Category, Capacity, and Assign Behavior updates for any subset of bays in the selected grouped set. Bulk changes reuse the existing progress/busy feedback while each selected bay is saved.
+- Promoted **Physical bay scan history** to the actual All Bay Scans modal title with **Indian Trail activity archive** and the explanatory copy in the shared modal heading rather than a second oversized hero inside the body.
+- Replaced the duplicate history hero with a compact Retained / Total scans / Page strip and reduced Location Corrections guidance to a single compact row.
+- Advanced `APPLICATION_VERSION` to 316 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.315 - In-Transit Rack Icon and Numeric Date Repair
+
+- Restored real rack-set artwork in the Indian Trail In-Transit Manifest by reusing the maintained rack icon library instead of a generic circular marker.
+- Carries saved rack-set icon colors into In-Transit rack headers, including custom A-frame glass cart and other administrator-selected rack visuals.
+- Changed In-Transit delivery-date cells from full weekday/month wording to compact `M/D/YYYY` formatting such as `8/14/2026`.
+- Applied the same compact delivery-date formatting to individual Rack content rows for consistent rack presentation.
+- Advanced `APPLICATION_VERSION` to 315 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.314 - Rack Hitbox, All-Date In-Transit, and Bay Editor Feedback
+
+- Hardened Rack History/Edit Racks after page navigation by rechecking heading geometry after the asynchronous rack refresh and forwarding clicks that fall inside the visible action rectangles even when a stale transparent shell layer wins browser hit testing.
+- Disabled scroll anchoring on the Rack Overview heading/content so later DOM refreshes cannot pull the top of those actions back under the sticky application shell.
+- Changed the Indian Trail In-Transit Manifest to include every active departed Indian Trail rack across delivery dates instead of silently limiting the manifest to the dashboard/today date.
+- Kept Bay Map Outbound, Received, in-transit counts, and the route progress bar date-specific; future/past in-transit pieces appear in the manifest without inflating today's progress.
+- Added Delivery Date to mixed-date in-transit item rows, removed the temporary Test 100% sound button, and polished the manifest header with the shared outlined-circle treatment.
+- Applied the shared blue primary-button format to maintained Edit Bays save/create actions.
+- Added live bay-by-bay progress feedback and busy-state protection while grouped bay-set changes are written sequentially.
+- Advanced `APPLICATION_VERSION` to 314 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.313 - Rack Action Hitbox and Compact Delivery Update Preview
+
+- Fixed the Rack Overview page-transition hitbox regression by resetting application scroll owners after page visibility changes, preventing the sticky header from retaining an overlap over the top of Rack History and Edit Racks.
+- Removed the expanded pseudo-element click surface from Rack History/Edit Racks and returned both actions to a smaller 36-pixel true button rectangle.
+- Narrowed the Delivery List Update Preview control center from the previous wide desktop footprint and reduced surrounding padding/vertical spacing.
+- Removed the preview filter buttons, search field, result counter, and four redundant top metric cards; the preview now focuses on date totals, route dropdowns, orders, and changed items.
+- Condensed route and order presentation while preserving exact glass colors from Lookup Manager, item glass type/size/QTY, change badges, and before/after values for updated fields.
+- Advanced `APPLICATION_VERSION` to 313 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.312 - Compact Bay Capacity and Managed Glass Color Palette
+
+- Condensed grouped Physical Bay utilization to a compact `occupied/total` fraction that remains inside the small group header while retaining color emphasis on the current occupied count.
+- Restored Rack Overview route/destination badges to the upper-right corner.
+- Added a Glass Colors library to Lookup Manager using the existing `admin_lookup_values` table, keeping SQLite schema version 11 unchanged.
+- Populated Glass Colors from the maintained known-glass vocabulary and active/discovered glass products.
+- Added administrator-editable exact hex colors with stable automatic defaults for glass types that have not been customized.
+- Replaced Delivery List Update Preview's page-local generated hues with the shared Lookup Manager palette, including reusable CSS variables for future glass-aware interfaces.
+- Advanced maintained application/cache references to v0.312.
+
+## v0.311 - Rack Transfer, History, Preview, and Bay Persistence
+
+- Fixed whole-rack content moves failing after the transfer because the source-rack reset still referenced obsolete `completed_by`, `departed_by`, and `returned_by` columns that are not part of the maintained rack schema.
+- Made both Packing List History and All Racks History own a bounded vertical scroll region inside the Rack History control center so expanded weeks and long action logs remain reachable.
+- Moved Rack Overview route/destination badges to the upper-left and hardened the full Rack History/Edit Racks button surfaces against decorative header hitbox interference.
+- Shifted one percentage point from the Scan Route column to Progress and kept compact progress pills such as `Outbound 0/1` on one row.
+- Removed the Glass Type dropdown level from Delivery List Update Preview; routes remain the only dropdowns and each route now contains polished static Order cards with flat item rows.
+- Added exact glass type and glass size to every preview item and assigned stable per-product hues so each clear thickness, mirror, and antique-mirror product has its own visual identity.
+- Preserved operator-edited bay display names during startup layout seeding so server restarts no longer restore the bootstrap JSON name over the database value.
+- Replaced grouped-bay `3/30 used` fractions with a compact occupied/total summary and utilization meter that transitions green to orange to red as capacity fills.
+- Advanced `APPLICATION_VERSION` to 311 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.310 - Physical Bay Policy and Attention Clarity
+
+- Restored the compact `AUTO` / `MAN` grouped-bay policy indicator in the upper-left of Physical Bay Map group headers, with `MIX` and `BLK` fallbacks for mixed or fully blocked sets.
+- Split grouped utilization text so the occupied value in labels such as `3/32 used` is visually emphasized while `/32 used` remains neutral supporting text.
+- Kept the occupied value utilization-aware, moving from green through orange to red as a bay group approaches full capacity.
+- Added a small `!` indicator to every individual bay that contributes to the grouped attention count and attached the specific attention reasons to its tooltip/accessibility label.
+- Centralized bay attention classification so group counts and individual indicators use the same error, stale-bay, and Picking/SDI rules.
+- Advanced `APPLICATION_VERSION` to 310 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.309 - Rack Creation Compatibility, Sticky Stage, and Bay Group Status Polish
+
+- Centralized new rack insertion through a compatibility-safe helper that explicitly supplies rack lifecycle values and neutral defaults for legacy SQLite `NOT NULL` columns without defaults, preventing `racks.completed_at` creation failures.
+- Raised Racks History and Edit Racks actions above decorative Rack Overview heading layers so the top portion of each visible button remains clickable.
+- Kept Scan Date/Stage context menus attached to their sticky controls during document scrolling and gave Stage explicit pointer/z-index ownership so the Stage dropdown remains selectable after scrolling down the Scan page.
+- Removed the legacy CSS-generated second `used` suffix from Physical Bay group utilization text.
+- Added utilization-aware Bay group count coloring that transitions from green through orange to red as occupied bays approach the group total.
+- Replaced the wide Bay group `N attention` strip with a small unobtrusive exclamation/count badge while preserving a descriptive tooltip and accessible label.
+- Advanced `APPLICATION_VERSION` to 309 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.308 - Rack Creation, Review Scope, History Scroll, and Preview Workflow Repair
+
+- Made Staging/Outbound Mark Reviewed acknowledge every currently existing update notice across active stages for that delivery date for the signed-in user only; Indian Trail, Greenville, CPU, and DTC direct review remains stage-specific.
+- Fixed Add Rack Set failing on strict `racks.completed_at` schemas by using explicit empty-string lifecycle values for new and reactivated racks instead of `NULL`/implicit defaults.
+- Added existing-rack visibility to Add Individual Rack for the selected rack set, including code, display name, and lifecycle state; duplicate rack code/name protections remain enforced.
+- Repaired the Racks History modal grid so the records tabs and body have dedicated rows, the body scrolls vertically, expanded weeks remain reachable, and the `print days · snapshots` summary stays compact.
+- Added a prominent lifecycle banner to individual Rack details so Complete, Incomplete, On the way, Received, and Empty state is obvious above the displayed orders.
+- Forced Edit Racks groups into independent full-width collapsible rows so expanding Wood, Coral, or another set cannot push Truck or a neighboring set downward through shared grid-row sizing.
+- Updated Delivery List Update Preview so selected non-Airport routes open automatically, whole-list/Airport previews keep routes collapsed, order sections are no longer dropdowns, and route headers show two concise metrics such as `23 New Lines | 26 New QTY`.
+- Removed redundant Physical Bay Map group policy/open indicators while retaining `used`, blocked, and attention information where useful.
+- Raised the sticky Scan panel above overlapping list content so Stage/Date controls remain clickable while scrolled and removed residual pseudo/overflow styling that could render a black dot beside the RM flag.
+- Advanced `APPLICATION_VERSION` to 308 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.307 - Rack Review Synchronization and Rack Manager Reliability
+
+- Made Staging/Outbound Mark Reviewed propagate by the durable automatic-import source fingerprint instead of requiring identical notice timestamps across stage copies; review receipts remain isolated to the signed-in user and affected Stage markers clear immediately before the authoritative refresh.
+- Kept manual-entry review propagation isolated by its change token and retained a legacy timestamp fallback only for notices without a source fingerprint.
+- Prevented duplicate active individual rack codes and duplicate rack display names with both live form validation and backend transaction checks.
+- Added live rack-set validation for duplicate set names and generated rack-code collisions before Create Rack Set can submit, with matching backend validation and form-local error text instead of relying on a generic red flash.
+- Synchronized backend rack-set visual support with the UI icon library, including A-frame glass cart, pallet, dolly, crate, and warehouse icons.
+- Stopped the Packing List History page summary from stretching to fill unused modal height; the print-day/snapshot line now stays compact at the top of its content flow.
+- Changed Edit Racks to one full-width collapsible set per row and pins Truck first so expanding Wood, Coral, or another set cannot stretch a neighboring grid row.
+- Renamed loaded Open rack status to Incomplete in the Rack Overview and added a prominent status indicator for Incomplete, Complete, On the way, Received, and Empty states.
+- Advanced `APPLICATION_VERSION` to 307 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.306 - Mobile Scan Workflow and Dialog Repair
+
+- Removed the compact Scan bottom navigation and now present scanner controls, summary, filters, paging, and delivery-list cards in one continuous handheld workflow.
+- Added Job Nr., explicit scanned/total quantity, and complete/partial/not-scanned states to mobile delivery-list cards.
+- Reworked Scan and Bay Map All Scans tables into labeled mobile audit cards while retaining the desktop tables.
+- Corrected blank header icons and constrained the combined Barefoot logo to the mobile navigation drawer.
+- Repaired compact Print/Export, preset, admin, bay, and operations dialogs so each owns its scrolling area and remains closable on a phone.
+- Constrained Home progress tracks to their card width and allowed expanded Bay Map groups and bay cards to grow to their complete content.
+
+## v0.305 - Unified Mobile Workflow and TC22 Visual Polish
+
+- Added a final `static/css/mobile.css` ownership layer loaded after every page stylesheet, eliminating compact-layout drift from older revision media queries without changing desktop rendering.
+- Reworked compact navigation into focused Scan, List, Summary, and Review views; Menu now opens the full application drawer instead of switching to an empty legacy view.
+- Prioritized station/date/stage context, transportation or bay destination, barcode entry, manual entry, and scan feedback for one-handed floor operation.
+- Reflowed Home, Statistics, Racks, Bay Map, Reject Tracking, Admin, Print / Export, login, and shared dialogs for 760px-and-below screens with a dedicated 430px and short-landscape pass.
+- Added safe-area-aware framing, consistent 44px-or-larger controls, contained search and filter overlays, full-screen mobile modal workspaces, and predictable mobile overflow behavior.
+- Advanced `APPLICATION_VERSION` to 305 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.304 - TC22 Mobile Workspace and Rush Notification Isolation
+
+- Restricted the full-screen `New Rush Submitted` production-priority alert to genuine `rush` notifications instead of treating every pending application notice as a Rush.
+- Kept automated import results, Superseded Order Review, and other administrative notifications in the normal notification center; they no longer enter the Scan-page Rush popup queue.
+- Tagged operator-created Rush notifications with `source: operator-priority-work` and added backend/browser automation-identity guards for defense in depth.
+- Prevented A+W/source imports from creating operator Rush state by stripping imported `Rush` / standalone `SDI` tokens while preserving audited operator Rush state and source-authoritative Remake markers.
+- Added a TC22-first responsive ownership layer for compact widths only. Zebra TC22-class handheld layouts now use a compact two-row header, safe-area-aware bottom navigation, touch-sized controls, and reduced navigation/logo overhead.
+- Reworked Home, Scan, Statistics, Racks, Bay Map, Reject Tracking, Admin, and Print / Export at 760px and below, plus an extra-narrow 430px pass for phone-class CSS viewports.
+- Made compact Scan controls prioritize barcode entry and one-handed use: Station/Date/Stage reflow cleanly, barcode input is larger, rack/bay/manual controls stack predictably, and update/Rush dialogs stay fully visible above mobile navigation.
+- Converted compact control centers and data-heavy pages to single-column or horizontally contained layouts so tables and modal content do not clip outside a handheld viewport.
+- Advanced `APPLICATION_VERSION` to 304 while preserving SQLite schema version 11. No migration or database reset is included.
+
 ## v0.303 - Delivery Date Recovery and Accurate Import Quantities
 
 - Prevented stale deleted-list metadata from blanking the Scan delivery-date selector after imports, restores, and catalog refreshes.

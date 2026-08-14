@@ -1172,9 +1172,21 @@ def _pending_notifications_without_automation(store: Any, original: Any, usernam
 
     visible = []
     for item in candidates:
-        source = str((item.get("details") or {}).get("source") or "").strip().lower()
-        if source == "sql-delivery-automation":
+        details = item.get("details") or {}
+        notification_type = str(item.get("type") or "").strip().lower()
+        source = str(details.get("source") or "").strip().lower()
+        created_by = str(item.get("createdBy") or "").strip().lower()
+
+        # This endpoint feeds the full-screen production-priority workflow, not
+        # the general notification center. Import results, superseded-order review,
+        # and every other administrative notice stay available in the bell inbox.
+        if notification_type != "rush":
             continue
+        if source in {"sql-delivery-automation", "superseded-order-review", "delivery-import"}:
+            continue
+        if created_by.startswith("sql-auto") or "automation" in created_by:
+            continue
+
         visible.append(item)
         if len(visible) >= requested:
             break

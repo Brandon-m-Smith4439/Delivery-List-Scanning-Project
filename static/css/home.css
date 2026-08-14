@@ -3903,3 +3903,84 @@
   display: grid;
   gap: 10px;
 }
+
+/* ========================================================================== */
+/* v0.304 compact-device Home dashboard                                       */
+/* ========================================================================== */
+@media (max-width: 760px) {
+  .home-grid,
+  .home-side {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .home-page .panel {
+    padding: 11px !important;
+  }
+
+  .today-progress-panel,
+  .delivery-date-group {
+    border-radius: 11px !important;
+  }
+
+  .today-stage-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .delivery-date-group {
+    padding: 9px !important;
+  }
+
+  .delivery-date-group summary,
+  .delivery-date-group summary > span:first-child {
+    min-width: 0;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 7px !important;
+    align-items: stretch !important;
+  }
+
+  .delivery-date-group summary .progress-line,
+  .delivery-card-progress {
+    width: 100% !important;
+    min-width: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 6px !important;
+    justify-self: stretch !important;
+  }
+
+  .delivery-date-group summary .progress-line > span,
+  .delivery-card-progress > span {
+    grid-column: 1 / -1;
+  }
+
+  .delivery-date-total {
+    min-width: 0 !important;
+    padding-left: 0 !important;
+    text-align: left !important;
+  }
+
+  .home-pager-row,
+  .home-pager-top {
+    min-height: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding-top: 8px !important;
+  }
+
+  .statistics-snapshot-grid,
+  .statistics-health-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .today-stage-grid,
+  .statistics-snapshot-grid,
+  .statistics-health-list {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

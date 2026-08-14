@@ -1424,7 +1424,7 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 
 .scan-page .delivery-table th:nth-child(8),
 .scan-page .delivery-table td:nth-child(8) {
-  width: 6%
+  width: 5%
 }
 
 .scan-page .delivery-table th:nth-child(9),
@@ -1436,7 +1436,7 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 
 .scan-page .delivery-table th:nth-child(10),
 .scan-page .delivery-table td:nth-child(10) {
-  width: 11%
+  width: 12%
 }
 
 .scan-page .delivery-table th:last-child,
@@ -3309,4 +3309,286 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 
 .scan-page .delivery-table .location-history-stack-v269.is-editable {
   width: 100%;
+}
+
+/* ========================================================================== */
+/* v0.304 TC22-first Scan workspace                                           */
+/* ========================================================================== */
+@media (max-width: 760px) {
+  .scan-page {
+    padding-inline: 7px !important;
+  }
+
+  .scan-page .workspace {
+    min-width: 0;
+    display: block !important;
+    padding: 0 !important;
+  }
+
+  .scan-page .list-panel,
+  .scan-page .scanner-panel {
+    width: 100% !important;
+    min-width: 0 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 18px rgba(8, 38, 90, 0.08) !important;
+  }
+
+  .scan-page .scanner-panel:not(.bay-scanner-panel) {
+    position: static !important;
+    top: auto !important;
+    padding: 0 10px 10px !important;
+    overflow: visible !important;
+  }
+
+  .scan-page .scanner-panel > .scanner-summary-header:first-child {
+    margin: 0 -10px 9px !important;
+    padding: 9px 10px 10px !important;
+    border-radius: 12px 12px 0 0 !important;
+  }
+
+  .scan-page .scanner-summary-header .scanner-panel-context-row-v196 {
+    width: 100% !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .scan-page .scanner-panel-station-v196 {
+    grid-column: 1 / -1 !important;
+    grid-row: 1 !important;
+  }
+
+  .scan-page .scanner-panel-date-select-v196,
+  .scan-page .scanner-panel-stage-select-v196 {
+    grid-row: 2 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  .scan-page .scanner-panel-context-select-v196 button.custom-select-trigger,
+  .scan-page .scanner-panel-context-select-v196 select,
+  .scan-page .scanner-panel-station-v196 > strong {
+    min-height: 44px !important;
+    height: 44px !important;
+    font-size: 15px !important;
+  }
+
+  .scan-page .scanner-panel-context-select-v196 .custom-select-value {
+    line-height: 44px !important;
+    font-size: 15px !important;
+  }
+
+  .scan-page .scanner-progress-row {
+    gap: 6px !important;
+  }
+
+  .scan-update-review-control {
+    grid-template-columns: 32px minmax(0, 1fr) !important;
+    gap: 8px !important;
+    margin-inline: 0 !important;
+    padding: 10px !important;
+  }
+
+  .scan-update-review-control::before {
+    left: 42px !important;
+  }
+
+  .scan-update-review-actions {
+    grid-column: 1 / -1 !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+  }
+
+  .scan-rack-row,
+  .outbound-rack-status-row,
+  .scan-bay-override-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .scan-rack-actions {
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .scan-form-heading {
+    min-height: 42px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+  }
+
+  .scan-page .scan-input-wrap,
+  .scan-page .scan-input-wrap input {
+    min-height: 52px !important;
+    height: 52px !important;
+  }
+
+  .scan-page .scan-input-wrap input {
+    font-size: 18px !important;
+    font-weight: 800 !important;
+  }
+
+  .scan-history-actions .undo-redo-icon {
+    min-width: 44px !important;
+    min-height: 40px !important;
+  }
+
+  .manual-scan-form,
+  .last-scan,
+  .scan-rack-panel,
+  .outbound-rack-status-panel,
+  .scan-bay-override-panel {
+    border-radius: 11px !important;
+  }
+
+  .manual-scan-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .manual-scan-row > button {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+  }
+
+  .manual-scan-row input,
+  .manual-scan-row select {
+    min-height: 44px !important;
+    font-size: 16px !important;
+  }
+
+  .compact-scan-history .last-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+  }
+
+  .compact-scan-history .last-fields span:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .recent-inline-block {
+    overflow: hidden;
+  }
+
+  .recent-table-wrap.compact {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-list-cards {
+    gap: 8px !important;
+  }
+
+  .mobile-list-card {
+    min-height: 82px !important;
+    border-radius: 11px !important;
+    padding: 10px !important;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .summary-card {
+    min-height: 76px !important;
+    padding: 9px !important;
+  }
+
+  .line-update-review-prompt-shell {
+    left: 8px !important;
+    right: 8px !important;
+    bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+    width: auto !important;
+  }
+
+  .line-update-review-prompt {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  .rush-alert-panel {
+    width: calc(100vw - 16px) !important;
+    max-width: none !important;
+    max-height: calc(100vh - 20px) !important;
+    overflow-y: auto !important;
+    padding: 15px !important;
+  }
+
+  .rush-alert-details {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .custom-select-menu.is-scan-context-menu {
+    max-width: calc(100vw - 14px) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .scan-rack-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .scan-page .scanner-panel-context-select-v196 button.custom-select-trigger.has-indicator {
+    padding-right: 45px !important;
+  }
+}
+
+
+/* v0.308 Sticky Scan context interaction and RM marker cleanup */
+.scan-page .scanner-panel:not(.bay-scanner-panel) {
+  z-index: 40 !important;
+  isolation: isolate;
+}
+
+.scan-page .delivery-table td:nth-child(7) .row-marker.remake-marker {
+  position: relative;
+  overflow: hidden !important;
+  list-style: none !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+.scan-page .delivery-table td:nth-child(7) .row-marker.remake-marker::before,
+.scan-page .delivery-table td:nth-child(7) .row-marker.remake-marker::after,
+.scan-page .delivery-table td:nth-child(7)::before,
+.scan-page .delivery-table td:nth-child(7)::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* v0.309 Sticky Stage selector interaction repair ---------------------------
+   Stage is the right-most control in the sticky scanner header, so give its
+   shell explicit pointer ownership while the panel is floating. The menu is
+   rendered on document.body and receives a higher layer than page headers. */
+.scan-page .scanner-panel-stage-select-v196 {
+  position: relative !important;
+  z-index: 70 !important;
+  pointer-events: auto !important;
+}
+
+.scan-page .scanner-panel-stage-select-v196 .custom-select-shell,
+.scan-page .scanner-panel-stage-select-v196 button.custom-select-trigger {
+  position: relative !important;
+  z-index: 71 !important;
+  pointer-events: auto !important;
+}
+
+.custom-select-menu.is-scan-context-menu[data-select-id="deliveryStageSelect"] {
+  z-index: 14000 !important;
+  pointer-events: auto !important;
+}
+
+
+/* v0.311 Scan table progress readability -----------------------------------
+   Give Process/Progress one additional percentage point from Route and keep
+   compact values such as "Outbound 0/1" on one line on desktop. */
+.scan-page .delivery-table td:nth-child(10) .process-pill {
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
 }

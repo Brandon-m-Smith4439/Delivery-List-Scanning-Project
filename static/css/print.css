@@ -9705,3 +9705,69 @@
     overflow-y: auto;
   }
 }
+
+/* ========================================================================== */
+/* v0.304 compact-device Print / Export                                       */
+/* ========================================================================== */
+@media (max-width: 760px) {
+  html body #printOptionsPanel.print-options-panel {
+    inset: 5px !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 14px !important;
+  }
+
+  #printOptionsPanel .print-options-hero-v197,
+  #printOptionsPanel .print-options-hero-v238,
+  #printOptionsPanel .print-options-hero-v240 {
+    min-height: 76px !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+  }
+
+  #printOptionsPanel .print-options-hero-v197 h2,
+  #printOptionsPanel .print-options-hero-v238 h2,
+  #printOptionsPanel .print-options-hero-v240 h2 {
+    font-size: 20px !important;
+  }
+
+  #printOptionsPanel .print-options-hero-v197 p,
+  #printOptionsPanel .print-options-hero-v238 p,
+  #printOptionsPanel .print-options-hero-v240 p {
+    display: none !important;
+  }
+
+  #printOptionsPanel .print-options-workspace-v197,
+  #printOptionsPanel .print-options-workspace-v195,
+  #printOptionsPanel .print-options-primary-grid-v182,
+  #printOptionsPanel .print-stage-options-v195,
+  #printOptionsPanel .print-specific-filter-grid-v182,
+  #printOptionsPanel .print-glass-group-options {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #printOptionsPanel .print-options-workspace-v197,
+  #printOptionsPanel .print-options-workspace-v195 {
+    overflow-y: auto !important;
+    padding: 8px !important;
+  }
+
+  #printOptionsPanel :is(input, select, button) {
+    min-height: 44px;
+  }
+
+  #printOptionsPanel .print-options-footer-v182 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #printOptionsPanel .print-options-footer-v182 button {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+    width: 100% !important;
+  }
+}

@@ -25595,3 +25595,321 @@ body[data-page="scan"] .app-header {
   opacity: .45;
   cursor: not-allowed;
 }
+
+/* ========================================================================== */
+/* v0.304 TC22 / compact-device responsive ownership                          */
+/* ========================================================================== */
+/* Zebra TC22-class handhelds commonly expose a phone-sized CSS viewport even
+   though the physical panel is Full HD+. Keep desktop/tablet behavior intact
+   and optimize only compact widths for one-handed scanning and gloved touch. */
+@media (max-width: 760px) {
+  :root {
+    --app-header-height: 106px;
+    --sticky-scanner-panel-top: 114px;
+    --mobile-page-pad: 10px;
+    --mobile-touch-target: 44px;
+  }
+
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    --app-primary-min-height: var(--mobile-touch-target);
+    --app-primary-font-size: 14px;
+    --app-primary-padding: 8px 13px;
+    --shared-close-size: 42px;
+    --shared-close-icon-size: 17px;
+    background: #edf2f7;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px;
+  }
+
+  .page-view {
+    min-width: 0;
+    padding: var(--mobile-page-pad) var(--mobile-page-pad) calc(16px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .page-heading,
+  .scan-heading {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+    align-items: start !important;
+    margin-bottom: 10px !important;
+  }
+
+  .page-heading h1,
+  .scan-heading h1 {
+    margin: 0 !important;
+    font-size: 22px !important;
+    line-height: 1.08 !important;
+    letter-spacing: -0.02em;
+  }
+
+  .page-heading p,
+  .scan-heading p {
+    margin: 3px 0 0 !important;
+    font-size: 12px !important;
+    line-height: 1.35 !important;
+  }
+
+  .page-heading-actions {
+    width: 100%;
+    justify-content: stretch !important;
+    justify-items: stretch !important;
+  }
+
+  .panel {
+    min-width: 0;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 20px rgba(7, 42, 99, 0.07) !important;
+  }
+
+  .app-header,
+  body[data-page="scan"] .app-header {
+    min-height: var(--app-header-height) !important;
+    grid-column: 1 !important;
+    grid-template-columns: 42px minmax(0, 1fr) !important;
+    grid-template-areas:
+      "menu actions"
+      "search search" !important;
+    align-content: center !important;
+    gap: 7px !important;
+    padding: 7px 9px !important;
+    border-bottom-color: #b9c9dd !important;
+    background: rgba(248, 251, 255, 0.98) !important;
+    box-shadow: 0 5px 16px rgba(7, 42, 99, 0.1) !important;
+  }
+
+  body[data-page="scan"] .mobile-sidebar-toggle,
+  .mobile-sidebar-toggle {
+    grid-area: menu !important;
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    display: grid !important;
+    border-radius: 10px !important;
+  }
+
+  .header-actions,
+  body[data-page="scan"] .header-actions {
+    grid-area: actions !important;
+    grid-column: auto !important;
+    justify-self: end !important;
+    min-width: 0 !important;
+  }
+
+  .header-quick-actions {
+    width: auto;
+    gap: 5px !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .header-actions .header-utility-button,
+  .header-actions .print-export-button {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+    padding: 0 !important;
+    border-radius: 9px !important;
+  }
+
+  .header-search,
+  body[data-page="scan"] .header-search {
+    grid-area: search !important;
+    grid-column: auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    grid-template-columns: minmax(0, 1fr) 70px !important;
+    gap: 6px !important;
+  }
+
+  .header-search .search-box,
+  .header-search .search-box input {
+    min-height: 40px !important;
+    height: 40px !important;
+  }
+
+  .header-search .search-action-button {
+    min-width: 70px !important;
+    min-height: 40px !important;
+    height: 40px !important;
+    padding: 0 8px !important;
+    font-size: 12px !important;
+  }
+
+  .app-sidebar,
+  .app.is-sidebar-collapsed .app-sidebar {
+    width: min(300px, calc(100vw - 34px)) !important;
+    padding: 10px !important;
+  }
+
+  .app.is-sidebar-mobile-open .app-sidebar .sidebar-brand-row {
+    min-height: 112px !important;
+    height: 112px !important;
+    padding: 4px 0 8px !important;
+  }
+
+  .app.is-sidebar-mobile-open .app-sidebar .brand-icon,
+  .app.is-sidebar-mobile-open .app-sidebar .brand-combined-logo {
+    width: min(112px, calc(100% - 24px)) !important;
+    height: 94px !important;
+    max-width: 112px !important;
+    max-height: 94px !important;
+    object-fit: contain !important;
+  }
+
+  .app-sidebar .app-nav {
+    gap: 4px !important;
+  }
+
+  .app-sidebar .app-nav button,
+  .app.is-sidebar-collapsed .app-sidebar .app-nav button {
+    min-height: 46px !important;
+    padding: 0 12px !important;
+    border-radius: 10px !important;
+  }
+
+  .mobile-nav {
+    display: none !important;
+    left: 7px !important;
+    right: 7px !important;
+    bottom: calc(6px + env(safe-area-inset-bottom)) !important;
+    z-index: 38 !important;
+    min-height: 62px !important;
+    height: 62px !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    overflow: hidden;
+    border: 1px solid #bac9da !important;
+    border-radius: 16px !important;
+    background: rgba(255, 255, 255, 0.98) !important;
+    box-shadow: 0 12px 28px rgba(6, 35, 72, 0.2) !important;
+  }
+
+  body[data-page="scan"] #scanPage {
+    padding-bottom: calc(78px + env(safe-area-inset-bottom)) !important;
+  }
+
+  body[data-page="scan"] .mobile-nav {
+    display: grid !important;
+  }
+
+  .mobile-nav button {
+    min-width: 0;
+    min-height: 60px !important;
+    gap: 2px !important;
+    border-radius: 0 !important;
+    font-size: 10px !important;
+    font-weight: 850 !important;
+    line-height: 1 !important;
+  }
+
+  .mobile-nav button.is-active {
+    background: linear-gradient(180deg, #154a84, #062f59) !important;
+  }
+
+  .mobile-nav .nav-icon {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .login-screen {
+    align-items: start !important;
+    padding: 12px !important;
+    overflow-y: auto;
+  }
+
+  .login-shell {
+    width: 100% !important;
+    max-width: 430px !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0 !important;
+    margin: auto;
+  }
+
+  .login-hero-card {
+    display: none !important;
+  }
+
+  .login-card,
+  .password-reset-card {
+    width: 100% !important;
+    padding: 20px 16px !important;
+    border-radius: 16px !important;
+  }
+
+  .login-card h2 {
+    font-size: 26px !important;
+  }
+
+  .login-card input {
+    min-height: 48px !important;
+    height: 48px !important;
+    font-size: 16px !important;
+  }
+
+  .login-action-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .table-wrap,
+  .admin-table {
+    max-width: 100%;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 430px) {
+  :root {
+    --app-header-height: 100px;
+    --sticky-scanner-panel-top: 108px;
+    --mobile-page-pad: 8px;
+  }
+
+  .page-heading h1,
+  .scan-heading h1 {
+    font-size: 20px !important;
+  }
+
+  .app-header,
+  body[data-page="scan"] .app-header {
+    padding-inline: 7px !important;
+  }
+
+  .header-actions .header-utility-button,
+  .header-actions .print-export-button {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+  }
+
+  .header-search {
+    grid-template-columns: minmax(0, 1fr) 62px !important;
+  }
+
+  .header-search .search-action-button {
+    min-width: 62px !important;
+    font-size: 11px !important;
+  }
+
+  .mobile-nav {
+    left: 5px !important;
+    right: 5px !important;
+    bottom: calc(4px + env(safe-area-inset-bottom)) !important;
+  }
+}

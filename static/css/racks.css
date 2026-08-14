@@ -2108,7 +2108,7 @@
 
 
 .rack-manager-grid {
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)) !important;
+  grid-template-columns: minmax(0, 1fr) !important;
   align-items: start;
   min-width: 0;
 }
@@ -2435,7 +2435,8 @@
 .rack-board-card > .rack-destination-pill {
   position: absolute;
   top: 8px;
-  right: 9px;
+  left: 9px;
+  right: auto;
   z-index: 3;
   max-width: calc(100% - 18px);
   box-shadow: 0 5px 12px rgba(7, 22, 51, 0.08);
@@ -5023,7 +5024,10 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
 
 #operationsModal[data-kind="rack-history"] .packing-history-shell-v272 {
   width: 100%;
+  height: auto !important;
   display: grid;
+  grid-template-rows: repeat(4, max-content);
+  align-content: start;
   gap: 12px;
 }
 
@@ -5266,8 +5270,11 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
    Keep history summaries compact, keep row actions together, and guarantee the
    snapshot viewer sits above the Operations modal rather than inside its stack. */
 .packing-history-page-summary-v272 {
+  width: 100% !important;
   min-height: 0 !important;
   height: auto !important;
+  flex: 0 0 auto !important;
+  align-self: start !important;
   justify-content: flex-start !important;
   padding: 5px 9px !important;
   line-height: 1.15 !important;
@@ -5327,4 +5334,478 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
   .packing-history-row-actions-v272 {
     justify-content: flex-start !important;
   }
+}
+
+/* ========================================================================== */
+/* v0.304 compact-device Rack workspace                                       */
+/* ========================================================================== */
+@media (max-width: 760px) {
+  .rack-heading-actions,
+  .rack-create-actions,
+  .rack-toolbar {
+    width: 100%;
+    justify-items: stretch !important;
+    justify-content: stretch !important;
+  }
+
+  .rack-create-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .rack-create-actions button {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+
+  .rack-grid,
+  .rack-board,
+  .rack-scan-grid,
+  .rack-scan-form,
+  .rack-admin-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 9px !important;
+  }
+
+  .rack-board {
+    gap: 10px !important;
+  }
+
+  .rack-board-group {
+    border-radius: 12px !important;
+  }
+
+  .rack-board-group-header {
+    min-height: 58px !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 7px !important;
+    padding: 9px 10px !important;
+  }
+
+  .rack-board-group-header h2 {
+    font-size: 16px !important;
+  }
+
+  .rack-column-actions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .rack-board-card-list {
+    padding: 8px !important;
+  }
+
+  .rack-board-card {
+    min-height: 64px !important;
+    padding: 9px !important;
+  }
+
+  .rack-detail-panel {
+    position: static !important;
+    top: auto !important;
+    max-height: none !important;
+    grid-template-rows: auto auto auto !important;
+  }
+
+  .rack-detail-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 11px !important;
+  }
+
+  .rack-detail-stats {
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .rack-detail-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    padding: 9px !important;
+  }
+
+  .rack-detail-actions button {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+
+  .rack-detail-pieces {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  html body #operationsModal.operations-modal-panel:is([data-kind="rack-details"], [data-kind="packing-history"]) {
+    inset: 5px !important;
+    width: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    grid-template-rows: auto auto minmax(0, 1fr) !important;
+    border-radius: 14px !important;
+  }
+
+  html body #operationsModal.operations-modal-panel:is([data-kind="rack-details"], [data-kind="packing-history"]) > .operations-modal-heading {
+    min-height: 78px !important;
+    height: auto !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 8px !important;
+    padding: 11px 12px !important;
+  }
+
+  html body #operationsModal.operations-modal-panel:is([data-kind="rack-details"], [data-kind="packing-history"]) .operations-modal-heading-copy h2 {
+    font-size: 20px !important;
+  }
+
+  html body #operationsModal.operations-modal-panel:is([data-kind="rack-details"], [data-kind="packing-history"]) .operations-modal-heading-copy p {
+    display: none !important;
+  }
+
+  html body #operationsModal.operations-modal-panel:is([data-kind="rack-details"], [data-kind="packing-history"]) > #operationsModalBody,
+  html body #operationsModal.operations-modal-panel:is([data-kind="rack-details"], [data-kind="packing-history"]) > #operationsModalHistory {
+    overflow-y: auto !important;
+    padding: 9px !important;
+  }
+
+  .packing-history-week-summary,
+  .packing-history-snapshot-row,
+  .packing-history-snapshot-actions {
+    min-width: 0 !important;
+  }
+
+  .packing-history-snapshot-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 7px !important;
+  }
+
+  .packing-history-snapshot-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+  }
+}
+
+/* v0.307 Rack identity validation and unmistakable lifecycle status ----------- */
+.rack-draft-validation-v307 {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #b8cfdf;
+  border-radius: 10px;
+  background: #f4f9fc;
+  color: #315d77;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.rack-draft-validation-v307::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #6f8ea4;
+}
+
+.rack-draft-validation-v307.is-ready {
+  border-color: #9fceb2;
+  background: #f1faf5;
+  color: #24623d;
+}
+
+.rack-draft-validation-v307.is-ready::before { background: #2f8a55; }
+
+.rack-draft-validation-v307.is-error {
+  border-color: #e1a9ad;
+  background: #fff4f4;
+  color: #8c2f37;
+}
+
+.rack-draft-validation-v307.is-error::before { background: #c74650; }
+
+.rack-board-state-v307 {
+  grid-column: 1 / -1;
+  width: max-content;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #c6d4e0;
+  border-radius: 999px;
+  background: #f2f6f9;
+  color: #536a7d;
+  padding: 0 10px;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.rack-board-state-v307 i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.rack-board-state-v307.open {
+  border-color: #e5c47e;
+  background: #fff8e9;
+  color: #8b5b07;
+}
+
+.rack-board-state-v307.complete {
+  border-color: #9bc9a9;
+  background: #eff9f2;
+  color: #246b3c;
+}
+
+.rack-board-state-v307.in-transit {
+  border-color: #94b9de;
+  background: #eef6ff;
+  color: #235f9a;
+}
+
+.rack-board-state-v307.received {
+  border-color: #8ec8c1;
+  background: #edf9f7;
+  color: #236b65;
+}
+
+.rack-board-state-v307.empty {
+  border-color: #cbd5df;
+  background: #f5f7f9;
+  color: #667789;
+}
+
+#adminModal[data-kind="racks"] .rack-manager-grid {
+  /* One full-width collapsible set per row prevents one open set from stretching
+     a neighboring CSS-grid row. Truck stays pinned first by the renderer. */
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+@media (max-width: 430px) {
+  .rack-create-actions,
+  .rack-detail-actions,
+  .packing-history-snapshot-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+
+/* v0.308 Rack creation safety, history scrolling, set independence, and lifecycle clarity */
+#operationsModal.is-control-center[data-kind="rack-history"] {
+  grid-template-rows: minmax(126px, auto) 58px minmax(0, 1fr) !important;
+}
+
+#operationsModal[data-kind="rack-history"] > #operationsRackRecordsTabs {
+  grid-row: 2 !important;
+  min-height: 58px !important;
+  height: 58px !important;
+}
+
+#operationsModal[data-kind="rack-history"] > #operationsModalBody {
+  grid-row: 3 !important;
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+#operationsModal[data-kind="rack-history"] .rack-history-control-center,
+#operationsModal[data-kind="rack-history"] .packing-history-shell-v272 {
+  min-height: 0 !important;
+  height: auto !important;
+  align-self: start !important;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-page-summary-v272 {
+  min-height: 30px !important;
+  height: 30px !important;
+  max-height: 30px !important;
+  place-self: start stretch !important;
+  align-items: center !important;
+  padding: 4px 9px !important;
+}
+
+#adminModal[data-kind="racks"] .rack-manager-grid {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+}
+
+#adminModal[data-kind="racks"] details.rack-manager-group-v272 {
+  width: 100% !important;
+  flex: 0 0 auto !important;
+}
+
+.rack-set-existing-v308 {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #d4e0eb;
+  border-radius: 11px;
+  background: #f7fafc;
+}
+.rack-set-existing-v308 > div:first-child { display: grid; gap: 2px; }
+.rack-set-existing-v308 > div:first-child strong { color: #173c63; font-size: 12px; }
+.rack-set-existing-v308 > div:first-child small { color: #667b90; font-size: 10px; }
+.rack-set-existing-list-v308 { display: flex; flex-wrap: wrap; gap: 6px; }
+.rack-set-existing-rack-v308 {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #cbd8e5;
+  border-radius: 9px;
+  background: #fff;
+}
+.rack-set-existing-rack-v308.is-current { border-color: #4e83bb; background: #edf5ff; }
+.rack-set-existing-rack-v308 b { color: #123b64; font-size: 11px; }
+.rack-set-existing-rack-v308 small { overflow: hidden; color: #64798e; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.rack-set-existing-rack-v308 i { border-radius: 999px; padding: 3px 6px; background: #eef2f6; color: #53697d; font-size: 9px; font-style: normal; font-weight: 900; }
+.rack-set-existing-rack-v308 i.complete { background: #e9f8ef; color: #287246; }
+.rack-set-existing-rack-v308 i.in-transit { background: #fff3d9; color: #916000; }
+.rack-set-existing-rack-v308 i.open { background: #edf4ff; color: #315f96; }
+.rack-set-existing-empty-v308 { color: #687d91; font-size: 11px; font-weight: 750; }
+
+.rack-details-status-banner-v308 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 11px 13px;
+  border: 1px solid #b9cadb;
+  border-left: 6px solid #4b77a5;
+  border-radius: 11px;
+  background: #f7fafc;
+}
+.rack-details-status-banner-v308 > span { width: 12px; height: 12px; flex: 0 0 12px; border-radius: 50%; background: #4b77a5; box-shadow: 0 0 0 5px rgba(75,119,165,.12); }
+.rack-details-status-banner-v308 > div { min-width: 0; display: grid; grid-template-columns: auto auto; gap: 1px 8px; align-items: baseline; }
+.rack-details-status-banner-v308 small { color: #687c90; font-size: 9px; font-weight: 900; letter-spacing: .07em; text-transform: uppercase; }
+.rack-details-status-banner-v308 strong { color: #173d65; font-size: 17px; font-weight: 950; }
+.rack-details-status-banner-v308 p { grid-column: 1 / -1; margin: 0; color: #5a7085; font-size: 11px; font-weight: 800; }
+.rack-details-status-banner-v308.complete { border-left-color: #2f9560; background: #f2fbf6; }
+.rack-details-status-banner-v308.complete > span { background: #2f9560; box-shadow: 0 0 0 5px rgba(47,149,96,.12); }
+.rack-details-status-banner-v308.in-transit { border-left-color: #d49116; background: #fff9eb; }
+.rack-details-status-banner-v308.in-transit > span { background: #d49116; box-shadow: 0 0 0 5px rgba(212,145,22,.14); }
+.rack-details-status-banner-v308.received { border-left-color: #23897f; background: #effaf8; }
+
+
+/* v0.311 Rack history scrolling, route placement, and reliable actions ------
+   The records tab itself owns vertical scrolling. Keeping the modal body fixed
+   prevents historical page rules from accidentally expanding the child beyond
+   the control-center viewport and removing the scrollbar. */
+#operationsModal.is-control-center[data-kind="rack-history"] {
+  min-height: 0 !important;
+  height: min(900px, calc(100dvh - 28px)) !important;
+  max-height: calc(100dvh - 28px) !important;
+  overflow: hidden !important;
+}
+
+#operationsModal[data-kind="rack-history"] > #operationsModalBody {
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+#operationsModal[data-kind="rack-history"] .rack-history-control-center {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+  overflow: hidden !important;
+}
+
+#operationsModal[data-kind="rack-history"] .rack-history-control-center > [data-rack-history-panel] {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding-right: 4px;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-shell-v272 {
+  align-content: start !important;
+}
+
+/* v0.312: Route/destination belongs in the upper-right of each Rack Overview card. */
+.rack-board-card > .rack-destination-pill {
+  left: auto !important;
+  right: 9px !important;
+}
+
+/* v0.313 Rack heading action geometry -----------------------------------------
+   Page changes now reset scroll after visibility changes in app.js. Keep the
+   actual button rectangle as the only hit target so stale pseudo hit-areas or
+   sticky-header overlap cannot create a visible dead band after navigation. */
+.racks-page > .page-heading {
+  overflow: visible !important;
+  overflow-anchor: none;
+}
+
+.racks-page > .page-heading::before,
+.racks-page > .page-heading::after {
+  pointer-events: none !important;
+}
+
+.racks-page .rack-heading-actions,
+.racks-page .rack-create-actions {
+  position: relative !important;
+  z-index: 3 !important;
+  overflow: visible !important;
+  pointer-events: auto !important;
+}
+
+.racks-page .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn) {
+  position: relative !important;
+  z-index: 4 !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 12px !important;
+  line-height: 1 !important;
+  overflow: visible !important;
+  pointer-events: auto !important;
+  touch-action: manipulation;
+}
+
+.racks-page .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn)::before,
+.racks-page .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn)::after {
+  content: none !important;
+  pointer-events: none !important;
+}
+
+
+
+/* v0.314 Rack heading action hit-test stabilization -------------------------
+   Rack data refreshes asynchronously after page entry. Disable scroll anchoring
+   on this page so the sticky application header cannot reclaim a few pixels of
+   the heading after the first paint. app.js also verifies the geometry after
+   the refresh and forwards clicks that land inside either visible action box. */
+#racksPage,
+#racksPage > .page-heading,
+#racksPage .rack-grid {
+  overflow-anchor: none !important;
+}
+
+#racksPage .rack-heading-actions,
+#racksPage .rack-create-actions,
+#racksPage :is(#rackPackingHistoryBtn, #rackEditOpenBtn) {
+  isolation: isolate;
 }

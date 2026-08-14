@@ -42,6 +42,7 @@ def test_page_stylesheets_are_present_and_balanced() -> None:
         "admin.css",
         "print.css",
         "shell.css",
+        "mobile.css",
     }
     assert {path.name for path in css_dir.glob("*.css")} == expected
     for path in css_dir.glob("*.css"):
@@ -59,7 +60,7 @@ def test_version_numbers_are_not_embedded_in_asset_filenames() -> None:
 def test_single_javascript_bundle_is_loaded() -> None:
     index = (ROOT / "index.html").read_text(encoding="utf-8")
     scripts = re.findall(r'<script\s+src="([^"]+)"', index)
-    assert scripts == ["static/js/app.js?v=20260811-v0.303"]
+    assert scripts == ["static/js/app.js?v=20260814-v0.319"]
     app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
     assert "DELIVERY AUTOMATION CONTROL CENTER" in app
     assert "NOTIFICATION CENTER AND LINE UPDATE REVIEW" in app
@@ -163,8 +164,8 @@ def test_scan_time_pill_qty_headers_and_table_are_width_safe() -> None:
     assert "<th>Progress</th>" in index
     assert "<th>Item Nr.</th>" not in index[index.index('<table class="delivery-table">'):index.index('</table>', index.index('<table class="delivery-table">'))]
     assert "<th>Process State</th>" not in index[index.index('<table class="delivery-table">'):index.index('</table>', index.index('<table class="delivery-table">'))]
-    assert "static/css/scan.css?v=20260811-v0.303" in index
-    assert "static/js/app.js?v=20260811-v0.303" in index
+    assert "static/css/scan.css?v=20260814-v0.319" in index
+    assert "static/js/app.js?v=20260814-v0.319" in index
 
 
 def test_v158_core_page_polish_and_scan_geometry() -> None:
@@ -188,20 +189,20 @@ def test_v158_core_page_polish_and_scan_geometry() -> None:
     assert "width: calc(100% - 2px)" not in scan
     assert "padding-right: 2px" not in scan
     expected_asset_keys = {
-        "styles": "20260811-v0.303",
-        "home": "20260811-v0.303",
-        "scan": "20260811-v0.303",
-        "racks": "20260811-v0.303",
-        "admin": "20260811-v0.303",
+        "styles": "20260814-v0.319",
+        "home": "20260814-v0.319",
+        "scan": "20260814-v0.319",
+        "racks": "20260814-v0.319",
+        "admin": "20260814-v0.319",
     }
     for name, cache_key in expected_asset_keys.items():
         assert f"static/css/{name}.css?v={cache_key}" in index
-    assert "static/js/app.js?v=20260811-v0.303" in index
+    assert "static/js/app.js?v=20260814-v0.319" in index
 
 
 def test_admin_control_center_modal_structure() -> None:
     index = (ROOT / "index.html").read_text(encoding="utf-8")
-    assert 'static/css/admin.css?v=20260811-v0.303' in index
+    assert 'static/css/admin.css?v=20260814-v0.319' in index
     for element_id in (
         "adminModalEyebrow",
         "adminModalDescription",
@@ -229,9 +230,9 @@ def test_v161_scan_timestamp_rack_status_and_rack_control_centers() -> None:
     scan = (ROOT / "static" / "css" / "scan.css").read_text(encoding="utf-8")
     racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
 
-    assert "static/css/scan.css?v=20260811-v0.303" in index
-    assert "static/css/racks.css?v=20260811-v0.303" in index
-    assert "static/js/app.js?v=20260811-v0.303" in index
+    assert "static/css/scan.css?v=20260814-v0.319" in index
+    assert "static/css/racks.css?v=20260814-v0.319" in index
+    assert "static/js/app.js?v=20260814-v0.319" in index
     for element_id in (
         "operationsModalDescription",
         "operationsModalStatusText",
@@ -264,10 +265,10 @@ def test_v162_scan_typography_and_control_center_layering_repair() -> None:
     racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
     admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
 
-    assert "static/css/scan.css?v=20260811-v0.303" in index
-    assert "static/css/racks.css?v=20260811-v0.303" in index
-    assert "static/css/admin.css?v=20260811-v0.303" in index
-    assert "static/js/app.js?v=20260811-v0.303" in index
+    assert "static/css/scan.css?v=20260814-v0.319" in index
+    assert "static/css/racks.css?v=20260814-v0.319" in index
+    assert "static/css/admin.css?v=20260814-v0.319" in index
+    assert "static/js/app.js?v=20260814-v0.319" in index
 
     assert ".last-scan-pill-v157 > :is(span, b, em)" in scan
     assert "font-size: 11.5px" in scan
@@ -288,9 +289,9 @@ def test_v163_modal_hidden_state_and_close_repair() -> None:
     racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
     admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
 
-    assert "static/css/racks.css?v=20260811-v0.303" in index
-    assert "static/css/admin.css?v=20260811-v0.303" in index
-    assert "static/js/app.js?v=20260811-v0.303" in index
+    assert "static/css/racks.css?v=20260814-v0.319" in index
+    assert "static/css/admin.css?v=20260814-v0.319" in index
+    assert "static/js/app.js?v=20260814-v0.319" in index
     assert 'id="adminModal" aria-hidden="true" hidden' in index
     assert 'id="operationsModal" aria-hidden="true" hidden' in index
 
@@ -310,9 +311,9 @@ def test_v164_simplified_gui_headers_and_automation_action() -> None:
     admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
     racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
 
-    assert "static/css/admin.css?v=20260811-v0.303" in index
-    assert "static/css/racks.css?v=20260811-v0.303" in index
-    assert "static/js/app.js?v=20260811-v0.303" in index
+    assert "static/css/admin.css?v=20260814-v0.319" in index
+    assert "static/css/racks.css?v=20260814-v0.319" in index
+    assert "static/js/app.js?v=20260814-v0.319" in index
     assert 'id="folderImportBtn" class="link-button admin-automation-link"' in index
     assert "Edit automated DL import" in index
     assert index.index("Edit automated DL import") < index.index("Edit delivery lists")
@@ -408,7 +409,7 @@ def test_v168_manual_edit_exact_row_capture_repair() -> None:
     assert "data.clientChangedFields = clientChangedFields" in app
     assert "The row has been left open so the entered values are not lost." in app
     assert "saveManualLineItem(saveLineItemButton.dataset.saveLineItem, saveLineItemButton)" in app
-    assert "static/js/app.js?v=20260811-v0.303" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
 
 
 def test_v169_manual_edit_glass_type_filters() -> None:
@@ -429,8 +430,8 @@ def test_v169_manual_edit_glass_type_filters() -> None:
     assert '"filterOptions": {' in store
     assert '"pieceQty": int(row["piece_qty"] or 0)' in store
     assert '.manual-edit-glass-filter-options' in css
-    assert 'static/css/admin.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
+    assert 'static/css/admin.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
 
 
 def test_v193_guarded_cross_delivery_date_scanning() -> None:
@@ -445,7 +446,7 @@ def test_v193_guarded_cross_delivery_date_scanning() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert '"v192_action_history_archive"' in migrations
     assert 'v193_' not in migrations
@@ -478,11 +479,11 @@ def test_v193_guarded_cross_delivery_date_scanning() -> None:
 
     assert 'id="crossDateScanOverview"' in index
     assert 'data-admin-modal="crossDateScanning"' in index
-    assert 'static/css/scan.css?v=20260811-v0.303' in index
-    assert 'static/css/admin.css?v=20260811-v0.303' in index
-    assert 'static/js/app.js?v=20260811-v0.303' in index
-    assert 'aria-label="Application version 0.303"' in index
-    assert '<strong>0.303</strong>' in index
+    assert 'static/css/scan.css?v=20260814-v0.319' in index
+    assert 'static/css/admin.css?v=20260814-v0.319' in index
+    assert 'static/js/app.js?v=20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert '<strong>0.318</strong>' in index
 
     assert 'v0.193 guarded cross-delivery-date scanning' in scan_css
     assert '.cross-date-scan-dialog' in scan_css
@@ -490,7 +491,7 @@ def test_v193_guarded_cross_delivery_date_scanning() -> None:
     assert 'v0.193 cross-delivery-date scan settings' in admin_css
     assert '.cross-date-settings-shell' in admin_css
 
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'Current maintained release: **v0.319**' in readme
     assert 'No database migration or separate setup script is required' in readme
     assert '## v0.193 - Guarded Cross-Delivery-Date Scanning' in changelog
 
@@ -504,7 +505,7 @@ def test_v194_exact_manual_scans_result_colors_sound_and_all_scans_history() -> 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'strict_order_item: bool = False' in store
     assert 'strict_order_item=is_manual' in store
     assert 'No exact order/item match' in store
@@ -522,9 +523,9 @@ def test_v194_exact_manual_scans_result_colors_sound_and_all_scans_history() -> 
     assert '.scan-page .scanner-panel .last-card.ok' in scan_css
     assert '.scan-page .scanner-panel .last-card.error' in scan_css
 
-    assert 'static/css/scan.css?v=20260811-v0.303' in index
-    assert 'static/js/app.js?v=20260811-v0.303' in index
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/scan.css?v=20260814-v0.319' in index
+    assert 'static/js/app.js?v=20260814-v0.319' in index
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.194 - Exact Manual Scans and Result Feedback Repair' in changelog
 
 
@@ -535,7 +536,7 @@ def test_v195_print_export_filter_workspace_and_exact_preview() -> None:
     contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert 'def summarize_print_package' in server
     assert 'parsed.path == "/api/print/package-preview"' in server
@@ -557,7 +558,7 @@ def test_v196_scanner_panel_context_selectors() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     scan_heading = index[index.index('<div class="scan-heading">'):index.index('<main class="workspace">')]
     assert 'deliveryDateSelect' not in scan_heading
     assert 'deliveryStageSelect' not in scan_heading
@@ -583,11 +584,11 @@ def test_v196_scanner_panel_context_selectors() -> None:
     assert '.scanner-panel-station-v196' in scan
     assert 'background: rgba(255, 255, 255, 0.07) !important' in scan
 
-    assert 'static/css/scan.css?v=20260811-v0.303' in index
-    assert 'static/js/app.js?v=20260811-v0.303' in index
-    assert 'aria-label="Application version 0.303"' in index
-    assert '<strong>0.303</strong>' in index
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/scan.css?v=20260814-v0.319' in index
+    assert 'static/js/app.js?v=20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert '<strong>0.318</strong>' in index
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.196 - Scanner Panel Date, Station, and Stage Header' in changelog
 
 
@@ -601,7 +602,7 @@ def test_v197_print_export_document_preview_control_center() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     for element_id in (
         "printSearchInput", "printDateFrom", "printDateTo",
@@ -644,11 +645,11 @@ def test_v197_print_export_document_preview_control_center() -> None:
     assert '"previewRows": preview_rows' in server
     assert '"pageCount": max((len(preview_rows)' in server
 
-    assert 'static/css/print.css?v=20260811-v0.303' in index
-    assert 'static/js/app.js?v=20260811-v0.303' in index
-    assert 'aria-label="Application version 0.303"' in index
-    assert '<strong>0.303</strong>' in index
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in index
+    assert 'static/js/app.js?v=20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert '<strong>0.318</strong>' in index
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.197 - Print / Export Document Preview Control Center' in changelog
 
 
@@ -662,7 +663,7 @@ def test_v198_route_first_print_filters_quick_date_and_smart_search() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert 'id="printOptionsStages"' not in index
     assert 'id="printQuickDate"' not in index
@@ -704,11 +705,11 @@ def test_v198_route_first_print_filters_quick_date_and_smart_search() -> None:
     hero_end = styles.index('}', hero_start)
     assert 'radial-gradient(circle at 96%' not in styles[hero_start:hero_end]
 
-    assert 'static/css/print.css?v=20260811-v0.303' in index
-    assert 'static/js/app.js?v=20260811-v0.303' in index
-    assert 'aria-label="Application version 0.303"' in index
-    assert '<strong>0.303</strong>' in index
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in index
+    assert 'static/js/app.js?v=20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert '<strong>0.318</strong>' in index
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.198 - Route-First Print Filters, Quick Date, and Smart Search' in changelog
 
 
@@ -743,9 +744,9 @@ def test_v199_multi_order_preset_gui_and_live_preview() -> None:
     assert ".print-filter-chip-v197:has(input:checked) span" in css
     assert ".print-selected-orders-list-v199" in css
     assert ".print-preset-modal-v199" in css
-    assert "APPLICATION_VERSION = \"303\"" in contract
-    assert "static/css/print.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
+    assert "APPLICATION_VERSION = \"318\"" in contract
+    assert "static/css/print.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
 
 
 def test_v200_live_preview_all_filters_preset_builder_and_output_selector() -> None:
@@ -782,11 +783,11 @@ def test_v200_live_preview_all_filters_preset_builder_and_output_selector() -> N
     assert '.print-clear-filters-v200' in css
     assert '.print-output-format-v200 .custom-select-trigger' in css
     assert '.print-preset-builder-v200' in css
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'Current maintained release: **v0.319**' in readme
 
 
 def test_v201_print_calendar_all_glass_and_preview_stability() -> None:
@@ -818,11 +819,11 @@ def test_v201_print_calendar_all_glass_and_preview_stability() -> None:
     assert '.print-header-date-control-v203' in css
     assert '.print-calendar-day-v201.is-today' in css
     assert 'grid-column: auto;' in css[css.index('.print-filter-chip-v197.is-status-all'):css.index('.print-options-footer-v200')]
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'Current maintained release: **v0.319**' in readme
 
 
 def test_v202_exact_print_sessions_item_selection_output_presets_and_scroll_preview() -> None:
@@ -884,11 +885,11 @@ def test_v202_exact_print_sessions_item_selection_output_presets_and_scroll_prev
     assert '.print-search-result-actions-v202' in css
     assert '.print-preset-output-grid-v202' in css
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.203 - Print Layout Completion and Direct Preview Printing' in changelog
 
 
@@ -931,11 +932,11 @@ def test_v203_print_header_date_layout_direct_print_and_exact_preview() -> None:
     assert '.print-copy-stepper-v203' in css
     assert '.print-orientation-toggle-v203' in css
     assert '.delivery-print-sheet-v203' in css
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.203 - Print Layout Completion and Direct Preview Printing' in changelog
 
 
@@ -947,12 +948,12 @@ def test_v204_print_preview_geometry_and_visual_polish() -> None:
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
     contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
 
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.204 - Print / Export Visual Polish and Preview Geometry Repair' in changelog
     assert 'v0.204 Print / Export visual polish and preview geometry repair' in css
 
@@ -993,10 +994,10 @@ def test_v205_range_calendar_known_glass_and_user_preset_persistence() -> None:
     assert 'resetPrintFilters({ clearActivePreset: false })' in app
     assert 'const initialization = resetPrintFilters({ clearActivePreset: false })' in app
     assert 'v0.205 consistent print controls, range calendar, and user preset state' in css
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.205 - Consistent Header Controls, Range Calendar, and User Presets' in changelog
 
 
@@ -1019,12 +1020,12 @@ def test_v206_compact_print_controls_instant_preset_builder_and_calendar_repair(
     assert '.custom-select-menu[data-select-id="printDateQuickSelect"]' in app
     assert 'v0.206 compact print header, instant preset builder, and calendar repair' in css
     assert 'min-height: 34px !important;' in css[css.index('v0.205 consistent print controls'):]
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.206 - Compact Print Controls, Instant Preset Builder, and Calendar Repair' in changelog
 
 
@@ -1050,12 +1051,12 @@ def test_v207_custom_range_stable_initial_filters_and_lookup_glass_library() -> 
     assert 'data-preset-search' in app
     assert 'grid-template-areas:' in css[css.index('v0.207 fills every desktop grid cell'):]
     assert 'font-size: 10.5px !important;' in css[css.index('v0.205 consistent print controls'):]
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.207 - Custom Range Completion, Stable Initial Filters, and Lookup Glass Library' in changelog
 
 
@@ -1081,12 +1082,12 @@ def test_v208_exact_glass_preview_state_and_centered_header_controls() -> None:
     assert 'grid-template-columns: 18px minmax(0, 1fr) 18px;' in css
     assert '.print-header-control-v205 .custom-select-value {' in css
     assert 'text-align: center !important;' in css[css.index('v0.205 consistent print controls'):]
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.208 - Exact Glass Preview State and Centered Header Controls' in changelog
 
 
@@ -1116,12 +1117,12 @@ def test_v209_system_default_landscape_totals_and_preset_redesign() -> None:
     assert 'inset: 10px;' in css
     assert '.delivery-print-sheet-v203.is-landscape .customer-col { width: 24%; }' in css
     assert 'font-size: 12.5px !important;' in css[css.index('v0.212 print header'):]
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.209 - System Default Preset, Landscape Sheets, and Print Totals' in changelog
 
 
@@ -1144,12 +1145,12 @@ def test_v210_deterministic_initial_airport_route() -> None:
     assert 'if (state.printWorkspacePromise) await state.printWorkspacePromise;' in app
     assert 'state.printWorkspaceReady = true;' in app
     assert 'if (!state.printWorkspaceReady) {' in app
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.210 - Deterministic Initial Airport Route' in changelog
 
 
@@ -1165,7 +1166,7 @@ def test_v211_letter_preview_parity_and_filter_summary() -> None:
     assert 'class="sheet-filter-summary"' in app
     assert 'filterSummary,' in app
     assert 'function localPrintPackageStylesheetUrls()' in app
-    assert 'static/css/styles.css?v=20260811-v0.303' in app
+    assert 'static/css/styles.css?v=20260814-v0.319' in app
     assert '@page{size:${pageSize};margin:.4in}' in app
     assert 'width: 8.5in !important;' in css
     assert 'height: 11in;' in css
@@ -1173,12 +1174,12 @@ def test_v211_letter_preview_parity_and_filter_summary() -> None:
     assert 'height: 8.5in;' in css
     assert '.delivery-print-sheet-v203 .sheet-filter-summary' in css
     assert 'inset: .49in;' in css
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.211 - Letter Preview Parity and Printed Filter Summary' in changelog
 
 
@@ -1205,12 +1206,12 @@ def test_v212_adaptive_filters_columns_and_route_state() -> None:
     assert '.delivery-print-sheet-v203.is-landscape .dimensions-col { width: 23%; }' in css
     assert '.delivery-print-sheet-v203.is-landscape .customer-col { width: 24%; }' in css
     assert 'inset: .42in;' in css
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.212 - Adaptive Print Metadata, Stable Route State, and Table Fit' in changelog
 
 
@@ -1230,7 +1231,7 @@ def test_v213_dense_rows_route_check_and_remake_frame() -> None:
     assert '? (pages.length ? 28 : 27)' in pagination
     assert ': (pages.length ? 28 : 26)' in pagination
     assert 'function localPrintPackageStylesheetUrls()' in app
-    assert 'static/css/styles.css?v=20260811-v0.303' in app
+    assert 'static/css/styles.css?v=20260814-v0.319' in app
     assert '.delivery-print-sheet-v203 .check-cell {' in css
     assert '.delivery-print-sheet-v203 th:nth-child(7) {' in css
     assert '.delivery-print-sheet-v203 td:nth-child(7) {' in css
@@ -1243,12 +1244,12 @@ def test_v213_dense_rows_route_check_and_remake_frame() -> None:
     assert '.delivery-print-sheet-v203.is-landscape .notes' not in css
     assert '.delivery-print-sheet-v203 .check-cell {\n  font-size: 12.25px;' in css
     assert 'text-align: center;' in css[css.index('.delivery-print-sheet-v203 th:nth-child(7)'):css.index('.delivery-print-sheet-v203 th:nth-child(8)')]
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.213 - Denser Delivery Sheets and Stable Remake Frames' in changelog
 
 
@@ -1279,12 +1280,12 @@ def test_v214_fuller_pages_gray_bands_and_repeating_footer() -> None:
     assert '.delivery-print-sheet-v203 .sheet-footer {' in css
     assert 'text-align: center;' in css[css.index('.delivery-print-sheet-v203 th:nth-child(7)'):css.index('.delivery-print-sheet-v203 th:nth-child(8)')]
     assert 'print-color-adjust: exact;' in css
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.214 - Fuller Page Capacity and Repeating Print Footer' in changelog
 
 
@@ -1305,7 +1306,7 @@ def test_v215_date_first_branded_header_and_alternating_rows() -> None:
     assert 'dateLabel: printSheetDateLabel(list.deliveryDate || "")' in app
     assert 'routeLabel: printSheetRouteLabel()' in app
     assert 'class="sheet-brand-mark"><img src="${escapeHtml(logoUrl)}"' in sheet_markup
-    assert 'barefoot-company-builders-firstsource-print-logo.png?v=20260811-v0.303' in sheet_markup
+    assert 'barefoot-company-builders-firstsource-print-logo.png?v=20260814-v0.319' in sheet_markup
     assert 'class="sheet-date-title"' in sheet_markup
     assert 'class="sheet-location-title"' in sheet_markup
     assert 'class="print-data-row ${stripeClass}"' in row_markup
@@ -1318,12 +1319,12 @@ def test_v215_date_first_branded_header_and_alternating_rows() -> None:
     assert 'border-bottom: 2px solid #000;' in css
     assert 'border-top: 2px solid #000;' in css
     assert '.delivery-print-sheet-v203 .print-data-row.is-even td {' in css
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.215 - Date-First Branded Print Header and Alternating Rows' in changelog
 
 
@@ -1341,7 +1342,7 @@ def test_v216_supplied_logo_clean_header_and_stacked_filters() -> None:
 
     assert logo.exists() and logo.stat().st_size > 0
     assert 'src="${escapeHtml(logoUrl)}"' in sheet_markup
-    assert 'barefoot-company-builders-firstsource-print-logo.png?v=20260811-v0.303' in sheet_markup
+    assert 'barefoot-company-builders-firstsource-print-logo.png?v=20260814-v0.319' in sheet_markup
     assert 'function localPrintPackageStylesheetUrls()' in app
     assert '.delivery-print-sheet-v203.rush .sheet-header {' in css
     assert '.delivery-print-sheet-v203.remake .sheet-header {' in css
@@ -1351,12 +1352,12 @@ def test_v216_supplied_logo_clean_header_and_stacked_filters() -> None:
     assert 'border-top: 2px solid #000;' in css
     assert 'border-bottom: 0;' in css[css.index('.delivery-print-sheet-v203 .sheet-header {'):css.index('.delivery-print-sheet-v203 .sheet-brand-title {')]
     assert 'display: block;' in css[css.index('.delivery-print-sheet-v203 .sheet-totals {'):css.index('.delivery-print-sheet-v203 .sheet-footer {')]
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.216 - Supplied Print Logo and Cleaner Header Metadata' in changelog
 
 
@@ -1388,12 +1389,12 @@ def test_v217_full_weekday_dates_and_route_first_titles() -> None:
     assert '.delivery-print-sheet-v203 .sheet-location-title {' in css
     assert '.delivery-print-sheet-v203 .sheet-date-title {' in css
     assert 'const minimum = isRange ? 370 : 230;' in app
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.217 - Full Weekday Dates and Route-First Delivery Titles' in changelog
 
 
@@ -1410,7 +1411,7 @@ def test_v218_reliable_print_logo_and_tightened_header():
     print_styles = app[app.index('function localPrintPackageStyles('):app.index('/** Build and synchronously open', app.index('function localPrintPackageStyles('))]
 
     assert logo.is_file() and logo.stat().st_size > 1000
-    assert 'barefoot-company-builders-firstsource-print-logo.png?v=20260811-v0.303' in markup
+    assert 'barefoot-company-builders-firstsource-print-logo.png?v=20260814-v0.319' in markup
     assert 'new URL(' in markup
     assert 'Continuation sheet' not in markup
     assert 'white-space: nowrap;' in css
@@ -1421,10 +1422,10 @@ def test_v218_reliable_print_logo_and_tightened_header():
     assert 'white-space: nowrap;' in css
     assert '.delivery-print-sheet-v203 .sheet-location-row.is-medium .sheet-location-title' in css
     assert '.delivery-print-sheet-v203 .sheet-location-row.is-long .sheet-location-title' in css
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.218 - Reliable Print Logo and Tightened Branded Header' in changelog
 
 
@@ -1440,20 +1441,20 @@ def test_v219_shared_preview_print_styles_and_portrait_zoom():
     assert '<strong id="printPreviewZoomLabel">90%</strong>' in html
     assert 'state.printPreviewZoom = 0.9;' in app
     assert 'function localPrintPackageStylesheetUrls()' in app
-    assert 'static/css/styles.css?v=20260811-v0.303' in app
-    assert 'static/css/print.css?v=20260811-v0.303' in app
+    assert 'static/css/styles.css?v=20260814-v0.319' in app
+    assert 'static/css/print.css?v=20260814-v0.319' in app
     assert '<link rel="stylesheet" href="${escapeHtml(stylesheetUrl)}">' in app
     assert 'document.fonts && document.fonts.ready' in app
     assert 'await Promise.all(imageLoads);' in app
     assert '.delivery-print-sheet-v203 .copy-box > span {' in css
     assert 'margin-top: 24px;' in css
     assert 'white-space: nowrap;' in css[css.rindex('/* v0.219 shared preview/print header alignment'):]
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.219 - Shared Preview and Print Styling' in changelog
 
 if __name__ == "__main__":
@@ -1533,11 +1534,11 @@ def test_v0220_print_filter_polish_and_repeating_metadata():
     assert 'content: "✓";' in css
 
     assert 'Grouped by Mirror, Tempered, and Annealed for faster selection' not in html
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.220 - Print Filter Visual Hierarchy and Compact Signoff' in changelog
 
 
@@ -1560,12 +1561,12 @@ def test_v0221_idle_route_and_catalog_detail_recovery():
     assert 'document.addEventListener("dls:delivery-list-catalog-synced"' in app
     assert 'if (printWorkspaceNeedsDetailReload()) void restorePrintWorkspaceAfterInactivity();' in app
     assert 'restorePrintWorkspaceAfterInactivity({ refreshIfHealthy: true })' in app
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.221 - Idle Route and Print Row State Recovery' in changelog
 
 def test_v0222_enlarged_branded_delivery_sheet_headers():
@@ -1586,11 +1587,11 @@ def test_v0222_enlarged_branded_delivery_sheet_headers():
     assert "font-size: 22px;" in css
     assert "? (pages.length ? 28 : 27)" in app
     assert ": (pages.length ? 28 : 26)" in app
-    assert "static/css/print.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert "static/css/print.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert "## v0.222 - Enlarged Branded Delivery-Sheet Headers" in changelog
 
 
@@ -1615,12 +1616,12 @@ def test_v0223_fuller_page_capacity_and_centered_compact_columns():
     assert '.delivery-print-sheet-v203 :is(th, td):nth-child(2)' in print_css
     assert '.delivery-print-sheet-v203 :is(th, td):nth-child(4)' in print_css
     assert 'text-align: center;' in print_css[print_css.rindex('/* v0.223 table-adjacent signoff'): ]
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.223 - Table-Adjacent Signoff and Fuller Delivery Pages' in changelog
 
 
@@ -1649,12 +1650,12 @@ def test_v0224_unavailable_filters_and_aligned_borderless_signoff():
     assert 'border: 0;' in signoff_css
     assert 'font-size: 16px;' in signoff_css
     assert 'font-size: 14px;' in signoff_css
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.224 - Unavailable Filter States and Aligned Print Signoff' in changelog
 
 
@@ -1699,12 +1700,12 @@ def test_v0226_automatic_all_choices_newest_dates_and_filter_readability():
     assert '--print-chip-active-end: #2f7d49;' in css
     assert 'width: 1.30in;' in css
     assert 'width: 1.12in;' in css
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.226 - Automatic All Selections and Newest-First Delivery Dates' in changelog
 
 
@@ -1744,12 +1745,12 @@ def test_v0227_health_state_attention_and_preset_control_center():
     assert 'if (setAsDefault) setDefaultPrintPresetName(cleanName);' in app
     assert 'const initialPreset = defaultPrintPresetName();' in app
 
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.227 - Health-State Attention Filters and Preset Control Center' in changelog
 
 
@@ -1781,12 +1782,12 @@ def test_v0228_create_preset_viewport_positioning_repair():
     assert 'if (workspace) workspace.scrollTop = 0;' in app
     assert 'focus({ preventScroll: true })' in app
 
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.228 - Create Preset Viewport Positioning Repair' in changelog
 
 
@@ -1817,12 +1818,12 @@ def test_v0229_compact_polished_create_preset_workspace():
     assert 'function printPresetChoiceVisualClass(name, value, label = value)' in app
     assert 'is-glass-${printGlassCategoryForLabel(label)}' in app
 
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.229 - Compact Polished Create Preset Workspace' in changelog
 
 
@@ -1845,12 +1846,12 @@ def test_v0230_create_preset_flow_repair_and_subtle_palette():
     assert 'width: min(1180px, calc(100vw - 40px));' in repair_css
     assert 'height: min(860px, calc(100vh - 20px));' in repair_css
 
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.230 - Create Preset Flow Repair and Subtle Control Palette' in changelog
 
 def test_v0231_neutral_preset_hierarchy_and_grouped_glass_library():
@@ -1888,12 +1889,12 @@ def test_v0231_neutral_preset_hierarchy_and_grouped_glass_library():
     assert 'grid-template-columns: repeat(3, minmax(0, 1fr));' in polish_css
     assert 'grid-template-rows: auto auto auto minmax(0, 1fr);' in polish_css
 
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.231 - Neutral Preset Selection and Grouped Glass Library' in changelog
 
 
@@ -1928,12 +1929,12 @@ def test_v0232_expanded_preset_workspace_and_restrained_category_colors():
     assert 'background: #e4f2e8;' in polish_css
     assert 'background: #eee9f7;' in polish_css
 
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.232 - Expanded Preset Workspace and Restrained Category Colors' in changelog
 
 
@@ -1960,12 +1961,12 @@ def test_v0233_create_preset_scroll_ownership_and_bottom_containment():
     assert '.print-preset-actions-card-v227' in scroll_css
     assert 'margin-top: 0;' in scroll_css
 
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.233 - Create Preset Scroll and Bottom Containment Repair' in changelog
 
 
@@ -2008,12 +2009,12 @@ def test_v0234_create_preset_simplification_and_theme_alignment():
     assert '.print-preset-options-card-v227' in ownership_css
     assert '.print-preset-actions-card-v227' in ownership_css
 
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.234 - Create Preset Simplification and Theme Alignment' in changelog
 
 
@@ -2034,12 +2035,12 @@ def test_v0235_startup_safe_create_preset_event_wiring():
     assert 'typeof handler !== "function"' in app
     assert "The rest of the webapp is still available." in app
 
-    assert "static/css/print.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert "<strong>0.303</strong>" in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert "static/css/print.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert "<strong>0.318</strong>" in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert "## v0.235 - Startup-Safe Create Preset Event Wiring" in changelog
 
 
@@ -2081,12 +2082,12 @@ def test_v0236_print_filter_cleanup_and_persistent_smart_search():
     assert "min-height: 24px;" in css
     assert "width: auto;" in css
 
-    assert "static/css/print.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert "<strong>0.303</strong>" in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert "static/css/print.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert "<strong>0.318</strong>" in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert "## v0.236 - Print Filter Cleanup and Persistent Smart Search" in changelog
 
 
@@ -2119,12 +2120,12 @@ def test_v0237_persistent_smart_search_and_dynamic_glass_family_presets():
     assert "glassFamilies: allGlass ? [] : glassFamilies" in app
     assert ".print-preset-glass-family-v237" in css
 
-    assert "static/css/print.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert "<strong>0.303</strong>" in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert "static/css/print.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert "<strong>0.318</strong>" in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert "## v0.237 - Persistent Smart Search and Dynamic Glass-Family Presets" in changelog
 
 
@@ -2153,12 +2154,12 @@ def test_v0238_print_workspace_interaction_polish():
     assert "@media (prefers-reduced-motion: reduce)" in css
     assert ".print-filter-pane-v238 .print-filter-chip-v197:hover:not(.is-unavailable)" in css
     assert ".print-options-panel-v238 button:focus-visible" in css
-    assert "static/css/print.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert "<strong>0.303</strong>" in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert "static/css/print.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert "<strong>0.318</strong>" in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert "## v0.238 - Print Workspace Interaction Polish" in changelog
 
 
@@ -2184,12 +2185,12 @@ def test_v0239_stable_surfaces_and_business_week_labels():
     assert "printQuickDateShift(start, 4)" in week_range_block
     assert "printQuickDateShift(start, 6)" not in week_range_block
 
-    assert "static/css/print.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert "<strong>0.303</strong>" in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert "static/css/print.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert "<strong>0.318</strong>" in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert "## v0.239 - Stable Workspace Surfaces and Business-Week Labels" in changelog
 
 
@@ -2225,12 +2226,12 @@ def test_v0240_consistent_header_rings_compact_preset_and_control_focus():
     assert ".print-options-panel-v240 .print-search-field-v197:focus-within" in ownership_css
     assert "box-shadow: none;" in ownership_css
 
-    assert "static/css/print.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert "<strong>0.303</strong>" in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert "static/css/print.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert "<strong>0.318</strong>" in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert "## v0.240 - Consistent Header Rings and Compact Preset Workspace" in changelog
 
 
@@ -2246,7 +2247,7 @@ def test_v0241_preset_deletion_and_default_name():
     assert 'custom-option-delete' in script
     assert '>Default</option>' in script
     assert 'System Default · All Items' not in script
-    assert 'static/js/app.js?v=20260811-v0.303' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
 
 
 def test_v0241_shared_close_button_and_glass_columns():
@@ -2301,10 +2302,10 @@ def test_v0242_adaptive_glass_controls_and_save_icon():
     assert "font-size: 11.5px;" in css
     assert "grid-template-columns: minmax(0, 1fr) 20px;" in css
     assert ".print-preset-save-icon-v242::before" in css
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
-    assert "static/css/print.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
+    assert "static/css/print.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
 
 
 
@@ -2322,7 +2323,7 @@ def test_v0243_formatted_xlsx_and_raw_csv_exports():
     assert 'function exportFormattedPrintXlsx(' in app
     assert 'function exportRawPrintCsv(' in app
     assert 'PRINT_XLSX_CONTENT_TYPE' in app
-    assert 'PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260811-v0.303"' in app
+    assert 'PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260814-v0.319"' in app
     assert 'one formatted worksheet per normal' in readme
     assert '"List ID", "Line Item ID", "Order", "Item", "Job", "Customer"' in app
     assert '<drawing r:id="rId1"/>' in app
@@ -2334,10 +2335,10 @@ def test_v0243_formatted_xlsx_and_raw_csv_exports():
     submit = app[submit_start:submit_end]
     assert '/api/export/package.xlsx' not in submit
     assert '/api/export/package.csv' not in submit
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.243 - Formatted Excel Export and Shared Webapp Controls' in changelog
 
 
@@ -2394,8 +2395,8 @@ def test_v0244_beveled_primary_actions_and_larger_close_controls():
     assert "background-color: #2f4865 !important;" in shared
     assert "background: linear-gradient(180deg, #e65f6e" in shared
     assert "background-color: #fff !important;" in shared
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert "## v0.244 - Beveled Actions and Rack GUI Visual Identity" in changelog
 
 def test_v0244_rack_detail_and_history_header_identity():
@@ -2435,8 +2436,8 @@ def test_v0245_final_shared_controls_and_requested_action_migration():
     readme = (root / "README.md").read_text(encoding="utf-8")
     changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'static/css/shared-ui.css?v=20260811-v0.303' in html
-    assert html.index('static/css/shared-ui.css?v=20260811-v0.303') > html.index('static/css/shell.css?v=20260731-v0.192')
+    assert 'static/css/shared-ui.css?v=20260814-v0.319' in html
+    assert html.index('static/css/shared-ui.css?v=20260814-v0.319') > html.index('static/css/shell.css?v=20260731-v0.192')
     for button_id in (
         "headerGlobalSearchBtn",
         "bayCheckBtn",
@@ -2460,8 +2461,8 @@ def test_v0245_final_shared_controls_and_requested_action_migration():
     assert ':focus-visible:not(:disabled)' in shared
     assert 'color: #fff !important;' in shared
     assert 'background: linear-gradient(180deg, #3c78b2' in shared
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.247 - CSS Ownership Cleanup and Stable Shared Controls' in changelog
 
 def test_v0245_close_geometry_and_rack_icon_separation():
@@ -2532,11 +2533,11 @@ def test_v0247_css_ownership_and_stable_shared_controls():
     assert 'BAY GUI CLOSE-BUTTON POSITIONING - v0.247' in bays
     assert 'REJECT GUI CLOSE-BUTTON POSITIONING - v0.247' in rejects
     assert '<button id="scanRackPrintBtn" class="app-primary-button"' in html
-    assert 'static/css/print.css?v=20260811-v0.303' in html
-    assert 'static/css/racks.css?v=20260811-v0.303' in html
-    assert 'static/css/admin.css?v=20260811-v0.303' in html
-    assert 'static/css/bays.css?v=20260811-v0.303' in html
-    assert 'static/css/shared-ui.css?v=20260811-v0.303' in html
+    assert 'static/css/print.css?v=20260814-v0.319' in html
+    assert 'static/css/racks.css?v=20260814-v0.319' in html
+    assert 'static/css/admin.css?v=20260814-v0.319' in html
+    assert 'static/css/bays.css?v=20260814-v0.319' in html
+    assert 'static/css/shared-ui.css?v=20260814-v0.319' in html
 
 
 def test_v0248_bay_rack_pager_and_update_review_polish():
@@ -2578,7 +2579,7 @@ def test_v0248_bay_rack_pager_and_update_review_polish():
     assert 'UPDATE_PROMPT_TIMEOUT_MS = 10000' in app
     assert 'data-update-prompt-time' in app
     assert 'currentPromptTimer = window.setTimeout(closeUpdatePrompt, UPDATE_PROMPT_TIMEOUT_MS);' in app
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
 
 
 def test_v0249_guided_racks_scan_header_and_week_grouping():
@@ -2618,7 +2619,7 @@ def test_v0249_guided_racks_scan_header_and_week_grouping():
     assert 'grid-template-columns: 120px minmax(150px, 1fr) 120px;' in scan
     assert '--app-primary-min-height: 28px;' in admin
     assert 'statusPill.hidden = !Boolean(profile.showStatus);' in app
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
 
 
 def test_v0250_numeric_dates_centered_scan_and_bay_status_clarity():
@@ -2654,9 +2655,9 @@ def test_v0250_numeric_dates_centered_scan_and_bay_status_clarity():
 
     assert 'v0.250 Print / Export category-gradient button system' not in print_css
     assert '--print-chip-gradient-end' not in print_css
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
 
 
 def test_v0251_flat_bay_actions_and_compact_scan_selectors():
@@ -2684,9 +2685,9 @@ def test_v0251_flat_bay_actions_and_compact_scan_selectors():
 
     assert 'v0.250 Print / Export category-gradient button system' not in print_css
     assert '--print-chip-gradient-end' not in print_css
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
 
 
 def test_v0252_uniform_bay_actions_and_sidebar_aligned_primary_buttons():
@@ -2714,13 +2715,13 @@ def test_v0252_uniform_bay_actions_and_sidebar_aligned_primary_buttons():
     assert 'background: linear-gradient(180deg, #1b5896 0%, #0d427c 46%, #07306c 100%) !important;' in shared
     assert 'background: linear-gradient(180deg, #0a3568 0%, #041f4d 100%) !important;' in shared
 
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/bays.css?v=20260811-v0.303' in html
-    assert 'static/css/shared-ui.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/bays.css?v=20260814-v0.319' in html
+    assert 'static/css/shared-ui.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.253 - Statistics Dashboard Hierarchy and Chart Explorer Polish' in changelog
 
 
@@ -2741,7 +2742,7 @@ def test_v0256_application_revision_does_not_change_the_five_migration_schema_co
     contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
     migrations_path = ROOT / "database" / "migrations.py"
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert 'Frontend-only releases must advance APPLICATION_VERSION without changing this value.' in contract
 
@@ -2821,13 +2822,13 @@ def test_v0258_inline_live_statistics_workspace_replaces_modal_and_avoids_duplic
     assert '.statistics-chart-modal' not in statistics_css
     assert 'body button.app-primary-button' in shared_css
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/statistics.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/statistics.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.258 - Inline Live Statistics Analytics Workspace' in changelog
 
 
@@ -2857,13 +2858,13 @@ def test_v0259_statistics_chart_density_sidebar_icon_and_stable_native_range_con
     assert 'min-height: 330px;' in statistics_css
     assert 'max-height: 400px;' in statistics_css
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/statistics.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/statistics.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.259 - Dense Statistics Workspace and Stable Range Control' in changelog
 
 
@@ -2939,7 +2940,7 @@ def test_v0260_compact_glass_first_statistics_breakage_reporting_and_progressive
     assert '"internalPiecesPercent"' in store
     assert '"withExternalPiecesPercent"' in store
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert '## v0.260 - Compact Glass-First Statistics and Breakage Analytics' in changelog
 
@@ -2955,11 +2956,11 @@ def test_v0261_admin_managed_glass_costs_feed_statistics_without_schema_change()
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'static/css/admin.css?v=20260811-v0.303' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'static/css/admin.css?v=20260814-v0.319' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.261 - Admin-Managed Glass Material Costs' in changelog
 
     assert '"glass_cost": {}' in store
@@ -3055,13 +3056,13 @@ def test_v0262_combined_breakage_reason_drilldown_and_custom_statistics_range():
     assert '.statistics-data-table-v0258.is-breakage-v0260.is-reasons-v0262' in statistics_css
     assert '.statistics-breakage-drill-grid-v0262' in statistics_css
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/statistics.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/statistics.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.262 - Combined Breakage Accountability and Custom Statistics Range' in changelog
 
 
@@ -3074,13 +3075,13 @@ def test_v0263_restores_statistics_typography_and_reorganizes_breakage_tables():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/statistics.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/statistics.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.263 - Statistics Readability and Breakage Table Hierarchy' in changelog
 
     assert '.statistics-analytics-title-v0258 h2 {' in statistics_css
@@ -3122,14 +3123,14 @@ def test_v0264_statistics_visibility_scan_selector_and_review_scroll_polish():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/statistics.css?v=20260811-v0.303' in html
-    assert 'static/css/scan.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/statistics.css?v=20260814-v0.319' in html
+    assert 'static/css/scan.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.264 - Statistics Chart Visibility and Scan Review Polish' in changelog
 
     assert 'const longestLabelLength = Math.max(...entries.map((entry) => String(entry.label || "").length), 0);' in app
@@ -3168,13 +3169,13 @@ def test_v0265_scan_stage_review_scope_markers_and_bay_group_edit_position():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/scan.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/scan.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.265 - Scan Stage Review Scope and Bay Group Header Polish' in changelog
 
     assert 'pendingUpdateStages: new Map()' in app
@@ -3217,13 +3218,13 @@ def test_v0266_update_review_sync_scope_timeout_and_scan_selector_fit():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/scan.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/scan.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.266 - Update Review Synchronization and Scan Selector Polish' in changelog
 
     assert 'UPDATE_PROMPT_TIMEOUT_MS = 10000' in app
@@ -3245,8 +3246,8 @@ def test_v0266_update_review_sync_scope_timeout_and_scan_selector_fit():
     assert 'review_batches = {' in operations
     assert 'AND n.delivery_date = ?' in operations
     assert 'AND n.source_hash = ?' in operations
-    assert 'AND n.created_at = ?' in operations
-    assert 'manual_clause = " AND n.change_token = ?"' in operations
+    assert 'occurrence_clause = " AND n.source_hash = ?"' in operations
+    assert 'occurrence_clause = " AND n.source_hash = ? AND n.change_token = ?"' in operations
     broad_block = operations[operations.index('review_batches = {'):operations.index('seen_at = utc_now()', operations.index('review_batches = {'))]
     assert 'li.order_no = ?' not in broad_block
     assert 'li.item_no = ?' not in broad_block
@@ -3264,13 +3265,13 @@ def test_v0267_scan_selector_menu_alignment_and_delivery_week_width():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/scan.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/scan.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.267 - Scan Selector Alignment and Delivery Week Readability' in changelog
 
     assert '`${formatNumericDeliveryDate(start)} - ${formatNumericDeliveryDate(end)}`' in app
@@ -3299,13 +3300,13 @@ def test_v0268_stage_selector_is_compact_indicator_is_round_and_bay_pencil_is_sm
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/scan.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/scan.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.268 - Compact Stage Selector and Bay Edit Icon Polish' in changelog
 
     assert 'width: min(100%, 480px);' in scan_css
@@ -3344,15 +3345,15 @@ def test_v0269_scan_update_copy_rack_history_shared_buttons_and_rack_set_visuals
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/scan.css?v=20260811-v0.303' in html
-    assert 'static/css/racks.css?v=20260811-v0.303' in html
-    assert 'static/css/shared-ui.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/scan.css?v=20260814-v0.319' in html
+    assert 'static/css/racks.css?v=20260814-v0.319' in html
+    assert 'static/css/shared-ui.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.269 - Scan Update Clarity, Rack Transport History, and Rack Set Visuals' in changelog
 
     # Scan notification semantics: stage creation is distinct from an existing
@@ -3428,13 +3429,13 @@ def test_v0270_rack_creation_workspaces_are_guided_and_return_to_manager():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'static/css/racks.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'static/css/racks.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.270 - Guided Rack Creation Workspaces' in changelog
 
     assert 'class="admin-form rack-modal-form rack-config-form-v270 rack-individual-form-v270"' in app
@@ -3479,7 +3480,7 @@ def test_v0271_rack_creation_visuals_deletion_and_bay_map_cleanup():
     assert "visuals.pop(rack_type.lower(), None)" in store
     assert 'data.get("rackCodes")' in store
     assert 'body: JSON.stringify({ rackCodes: racks.map((rack) => rack.code) })' in js
-    assert 'APPLICATION_VERSION = "303"' in (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    assert 'APPLICATION_VERSION = "319"' in (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
     assert "CURRENT_SCHEMA_VERSION = 11" in (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
 
 
@@ -3489,13 +3490,14 @@ def test_v0272_rack_manager_collapses_icons_fit_and_packing_history_is_weekly():
     app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
     racks_css = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
     shared_css = (ROOT / "static" / "css" / "shared-ui.css").read_text(encoding="utf-8")
+    styles_css = (ROOT / "static" / "css" / "styles.css").read_text(encoding="utf-8")
     contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'static/css/racks.css?v=20260811-v0.303' in html
-    assert 'static/css/shared-ui.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'static/css/racks.css?v=20260814-v0.319' in html
+    assert 'static/css/shared-ui.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert '## v0.272 - Rack Manager Collapse and Packing Snapshot History' in changelog
 
@@ -3522,9 +3524,12 @@ def test_v0272_rack_manager_collapses_icons_fit_and_packing_history_is_weekly():
     assert 'packing-history-pagination-v272' in racks_css
     assert 'overflow: visible !important' in racks_css
 
-    assert '.action-confirm-dialog' in shared_css
-    assert '--gui-close-position: absolute' in shared_css
-    assert '--gui-close-right: 14px' in shared_css
+    # Current CSS ownership keeps confirmation geometry in the global shell
+    # stylesheet; shared-ui.css remains reserved for reusable control styling.
+    assert '.action-confirm-dialog' in styles_css
+    assert '.action-confirm-close' in styles_css
+    assert 'position: absolute' in styles_css[styles_css.index('.action-confirm-close'):styles_css.index('.action-confirm-close') + 260]
+    assert 'right: 12px' in styles_css[styles_css.index('.action-confirm-close'):styles_css.index('.action-confirm-close') + 260]
 
 
 
@@ -3538,14 +3543,14 @@ def test_v0273_packing_history_preview_actions_aframe_cart_and_bay_edit_shortcut
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/racks.css?v=20260811-v0.303' in html
-    assert 'static/css/bays.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/racks.css?v=20260814-v0.319' in html
+    assert 'static/css/bays.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.273 - Packing Snapshot Layout and Bay Edit Shortcut' in changelog
 
     assert 'packing-history-page-summary-copy-v273' in app
@@ -3588,7 +3593,7 @@ def test_v0230_authoritative_aw_removals_and_update_preview():
     readme = (root / "README.md").read_text(encoding="utf-8")
     changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert '"snapshot_json"' in contract
     assert 'v230_removed_import_lines' in migrations
@@ -3627,11 +3632,11 @@ def test_v0230_authoritative_aw_removals_and_update_preview():
     assert '.admin-import-stage-actions-v230' in polish_css
     assert '.admin-update-preview-icon' in polish_css
 
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.275 - Authoritative A+W Removals and Update Preview' in changelog
 
 
@@ -3654,13 +3659,13 @@ def test_v0231_authoritative_sql_reconciliation_repair():
         root / "automation/sql_delivery_export/Run-DeliveryListSqlAutomation.ps1"
     ).read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.276 - Authoritative SQL Reconciliation Repair' in changelog
 
     assert 'if ($Mode -eq "Custom")' in runner
@@ -3696,13 +3701,13 @@ def test_v0232_manual_automation_startup_and_live_log_repair():
         root / "automation/sql_delivery_export/Run-DeliveryListSqlAutomation.ps1"
     ).read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.277 - Manual Automation Startup and Live Log Repair' in changelog
 
     assert 'AUTOMATION_RUNTIME_FILES = (' in controller
@@ -3728,13 +3733,13 @@ def test_v0233_import_notice_schema_recovery_and_duplicate_source_protection():
     readme = (root / "README.md").read_text(encoding="utf-8")
     changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.278 - Import Notice Schema Recovery' in changelog
 
     assert 'v233_repair_removed_import_notice_schema' in migrations
@@ -3827,13 +3832,13 @@ def test_v0234_runtime_notice_schema_guard_and_single_source_import():
     readme = (root / "README.md").read_text(encoding="utf-8")
     changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.279 - Runtime Import Schema Guard and Single-Source Reconciliation' in changelog
 
     assert 'v234_authoritative_import_schema_guard' in migrations
@@ -3950,13 +3955,13 @@ def test_v0235_authoritative_manual_duplicate_retirement():
     readme = (root / "README.md").read_text(encoding="utf-8")
     changelog = (root / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.280 - Authoritative Manual Duplicate Retirement' in changelog
 
     for source in (safety_source, automation_safety):
@@ -4203,7 +4208,7 @@ def test_v236_protected_manual_orders_and_remake_diagnostics():
     runner = (ROOT / "automation" / "sql_delivery_export" / "Run-DeliveryListSqlAutomation.ps1").read_text(encoding="utf-8")
     app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert 'v236_protected_manual_orders' in migrations
     assert 'protect_from_aw_import' in operations
@@ -4224,13 +4229,13 @@ def test_v237_historical_status_filter_is_documented_but_no_longer_active():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.282 - A+W Report Eligibility and Removed Scheduling Rows' in changelog
 
     # v0.282's 460/status-and-batch rule remains in the historical changelog only.
@@ -4255,12 +4260,12 @@ def test_v238_sqlite_migration_registry_repairs_a_schema8_database():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert 'def validate_migration_registry()' in migrations_text
     assert 'v236_protected_manual_orders' in migrations_text
     assert 'Database did not reach the expected schema version.' in migrations_text
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.283 - SQLite Migration Registry Startup Repair' in changelog
 
     connection = sqlite3.connect(":memory:")
@@ -4315,13 +4320,13 @@ def test_v239_manual_and_scheduled_automation_runs_are_isolated():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.284 - Manual and Scheduled Automation Run Isolation' in changelog
 
     assert '"gui_summary": working_root / "State" / "web-gui-summary.json"' in controller
@@ -4360,13 +4365,13 @@ def test_v240_powershell_excluded_row_log_is_parser_safe():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.285 - PowerShell Eligibility Log Parser Repair' in changelog
 
     assert 'Verified A+W exclusions for {0}: {1}' in runner
@@ -4398,13 +4403,13 @@ def test_v241_active_scan_refresh_complete_change_preview_and_eye_icons():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.286 - Active Scan Refresh and Complete Change Preview' in changelog
 
     assert 'list.revision,' in app
@@ -4463,13 +4468,13 @@ def test_v242_live_totals_manual_breakdown_retained_preview_and_scan_coherence()
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert changelog.startswith('# Delivery List Scanner Changelog\n\n## v0.299 - Stable Manual Delivery List Expansion')
 
     assert 'AS manual_piece_qty' in store
@@ -4618,20 +4623,20 @@ def test_v245_local_superseded_order_review_uses_exact_admin_approval():
         )
     )
 
-    assert 'APPLICATION_VERSION = "303"' in contract
+    assert 'APPLICATION_VERSION = "319"' in contract
     assert 'CURRENT_SCHEMA_VERSION = 11' in contract
     assert 'v245_superseded_order_review' in migrations
     assert '_migration_010_v245_superseded_order_review' in migrations
     assert 'CREATE TABLE IF NOT EXISTS superseded_order_reviews' in migrations
     assert "CREATE TABLE dbo.superseded_order_reviews" in azure_schema
 
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
     assert 'data-admin-modal="supersededOrders"' in html
     assert 'id="supersededOrderReviewCount"' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'Current maintained release: **v0.319**' in readme
     assert '## v0.290 - Local Superseded Order Review and Exact-Key Approval' in changelog
 
     assert 'AllowedOrderStatuses' not in runner
@@ -4829,10 +4834,10 @@ def test_v246_automatic_import_result_and_notification_recovery():
     assert 'except Exception as exc:' in importer
     assert 'summary["supersededOrderReviewWarning"] = warning' in importer
     assert 'traceback.format_exc()' in importer
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
 
 
 def test_v247_review_queue_installation_and_simple_active_totals():
@@ -4853,10 +4858,10 @@ def test_v247_review_queue_installation_and_simple_active_totals():
     assert '<strong>${escapeHtml(stagingUpdatedQty)} pcs</strong>' in app
     assert 'active total</small>' not in app
     assert '} A+W pcs</strong>${quantityBreakdownHtmlForRow' not in app
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
 
 
 def test_v248_daily_import_history_keeps_older_same_day_runs_without_latest_duplicate():
@@ -5006,8 +5011,8 @@ def test_v248_recent_import_polish_and_change_preview_contract():
     assert 'Do not collapse rows by delivery date here' in app
     assert 'String(entry.sourceName || entry.fileName || "")' in app
     assert 'delivery-update-preview-v248' in app
-    assert 'data-preview-filter-button' in app
-    assert 'data-preview-search-input' in app
+    assert 'data-preview-filter-button' not in app[app.index('function deliveryListUpdatePreviewHtml'):app.index('function importPreviewPayloadsFromContext')]
+    assert 'data-preview-search-input' not in app[app.index('function deliveryListUpdatePreviewHtml'):app.index('function importPreviewPayloadsFromContext')]
     assert 'delivery-update-preview-diffs' in app
     assert 'Removed lines are no longer active or scannable.' not in app
     assert '.admin-import-run-browser-v248' in css
@@ -5017,13 +5022,13 @@ def test_v248_recent_import_polish_and_change_preview_contract():
     assert backend_safety.splitlines()[1:] == runtime_safety.splitlines()[1:]
     assert 'previous_row: Any | None = None' in backend_safety
     assert 'comparison_fields = (' in backend_safety
-    assert 'static/css/admin.css?v=20260811-v0.303' in html
-    assert 'static/css/styles.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/admin.css?v=20260814-v0.319' in html
+    assert 'static/css/styles.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert changelog.startswith(
         '# Delivery List Scanner Changelog\n\n'
         '## v0.299 - Stable Manual Delivery List Expansion'
@@ -5075,12 +5080,12 @@ def test_v249_import_history_preview_and_change_totals_contract() -> None:
     assert '"updatedPieceQty": int_value(row.get("updatedPieceQty"))' in importer
     assert 'Unable to load the delivery-list update preview' in server
 
-    assert 'static/css/admin.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'static/css/admin.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'Current maintained release: **v0.319**' in readme
     assert changelog.startswith(
         '# Delivery List Scanner Changelog\n\n'
         '## v0.299 - Stable Manual Delivery List Expansion'
@@ -5146,11 +5151,11 @@ def test_v250_version_and_scope_repair_contract():
     assert "run_started_at=run_started_at" in sync_method
     assert "run_id=args.run_id" in importer[importer.index("def main()"):]
     assert "run_started_at=args.run_started_at" in importer[importer.index("def main()"):]
-    assert "static/js/app.js?v=20260811-v0.303" in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert "<strong>0.303</strong>" in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert "static/js/app.js?v=20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert "<strong>0.318</strong>" in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert changelog.startswith(
         "# Delivery List Scanner Changelog\n\n"
         "## v0.299 - Stable Manual Delivery List Expansion"
@@ -5213,12 +5218,12 @@ def test_v251_cross_stage_preview_and_durable_daily_history_contract():
     assert "A different stable run ID is a different import" in controller
     assert "candidate_run_ids" in controller
 
-    assert "static/css/admin.css?v=20260811-v0.303" in html
-    assert "static/js/app.js?v=20260811-v0.303" in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert "<strong>0.303</strong>" in html
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "Current maintained release: **v0.303**" in readme
+    assert "static/css/admin.css?v=20260814-v0.319" in html
+    assert "static/js/app.js?v=20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert "<strong>0.318</strong>" in html
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "Current maintained release: **v0.319**" in readme
     assert changelog.startswith(
         "# Delivery List Scanner Changelog\n\n"
         "## v0.299 - Stable Manual Delivery List Expansion"
@@ -5234,10 +5239,10 @@ def test_v253_complete_stage_view_route_preview_and_historical_recovery_contract
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert changelog.startswith(
         '# Delivery List Scanner Changelog\n\n'
         '## v0.299 - Stable Manual Delivery List Expansion'
@@ -5291,12 +5296,12 @@ def test_v254_stable_manual_delivery_list_expansion_contract():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/admin.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/admin.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert changelog.startswith(
         '# Delivery List Scanner Changelog\n\n'
         '## v0.299 - Stable Manual Delivery List Expansion'
@@ -5386,14 +5391,14 @@ def test_v0256_delivery_update_preview_groups_route_glass_order_item_without_inn
         app.index("async function openDeliveryListUpdatePreview")
     ]
     assert 'const previewGlassType = (item) => String(item.glassType || item.product || "").trim() || "Other Glass";' in preview
-    assert 'delivery-update-preview-glass-group-v256' in preview
-    assert 'delivery-update-preview-order-group-v256' in preview
-    assert 'delivery-update-preview-item-v256' in preview
-    assert 'data-preview-container="route"' in preview
-    assert 'data-preview-container="glass"' in preview
-    assert 'data-preview-container="order"' in preview
-    assert '[...containers].reverse().forEach' in preview
-    assert 'container.open = true;' in preview
+    assert 'delivery-update-preview-glass-group-v256' not in preview
+    assert 'delivery-update-preview-order-group-v256' not in preview
+    assert 'delivery-update-preview-order-list-v311' in preview
+    assert 'delivery-update-preview-location-group-v311' in preview
+    assert 'delivery-update-preview-order-meta-v313' in preview
+    assert 'routeStartsOpen' in preview
+    assert 'data-preview-filter-button' not in preview
+    assert 'data-preview-search-input' not in preview
 
     assert '.delivery-update-preview-v256 .delivery-update-preview-glass-list-v256' in css
     assert 'max-height: none;' in css
@@ -5409,12 +5414,12 @@ def test_v0256_version_contract():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert 'static/css/admin.css?v=20260811-v0.303' in html
-    assert 'static/js/app.js?v=20260811-v0.303' in html
-    assert 'aria-label="Application version 0.303"' in html
-    assert '<strong>0.303</strong>' in html
-    assert 'Current maintained release: **v0.303**' in readme
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'static/css/admin.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert '<strong>0.318</strong>' in html
+    assert 'Current maintained release: **v0.319**' in readme
     assert changelog.startswith(
         '# Delivery List Scanner Changelog\n\n'
         '## v0.301 - Complete Same-Day Import History and Hierarchical Update Preview'
@@ -5533,6 +5538,672 @@ def test_v0303_import_totals_and_scan_date_selection_are_catalog_safe():
     assert 'state.lists.some((list) => String(list.deliveryDate || "") === detailDate)' in app
     assert 'state.activeListId = desiredListId;' in app
     assert "detailRefreshListId !== previousActiveListId" in app
-    assert "All rows" in app and "New rows" in app and "Updated rows" in app
-    assert 'APPLICATION_VERSION = "303"' in contract
-    assert "static/js/app.js?v=20260811-v0.303" in html
+    assert "All rows" not in app[app.index("function deliveryListUpdatePreviewHtml"):app.index("function importPreviewPayloadsFromContext")]
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert "static/js/app.js?v=20260814-v0.319" in html
+
+
+def test_v0304_rush_popup_isolation_and_tc22_mobile_ownership():
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    import_safety = (ROOT / "backend" / "import_safety.py").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert "function isRushPopupNotification(notification)" in app
+    assert 'if (type !== "rush") return false;' in app
+    assert 'if (!isRushPopupNotification(notification)) continue;' in app
+    assert 'if (!isRushPopupNotification(notification) || rushNotificationIsBlocked()) return false;' in app
+    assert '"source": "operator-priority-work"' in store
+    assert "def imported_nonpriority_state" in store
+    assert 're.search(r"\\b(?:SDI|RUSH)\\b", text)' in store
+    assert '"process_state": imported_nonpriority_state(item.get("processState", ""))' in store
+    assert 'if notification_type != "rush":' in import_safety
+    assert '"superseded-order-review"' in import_safety
+    assert 'created_by.startswith("sql-auto")' in import_safety
+
+    for stylesheet in (
+        "styles.css", "home.css", "scan.css", "racks.css", "bays.css",
+        "admin.css", "statistics.css", "rejects.css", "print.css",
+    ):
+        css = (ROOT / "static" / "css" / stylesheet).read_text(encoding="utf-8")
+        assert "v0.304" in css, stylesheet
+        assert "@media (max-width: 760px)" in css, stylesheet
+
+    styles = (ROOT / "static" / "css" / "styles.css").read_text(encoding="utf-8")
+    scan = (ROOT / "static" / "css" / "scan.css").read_text(encoding="utf-8")
+    assert "--mobile-touch-target: 44px" in styles
+    assert "env(safe-area-inset-bottom)" in styles
+    assert "@media (max-width: 430px)" in styles
+    assert "v0.304 TC22-first Scan workspace" in scan
+    assert "min-height: 52px !important" in scan
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+    assert "20260814-v0.319" in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert "v0.304" in readme
+    assert "## v0.304 - TC22 Mobile Workspace and Rush Notification Isolation" in changelog
+
+
+def test_v0306_single_page_mobile_workflow_and_dialog_repairs():
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    mobile = (ROOT / "static" / "css" / "mobile.css").read_text(encoding="utf-8")
+
+    assert 'viewport-fit=cover' in html
+    assert 'static/css/mobile.css?v=20260814-v0.319' in html
+    assert html.index('static/css/shared-ui.css') < html.index('static/css/mobile.css')
+    assert html.index('static/css/mobile.css') < html.index('static/js/app.js')
+    assert mobile.startswith("/* File: static/css/mobile.css */")
+    assert "@media (max-width: 760px)" in mobile
+    assert "@media (max-width: 430px)" in mobile
+    assert "orientation: landscape" in mobile
+    assert 'class="mobile-nav"' not in html
+    assert 'data-mobile-target' not in html
+    assert 'document.body.dataset.mobileView' not in app
+    assert 'body[data-page="scan"] .scan-page :is(.scanner-panel, .list-panel, .mobile-list-cards, .summary-grid)' in mobile
+    assert '.mobile-card-job' in mobile
+    assert '.mobile-card-scan-state' in mobile
+    assert '<small>Job Nr.</small>' in app
+    assert 'data-label="Order / Item / Job Nr."' in app
+    assert '#adminModal[data-kind="recentScans"]' in mobile
+    assert '#printOptionsPanel .print-options-workspace-v197' in mobile
+    assert '.app-sidebar .brand-combined-logo' in mobile
+    assert '.header-actions :is(.button-icon, .language-globe-icon, .refresh-page-icon, .fullscreen-icon)' in mobile
+    assert '.bay-floor-grid-v19 .physical-bay-section-v17[open]' in mobile
+    assert ".slice(0, 12)" not in app
+    assert html.index('id="mobileListCards"') < html.index('id="scanPanel"')
+    assert 'APPLICATION_VERSION = "319"' in contract
+
+def test_v0307_rack_review_history_creation_and_status_reliability() -> None:
+    """v0.307 keeps review receipts per user and makes rack management deterministic."""
+    app = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+    racks_css = (ROOT / "static/css/racks.css").read_text(encoding="utf-8")
+    store = (ROOT / "backend/store.py").read_text(encoding="utf-8")
+    operations = (ROOT / "backend/operations.py").read_text(encoding="utf-8")
+    contract = (ROOT / "database/contract.py").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+    assert 'static/css/racks.css?v=20260814-v0.319' in index
+    assert 'static/js/app.js?v=20260814-v0.319' in index
+    assert '## v0.307 - Rack Review Synchronization and Rack Manager Reliability' in changelog
+
+    # v0.308 deliberately broadens the v0.307 Airport review propagation from
+    # one import fingerprint to every current notice on that delivery date.
+    # Preserve the v0.307 guarantees that receipts remain per-user and direct
+    # route-stage reviews stay separate.
+    assert 'def _airport_review_scope' in operations
+    assert 'INSERT OR IGNORE INTO line_update_receipts' in operations
+    assert '(notice_id, user_id, seen_at)' in operations
+    assert '"selected-stage"' in operations
+    assert 'state?.pendingUpdateStages?.delete?.(listId);' in app
+    assert 'renderDeliveryListSelect();' in app
+
+    for icon in ('glasscart', 'pallet', 'dolly', 'crate', 'warehouse'):
+        assert f'"{icon}"' in store
+    assert 'LOWER(TRIM(display_name)) = LOWER(TRIM(?))' in store
+    assert 'Rack name {name!r} is already used by' in store
+    assert 'Rack set {rack_type!r} already exists' in store
+    assert 'UPPER(rack_code) IN' in store
+
+    assert 'function rackFormDraftValidation()' in app
+    assert 'function rackSetDraftValidation()' in app
+    assert 'Rack code and name are available.' in app
+    assert 'already exists. Add an individual rack to that set instead.' in app
+    assert 'syncRackDraftValidation(form, { ok: false, message: error.message }, "[data-rack-form-validation]")' in app
+    assert 'syncRackDraftValidation(form, { ok: false, message: error.message }, "[data-rack-set-validation]")' in app
+    assert 'if (qty > 0) return "Incomplete";' in app
+    assert '>Incomplete</option>' in app
+    assert 'rack-board-state-v307' in app
+    assert 'if (a === "Truck") return -1;' in app
+
+    assert '#adminModal[data-kind="racks"] .rack-manager-grid {' in racks_css
+    assert '.rack-draft-validation-v307 {' in racks_css
+    assert '.rack-board-state-v307.complete {' in racks_css
+    assert '.rack-board-state-v307.in-transit {' in racks_css
+
+
+
+def test_v0308_rack_review_history_preview_and_scan_repairs() -> None:
+    operations = (ROOT / "backend" / "operations.py").read_text(encoding="utf-8")
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
+    admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
+    scan = (ROOT / "static" / "css" / "scan.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+    assert '"scope": "airport-delivery-date" if airport_scope else "selected-stage"' in operations
+    assert "SELECT n.id, n.list_id" in operations and "AND n.delivery_date = ?" in operations
+    assert "completed_at = '', departed_at = ''" in store
+    assert "def _insert_rack_definition" in store
+    assert "rackFormExistingSetRacksHtml" in app
+    assert "rack-details-status-banner-v308" in app
+    assert "delivery-update-preview-order-block-v308" in app
+    assert "delivery-update-preview-location-title-v308" in app
+    assert 'selectedRoute !== "airport"' in app
+    preview_block = app[app.index("function deliveryListUpdatePreviewHtml"):app.index("function initializeDeliveryListUpdatePreviewControls")]
+    assert '<section class="delivery-update-preview-order-group-v256' in preview_block
+    assert '<details class="delivery-update-preview-order-group-v256' not in preview_block
+    assert "New QTY" not in preview_block or "changeWord" in preview_block
+    bay_block = app[app.index("function renderBaySection(section)"):app.index("function renderBayLayoutDropZone", app.index("function renderBaySection(section)"))]
+    assert "bay-section-status status-" not in bay_block
+    assert " open</i>" not in bay_block
+    assert "/${escapeHtml(totalBays)} used" in bay_block
+    assert '#operationsModal.is-control-center[data-kind="rack-history"]' in racks
+    assert 'overflow-y: auto !important' in racks
+    assert '#adminModal[data-kind="racks"] .rack-manager-grid' in racks and 'flex-direction: column !important' in racks
+    assert '.delivery-update-preview-order-header-v308' in admin
+    assert '.scan-page .scanner-panel:not(.bay-scanner-panel)' in scan and 'z-index: 40 !important' in scan
+    assert 'row-marker.remake-marker::after' in scan
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+
+
+def test_v0309_rack_creation_sticky_stage_and_bay_group_status_polish() -> None:
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
+    scan = (ROOT / "static" / "css" / "scan.css").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+    assert 'def _insert_rack_definition' in store
+    assert 'PRAGMA table_info(racks)' in store
+    assert '"completed_at": ""' in store
+    assert 'not_null and default_value is None' in store
+    assert 'self._insert_rack_definition(' in store
+    assert 'self._insert_rack_definition(con, code, name, rack_type, sort_order)' in store
+
+    assert '["deliveryDateSelect", "deliveryStageSelect"].includes(customSelectUi.openSelect.id)' in app
+    assert 'window.requestAnimationFrame(positionCustomSelectMenu);' in app
+    assert 'scanner-panel-stage-select-v196' in scan
+    assert 'data-select-id="deliveryStageSelect"' in scan
+    assert 'z-index: 14000 !important' in scan
+
+    bay_block = app[app.index("function renderBaySection(section)"):app.index("function bayLayoutColumns", app.index("function renderBaySection(section)"))]
+    assert 'const utilizationHue = Math.round(120 * (1 - utilizationRatio));' in bay_block
+    assert '--bay-group-utilization-hue:' in bay_block
+    assert 'bay-section-attention-v309' in bay_block
+    assert 'bay-section-utilization-v310' in bay_block
+    assert 'content: none !important' in bays
+    assert '--bay-group-utilization-hue' in bays
+    assert '.bay-section-attention-v309' in bays
+
+    assert '#rackPackingHistoryBtn, #rackEditOpenBtn' in racks
+    assert 'height: 36px !important' in racks
+    assert 'content: none !important' in racks
+    assert 'pointer-events: auto !important' in racks
+
+    assert 'static/css/racks.css?v=20260814-v0.319' in html
+    assert 'static/css/scan.css?v=20260814-v0.319' in html
+    assert 'static/css/bays.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert 'Current maintained release: **v0.319**' in readme
+    assert '## v0.309 - Rack Creation Compatibility, Sticky Stage, and Bay Group Status Polish' in changelog
+
+
+def test_v0310_physical_bay_policy_attention_and_used_count_clarity() -> None:
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+
+    assert 'function bayAttentionReasons(bay)' in app
+    assert 'function bayNeedsAttention(bay)' in app
+    assert 'const attentionReasons = bayAttentionReasons(bay);' in app
+    assert 'bay-slot-attention-v310' in app
+    assert 'operationalBays.filter((bay) => bayNeedsAttention(bay)).length' in app
+
+    bay_block = app[app.index("function renderBaySection(section)"):app.index("function bayLayoutColumns", app.index("function renderBaySection(section)"))]
+    assert 'bay-section-policy-v310' in bay_block
+    assert 'auto: "AUTO"' in bay_block
+    assert 'manual: "MAN"' in bay_block
+    assert 'bay-section-occupancy-v312' in bay_block
+    assert '<strong>${escapeHtml(occupied)}</strong><span>/${escapeHtml(totalBays)}</span>' in bay_block
+
+    assert '.bay-section-policy-v310' in bays
+    assert '.bay-section-used-current-v310' in bays
+    assert 'color: hsl(var(--bay-group-utilization-hue, 120)' in bays
+    assert '.bay-slot-attention-v310' in bays
+
+    assert 'static/css/bays.css?v=20260814-v0.319' in html
+    assert 'static/js/app.js?v=20260814-v0.319' in html
+    assert 'aria-label="Application version 0.319"' in html
+    assert 'Current maintained release: **v0.319**' in readme
+    assert '## v0.310 - Physical Bay Policy and Attention Clarity' in changelog
+
+
+
+def test_v311_rack_transfer_history_preview_and_bay_persistence() -> None:
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
+    scan = (ROOT / "static" / "css" / "scan.css").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+
+    move_start = store.index("def move_rack_contents")
+    move_end = store.index("def ", move_start + 10)
+    move_body = store[move_start:move_end]
+    assert "completed_by" not in move_body
+    assert "departed_by" not in move_body
+    assert "returned_by" not in move_body
+    assert "SET status = 'Open', completed_at = ''" in move_body
+
+    seed_start = store.index("def seed_layout_bays")
+    seed_end = store.index("def ", seed_start + 10)
+    seed_body = store[seed_start:seed_end]
+    assert "TRIM(COALESCE(bays.display_name, '')) <> '' THEN bays.display_name" in seed_body
+
+    assert '.rack-history-control-center > [data-rack-history-panel]' in racks
+    assert 'overflow-y: auto !important' in racks
+    assert 'touch-action: pan-y' in racks
+    assert 'right: 9px !important' in racks
+    assert 'resetPageScrollPosition' in app
+    assert 'overflow-anchor: none' in racks
+    assert 'height: 36px !important' in racks
+
+    assert ".scan-page .delivery-table td:nth-child(8) {\n  width: 5%" in scan
+    assert ".scan-page .delivery-table td:nth-child(10) {\n  width: 12%" in scan
+    assert 'td:nth-child(10) .process-pill' in scan
+    assert 'white-space: nowrap !important' in scan
+
+    preview_start = app.index("function deliveryListUpdatePreviewHtml")
+    preview_end = app.index("function initializeDeliveryListUpdatePreviewControls", preview_start)
+    preview = app[preview_start:preview_end]
+    assert 'delivery-update-preview-glass-group-v256' not in preview
+    assert 'delivery-update-preview-order-list-v311' in preview
+    assert 'delivery-update-preview-item-glass-v311' in preview
+    assert 'delivery-update-preview-item-size-v311' in preview
+    assert 'exactGlassColorMap' in preview
+    assert 'glassVisualCssVariables' in preview
+    assert 'delivery-update-preview-order-meta-v313' in preview
+    assert 'routeStartsOpen' in preview
+    assert '.delivery-update-preview-item-row-v311' in admin
+    assert 'var(--glass-type-color' in admin
+
+    render_start = app.index("function renderBaySection")
+    render_end = app.index("function bayLayoutColumns", render_start)
+    render_bay = app[render_start:render_end]
+    assert 'bay-section-occupancy-v312' in render_bay
+    assert '<strong>${escapeHtml(occupied)}</strong><span>/${escapeHtml(totalBays)}</span>' in render_bay
+    assert '/${escapeHtml(totalBays)} used' not in render_bay
+    assert '.bay-section-occupancy-v312' in bays
+
+    assert 'static/js/app.js?v=20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+
+
+def test_v312_compact_bay_capacity_and_managed_glass_colors() -> None:
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
+    admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+
+    render_bay = app[app.index("function renderBaySection(section)"):app.index("function bayLayoutColumns", app.index("function renderBaySection(section)"))]
+    assert 'bay-section-occupancy-v312' in render_bay
+    assert '<strong>${escapeHtml(occupied)}</strong><span>/${escapeHtml(totalBays)}</span>' in render_bay
+    assert 'bay-section-occupancy-meter-v311' not in render_bay
+    assert '.bay-section-occupancy-v312' in bays
+
+    assert 'left: auto !important;' in racks
+    assert 'right: 9px !important;' in racks
+
+    assert '"glass_color": {}' in store
+    assert '"glassColors": sorted(' in store
+    assert 'lookup_type not in {"product", "route", "process", "glass_cost", "glass_color"}' in store
+    assert 'Glass color must be a six-digit hex color' in store
+    assert '"color": category' in store
+
+    assert 'glassColors: Array.isArray(payload.glassColors)' in app
+    assert 'function buildGlassVisualColorMap(extraLabels = [])' in app
+    assert 'function glassVisualCssVariables(label, colorMap = null)' in app
+    assert '["glass_color", "Glass colors", glassColorTotal]' in app
+    assert 'id="lookupColorInput" type="color"' in app
+    assert 'data-preview-glass-type=' in app
+    assert '--glass-type-color:' in app
+    assert '--preview-glass-hue' not in app[app.index("function deliveryListUpdatePreviewHtml"):app.index("function initializeDeliveryListUpdatePreviewControls")]
+    assert '.lookup-manager-list.glass-colors' in admin
+    assert 'var(--glass-type-color' in admin
+
+    assert '20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert 'Current maintained release: **v0.319**' in readme
+    assert '## v0.312 - Compact Bay Capacity and Managed Glass Color Palette' in changelog
+
+
+def test_v0313_rack_action_navigation_hitbox_and_compact_update_preview() -> None:
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
+    admin = (ROOT / "static" / "css" / "admin.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+
+    show_page_start = app.index("function resetPageScrollPosition()")
+    show_page_end = app.index("function showOutboundOverrideDialog", show_page_start)
+    show_page = app[show_page_start:show_page_end]
+    assert 'document.querySelector(".app > main")' in show_page
+    assert 'document.querySelectorAll(".page-view").forEach' in show_page
+    assert 'resetPageScrollPosition();' in show_page
+    assert 'requestAnimationFrame(() => {' in show_page
+
+    assert 'overflow-anchor: none' in racks
+    assert 'height: 36px !important' in racks
+    assert 'content: none !important' in racks
+    assert 'top: -10px !important' not in racks
+    assert 'right: 9px !important' in racks
+
+    preview_start = app.index("function deliveryListUpdatePreviewHtml")
+    preview_end = app.index("function initializeDeliveryListUpdatePreviewControls", preview_start)
+    preview = app[preview_start:preview_end]
+    assert 'delivery-update-preview-v313' in preview
+    assert 'delivery-update-preview-order-list-v311' in preview
+    assert 'delivery-update-preview-item-glass-v311' in preview
+    assert 'delivery-update-preview-item-size-v311' in preview
+    assert 'glassVisualCssVariables' in preview
+    assert 'data-preview-filter-button' not in preview
+    assert 'data-preview-search-input' not in preview
+    assert 'delivery-update-preview-metrics-v230' not in preview
+    assert 'Glass Types</small>' not in preview
+    assert '${escapeHtml(items.length)} changed line' in preview
+
+    assert 'width: min(1100px, calc(100vw - 48px));' in admin
+    assert '.delivery-update-preview-v313' in admin
+    assert '.delivery-update-preview-order-meta-v313' in admin
+
+    assert '20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert 'Current maintained release: **v0.319**' in readme
+    assert '## v0.313 - Rack Action Hitbox and Compact Delivery Update Preview' in changelog
+
+
+def test_v0314_rack_hitbox_all_date_transit_and_bay_editor_feedback() -> None:
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    racks = (ROOT / "static" / "css" / "racks.css").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+
+    assert 'function stabilizeRackHeadingActions()' in app
+    assert 'function scheduleRackHeadingStabilization()' in app
+    assert 'function forwardRackHeadingActionClick(event)' in app
+    assert 'document.addEventListener("click", forwardRackHeadingActionClick, true)' in app
+    assert '.then(() => scheduleRackHeadingStabilization())' in app
+    assert '#racksPage' in racks
+    assert 'overflow-anchor: none !important' in racks
+
+    transit_start = store.index('def _indian_trail_in_transit_payload')
+    transit_end = store.index('def indian_trail_outbound_totals', transit_start)
+    transit_store = store[transit_start:transit_end]
+    assert 'if not requested_date:' in transit_store
+    assert 'SELECT DISTINCT src_dl.delivery_date' in transit_store
+    assert '"deliveryDates": delivery_dates' in transit_store
+    assert '"deliveryDate": resolved_date' in transit_store
+    assert "IN ('INDIAN TRAIL', 'IT')" in transit_store
+
+    assert 'fetchJson("/api/indian-trail/in-transit")' in app
+    assert 'function indianTrailDateQuery() {\n  const deliveryDate = todayKey();' in app
+    assert 'const key = todayKey();' in app[app.index('function renderBayRouteFlow(summary)'):app.index('function transitManifestRowHtml', app.index('function renderBayRouteFlow(summary)'))]
+    assert 'fetchJson(`/api/indian-trail/in-transit${indianTrailDateQuery()}`)' not in app
+    assert '<th>Delivery</th><th>Job Nr.</th>' in app
+    assert 'data-progress-sound-test="transit"' not in app
+    assert '.transit-manifest-header::after' in bays
+
+    assert 'class="app-primary-button" data-bay-editor-action="save-group"' in app
+    assert 'class="app-primary-button" data-bay-editor-action="add-bays"' in app
+    assert 'class="app-primary-button" data-bay-editor-action="create-group"' in app
+    assert 'class="app-primary-button" data-bay-editor-action="save-bay"' in app
+    assert 'function setBayEditorProgress' in app
+    assert 'data-bay-editor-progress' in app
+    assert '.bay-editor-progress-track' in bays
+    assert 'id="bayEditorNewGroupBtn" class="app-primary-button"' in index
+
+    assert '20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert 'Current maintained release: **v0.319**' in readme
+    assert '## v0.314 - Rack Hitbox, All-Date In-Transit, and Bay Editor Feedback' in changelog
+
+
+def test_v0315_in_transit_rack_icon_and_numeric_dates() -> None:
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+    assert 'item.deliveryDate ? formatNumericDeliveryDate(item.deliveryDate) : "-"' in app
+    assert 'item.deliveryDate ? formatNumericDeliveryDate(item.deliveryDate) : item.deliveryLabel || ""' in app
+    assert 'return rackSetVisualIcon(rack?.type || rack?.name || rack?.code || "Rack")' in app
+    assert 'function transitRackIconStyle(rack)' in app
+    assert 'class="rack-set-visual-icon-v269 transit-rack-icon"' in app
+    assert 'data-rack-icon="${escapeHtml(transitRackIconClass(rack))}"' in app
+    assert '.transit-rack-head .transit-rack-icon.rack-set-visual-icon-v269' in bays
+    assert 'border-radius: 11px !important' in bays
+    assert '20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert 'Current maintained release: **v0.319**' in readme
+    assert '## v0.315 - In-Transit Rack Icon and Numeric Date Repair' in changelog
+
+
+def test_v316_physical_transit_counts_bay_bulk_edit_and_scan_archive_compaction() -> None:
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+    assert "Rack assignments are the physical source of truth once a rack departs" in store
+    transit_start = store.index("    def _indian_trail_in_transit_payload(")
+    transit_end = store.index("\n    def indian_trail_outbound_totals(", transit_start)
+    transit_block = store[transit_start:transit_end]
+    assert "received_by_key" in transit_block
+    assert "rack_map_by_item" in transit_block
+    assert "if key not in inventory" not in transit_block
+    assert "AND COALESCE(src_li.is_deleted, 0) = 0" not in transit_block
+    assert "JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id AND src_dl.status = 'active'" not in transit_block
+
+    assert "bayEditorSelectedBayCodes: new Set()" in app
+    assert 'data-bay-editor-selection-action="all"' in app
+    assert 'data-bay-editor-action="save-selected"' in app
+    assert "async function saveBayEditorSelectedBays()" in app
+    assert 'title: "Physical bay scan history"' in app
+    assert 'eyebrow: "Indian Trail activity archive"' in app
+    assert "Location corrections belong here" not in app
+    assert "bay-all-scans-summary-strip-v316" in app
+
+    assert "v0.316 Physical transit counts, Bay multi-select, and compact scan archive" in bays
+    assert ".bay-editor-bulk-tools-v316" in bays
+    assert ".bay-all-scans-guidance-v317" in bays
+    assert "static/css/bays.css?v=20260814-v0.319" in index
+    assert "static/js/app.js?v=20260814-v0.319" in index
+
+
+
+def test_v317_all_date_transit_count_bay_row_selection_and_compact_guidance() -> None:
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+    assert '20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert 'Current maintained release: **v0.319**' in readme
+    assert '## v0.317 - All-Date Transit Count and Bay Selection Polish' in changelog
+
+    summary_start = store.index("    def indian_trail_summary(")
+    summary_end = store.index("\n    def admin_search_line_items(", summary_start)
+    summary = store[summary_start:summary_end]
+    assert 'date_in_transit_payload = self._indian_trail_in_transit_payload(con, resolved_date or delivery_date)' in summary
+    assert 'in_transit_payload = self._indian_trail_in_transit_payload(con, "")' in summary
+    assert '"inTransitQty": in_transit_payload.get("totalQty", 0)' in summary
+    assert '"dateInTransitQty": date_in_transit_payload.get("totalQty", 0)' in summary
+
+    assert 'function setBayEditorGroupSelection(selectAll)' in app
+    assert 'function toggleBayEditorRowSelection(bayCode)' in app
+    assert 'data-bay-editor-selection-action="all"' in app
+    assert 'data-bay-editor-selection-action="clear"' in app
+    assert 'data-bay-editor-select-row=' in app
+    assert 'interactiveTarget = event.target.closest("input, select, textarea, button, a, label")' in app
+    assert 'data-bay-editor-select-all' not in app
+
+    assert 'bay-all-scans-topline-v317' in app
+    assert 'bay-all-scans-guidance-v317' in app
+    assert 'bay-all-scans-guidance-v159 bay-all-scans-guidance-v316' not in app
+    assert '#adminModal[data-custom-view="bay-all-scans"] .bay-full-scans-modal-v159' in bays
+    assert 'grid-auto-rows: max-content' in bays
+    assert '.bay-all-scans-guidance-v317' in bays
+    assert '.bay-editor-selection-actions-v317' in bays
+    assert '.bay-editor-bay-row-v317' in bays
+
+
+def test_v318_bay_operations_exact_item_management_and_priority_clarity() -> None:
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    store = (ROOT / "backend" / "store.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+    assert '20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert 'Current maintained release: **v0.319**' in readme
+    assert '## v0.318 - Bay Operations, Exact-Item Management, and Priority Work Clarity' in changelog
+
+    # Old Bays and Bay Scanner receive the shared decorative ring treatment, and
+    # the Old Bays row surface itself owns selection rather than only the checkbox.
+    assert '.stale-bay-header-v181::after' in bays
+    assert '.bay-scanner-panel-v150 .bay-scanner-header-v150::after' in bays
+    assert 'data-stale-assignment-row=' in app
+    assert 'event.target.closest("[data-stale-assignment-row]")' in app
+
+    # Rush priority work carries source audit metadata and keeps expanded detail
+    # above the surrounding card so dates/user/item information remains visible.
+    assert 'priorityPreviousDeliveryDate' in store
+    assert 'priorityMarkedAt' in store
+    assert 'priorityMarkedBy' in store
+    assert 'for offset in range(0, len(line_ids), 500)' in store
+    assert '<small>Original delivery</small>' in app
+    assert '<small>Priority delivery</small>' in app
+    assert '<small>Marked by</small>' in app
+    assert '#sdiPanel .sdi-current-group.is-expanded' in bays
+    assert 'overflow: visible !important' in bays
+
+    # Manage Items supports job-level and exact-item selection. Moving an exact
+    # assignment preserves intentionally split sibling locations.
+    assert 'manageItemsSelectedIds: new Set()' in app
+    assert 'data-manage-group-card=' in app
+    assert 'data-manage-item-select=' in app
+    assert 'data-manage-selection-action="all"' in app
+    assert 'data-manage-selection-action="clear"' in app
+    assert 'function manageBayLocationLabel' in app
+    assert 'body: JSON.stringify({ assignmentId: assignment.id, newBayCode: targetBay, reason, ...requestContext() })' in app
+
+    # Selected Bay resolves each sibling item against its actual latest location,
+    # and audit history receives enough identity/location context to be searchable.
+    assert '"selectedBayQty": selected_qty' in store
+    assert '"bayGroup": item_bay_group' in store
+    assert 'item.isInSelectedBay' in app
+    assert 'In another bay' in app
+    assert 'def _bay_assignment_audit_context' in store
+    assert '"oldBayGroup": previous_context.get("bayGroup", "")' in store
+    assert 'if (action === "move_bay")' in app
+    assert 'if (action.startsWith("set_bay_"))' in app
+    assert 'if (action.startsWith("bay_check_"))' in app
+
+
+def test_v319_manage_items_readability_scanner_footer_boundary_and_transit_contrast() -> None:
+    contract = (ROOT / "database" / "contract.py").read_text(encoding="utf-8")
+    app = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    bays = (ROOT / "static" / "css" / "bays.css").read_text(encoding="utf-8")
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "README_CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert 'APPLICATION_VERSION = "319"' in contract
+    assert 'CURRENT_SCHEMA_VERSION = 11' in contract
+    assert '20260814-v0.319' in index
+    assert 'aria-label="Application version 0.319"' in index
+    assert 'Current maintained release: **v0.319**' in readme
+    assert '## v0.319 - Manage Items Readability and Bay Scanner Footer Boundary' in changelog
+
+    # Manage Items gives the left job/order workspace enough room and stacks
+    # exact-item location information instead of horizontally clipping it.
+    assert 'grid-template-columns: minmax(560px, 1.08fr) minmax(500px, .92fr) !important;' in bays
+    assert 'grid-template-areas:' in bays
+    assert '"select identity status"' in bays
+    assert '". location location"' in bays
+    assert '#manageItemsPanel .manage-item-exact-identity strong' in bays
+    assert 'white-space: normal;' in bays
+
+    # The fixed Bay Scanner is bounded by the real application footer.
+    assert 'appFooter: document.querySelector(".desktop-footer")' in app
+    assert 'const footerRect = els.appFooter?.getBoundingClientRect();' in app
+    assert 'footerRect.top - visiblePanelHeight - 8' in app
+    assert '--bay-scanner-fixed-max-height-v319' in app
+    assert '--bay-scanner-fixed-max-height-v319' in bays
+
+    # In-transit count uses full white contrast in the scanner route pulse.
+    assert '.bay-scanner-panel-v150 .bay-route-metrics-v150 .bay-panel-route-lane > span' in bays
+    assert 'color: #ffffff !important;' in bays
+
+    # Requested bay-operation action history already formats work identity from
+    # the enriched v0.318 audit payload; keep the one shared renderer.
+    assert 'const job = String(payload.job || "").trim();' in app
+    assert 'const order = String(payload.order || "").trim();' in app
+    assert 'const item = String(payload.item || "").trim();' in app
+    assert 'const workRef = [jobRef, itemRef].filter(Boolean).join(" · ");' in app

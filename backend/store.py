@@ -277,6 +277,7 @@ RACK_SET_VISUALS_METADATA_KEY = "rack_set_visuals_v1"
 RACK_SET_VISUAL_ICONS = {
     "rack", "truck", "steel", "wood", "aluminum", "coral", "lr", "rr",
     "showers", "mirror", "framed-mirror", "bfs-mirror", "crl", "spacer",
+    "glasscart", "pallet", "dolly", "crate", "warehouse",
 }
 DEFAULT_CROSS_DATE_SCAN_MODE = "auto_unique"
 DEFAULT_CROSS_DATE_SCAN_PAST_DAYS = 7
@@ -327,6 +328,42 @@ def parse_iso(value: str) -> datetime:
     return parse_utc_timestamp(value)
 
 
+def _pbkdf2_hmac_sha256(password: bytes, salt: bytes, iterations: int) -> bytes:
+    """Derive the application's password digest across supported Python builds.
+
+    Some embedded Windows Python distributions omit ``hashlib.pbkdf2_hmac``
+    even though the same OpenSSL-backed function remains available from the
+    private ``_hashlib`` extension. The final implementation is the PBKDF2
+    algorithm from RFC 8018 and preserves the existing 32-byte SHA-256 digest
+    format when neither accelerated provider is present.
+    """
+    rounds = int(iterations)
+    if rounds <= 0:
+        raise ValueError("PBKDF2 iterations must be greater than zero")
+
+    native_pbkdf2 = getattr(hashlib, "pbkdf2_hmac", None)
+    if callable(native_pbkdf2):
+        return native_pbkdf2("sha256", password, salt, rounds)
+
+    try:
+        import _hashlib
+
+        accelerated_pbkdf2 = getattr(_hashlib, "pbkdf2_hmac", None)
+        if callable(accelerated_pbkdf2):
+            return accelerated_pbkdf2("sha256", password, salt, rounds)
+    except (ImportError, AttributeError):
+        pass
+
+    block = salt + (1).to_bytes(4, "big")
+    result = hmac.new(password, block, hashlib.sha256).digest()
+    accumulator = bytearray(result)
+    for _ in range(1, rounds):
+        result = hmac.new(password, result, hashlib.sha256).digest()
+        for index, value in enumerate(result):
+            accumulator[index] ^= value
+    return bytes(accumulator)
+
+
 def hash_password(password: str) -> str:
     """Purpose: Run the hash password workflow for the delivery-list scanner.
 
@@ -334,7 +371,7 @@ def hash_password(password: str) -> str:
     Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
     """
     salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
+    digest = _pbkdf2_hmac_sha256(password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
     return "pbkdf2_sha256${}${}${}".format(
         PASSWORD_ITERATIONS,
         base64.b64encode(salt).decode("ascii"),
@@ -354,7 +391,7 @@ def verify_password(password: str, stored_hash: str) -> bool:
             return False
         salt = base64.b64decode(salt_text.encode("ascii"))
         expected = base64.b64decode(digest_text.encode("ascii"))
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, int(iterations))
+        actual = _pbkdf2_hmac_sha256(password.encode("utf-8"), salt, int(iterations))
         return hmac.compare_digest(actual, expected)
     except Exception:
         return False
@@ -1389,7 +1426,20 @@ def is_rush_item(item: dict[str, Any]) -> bool:
     Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
     """
     text = " ".join(str(item.get(key, "")) for key in ("remake", "processState", "queueState")).upper()
-    return "SDI" in text or re.search(r"\bRUSH\b", text) is not None
+    return re.search(r"\b(?:SDI|RUSH)\b", text) is not None
+
+
+def imported_nonpriority_state(value: Any) -> str:
+    """Remove operator-owned Rush markers from source-imported state text.
+
+    Rush/SDI is created only through the explicit Priority Work workflow. A+W
+    imports may carry descriptive/status text, but they must never create a new
+    operator Rush simply because a source field contains one of those tokens.
+    Remake markers remain source-authoritative and are intentionally preserved.
+    """
+    text = str(value or "")
+    text = re.sub(r"\b(?:Rush|SDI)\b", " ", text, flags=re.IGNORECASE)
+    return re.sub(r"\s{2,}", " ", text).strip(" -|,")
 
 
 def is_mirror_item(item: dict[str, Any]) -> bool:
@@ -5681,8 +5731,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "source_route": str(item.get("sourceRoute", item.get("route", ""))),
             "job": str(item.get("job", "")),
             "product": product,
-            "process_state": str(item.get("processState", "")),
-            "queue_state": str(item.get("queueState", "")),
+            "process_state": imported_nonpriority_state(item.get("processState", "")),
+            "queue_state": imported_nonpriority_state(item.get("queueState", "")),
             "suggested_bay": suggested_bay(product, dimensions, route, auto_assign_settings),
         }
 
@@ -6528,7 +6578,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Effects: This function reads or changes database records.
         Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
         """
-        created = now_iso()
         rack_defs: list[tuple[str, str, str, int]] = []
         for index in range(1, 11):
             rack_defs.append((f"R{index}S", f"Rack {index} Steel", "Steel", index))
@@ -6536,13 +6585,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rack_defs.append((f"R{index}W", f"Rack {index} Wood", "Wood", 10 + index))
         rack_defs.append(("T", "Truck / No Rack", "Truck", 99))
         for code, name, rack_type, sort_order in rack_defs:
-            con.execute(
-                """
-                INSERT OR IGNORE INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at)
-                VALUES (?, ?, ?, 'Open', 1, ?, ?)
-                """,
-                (code, name, rack_type, sort_order, created),
-            )
+            existing = con.execute(
+                "SELECT 1 FROM racks WHERE UPPER(rack_code) = UPPER(?) LIMIT 1",
+                (code,),
+            ).fetchone()
+            if existing:
+                continue
+            self._insert_rack_definition(con, code, name, rack_type, sort_order)
         con.commit()
 
     def layout_bay_policy_status(self, bay: dict[str, Any]) -> str:
@@ -6594,7 +6643,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(bay_code) DO UPDATE SET
-                    display_name = excluded.display_name,
+                    -- The JSON map is a bootstrap source. Once a bay exists, keep the
+                    -- operator-maintained display name so server restarts cannot undo Edit Bays.
+                    display_name = CASE
+                        WHEN TRIM(COALESCE(bays.display_name, '')) <> '' THEN bays.display_name
+                        ELSE excluded.display_name
+                    END,
                     area = excluded.area,
                     bay_type = excluded.bay_type,
                     capacity_qty = CASE
@@ -8340,18 +8394,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
 
     def get_manual_edit_lookups(self) -> dict[str, list[dict[str, Any]]]:
-        """Return maintained manual-edit choices plus editable glass pricing.
+        """Return maintained edit choices, glass pricing, and glass colors.
 
         Effects: Reads existing line-item products and the shared admin lookup table.
-        Flow: Builds the product/route/process libraries as before, exposes every
-        default glass rate, overlays administrator glass-cost overrides, and adds
-        discovered unpriced products so new glass types are visible for pricing.
+        Flow: Builds the product/route/process libraries, exposes every known glass
+        type for pricing and visual-color configuration, then overlays administrator
+        values without requiring a database migration.
         """
         buckets: dict[str, dict[str, dict[str, Any]]] = {
             "product": {},
             "route": {},
             "process": {},
             "glass_cost": {},
+            "glass_color": {},
         }
 
         def add_lookup(
@@ -8363,6 +8418,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             source: str = "discovered",
             lookup_id: int | None = None,
             rate: float | None = None,
+            color: str = "",
         ) -> None:
             """Add one normalized library row, preferring maintained/manual values."""
             clean_kind = str(kind or "").strip().lower()
@@ -8382,6 +8438,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             }
             if clean_kind == "glass_cost":
                 next_item["rate"] = round(float(rate), 4) if rate is not None else None
+            if clean_kind == "glass_color":
+                clean_color = str(color or category or "").strip().upper()
+                next_item["color"] = clean_color if re.fullmatch(r"#[0-9A-F]{6}", clean_color) else ""
             replaceable_sources = {"discovered", "default"}
             if not existing or existing.get("source") in replaceable_sources or source == "manual":
                 buckets[clean_kind][key] = next_item
@@ -8426,14 +8485,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             for row in product_rows:
                 product = str(row["product"] or "").strip()
                 add_lookup("product", product)
-                _matched_label, matched_rate = glass_cost_profile(product, effective_costs)
+                add_lookup("glass_color", product, product, source="discovered")
+                matched_label, matched_rate = glass_cost_profile(product, effective_costs)
                 if matched_rate is None:
                     add_lookup("glass_cost", product, product, source="discovered", rate=None)
+                elif matched_label:
+                    # Canonical pricing labels are also the maintained visual
+                    # glass-type vocabulary used by Glass Colors.
+                    add_lookup("glass_cost", matched_label, matched_label, source="default", rate=matched_rate)
 
             for row in con.execute("SELECT DISTINCT route FROM line_items WHERE COALESCE(is_deleted, 0) = 0 AND TRIM(route) <> '' ORDER BY route").fetchall():
                 add_lookup("route", row["route"])
             for row in con.execute("SELECT DISTINCT process_state FROM line_items WHERE COALESCE(is_deleted, 0) = 0 AND TRIM(process_state) <> '' ORDER BY process_state").fetchall():
                 add_lookup("process", row["process_state"])
+
+            # Every known glass-cost entry becomes a Glass Colors row. The
+            # browser assigns a stable default color until an administrator
+            # stores an explicit override in the same generic lookup table.
+            for item in list(buckets["glass_cost"].values()):
+                add_lookup("glass_color", item["value"], item["label"], source="default")
 
             for row in admin_rows:
                 row_type = str(row["type"] or "").strip().lower()
@@ -8452,6 +8522,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         row["id"],
                         rate,
                     )
+                    add_lookup("glass_color", row["value"], row["label"], source="default")
+                elif row_type == "glass_color":
+                    add_lookup(
+                        row_type,
+                        row["value"],
+                        row["label"],
+                        row["category"],
+                        "",
+                        row["source"] or "manual",
+                        row["id"],
+                        color=str(row["category"] or ""),
+                    )
                 else:
                     add_lookup(
                         row_type,
@@ -8463,12 +8545,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         row["id"],
                     )
                     # A newly added Product lookup should immediately become
-                    # priceable even before that product appears on an import.
+                    # priceable/colorable even before that product appears on an import.
                     if row_type == "product":
                         product_value = str(row["value"] or "").strip()
-                        _matched_label, matched_rate = glass_cost_profile(product_value, effective_costs)
+                        add_lookup("glass_color", product_value, product_value, source="discovered")
+                        matched_label, matched_rate = glass_cost_profile(product_value, effective_costs)
+                        glass_label = str(matched_label or product_value).strip()
                         if product_value and matched_rate is None:
                             add_lookup("glass_cost", product_value, product_value, source="discovered", rate=None)
+                        if glass_label:
+                            add_lookup("glass_color", glass_label, glass_label, source="default")
 
         return {
             "products": sorted(buckets["product"].values(), key=lambda item: item["label"].lower()),
@@ -8478,19 +8564,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 buckets["glass_cost"].values(),
                 key=lambda item: (item.get("rate") is None, item["label"].lower()),
             ),
+            "glassColors": sorted(
+                buckets["glass_color"].values(),
+                key=lambda item: item["label"].lower(),
+            ),
         }
 
     def add_manual_edit_lookup(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
-        """Create or update a Lookup Manager value, including glass cost per SQFT.
+        """Create or update a Lookup Manager value, glass cost, or glass color.
 
         Effects: Writes one row to the existing admin_lookup_values table and records
-        the normal audit entry. No schema change is required for glass pricing.
-        Flow: Validates the active library type, stores glass cost in the existing
-        category field for glass_cost rows, then returns the refreshed libraries.
+        the normal audit entry. Glass prices and colors reuse the generic category
+        field, so this remains schema-neutral.
+        Flow: Validates the active library type, normalizes its specialized value,
+        stores the row, then returns the refreshed Lookup Manager libraries.
         """
         lookup_type = str(data.get("type") or "").strip().lower()
-        if lookup_type not in {"product", "route", "process", "glass_cost"}:
-            raise ValueError("Lookup type must be product, route, process, or glass cost")
+        if lookup_type not in {"product", "route", "process", "glass_cost", "glass_color"}:
+            raise ValueError("Lookup type must be product, route, process, glass cost, or glass color")
         value = str(data.get("value") or "").strip()
         label = str(data.get("label") or value).strip()
         category = str(data.get("category") or "").strip() if lookup_type == "route" else ""
@@ -8508,9 +8599,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 raise ValueError("Glass cost per SQFT is required") from exc
             if rate < 0:
                 raise ValueError("Glass cost per SQFT cannot be negative")
-            # category is intentionally reused as the persisted numeric value so
-            # v0.261 remains schema-neutral and compatible with current databases.
             category = f"{rate:.4f}".rstrip("0").rstrip(".")
+            label = value
+            match_terms = ""
+        elif lookup_type == "glass_color":
+            color = str(data.get("color") or data.get("category") or "").strip().upper()
+            if not re.fullmatch(r"#[0-9A-F]{6}", color):
+                raise ValueError("Glass color must be a six-digit hex color such as #2F80ED")
+            category = color
             label = value
             match_terms = ""
 
@@ -8538,6 +8634,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             audit_payload: dict[str, Any] = {"label": label, "category": category}
             if lookup_type == "glass_cost":
                 audit_payload = {"glassType": value, "costPerSqft": float(category)}
+            elif lookup_type == "glass_color":
+                audit_payload = {"glassType": value, "color": category}
             self.insert_audit(
                 con,
                 "admin_lookup_value",
@@ -9170,6 +9268,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         """
         clean_query = str(query or "").strip()
         clean_bay = str(bay_code or "").strip()
+        priority_audit_meta: dict[str, dict[str, Any]] = {}
         with self.connect() as con:
             rows = self.sdi_destination_rows(con)
             selected_rows = (
@@ -9177,6 +9276,35 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if clean_query
                 else []
             )
+            line_ids = sorted({str(row["id"] or "") for row in rows if str(row["id"] or "")})
+            # Keep audit lookups below SQLite/SQL Server parameter limits on larger delivery days.
+            for offset in range(0, len(line_ids), 500):
+                line_id_chunk = line_ids[offset : offset + 500]
+                placeholders = ",".join("?" for _ in line_id_chunk)
+                audit_rows = con.execute(
+                    f"""
+                    SELECT entity_id, action, user_name, reason, payload_json, created_at
+                    FROM audit_events
+                    WHERE entity_type = 'line_item'
+                      AND entity_id IN ({placeholders})
+                      AND action IN ('mark_rush_sdi', 'change_priority_delivery_date')
+                    ORDER BY id DESC
+                    """,
+                    tuple(line_id_chunk),
+                ).fetchall()
+                for audit_row in audit_rows:
+                    line_id = str(audit_row["entity_id"] or "")
+                    meta = priority_audit_meta.setdefault(line_id, {})
+                    try:
+                        audit_payload = json.loads(audit_row["payload_json"] or "{}")
+                    except Exception:
+                        audit_payload = {}
+                    if audit_row["action"] == "mark_rush_sdi" and "markedAt" not in meta:
+                        meta["markedAt"] = str(audit_row["created_at"] or "")
+                        meta["markedBy"] = str(audit_row["user_name"] or "")
+                        meta["markedReason"] = str(audit_row["reason"] or "")
+                    elif audit_row["action"] == "change_priority_delivery_date" and "previousDeliveryDate" not in meta:
+                        meta["previousDeliveryDate"] = str(audit_payload.get("previousDeliveryDate") or "")
 
         def item_payload(row: Any) -> dict[str, Any]:
             """Convert one destination row into the SDI modal's item-level status payload."""
@@ -9184,6 +9312,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             process_state = str(row["process_state"] or "")
             remake = is_remake_item({"processState": process_state, "queueState": row["queue_state"]})
             rush = is_rush_item({"processState": process_state, "queueState": row["queue_state"]}) and not remake
+            priority_meta = priority_audit_meta.get(str(row["id"]), {})
             return {
                 "lineItemId": str(row["id"]),
                 "sourceId": str(row["source_id"] or ""),
@@ -9203,8 +9332,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "remake": remake,
                 "marked": rush or remake,
                 "priorityDeliveryDate": str(row["priority_delivery_date"] or ""),
+                "priorityPreviousDeliveryDate": str(priority_meta.get("previousDeliveryDate") or ""),
+                "priorityMarkedAt": str(priority_meta.get("markedAt") or ""),
+                "priorityMarkedBy": str(priority_meta.get("markedBy") or ""),
                 "priorityDirectToTruck": bool(row["priority_direct_to_truck"] or 0),
-                "priorityReason": str(row_value(row, "assignment_reason", "") or ""),
+                "priorityReason": str(priority_meta.get("markedReason") or row_value(row, "assignment_reason", "") or ""),
                 **presence,
                 "eligibleByDefault": presence["missingQty"] > 0,
             }
@@ -9267,11 +9399,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not marked_items:
                 continue
             first = marked_items[0]
+            marked_pairs = sorted(
+                (
+                    (str(item.get("priorityMarkedAt") or ""), str(item.get("priorityMarkedBy") or ""))
+                    for item in marked_items
+                    if item.get("priorityMarkedAt")
+                ),
+                key=lambda pair: pair[0],
+            )
+            first_marked_at, first_marked_by = marked_pairs[0] if marked_pairs else ("", "")
             current_groups.append({
                 "key": f"{first['deliveryListId']}::{group_value}",
                 "job": first["job"] or first["order"],
                 "customer": first["customer"],
                 "deliveryDate": first["priorityDeliveryDate"] or first["deliveryDate"],
+                "originalDeliveryDate": first["deliveryDate"],
+                "markedAt": first_marked_at,
+                "markedBy": first_marked_by,
                 "items": marked_items,
             })
         # Priority work should surface the earliest required date first. Blank dates
@@ -13828,13 +13972,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "rack-details": ({"rack", "rack_item", "packing_list_print"}, ("rack", "packing_list", "outbound_override_transportation")),
             "racks-history": ({"rack", "rack_item", "rack_set", "packing_list_print"}, ("rack", "packing_list", "outbound_override_transportation")),
             "packing-history": ({"packing_list_print"}, ("packing_list",)),
-            "oldBays": ({"bay_assignment", "bay"}, ("snooze_stale_bay", "bay_check_")),
-            "rush": ({"line_item", "bay_assignment"}, ("mark_rush", "clear_rush_priority", "remove_rush_preassign", "remove_sdi")),
+            "oldBays": ({"bay_assignment", "bay"}, ("snooze_stale_bay", "bay_check_", "clear_bay")),
+            "rush": ({"line_item", "bay_assignment"}, ("mark_rush", "change_priority_delivery_date", "clear_rush_priority", "remove_rush_preassign", "remove_sdi")),
             "manageBayItems": ({"bay_assignment", "bay"}, ("move_bay", "clear_bay_assignment", "restore_bay_assignment", "assign_bay")),
             "editBays": ({"bay", "bay_group"}, ("create_bays", "delete_bay", "delete_bay_group", "move_bay_group", "set_bay_", "update_bay_layout")),
         }
         exact_action_contexts: dict[str, set[str]] = {
-            "oldBays": {"snooze_stale_bay", "bay_check_empty", "bay_check_needs_review", "bay_check_still_occupied"},
+            "oldBays": {"snooze_stale_bay", "bay_check_empty", "bay_check_needs_review", "bay_check_still_occupied", "clear_bay"},
             "manageBayItems": {"move_bay", "clear_bay_assignment", "restore_bay_assignment", "assign_bay"},
             "racks": {"upsert_rack", "create_rack_set", "delete_rack"},
             "rackForm": {"upsert_rack", "delete_rack"},
@@ -14239,11 +14383,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
 
     def get_bay_job_details(self, bay_code: str) -> dict[str, Any]:
-        """Return live job fulfillment for one bay, including scan-in timestamps.
+        """Return live job fulfillment for one bay with each item's actual current location.
 
-        Fulfillment is based on physical bay assignments, not the delivery-list
-        received quantity. That distinction matters when a received item is
-        scanned out and later returned to a bay.
+        The selected bay identifies the jobs shown here, but each exact order-item is
+        resolved against its latest active assignment across the entire Bay Map. This
+        supports intentionally splitting sibling items across different physical bays.
         """
         clean_code = str(bay_code or "").strip()
         if not clean_code:
@@ -14269,10 +14413,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (bay["id"],),
             ).fetchall()
 
-            assignment_by_line: dict[str, sqlite3.Row] = {}
-            for assignment in assignments:
-                assignment_by_line.setdefault(str(assignment["line_item_id"]), assignment)
-
             job_details: list[dict[str, Any]] = []
             seen_job_keys: set[tuple[str, str]] = set()
 
@@ -14291,6 +14431,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         """
                         SELECT * FROM line_items
                         WHERE list_id = ? AND TRIM(COALESCE(job, '')) = ?
+                          AND COALESCE(is_deleted, 0) = 0
                         ORDER BY CAST(order_no AS INTEGER), CAST(item_no AS INTEGER), id
                         """,
                         (delivery_list_id, job_value),
@@ -14300,38 +14441,65 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         """
                         SELECT * FROM line_items
                         WHERE list_id = ? AND order_no = ?
+                          AND COALESCE(is_deleted, 0) = 0
                         ORDER BY CAST(order_no AS INTEGER), CAST(item_no AS INTEGER), id
                         """,
                         (delivery_list_id, order_value),
                     ).fetchall()
 
+                line_ids = [str(row["id"]) for row in group_rows]
+                location_by_line: dict[str, Any] = {}
+                if line_ids:
+                    placeholders = ",".join("?" for _ in line_ids)
+                    location_rows = con.execute(
+                        f"""
+                        SELECT ba.*, b.bay_code AS location_bay_code,
+                               b.display_name AS location_bay_display,
+                               b.map_section AS location_bay_group
+                        FROM bay_assignments ba
+                        LEFT JOIN bays b ON b.id = ba.bay_id
+                        WHERE ba.line_item_id IN ({placeholders})
+                          AND ba.status NOT IN ('Cleared', 'Cancelled')
+                          AND ba.id = (
+                              SELECT MAX(ba2.id)
+                              FROM bay_assignments ba2
+                              WHERE ba2.line_item_id = ba.line_item_id
+                                AND ba2.status NOT IN ('Cleared', 'Cancelled')
+                          )
+                        """,
+                        tuple(line_ids),
+                    ).fetchall()
+                    location_by_line = {str(row["line_item_id"]): row for row in location_rows}
+
                 required_qty = sum(max(int(row["qty"] or 0), 0) for row in group_rows)
-                in_bay_qty = 0
+                located_qty = 0
+                selected_bay_qty = 0
                 latest_scan_in = ""
                 all_items: list[dict[str, Any]] = []
                 missing_items: list[dict[str, Any]] = []
 
                 for row in group_rows:
                     needed_qty = max(int(row["qty"] or 0), 0)
-                    current_assignment = assignment_by_line.get(str(row["id"]))
+                    current_assignment = location_by_line.get(str(row["id"]))
                     assignment_status = str(current_assignment["status"] or "") if current_assignment else ""
-                    physically_in_bay = bool(current_assignment) and assignment_status not in {
-                        "PreAssigned",
-                        "Cancelled",
-                        "Cleared",
+                    physically_located = bool(current_assignment) and assignment_status not in {
+                        "PreAssigned", "Cancelled", "Cleared",
                     }
                     present_qty = (
                         min(max(int(current_assignment["assigned_qty"] or 0), 0), needed_qty)
-                        if physically_in_bay
-                        else 0
+                        if physically_located else 0
                     )
+                    item_bay_code = str(row_value(current_assignment, "location_bay_code", "") or "") if current_assignment else ""
+                    item_bay_display = str(row_value(current_assignment, "location_bay_display", "") or item_bay_code) if current_assignment else ""
+                    item_bay_group = str(row_value(current_assignment, "location_bay_group", "") or "") if current_assignment else ""
+                    is_in_selected_bay = physically_located and item_bay_code == clean_code
+                    selected_qty = present_qty if is_in_selected_bay else 0
                     missing_qty = max(needed_qty - present_qty, 0)
-                    scanned_into_bay_at = (
-                        str(current_assignment["assigned_at"] or "") if physically_in_bay else ""
-                    )
-                    if scanned_into_bay_at and scanned_into_bay_at > latest_scan_in:
+                    scanned_into_bay_at = str(current_assignment["assigned_at"] or "") if physically_located else ""
+                    if is_in_selected_bay and scanned_into_bay_at and scanned_into_bay_at > latest_scan_in:
                         latest_scan_in = scanned_into_bay_at
-                    in_bay_qty += present_qty
+                    located_qty += present_qty
+                    selected_bay_qty += selected_qty
 
                     item_payload = {
                         "lineItemId": row["id"],
@@ -14340,11 +14508,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "item": row["item_no"],
                         "qty": needed_qty,
                         "inBayQty": present_qty,
+                        "locatedQty": present_qty,
+                        "selectedBayQty": selected_qty,
                         "missingQty": missing_qty,
                         "dimensions": row["dimensions"],
                         "product": row["product"],
                         "customer": row["customer"],
+                        "bayCode": item_bay_code,
+                        "bayDisplay": item_bay_display,
+                        "bayGroup": item_bay_group,
                         "bayStatus": assignment_status,
+                        "isInSelectedBay": is_in_selected_bay,
                         "scannedIntoBayAt": scanned_into_bay_at,
                         "complete": missing_qty == 0,
                     }
@@ -14352,24 +14526,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     if missing_qty > 0:
                         missing_items.append(item_payload)
 
-                job_details.append(
-                    {
-                        "key": f"job:{job_value.lower()}" if job_value else f"order:{order_value}",
-                        "job": job_value or order_value,
-                        "customer": str(assignment["customer"] or ""),
-                        "deliveryListId": delivery_list_id,
-                        "deliveryDate": str(assignment["delivery_date"] or ""),
-                        "requiredQty": required_qty,
-                        "inBayQty": in_bay_qty,
-                        "missingQty": max(required_qty - in_bay_qty, 0),
-                        "complete": required_qty > 0 and in_bay_qty >= required_qty,
-                        "lastScannedIntoBayAt": latest_scan_in,
-                        "items": all_items,
-                        "missingItems": missing_items,
-                    }
-                )
+                job_details.append({
+                    "key": f"job:{job_value.lower()}" if job_value else f"order:{order_value}",
+                    "job": job_value or order_value,
+                    "customer": str(assignment["customer"] or ""),
+                    "deliveryListId": delivery_list_id,
+                    "deliveryDate": str(assignment["delivery_date"] or ""),
+                    "requiredQty": required_qty,
+                    "inBayQty": located_qty,
+                    "locatedQty": located_qty,
+                    "selectedBayQty": selected_bay_qty,
+                    "missingQty": max(required_qty - located_qty, 0),
+                    "complete": required_qty > 0 and located_qty >= required_qty,
+                    "lastScannedIntoBayAt": latest_scan_in,
+                    "items": all_items,
+                    "missingItems": missing_items,
+                })
 
         return {"bayCode": clean_code, "jobDetails": job_details}
+
     def get_bay_layout(self) -> dict[str, Any]:
         """Purpose: Read bay layout for the delivery-list scanner workflow.
 
@@ -14656,6 +14831,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             raise ValueError("At least one stale bay assignment is required")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            audit_assignments = [self._bay_assignment_audit_context(con, assignment_id) for assignment_id in assignment_ids]
             for assignment_id in assignment_ids:
                 con.execute(
                     """
@@ -14668,7 +14844,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     """,
                     (assignment_id, snoozed_until, user, now_iso()),
                 )
-            self.insert_audit(con, "bay_assignment", ",".join(str(value) for value in assignment_ids), "snooze_stale_bay", user, "", f"Snoozed {days} day(s)", {"days": days})
+            self.insert_audit(
+                con,
+                "bay_assignment",
+                ",".join(str(value) for value in assignment_ids),
+                "snooze_stale_bay",
+                user,
+                "",
+                f"Snoozed {days} day(s)",
+                {"days": days, "assignments": audit_assignments},
+            )
             con.commit()
         return {"ok": True, "snoozedUntil": snoozed_until, "orders": self.get_stale_bay_orders()}
 
@@ -15166,8 +15351,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 con.execute(
                     """
                     UPDATE racks
-                    SET status = 'Open', completed_at = '', completed_by = '',
-                        departed_at = '', departed_by = '', returned_at = '', returned_by = '',
+                    SET status = 'Open', completed_at = '',
+                        departed_at = '', returned_at = '',
                         updated_at = ?
                     WHERE id = ?
                     """,
@@ -15656,6 +15841,74 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         payload["rackSummary"] = racks_payload.get("summary")
         return payload
 
+    def _insert_rack_definition(
+        self,
+        con: Any,
+        code: str,
+        display_name: str,
+        rack_type: str,
+        sort_order: int,
+    ) -> None:
+        """Insert one operational rack with safe lifecycle defaults.
+
+        Some long-lived floor databases carry the transport lifecycle columns as
+        NOT NULL columns without SQLite defaults. Rack creation must therefore
+        supply those fields explicitly instead of relying on the table default.
+        The SQLite path also fills any future NOT NULL/no-default compatibility
+        columns with a neutral value so old databases remain creatable after
+        additive schema changes.
+        """
+        timestamp = now_iso()
+        values: dict[str, Any] = {
+            "rack_code": code,
+            "display_name": display_name,
+            "rack_type": rack_type,
+            "status": "Open",
+            "active": 1,
+            "sort_order": int(sort_order),
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "destination": "",
+            "destination_override_until": "",
+            "destination_override_by": "",
+            "completed_at": "",
+            "departed_at": "",
+            "returned_at": "",
+            "created_at_utc": timestamp,
+            "updated_at_utc": timestamp,
+            "is_deleted": 0,
+            "deleted_at_utc": "",
+        }
+
+        database_type = str(getattr(self, "database_type", "sqlite") or "sqlite").lower()
+        if database_type == "sqlite":
+            schema_rows = con.execute("PRAGMA table_info(racks)").fetchall()
+            columns_in_order = [str(row["name"]) for row in schema_rows if str(row["name"]) != "id"]
+            for row in schema_rows:
+                name = str(row["name"])
+                if name == "id" or name in values:
+                    continue
+                not_null = bool(int(row["notnull"] or 0))
+                default_value = row["dflt_value"]
+                if not_null and default_value is None:
+                    declared_type = str(row["type"] or "").upper()
+                    values[name] = 0 if any(token in declared_type for token in ("INT", "REAL", "NUM", "DEC", "BOOL")) else ""
+        else:
+            # Azure SQL deployments use the maintained compatibility schema; do
+            # not probe it with SQLite PRAGMA syntax.
+            columns_in_order = [
+                "rack_code", "display_name", "rack_type", "status", "active",
+                "sort_order", "created_at", "updated_at", "destination",
+                "completed_at", "departed_at", "returned_at",
+            ]
+
+        selected = [name for name in columns_in_order if name in values]
+        placeholders = ", ".join("?" for _ in selected)
+        con.execute(
+            f"INSERT INTO racks ({', '.join(f'[{name}]' for name in selected)}) VALUES ({placeholders})",
+            tuple(values[name] for name in selected),
+        )
+
     def update_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Purpose: Update rack for the delivery-list scanner workflow.
 
@@ -15674,22 +15927,45 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             raise ValueError("Rack code is required")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            existing = con.execute("SELECT id, rack_code FROM racks WHERE rack_code = ?", (old_code,)).fetchone() if old_code else None
+            existing = con.execute(
+                "SELECT id, rack_code, display_name FROM racks WHERE UPPER(rack_code) = UPPER(?)",
+                (old_code,),
+            ).fetchone() if old_code else None
+            existing_id = int(existing["id"]) if existing else 0
+            code_conflict = con.execute(
+                "SELECT id, rack_code FROM racks WHERE active = 1 AND UPPER(rack_code) = UPPER(?) AND id <> ? LIMIT 1",
+                (code, existing_id),
+            ).fetchone()
+            if code_conflict:
+                raise ValueError(f"Rack code {code} already exists. Choose a different rack code.")
+            name_conflict = con.execute(
+                """
+                SELECT id, rack_code, display_name
+                FROM racks
+                WHERE active = 1
+                  AND LOWER(TRIM(display_name)) = LOWER(TRIM(?))
+                  AND id <> ?
+                LIMIT 1
+                """,
+                (name, existing_id),
+            ).fetchone()
+            if name_conflict:
+                raise ValueError(
+                    f"Rack name {name!r} is already used by {name_conflict['rack_code']}. "
+                    "Choose a unique rack name."
+                )
             if existing:
                 if old_code == "T" and code != "T":
                     raise ValueError("Truck rack code cannot be changed")
-                if code != old_code:
-                    conflict = con.execute("SELECT id FROM racks WHERE rack_code = ? AND id <> ?", (code, existing["id"])).fetchone()
-                    if conflict:
-                        raise ValueError(f"Rack code {code} already exists")
                 con.execute(
                     "UPDATE racks SET rack_code = ?, display_name = ?, rack_type = ?, active = 1, updated_at = ? WHERE id = ?",
                     (code, name, rack_type, now_iso(), existing["id"]),
                 )
             else:
-                conflict = con.execute("SELECT id, active FROM racks WHERE rack_code = ?", (code,)).fetchone()
-                if conflict and int(row_value(conflict, "active", 0) or 0):
-                    raise ValueError(f"Rack code {code} already exists. Choose a different rack code.")
+                conflict = con.execute(
+                    "SELECT id, active FROM racks WHERE UPPER(rack_code) = UPPER(?)",
+                    (code,),
+                ).fetchone()
                 if conflict:
                     # Reusing a previously deleted empty code creates a clean operational rack
                     # while preserving historical rack_items/audit records by their original IDs.
@@ -15697,15 +15973,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         """
                         UPDATE racks
                         SET display_name = ?, rack_type = ?, status = 'Open', active = 1,
-                            destination = '', completed_at = NULL, departed_at = NULL,
-                            returned_at = NULL, updated_at = ?
+                            destination = '', completed_at = '', departed_at = '',
+                            returned_at = '', updated_at = ?
                         WHERE rack_code = ?
                         """,
                         (name, rack_type, now_iso(), code),
                     )
                 else:
                     sort_order = con.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM racks").fetchone()[0]
-                    con.execute("INSERT INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at) VALUES (?, ?, ?, 'Open', 1, ?, ?)", (code, name, rack_type, sort_order, now_iso()))
+                    self._insert_rack_definition(con, code, name, rack_type, int(sort_order or 1))
             if visual_icon or visual_color:
                 self.save_rack_set_visual(con, rack_type, visual_icon or "rack", visual_color or "#176d72", visual_source_type)
             self.insert_audit(con, "rack", code, "upsert_rack", user, old_code if old_code != code else "", "", {"name": name, "type": rack_type, "oldCode": old_code, "setIcon": visual_icon, "setColor": visual_color})
@@ -15732,6 +16008,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         created_codes: list[str] = []
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            existing_set = con.execute(
+                "SELECT rack_type FROM racks WHERE active = 1 AND LOWER(TRIM(rack_type)) = LOWER(TRIM(?)) LIMIT 1",
+                (rack_type,),
+            ).fetchone()
+            if existing_set:
+                raise ValueError(
+                    f"Rack set {rack_type!r} already exists. Add an individual rack to that set or choose a new set name."
+                )
             sort_order = int(con.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM racks").fetchone()[0] or 1)
             target_codes = [
                 f"R{start + offset}{prefix}" if len(prefix) <= 3 else f"{prefix}{start + offset}"
@@ -15739,7 +16023,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ]
             placeholders = ",".join("?" for _ in target_codes)
             active_conflicts = con.execute(
-                f"SELECT rack_code FROM racks WHERE active = 1 AND rack_code IN ({placeholders}) ORDER BY rack_code",
+                f"SELECT rack_code FROM racks WHERE active = 1 AND UPPER(rack_code) IN ({placeholders}) ORDER BY rack_code",
                 target_codes,
             ).fetchall()
             if active_conflicts:
@@ -15756,16 +16040,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         """
                         UPDATE racks
                         SET display_name = ?, rack_type = ?, status = 'Open', active = 1,
-                            destination = '', completed_at = NULL, departed_at = NULL,
-                            returned_at = NULL, sort_order = ?, updated_at = ?
+                            destination = '', completed_at = '', departed_at = '',
+                            returned_at = '', sort_order = ?, updated_at = ?
                         WHERE rack_code = ?
                         """,
                         (display, rack_type, sort_order + offset, now_iso(), code),
                     )
                 else:
-                    con.execute(
-                        "INSERT INTO racks (rack_code, display_name, rack_type, status, active, sort_order, created_at) VALUES (?, ?, ?, 'Open', 1, ?, ?)",
-                        (code, display, rack_type, sort_order + offset, now_iso()),
+                    self._insert_rack_definition(
+                        con,
+                        code,
+                        display,
+                        rack_type,
+                        sort_order + offset,
                     )
                 created_codes.append(code)
             visual = self.save_rack_set_visual(con, rack_type, visual_icon, visual_color)
@@ -16216,28 +16503,73 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return self._indian_trail_in_transit_payload(con, delivery_date)
 
     def _indian_trail_in_transit_payload(self, con: sqlite3.Connection, delivery_date: str = "") -> dict[str, Any]:
-        """Return only glass on transportation methods that actually departed for Indian Trail.
+        """Return every physical piece still riding on an Indian Trail rack.
 
-        Effects: Reads active Indian Trail, Outbound, rack, and rack-item records.
-        Flow: Aggregates all Indian Trail list copies for the resolved date, finds rack assignments
-        whose rack was scanned Outbound and is still In Transit, subtracts received quantities once
-        per physical Order/Item, and groups the remaining pieces by Job Nr. and rack for the existing
-        manifest UI. Pieces merely assigned to a rack are intentionally excluded until departure.
+        Effects: Reads active rack assignments plus current Outbound/Indian Trail scan state.
+        Flow: Rack assignments are the physical source of truth once a rack departs. Source delivery
+        lists may later be superseded or their line items soft-deleted by an update, so this query
+        intentionally keeps those still-active rack assignments visible. Receiving scans are then
+        subtracted once per Order Nr./Item Nr. before the remaining quantity is allocated across the
+        departed racks. With no date supplied, every delivery date represented by an in-transit rack
+        is combined for the manifest while the Bay Map route summary remains date-specific.
         """
-        resolved_date, inbound_lists = self.active_indian_trail_lists(con, delivery_date)
-        if not inbound_lists:
+        requested_date = str(delivery_date or "").strip()
+        if not requested_date:
+            date_rows = con.execute(
+                """
+                SELECT DISTINCT src_dl.delivery_date
+                FROM rack_items ri
+                JOIN racks r ON r.id = ri.rack_id AND r.active = 1
+                JOIN line_items src_li ON src_li.id = ri.line_item_id
+                JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
+                WHERE ri.status = 'Active'
+                  AND LOWER(REPLACE(COALESCE(r.status, ''), ' ', '')) = 'intransit'
+                  AND COALESCE(r.departed_at, '') <> ''
+                  AND UPPER(TRIM(COALESCE(NULLIF(r.destination, ''), 'Indian Trail'))) IN ('INDIAN TRAIL', 'IT')
+                  AND COALESCE(src_dl.delivery_date, '') <> ''
+                ORDER BY src_dl.delivery_date
+                """
+            ).fetchall()
+            delivery_dates = [
+                str(row["delivery_date"] or "").strip()
+                for row in date_rows
+                if str(row["delivery_date"] or "").strip()
+            ]
+            combined_rows: list[dict[str, Any]] = []
+            outbound_ids: list[str] = []
+            inbound_ids: list[str] = []
+            for date_value in delivery_dates:
+                payload = self._indian_trail_in_transit_payload(con, date_value)
+                combined_rows.extend(payload.get("rows") or [])
+                outbound_ids.extend(str(value) for value in payload.get("outboundListIds") or [] if str(value))
+                inbound_ids.extend(str(value) for value in payload.get("inboundListIds") or [] if str(value))
+
+            total_qty = sum(max(int(row.get("qty") or 0), 0) for row in combined_rows)
+            job_keys = {
+                normalized_match_text(row.get("job") or row.get("product") or row.get("order") or "No Job Nr.")
+                or f"ORDER{row.get('order', '')}"
+                for row in combined_rows
+            }
             return {
                 "deliveryDate": "",
-                "outboundListId": "",
-                "inboundListId": "",
-                "inboundListIds": [],
-                "totalQty": 0,
+                "deliveryDates": delivery_dates,
+                "deliveryDateCount": len(delivery_dates),
+                "outboundListId": outbound_ids[0] if outbound_ids else "",
+                "outboundListIds": list(dict.fromkeys(outbound_ids)),
+                "inboundListId": inbound_ids[0] if inbound_ids else "",
+                "inboundListIds": list(dict.fromkeys(inbound_ids)),
+                "totalQty": total_qty,
+                "jobCount": len(job_keys),
+                "rowCount": len(combined_rows),
                 "jobs": [],
-                "rows": [],
+                "rows": combined_rows,
             }
 
-        inventory = self.indian_trail_physical_inventory(con, resolved_date)
-        primary_inbound = inbound_lists[0]
+        resolved_date = requested_date
+        _inbound_date, inbound_lists = self.active_indian_trail_lists(con, requested_date)
+        inventory = self.indian_trail_physical_inventory(con, resolved_date) if inbound_lists else {}
+        primary_inbound = inbound_lists[0] if inbound_lists else None
+
         outbound_lists = con.execute(
             """
             SELECT id, label, stage
@@ -16278,6 +16610,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "scanned_qty": scanned_qty,
                     }
 
+        receipt_rows = con.execute(
+            """
+            SELECT recv.order_no, recv.item_no, recv.scanned_qty, recv_dl.stage, recv_dl.scanner
+            FROM delivery_lists recv_dl
+            JOIN line_items recv ON recv.list_id = recv_dl.id
+            WHERE recv_dl.delivery_date = ?
+              AND recv_dl.status = 'active'
+              AND COALESCE(recv.is_deleted, 0) = 0
+              AND recv.scanned_qty > 0
+            """,
+            (resolved_date,),
+        ).fetchall()
+        received_by_key: dict[tuple[str, str], int] = {}
+        for receipt in receipt_rows:
+            if receiving_stage_destination(receipt["stage"], receipt["scanner"]) != "Indian Trail":
+                continue
+            key = (
+                str(receipt["order_no"] or "").strip(),
+                str(receipt["item_no"] or "").strip().zfill(3),
+            )
+            received_by_key[key] = max(received_by_key.get(key, 0), max(int(receipt["scanned_qty"] or 0), 0))
+
         rack_rows = con.execute(
             """
             SELECT
@@ -16294,6 +16648,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 src_li.product,
                 src_li.process_state,
                 src_li.queue_state,
+                src_dl.delivery_date,
                 r.rack_code,
                 COALESCE(NULLIF(r.display_name, ''), r.rack_code) AS rack_name,
                 COALESCE(NULLIF(r.rack_type, ''), CASE WHEN r.rack_code = 'T' THEN 'Truck' ELSE 'Rack' END) AS rack_type,
@@ -16302,13 +16657,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             FROM rack_items ri
             JOIN racks r ON r.id = ri.rack_id AND r.active = 1
             JOIN line_items src_li ON src_li.id = ri.line_item_id
-            JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id AND src_dl.status = 'active'
+            JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
             WHERE ri.status = 'Active'
-              AND COALESCE(src_li.is_deleted, 0) = 0
               AND src_dl.delivery_date = ?
               AND LOWER(REPLACE(COALESCE(r.status, ''), ' ', '')) = 'intransit'
               AND COALESCE(r.departed_at, '') <> ''
-              AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
+              AND UPPER(TRIM(COALESCE(NULLIF(r.destination, ''), 'Indian Trail'))) IN ('INDIAN TRAIL', 'IT')
             ORDER BY r.sort_order, r.rack_code, src_li.order_no, src_li.item_no, ri.id
             """,
             (resolved_date,),
@@ -16320,17 +16674,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 str(row["order_no"] or "").strip(),
                 str(row["item_no"] or "").strip().zfill(3),
             )
-            if key not in inventory:
-                continue
             rack_code = str(row["rack_code"] or "").strip()
-            if not rack_code:
+            if not key[0] or not rack_code:
                 continue
             item_racks = rack_map_by_item.setdefault(key, {})
             current = item_racks.get(rack_code)
             rack_qty = max(int(row["rack_qty"] or 0), 0)
-            # Reimports can leave equivalent active assignment records pointing at different
-            # stage copies. Use the largest quantity for the same physical item/rack rather
-            # than summing those duplicates, while still allowing one item to span two racks.
+            # Delivery-list updates can leave equivalent source rows behind. For one physical
+            # item on one rack, keep the largest live assignment rather than double-counting
+            # stage/update copies. Quantities on different racks still add together normally.
             if current is None or rack_qty > int(current["rack_qty"] or 0):
                 item_racks[rack_code] = {
                     "rack_qty": rack_qty,
@@ -16351,24 +16703,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 }
 
         flat_rows: list[dict[str, Any]] = []
-        for key, item in inventory.items():
+        for key, rack_entries in rack_map_by_item.items():
             racks = sorted(
-                rack_map_by_item.get(key, {}).values(),
+                rack_entries.values(),
                 key=lambda row: (int(row["rack_sort_order"]), str(row["rack_code"])),
             )
             if not racks:
                 continue
-            item_qty = max(int(item["qty"] or 0), 0)
-            received_qty = min(max(int(item["received_qty"] or 0), 0), item_qty)
-            departed_qty = min(sum(max(int(row["rack_qty"] or 0), 0) for row in racks), item_qty)
+            departed_qty = sum(max(int(row["rack_qty"] or 0), 0) for row in racks)
+            received_qty = min(max(int(received_by_key.get(key, 0)), 0), departed_qty)
             remaining_qty = max(departed_qty - received_qty, 0)
             if remaining_qty <= 0:
                 continue
+
+            item = inventory.get(key, {})
             outbound = outbound_by_key.get(key, {})
-            outbound_scanned_qty = min(
-                max(int(outbound.get("scanned_qty") or 0), received_qty + remaining_qty),
-                item_qty,
-            )
+            outbound_scanned_qty = max(int(outbound.get("scanned_qty") or 0), departed_qty)
             qty_to_allocate = remaining_qty
             for rack in racks:
                 if qty_to_allocate <= 0:
@@ -16385,24 +16735,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     rack_type = rack_type or "Truck"
                 flat_rows.append(
                     {
-                        "inboundLineId": item["inbound_line_id"],
+                        "inboundLineId": str(item.get("inbound_line_id") or ""),
                         "outboundLineId": str(outbound.get("line_id") or ""),
-                        "order": item["order_no"],
-                        "item": item["item_no"],
+                        "order": key[0],
+                        "item": key[1],
                         "qty": rack_qty,
                         "outboundScannedQty": outbound_scanned_qty,
                         "receivedQty": received_qty,
-                        "dimensions": item["dimensions"] or rack["dimensions"],
-                        "customer": item["customer"] or rack["customer"],
-                        "route": item["route"] or rack["route"],
-                        "job": item["job"] or rack["job"],
-                        "product": item["product"] or rack["product"],
-                        "processState": item["process_state"] or rack["process_state"],
-                        "queueState": item["queue_state"] or rack["queue_state"],
+                        "dimensions": str(item.get("dimensions") or rack["dimensions"] or ""),
+                        "customer": str(item.get("customer") or rack["customer"] or ""),
+                        "route": str(item.get("route") or rack["route"] or ""),
+                        "job": str(item.get("job") or rack["job"] or ""),
+                        "product": str(item.get("product") or rack["product"] or ""),
+                        "processState": str(item.get("process_state") or rack["process_state"] or ""),
+                        "queueState": str(item.get("queue_state") or rack["queue_state"] or ""),
                         "rackCode": rack_code,
                         "rackName": rack_name,
                         "rackType": rack_type,
                         "rackDepartedAt": rack["rack_departed_at"],
+                        "deliveryDate": resolved_date,
                     }
                 )
 
@@ -16456,9 +16807,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "outboundListId": str(primary_outbound["id"] or "") if primary_outbound else "",
             "outboundListIds": outbound_ids,
             "outboundLabel": str(primary_outbound["label"] or "") if primary_outbound else "",
-            "inboundListId": str(primary_inbound["id"] or ""),
+            "inboundListId": str(primary_inbound["id"] or "") if primary_inbound else "",
             "inboundListIds": [str(row["id"] or "") for row in inbound_lists],
-            "inboundLabel": str(primary_inbound["label"] or ""),
+            "inboundLabel": str(primary_inbound["label"] or "") if primary_inbound else "",
             "totalQty": total_qty,
             "jobCount": len(jobs),
             "rowCount": len(flat_rows),
@@ -16519,7 +16870,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
               AND src_dl.delivery_date = ?
               AND LOWER(REPLACE(COALESCE(r.status, ''), ' ', '')) = 'intransit'
               AND COALESCE(r.departed_at, '') <> ''
-              AND COALESCE(NULLIF(r.destination, ''), 'Indian Trail') = 'Indian Trail'
+              AND UPPER(TRIM(COALESCE(NULLIF(r.destination, ''), 'Indian Trail'))) IN ('INDIAN TRAIL', 'IT')
             """,
             (delivery_date,),
         ).fetchall()
@@ -16620,7 +16971,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (today_start,),
             ).fetchone()[0]
             rack_summary = self.rack_summary(con)
-            in_transit_payload = self._indian_trail_in_transit_payload(con, resolved_date or delivery_date)
+            # The route progress totals above stay tied to the requested/today delivery date,
+            # but "pieces on the way" is a physical transportation count and must include
+            # every Indian Trail rack that is currently departed regardless of delivery date.
+            # Keep the date-specific payload as an explicit diagnostic field for callers that
+            # need to distinguish today's in-transit quantity from the all-date live manifest.
+            date_in_transit_payload = self._indian_trail_in_transit_payload(con, resolved_date or delivery_date)
+            in_transit_payload = self._indian_trail_in_transit_payload(con, "")
             transit_rows = in_transit_payload.get("rows", []) if isinstance(in_transit_payload, dict) else []
 
             def transit_row_is_truck(row: dict[str, Any]) -> bool:
@@ -16686,6 +17043,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "needsCheck": needs_check,
             "inTransitQty": in_transit_payload.get("totalQty", 0),
             "inTransitJobCount": in_transit_payload.get("jobCount", 0),
+            "dateInTransitQty": date_in_transit_payload.get("totalQty", 0),
+            "dateInTransitJobCount": date_in_transit_payload.get("jobCount", 0),
             "rackInTransitQty": indian_trail_rack_qty,
             "truckInTransitQty": indian_trail_truck_qty,
             "racksInTransit": [
@@ -16992,7 +17351,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (item["list_id"], line_item_id, bay["id"], assigned_qty, user, now_iso(), reason),
             )
             self.insert_bay_event(con, bay["id"], line_item_id, "AssignBay", user, reason, new_bay_id=bay["id"])
-            self.insert_audit(con, "bay_assignment", str(cur.lastrowid), "assign_bay", user, "", reason, {"bayCode": bay_code})
+            audit_context = self._bay_assignment_audit_context(con, int(cur.lastrowid))
+            self.insert_audit(con, "bay_assignment", str(cur.lastrowid), "assign_bay", user, "", reason, audit_context)
             con.commit()
         return {"ok": True, "assignmentId": cur.lastrowid, "bayCode": bay_code}
 
@@ -17629,6 +17989,42 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "priorityDeliveryDate": priority_delivery_date,
             "lastScan": last,
         }
+    def _bay_assignment_audit_context(self, con: Any, assignment_id: int) -> dict[str, Any]:
+        """Return human-readable item and bay context for one bay assignment audit event."""
+        row = con.execute(
+            """
+            SELECT ba.id, ba.line_item_id, ba.assigned_qty, ba.status, ba.assigned_at,
+                   li.order_no, li.item_no, li.job, li.customer, li.product, li.dimensions,
+                   dl.delivery_date,
+                   b.bay_code, b.display_name AS bay_display, b.map_section AS bay_group
+            FROM bay_assignments ba
+            JOIN line_items li ON li.id = ba.line_item_id
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            LEFT JOIN bays b ON b.id = ba.bay_id
+            WHERE ba.id = ?
+            """,
+            (assignment_id,),
+        ).fetchone()
+        if not row:
+            return {"assignmentId": assignment_id}
+        return {
+            "assignmentId": int(row["id"] or 0),
+            "lineItemId": str(row["line_item_id"] or ""),
+            "job": str(row["job"] or ""),
+            "order": str(row["order_no"] or ""),
+            "item": str(row["item_no"] or ""),
+            "customer": str(row["customer"] or ""),
+            "product": str(row["product"] or ""),
+            "dimensions": str(row["dimensions"] or ""),
+            "deliveryDate": str(row["delivery_date"] or ""),
+            "bayCode": str(row["bay_code"] or ""),
+            "bayDisplay": str(row["bay_display"] or row["bay_code"] or ""),
+            "bayGroup": str(row["bay_group"] or ""),
+            "assignedQty": int(row["assigned_qty"] or 0),
+            "assignmentStatus": str(row["status"] or ""),
+            "assignedAt": str(row["assigned_at"] or ""),
+        }
+
     def move_bay_assignment(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Purpose: Run the move bay assignment workflow for the delivery-list scanner.
 
@@ -17645,6 +18041,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             assignment = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
             if not assignment:
                 raise ValueError("Assignment not found")
+            previous_context = self._bay_assignment_audit_context(con, assignment_id)
             new_bay = self.get_bay_by_code(con, new_bay_code)
             previous_status = str(assignment["status"] or "Assigned")
             # A PreAssigned row reserves a destination but does not prove that the
@@ -17666,7 +18063,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "",
                 reason,
                 {
+                    **previous_context,
+                    "oldBayCode": previous_context.get("bayCode", ""),
+                    "oldBayDisplay": previous_context.get("bayDisplay", ""),
+                    "oldBayGroup": previous_context.get("bayGroup", ""),
                     "newBayCode": new_bay_code,
+                    "newBayDisplay": str(new_bay["display_name"] or new_bay["bay_code"] or ""),
+                    "newBayGroup": str(new_bay["map_section"] or ""),
                     "previousStatus": previous_status,
                     "status": next_status,
                 },
@@ -17691,13 +18094,29 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("BEGIN IMMEDIATE")
             bay = self.get_bay_by_code(con, bay_code)
             rows = con.execute("SELECT * FROM bay_assignments WHERE bay_id = ? AND status NOT IN ('Cleared', 'Cancelled')", (bay["id"],)).fetchall()
+            cleared_contexts = [self._bay_assignment_audit_context(con, int(row["id"])) for row in rows]
             for row in rows:
                 con.execute(
                     "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = ? WHERE id = ?",
                     (user, now_iso(), reason, row["id"]),
                 )
                 self.insert_bay_event(con, bay["id"], row["line_item_id"], "ClearBay", user, reason, old_bay_id=bay["id"])
-            self.insert_audit(con, "bay", bay_code, "clear_bay", user, "", reason, {"clearedAssignments": len(rows)})
+            self.insert_audit(
+                con,
+                "bay",
+                bay_code,
+                "clear_bay",
+                user,
+                "",
+                reason,
+                {
+                    "bayCode": bay_code,
+                    "displayName": str(bay["display_name"] or bay_code),
+                    "bayGroup": str(bay["map_section"] or ""),
+                    "clearedAssignments": len(rows),
+                    "assignments": cleared_contexts,
+                },
+            )
             con.commit()
         return {"ok": True, "bayCode": bay_code, "clearedAssignments": len(rows)}
 
@@ -17716,12 +18135,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             row = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
             if not row:
                 raise ValueError("Assignment not found")
+            audit_context = self._bay_assignment_audit_context(con, assignment_id)
             con.execute(
                 "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = ? WHERE id = ?",
                 (user, now_iso(), reason, assignment_id),
             )
             self.insert_bay_event(con, row["bay_id"], row["line_item_id"], "ClearAssignment", user, reason, old_bay_id=row["bay_id"])
-            self.insert_audit(con, "bay_assignment", str(assignment_id), "clear_bay_assignment", user, "", reason)
+            self.insert_audit(con, "bay_assignment", str(assignment_id), "clear_bay_assignment", user, "", reason, audit_context)
             con.commit()
         return {"ok": True, "assignmentId": assignment_id}
 
@@ -17740,6 +18160,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             row = con.execute("SELECT * FROM bay_assignments WHERE id = ?", (assignment_id,)).fetchone()
             if not row:
                 raise ValueError("Assignment not found")
+            audit_context = self._bay_assignment_audit_context(con, assignment_id)
             bay = con.execute("SELECT * FROM bays WHERE id = ?", (row["bay_id"],)).fetchone()
             if not bay:
                 raise ValueError("Assignment bay not found")
@@ -17748,7 +18169,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (reason, assignment_id),
             )
             self.insert_bay_event(con, row["bay_id"], row["line_item_id"], "RestoreAssignment", user, reason, new_bay_id=row["bay_id"])
-            self.insert_audit(con, "bay_assignment", str(assignment_id), "restore_bay_assignment", user, "", reason)
+            self.insert_audit(con, "bay_assignment", str(assignment_id), "restore_bay_assignment", user, "", reason, audit_context)
             con.commit()
         return {"ok": True, "assignmentId": assignment_id, "bayCode": bay["bay_code"]}
 
@@ -17783,7 +18204,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             # for true soft deletion, not Manual Assign or Blocked Scans status.
             con.execute("UPDATE bays SET status = ?, active = 1 WHERE id = ?", (status, bay["id"]))
             self.insert_bay_event(con, bay["id"], "", f"{status}Bay", user, reason)
-            self.insert_audit(con, "bay", bay_code, f"set_bay_{status.lower()}", user, "", reason)
+            self.insert_audit(
+                con,
+                "bay",
+                bay_code,
+                f"set_bay_{status.lower()}",
+                user,
+                "",
+                reason,
+                {
+                    "bayCode": bay_code,
+                    "displayName": str(bay["display_name"] or bay_code),
+                    "bayGroup": str(bay["map_section"] or ""),
+                    "previousStatus": str(bay["status"] or ""),
+                    "status": status,
+                },
+            )
             con.commit()
         return {"ok": True, "bayCode": bay_code, "status": status, "bays": self.get_bays()}
 
@@ -17927,7 +18363,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (display_name, map_section, bay_category, layout_row, layout_col, capacity, active, row["id"]),
             )
             self.insert_bay_event(con, row["id"], "", "UpdateBayLayout", user, "Bay layout updated")
-            self.insert_audit(con, "bay", bay_code, "update_bay_layout", user, "", "", data)
+            audit_payload = {
+                **data,
+                "bayCode": bay_code,
+                "previousDisplayName": str(row["display_name"] or row["bay_code"] or ""),
+                "previousMapSection": str(row["map_section"] or ""),
+                "previousBayCategory": str(row["bay_category"] or ""),
+                "previousCapacityQty": int(row["capacity_qty"] or 0),
+                "previousStatus": str(row["status"] or ""),
+                "displayName": display_name,
+                "mapSection": map_section,
+                "bayCategory": bay_category,
+                "capacityQty": capacity,
+            }
+            self.insert_audit(con, "bay", bay_code, "update_bay_layout", user, "", "", audit_payload)
             con.commit()
         return {"ok": True, "bayCode": bay_code, "bays": self.get_bays()}
 
@@ -18344,6 +18793,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "lookup": lookup_text,
                         "explicitItemSelection": explicit_selection,
                         "affectedListIds": affected_list_ids,
+                        "job": str(row["job"] or ""),
+                        "order": str(row["order_no"] or ""),
+                        "item": str(row["item_no"] or ""),
+                        "customer": str(row["customer"] or ""),
+                        "product": str(row["product"] or ""),
+                        "dimensions": str(row["dimensions"] or ""),
+                        "deliveryDate": str(row_value(row, "delivery_date") or ""),
+                        "priorityDeliveryDate": requested_delivery_date or str(row_value(row, "priority_delivery_date") or row_value(row, "delivery_date") or ""),
                     },
                 )
 
@@ -18377,7 +18834,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         user,
                         "",
                         reason,
-                        {"previousDeliveryDate": row_previous_date, "deliveryDate": requested_delivery_date, "orderType": order_type},
+                        {
+                            "previousDeliveryDate": row_previous_date,
+                            "deliveryDate": requested_delivery_date,
+                            "orderType": order_type,
+                            "job": str(row["job"] or ""),
+                            "order": str(row["order_no"] or ""),
+                            "item": str(row["item_no"] or ""),
+                            "customer": str(row["customer"] or ""),
+                            "product": str(row["product"] or ""),
+                        },
                     )
 
             notification_id = 0
@@ -18407,6 +18873,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     notice_message,
                     user,
                     {
+                        # Full-screen Rush alerts are reserved for explicit operator Priority Work.
+                        # Import/system notifications remain in the bell inbox and must never reuse
+                        # the production-priority popup.
+                        "source": "operator-priority-work",
                         "job": notice_job,
                         "order": notice_order,
                         "customer": notice_customer,
@@ -18571,6 +19041,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "lineItemIds": line_item_ids,
                         "affectedListIds": [item["id"] for item in affected_lists],
                         "rushOnly": rush_only,
+                        "job": str(row["job"] or ""),
+                        "order": str(row["order_no"] or ""),
+                        "item": str(row["item_no"] or ""),
+                        "customer": str(row["customer"] or ""),
+                        "product": str(row["product"] or ""),
+                        "previousPriorityDeliveryDate": str(row_value(row, "priority_delivery_date") or ""),
+                        "deliveryDate": str(row_value(row, "delivery_date") or ""),
                     },
                 )
             con.commit()
@@ -18614,7 +19091,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("BEGIN IMMEDIATE")
             bay = self.get_bay_by_code(con, bay_code)
             self.insert_bay_event(con, bay["id"], "", event_type, user, reason)
-            self.insert_audit(con, "bay", bay_code, f"bay_check_{action}", user, "", reason)
+            self.insert_audit(
+                con,
+                "bay",
+                bay_code,
+                f"bay_check_{action}",
+                user,
+                "",
+                reason,
+                {
+                    "bayCode": bay_code,
+                    "displayName": str(bay["display_name"] or bay_code),
+                    "bayGroup": str(bay["map_section"] or ""),
+                    "status": str(bay["status"] or ""),
+                    "checkResult": action,
+                },
+            )
             con.commit()
         return {"ok": True, "bayCode": bay_code, "action": action}
 

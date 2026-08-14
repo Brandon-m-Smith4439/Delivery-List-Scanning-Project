@@ -721,7 +721,7 @@
 
 
 .customer-route-stat {
-  min-height: 62px;
+  min-height: 54px;
   display: grid;
   align-content: center;
   gap: 2px;
@@ -1024,7 +1024,7 @@
 .admin-import-panel #importPreviewBox {
   width: 100%;
   margin-top: 10px;
-  min-height: 52px;
+  min-height: 48px;
 }
 
 
@@ -8868,15 +8868,15 @@ button.custom-select-trigger:hover:not(:disabled),
 }
 
 .admin-modal-panel:has(.delivery-update-preview-v248) {
-  width: min(1480px, calc(100vw - 24px));
-  height: min(920px, calc(100vh - 24px));
-  max-height: calc(100vh - 24px);
+  width: min(1100px, calc(100vw - 48px));
+  height: min(840px, calc(100vh - 40px));
+  max-height: calc(100vh - 40px);
 }
 
 #adminModalBody:has(.delivery-update-preview-v248) {
   min-height: 0;
   overflow: auto;
-  padding: 16px;
+  padding: 12px;
 }
 
 .delivery-update-preview-v248 {
@@ -11177,4 +11177,540 @@ button.custom-select-trigger:hover:not(:disabled),
   line-height: 1.2;
   opacity: 0.72;
   white-space: nowrap;
+}
+
+/* ========================================================================== */
+/* v0.304 compact-device Administration                                       */
+/* ========================================================================== */
+@media (max-width: 760px) {
+  .admin-page .admin-layout,
+  .admin-layout,
+  .admin-form,
+  .lookup-manager-form,
+  .lookup-manager-grid,
+  .admin-tool-grid,
+  .admin-button-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .admin-page .panel,
+  .admin-import-panel,
+  .admin-users-panel,
+  .admin-maintenance-panel,
+  .admin-wide-panel,
+  .admin-compact-panel,
+  .admin-page .panel:has(#activeSessions) {
+    grid-column: 1 / -1 !important;
+    padding: 11px !important;
+  }
+
+  .admin-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .admin-kpi-row .mini-stat {
+    min-height: 82px !important;
+    padding: 11px !important;
+  }
+
+  .admin-form :is(input, select, button),
+  .lookup-manager-form :is(input, select, button),
+  .admin-tool-grid :is(input, select, button) {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 44px !important;
+  }
+
+  .admin-button-row {
+    display: grid !important;
+  }
+
+  .admin-button-row button {
+    width: 100% !important;
+    flex: none !important;
+  }
+
+  .admin-table {
+    border: 1px solid #dbe5f2;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .admin-table table {
+    min-width: 680px;
+  }
+
+  html body #adminModal.admin-modal-panel {
+    inset: 5px !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    border-radius: 14px !important;
+  }
+
+  html body #adminModal.admin-modal-panel > .admin-control-center-header,
+  html body #adminModal.admin-modal-panel > .admin-modal-heading {
+    min-height: 76px !important;
+    height: auto !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+  }
+
+  html body #adminModal.admin-modal-panel .admin-modal-heading-copy h2,
+  html body #adminModal.admin-modal-panel .admin-control-center-header h2 {
+    font-size: 20px !important;
+    line-height: 1.08 !important;
+  }
+
+  html body #adminModal.admin-modal-panel :is(#adminModalBody, #adminModalHistory) {
+    min-width: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    padding: 9px !important;
+  }
+
+  .delivery-automation-tabs,
+  .admin-modal-tabs,
+  .role-permission-tabs {
+    max-width: 100%;
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .manual-edit-modal-tools,
+  .manual-edit-toolbar,
+  .customer-route-stat-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .admin-kpi-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+
+/* v0.308 Delivery List Update Preview: open selected route, static order headers, concise route counts */
+.delivery-update-preview-v257 .delivery-update-preview-location-group > summary {
+  grid-template-columns: 20px minmax(0, auto) minmax(0, 1fr) !important;
+  justify-content: start !important;
+}
+.delivery-update-preview-location-title-v308 {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.delivery-update-preview-location-title-v308 > strong { color: #173d65; font-size: 14px; font-weight: 950; }
+.delivery-update-preview-location-title-v308 > b { color: #3f617f; font-size: 11px; font-weight: 900; white-space: nowrap; }
+.delivery-update-preview-location-title-v308 > b i { margin: 0 4px; color: #9aabba; font-style: normal; }
+.delivery-update-preview-location-copy-v308 { justify-self: end; }
+.delivery-update-preview-location-copy-v308 small { color: #70859a; font-size: 10px; font-weight: 750; }
+
+.delivery-update-preview-order-block-v308 {
+  overflow: hidden;
+  border: 1px solid #cedbe8;
+  border-radius: 11px;
+  background: #fff;
+}
+.delivery-update-preview-order-header-v308 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #dce5ed;
+  background: linear-gradient(180deg, #f8fbfd 0%, #eef4f8 100%);
+}
+.delivery-update-preview-order-title-v308 { min-width: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.delivery-update-preview-order-title-v308 strong { color: #173d65; font-size: 13px; font-weight: 950; }
+.delivery-update-preview-order-title-v308 span { color: #3f607e; font-size: 11px; font-weight: 850; }
+.delivery-update-preview-order-summary-v308 { flex: 0 0 auto; color: #5c7389; font-size: 10px; font-weight: 900; white-space: nowrap; }
+.delivery-update-preview-order-meta-v308 { padding: 9px 12px !important; border-bottom: 1px solid #e3eaf1; background: #fbfdff; }
+.delivery-update-preview-order-meta-v308 .delivery-update-preview-location-badges,
+.delivery-update-preview-order-meta-v308 b.is-new,
+.delivery-update-preview-order-meta-v308 b.is-updated,
+.delivery-update-preview-order-meta-v308 b.is-removed { display: inline-flex; }
+.delivery-update-preview-order-block-v308 .delivery-update-preview-item-list-v257 { padding: 8px 10px 10px; }
+
+@media (max-width: 760px) {
+  .delivery-update-preview-v257 .delivery-update-preview-location-group > summary { grid-template-columns: 20px minmax(0, 1fr) !important; }
+  .delivery-update-preview-location-copy-v308 { grid-column: 2; justify-self: start; }
+  .delivery-update-preview-order-header-v308 { align-items: flex-start; flex-direction: column; gap: 4px; }
+}
+
+
+/* ========================================================================== */
+/* 26. v0.311 Route -> Order update preview and exact-glass visual language   */
+/* ========================================================================== */
+
+.delivery-update-preview-v311 .delivery-update-preview-location-body-v311 {
+  padding: 9px;
+  background: #f3f7fb;
+}
+
+.delivery-update-preview-order-list-v311 {
+  display: grid;
+  gap: 9px;
+}
+
+.delivery-update-preview-order-block-v311 {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #c9d7e6;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(8, 38, 90, .06);
+}
+
+.delivery-update-preview-order-header-v311 {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 11px;
+  border-bottom: 1px solid #dbe4ee;
+  background: linear-gradient(180deg, #fcfdff 0%, #f3f7fb 100%);
+  box-shadow: inset 4px 0 0 #315f91;
+}
+
+.delivery-update-preview-order-identity-v311 {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  flex-wrap: wrap;
+}
+
+.delivery-update-preview-order-identity-v311 > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.delivery-update-preview-order-identity-v311 small,
+.delivery-update-preview-order-meta-v311 small,
+.delivery-update-preview-item-main-v311 small {
+  color: #73849a;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.delivery-update-preview-order-identity-v311 strong {
+  color: #0d315d;
+  font-size: 15px;
+  font-weight: 950;
+  line-height: 1.05;
+}
+
+.delivery-update-preview-order-totals-v311 {
+  min-width: max-content;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+  color: #5f7187;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.delivery-update-preview-order-totals-v311 > strong,
+.delivery-update-preview-order-totals-v311 > span:not(.delivery-update-preview-order-change-v311) {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d2ddea;
+  border-radius: 999px;
+  background: #fff;
+  padding: 3px 8px;
+}
+
+.delivery-update-preview-order-change-v311 {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.delivery-update-preview-order-change-v311 b {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 9px;
+  font-weight: 950;
+}
+
+.delivery-update-preview-order-change-v311 b.is-new { background: #eaf8ef; color: #226b3a; border: 1px solid #a9d8b7; }
+.delivery-update-preview-order-change-v311 b.is-updated { background: #eef5ff; color: #245d9b; border: 1px solid #b2cbe7; }
+.delivery-update-preview-order-change-v311 b.is-removed { background: #fff0f2; color: #9d2637; border: 1px solid #e1b1b8; }
+
+.delivery-update-preview-order-meta-v311 {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.35fr) minmax(130px, .7fr) minmax(110px, .5fr);
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #e3eaf2;
+  background: #fbfcfe;
+}
+
+.delivery-update-preview-order-meta-v311 > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.delivery-update-preview-order-meta-v311 strong {
+  color: #223e60;
+  font-size: 11px;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.delivery-update-preview-item-list-v311 {
+  display: grid;
+  gap: 7px;
+  padding: 8px 9px 10px;
+  background: #f6f9fc;
+}
+
+.delivery-update-preview-item-row-v311 {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--glass-type-border, #cbd8e5);
+  border-left: 6px solid var(--glass-type-color, #4d78a8);
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--glass-type-soft, #f1f5f9) 0%, #fff 30%, #fff 100%);
+  box-shadow: 0 3px 9px rgba(8, 38, 90, .04);
+}
+
+.delivery-update-preview-item-main-v311 {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 72px minmax(180px, 1.3fr) minmax(130px, .9fr) 58px auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+}
+
+.delivery-update-preview-item-main-v311 > span:not(.delivery-update-preview-item-change-v311) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.delivery-update-preview-item-main-v311 strong {
+  min-width: 0;
+  color: #173959;
+  font-size: 11px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.delivery-update-preview-item-number-v311 strong {
+  font-size: 14px;
+  color: #0e315a;
+}
+
+.delivery-update-preview-item-glass-v311 {
+  position: relative;
+  padding-left: 16px;
+}
+
+.delivery-update-preview-item-glass-v311 > i {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 9px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--glass-type-color, #4d78a8);
+  transform: translateY(-50%);
+  box-shadow: 0 0 0 3px var(--glass-type-ring, rgba(77,120,168,.16));
+}
+
+.delivery-update-preview-item-qty-v311 {
+  text-align: center;
+}
+
+.delivery-update-preview-item-qty-v311 strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.delivery-update-preview-item-change-v311 {
+  min-width: 68px;
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 9px;
+  font-weight: 950;
+}
+
+.delivery-update-preview-item-change-v311.is-new { background: #eaf8ef; color: #226b3a; border: 1px solid #a8d7b6; }
+.delivery-update-preview-item-change-v311.is-updated { background: #eef5ff; color: #245d9b; border: 1px solid #b2cbe7; }
+.delivery-update-preview-item-change-v311.is-removed { background: #fff0f2; color: #9d2637; border: 1px solid #e1b1b8; }
+
+.delivery-update-preview-item-diffs-v311 {
+  border-top: 1px solid var(--glass-type-border, #d6e1ec);
+  background: rgba(255,255,255,.86);
+  padding: 8px 10px 10px;
+}
+
+@media (max-width: 900px) {
+  .delivery-update-preview-order-header-v311,
+  .delivery-update-preview-order-meta-v311,
+  .delivery-update-preview-item-main-v311 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .delivery-update-preview-order-totals-v311 {
+    justify-content: flex-start;
+  }
+
+  .delivery-update-preview-item-change-v311 {
+    justify-self: start;
+  }
+}
+
+
+/* v0.312 Lookup Manager exact glass-color ownership -------------------------
+   Glass Colors is the reusable palette authority. The generic lookup table
+   stores only explicit overrides; automatic colors remain visible/editable. */
+.lookup-manager-list.glass-colors .lookup-type-icon {
+  background: linear-gradient(135deg, #2f80ed 0%, #7c3aed 50%, #e0548b 100%);
+}
+
+.lookup-glass-color-row-v312 {
+  display: grid !important;
+  grid-template-columns: 24px auto 1fr !important;
+  align-items: center !important;
+  gap: 7px !important;
+  margin-top: 5px;
+}
+
+.lookup-glass-color-row-v312 > i,
+.lookup-glass-color-preview-v312 > i {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+  border: 2px solid #fff;
+  border-radius: 6px;
+  background: var(--lookup-glass-color, #4d78a8);
+  box-shadow: 0 0 0 1px #b9c8d8, 0 2px 5px rgba(10, 39, 72, .12);
+}
+
+.lookup-glass-color-row-v312 > b {
+  color: #173959;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lookup-glass-color-row-v312 > small {
+  color: #687c91;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.lookup-glass-color-field-v312 .lookup-glass-color-picker-v312 {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #cbd8e5;
+  border-radius: 9px;
+  background: #fff;
+  padding: 5px 9px 5px 6px;
+}
+
+.lookup-glass-color-picker-v312 input[type="color"] {
+  width: 50px;
+  min-width: 50px;
+  height: 32px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.lookup-glass-color-picker-v312 b {
+  color: #173959;
+  font-size: 12px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.lookup-glass-color-preview-v312 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+/* v0.313 Compact Delivery List Update Preview -------------------------------
+   The preview is intentionally review-first: route disclosures, order headers,
+   and item details only. Filter/search controls and redundant metric cards were
+   removed from the markup so the control center can use a narrower footprint. */
+.delivery-update-preview-v313 {
+  gap: 10px;
+}
+
+.delivery-update-preview-v313 .delivery-update-preview-header-v313 {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+
+.delivery-update-preview-v313 .delivery-update-preview-header-v313 h3 {
+  font-size: 21px;
+}
+
+.delivery-update-preview-v313 .delivery-update-preview-header-v313 p {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.delivery-update-preview-v313 .delivery-update-preview-location-group > summary {
+  min-height: 48px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  padding: 8px 11px;
+}
+
+.delivery-update-preview-v313 .delivery-update-preview-location-title-v308 {
+  gap: 8px;
+}
+
+.delivery-update-preview-v313 .delivery-update-preview-order-meta-v313 {
+  grid-template-columns: minmax(180px, 1.4fr) minmax(120px, .6fr);
+}
+
+@media (max-width: 760px) {
+  .admin-modal-panel:has(.delivery-update-preview-v313) {
+    width: calc(100vw - 10px);
+    height: calc(100dvh - 10px);
+    max-height: calc(100dvh - 10px);
+  }
+
+  .delivery-update-preview-v313 .delivery-update-preview-order-meta-v313 {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

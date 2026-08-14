@@ -308,45 +308,29 @@ class OperationsFeatureService:
             target_list_ids = {clean_list_id}
             airport_scope = self._airport_review_scope(selected_list["stage"], selected_list["scanner"])
             if airport_scope:
-                # Staging/Outbound contain the complete delivery-date population. The
-                # import safety layer generates a different change token per automatic
-                # line/list, so the authoritative batch key is source hash + created-at.
-                # Manual-entry notices share one change token as an additional guard.
-                review_batches = {
-                    (
-                        str(row["delivery_date"] or selected_list["delivery_date"] or ""),
-                        str(row["source_hash"] or ""),
-                        str(row["created_at"] or ""),
-                        str(row["change_token"] or "") if str(row["source_hash"] or "").lower() == "manual-entry" else "",
+                # Staging and Outbound are the complete delivery-date review surface.
+                # When a user marks either one reviewed, acknowledge every notice
+                # that currently exists across active stage copies for that delivery
+                # date. Receipts are still keyed by user_id, and future imports create
+                # new notice rows that remain unread until that same user reviews them.
+                matches = con.execute(
+                    """
+                    SELECT n.id, n.list_id
+                    FROM line_update_notices n
+                    JOIN delivery_lists dl ON dl.id = n.list_id
+                    WHERE dl.status = 'active'
+                      AND n.delivery_date = ?
+                    ORDER BY n.id
+                    """,
+                    (str(selected_list["delivery_date"] or ""),),
+                ).fetchall()
+                if matches:
+                    target_ids = sorted({int(match["id"]) for match in matches})
+                    target_list_ids.update(
+                        str(match["list_id"] or "")
+                        for match in matches
+                        if str(match["list_id"] or "")
                     )
-                    for row in rows
-                    if str(row["created_at"] or "").strip()
-                }
-                propagated_ids: set[int] = set()
-                for delivery_date, source_hash, created_at, manual_change_token in review_batches:
-                    params: list[Any] = [delivery_date, source_hash, created_at]
-                    manual_clause = ""
-                    if manual_change_token:
-                        manual_clause = " AND n.change_token = ?"
-                        params.append(manual_change_token)
-                    matches = con.execute(
-                        f"""
-                        SELECT n.id, n.list_id
-                        FROM line_update_notices n
-                        JOIN delivery_lists dl ON dl.id = n.list_id
-                        WHERE dl.status = 'active'
-                          AND n.delivery_date = ?
-                          AND n.source_hash = ?
-                          AND n.created_at = ?
-                          {manual_clause}
-                        """,
-                        params,
-                    ).fetchall()
-                    for match in matches:
-                        propagated_ids.add(int(match["id"]))
-                        target_list_ids.add(str(match["list_id"] or ""))
-                if propagated_ids:
-                    target_ids = sorted(propagated_ids)
 
             seen_at = utc_now()
             con.executemany(
@@ -366,7 +350,7 @@ class OperationsFeatureService:
                     "requestedNoticeIds": valid_ids,
                     "acknowledgedNoticeIds": target_ids,
                     "acknowledgedListIds": sorted(value for value in target_list_ids if value),
-                    "scope": "airport-delivery-date-batch" if airport_scope else "selected-stage",
+                    "scope": "airport-delivery-date" if airport_scope else "selected-stage",
                     "seenAt": seen_at,
                 },
             )
@@ -375,7 +359,7 @@ class OperationsFeatureService:
         result = self.line_flags(clean_list_id, username)
         result.update(
             {
-                "reviewScope": "airport-delivery-date-batch" if airport_scope else "selected-stage",
+                "reviewScope": "airport-delivery-date" if airport_scope else "selected-stage",
                 "acknowledgedNoticeIds": target_ids,
                 "acknowledgedListIds": sorted(value for value in target_list_ids if value),
             }

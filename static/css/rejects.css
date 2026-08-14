@@ -3146,3 +3146,90 @@ tr.has-internal-reject > td:first-child {
   inset: auto;
   z-index: 4;
 }
+
+/* ========================================================================== */
+/* v0.304 compact-device Reject Tracking                                      */
+/* ========================================================================== */
+@media (max-width: 760px) {
+  .rejects-command-header,
+  .reject-history-heading,
+  .reject-filter-panel,
+  .reject-date-range,
+  .reject-match-summary-v182,
+  .reject-log-identify-grid-v182,
+  .reject-log-incident-grid-v182,
+  .reject-log-actions-v182 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .rejects-command-header,
+  .reject-history-heading {
+    display: grid !important;
+    align-items: stretch !important;
+    padding: 13px !important;
+  }
+
+  .reject-log-open-button,
+  .reject-refresh-button,
+  .reject-clear-filters {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+
+  .reject-filter-panel {
+    padding: 10px !important;
+  }
+
+  .reject-date-range-arrow {
+    display: none !important;
+  }
+
+  .reject-history-panel {
+    overflow: hidden !important;
+  }
+
+  html body #operationsModal.operations-modal-panel[data-kind="reject-log"] {
+    inset: 5px !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    grid-template-rows: auto auto minmax(0, 1fr) !important;
+    border-radius: 14px !important;
+  }
+
+  html body #operationsModal.operations-modal-panel[data-kind="reject-log"] > .operations-modal-heading {
+    min-height: 78px !important;
+    height: auto !important;
+    padding: 11px 12px !important;
+  }
+
+  html body #operationsModal.operations-modal-panel[data-kind="reject-log"] .operations-modal-heading-copy h2 {
+    font-size: 20px !important;
+  }
+
+  html body #operationsModal.operations-modal-panel[data-kind="reject-log"] .operations-modal-heading-copy p {
+    display: none !important;
+  }
+
+  html body #operationsModal.operations-modal-panel[data-kind="reject-log"] #operationsModalBody {
+    overflow-y: auto !important;
+  }
+
+  .reject-log-form-v182 {
+    height: auto !important;
+    min-height: 100% !important;
+    grid-template-rows: none !important;
+    grid-auto-rows: max-content !important;
+    overflow: visible !important;
+    padding: 9px !important;
+  }
+
+  .reject-log-step-v182,
+  .reject-match-preview-v182 {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

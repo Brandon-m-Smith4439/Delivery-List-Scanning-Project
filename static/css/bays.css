@@ -18926,3 +18926,1647 @@ body.bay-move-mode .bay-layout-drop-zone {
   color: #174f80 !important;
   outline: none !important;
 }
+
+/* ========================================================================== */
+/* v0.304 compact-device Bay Map                                              */
+/* ========================================================================== */
+@media (max-width: 760px) {
+  .bay-map-page {
+    padding-inline: 7px !important;
+  }
+
+  .bay-action-bar,
+  .bay-map-shell,
+  .bay-route-flow,
+  .bay-scan-out-panel,
+  .bay-scan-out-recent,
+  .selected-bay-stats,
+  .bay-category-filters {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .bay-action-bar {
+    margin: 8px 0 10px !important;
+    padding: 8px !important;
+    border-left-width: 4px !important;
+  }
+
+  .bay-action-bar .search-box,
+  .bay-action-bar select,
+  .bay-action-bar #bayCheckBtn {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  .bay-summary {
+    justify-content: stretch !important;
+  }
+
+  .bay-summary .mini-stat-grid {
+    width: 100% !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 5px !important;
+  }
+
+  .physical-bay-map,
+  .bay-map-layout,
+  .bay-right-rail {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .physical-bay-section,
+  .bay-type-section,
+  .bay-zone {
+    border-radius: 10px !important;
+  }
+
+  .physical-bay-section > header,
+  .physical-bay-section > summary,
+  .bay-type-section > summary {
+    min-height: 46px !important;
+    padding: 8px 10px !important;
+  }
+
+  .physical-bay-grid,
+  .bay-slot-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    padding: 7px !important;
+  }
+
+  .physical-bay-slot,
+  .bay-slot {
+    min-width: 0 !important;
+    min-height: 62px !important;
+  }
+
+  .bay-scanner-panel-v2,
+  .bay-scanner-sticky-slot,
+  .bay-right-rail .bay-scanner-panel-v2 {
+    position: static !important;
+    top: auto !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .bay-scanner-panel-v2 .manual-scan-row,
+  .bay-scanner-panel-v2 .bay-mode-options,
+  .bay-scanner-panel-v2 .bay-scanner-target-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .bay-editor-panel,
+  .sdi-panel {
+    width: calc(100vw - 10px) !important;
+    max-width: none !important;
+    max-height: calc(100vh - 10px) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .physical-bay-grid,
+  .bay-slot-grid,
+  .bay-summary .mini-stat-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+
+/* v0.308 Physical Bay Map group header simplification */
+.physical-bay-section > summary .bay-section-counts {
+  margin-left: auto;
+}
+.physical-bay-section > summary .bay-section-counts > b {
+  white-space: nowrap;
+}
+
+/* v0.309 Physical Bay group utilization and compact attention ---------------
+   The used count owns its wording in markup, so suppress the legacy generated
+   second "used" label. Its hue moves from green through orange to red as the
+   group fills. Attention is intentionally a small count badge rather than a
+   wide warning strip. */
+.physical-bay-section > summary .bay-section-counts > b::after {
+  content: none !important;
+  display: none !important;
+}
+
+.physical-bay-section > summary .bay-section-counts > b {
+  border: 1px solid hsl(var(--bay-group-utilization-hue, 130) 48% 68%) !important;
+  background: hsl(var(--bay-group-utilization-hue, 130) 72% 95%) !important;
+  color: hsl(var(--bay-group-utilization-hue, 130) 68% 27%) !important;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.physical-bay-section > summary .bay-section-counts > .bay-section-attention-v309 {
+  grid-column: auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  margin: 0 !important;
+  border: 1px solid #e2b566 !important;
+  border-radius: 999px !important;
+  background: #fff8e8 !important;
+  color: #86590c !important;
+  padding: 0 6px 0 4px !important;
+  font-size: 9px !important;
+  font-style: normal !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  overflow: visible !important;
+}
+
+.physical-bay-section > summary .bay-section-attention-mark-v309 {
+  width: 13px;
+  height: 13px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #d18a17;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+/* v0.310 Physical Bay glance indicators ------------------------------------
+   Restore the compact MAN/AUTO policy chip requested for each grouped bay set,
+   separate the live occupied count from the neutral capacity text, and use the
+   same attention rule for the group badge and the exact bay cards below it. */
+.bay-floor-grid-v19 .physical-bay-section-v17 > summary .bay-section-policy-v310,
+.bay-dense-grid-v17 .physical-bay-section-v17 > summary .bay-section-policy-v310,
+.bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-policy-v310 {
+  position: absolute !important;
+  top: 6px !important;
+  left: 7px !important;
+  right: auto !important;
+  z-index: 14 !important;
+  min-width: 36px !important;
+  height: 19px !important;
+  min-height: 19px !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  margin: 0 !important;
+  border: 1px solid #b9c9db !important;
+  border-radius: 6px !important;
+  background: #f7faff !important;
+  color: #36536f !important;
+  padding: 0 5px !important;
+  font-size: 8px !important;
+  font-style: normal !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+  letter-spacing: .04em !important;
+  box-shadow: 0 1px 4px rgba(8, 38, 90, .07) !important;
+  pointer-events: none !important;
+}
+
+.bay-floor-grid-v19 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-auto,
+.bay-dense-grid-v17 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-auto,
+.bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-auto {
+  border-color: #9bcfaa !important;
+  background: #edf9f0 !important;
+  color: #21733a !important;
+}
+
+.bay-floor-grid-v19 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-manual,
+.bay-dense-grid-v17 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-manual,
+.bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-manual {
+  border-color: #e4be78 !important;
+  background: #fff7e7 !important;
+  color: #8a5a08 !important;
+}
+
+.bay-floor-grid-v19 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-mixed,
+.bay-dense-grid-v17 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-mixed,
+.bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-mixed {
+  border-color: #adc4df !important;
+  background: #f0f6fd !important;
+  color: #315e8c !important;
+}
+
+.bay-floor-grid-v19 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-blocked,
+.bay-dense-grid-v17 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-blocked,
+.bay-edit-column-grid-v23 .physical-bay-section-v17 > summary .bay-section-policy-v310.policy-blocked {
+  border-color: #d8a8ae !important;
+  background: #fff0f2 !important;
+  color: #9f2c3d !important;
+}
+
+.physical-bay-section > summary .bay-section-counts > .bay-section-utilization-v310 {
+  min-height: 21px !important;
+  display: inline-flex !important;
+  align-items: baseline !important;
+  gap: 0 !important;
+  border: 1px solid #d0dce9 !important;
+  border-radius: 999px !important;
+  background: #f8fbfe !important;
+  color: #5d6e82 !important;
+  padding: 1px 7px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.physical-bay-section > summary .bay-section-used-current-v310 {
+  color: hsl(var(--bay-group-utilization-hue, 120) 72% 34%) !important;
+  font-size: 12px !important;
+  font-weight: 950 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.physical-bay-section > summary .bay-section-used-total-v310 {
+  color: #64758a !important;
+  font-size: 9px !important;
+  font-weight: 850 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.bay-slot-head-status-v310 {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.bay-slot-attention-v310 {
+  width: 15px;
+  min-width: 15px;
+  height: 15px;
+  min-height: 15px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #b97912;
+  border-radius: 50%;
+  background: #d18a17;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 950;
+  font-style: normal;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(125, 76, 4, .18);
+}
+
+.bay-floor-grid-v19 .bay-slot-v17 .bay-slot-attention-v310 {
+  width: 13px;
+  min-width: 13px;
+  height: 13px;
+  min-height: 13px;
+  font-size: 8px;
+}
+
+
+
+/* v0.312 Compact grouped-bay capacity ---------------------------------------
+   The grouped physical-map cards have very little horizontal room. Keep the
+   status to one compact fraction, color only the live occupied count, and put
+   the full occupied/available/total explanation in the tooltip. */
+.physical-bay-section > summary .bay-section-occupancy-v311,
+.physical-bay-section > summary .bay-section-occupancy-meter-v311 {
+  display: none !important;
+}
+
+.physical-bay-section > summary .bay-section-occupancy-v312 {
+  min-width: 0 !important;
+  min-height: 24px !important;
+  display: inline-flex !important;
+  align-items: baseline !important;
+  justify-content: center !important;
+  gap: 1px !important;
+  border: 1px solid #d0dce9 !important;
+  border-radius: 999px !important;
+  background: #f8fbfe !important;
+  padding: 3px 6px !important;
+  font-style: normal !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.physical-bay-section > summary .bay-section-occupancy-v312 > strong {
+  color: hsl(var(--bay-group-utilization-hue, 120) 72% 34%) !important;
+  font-size: 13px !important;
+  font-weight: 950 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.physical-bay-section > summary .bay-section-occupancy-v312 > span {
+  color: #64768a !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* v0.314 In-Transit manifest and Edit Bays operation feedback --------------- */
+.transit-manifest-header {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.transit-manifest-header::after {
+  content: "";
+  position: absolute;
+  right: -56px;
+  top: -92px;
+  width: 218px;
+  height: 218px;
+  border: 28px solid rgba(255, 255, 255, 0.10);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.transit-manifest-header > * {
+  position: relative;
+  z-index: 1;
+}
+
+.transit-manifest-header-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  align-self: flex-start;
+}
+
+.transit-summary-row-v31 article {
+  border-left-width: 3px;
+  box-shadow: 0 6px 16px rgba(12, 50, 88, 0.05);
+}
+
+.transit-rack-group-card[open] {
+  border-color: #9ebbd7;
+  box-shadow: 0 12px 28px rgba(15, 56, 96, 0.09);
+}
+
+.transit-glass-table th:first-child,
+.transit-glass-table td:first-child {
+  width: 92px;
+  white-space: nowrap;
+}
+
+#bayEditorPanel .bay-editor-new-group.app-primary-button,
+#bayEditorPanel .bay-editor-actions .app-primary-button,
+#bayEditorPanel .bay-editor-row-actions .app-primary-button {
+  min-height: 38px !important;
+}
+
+.bay-editor-progress {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  border: 1px solid #b9cce4;
+  border-radius: 10px;
+  background: #f4f8fd;
+  padding: 9px 10px;
+}
+
+.bay-editor-progress[hidden] {
+  display: none !important;
+}
+
+.bay-editor-progress-copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bay-editor-progress-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #12365f;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bay-editor-progress-copy span {
+  flex: 0 0 auto;
+  color: #526b86;
+  font-size: 11px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.bay-editor-progress-track {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid #b7c7d9;
+  border-radius: 999px;
+  background: #e3ebf4;
+  box-shadow: inset 0 1px 2px rgba(7, 42, 99, 0.08);
+}
+
+.bay-editor-progress-track > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0a3568, #1765a8);
+  transition: width 180ms ease;
+}
+
+#bayEditorPanel[aria-busy="true"] .bay-editor-group-row,
+#bayEditorPanel[aria-busy="true"] .bay-editor-new-group {
+  pointer-events: none;
+}
+
+/* v0.315 In-Transit rack identity -------------------------------------------
+   Reuse the maintained rack-set icon library instead of rendering a generic
+   circular marker. Custom rack sets therefore keep their selected A-frame,
+   pallet, dolly, crate, warehouse, material, or truck icon and saved color. */
+.transit-rack-head .transit-rack-icon.rack-set-visual-icon-v269 {
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 42px !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  padding: 0 !important;
+  border: 1px solid color-mix(in srgb, var(--rack-set-icon-color, #176d72) 34%, #c8d6e5) !important;
+  border-radius: 11px !important;
+  background: color-mix(in srgb, var(--rack-set-icon-color, #176d72) 10%, #ffffff) !important;
+  color: var(--rack-set-icon-color, #176d72) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .82), 0 4px 10px rgba(16, 49, 82, .08) !important;
+}
+
+.transit-rack-head .transit-rack-icon.rack-set-visual-icon-v269::before {
+  width: 28px !important;
+  height: 28px !important;
+  margin: 0 !important;
+  transform: none !important;
+  background: currentColor !important;
+}
+
+/* v0.316 Physical transit counts, Bay multi-select, and compact scan archive ---
+   Keep the All Bay Scans guidance compact, make its descriptive heading the
+   actual dialog heading, and provide a clear multi-select editor for bay sets. */
+#adminModal[data-custom-view="bay-all-scans"] > .section-heading {
+  min-height: 76px !important;
+  padding: 9px 16px !important;
+}
+
+#adminModal[data-custom-view="bay-all-scans"] > .section-heading .admin-modal-heading-copy {
+  gap: 1px;
+}
+
+#adminModal[data-custom-view="bay-all-scans"] > .section-heading .admin-modal-eyebrow {
+  font-size: 0.62rem !important;
+  letter-spacing: 0.1em;
+}
+
+#adminModal[data-custom-view="bay-all-scans"] > .section-heading h2 {
+  margin-top: 1px !important;
+  font-size: 1.12rem !important;
+  line-height: 1.08;
+}
+
+#adminModal[data-custom-view="bay-all-scans"] > .section-heading p {
+  max-width: 780px;
+  margin-top: 2px !important;
+  font-size: 0.7rem !important;
+  line-height: 1.25;
+}
+
+#adminModal[data-custom-view="bay-all-scans"] #adminModalBody {
+  padding: 10px 12px !important;
+}
+
+#adminModal[data-custom-view="bay-all-scans"] .bay-full-scans-modal-v159 {
+  gap: 8px;
+}
+
+.bay-all-scans-summary-strip-v316 {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 30px;
+}
+
+.bay-all-scans-summary-strip-v316 > span {
+  min-width: 92px;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #c8d6e5;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 5px 8px;
+  box-shadow: 0 3px 9px rgba(12, 49, 87, 0.05);
+}
+
+.bay-all-scans-summary-strip-v316 small {
+  color: #718397;
+  font-size: 0.58rem;
+  font-weight: 850;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.bay-all-scans-summary-strip-v316 strong {
+  color: #244f7d;
+  font-size: 0.72rem;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.bay-all-scans-guidance-v316 {
+  min-height: 30px;
+  gap: 7px;
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+
+.bay-all-scans-guidance-v316 .bay-all-scans-guidance-icon-v159 {
+  width: 20px;
+  height: 20px;
+}
+
+.bay-all-scans-guidance-v316 .bay-all-scans-guidance-icon-v159::before {
+  font-size: 0.78rem;
+}
+
+.bay-all-scans-guidance-v316 > div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.bay-all-scans-guidance-v316 strong {
+  flex: 0 0 auto;
+  font-size: 0.69rem;
+}
+
+.bay-all-scans-guidance-v316 small {
+  min-width: 0;
+  margin-top: 0;
+  overflow: hidden;
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bay-all-scans-loading-note-v316 {
+  border: 1px solid #cbd8e6;
+  border-radius: 8px;
+  background: #f7f9fc;
+  padding: 6px 9px;
+  color: #66798d;
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+#bayEditorPanel .bay-editor-bay-heading-v316 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+#bayEditorPanel .bay-editor-select-all-v316 {
+  min-width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #365878;
+  font-size: 0.7rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+#bayEditorPanel .bay-editor-select-all-v316 input {
+  width: 16px !important;
+  min-width: 16px !important;
+  height: 16px !important;
+  min-height: 16px !important;
+  margin: 0;
+  accent-color: #1765a8;
+}
+
+#bayEditorPanel .bay-editor-bulk-tools-v316 {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.85fr) minmax(145px, 1fr) minmax(105px, 0.55fr) minmax(155px, 0.9fr) auto;
+  align-items: end;
+  gap: 9px;
+  margin: 0 0 9px;
+  border: 1px solid #b8cce1;
+  border-radius: 11px;
+  background: linear-gradient(180deg, #f8fbff, #eef5fc);
+  padding: 9px 10px;
+}
+
+#bayEditorPanel .bay-editor-bulk-copy-v316 {
+  min-width: 0;
+  align-self: center;
+}
+
+#bayEditorPanel .bay-editor-bulk-copy-v316 strong,
+#bayEditorPanel .bay-editor-bulk-copy-v316 span {
+  display: block;
+}
+
+#bayEditorPanel .bay-editor-bulk-copy-v316 strong {
+  color: #163e69;
+  font-size: 0.76rem;
+  font-weight: 950;
+}
+
+#bayEditorPanel .bay-editor-bulk-copy-v316 span {
+  margin-top: 2px;
+  color: #647d97;
+  font-size: 0.65rem;
+  font-weight: 850;
+}
+
+#bayEditorPanel .bay-editor-bulk-tools-v316 > label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+#bayEditorPanel .bay-editor-bulk-tools-v316 > label > span {
+  color: #607790;
+  font-size: 0.61rem;
+  font-weight: 900;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+#bayEditorPanel .bay-editor-bulk-tools-v316 input,
+#bayEditorPanel .bay-editor-bulk-tools-v316 select {
+  width: 100%;
+  min-width: 0;
+  min-height: 35px;
+  border: 1px solid #aebfd2;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #244663;
+  padding: 0 9px;
+  font-size: 0.71rem;
+  font-weight: 750;
+}
+
+#bayEditorPanel .bay-editor-bulk-tools-v316 > button {
+  min-height: 35px !important;
+  margin: 0;
+  padding-inline: 13px;
+  white-space: nowrap;
+}
+
+#bayEditorPanel .bay-editor-bay-row {
+  grid-template-columns: minmax(205px, 1.1fr) minmax(135px, 0.75fr) minmax(118px, 0.65fr) minmax(118px, 0.65fr) minmax(88px, 0.45fr) minmax(128px, 0.7fr) auto !important;
+  transition: border-color 130ms ease, background 130ms ease, box-shadow 130ms ease;
+}
+
+#bayEditorPanel .bay-editor-bay-row.is-selected {
+  border-color: #75a9d7 !important;
+  background: #f3f8fe !important;
+  box-shadow: inset 3px 0 0 #1765a8, 0 4px 12px rgba(19, 83, 142, 0.06);
+}
+
+#bayEditorPanel .bay-editor-bay-summary-v316 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+#bayEditorPanel .bay-editor-bay-summary-v316 > div {
+  min-width: 0;
+}
+
+#bayEditorPanel .bay-editor-row-select-v316 {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  cursor: pointer;
+}
+
+#bayEditorPanel .bay-editor-row-select-v316 input {
+  width: 17px !important;
+  min-width: 17px !important;
+  height: 17px !important;
+  min-height: 17px !important;
+  margin: 0;
+  accent-color: #1765a8;
+  cursor: pointer;
+}
+
+#bayEditorPanel[aria-busy="true"] .bay-editor-bulk-tools-v316,
+#bayEditorPanel[aria-busy="true"] .bay-editor-bay-row {
+  opacity: 0.72;
+}
+
+@media (max-width: 1180px) {
+  #bayEditorPanel .bay-editor-bulk-tools-v316 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #bayEditorPanel .bay-editor-bulk-copy-v316,
+  #bayEditorPanel .bay-editor-bulk-tools-v316 > button {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .bay-all-scans-summary-strip-v316 {
+    justify-content: stretch;
+  }
+
+  .bay-all-scans-summary-strip-v316 > span {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  .bay-all-scans-guidance-v316 > div {
+    display: block;
+    white-space: normal;
+  }
+
+  .bay-all-scans-guidance-v316 small {
+    display: block;
+    margin-top: 1px;
+    white-space: normal;
+  }
+
+  #bayEditorPanel .bay-editor-bay-heading-v316,
+  #bayEditorPanel .bay-editor-bulk-tools-v316 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+
+/* v0.317: all-date transit count companion UI, compact All Bay Scans guidance,
+   and full-row multi-selection controls for Edit Bays. */
+#adminModal[data-custom-view="bay-all-scans"] .bay-full-scans-modal-v159 {
+  align-content: start;
+  grid-auto-rows: max-content;
+}
+
+.bay-all-scans-topline-v317 {
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  align-self: start;
+}
+
+.bay-all-scans-guidance-v317 {
+  min-width: 0;
+  max-width: min(620px, 100%);
+  margin: 0;
+  border: 1px solid #c7d7e7;
+  border-left: 3px solid #2d72b8;
+  border-radius: 7px;
+  background: #f7faff;
+  padding: 4px 7px;
+  color: #66798c;
+  font-size: 0.64rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.bay-all-scans-guidance-v317 strong {
+  color: #173f6c;
+  font-size: inherit;
+  font-weight: 900;
+}
+
+#bayEditorPanel .bay-editor-bay-heading-v317 {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+#bayEditorPanel .bay-editor-selection-actions-v317 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#bayEditorPanel .bay-editor-selection-button-v317 {
+  min-height: 30px !important;
+  height: 30px;
+  margin: 0;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+#bayEditorPanel .bay-editor-selection-button-v317.is-clear:not(:disabled) {
+  background: #2e79b9;
+}
+
+#bayEditorPanel .bay-editor-bay-row-v317 {
+  cursor: pointer;
+}
+
+#bayEditorPanel .bay-editor-bay-row-v317 :is(input, select, textarea, button, label) {
+  cursor: auto;
+}
+
+#bayEditorPanel .bay-editor-bay-row-v317 .bay-editor-bay-summary-v316,
+#bayEditorPanel .bay-editor-bay-row-v317 .bay-editor-bay-summary-v316 * {
+  cursor: pointer;
+}
+
+#bayEditorPanel .bay-editor-bay-row-v317 .bay-editor-row-select-v316,
+#bayEditorPanel .bay-editor-bay-row-v317 .bay-editor-row-select-v316 * {
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .bay-all-scans-topline-v317 {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bay-all-scans-guidance-v317 {
+    max-width: none;
+  }
+
+  .bay-all-scans-summary-strip-v316 {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 680px) {
+  #bayEditorPanel .bay-editor-bay-heading-v317 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #bayEditorPanel .bay-editor-selection-actions-v317 {
+    flex-wrap: wrap;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   v0.318 - Bay operations selection, Priority Work detail, and visual polish
+   -------------------------------------------------------------------------- */
+
+/* The Old Bays and sticky Bay Scanner headers use the same quiet outline-ring
+   motif as the In-Transit control center. The ring is decorative only. */
+.stale-bay-header-v181,
+.bay-scanner-panel-v150 .bay-scanner-header-v150 {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden !important;
+}
+
+.stale-bay-header-v181::after,
+.bay-scanner-panel-v150 .bay-scanner-header-v150::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  width: 178px;
+  height: 178px;
+  border: 22px solid rgba(255, 255, 255, 0.11);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.stale-bay-header-v181::after {
+  top: -92px;
+  right: -48px;
+}
+
+.bay-scanner-panel-v150 .bay-scanner-header-v150::after {
+  top: -100px;
+  right: -58px;
+}
+
+.stale-bay-header-v181 > *,
+.bay-scanner-panel-v150 .bay-scanner-header-v150 > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* Old Bays rows are selectable from the full non-interactive card surface. */
+.stale-bay-order-v105[data-stale-assignment-row] {
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.stale-bay-order-v105[data-stale-assignment-row]:hover {
+  border-color: #87a8ca !important;
+  box-shadow: 0 9px 20px rgba(10, 50, 91, 0.11) !important;
+  transform: translateY(-1px);
+}
+
+.stale-bay-order-v105[data-stale-assignment-row].is-selected {
+  border-color: #1f6fd1 !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f0f7ff 100%) !important;
+  box-shadow: 0 0 0 3px rgba(31, 111, 209, 0.12), 0 9px 20px rgba(10, 50, 91, 0.1) !important;
+}
+
+.stale-bay-order-v105[data-stale-assignment-row] :is(input, select, textarea, button, a, label) {
+  cursor: auto;
+}
+
+/* Priority Work: expanded content owns its stacking context instead of being
+   clipped behind the surrounding job/date outline. */
+#sdiPanel .sdi-current-date-groups,
+#sdiPanel .sdi-current-date-group,
+#sdiPanel .sdi-current-date-body {
+  overflow: visible !important;
+}
+
+#sdiPanel .sdi-current-group {
+  position: relative;
+  overflow: visible !important;
+}
+
+#sdiPanel .sdi-current-group.is-expanded {
+  z-index: 4;
+  border-color: #a9bfdc;
+  box-shadow: 0 12px 28px rgba(8, 45, 91, 0.14);
+}
+
+#sdiPanel .sdi-current-group-toggle {
+  grid-template-columns: minmax(0, 1fr) auto minmax(150px, auto) 20px !important;
+}
+
+#sdiPanel .sdi-current-mark-summary {
+  min-width: 0;
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  text-align: right;
+}
+
+#sdiPanel .sdi-current-mark-summary b {
+  color: #244f7d;
+  font-size: 0.68rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+#sdiPanel .sdi-current-mark-summary small {
+  color: #6b7d91;
+  font-size: 0.62rem;
+  font-weight: 750;
+}
+
+#sdiPanel .sdi-current-group-items {
+  position: relative;
+  z-index: 3;
+  overflow: visible !important;
+  border-radius: 0 0 11px 11px;
+  background: #f4f8fd !important;
+  padding: 10px !important;
+}
+
+#sdiPanel .sdi-current-priority-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+#sdiPanel .sdi-current-priority-facts > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 8px 9px;
+  border: 1px solid #d2deeb;
+  border-radius: 9px;
+  background: #fff;
+}
+
+#sdiPanel .sdi-current-priority-facts small,
+#sdiPanel .sdi-current-item-facts small {
+  color: #718197;
+  font-size: 0.59rem;
+  font-weight: 850;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+#sdiPanel .sdi-current-priority-facts strong,
+#sdiPanel .sdi-current-item-facts strong {
+  overflow: hidden;
+  color: #143d69;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#sdiPanel .sdi-current-priority-items {
+  display: grid;
+  gap: 8px;
+}
+
+#sdiPanel .sdi-current-item-v318 {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+  padding: 10px 11px !important;
+  border: 1px solid #cedceb !important;
+  border-left: 4px solid #e0a126 !important;
+  border-radius: 11px;
+  background: #fff !important;
+  box-shadow: 0 4px 12px rgba(9, 48, 91, 0.055);
+}
+
+#sdiPanel .sdi-current-item-identity {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+#sdiPanel .sdi-current-item-identity > span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+#sdiPanel .sdi-current-item-identity strong {
+  color: #103963;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+#sdiPanel .sdi-current-item-identity small {
+  overflow: hidden;
+  color: #63768c;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#sdiPanel .sdi-current-item-facts {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+#sdiPanel .sdi-current-item-facts > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 6px 7px;
+  border-radius: 7px;
+  background: #f5f8fc;
+}
+
+#sdiPanel .sdi-current-item-reason {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #fff7e5;
+  color: #6d4a0d;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+#sdiPanel .sdi-current-item-actions {
+  justify-self: end;
+}
+
+/* Manage Items is now an exact-item workspace. A job card bulk-selects all of
+   its items; each item row remains independently selectable and movable. */
+#manageItemsPanel.manage-items-panel-v182 .manage-items-list {
+  gap: 9px;
+}
+
+#manageItemsPanel .manage-items-selection-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 9px;
+  border: 1px solid #c8d8e9;
+  border-radius: 10px;
+  background: rgba(248, 251, 255, 0.96);
+  box-shadow: 0 5px 12px rgba(10, 47, 88, 0.07);
+  backdrop-filter: blur(8px);
+}
+
+#manageItemsPanel .manage-items-selection-toolbar > span {
+  display: grid;
+  gap: 1px;
+}
+
+#manageItemsPanel .manage-items-selection-toolbar strong {
+  color: #123e6e;
+  font-size: 0.72rem;
+  font-weight: 950;
+}
+
+#manageItemsPanel .manage-items-selection-toolbar small {
+  color: #718298;
+  font-size: 0.61rem;
+  font-weight: 750;
+}
+
+#manageItemsPanel .manage-items-selection-toolbar > div {
+  display: flex;
+  gap: 5px;
+}
+
+#manageItemsPanel .manage-items-selection-toolbar button {
+  min-height: 29px;
+  padding: 0 9px;
+  border: 1px solid #9eb9d8;
+  border-radius: 7px;
+  background: #fff;
+  color: #175493;
+  font-size: 0.64rem;
+  font-weight: 900;
+}
+
+#manageItemsPanel .manage-items-selection-toolbar button:first-child:not(:disabled) {
+  border-color: #1f70d2;
+  background: #1f70d2;
+  color: #fff;
+}
+
+#manageItemsPanel .manage-item-job-card {
+  overflow: hidden;
+  border: 1px solid #c9d7e6;
+  border-left: 4px solid #7893b0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 5px 14px rgba(10, 48, 89, 0.06);
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+#manageItemsPanel .manage-item-job-card:hover,
+#manageItemsPanel .manage-item-job-card.is-active {
+  border-color: #79a4d1;
+  border-left-color: #1f70d2;
+  box-shadow: 0 8px 18px rgba(11, 58, 109, 0.11);
+}
+
+#manageItemsPanel .manage-item-job-card.is-selected {
+  border-color: #1f70d2;
+  border-left-color: #1f70d2;
+}
+
+#manageItemsPanel .manage-item-job-card.is-partial {
+  border-left-color: #d59a25;
+}
+
+#manageItemsPanel .manage-item-job-head {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #fff, #f6f9fd);
+}
+
+#manageItemsPanel .manage-item-job-head:hover,
+#manageItemsPanel .manage-item-job-head:focus-visible {
+  outline: none;
+  background: #eef6ff;
+}
+
+#manageItemsPanel .manage-item-select-box {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+#manageItemsPanel .manage-item-select-box input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#manageItemsPanel .manage-item-select-box > span {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #9cafc3;
+  border-radius: 5px;
+  background: #fff;
+}
+
+#manageItemsPanel .manage-item-select-box input:checked + span {
+  border-color: #1f70d2;
+  background: #1f70d2;
+}
+
+#manageItemsPanel .manage-item-select-box input:checked + span::after {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+#manageItemsPanel .manage-item-job-identity,
+#manageItemsPanel .manage-item-job-summary,
+#manageItemsPanel .manage-item-exact-identity,
+#manageItemsPanel .manage-item-location {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+#manageItemsPanel .manage-item-job-identity small,
+#manageItemsPanel .manage-item-location small {
+  color: #7a899c;
+  font-size: 0.58rem;
+  font-weight: 850;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+#manageItemsPanel .manage-item-job-identity strong {
+  color: #103b68;
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+
+#manageItemsPanel .manage-item-job-identity span,
+#manageItemsPanel .manage-item-job-summary small {
+  overflow: hidden;
+  color: #687a8e;
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#manageItemsPanel .manage-item-job-summary {
+  justify-items: end;
+  text-align: right;
+}
+
+#manageItemsPanel .manage-item-job-summary b {
+  color: #365675;
+  font-size: 0.66rem;
+  font-weight: 900;
+}
+
+#manageItemsPanel .manage-item-exact-list {
+  display: grid;
+  border-top: 1px solid #dce5ef;
+  background: #fbfdff;
+}
+
+#manageItemsPanel .manage-item-exact-row {
+  display: grid;
+  grid-template-columns: 28px minmax(170px, 1.25fr) minmax(150px, 0.9fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 58px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #e7edf4;
+  cursor: pointer;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+#manageItemsPanel .manage-item-exact-row:last-child {
+  border-bottom: 0;
+}
+
+#manageItemsPanel .manage-item-exact-row:hover,
+#manageItemsPanel .manage-item-exact-row:focus-visible {
+  outline: none;
+  background: #f1f7ff;
+}
+
+#manageItemsPanel .manage-item-exact-row.is-selected {
+  background: #eaf4ff;
+  box-shadow: inset 3px 0 0 #1f70d2;
+}
+
+#manageItemsPanel .manage-item-exact-identity strong,
+#manageItemsPanel .manage-item-location strong {
+  overflow: hidden;
+  color: #173f6b;
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#manageItemsPanel .manage-item-exact-identity span {
+  overflow: hidden;
+  color: #6d7e91;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#manageItemsPanel .manage-item-status {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #e9f0f7;
+  color: #456078;
+  font-size: 0.58rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+#manageItemsPanel .manage-item-status.status-preassigned {
+  background: #fff1cc;
+  color: #8a5c00;
+}
+
+#manageItemsPanel .manage-selected-card-v318 {
+  display: grid;
+  gap: 11px;
+}
+
+#manageItemsPanel .manage-selected-overview p {
+  margin: 4px 0 0;
+  color: #667990;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+#manageItemsPanel .manage-selected-item-list {
+  max-height: 210px;
+  display: grid;
+  gap: 5px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+#manageItemsPanel .manage-selected-item-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.75fr);
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid #d8e2ed;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+#manageItemsPanel .manage-selected-item-line > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+#manageItemsPanel .manage-selected-item-line strong,
+#manageItemsPanel .manage-selected-item-line b {
+  overflow: hidden;
+  color: #173f6b;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#manageItemsPanel .manage-selected-item-line small {
+  overflow: hidden;
+  color: #718196;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#manageItemsPanel .manage-items-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Selected Bay shows when sibling items were manually split into another bay. */
+.selected-bay-job-item.is-other-bay {
+  border-color: #a9c6e6 !important;
+  background: #f0f7ff !important;
+}
+
+.selected-bay-job-item.is-other-bay .selected-bay-job-item-status {
+  background: #dbeeff !important;
+  color: #1769b0 !important;
+}
+
+@media (max-width: 900px) {
+  #sdiPanel .sdi-current-group-toggle {
+    grid-template-columns: minmax(0, 1fr) auto 20px !important;
+  }
+
+  #sdiPanel .sdi-current-mark-summary {
+    display: none;
+  }
+
+  #sdiPanel .sdi-current-priority-facts,
+  #sdiPanel .sdi-current-item-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #manageItemsPanel .manage-item-exact-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+  }
+
+  #manageItemsPanel .manage-item-location {
+    grid-column: 2 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  #manageItemsPanel .manage-items-selection-toolbar,
+  #manageItemsPanel .manage-item-job-head,
+  #manageItemsPanel .manage-selected-item-line {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #manageItemsPanel .manage-items-selection-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  #manageItemsPanel .manage-item-job-head {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  #manageItemsPanel .manage-item-job-summary {
+    grid-column: 2;
+    justify-items: start;
+    text-align: left;
+  }
+
+  #sdiPanel .sdi-current-priority-facts,
+  #sdiPanel .sdi-current-item-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   v0.319 - Manage Items readability and Bay Scanner footer containment
+   -------------------------------------------------------------------------- */
+
+/* Give the Manage Items order workspace enough width to display complete job,
+   item, product, size, location, and status information without squeezing the
+   left column into tiny clipped rows. */
+#manageItemsPanel.manage-items-panel-v182 .manage-items-layout {
+  grid-template-columns: minmax(560px, 1.08fr) minmax(500px, .92fr) !important;
+}
+
+#manageItemsPanel .manage-item-job-head {
+  grid-template-columns: 28px minmax(0, 1fr) minmax(150px, auto);
+  gap: 10px;
+  padding: 11px 12px;
+}
+
+#manageItemsPanel .manage-item-job-identity strong {
+  font-size: 0.92rem;
+}
+
+#manageItemsPanel .manage-item-job-identity span,
+#manageItemsPanel .manage-item-job-summary small {
+  overflow: visible;
+  font-size: 0.69rem;
+  line-height: 1.3;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#manageItemsPanel .manage-item-job-summary {
+  min-width: 150px;
+  align-self: center;
+}
+
+#manageItemsPanel .manage-item-job-summary b {
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+/* Exact items use a two-line card layout inside the left workspace rather than
+   forcing identity, location, and status into one narrow horizontal row. */
+#manageItemsPanel .manage-item-exact-row {
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "select identity status"
+    ". location location";
+  align-items: start;
+  gap: 5px 10px;
+  min-height: 76px;
+  padding: 9px 12px;
+}
+
+#manageItemsPanel .manage-item-exact-row > .manage-item-select-box {
+  grid-area: select;
+  align-self: center;
+}
+
+#manageItemsPanel .manage-item-exact-identity {
+  grid-area: identity;
+}
+
+#manageItemsPanel .manage-item-location {
+  grid-area: location;
+  min-width: 0;
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: #f0f5fa;
+}
+
+#manageItemsPanel .manage-item-status {
+  grid-area: status;
+  align-self: start;
+}
+
+#manageItemsPanel .manage-item-exact-identity strong,
+#manageItemsPanel .manage-item-location strong {
+  overflow: visible;
+  font-size: 0.76rem;
+  line-height: 1.28;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#manageItemsPanel .manage-item-exact-identity span {
+  overflow: visible;
+  font-size: 0.67rem;
+  line-height: 1.3;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* The transit count is operationally important, so keep the complete value at
+   full white contrast inside the Bay Scanner route pulse. */
+.bay-scanner-panel-v150 .bay-route-metrics-v150 .bay-panel-route-lane > span {
+  color: #ffffff !important;
+}
+
+/* The custom fixed Bay Scanner follows a footer-aware top supplied by JS and
+   retains its own internal scrollbar when its contents exceed the viewport. */
+.bay-scanner-sticky-panel-v155.is-fixed-v155 {
+  max-height: var(--bay-scanner-fixed-max-height-v319, calc(100dvh - var(--bay-scanner-fixed-top-v155, 5px) - 5px)) !important;
+}
+
+@media (max-width: 1180px) and (min-width: 1081px) {
+  #manageItemsPanel.manage-items-panel-v182 .manage-items-layout {
+    grid-template-columns: minmax(520px, 1.04fr) minmax(440px, .96fr) !important;
+  }
+}
+
+@media (max-width: 1080px) {
+  #manageItemsPanel.manage-items-panel-v182 .manage-items-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 620px) {
+  #manageItemsPanel .manage-item-job-head,
+  #manageItemsPanel .manage-item-exact-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  #manageItemsPanel .manage-item-exact-row {
+    grid-template-areas:
+      "select identity"
+      ". status"
+      ". location";
+  }
+
+  #manageItemsPanel .manage-item-job-summary {
+    grid-column: 2;
+    min-width: 0;
+    justify-items: start;
+    text-align: left;
+  }
+}

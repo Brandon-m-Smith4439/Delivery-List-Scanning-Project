@@ -9,22 +9,25 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#062f59">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/home.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/print.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/shell.css?v=20260811-v0.303">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260811-v0.303">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/home.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/print.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/shell.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260814-v0.319">
+    <link rel="stylesheet" href="static/css/mobile.css?v=20260814-v0.319">
 </head>
-<body data-page="home" data-mobile-view="scan">
+<body data-page="home">
   <!-- SECTION: Authentication and password reset -->
   <section class="login-screen" id="loginPanel" hidden>
     <button class="login-language-toggle" id="loginLanguageToggleBtn" type="button" aria-label="Cambiar a Español" title="Cambiar a Español">
@@ -613,6 +616,8 @@
               </table>
             </div>
 
+            <section class="mobile-list-cards" id="mobileListCards"></section>
+
             <div class="list-footer">
               <span id="totalItemsText">0 total items</span>
               <div class="pager" id="scanPagerBottom" aria-label="Pagination"></div>
@@ -798,8 +803,6 @@
                 </div>
               </div>
             </section>
-
-            <section class="mobile-list-cards" id="mobileListCards"></section>
 
             <section class="summary-grid" id="summaryPanel">
               <div class="summary-card remaining">
@@ -1347,7 +1350,7 @@
         <div class="modal-backdrop" id="manageItemsBackdrop" hidden></div>
         <section class="modal-panel manage-items-panel manage-items-panel-v182" id="manageItemsPanel" hidden>
           <div class="section-heading manage-items-heading">
-            <div><small>Indian Trail inventory</small><h2>Manage Bay Items</h2><span>Filter, review, move, clear, target, or mark Rush work from one larger workspace.</span></div>
+            <div><small>Indian Trail inventory</small><h2>Manage Bay Items</h2><span>Select whole jobs or exact items, see grouped bay locations, and manually split sibling items across bays when needed.</span></div>
             <button id="manageItemsCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close manage items window">×</button>
           </div>
           <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Manage Items sections">
@@ -1397,7 +1400,7 @@
           <section class="bay-operation-view" data-bay-modal-panel="editor" data-bay-modal-view="workspace">
             <div class="bay-editor-layout">
               <aside class="bay-editor-sidebar">
-                <button class="bay-editor-new-group" id="bayEditorNewGroupBtn" type="button">+ Add New Bay Group</button>
+                <button class="bay-editor-new-group" id="bayEditorNewGroupBtn" class="app-primary-button" type="button">+ Add New Bay Group</button>
                 <div id="bayEditorGroupList" class="bay-editor-group-list"></div>
                 <p class="bay-editor-note"><strong>Unmapped bays</strong> are active bays without a confirmed map group/position. Assign them to a group here or in Edit Map.</p>
               </aside>
@@ -1549,13 +1552,13 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.303">
+        <span class="footer-version-v0163" aria-label="Application version 0.319">
           <small>Version</small>
-          <strong>0.303</strong>
+          <strong>0.319</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
-          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.303&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
+          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.319&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
           title="Report a Delivery List Scanner bug"
         >
           <span class="footer-bug-icon-v0163" aria-hidden="true"></span>
@@ -1563,14 +1566,6 @@
         </a>
       </div>
     </footer>
-
-    <nav class="mobile-nav" aria-label="Mobile navigation">
-      <button class="is-active" data-mobile-target="scan" type="button"><span class="nav-icon scan"></span>Scan</button>
-      <button data-mobile-target="list" type="button"><span class="nav-icon list"></span>List</button>
-      <button data-mobile-target="summary" type="button"><span class="nav-icon summary"></span>Summary</button>
-      <button data-mobile-target="alerts" type="button"><span class="nav-icon alerts"></span>Review</button>
-      <button data-mobile-target="menu" type="button"><span class="nav-icon menu"></span>Menu</button>
-    </nav>
 
     <!-- SECTION: Global print and export modal -->
     <div class="print-options-backdrop" id="printOptionsBackdrop" hidden></div>
@@ -1884,6 +1879,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260811-v0.303"></script>
+  <script src="static/js/app.js?v=20260814-v0.319"></script>
 </body>
 </html>
