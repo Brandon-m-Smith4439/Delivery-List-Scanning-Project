@@ -13,9 +13,13 @@ L  Dimensions
 N  Customer
 V  Remake
 X  Route
+Y  Original Source Order (hidden)
+Z  Original Source Item (hidden)
 
-This keeps the generated XLSX compatible with the Delivery List Scanner's
-existing parse_aw_delivery_workbook() function without adding a second parser.
+The hidden source columns preserve immutable A+W identity when an operator has
+manually changed the visible Order Nr. or Item Nr. They do not alter the printed
+report, but they let the scanner reconcile the edited row back to the same source
+record instead of treating the visible edit as a brand-new A+W line.
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ from xml.sax.saxutils import escape
 MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
-WORKBOOK_FORMAT_VERSION = "v115-ooxml-1"
+WORKBOOK_FORMAT_VERSION = "v324-ooxml-2"
 
 
 def parse_args() -> argparse.Namespace:
@@ -133,8 +137,11 @@ def normalize_rows(payload: dict) -> list[dict[str, object]]:
                 "job": safe_text(source.get("job")),
                 "order": as_int(source.get("order")),
                 "item": as_int(source.get("item")),
+                "sourceOrder": as_int(source.get("sourceOrder") or source.get("order")),
+                "sourceItem": as_int(source.get("sourceItem") or source.get("item")),
                 "quantity": quantity,
-                "dimensions": format_dimensions(source.get("widthUnits"), source.get("heightUnits"), units_per_inch),
+                "dimensions": safe_text(source.get("dimensionsOverride"))
+                or format_dimensions(source.get("widthUnits"), source.get("heightUnits"), units_per_inch),
                 "customer": safe_text(source.get("customer")),
                 "remake": safe_text(source.get("remake")),
                 "route": safe_text(source.get("route")),
@@ -183,6 +190,8 @@ def worksheet_xml(payload: dict, delivery_date: str) -> str:
                 inline_cell("N6", "Customer", 2),
                 inline_cell("V6", "Remake", 2),
                 inline_cell("X6", "Route", 2),
+                inline_cell("Y6", "Source Order", 2),
+                inline_cell("Z6", "Source Item", 2),
             ],
             20,
         )
@@ -213,6 +222,8 @@ def worksheet_xml(payload: dict, delivery_date: str) -> str:
                         inline_cell(f"N{current_row}", item["customer"], 4),
                         inline_cell(f"V{current_row}", item["remake"], 4),
                         inline_cell(f"X{current_row}", item["route"], 4),
+                        numeric_cell(f"Y{current_row}", item["sourceOrder"], 4),
+                        numeric_cell(f"Z{current_row}", item["sourceItem"], 4),
                     ],
                     18,
                 )
@@ -239,7 +250,7 @@ def worksheet_xml(payload: dict, delivery_date: str) -> str:
     return f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="{MAIN_NS}" xmlns:r="{REL_NS}">
   <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
-  <dimension ref="A1:X{dimension_end}"/>
+  <dimension ref="A1:Z{dimension_end}"/>
   <sheetViews>
     <sheetView workbookViewId="0">
       <pane ySplit="6" topLeftCell="A7" activePane="bottomLeft" state="frozen"/>
@@ -262,6 +273,7 @@ def worksheet_xml(payload: dict, delivery_date: str) -> str:
     <col min="22" max="22" width="10" customWidth="1"/>
     <col min="23" max="23" width="3" customWidth="1"/>
     <col min="24" max="24" width="12" customWidth="1"/>
+    <col min="25" max="26" width="0" hidden="1" customWidth="1"/>
   </cols>
   <sheetData>{''.join(report_rows)}</sheetData>
   <mergeCells count="{len(merges)}">{merge_xml}</mergeCells>
@@ -567,6 +579,8 @@ def self_test() -> None:
                 "job": "88915190. Add It. Duke 7726",
                 "order": 235897,
                 "item": 1,
+                "sourceOrder": 123456,
+                "sourceItem": 7,
                 "quantity": 1,
                 "widthUnits": 960,
                 "heightUnits": 2368,
@@ -599,6 +613,10 @@ def self_test() -> None:
             raise AssertionError("Dimension conversion failed.")
         if "RM" not in cells.values() or "DTC" not in cells.values():
             raise AssertionError("Route/remake layout failed.")
+        source_orders = [value for reference, value in cells.items() if reference.startswith("Y")]
+        source_items = [value for reference, value in cells.items() if reference.startswith("Z")]
+        if "123456" not in source_orders or "7" not in source_items:
+            raise AssertionError("Hidden immutable source identity was not preserved.")
     print("Workbook builder self-test passed.")
 
 

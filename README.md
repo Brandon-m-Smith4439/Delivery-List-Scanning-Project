@@ -1,21 +1,35 @@
-**# Delivery List Scanner**
+# Delivery List Scanner
 
-Current maintained release: **v0.323**. SQLite remains the active/default backend.
+Current maintained release: **v0.324**. SQLite remains the active/default backend.
 
-v0.323 makes Automated DL Import schedule installation self-healing for local/network-folder deployments by synchronizing the complete scheduler runtime before Windows tasks are installed.
+v0.324 makes Admin-approved superseded orders and source-owned manual edits durable across repeated SQL workbook rebuilds and automated imports.
 
-**## Install v0.323**
+## Install v0.324
 
-1\. Stop the Delivery List Scanner if it is running.
-2\. Extract the v0.323 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
-3\. Preserve the existing `data` folder, database files, and `C:\DeliveryListAutomation` configuration/state folders.
-4\. Start the scanner manually with `py -3 server.py`.
-5\. Hard-refresh the browser (`Ctrl+F5`) once so the v0.323 cache keys are loaded.
-6\. In Automated DL Import, save the network-folder settings and choose **Save & Install Schedule** again. The server now deploys the scheduler runtime and command wrappers automatically before Task Scheduler installation.
+1. Stop the Delivery List Scanner if it is running.
+2. Extract the v0.324 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
+3. Preserve the existing `data` folder, database files, and `C:\DeliveryListAutomation` configuration/state folders.
+4. Start the scanner manually with `py -3 server.py`.
+5. Hard-refresh the browser (`Ctrl+F5`) once so the v0.324 cache keys are loaded.
+6. If SQL automation is installed, opening the Admin automation GUI or restarting the scanner refreshes the updated runtime files under `C:\DeliveryListAutomation\Scripts` before the next run.
 
 No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **11**.
 
-**## v0.323 highlights**
+## v0.324 highlights
+
+- Treats an Admin-approved superseded-order removal as a durable **source-order** decision. A later SQL fingerprint/item change on that same removed order no longer silently resets the approval to Pending.
+- Removes every live source-owned row for the approved A+W order by immutable source lineage, even if an operator previously changed the visible Order Nr. or Item Nr.
+- Soft-retires superseded rows from live delivery lists, rack assignments, and bay assignments instead of hard-deleting history-linked records, preserving scan/machine/audit history.
+- Publishes order-level superseded exclusions to the SQL exporter so future regenerated Excel workbooks omit the entire approved old order, including newly appearing items on that same source order.
+- Persists field-level manual edits for source-owned rows by original A+W Order/Item identity. Later workbook imports update untouched source fields but keep the operator's explicitly edited Order Nr., Item Nr., Qty, dimensions, customer, route, Job Nr., and product.
+- Gives a manual route override higher priority than Job Nr. hints and Customer Route Rules, preventing an IT→CPU edit from being re-created in Indian Trail during the next automated import.
+- Writes source-owned manual overrides into the shared persistent-decision file and applies them during SQL workbook generation, so regenerated workbooks reflect supported manual edits rather than immediately restoring the raw SQL values.
+- Stores the original A+W source Order/Item in hidden workbook columns so visible manual Order Nr./Item Nr. edits still reconcile to the same source row on the next import instead of creating a duplicate identity.
+- Advances the SQL workbook integrity marker to `v324-ooxml-2`, forcing maintained automation to rebuild older workbook copies into the source-lineage-aware format before treating them as current.
+- Aligns folder-import drift checks and end-to-end workbook verification with the same persistent-decision preparation used by the real importer, avoiding false IT/CPU stage mismatches after manual routing changes.
+- Advances `APPLICATION_VERSION` to 324 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
+
+## v0.323 highlights
 
 - Expands the browser-controlled runtime synchronization from four run-time reconciliation files to the complete maintained scheduler/runtime dependency set, including the install/remove/status/verification PowerShell scripts and scanner compatibility helpers.
 - Self-heals a partially installed local runtime under `C:\DeliveryListAutomation` before installing or removing the Windows schedule.
@@ -26,7 +40,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Preserves the folder-import-only preflight, which validates network-folder read access and scanner compatibility without querying A+W SQL.
 - Advances `APPLICATION_VERSION` to 323 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.322 highlights**
+## v0.322 highlights
 
 - Restores vertical scrolling to the Automated DL Import **Run Now**, **Schedule**, and **Status** tabs so long content and bottom controls remain reachable at normal and reduced viewport heights.
 - Keeps the automation modal itself contained inside the viewport instead of allowing the whole dialog to spill beyond its frame.
@@ -34,7 +48,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Uses one owning desktop rule instead of adding a competing bottom-of-file override, reducing future cascade conflicts.
 - Advances `APPLICATION_VERSION` to 322 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.321 highlights**
+## v0.321 highlights
 
 - Makes Rack Overview lifecycle pills content-sized instead of grid-sized and pins each reset action to the lower-right so **Incomplete**, **Complete**, and **On the Way** never rearrange the card.
 - Stops startup bay seeding from overwriting saved display names, grouped-set names, policies, capacity, visibility, and layout values with the bundled base map.
@@ -47,7 +61,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Changes Indian Trail bay grouping from Job Nr. to Order Nr. so different orders sharing one job number cannot be automatically combined into one bay.
 - Advances `APPLICATION_VERSION` to 321 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.320 highlights**
+## v0.320 highlights
 
 - Presents the historical `T` rack consistently as **Truck 1** and numbered truck racks as **Truck N** in locations, rack selectors, Rack Manager, Global Search, scan confirmations, and in-transit data.
 - Separates **No Rack** from Truck 1 completely in maintained input normalization; No Rack remains the explicit blank-location selector and legacy `NORACK` no longer resolves to Truck 1.
@@ -57,7 +71,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Gives the Manage Bay Items left order/item workspace a dedicated vertical scrollbar with stationary filters and non-shrinking cards.
 - Advances `APPLICATION_VERSION` to 320 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.319 highlights**
+## v0.319 highlights
 
 - Rebalances the Manage Bay Items workspace so the left-side job/order list has substantially more usable width instead of squeezing exact-item information into tiny clipped rows.
 - Reflows exact item cards into a readable two-line layout with full Order/Item, glass/product, size, grouped bay location, and status information.
@@ -66,7 +80,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Verified that Old Bays, Rush, Edit Bays, and Manage Items action-history formatting already includes Job Nr./Order Nr./Item Nr. when the recorded audit payload contains that work identity, so no duplicate history implementation was added.
 - Advances `APPLICATION_VERSION` to 319 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.318 highlights**
+## v0.318 highlights
 
 - Adds the quiet outline-circle header treatment to Old Bay Control Center and the Bay Map scanner panel.
 - Lets Old Bays rows be selected from the whole non-interactive order card surface instead of requiring the small checkbox target.
@@ -77,7 +91,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Enriches Old Bays, Rush, Edit Bays, and Manage Items action-history details with job/order/item, old/new bay, policy, priority-date, and related context.
 - Advances `APPLICATION_VERSION` to 318 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.317 highlights**
+## v0.317 highlights
 
 - Counts **Pieces On The Way** across every Indian Trail rack currently marked In Transit, even when that rack belongs to a delivery date other than today.
 - Keeps today's Outbound sent, Indian Trail received, and dual progress meters date-specific; all-date physical transit no longer changes those daily progress counts.
@@ -86,7 +100,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Moves Location Corrections guidance into a compact top line and prevents the All Bay Scans grid from stretching short content vertically when only a few scan records exist.
 - Advances `APPLICATION_VERSION` to 317 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.316 highlights**
+## v0.316 highlights
 
 - Counts Indian Trail pieces on the way from active rack assignments on departed racks, even when the source delivery-list copy has since been superseded or soft-deleted by an update.
 - Subtracts Indian Trail receiving scans once per Order Nr./Item Nr. before allocating the remaining physical quantity across racks, preventing received quantities from being subtracted once per rack.
@@ -95,7 +109,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Replaces the oversized duplicate history hero with a compact retained/scan/page strip and compresses the Location Corrections guidance into a single low-profile row.
 - Advances `APPLICATION_VERSION` to 316 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.315 highlights**
+## v0.315 highlights
 
 - Reuses the maintained rack-set icon library inside the In-Transit Manifest, including custom A-frame glass cart, pallet, dolly, crate, warehouse, material, and truck artwork.
 - Carries each rack set's saved icon color into the In-Transit rack marker instead of falling back to a plain blue circular marker.
@@ -103,7 +117,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Uses the same compact numeric delivery date in individual Rack contents so rack detail and In-Transit presentation stay consistent.
 - Advances `APPLICATION_VERSION` to 315 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.314 highlights**
+## v0.314 highlights
 
 - Re-checks Rack Overview heading geometry after asynchronous rack refreshes and forwards clicks that land inside the visible Rack History/Edit Racks button rectangles even if a stale transparent shell layer wins browser hit testing.
 - Keeps the In-Transit Manifest all-date so every rack currently marked In Transit for Indian Trail is visible, while Bay Map Outbound/Indian Trail counts and progress remain tied strictly to today's delivery date.
@@ -113,7 +127,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Shows live bay-by-bay progress while a grouped bay set rename/policy update is being written instead of silently waiting through sequential updates.
 - Advances `APPLICATION_VERSION` to 314 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
-**## v0.313 highlights**
+## v0.313 highlights
 
 - Resets page scrolling only after the destination page becomes visible, eliminating the navigation-dependent sticky-header overlap that made the upper part of Rack History/Edit Racks unclickable.
 - Uses the real 36-pixel Rack History/Edit Racks button surfaces instead of an oversized pseudo-element hit area.
@@ -124,15 +138,15 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 
 **## Install v0.312**
 
-1\. Stop the Delivery List Scanner if it is running.
-2\. Extract the v0.312 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
-3\. Preserve the existing `data` folder and database files.
-4\. Start the scanner manually with `py -3 server.py`.
-5\. Hard-refresh the browser (`Ctrl+F5`) once so the v0.312 CSS/JavaScript cache keys are loaded.
+1. Stop the Delivery List Scanner if it is running.
+2. Extract the v0.312 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
+3. Preserve the existing `data` folder and database files.
+4. Start the scanner manually with `py -3 server.py`.
+5. Hard-refresh the browser (`Ctrl+F5`) once so the v0.312 CSS/JavaScript cache keys are loaded.
 
 No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **11**.
 
-**## v0.312 highlights**
+## v0.312 highlights
 
 - Replaces the oversized grouped-bay occupied/total/meter block with a compact `3/32` capacity pill that fits the Physical Bay group card and keeps only the live occupied number color-coded.
 - Restores Rack Overview route/destination pills to the upper-right corner while retaining the current rack-history scrolling and action-button hitbox fixes.
@@ -142,7 +156,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Centralizes glass-color resolution in shared browser helpers and applies it to Delivery List Update Preview item borders, tinting, and glass indicators so future glass-aware interfaces can reuse the same palette.
 - Advances `APPLICATION_VERSION` to 312 while preserving SQLite schema version 11.
 
-**## v0.311 highlights**
+## v0.311 highlights
 
 - Fixes whole-rack content transfers by removing references to obsolete rack lifecycle `*_by` columns while preserving timestamp resets and transfer auditing.
 - Gives Packing List History and All Racks History their own bounded vertical scroll areas inside the Rack History control center.
@@ -153,7 +167,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Replaces the `3/30 used` group fraction with an occupied/total summary and utilization meter that transitions from green through orange to red as the set fills.
 - Advances `APPLICATION_VERSION` to 311 while preserving SQLite schema version 11.
 
-**## v0.310 highlights**
+## v0.310 highlights
 
 - Restores a compact **AUTO / MAN / MIX / BLK** policy chip to the upper-left of each Physical Bay grouped set without bringing back the redundant large status block.
 - Adds the same small `!` indicator to each individual bay that contributes to the grouped attention count, with a tooltip describing the attention reason.
@@ -161,7 +175,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Keeps Rack creation and sticky Scan Stage behavior from v0.309 unchanged.
 - Advances `APPLICATION_VERSION` to 310 while preserving SQLite schema version 11.
 
-**## v0.309 highlights**
+## v0.309 highlights
 
 - Routes all new rack and rack-set inserts through one compatibility-safe rack creator that explicitly supplies lifecycle values and fills any legacy SQLite `NOT NULL`/no-default rack columns with neutral values.
 - Raises the complete Racks History and Edit Racks button surfaces above decorative heading layers so their full visible area is clickable.
@@ -171,7 +185,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Replaces the wide Bay group attention message with a small `!` + count badge and tooltip/accessibility label.
 - Advances `APPLICATION_VERSION` to 309 while preserving SQLite schema version 11.
 
-**## v0.308 highlights**
+## v0.308 highlights
 
 - Marks every currently existing stage-copy update notice for the delivery date reviewed for the signed-in user when Staging or Outbound is reviewed; route-specific review remains isolated.
 - Repairs Add Rack Set on databases where rack lifecycle columns such as `completed_at` are `NOT NULL` by writing explicit empty lifecycle values instead of `NULL` or relying on legacy defaults.
@@ -184,7 +198,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Raises the sticky Scan panel above overlapping page content so Stage remains interactive while scrolled and hardens RM flag styling against the stray black-dot artifact.
 - Advances `APPLICATION_VERSION` to 308 while preserving SQLite schema version 11.
 
-**## v0.307 highlights**
+## v0.307 highlights
 
 - Staging/Outbound review now clears the matching automatic-import occurrence across downstream active stages for only the signed-in user, immediately clears those Stage markers, and then verifies them from the backend.
 - Rack-set creation validates set names and generated rack codes before submit and again in the backend transaction, with the exact error kept visible inside the form instead of only flashing a generic error.
@@ -194,7 +208,7 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Rack Overview labels loaded open racks as **Incomplete** and adds a stronger lifecycle indicator for Incomplete, Complete, On the way, Received, and Empty.
 - Preserves the v0.306 mobile interface as-is and keeps SQLite schema version 11.
 
-**## v0.306 highlights**
+## v0.306 highlights
 
 - Presents scanner controls, recent feedback, summary, filters, paging, and delivery-list cards as one continuous mobile Scan page with no bottom sub-navigation.
 - Adds Job Nr., explicit scanned/total quantity, and complete, partial, or not-scanned status to every handheld delivery-list card.
@@ -202,13 +216,13 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 - Repairs compact header icons, sidebar branding, Home progress geometry, expanded physical Bay groups, and maintained mobile dialog shells.
 - Reflows Print / Export and preset controls into one internally scrollable, touch-first workspace with an accessible close action.
 
-**## v0.305 highlights**
+## v0.305 highlights
 
 - Added a final `static/css/mobile.css` ownership layer loaded after every page stylesheet so compact-device fixes do not change desktop rendering.
 - Reworked compact navigation and the main page/dialog layouts for TC22-class handheld use with safe-area handling and touch-sized controls.
 - Preserved SQLite schema version 11 with no database migration.
 
-**## v0.304 highlights**
+## v0.304 highlights
 
 - Restricts the full-screen New Rush Submitted alert to genuine Rush notifications created by the operator Priority Work workflow; import results and Superseded Order Review remain in the notification center instead of impersonating a Rush.
 - Adds defensive backend and browser filtering so automation/system identities cannot enter the Rush popup queue.
@@ -329,10 +343,10 @@ No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **1
 
 **## Install v0.232**
 
-1\. Start from the maintained v0.231 project.
-2\. Extract the v0.232 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.231 project.
+2. Extract the v0.232 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.232 keeps schema version 5.
 
@@ -347,10 +361,10 @@ No database migration or separate setup script is required. v0.232 keeps schema 
 
 **## Install v0.231**
 
-1\. Start from the maintained v0.230 project.
-2\. Extract the v0.231 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.230 project.
+2. Extract the v0.231 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.231 keeps schema version 5.
 
@@ -367,10 +381,10 @@ No database migration or separate setup script is required. v0.231 keeps schema 
 
 **## Install v0.230**
 
-1\. Start from the maintained v0.229 project.
-2\. Extract the v0.230 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.229 project.
+2. Extract the v0.230 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.230 keeps schema version 5.
 
@@ -386,10 +400,10 @@ No database migration or separate setup script is required. v0.230 keeps schema 
 
 **## Install v0.229**
 
-1\. Start from the maintained v0.228 project.
-2\. Extract the v0.229 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.228 project.
+2. Extract the v0.229 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.229 keeps schema version 5.
 
@@ -404,10 +418,10 @@ No database migration or separate setup script is required. v0.229 keeps schema 
 
 **## Install v0.228**
 
-1\. Start from the maintained v0.227 project.
-2\. Extract the v0.228 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.227 project.
+2. Extract the v0.228 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.228 keeps schema version 5.
 
@@ -423,10 +437,10 @@ No database migration or separate setup script is required. v0.228 keeps schema 
 
 **## Install v0.227**
 
-1\. Start from the maintained v0.226 project.
-2\. Extract the v0.227 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.226 project.
+2. Extract the v0.227 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.227 keeps schema version 5.
 
@@ -443,10 +457,10 @@ No database migration or separate setup script is required. v0.227 keeps schema 
 
 **## Install v0.226**
 
-1\. Start from the maintained v0.225 project.
-2\. Extract the v0.226 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.225 project.
+2. Extract the v0.226 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.226 keeps schema version 5.
 
@@ -462,10 +476,10 @@ No database migration or separate setup script is required. v0.226 keeps schema 
 
 **## Install v0.225**
 
-1\. Start from the maintained v0.224 project.
-2\. Extract the v0.225 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.224 project.
+2. Extract the v0.225 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.225 keeps schema version 5.
 
@@ -481,10 +495,10 @@ No database migration or separate setup script is required. v0.225 keeps schema 
 
 **## Install v0.224**
 
-1\. Start from the maintained v0.223 project.
-2\. Extract the v0.224 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.223 project.
+2. Extract the v0.224 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.224 keeps schema version 5.
 
@@ -500,10 +514,10 @@ No database migration or separate setup script is required. v0.224 keeps schema 
 
 **## Install v0.223**
 
-1\. Start from the maintained v0.222 project.
-2\. Extract the v0.223 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.222 project.
+2. Extract the v0.223 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.223 keeps schema version 5.
 
@@ -520,10 +534,10 @@ No database migration or separate setup script is required. v0.223 keeps schema 
 
 **## Install v0.222**
 
-1\. Start from the maintained v0.221 project.
-2\. Extract the v0.222 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.221 project.
+2. Extract the v0.222 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.222 keeps schema version 5.
 
@@ -538,10 +552,10 @@ No database migration or separate setup script is required. v0.222 keeps schema 
 
 **## Install v0.221**
 
-1\. Start from the maintained v0.220 project.
-2\. Extract the v0.221 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.220 project.
+2. Extract the v0.221 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.221 keeps schema version 5.
 
@@ -555,10 +569,10 @@ No database migration or separate setup script is required. v0.221 keeps schema 
 
 **## Install v0.220**
 
-1\. Start from the maintained v0.219 project.
-2\. Extract the v0.220 changed-files ZIP directly into the current project folder.
-3\. Preserve the existing \`data\` folder and database files.
-4\. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
+1. Start from the maintained v0.219 project.
+2. Extract the v0.220 changed-files ZIP directly into the current project folder.
+3. Preserve the existing \`data\` folder and database files.
+4. Restart the scanner server and refresh the browser with \`Ctrl+F5\`.
 
 No database migration or separate setup script is required. v0.220 keeps schema version 5.
 
@@ -774,10 +788,10 @@ No database migration or separate setup script is required. v0.220 keeps schema 
 
 **## Start the local web app**
 
-1\. Keep \`Start-DeliveryScannerWebApp.bat\` and \`Start-DeliveryScannerWebApp.ps1\` beside \`server.py\`.
-2\. Keep the existing \`data\`, \`assets\`, \`sounds\`, and \`static\` folders in the project folder.
-3\. Double-click \`Start-DeliveryScannerWebApp.bat\`.
-4\. Keep the launcher window open while the local server is running.
+1. Keep \`Start-DeliveryScannerWebApp.bat\` and \`Start-DeliveryScannerWebApp.ps1\` beside \`server.py\`.
+2. Keep the existing \`data\`, \`assets\`, \`sounds\`, and \`static\` folders in the project folder.
+3. Double-click \`Start-DeliveryScannerWebApp.bat\`.
+4. Keep the launcher window open while the local server is running.
 
 SQLite remains the active/default database. The production database is:
 
@@ -822,11 +836,11 @@ The maintained automation package is under \`automation\sql\_delivery\_export\`.
 
 **### Floor computers: import the shared folder every hour**
 
-1\. Extract the newest changed-files package into the current scanner project folder.
-2\. Close the scanner web app/server window.
-3\. Run \`automation\sql\_delivery\_export\Setup-DeliveryListSqlAutomation.bat\` once.
-4\. Restart the scanner web app and confirm **\*\*Admin > Delivery Automation Control Center\*\*** shows **\*\*Import Temp Folder Only\*\*** with the schedule installed.
-5\. Run \`C:\DeliveryListAutomation\Run-Now\.cmd\` for a visible manual verification.
+1. Extract the newest changed-files package into the current scanner project folder.
+2. Close the scanner web app/server window.
+3. Run \`automation\sql\_delivery\_export\Setup-DeliveryListSqlAutomation.bat\` once.
+4. Restart the scanner web app and confirm **\*\*Admin > Delivery Automation Control Center\*\*** shows **\*\*Import Temp Folder Only\*\*** with the schedule installed.
+5. Run \`C:\DeliveryListAutomation\Run-Now\.cmd\` for a visible manual verification.
 
 The floor setup copies the maintained runtime to \`C:\DeliveryListAutomation\Scripts\`, uses the existing shared Temp Delivery Lists folder, creates a 60-minute incremental task plus the normal daily full-window safety task, and disables the older built-in 5 PM importer for that Windows user. It does not query A+W SQL or replace the scanner database.
 

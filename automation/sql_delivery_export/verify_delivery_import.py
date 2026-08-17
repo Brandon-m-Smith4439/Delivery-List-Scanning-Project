@@ -50,7 +50,11 @@ def main() -> int:
     config = load_config(project_root)
     store = create_store(config)
     store.initialize()
-    routed_payload = store.apply_customer_route_rules_to_payload(payload)
+    preparer = getattr(store, "prepare_import_payload", None)
+    if callable(preparer):
+        routed_payload = preparer(payload)
+    else:
+        routed_payload = store.apply_customer_route_rules_to_payload(payload)
     definitions = build_delivery_lists(routed_payload)
     expected_ids = sorted({str(row[0]).strip() for row in definitions if row and str(row[0]).strip()})
     if not expected_ids:

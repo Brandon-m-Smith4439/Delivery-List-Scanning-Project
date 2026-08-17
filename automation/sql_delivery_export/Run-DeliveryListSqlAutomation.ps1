@@ -46,6 +46,8 @@ $script:LastExcludedDeliveryRows = @()
 $script:LastEligibilityRule = ""
 $script:LastStatusDiagnosticSummary = ""
 $script:VerifiedSourceExclusions = @()
+$script:VerifiedSourceOrderExclusions = @()
+$script:VerifiedSourceManualOverrides = @()
 $script:SupersededOrderCandidates = @()
 # Retained in run summaries for backward compatibility with v0.243. v0.245 no
 # longer defers dates by production status because those values are diagnostic.
@@ -448,6 +450,95 @@ function Read-VerifiedSourceExclusions {
     return @($normalizedByKey.Values | Sort-Object deliveryDate, orderNumber, itemNumber)
 }
 
+function Read-VerifiedSourceOrderExclusions {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $projectRoot = [string](Get-OptionalProperty -Object $Config -Name "ProjectRoot" -DefaultValue "")
+    if ([string]::IsNullOrWhiteSpace($projectRoot)) {
+        return @()
+    }
+    $path = Join-Path $projectRoot "data\superseded-source-exclusions.json"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return @()
+    }
+
+    $payload = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $normalizedByKey = @{}
+    foreach ($entry in @(Get-OptionalProperty -Object $payload -Name "orderEntries" -DefaultValue @())) {
+        $deliveryDate = ([string](Get-OptionalProperty -Object $entry -Name "deliveryDate" -DefaultValue "")).Trim()
+        $orderNumber = ([string](Get-OptionalProperty -Object $entry -Name "orderNumber" -DefaultValue "")).Trim()
+        $reason = ([string](Get-OptionalProperty -Object $entry -Name "reason" -DefaultValue "Approved superseded-order removal.")).Trim()
+        if ($deliveryDate -notmatch '^\d{4}-\d{2}-\d{2}$') {
+            throw "Superseded order exclusion file contains an invalid deliveryDate: $deliveryDate"
+        }
+        if ($orderNumber -notmatch '^\d+$') {
+            throw "Superseded order exclusion file contains an invalid order number: $orderNumber"
+        }
+        $key = "${deliveryDate}|${orderNumber}"
+        $normalizedByKey[$key] = [pscustomobject]@{
+            deliveryDate = $deliveryDate
+            orderNumber = $orderNumber
+            reason = $reason
+            sourceFile = [IO.Path]::GetFileName($path)
+        }
+    }
+    return @($normalizedByKey.Values | Sort-Object deliveryDate, orderNumber)
+}
+
+function Get-VerifiedSourceOrderExclusionsForDate {
+    param([Parameter(Mandatory = $true)][datetime]$Date)
+
+    $dateKey = $Date.ToString("yyyy-MM-dd")
+    return @(
+        $script:VerifiedSourceOrderExclusions |
+            Where-Object { [string]$_.deliveryDate -eq $dateKey }
+    )
+}
+
+function Read-VerifiedSourceManualOverrides {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $projectRoot = [string](Get-OptionalProperty -Object $Config -Name "ProjectRoot" -DefaultValue "")
+    if ([string]::IsNullOrWhiteSpace($projectRoot)) {
+        return @()
+    }
+    $path = Join-Path $projectRoot "data\superseded-source-exclusions.json"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return @()
+    }
+    $payload = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $normalized = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @(Get-OptionalProperty -Object $payload -Name "manualOverrides" -DefaultValue @())) {
+        $deliveryDate = ([string](Get-OptionalProperty -Object $entry -Name "deliveryDate" -DefaultValue "")).Trim()
+        $sourceOrder = ([string](Get-OptionalProperty -Object $entry -Name "sourceOrderNumber" -DefaultValue "")).Trim()
+        $sourceItem = ([string](Get-OptionalProperty -Object $entry -Name "sourceItemNumber" -DefaultValue "")).Trim().PadLeft(3, '0')
+        $fields = Get-OptionalProperty -Object $entry -Name "fields" -DefaultValue $null
+        if ($deliveryDate -notmatch '^\d{4}-\d{2}-\d{2}$' -or
+            $sourceOrder -notmatch '^\d+$' -or $sourceItem -notmatch '^\d{3,}$' -or
+            $null -eq $fields) {
+            continue
+        }
+        $normalized.Add([pscustomobject]@{
+            deliveryDate = $deliveryDate
+            sourceOrderNumber = $sourceOrder
+            sourceItemNumber = $sourceItem
+            orderItemKey = "${sourceOrder}-${sourceItem}"
+            fields = $fields
+        })
+    }
+    return @($normalized.ToArray())
+}
+
+function Get-VerifiedSourceManualOverridesForDate {
+    param([Parameter(Mandatory = $true)][datetime]$Date)
+
+    $dateKey = $Date.ToString("yyyy-MM-dd")
+    return @(
+        $script:VerifiedSourceManualOverrides |
+            Where-Object { [string]$_.deliveryDate -eq $dateKey }
+    )
+}
+
 function Get-VerifiedSourceExclusionsForDate {
     param([Parameter(Mandatory = $true)][datetime]$Date)
 
@@ -690,6 +781,17 @@ ORDER BY
     foreach ($entry in $verifiedExclusions) {
         $verifiedByKey[[string]$entry.orderItemKey] = $entry
     }
+    $verifiedOrderExclusions = @(Get-VerifiedSourceOrderExclusionsForDate -Date $Date)
+    $verifiedByOrder = @{}
+    foreach ($entry in $verifiedOrderExclusions) {
+        $verifiedByOrder[[string]$entry.orderNumber] = $entry
+    }
+    $manualOverrides = @(Get-VerifiedSourceManualOverridesForDate -Date $Date)
+    $manualByKey = @{}
+    foreach ($entry in $manualOverrides) {
+        $manualByKey[[string]$entry.orderItemKey] = $entry
+    }
+    $appliedManualOverrideCount = 0
 
     $rows = New-Object System.Collections.Generic.List[object]
     $excludedRows = New-Object System.Collections.Generic.List[object]
@@ -724,8 +826,13 @@ ORDER BY
         $orderNumber = [string][int64]$row.OrderNumber
         $itemNumber = ([string][int]$row.ItemNumber).PadLeft(3, '0')
         $orderItemKey = "${orderNumber}-${itemNumber}"
-        if ($verifiedByKey.ContainsKey($orderItemKey)) {
-            $verified = $verifiedByKey[$orderItemKey]
+        if ($verifiedByKey.ContainsKey($orderItemKey) -or $verifiedByOrder.ContainsKey($orderNumber)) {
+            $verified = if ($verifiedByKey.ContainsKey($orderItemKey)) {
+                $verifiedByKey[$orderItemKey]
+            }
+            else {
+                $verifiedByOrder[$orderNumber]
+            }
             $excludedRows.Add([pscustomobject]@{
                 order = [int64]$row.OrderNumber
                 item = [int]$row.ItemNumber
@@ -742,11 +849,13 @@ ORDER BY
             continue
         }
 
-        $rows.Add([ordered]@{
+        $exportRow = [ordered]@{
             product = [string]$row.ProductHeading
             job = [string]$row.JobNumber
             order = [int64]$row.OrderNumber
             item = [int]$row.ItemNumber
+            sourceOrder = [int64]$row.OrderNumber
+            sourceItem = [int]$row.ItemNumber
             quantity = [decimal]$row.Quantity
             widthUnits = [decimal]$row.WidthUnits
             heightUnits = [decimal]$row.HeightUnits
@@ -754,13 +863,34 @@ ORDER BY
             remake = if ($isRemake) { "RM" } else { "" }
             remakeFlags = $headerFlags
             route = Resolve-SourceRoute -Mapping $mapping -RawRoute ([string]$row.SourceRoute)
-        })
+            dimensionsOverride = ""
+        }
+        if ($manualByKey.ContainsKey($orderItemKey)) {
+            $manualEntry = $manualByKey[$orderItemKey]
+            $fields = $manualEntry.fields
+            if ($fields.PSObject.Properties.Name -contains "product") { $exportRow.product = [string]$fields.product }
+            if ($fields.PSObject.Properties.Name -contains "job") { $exportRow.job = [string]$fields.job }
+            if ($fields.PSObject.Properties.Name -contains "order" -and [string]$fields.order -match '^\d+$') { $exportRow.order = [int64]$fields.order }
+            if ($fields.PSObject.Properties.Name -contains "item" -and [string]$fields.item -match '^\d+$') { $exportRow.item = [int]$fields.item }
+            if ($fields.PSObject.Properties.Name -contains "qty") { $exportRow.quantity = [decimal]$fields.qty }
+            if ($fields.PSObject.Properties.Name -contains "customer") { $exportRow.customer = [string]$fields.customer }
+            if ($fields.PSObject.Properties.Name -contains "route") { $exportRow.route = [string]$fields.route }
+            if ($fields.PSObject.Properties.Name -contains "dimensions") { $exportRow.dimensionsOverride = [string]$fields.dimensions }
+            $appliedManualOverrideCount++
+        }
+        $rows.Add($exportRow)
     }
 
     $script:LastRawDeliveryRowCount = [int]$table.Rows.Count
     $script:LastRawRemakeLineCount = [int]$rawRemakeLineCount
     $script:LastExcludedDeliveryRows = @($excludedRows.ToArray())
-    $script:LastEligibilityRule = "v0.245-raw-date-plus-approved-exclusions-1"
+    $script:LastEligibilityRule = "v0.324-approved-order-exclusions-plus-manual-overrides-1"
+    if ($appliedManualOverrideCount -gt 0) {
+        Write-AutomationLog -Message (
+            "Applied {0} persisted manual scanner override(s) to the SQL workbook rows for {1}." -f
+            $appliedManualOverrideCount, $Date.ToString("yyyy-MM-dd")
+        )
+    }
     $script:LastStatusDiagnosticSummary = (
         "order statuses [{0}]; item statuses [{1}]" -f
         (Get-StatusCountSummary -Counts $orderStatusCounts),
@@ -828,7 +958,7 @@ function Write-DateState {
         dataHash = $Hash
         workbookPath = $WorkbookPath
         workbookHash = $WorkbookHash
-        workbookFormatVersion = "v115-ooxml-1"
+        workbookFormatVersion = "v324-ooxml-2"
         rowCount = $RowCount
         pieceCount = $PieceCount
         imported = $Imported
@@ -1226,7 +1356,7 @@ function Export-DeliveryDate {
         }
     }
     $workbookIsCurrent = (
-        $stateFormatVersion -eq "v115-ooxml-1" -and
+        $stateFormatVersion -eq "v324-ooxml-2" -and
         -not [string]::IsNullOrWhiteSpace($stateWorkbookHash) -and
         $currentWorkbookHash -eq $stateWorkbookHash
     )
@@ -1238,7 +1368,7 @@ function Export-DeliveryDate {
         return
     }
     if ($RunMode -ne "Test" -and $stateHash -eq $dataHash -and -not $workbookIsCurrent) {
-        Write-AutomationLog -Message "Existing workbook is missing the v115 integrity marker or does not match its recorded hash. Rebuilding $fileName." -Level "WARN"
+        Write-AutomationLog -Message "Existing workbook is missing the v0.324 source-lineage integrity marker or does not match its recorded hash. Rebuilding $fileName." -Level "WARN"
     }
 
     $runToken = "{0}-{1}" -f $dateKey, [guid]::NewGuid().ToString("N")
@@ -1645,10 +1775,14 @@ try {
     $script:Config = Read-AutomationConfig -Path $ConfigPath
     Initialize-WorkingFolders -Config $script:Config
     $script:VerifiedSourceExclusions = @(Read-VerifiedSourceExclusions -Config $script:Config)
+    $script:VerifiedSourceOrderExclusions = @(Read-VerifiedSourceOrderExclusions -Config $script:Config)
+    $script:VerifiedSourceManualOverrides = @(Read-VerifiedSourceManualOverrides -Config $script:Config)
     Write-AutomationLog -Message "Starting Delivery List SQL Exporter v121 in $Mode mode with action $RunAction."
     Write-AutomationLog -Message (
-        "A+W production statuses are diagnostic only. Automatic source-row removal is paused except for {0} exact Crystal-verified order/item exclusion(s)." -f
-        [int]$script:VerifiedSourceExclusions.Count
+        "A+W production statuses are diagnostic only. Persistent scanner decisions loaded: {0} exact item exclusion(s), {1} approved superseded-order exclusion(s), and {2} manual source override(s)." -f
+        [int]$script:VerifiedSourceExclusions.Count,
+        [int]$script:VerifiedSourceOrderExclusions.Count,
+        [int]$script:VerifiedSourceManualOverrides.Count
     )
 
     if (-not (Acquire-AutomationLock -Config $script:Config -FailWhenBusy ([bool]$FailIfBusy))) {

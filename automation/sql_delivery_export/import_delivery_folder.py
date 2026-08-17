@@ -674,12 +674,16 @@ def routed_payload_for_stage_expectations(store: Any, payload: dict[str, Any]) -
     routed payload or an all-CPU/DTC/Greenville date can incorrectly appear to
     be missing the default Indian Trail stage after a successful import.
     """
-    resolver = getattr(store, "apply_customer_route_rules_to_payload", None)
-    if not callable(resolver):
-        return payload
-    routed = resolver(payload)
+    preparer = getattr(store, "prepare_import_payload", None)
+    if callable(preparer):
+        routed = preparer(payload)
+    else:
+        resolver = getattr(store, "apply_customer_route_rules_to_payload", None)
+        if not callable(resolver):
+            return payload
+        routed = resolver(payload)
     if not isinstance(routed, dict):
-        raise TypeError("Scanner customer-route resolution returned an invalid payload.")
+        raise TypeError("Scanner import preparation returned an invalid payload.")
     return routed
 
 

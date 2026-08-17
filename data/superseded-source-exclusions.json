@@ -41,7 +41,54 @@
       "reviewId": 2
     }
   ],
-  "generatedAt": "2026-08-17T14:58:55+00:00",
+  "generatedAt": "2026-08-17T15:57:52+00:00",
+  "manualOverrides": [
+    {
+      "deliveryDate": "2026-07-21",
+      "fields": {
+        "route": "CPU"
+      },
+      "sourceItemNumber": "001",
+      "sourceMatchKey": "236087-001",
+      "sourceOrderNumber": "236087"
+    },
+    {
+      "deliveryDate": "2026-07-21",
+      "fields": {
+        "route": "CPU"
+      },
+      "sourceItemNumber": "002",
+      "sourceMatchKey": "236087-002",
+      "sourceOrderNumber": "236087"
+    },
+    {
+      "deliveryDate": "2026-07-21",
+      "fields": {
+        "route": "INDIAN TRAIL"
+      },
+      "sourceItemNumber": "001",
+      "sourceMatchKey": "236149-001",
+      "sourceOrderNumber": "236149"
+    }
+  ],
+  "orderEntries": [
+    {
+      "approvedBy": "admin",
+      "deliveryDate": "2026-08-10",
+      "keptOrderNumber": "237047",
+      "orderNumber": "237030",
+      "reason": "Approved exact removal of order 237030; kept order 237047.",
+      "reviewId": 1
+    },
+    {
+      "approvedBy": "admin",
+      "deliveryDate": "2026-08-21",
+      "keptOrderNumber": "237548",
+      "orderNumber": "237545",
+      "reason": "Approved exact removal of order 237545; kept order 237548.",
+      "reviewId": 2
+    }
+  ],
   "preserveEntries": [],
-  "version": "v0.257"
+  "version": "v0.324"
 }

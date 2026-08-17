@@ -1,5 +1,20 @@
 # Delivery List Scanner Changelog
 
+## v0.324 - Persistent Manual Overrides and Superseded Order Enforcement
+
+- Made approved superseded-order decisions durable at the original A+W source-order level instead of resetting an approval when the candidate fingerprint gains or changes items on the same selected removal target.
+- Changed immediate superseded-order cleanup to find every active source-owned row by original `source_id` lineage, so a manually changed visible Order Nr./Item Nr. cannot hide an old source row from removal.
+- Replaced hard deletion of approved superseded rows with soft retirement plus active rack/bay cancellation, preserving immutable scan, machine, rack, bay, and audit history while removing the old order from live workflows.
+- Added order-level entries to `data/superseded-source-exclusions.json`; the SQL exporter now excludes the entire approved source order when rebuilding the shared Excel delivery list.
+- Added audit-backed source-owned manual import overrides keyed to the original A+W Order/Item. Only explicitly edited fields remain authoritative; untouched fields can continue following later SQL updates.
+- Raised explicit manual route edits above Job Nr. hints and Customer Route Rules so a saved IT→CPU/other route change cannot be re-imported into its old receiving stage.
+- Publishes supported manual order/item/qty/dimensions/customer/route/job/product overrides to the shared persistent-decision file and applies them to regenerated SQL workbook rows.
+- Adds hidden Source Order/Source Item lineage cells to SQL-generated workbooks so a visible manual Order Nr./Item Nr. edit can survive workbook round-trips without becoming a second source identity.
+- Advanced the workbook integrity marker to `v324-ooxml-2`, so older generated workbooks are rebuilt once into the lineage-aware format instead of being accepted as current from prior state hashes.
+- Updated the workbook builder to honor a persisted dimensions override without changing the underlying source-unit conversion for normal SQL rows.
+- Updated automated folder-import drift calculation and end-to-end verification to use the same `prepare_import_payload(...)` path as the actual importer.
+- Advanced `APPLICATION_VERSION` to 324 while preserving SQLite schema version 11. No migration or database reset is included.
+
 ## v0.323 - Self-Healing Automated Import Schedule Runtime
 
 - Fixed **Save & Install Schedule** on local/network-folder scanner installations where `C:\DeliveryListAutomation\Scripts\Install-DeliveryListSqlAutomationTasks.ps1` had never been deployed.
