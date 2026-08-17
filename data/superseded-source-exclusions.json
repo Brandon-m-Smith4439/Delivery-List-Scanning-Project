@@ -9,9 +9,39 @@
       "reason": "Approved exact removal of order 237030; kept order 237047.",
       "replacementOrderNumber": "237047",
       "reviewId": 1
+    },
+    {
+      "approvedBy": "admin",
+      "deliveryDate": "2026-08-21",
+      "itemNumber": "001",
+      "keptOrderNumber": "237548",
+      "orderNumber": "237545",
+      "reason": "Approved exact removal of order 237545; kept order 237548.",
+      "replacementOrderNumber": "237548",
+      "reviewId": 2
+    },
+    {
+      "approvedBy": "admin",
+      "deliveryDate": "2026-08-21",
+      "itemNumber": "002",
+      "keptOrderNumber": "237548",
+      "orderNumber": "237545",
+      "reason": "Approved exact removal of order 237545; kept order 237548.",
+      "replacementOrderNumber": "237548",
+      "reviewId": 2
+    },
+    {
+      "approvedBy": "admin",
+      "deliveryDate": "2026-08-21",
+      "itemNumber": "003",
+      "keptOrderNumber": "237548",
+      "orderNumber": "237545",
+      "reason": "Approved exact removal of order 237545; kept order 237548.",
+      "replacementOrderNumber": "237548",
+      "reviewId": 2
     }
   ],
-  "generatedAt": "2026-08-14T15:41:38+00:00",
+  "generatedAt": "2026-08-17T14:58:55+00:00",
   "preserveEntries": [],
   "version": "v0.257"
 }

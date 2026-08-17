@@ -107,7 +107,7 @@ const state = {
   racks: [],
   rackSummary: null,
   selectedRackCode: "T",
-  selectedScanRackCode: "T",
+  selectedScanRackCode: NO_RACK_SELECTION,
   selectedOutboundRackCode: "",
   selectedRackOverviewCode: "",
   selectedRackSetLabel: "",
@@ -1008,6 +1008,7 @@ const els = {
   lastCard: document.getElementById("lastCard"),
   lastScanTime: document.getElementById("lastScanTime"),
   lastJob: document.getElementById("lastJob"),
+  lastBay: document.getElementById("lastBay"),
   lastOrder: document.getElementById("lastOrder"),
   lastItem: document.getElementById("lastItem"),
   lastQty: document.getElementById("lastQty"),
@@ -2725,7 +2726,7 @@ const SPANISH_OPERATIONAL_TEXT = new Map([
   ["DTC - Deliver to Customer", "DTC - Entregar al cliente"],
   ["Indian Trail Received", "Recibido en Indian Trail"],
   ["Truck", "Camión"],
-  ["Truck / No Rack", "Camión / Sin rack"],
+  ["Truck 1", "Camión / Sin rack"],
   ["No Rack", "Sin rack"],
   ["No Rack - Leave location blank", "Sin rack - Dejar ubicación en blanco"],
   ["No specific bay", "Sin bahía específica"],
@@ -6645,7 +6646,7 @@ function locationLabel(item) {
   const rackCode = String(item.rackCode || "").trim().toUpperCase();
   if (stageText.includes("indian trail") && item.bayCode) return `Bay ${item.bayCode}`;
   if (rackCode === "T" || /^T\d+$/i.test(rackCode) || /truck|no rack/i.test(`${item.rackName || ""} ${item.rackType || ""}`)) {
-    return rackCode === "T" ? "Truck" : `Truck ${rackCode.replace(/^T/i, "")}`;
+    return rackLocationDisplayLabel(rackCode, item.rackName, item.rackType);
   }
   if (rackCode) return rackCode;
 
@@ -6654,7 +6655,7 @@ function locationLabel(item) {
   // so operators can distinguish prior transportation from the current location.
   const previousRackCode = String(item.lastRackCode || "").trim().toUpperCase();
   if (previousRackCode === "T" || /^T\d+$/i.test(previousRackCode) || /truck|no rack/i.test(`${item.lastRackName || ""} ${item.lastRackType || ""}`)) {
-    return previousRackCode === "T" ? "Truck" : `Truck ${previousRackCode.replace(/^T/i, "")}`;
+    return rackLocationDisplayLabel(previousRackCode, item.lastRackName, item.lastRackType);
   }
   if (previousRackCode) return previousRackCode;
   return "";
@@ -6664,7 +6665,7 @@ function rackHistoryLocationLabel(item) {
   const previousRackCode = String(item?.lastRackCode || "").trim().toUpperCase();
   if (!previousRackCode) return "";
   if (previousRackCode === "T" || /^T\d+$/i.test(previousRackCode) || /truck|no rack/i.test(`${item?.lastRackName || ""} ${item?.lastRackType || ""}`)) {
-    return previousRackCode === "T" ? "Truck" : `Truck ${previousRackCode.replace(/^T/i, "")}`;
+    return rackLocationDisplayLabel(previousRackCode, item?.lastRackName, item?.lastRackType);
   }
   return previousRackCode;
 }
@@ -7437,7 +7438,10 @@ function rackSetFormChoices(selected = "") {
 function rackDraftCode(value = "") {
   let text = String(value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   if (text.startsWith("RACK")) text = text.slice(4);
-  if (text === "TRUCK" || text === "NORACK") return "T";
+  if (text === "NORACK") return "";
+  if (text === "TRUCK" || text === "TRUCK1") return "T";
+  const truckMatch = text.match(/^TRUCK(\d+)$/);
+  if (truckMatch) return Number(truckMatch[1]) === 1 ? "T" : `T${Number(truckMatch[1])}`;
   return text;
 }
 
@@ -7680,6 +7684,7 @@ function clearRackOperationsVisual() {
  */
 function groupedRackOptionsHtml(racks = [], selectedCode = "", options = {}) {
   const includeNoRack = Boolean(options.includeNoRack);
+  const disableLocked = Boolean(options.disableLocked);
   const noRackOption = includeNoRack
     ? `<option value="${NO_RACK_SELECTION}" ${selectedCode === NO_RACK_SELECTION ? "selected" : ""}>No Rack - Leave location blank</option>`
     : "";
@@ -7702,7 +7707,10 @@ function groupedRackOptionsHtml(racks = [], selectedCode = "", options = {}) {
         ${groupRacks
           .slice()
           .sort((rackA, rackB) => String(rackA.code || "").localeCompare(String(rackB.code || ""), undefined, { numeric: true, sensitivity: "base" }))
-          .map((rack) => `<option value="${escapeHtml(rack.code)}" ${String(rack.code) === String(selectedCode) ? "selected" : ""}>${rackOptionLabel(rack)}</option>`)
+          .map((rack) => {
+            const locked = disableLocked && rackIsLockedForLineAssignment(rack);
+            return `<option value="${escapeHtml(rack.code)}" ${String(rack.code) === String(selectedCode) ? "selected" : ""} ${locked ? "disabled" : ""}>${rackOptionLabel(rack)}</option>`;
+          })
           .join("")}
       </optgroup>
     `)
@@ -7719,6 +7727,26 @@ function groupedRackOptionsHtml(racks = [], selectedCode = "", options = {}) {
 function rackCodeForScan(value) {
   const selectedCode = String(value || "").trim();
   return selectedCode === NO_RACK_SELECTION ? "" : selectedCode;
+}
+
+/** Return a stable operator label from the persisted truck/rack identity. */
+function rackDisplayLabelFromParts(code = "", name = "", type = "") {
+  const cleanCode = String(code || "").trim().toUpperCase();
+  if (cleanCode === "T") return "Truck 1";
+  const numberedTruck = cleanCode.match(/^T(\d+)$/);
+  if (numberedTruck) return `Truck ${Number(numberedTruck[1])}`;
+  const cleanName = String(name || "").trim();
+  if (/truck/i.test(`${cleanName} ${type || ""}`)) return cleanName || cleanCode || "Truck";
+  return cleanName || cleanCode;
+}
+
+/** Return the concise current-location label used in scanner/order tables. */
+function rackLocationDisplayLabel(code = "", name = "", type = "") {
+  const cleanCode = String(code || "").trim().toUpperCase();
+  if (cleanCode === "T" || /^T\d+$/.test(cleanCode) || /truck/i.test(`${name || ""} ${type || ""}`)) {
+    return rackDisplayLabelFromParts(cleanCode, name, type);
+  }
+  return cleanCode || String(name || "").trim();
 }
 
 /**
@@ -7793,9 +7821,11 @@ function rackStatusClassName(rack) {
  */
 function rackOptionLabel(rack) {
   const code = String(rack?.code || "").trim() || "Rack";
+  const display = rackDisplayLabelFromParts(code, rack?.name, rack?.type) || code;
+  const codeText = display !== code ? ` [${code}]` : "";
   const qty = Number(rack?.qty || 0);
   const qtyText = qty ? ` ${qty}pcs` : "";
-  return `${escapeHtml(code)}${escapeHtml(qtyText)} (${escapeHtml(rackStatusLabel(rack))})`;
+  return `${escapeHtml(display)}${escapeHtml(codeText)}${escapeHtml(qtyText)} (${escapeHtml(rackStatusLabel(rack))})`;
 }
 
 /**
@@ -8099,8 +8129,8 @@ function renderRacksPage() {
             type="button"
             class="icon-only icon-pencil light"
             data-rack-edit="T"
-            title="Edit truck / no rack"
-            aria-label="Edit truck / no rack"
+            title="Edit Truck 1"
+            aria-label="Edit Truck 1"
           ></button>
         </div>
       `;
@@ -8132,6 +8162,9 @@ function renderRacksPage() {
     const destinationPill = rack.destination
       ? `<small class="rack-destination-pill ${escapeHtml(rackDestinationClass(rack.destination))}">${escapeHtml(rackDestinationLabel(rack.destination))}</small>`
       : "";
+    const rackIdentity = isTruck
+      ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type)
+      : rack.code;
 
     return `
       <article
@@ -8140,13 +8173,13 @@ function renderRacksPage() {
         aria-current="${selected ? "true" : "false"}"
         tabindex="0"
         role="button"
-        aria-label="View ${escapeHtml(isTruck ? "Truck" : rack.code)} details"
+        aria-label="View ${escapeHtml(rackIdentity)} details"
       >
         <div class="rack-board-state-v307 ${escapeHtml(statusClass)}"><i aria-hidden="true"></i><strong>${escapeHtml(statusText)}</strong></div>
         ${destinationPill}
         <div class="rack-board-card-main">
-          <strong>${escapeHtml(isTruck ? "Truck" : rack.code)}</strong>
-          <span>${escapeHtml(rack.name || rack.type || "")}</span>
+          <strong>${escapeHtml(rackIdentity)}</strong>
+          <span>${escapeHtml(isTruck ? `Code ${rack.code}` : (rack.name || rack.type || ""))}</span>
         </div>
 
         <div class="rack-board-card-meta">
@@ -9125,11 +9158,17 @@ function setLastScan(entry) {
   els.lastCard.classList.remove("ok", "error");
   els.lastCard.classList.add(entry.ok ? "ok" : "error");
   if (els.lastScanTime) els.lastScanTime.textContent = entry.ok ? "Just now" : entry.eventType === "duplicate" ? "Notice" : "Needs review";
-  const manualPrefix = scanEntryIsManual(entry) ? "Manual Scan - " : "";
+  const manualPrefix = scanEntryIsManual(entry) ? "Manual Scan · " : "";
   const compactMessage = scanEntryCompactMessage(entry);
   if (els.lastJob) els.lastJob.textContent = !entry.ok || !entry.item
     ? compactMessage
-    : `${manualPrefix}${entry.item.job || entry.item.product || compactMessage || ""}`.trim();
+    : `${manualPrefix}Job Nr. ${entry.item.job || "-"}`;
+  if (els.lastBay) {
+    const bayCode = String(entry.item?.bayCode || "").trim();
+    els.lastBay.textContent = bayCode ? `Bay ${bayCode}` : "-";
+    const bayLocation = els.lastBay.closest(".last-bay-location-v321");
+    if (bayLocation) bayLocation.hidden = !bayCode;
+  }
   if (els.lastOrder) els.lastOrder.textContent = entry.item ? entry.item.order : "-";
   if (els.lastItem) els.lastItem.textContent = entry.item ? entry.item.item : "-";
   if (els.lastQty) els.lastQty.textContent = entry.item ? String(entry.item.scanned) : "-";
@@ -9150,6 +9189,11 @@ function renderLastScan() {
   els.lastCard?.classList.remove("ok", "error");
   if (els.lastScanTime) els.lastScanTime.textContent = "Waiting";
   if (els.lastJob) els.lastJob.textContent = "No scans yet";
+  if (els.lastBay) {
+    els.lastBay.textContent = "-";
+    const bayLocation = els.lastBay.closest(".last-bay-location-v321");
+    if (bayLocation) bayLocation.hidden = true;
+  }
   if (els.lastOrder) els.lastOrder.textContent = "-";
   if (els.lastItem) els.lastItem.textContent = "-";
   if (els.lastQty) els.lastQty.textContent = "-";
@@ -9222,6 +9266,7 @@ function renderRecent() {
           return `
             <tr class="${scanEntryRowClass(entry)}">
               <td><strong>${escapeHtml(primaryText)}</strong>${compactNote ? `<small class="scan-row-note">${escapeHtml(compactNote)}</small>` : ""}</td>
+              <td class="recent-bay-cell-v321">${item?.bayCode ? `Bay ${escapeHtml(item.bayCode)}` : "-"}</td>
               <td>${item ? escapeHtml(item.order) : "-"}</td>
               <td>${item ? escapeHtml(item.item) : "-"}</td>
               <td>${item ? item.scanned : Math.abs(Number(entry.qtyDelta || 0)) || "-"}</td>
@@ -9231,7 +9276,7 @@ function renderRecent() {
           `;
         })
         .join("")
-    : `<tr><td colspan="6">No scans yet</td></tr>`;
+    : `<tr><td colspan="7">No scans yet</td></tr>`;
 }
 
 /**
@@ -9635,13 +9680,20 @@ function renderScanRackTools() {
     return;
   }
   els.scanRackPanel.classList.remove("is-loading");
-  const noRackSelected = state.selectedScanRackCode === NO_RACK_SELECTION;
-  if (!noRackSelected && (!state.selectedScanRackCode || !state.racks.some((rack) => rack.code === state.selectedScanRackCode))) {
-    state.selectedScanRackCode = state.racks.find((rack) => rack.code === "T")?.code || state.racks[0]?.code || NO_RACK_SELECTION;
-  }
-  const selectedRack = noRackSelected
+  let selectionNotice = "";
+  let selectedRack = state.selectedScanRackCode === NO_RACK_SELECTION
     ? null
     : state.racks.find((rack) => rack.code === state.selectedScanRackCode);
+  if (state.selectedScanRackCode !== NO_RACK_SELECTION && !selectedRack) {
+    state.selectedScanRackCode = NO_RACK_SELECTION;
+    selectionNotice = "The previous rack selection is no longer available. No Rack is selected.";
+  } else if (selectedRack && rackIsLockedForLineAssignment(selectedRack)) {
+    const lockedLabel = rackDisplayLabelFromParts(selectedRack.code, selectedRack.name, selectedRack.type) || selectedRack.code;
+    selectionNotice = `${lockedLabel} is ${rackStatusLabel(selectedRack)} and cannot receive staging scans. The selection was cleared.`;
+    state.selectedScanRackCode = NO_RACK_SELECTION;
+    selectedRack = null;
+  }
+  const noRackSelected = state.selectedScanRackCode === NO_RACK_SELECTION;
   const selectedRackState = String(selectedRack?.status || "").toLowerCase();
   const selectedClosed = selectedRackState === "closed";
   const selectedInTransit = selectedRackState === "in transit";
@@ -9650,7 +9702,7 @@ function renderScanRackTools() {
   els.scanRackPanel.classList.toggle("selected-rack-in-transit", selectedInTransit);
   els.scanRackPanel.classList.toggle("selected-rack-loaded", Boolean(selectedRack && Number(selectedRack.qty || 0) > 0 && !selectedClosed && !selectedInTransit));
   if (els.scanRackSelect) {
-    els.scanRackSelect.innerHTML = groupedRackOptionsHtml(state.racks, state.selectedScanRackCode, { includeNoRack: true });
+    els.scanRackSelect.innerHTML = groupedRackOptionsHtml(state.racks, state.selectedScanRackCode, { includeNoRack: true, disableLocked: true });
     els.scanRackSelect.value = state.selectedScanRackCode;
     syncCustomSelect(els.scanRackSelect);
   }
@@ -9663,11 +9715,11 @@ function renderScanRackTools() {
     els.scanRackPrintBtn.disabled = noRackSelected || !selectedRack || (selectedInTransit ? false : !selectedClosed || Number(selectedRack.qty || 0) <= 0);
   }
   if (els.scanRackStatus) {
-    const statusMessage = noRackSelected
-      ? "No rack selected. The scanned line will keep a blank Location value."
+    const statusMessage = selectionNotice || (noRackSelected
+      ? "No Rack is selected. The scanned line will keep a blank Location value."
       : selectedInTransit
         ? "This rack is marked on the way. Return it to clear it, or mark Not On The Way to reopen it and undo this rack's outbound scans."
-        : "";
+        : "");
     els.scanRackStatus.textContent = statusMessage;
     els.scanRackStatus.hidden = !statusMessage;
   }
@@ -9850,6 +9902,12 @@ function bayOverrideSort(a, b) {
  * Effects: Updates visible dom state, may call the backend api, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
+function bayAvailableForNewOrderAssignment(bay) {
+  return bay?.active !== false &&
+    !/blocked|scanblocked|hold/i.test(`${bay?.sourceStatus || ""} ${bay?.status || ""}`) &&
+    bayStatusKind(bay) === "available";
+}
+
 function renderScanBayOverrideTools() {
   if (!els.scanBayOverridePanel) return;
   const visible = scanBayOverrideVisible();
@@ -9874,8 +9932,7 @@ function renderScanBayOverrideTools() {
   els.scanBayOverridePanel.classList.remove("is-loading");
 
   const availableBays = state.bays
-    .filter((bay) => bay.active !== false)
-    .filter((bay) => !/blocked|hold/i.test(`${bay.sourceStatus || ""} ${bay.status || ""}`))
+    .filter(bayAvailableForNewOrderAssignment)
     .sort(bayOverrideSort);
   const grouped = new Map();
   for (const bay of availableBays) {
@@ -12150,10 +12207,10 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function availableIndianTrailBays() {
+function availableIndianTrailBays(includeBayCode = "") {
+  const preservedCode = String(includeBayCode || "").trim();
   return (state.bays || [])
-    .filter((bay) => bay.active !== false)
-    .filter((bay) => !/blocked|scanblocked/i.test(`${bay.sourceStatus || ""} ${bay.status || ""}`))
+    .filter((bay) => bayAvailableForNewOrderAssignment(bay) || (preservedCode && bay.bayCode === preservedCode))
     .sort(bayOverrideSort);
 }
 
@@ -12164,7 +12221,7 @@ function availableIndianTrailBays() {
  */
 function indianTrailBayOptionsHtml(selectedCode = "") {
   const grouped = new Map();
-  for (const bay of availableIndianTrailBays()) {
+  for (const bay of availableIndianTrailBays(selectedCode)) {
     const label = bayOverrideGroupLabel(bay);
     if (!grouped.has(label)) grouped.set(label, []);
     grouped.get(label).push(bay);
@@ -12612,7 +12669,7 @@ async function showIndianTrailPlacementPrompt(result) {
   const itemLabel = `${item.order || "item"}${item.item ? `-${item.item}` : ""}`;
   const priorityDate = result.priorityDeliveryDate ? formatDisplayDate(result.priorityDeliveryDate) : "";
   const oversizeBay = result.oversize && !directToTruck
-    ? availableIndianTrailBays().find((bay) => /oversize/i.test(`${bay.bayType || ""} ${bay.bayCategory || ""} ${bay.mapSection || ""} ${bay.displayName || ""}`))
+    ? availableIndianTrailBays(result.bayCode).find((bay) => /oversize/i.test(`${bay.bayType || ""} ${bay.bayCategory || ""} ${bay.mapSection || ""} ${bay.displayName || ""}`))
     : null;
   const selectedCode = oversizeBay?.bayCode || result.bayCode || "";
   const eyebrow = isRush
@@ -12652,6 +12709,11 @@ async function showIndianTrailPlacementPrompt(result) {
             <strong>${spanish ? "Camion del instalador — omitir bahia" : "Installer truck — skip bay"}</strong>
           </div>
         ` : `
+          <div class="indian-trail-placement-destination-v321">
+            <small>${spanish ? "COLOQUE ESTA ORDEN EN" : "PLACE THIS ORDER IN"}</small>
+            <strong>${spanish ? "BAHIA" : "BAY"} ${escapeHtml(result.bayCode)}</strong>
+            <span>${spanish ? "Orden" : "Order"} ${escapeHtml(item.order || "-")} · Job Nr. ${escapeHtml(item.job || "-")}</span>
+          </div>
           <label class="indian-trail-placement-field">
             <span>${isRush ? (spanish ? "Bahia urgente" : "Priority Rush bay") : (spanish ? "Cambiar bahia" : "Override bay")}</span>
             <select data-placement-bay>
@@ -12861,6 +12923,8 @@ async function processScanInternal(rawScan, options = {}) {
       hasPermission("indian_trail_receive") &&
       /indian trail/i.test(`${state.meta?.stage || ""} ${currentScanStation()}`);
     if (indianTrailReceive) {
+      const requestedBayCode = options.bayCode || (state.bayOverrideMode === "manual" ? state.selectedBayOverrideCode || "" : "");
+      const usedManualBayAssignment = state.bayOverrideMode === "manual" && Boolean(requestedBayCode);
       if (state.bayOverrideMode === "manual" && !state.selectedBayOverrideCode && !options.bayCode) {
         els.scanBayOverrideSelect?.focus();
         throw new Error("Choose a manual Indian Trail bay before scanning, or switch bay assignment back to Auto.");
@@ -12870,7 +12934,7 @@ async function processScanInternal(rawScan, options = {}) {
         body: JSON.stringify({
           listId: state.activeListId,
           barcode: scanText,
-          bayCode: options.bayCode || (state.bayOverrideMode === "manual" ? state.selectedBayOverrideCode || "" : ""),
+          bayCode: requestedBayCode,
           outboundOverride: Boolean(options.outboundOverride),
           allowReceivedOverride: Boolean(options.allowReceivedOverride),
           isManual: Boolean(options.isManual),
@@ -12909,6 +12973,13 @@ async function processScanInternal(rawScan, options = {}) {
           renderScanPage();
         }
         return;
+      }
+
+      if (result.ok && usedManualBayAssignment) {
+        // Manual is a one-scan override. A successful receive always returns the
+        // scanner to Auto so the next operator scan cannot inherit a stale bay.
+        state.bayOverrideMode = "auto";
+        state.selectedBayOverrideCode = "";
       }
 
       await activateList(result.matchedListId || state.activeListId, false);
@@ -13819,7 +13890,9 @@ function renderGlobalSearchResults(results) {
         const destinationLabel = result.bay
           ? `Bay ${result.bay}`
           : result.rackCode
-            ? `${result.rackCode === "T" || /^T\d+$/i.test(String(result.rackCode || "")) || /truck/i.test(result.rackType || "") ? "Truck" : "Rack"} ${result.rackName || result.rackCode}`
+            ? (result.rackCode === "T" || /^T\d+$/i.test(String(result.rackCode || "")) || /truck/i.test(result.rackType || "")
+              ? rackDisplayLabelFromParts(result.rackCode, result.rackName, result.rackType)
+              : `Rack ${result.rackName || result.rackCode}`)
             : result.stage || "";
 
         return `
@@ -13831,6 +13904,7 @@ function renderGlobalSearchResults(results) {
           <span class="global-result-job">${escapeHtml(result.job || result.product || "No job/product")}</span>
           <span class="global-result-meta">${escapeHtml(destinationLabel)}${result.deliveryDate ? ` • ${escapeHtml(formatDisplayDate(result.deliveryDate))}` : ""}</span>
           <div class="global-result-status-row">${globalSearchStatusBadges(result)}</div>
+          ${result.lastScanTime ? `<time class="global-result-scan-time-v321" datetime="${escapeHtml(result.lastScanTime)}">Scanned ${escapeHtml(formatDateTime(result.lastScanTime))}</time>` : ""}
         </button>
       `;
       },
@@ -24180,7 +24254,7 @@ function rackManagerRackEditHtml() {
     <form id="rackManagerInlineEditForm" class="rack-manager-set-edit rack-manager-rack-edit">
       <input id="rackManagerInlineOldCode" type="hidden" value="${escapeHtml(rack.code)}">
       <div class="rack-manager-quick-copy">
-        <strong>Edit ${escapeHtml(legacyTruck ? "Truck / No Rack" : rack.code)}</strong>
+        <strong>Edit ${escapeHtml(isTruckRack(rack) ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : rack.code)}</strong>
         <span>Change the coded rack name, display name, or rack set/type from the same edit area used for rack sets.</span>
       </div>
 
@@ -24381,7 +24455,7 @@ async function saveRackSetQuickEdit() {
     const nextType = isTruck ? "Truck" : newType;
     const nextName = isTruck
       ? rack.code === "T"
-        ? rack.name || "Truck / No Rack"
+        ? rack.name || "Truck 1"
         : `${nameRoot || "Truck"}${number ? ` ${number}` : ""}`
       : `${nameRoot}${number ? ` ${number}` : ""}`;
 
@@ -24508,7 +24582,7 @@ function rackManagerModalHtml() {
                             return `
                               <article class="rack-manager-row ${isEditing ? "is-editing" : ""}">
                                 <div>
-                                  <strong>${escapeHtml(legacyTruck ? "Truck / No Rack" : rack.code)}</strong>
+                                  <strong>${escapeHtml(isTruck ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : rack.code)}</strong>
                                   <span>${escapeHtml(rack.name || rack.type || "")}</span>
                                 </div>
                                 <span class="rack-status-badge ${escapeHtml(statusClass)}">${escapeHtml(status)}</span>
@@ -29346,7 +29420,7 @@ function manualEditLocationOptions(item) {
     options.push([
       code,
       isTruckRack(rack)
-        ? `${code} - ${name || (code === "T" ? "Truck / no rack" : `Truck ${code.replace(/^T/i, "")}`)} (${qty} pcs, ${status})`
+        ? `${rackDisplayLabelFromParts(code, name, rack.type)} [${code}] (${qty} pcs, ${status})`
         : `${code} - ${name} (${qty} pcs, ${status})`,
     ]);
   }
@@ -30351,9 +30425,9 @@ function openRackDetailsModal(rackCode) {
   openOperationsModal({
     kind: "rack-details",
     eyebrow: rackGroupLabel(rack),
-    title: rack.code === "T" ? "Truck / No Rack" : `Rack ${rack.code}`,
+    title: isTruckRack(rack) ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : `Rack ${rack.code}`,
     description: `${rack.name || rack.type || rackGroupLabel(rack)} · ${rackStatusLabel(rack)} · ${Number(rack.qty || 0)} pieces`,
-    context: rack.code === "T" ? "Truck loading workspace" : `${rack.type || "Rack"} workspace`,
+    context: isTruckRack(rack) ? `${rackDisplayLabelFromParts(rack.code, rack.name, rack.type)} loading workspace` : `${rack.type || "Rack"} workspace`,
     status: rackStatusLabel(rack),
     body: rackDetailsModalHtml(rack),
   });
@@ -30368,9 +30442,9 @@ async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode)
   if (rack && state.operationsModalKind === "rack-details") {
     applyOperationsModalProfile("rack-details", {
       eyebrow: rackGroupLabel(rack),
-      title: rack.code === "T" ? "Truck / No Rack" : `Rack ${rack.code}`,
+      title: isTruckRack(rack) ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : `Rack ${rack.code}`,
       description: `${rack.name || rack.type || rackGroupLabel(rack)} · ${rackStatusLabel(rack)} · ${Number(rack.qty || 0)} pieces`,
-      context: rack.code === "T" ? "Truck loading workspace" : `${rack.type || "Rack"} workspace`,
+      context: isTruckRack(rack) ? `${rackDisplayLabelFromParts(rack.code, rack.name, rack.type)} loading workspace` : `${rack.type || "Rack"} workspace`,
       status: rackStatusLabel(rack),
     });
     applyRackOperationsVisual(rack);

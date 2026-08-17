@@ -1450,10 +1450,12 @@
 
 
 .rack-overview-card-grid .rack-board-card-meta {
+  min-height: 38px;
   display: flex;
   align-items: end;
   justify-content: space-between;
   gap: 8px;
+  padding-right: 42px;
 }
 
 
@@ -2445,7 +2447,7 @@
 
 
 .rack-overview-card-grid .rack-board-card {
-  padding-top: 34px;
+  padding-top: 46px;
 }
 
 
@@ -5526,21 +5528,28 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
 .rack-draft-validation-v307.is-error::before { background: #c74650; }
 
 .rack-board-state-v307 {
-  grid-column: 1 / -1;
-  width: max-content;
-  min-height: 26px;
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  width: fit-content;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   border: 1px solid #c6d4e0;
   border-radius: 999px;
   background: #f2f6f9;
   color: #536a7d;
-  padding: 0 10px;
-  font-size: 10px;
+  padding: 5px 8px;
+  font-size: 9px;
   font-weight: 950;
+  line-height: 1;
   letter-spacing: .045em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .rack-board-state-v307 i {
@@ -5580,6 +5589,22 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
   border-color: #cbd5df;
   background: #f5f7f9;
   color: #667789;
+}
+
+/* v0.321: Rack Overview status and reset controls are independent anchors.
+   Status text sizes to its content and can never stretch the card grid row;
+   the reset action remains fixed at the lower-right in every lifecycle state. */
+.rack-overview-card-grid .rack-board-card > .rack-board-card-meta > .icon-reset {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 4;
+  margin: 0;
+}
+
+.rack-overview-card-grid .rack-board-state-v307 strong {
+  line-height: 1;
+  white-space: nowrap;
 }
 
 #adminModal[data-kind="racks"] .rack-manager-grid {

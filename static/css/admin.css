@@ -7863,7 +7863,9 @@ button.custom-select-trigger:hover:not(:disabled),
   font-weight: 950;
 }
 
-/* Automation uses the full available desktop workspace. Only history results scroll. */
+/* Automation uses the full available desktop workspace. Import History keeps
+   its dedicated results scroller; the other workspaces scroll as a whole so
+   Run Now, Schedule, and Status can always reach their bottom controls. */
 .delivery-automation-modal {
   width: min(1480px, calc(100vw - 24px));
   height: min(940px, calc(100vh - 24px));
@@ -7878,8 +7880,14 @@ button.custom-select-trigger:hover:not(:disabled),
 .delivery-automation-tab.is-active {
   height: 100%;
   min-height: 0;
-  overflow: hidden;
   align-content: start;
+}
+
+.delivery-automation-tab.is-active:not(.import-history-workspace) {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .delivery-automation-tab.import-history-workspace.is-active {

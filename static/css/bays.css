@@ -20570,3 +20570,51 @@ body.bay-move-mode .bay-layout-drop-zone {
     text-align: left;
   }
 }
+
+
+/* --------------------------------------------------------------------------
+   v0.320 - Manage Items left-workspace scrolling
+   -------------------------------------------------------------------------- */
+
+/* Keep the search/filter controls stationary and give the order/item list its
+   own vertical scroll region. Explicit flex sizing prevents long job lists from
+   shrinking cards or pushing the left workspace beyond the modal boundary. */
+#manageItemsPanel.manage-items-panel-v182 .bay-operation-view[data-bay-modal-view="workspace"] {
+  min-height: 0;
+  overflow: hidden !important;
+}
+
+#manageItemsPanel.manage-items-panel-v182 .manage-items-layout {
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+#manageItemsPanel.manage-items-panel-v182 .manage-items-sidebar {
+  height: 100%;
+  max-height: 100%;
+  display: flex !important;
+  flex-direction: column;
+  overflow: hidden !important;
+}
+
+#manageItemsPanel.manage-items-panel-v182 .manage-items-filter-bar-v182 {
+  flex: 0 0 auto;
+}
+
+#manageItemsPanel.manage-items-panel-v182 .manage-items-list {
+  flex: 1 1 auto;
+  min-height: 0 !important;
+  max-height: 100%;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 7px;
+}
+
+@media (max-width: 1080px) {
+  #manageItemsPanel.manage-items-panel-v182 .manage-items-sidebar {
+    height: min(390px, 48vh);
+  }
+}

@@ -1,5 +1,40 @@
 # Delivery List Scanner Changelog
 
+## v0.322 - Automated DL Import Tab Scrolling
+
+- Restored contained vertical scrolling to the Automated DL Import **Run Now**, **Schedule**, and **Status** workspaces so longer tab content and bottom actions remain reachable.
+- Kept the Automation Control Center frame fixed to the viewport and avoided reintroducing a second outer modal scrollbar.
+- Preserved Import History's dedicated results-only scrollbar so its filter/header/footer controls remain stable while history rows scroll.
+- Replaced the blanket active-tab `overflow: hidden` behavior with explicit non-History scrolling ownership.
+- Advanced `APPLICATION_VERSION` to 322 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.321 - Rack Cards, Persistent Bays, and Indian Trail Scan Safety
+
+- Reworked Rack Overview lifecycle badges so **Incomplete**, **Complete**, **On the Way**, and other statuses size to their text instead of consuming a flexible card grid row.
+- Anchored the Rack Overview reset action to the lower-right of each card so lifecycle text, outbound timestamps, and destination pills cannot push the control around.
+- Changed bay-layout startup seeding to bootstrap-only behavior for existing rows. Saved names, grouped-set names, bay policy/status, capacity, active state, category, source cell, and layout coordinates now remain database-authoritative after restart.
+- Made the old synthetic-bay cleanup a one-time migration-style repair and changed built-in role permissions to bootstrap-only defaults, so later Admin visibility/role edits are not silently restored by a server restart.
+- Added a large **PLACE THIS ORDER IN / BAY ##** destination block to successful Indian Trail receive notifications, including Order Nr. and Job Nr. context.
+- Added a prominent Current Bay destination to Last Scan, added explicit Job Nr. labeling, and added Bay information to Recent Scans.
+- Made Manual Bay a one-scan override on the Indian Trail Scan page; a successful manual receive clears the selected manual bay and returns the scanner to Auto.
+- Added latest scan date/time beneath Global Search's resolved current stage/location for scanned items.
+- Removed occupied/preassigned bays from new manual-bay choices while preserving the already assigned bay in the post-scan correction selector.
+- Added transaction-level one-order-per-bay validation to manual assignment, receiving, outbound preassignment, location editing, bay moves/restores, and Rush preassignment.
+- Changed Indian Trail auto/preassignment grouping from Job Nr. to Order Nr. so different orders that share a Job Nr. can never be automatically placed in the same physical bay.
+- Expanded scan-event payloads with current bay identity so Last Scan and Recent Scans remain accurate after refresh.
+- Advanced `APPLICATION_VERSION` to 321 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.320 - Truck Rack Consistency and Manage Items Scrolling
+
+- Standardized Truck 1/Truck 2 operator-facing identity across staging, rack management, location displays, Global Search, scan confirmations, and Indian Trail in-transit data while retaining the historical `T` database code for Truck 1 compatibility.
+- Removed the old `Truck / No Rack` presentation. The dedicated No Rack selector is now the only maintained blank-location choice, and legacy `NORACK` input no longer aliases Truck 1.
+- Changed the Staging rack selector to default to No Rack, disable Complete/On-the-Way destinations, and automatically clear a stale selection when its rack lifecycle changes.
+- Added backend lifecycle validation before Staging scan quantities/rack assignments can change, closing the path that allowed a stale On-the-Way truck selection to receive another piece.
+- Reused the same open-rack rule for direct rack scans, item/rack moves, manual rack-location recovery, and outbound transportation overrides so failed moves leave the original rack assignment untouched.
+- Added a contained vertical scrollbar to the Manage Bay Items left order/item workspace so long lists scroll instead of compressing their cards.
+- Added/updated regression assertions for Truck 1 labeling, No Rack separation, locked-rack safeguards, Manage Items scrolling, cache keys, and application versioning.
+- Advanced `APPLICATION_VERSION` to 320 while preserving SQLite schema version 11. No migration or database reset is included.
+
 ## v0.319 - Manage Items Readability and Bay Scanner Footer Boundary
 
 - Rebalanced the Manage Bay Items workspace to give the left-side job/order list more room and prevent exact-item details from becoming tiny or clipped.

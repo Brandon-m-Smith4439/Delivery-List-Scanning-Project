@@ -1,18 +1,49 @@
 **# Delivery List Scanner**
 
-Current maintained release: **v0.319**. SQLite remains the active/default backend.
+Current maintained release: **v0.322**. SQLite remains the active/default backend.
 
-v0.319 improves Manage Bay Items readability, keeps the Bay Map scanner above the application footer, and raises the in-transit count to full-contrast white while preserving the richer v0.318 action-history context.
+v0.322 restores contained vertical scrolling across the longer Automated DL Import workspaces while preserving Import History's dedicated results scroller.
 
-**## Install v0.319**
+**## Install v0.322**
 
 1\. Stop the Delivery List Scanner if it is running.
-2\. Extract the v0.319 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
+2\. Extract the v0.322 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
 3\. Preserve the existing `data` folder and database files.
 4\. Start the scanner manually with `py -3 server.py`.
-5\. Hard-refresh the browser (`Ctrl+F5`) once so the v0.319 CSS/JavaScript cache keys are loaded.
+5\. Hard-refresh the browser (`Ctrl+F5`) once so the v0.322 CSS/JavaScript cache keys are loaded.
 
 No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **11**.
+
+**## v0.322 highlights**
+
+- Restores vertical scrolling to the Automated DL Import **Run Now**, **Schedule**, and **Status** tabs so long content and bottom controls remain reachable at normal and reduced viewport heights.
+- Keeps the automation modal itself contained inside the viewport instead of allowing the whole dialog to spill beyond its frame.
+- Preserves the existing **Import History** layout, where only the history results area scrolls and its filters/header/footer remain fixed.
+- Uses one owning desktop rule instead of adding a competing bottom-of-file override, reducing future cascade conflicts.
+- Advances `APPLICATION_VERSION` to 322 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
+
+**## v0.321 highlights**
+
+- Makes Rack Overview lifecycle pills content-sized instead of grid-sized and pins each reset action to the lower-right so **Incomplete**, **Complete**, and **On the Way** never rearrange the card.
+- Stops startup bay seeding from overwriting saved display names, grouped-set names, policies, capacity, visibility, and layout values with the bundled base map.
+- Treats legacy synthetic-bay cleanup and built-in role permissions as bootstrap-only startup work so saved Admin visibility and role-permission changes remain authoritative after restart.
+- Adds a large **PLACE THIS ORDER IN / BAY ##** destination block to successful Indian Trail scan confirmations.
+- Adds a prominent Current Bay block and explicit **Job Nr.** to Last Scan, plus Bay and Job Nr. information in Recent Scans.
+- Treats Manual Bay as a one-scan override: after a successful manual receive, the scanner automatically returns to **Auto** bay assignment.
+- Shows the latest scan date/time directly below the resolved current stage/location in Global Search.
+- Hides occupied bays from new manual bay choices and enforces the same safety rule server-side so one physical bay cannot contain different Order Nr. values.
+- Changes Indian Trail bay grouping from Job Nr. to Order Nr. so different orders sharing one job number cannot be automatically combined into one bay.
+- Advances `APPLICATION_VERSION` to 321 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
+
+**## v0.320 highlights**
+
+- Presents the historical `T` rack consistently as **Truck 1** and numbered truck racks as **Truck N** in locations, rack selectors, Rack Manager, Global Search, scan confirmations, and in-transit data.
+- Separates **No Rack** from Truck 1 completely in maintained input normalization; No Rack remains the explicit blank-location selector and legacy `NORACK` no longer resolves to Truck 1.
+- Defaults Staging to the explicit **No Rack** choice instead of Truck 1 and disables Complete/On-the-Way racks as staging destinations. If a selected rack becomes locked, the stale selection is cleared before another scan.
+- Adds backend lifecycle validation before Staging scan quantity or rack assignments are mutated, preventing pieces from being loaded or manually moved onto a Complete/On-the-Way rack even when a browser has stale state.
+- Applies the same open-rack requirement to rack moves, manual rack recovery, and outbound transportation overrides so the browser and API enforce one rule.
+- Gives the Manage Bay Items left order/item workspace a dedicated vertical scrollbar with stationary filters and non-shrinking cards.
+- Advances `APPLICATION_VERSION` to 320 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
 **## v0.319 highlights**
 

@@ -448,17 +448,60 @@ def clean_barcode(value: str) -> str:
 
 
 def normalize_rack_code(value: str) -> str:
-    """Purpose: Normalize rack code for the delivery-list scanner workflow.
+    """Return the canonical persisted rack code for operator/API input.
 
-    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-    Flow: Validates the supplied value, normalizes supported formats, and returns a predictable representation.
+    Truck 1 intentionally keeps the historical ``T`` database code so existing
+    rack items, barcodes, and audit history remain valid. ``TRUCK1`` is therefore
+    an input alias for ``T`` and ``TRUCK2`` becomes ``T2``. ``NORACK`` no longer
+    aliases Truck 1; the maintained No Rack UI sends a blank rack code instead.
     """
     text = clean_barcode(value)
     if text.startswith("RACK"):
         text = text[4:]
-    if text in {"TRUCK", "NORACK"}:
+    if text == "NORACK":
+        return ""
+    if text in {"TRUCK", "TRUCK1"}:
         return "T"
+    truck_match = re.fullmatch(r"TRUCK(\d+)", text)
+    if truck_match:
+        number = int(truck_match.group(1))
+        return "T" if number == 1 else f"T{number}"
     return text
+
+
+def rack_public_label(rack_code: Any, display_name: Any = "", rack_type: Any = "") -> str:
+    """Return one unambiguous operator-facing rack/truck identity label.
+
+    The primary truck remains code ``T`` internally but is always presented as
+    Truck 1. Numbered truck codes are presented as Truck N. This helper prevents
+    legacy ``Truck / No Rack`` wording from leaking back into locations, errors,
+    and in-transit data while preserving existing database identities.
+    """
+    code = normalize_rack_code(str(rack_code or ""))
+    if code == "T":
+        return "Truck 1"
+    numbered = re.fullmatch(r"T(\d+)", code)
+    if numbered:
+        return f"Truck {int(numbered.group(1))}"
+    name = str(display_name or "").strip()
+    rack_type_text = str(rack_type or "").strip()
+    if "truck" in f"{name} {rack_type_text}".lower():
+        return name if name and "no rack" not in name.lower() else (code or "Truck")
+    return name or code
+
+
+def rack_assignment_lock_message(rack_code: Any, status: Any) -> str:
+    """Return a floor-safe explanation when a rack cannot accept pieces."""
+    status_text = str(status or "Open").strip() or "Open"
+    normalized = re.sub(r"[\s_-]+", "", status_text).lower()
+    if normalized == "open":
+        return ""
+    label = rack_public_label(rack_code) or f"Rack {rack_code}"
+    if normalized in {"intransit", "ontheway"}:
+        return f"{label} is already On the Way. Mark it Not On The Way before assigning or scanning additional pieces."
+    if normalized in {"closed", "complete", "completed"}:
+        return f"{label} is Complete. Uncomplete it before assigning or scanning additional pieces."
+    return f"{label} is {status_text} and is not open for additional pieces."
 
 
 def parse_rack_barcode(value: str) -> tuple[str, str]:
@@ -471,10 +514,10 @@ def parse_rack_barcode(value: str) -> tuple[str, str]:
     if not text.startswith("RACK"):
         return "", ""
     payload = text[4:]
+    if payload.startswith("NORACK"):
+        return "", ""
     if payload.startswith("TRUCK"):
         payload = "T" + payload[5:]
-    if payload.startswith("NORACK"):
-        payload = "T" + payload[6:]
     legacy_truck_match = re.fullmatch(r"T(20\d{6})", payload)
     if legacy_truck_match:
         date_text = legacy_truck_match.group(1)
@@ -1552,6 +1595,8 @@ def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
             "rackCode": row_value(row, "rack_code", ""),
             "rackName": row_value(row, "rack_name", ""),
             "rackStatus": row_value(row, "rack_status", ""),
+            "bayCode": row_value(row, "bay_code", ""),
+            "bayName": row_value(row, "bay_name", ""),
             "outboundScanned": bool(row_value(row, "outbound_scanned", 0)),
             "listStage": row_value(row, "list_stage", ""),
         }
@@ -3426,7 +3471,7 @@ class BaseDeliveryStore:
             if not clean_code:
                 return ""
             if clean_code == "T":
-                return "Truck"
+                return "Truck 1"
             if re.fullmatch(r"T\d+", clean_code):
                 return f"Truck {clean_code[1:]}"
             return f"Rack {clean_code}"
@@ -6471,15 +6516,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
 
         for role_name, permissions in ROLE_PERMISSIONS.items():
-            con.execute(
-                "INSERT OR IGNORE INTO roles (name, description) VALUES (?, ?)",
+            existing_role = con.execute(
+                "SELECT id FROM roles WHERE name = ?",
+                (role_name,),
+            ).fetchone()
+            if existing_role:
+                # Built-in role defaults are bootstrap values only. Once a role
+                # exists, Admin changes in the Role editor are authoritative and
+                # must not be silently re-added when the server restarts.
+                continue
+            cur = con.execute(
+                "INSERT INTO roles (name, description) VALUES (?, ?)",
                 (role_name, f"{role_name} role"),
             )
-            role_id = con.execute("SELECT id FROM roles WHERE name = ?", (role_name,)).fetchone()["id"]
             for permission in permissions:
                 con.execute(
                     "INSERT OR IGNORE INTO role_permissions (role_id, permission_name) VALUES (?, ?)",
-                    (role_id, permission),
+                    (cur.lastrowid, permission),
                 )
 
         row = con.execute("SELECT COUNT(*) AS count FROM users").fetchone()
@@ -6583,13 +6636,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rack_defs.append((f"R{index}S", f"Rack {index} Steel", "Steel", index))
         for index in range(1, 11):
             rack_defs.append((f"R{index}W", f"Rack {index} Wood", "Wood", 10 + index))
-        rack_defs.append(("T", "Truck / No Rack", "Truck", 99))
+        # Truck 1 keeps the historical T code for data compatibility, but the
+        # operator-facing identity is no longer shared with the No Rack choice.
+        rack_defs.append(("T", "Truck 1", "Truck", 99))
         for code, name, rack_type, sort_order in rack_defs:
             existing = con.execute(
-                "SELECT 1 FROM racks WHERE UPPER(rack_code) = UPPER(?) LIMIT 1",
+                "SELECT id, display_name, rack_type FROM racks WHERE UPPER(rack_code) = UPPER(?) LIMIT 1",
                 (code,),
             ).fetchone()
             if existing:
+                if code == "T":
+                    legacy_name = str(existing["display_name"] or "").strip().lower()
+                    if legacy_name in {"", "truck", "truck / no rack", "no rack"}:
+                        con.execute(
+                            "UPDATE racks SET display_name = 'Truck 1', rack_type = 'Truck', updated_at = ? WHERE id = ?",
+                            (now_iso(), existing["id"]),
+                        )
                 continue
             self._insert_rack_definition(con, code, name, rack_type, sort_order)
         con.commit()
@@ -6616,14 +6678,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Effects: This function reads or changes database records.
         Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
         """
-        con.execute(
-            """
-            UPDATE bays
-            SET active = 0
-            WHERE bay_code LIKE 'STD-%' OR bay_code LIKE 'TALL-%' OR bay_code LIKE 'OVER-%'
-               OR bay_code LIKE 'MIR-%' OR bay_code LIKE 'CPU-%' OR bay_code LIKE 'SDI-%'
-            """
-        )
+        legacy_cleanup_key = "legacy_synthetic_bay_cleanup_v321"
+        if self.system_metadata_value(con, legacy_cleanup_key) != "done":
+            # Old pre-layout releases generated synthetic STD/TALL/OVER/MIR/CPU/SDI
+            # bays. Retire only unmapped leftovers once. Repeating this UPDATE on
+            # every startup could otherwise override a later Admin visibility edit.
+            con.execute(
+                """
+                UPDATE bays
+                SET active = 0
+                WHERE (
+                    bay_code LIKE 'STD-%' OR bay_code LIKE 'TALL-%' OR bay_code LIKE 'OVER-%'
+                    OR bay_code LIKE 'MIR-%' OR bay_code LIKE 'CPU-%' OR bay_code LIKE 'SDI-%'
+                )
+                  AND COALESCE(map_section, '') = ''
+                  AND COALESCE(source_cell, '') = ''
+                  AND COALESCE(layout_cell, '') = ''
+                  AND COALESCE(layout_row, 0) = 0
+                  AND COALESCE(layout_col, 0) = 0
+                """
+            )
+            self.set_system_metadata_value(con, legacy_cleanup_key, "done")
         for index, bay in enumerate(bays, start=1):
             bay_code = str(bay.get("bayCode") or "").strip()
             if not bay_code:
@@ -6643,36 +6718,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(bay_code) DO UPDATE SET
-                    -- The JSON map is a bootstrap source. Once a bay exists, keep the
-                    -- operator-maintained display name so server restarts cannot undo Edit Bays.
-                    display_name = CASE
-                        WHEN TRIM(COALESCE(bays.display_name, '')) <> '' THEN bays.display_name
-                        ELSE excluded.display_name
-                    END,
-                    area = excluded.area,
-                    bay_type = excluded.bay_type,
-                    capacity_qty = CASE
-                        WHEN bays.status = 'Deleted' THEN bays.capacity_qty
-                        ELSE excluded.capacity_qty
-                    END,
-                    sort_order = excluded.sort_order,
-                    active = CASE
-                        WHEN bays.status = 'Deleted' THEN 0
-                        ELSE excluded.active
-                    END,
-                    status = CASE
-                        WHEN bays.status = 'Deleted' THEN 'Deleted'
-                        ELSE excluded.status
-                    END,
-                    map_section = excluded.map_section,
-                    bay_category = excluded.bay_category,
-                    source_cell = excluded.source_cell,
+                    -- The JSON map is bootstrap-only after a bay exists. Persisted
+                    -- operator edits are authoritative so names, groups, policy,
+                    -- capacity, visibility, and layout survive every server restart.
+                    display_name = COALESCE(NULLIF(TRIM(bays.display_name), ''), excluded.display_name),
+                    area = COALESCE(NULLIF(TRIM(bays.area), ''), excluded.area),
+                    bay_type = COALESCE(NULLIF(TRIM(bays.bay_type), ''), excluded.bay_type),
+                    capacity_qty = bays.capacity_qty,
+                    sort_order = bays.sort_order,
+                    active = bays.active,
+                    status = COALESCE(NULLIF(TRIM(bays.status), ''), excluded.status),
+                    map_section = COALESCE(NULLIF(TRIM(bays.map_section), ''), excluded.map_section),
+                    bay_category = COALESCE(NULLIF(TRIM(bays.bay_category), ''), excluded.bay_category),
+                    source_cell = COALESCE(NULLIF(TRIM(bays.source_cell), ''), excluded.source_cell),
                     layout_row = COALESCE(bays.layout_row, excluded.layout_row),
                     layout_col = COALESCE(bays.layout_col, excluded.layout_col),
-                    layout_cell = CASE
-                        WHEN COALESCE(bays.layout_cell, '') <> '' THEN bays.layout_cell
-                        ELSE excluded.layout_cell
-                    END
+                    layout_cell = COALESCE(NULLIF(TRIM(bays.layout_cell), ''), excluded.layout_cell)
                 """,
                 (
                     bay_code,
@@ -7381,13 +7442,33 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 rack = rack_by_item.get(item["id"])
                 rack_history = rack_history_by_item.get(item["id"])
                 if rack:
-                    item["rackCode"] = rack["rack_code"]
-                    item["rackName"] = rack["rack_name"] or rack["rack_code"]
-                    item["rackType"] = rack["rack_type"]
+                    rack_code = str(rack["rack_code"] or "")
+                    rack_type = str(rack["rack_type"] or "")
+                    item["rackCode"] = rack_code
+                    item["rackName"] = (
+                        rack_public_label(rack_code, rack["rack_name"], rack_type)
+                        if (
+                            rack_code.upper() == "T"
+                            or re.fullmatch(r"T\d+", rack_code.upper())
+                            or "TRUCK" in rack_type.upper()
+                        )
+                        else (rack["rack_name"] or rack_code)
+                    )
+                    item["rackType"] = rack_type
                 if rack_history:
-                    item["lastRackCode"] = str(rack_history["rack_code"] or "")
-                    item["lastRackName"] = str(rack_history["rack_name"] or rack_history["rack_code"] or "")
-                    item["lastRackType"] = str(rack_history["rack_type"] or "")
+                    last_rack_code = str(rack_history["rack_code"] or "")
+                    last_rack_type = str(rack_history["rack_type"] or "")
+                    item["lastRackCode"] = last_rack_code
+                    item["lastRackName"] = (
+                        rack_public_label(last_rack_code, rack_history["rack_name"], last_rack_type)
+                        if (
+                            last_rack_code.upper() == "T"
+                            or re.fullmatch(r"T\d+", last_rack_code.upper())
+                            or "TRUCK" in last_rack_type.upper()
+                        )
+                        else str(rack_history["rack_name"] or last_rack_code)
+                    )
+                    item["lastRackType"] = last_rack_type
                     item["lastRackItemStatus"] = str(rack_history["rack_item_status"] or "")
                     item["lastRackAddedAt"] = str(rack_history["added_at"] or "")
                     item["lastRackRemovedAt"] = str(rack_history["removed_at"] or "")
@@ -7572,6 +7653,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                        ORDER BY ri.added_at DESC, ri.id DESC
                        LIMIT 1
                    ) AS rack_status,
+                   (
+                       SELECT b.bay_code
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                         AND ba.status NOT IN ('Cleared', 'Cancelled')
+                       ORDER BY ba.assigned_at DESC, ba.id DESC
+                       LIMIT 1
+                   ) AS bay_code,
+                   (
+                       SELECT b.display_name
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                         AND ba.status NOT IN ('Cleared', 'Cancelled')
+                       ORDER BY ba.assigned_at DESC, ba.id DESC
+                       LIMIT 1
+                   ) AS bay_name,
                    EXISTS(
                        SELECT 1
                        FROM delivery_lists outbound_list
@@ -9590,11 +9689,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return con.execute("SELECT * FROM line_items WHERE id = ?", (line_id,)).fetchone()
 
     def assign_line_items_to_bay(self, con: sqlite3.Connection, rows: list[sqlite3.Row], bay: sqlite3.Row, user: str, reason: str) -> list[int]:
-        """Purpose: Run the assign line items to bay workflow for the delivery-list scanner.
+        """Assign one physical order to a bay while preventing mixed-order storage.
 
-        Effects: This function reads or changes database records.
-        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        Effects: May create or move active bay assignments in the current transaction.
+        Flow: Validates that the selected rows belong to one Order Nr., validates the
+        target bay against every other active order, then applies the requested moves.
         """
+        order_numbers = {
+            str(row_value(row, "order_no", "") or "").strip()
+            for row in rows
+            if str(row_value(row, "order_no", "") or "").strip()
+        }
+        if len(order_numbers) > 1:
+            raise ValueError("A bay can contain only one Order Nr. Select one exact order before assigning a bay.")
+        line_item_ids = [str(row_value(row, "id", "") or "").strip() for row in rows]
+        if order_numbers:
+            self.ensure_bay_accepts_order(con, bay, next(iter(order_numbers)), line_item_ids)
+
         assignment_ids: list[int] = []
         for row in rows:
             existing = con.execute(
@@ -11227,7 +11338,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         row = con.execute(
             """
             SELECT se.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.dimensions,
-                   li.customer, li.route, li.job, li.product, li.suggested_bay
+                   li.customer, li.route, li.job, li.product, li.suggested_bay,
+                   (
+                       SELECT b.bay_code
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                         AND ba.status NOT IN ('Cleared', 'Cancelled')
+                       ORDER BY ba.assigned_at DESC, ba.id DESC
+                       LIMIT 1
+                   ) AS bay_code,
+                   (
+                       SELECT b.display_name
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                         AND ba.status NOT IN ('Cleared', 'Cancelled')
+                       ORDER BY ba.assigned_at DESC, ba.id DESC
+                       LIMIT 1
+                   ) AS bay_name
             FROM scan_events se
             LEFT JOIN line_items li ON li.id = se.line_item_id
             WHERE se.id = ?
@@ -11371,7 +11500,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             override_minutes = self.rack_destination_override_minutes_con(con)
             if rack_code_for_scan and list_row_for_rack and "staging" in str(list_row_for_rack["stage"]).lower():
                 rack_for_scan = self.get_rack_by_code(con, rack_code_for_scan)
-                if str(rack_for_scan["status"] or "").lower() == "closed":
+                rack_lock_message = rack_assignment_lock_message(
+                    rack_for_scan["rack_code"],
+                    rack_for_scan["status"],
+                )
+                if rack_lock_message:
+                    # Validate lifecycle state before scanned_qty or rack_items are
+                    # changed. A stale browser selection must never load a truck
+                    # that has already departed.
                     last = self.insert_event(
                         con,
                         list_id,
@@ -11381,8 +11517,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         user,
                         station,
                         "error",
-                        f"Rack {rack_for_scan['rack_code']} is closed",
-                        "Uncomplete or clear this rack before scanning more pieces into it.",
+                        rack_lock_message,
+                        rack_lock_message,
                     )
                     con.commit()
                     payload = self._get_payload(con, list_id, last)
@@ -11406,8 +11542,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     station=station,
                 )
                 if mismatch and not destination_override_requested and not override_active:
+                    rack_label = rack_public_label(
+                        rack_for_scan["rack_code"],
+                        row_value(rack_for_scan, "display_name"),
+                        row_value(rack_for_scan, "rack_type"),
+                    ) or f"Rack {rack_for_scan['rack_code']}"
                     reason_text = (
-                        f"Rack {rack_for_scan['rack_code']} is assigned to {rack_destination}. "
+                        f"{rack_label} is assigned to {rack_destination}. "
                         f"This item is marked for {item_destination}."
                     )
                     last = self.insert_event(
@@ -11572,8 +11713,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not clean_rack_code:
             raise ValueError("Choose a transportation method before overriding outbound scan safety.")
         rack = self.get_rack_by_code(con, clean_rack_code)
-        if str(rack["status"] or "").lower() in {"closed", "complete", "completed", "in transit"}:
-            raise ValueError(f"Rack {rack['rack_code']} is {rack['status']}. Choose an open rack or the truck before overriding outbound scan safety.")
+        rack_lock_message = rack_assignment_lock_message(rack["rack_code"], rack["status"])
+        if rack_lock_message:
+            raise ValueError(rack_lock_message)
         con.execute(
             """
             INSERT INTO rack_items (rack_id, line_item_id, qty, status, added_by, added_at, reason)
@@ -11869,31 +12011,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not inbound:
             return ""
 
-        # Indian Trail bay assignment is job-based. One Job Nr. may contain multiple line items;
-        # every item in that job should live in one physical bay so the floor can pull the whole job together.
+        # Physical bay ownership is Order Nr.-based. Different orders may share
+        # a Job Nr., but they must never be placed in the same individual bay.
         job_key = str(inbound["job"] or "").strip()
-        if job_key:
-            group_rows = con.execute(
-                """
-                SELECT * FROM line_items
-                WHERE list_id = ?
-                  AND COALESCE(is_deleted, 0) = 0
-                  AND COALESCE(job, '') = ?
-                ORDER BY order_no, item_no, id
-                """,
-                (inbound["list_id"], job_key),
-            ).fetchall()
-        else:
-            group_rows = con.execute(
-                """
-                SELECT * FROM line_items
-                WHERE list_id = ?
-                  AND COALESCE(is_deleted, 0) = 0
-                  AND order_no = ?
-                ORDER BY order_no, item_no, id
-                """,
-                (inbound["list_id"], inbound["order_no"]),
-            ).fetchall()
+        group_rows = con.execute(
+            """
+            SELECT * FROM line_items
+            WHERE list_id = ?
+              AND COALESCE(is_deleted, 0) = 0
+              AND order_no = ?
+            ORDER BY order_no, item_no, id
+            """,
+            (inbound["list_id"], inbound["order_no"]),
+        ).fetchall()
         group_rows = group_rows or [inbound]
         group_ids = [row["id"] for row in group_rows]
         placeholders = ",".join("?" for _ in group_ids)
@@ -11919,9 +12049,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return ""
             bay = self.find_bay_for_assignment(con, bay_type) or self.find_bay_for_assignment(con, "Standard")
         if not bay:
-            self.insert_exception(con, inbound["list_id"], None, "bay_assignment_conflict", "No safe bay available during outbound job preassign")
+            self.insert_exception(con, inbound["list_id"], None, "bay_assignment_conflict", "No empty safe bay available during outbound order preassign")
             return ""
 
+        self.ensure_bay_accepts_order(con, bay, inbound["order_no"], group_ids)
         assigned_count = 0
         for group_row in group_rows:
             active = con.execute(
@@ -11933,13 +12064,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute(
                 """
                 INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
-                VALUES (?, ?, ?, ?, 'PreAssigned', ?, ?, 'Job preassigned from outbound scan')
+                VALUES (?, ?, ?, ?, 'PreAssigned', ?, ?, 'Order preassigned from outbound scan')
                 """,
                 (inbound["list_id"], group_row["id"], bay["id"], int(group_row["qty"] or 1), user, now_iso()),
             )
-            self.insert_bay_event(con, bay["id"], group_row["id"], "PreAssignBay", user, "Job preassigned from outbound scan", new_bay_id=bay["id"])
+            self.insert_bay_event(con, bay["id"], group_row["id"], "PreAssignBay", user, "Order preassigned from outbound scan", new_bay_id=bay["id"])
             assigned_count += 1
-        self.insert_audit(con, "bay_assignment", inbound["id"], "preassign_job_bay_from_outbound", user, station, "", {"bayCode": bay["bay_code"], "job": job_key, "itemsAssigned": assigned_count})
+        self.insert_audit(
+            con,
+            "bay_assignment",
+            inbound["id"],
+            "preassign_job_bay_from_outbound",
+            user,
+            station,
+            "",
+            {"bayCode": bay["bay_code"], "order": inbound["order_no"], "job": job_key, "itemsAssigned": assigned_count},
+        )
         return str(bay["bay_code"])
 
     def reset_stage(self, list_id: str, user: str, station: str) -> dict[str, Any]:
@@ -12600,18 +12740,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return (0, "", progress_rank)
 
         def rack_location_label(code: Any) -> str:
-            """Purpose: Run the rack location label workflow for the delivery-list scanner.
-
-            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
-            """
+            """Return the public transportation/rack label used by Global Search."""
             clean_code = normalize_rack_code(str(code or ""))
             if not clean_code:
                 return ""
-            if clean_code == "T":
-                return "Truck"
-            if re.fullmatch(r"T\d+", clean_code):
-                return f"Truck {clean_code[1:]}"
+            if clean_code == "T" or re.fullmatch(r"T\d+", clean_code):
+                return rack_public_label(clean_code)
             return f"Rack {clean_code}"
 
         def airport_label(scanner: Any) -> str:
@@ -13249,6 +13383,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not bay:
             bay = con.execute("SELECT * FROM bays WHERE UPPER(display_name) = UPPER(?) AND active = 1", (clean,)).fetchone()
         if bay:
+            self.ensure_bay_accepts_order(con, bay, row["order_no"], [line_item_id])
             previous_rack_ids = [item["rack_id"] for item in con.execute("SELECT DISTINCT rack_id FROM rack_items WHERE line_item_id = ? AND status = 'Active'", (line_item_id,)).fetchall()]
             con.execute(
                 "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Moved to bay from manual edit' WHERE line_item_id = ? AND status = 'Active'",
@@ -14958,7 +15093,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "id": rack["id"],
             "code": rack["rack_code"],
             "barcode": f"RACK-{rack['rack_code']}",
-            "name": rack["display_name"] or rack["rack_code"],
+            # Truck identities are code-driven so every API consumer sees Truck 1,
+            # Truck 2, etc. even if an older database still carries a legacy name.
+            "name": rack_public_label(rack["rack_code"], rack["display_name"], rack["rack_type"])
+            if str(rack["rack_code"] or "").upper() == "T"
+            or re.fullmatch(r"T\d+", str(rack["rack_code"] or "").upper())
+            or "TRUCK" in str(rack["rack_type"] or "").upper()
+            else (rack["display_name"] or rack["rack_code"]),
             "type": rack["rack_type"],
             "status": rack["status"],
             "destination": destination,
@@ -15079,11 +15220,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not list_row or "staging" not in str(list_row["stage"]).lower():
                 raise ValueError("Rack scans must be made from a staging delivery list")
             rack = self.get_rack_by_code(con, rack_code)
-            rack_status = str(rack["status"] or "").lower()
-            if rack_status == "closed":
-                raise ValueError(f"Rack {rack['rack_code']} is closed. Uncomplete or clear it before scanning more pieces.")
-            if rack_status == "in transit":
-                raise ValueError(f"Rack {rack['rack_code']} is marked on the way. Mark it Not On The Way before scanning more pieces into it.")
+            rack_label = (
+                rack_public_label(rack["rack_code"], rack["display_name"], rack["rack_type"])
+                or f"Rack {rack['rack_code']}"
+            )
+            rack_lock_message = rack_assignment_lock_message(rack["rack_code"], rack["status"])
+            if rack_lock_message:
+                raise ValueError(rack_lock_message)
             rows = con.execute(
                 "SELECT * FROM line_items WHERE list_id = ? AND COALESCE(is_deleted, 0) = 0",
                 (list_id,),
@@ -15112,7 +15255,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
             if mismatch and not destination_override_requested and not override_active:
                 reason_text = (
-                    f"Rack {rack['rack_code']} is assigned to {rack_destination}. "
+                    f"{rack_label} is assigned to {rack_destination}. "
                     f"This item is marked for {item_destination}."
                 )
                 last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "notice", "Rack destination mismatch", reason_text)
@@ -15169,11 +15312,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ),
             )
             destination = self.refresh_rack_destination(con, rack["id"])
-            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", f"Added to {rack['rack_code']}", f"{reason} Destination: {destination}".strip(), 1)
+            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "scan", f"Added to {rack_label}", f"{reason} Destination: {destination}".strip(), 1)
             self.insert_audit(con, "rack", rack["rack_code"], "rack_scan_in", user, station, reason, {"lineItemId": row["id"]})
             con.commit()
         payload = self.get_racks()
-        message = f"Added {row['order_no']}-{row['item_no']} to {rack['rack_code']}"
+        message = f"Added {row['order_no']}-{row['item_no']} to {rack_label}"
         if mismatch and override_active:
             message += f". Mixed-destination override is active for {override_minutes} minutes"
         payload.update(
@@ -15552,12 +15695,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Effects: This function reads or updates shared application state.
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
+        rack_lock_message = rack_assignment_lock_message(rack["rack_code"], rack["status"])
+        if rack_lock_message:
+            raise ValueError(rack_lock_message)
         destination = self.destination_for_line_item(item)
         current_destinations = self.rack_destinations_from_items(con, int(rack["id"]))
         if current_destinations and current_destinations != [destination]:
             existing = ", ".join(current_destinations)
+            rack_label = (
+                rack_public_label(rack["rack_code"], rack["display_name"], rack["rack_type"])
+                or f"Rack {rack['rack_code']}"
+            )
             raise ValueError(
-                f"Rack {rack['rack_code']} is already assigned to {existing}. "
+                f"{rack_label} is already assigned to {existing}. "
                 f"This item is marked for {destination} and must go on a separate rack."
             )
         return destination
@@ -15584,9 +15734,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (destination, now_iso(), now_iso(), rack["id"]),
             )
             self.insert_audit(con, "rack", rack["rack_code"], "complete_rack", user, "", "Rack closed with automatic destination from contents", {"destination": destination})
+            rack_label = rack_public_label(rack["rack_code"], rack["display_name"], rack["rack_type"]) or f"Rack {rack_code}"
             con.commit()
         payload = self.get_racks()
-        payload["message"] = f"Rack {rack_code} completed for {destination}."
+        payload["message"] = f"{rack_label} completed for {destination}."
         return payload
 
     def uncomplete_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
@@ -15632,6 +15783,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rack = self.get_rack_by_code(con, rack_code)
             if str(rack["status"] or "").lower() != "in transit":
                 raise ValueError("Only racks marked on the way can be marked Not On The Way")
+            rack_label = (
+                rack_public_label(rack["rack_code"], rack["display_name"], rack["rack_type"])
+                or f"Rack {rack['rack_code']}"
+            )
 
             canonical = f"RACK-{rack['rack_code']}"
             outbound_rows = con.execute(
@@ -15695,7 +15850,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     user,
                     "",
                     "undo",
-                    f"Rack {rack['rack_code']} marked Not On The Way",
+                    f"{rack_label} marked Not On The Way",
                     "Outbound rack scan quantity was reversed so the rack can be reopened.",
                     -decrement,
                 )
@@ -15722,7 +15877,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         payload.update(
             {
                 "ok": True,
-                "message": f"Rack {rack['rack_code']} is open again. Reversed {undone_piece_qty} outbound piece scan{'s' if undone_piece_qty != 1 else ''}.",
+                "message": f"{rack_label} is open again. Reversed {undone_piece_qty} outbound piece scan{'s' if undone_piece_qty != 1 else ''}.",
                 "undonePieceQty": undone_piece_qty,
                 "undoneRowCount": undone_row_count,
             }
@@ -15814,15 +15969,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 (target_row["id"],),
             ).fetchone()
             if current_rack:
-                current_status = str(current_rack["status"] or "").lower()
-                if current_status in {"closed", "complete", "completed", "in transit", "on the way"}:
-                    raise ValueError(f"Rack {current_rack['rack_code']} is {current_rack['status']} and cannot be changed from the scan table")
+                current_lock_message = rack_assignment_lock_message(current_rack["rack_code"], current_rack["status"])
+                if current_lock_message:
+                    current_label = rack_public_label(
+                        current_rack["rack_code"],
+                        row_value(current_rack, "display_name"),
+                        row_value(current_rack, "rack_type"),
+                    )
+                    raise ValueError(
+                        f"{current_label} is {current_rack['status']} and its assigned pieces cannot be moved from the scan table. "
+                        "Use the rack lifecycle controls first."
+                    )
 
             if rack_code:
                 rack = self.get_rack_by_code(con, rack_code)
-                rack_status = str(rack["status"] or "").lower()
-                if rack_status in {"closed", "complete", "completed", "in transit", "on the way"}:
-                    raise ValueError(f"Rack {rack['rack_code']} must be open before assigning a line item to it")
+                target_lock_message = rack_assignment_lock_message(rack["rack_code"], rack["status"])
+                if target_lock_message:
+                    raise ValueError(target_lock_message)
             self.update_line_item_location(con, target_row, rack_code, user)
             payload = self._get_payload(con, target_row["list_id"])
             self.insert_audit(
@@ -16356,11 +16519,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 {"scannedCount": scanned_count, "cappedRows": capped_count, "departedAt": effective_departure_timestamp},
             )
             rack_snapshot = self.rack_from_row(con, self.get_rack_by_code(con, rack["rack_code"]))
+            rack_label = rack_public_label(rack["rack_code"], rack["display_name"], rack["rack_type"]) or f"Rack {rack['rack_code']}"
             con.commit()
             payload = self._get_payload(con, list_id, last)
             payload["redirectListId"] = list_id
             cap_message = f" {capped_count} row{'s' if capped_count != 1 else ''} capped at remaining quantity." if capped_count else ""
-            payload["message"] = f"Rack {rack['rack_code']} scanned outbound for {scanned_count} piece{'s' if scanned_count != 1 else ''}.{cap_message}"
+            payload["message"] = f"{rack_label} scanned outbound for {scanned_count} piece{'s' if scanned_count != 1 else ''}.{cap_message}"
             payload["rackDepartureAt"] = effective_departure_timestamp
             payload["rackCode"] = rack["rack_code"]
             payload["rackDestination"] = self.rack_destination_value(rack_snapshot.get("destination"))
@@ -16731,7 +16895,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 rack_type = str(rack["rack_type"] or "").strip() or "Rack"
                 rack_name = str(rack["rack_name"] or rack_code).strip() or rack_code
                 if rack_code == "T" or re.fullmatch(r"T\d+", rack_code) or "TRUCK" in rack_type.upper():
-                    rack_name = rack_name or ("Truck" if rack_code == "T" else f"Truck {rack_code[1:]}")
+                    rack_name = rack_public_label(rack_code, rack_name, rack_type)
                     rack_type = rack_type or "Truck"
                 flat_rows.append(
                     {
@@ -17015,7 +17179,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     rack_code,
                     {
                         "code": rack_code,
-                        "name": str(row.get("rackName") or rack_code),
+                        "name": (
+                            rack_public_label(rack_code, row.get("rackName"), row.get("rackType"))
+                            if transit_row_is_truck(row)
+                            else str(row.get("rackName") or rack_code)
+                        ),
                         "type": str(row.get("rackType") or ("Truck" if transit_row_is_truck(row) else "Rack")),
                         "status": rack_sort.get(rack_code, {}).get("status", "In Transit"),
                         "sortOrder": rack_sort.get(rack_code, {}).get("sortOrder", 9999),
@@ -17204,7 +17372,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rows = con.execute(
                 f"""
                 SELECT li.*, dl.label, dl.delivery_date, dl.stage, dl.scanner,
-                       r.rack_code, r.display_name AS rack_name,
+                       r.rack_code, r.display_name AS rack_name, r.rack_type,
                        b.bay_code, b.display_name AS bay_name
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
@@ -17234,7 +17402,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "stage": row["stage"],
                     "scanner": row["scanner"],
                     "location": row["bay_code"] or row["rack_code"] or "",
-                    "locationDisplay": row["bay_name"] or row["rack_name"] or row["bay_code"] or row["rack_code"] or "",
+                    "locationDisplay": (
+                        row["bay_name"]
+                        or (
+                            rack_public_label(row["rack_code"], row["rack_name"], row["rack_type"])
+                            if row["rack_code"]
+                            and (
+                                str(row["rack_code"] or "").upper() == "T"
+                                or re.fullmatch(r"T\d+", str(row["rack_code"] or "").upper())
+                                or "TRUCK" in str(row["rack_type"] or "").upper()
+                            )
+                            else row["rack_name"]
+                        )
+                        or row["bay_code"]
+                        or row["rack_code"]
+                        or ""
+                    ),
                 }
             )
             results.append(item)
@@ -17255,35 +17438,85 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             },
         }
 
-    def find_bay_for_assignment(self, con: sqlite3.Connection, bay_type: str) -> sqlite3.Row | None:
-        """Purpose: Resolve bay for assignment for the delivery-list scanner workflow.
-
-        Effects: This function reads or changes database records.
-        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
-        """
+    def bay_active_order_numbers(
+        self,
+        con: sqlite3.Connection,
+        bay_id: int,
+        exclude_line_item_ids: Iterable[str] | None = None,
+    ) -> list[str]:
+        """Return distinct active Order Nr. values physically reserved in one bay."""
+        excluded = [str(value or "").strip() for value in (exclude_line_item_ids or []) if str(value or "").strip()]
+        exclusion_sql = ""
+        params: list[Any] = [int(bay_id)]
+        if excluded:
+            placeholders = ",".join("?" for _ in excluded)
+            exclusion_sql = f" AND ba.line_item_id NOT IN ({placeholders})"
+            params.extend(excluded)
         rows = con.execute(
+            f"""
+            SELECT DISTINCT TRIM(COALESCE(li.order_no, '')) AS order_no
+            FROM bay_assignments ba
+            JOIN line_items li ON li.id = ba.line_item_id
+            WHERE ba.bay_id = ?
+              AND ba.status NOT IN ('Cleared', 'Cancelled')
+              AND COALESCE(li.is_deleted, 0) = 0
+              {exclusion_sql}
+            ORDER BY order_no
+            """,
+            params,
+        ).fetchall()
+        return [str(row_value(row, "order_no", "") or "").strip() for row in rows if str(row_value(row, "order_no", "") or "").strip()]
+
+    def ensure_bay_accepts_order(
+        self,
+        con: sqlite3.Connection,
+        bay: Any,
+        order_no: Any,
+        exclude_line_item_ids: Iterable[str] | None = None,
+    ) -> None:
+        """Reject an assignment when the target bay already contains another order."""
+        clean_order = str(order_no or "").strip()
+        if not clean_order:
+            raise ValueError("An Order Nr. is required before assigning a bay.")
+        occupied_orders = self.bay_active_order_numbers(
+            con,
+            int(row_value(bay, "id", 0) or 0),
+            exclude_line_item_ids,
+        )
+        conflict = next((value for value in occupied_orders if value != clean_order), "")
+        if conflict:
+            bay_label = str(row_value(bay, "display_name", "") or row_value(bay, "bay_code", "") or "Selected bay")
+            raise ValueError(
+                f"{bay_label} is already occupied by Order {conflict}. "
+                "Each bay may contain only one Order Nr."
+            )
+
+    def find_bay_for_assignment(self, con: sqlite3.Connection, bay_type: str) -> sqlite3.Row | None:
+        """Return the first active, empty auto-assignable bay of the requested type.
+
+        A bay with any active physical/preassigned item is reserved for that Order Nr.
+        Existing-order workflows reuse their current bay before this helper is called.
+        """
+        return con.execute(
             """
-            SELECT candidate.*
-            FROM (
-                SELECT b.*,
-                       COALESCE((
-                           SELECT SUM(ba.assigned_qty)
-                           FROM bay_assignments ba
-                           WHERE ba.bay_id = b.id
-                             AND ba.status NOT IN ('Cleared', 'Cancelled')
-                       ), 0) AS used_qty
-                FROM bays b
-                WHERE b.active = 1
-                  AND b.bay_type = ?
-                  AND COALESCE(b.status, 'Available') = 'Available'
-            ) candidate
-            WHERE candidate.used_qty < candidate.capacity_qty OR candidate.capacity_qty = 0
-            ORDER BY candidate.used_qty, candidate.sort_order
+            SELECT b.*
+            FROM bays b
+            WHERE b.active = 1
+              AND b.bay_type = ?
+              AND COALESCE(b.status, 'Available') = 'Available'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM bay_assignments ba
+                  JOIN line_items li ON li.id = ba.line_item_id
+                  WHERE ba.bay_id = b.id
+                    AND ba.status NOT IN ('Cleared', 'Cancelled')
+                    AND COALESCE(li.is_deleted, 0) = 0
+              )
+            ORDER BY b.sort_order, b.id
             LIMIT 1
             """,
             (bay_type,),
         ).fetchone()
-        return rows
 
     def get_bay_by_code(self, con: sqlite3.Connection, bay_code: str) -> sqlite3.Row:
         """Purpose: Read bay by code for the delivery-list scanner workflow.
@@ -17343,6 +17576,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not item:
                 raise ValueError("Line item not found")
             bay = self.get_bay_by_code(con, bay_code)
+            self.ensure_bay_accepts_order(con, bay, item["order_no"], [line_item_id])
             cur = con.execute(
                 """
                 INSERT INTO bay_assignments (delivery_list_id, line_item_id, bay_id, assigned_qty, status, assigned_by, assigned_at, reason)
@@ -17526,28 +17760,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return {"ok": False, "message": reason, "lastScan": last}
 
             job_key = str(row["job"] or "").strip()
-            if job_key:
-                group_rows = con.execute(
-                    """
-                    SELECT * FROM line_items
-                    WHERE list_id = ?
-                      AND COALESCE(is_deleted, 0) = 0
-                      AND COALESCE(job, '') = ?
-                    ORDER BY order_no, item_no, id
-                    """,
-                    (list_id, job_key),
-                ).fetchall()
-            else:
-                group_rows = con.execute(
-                    """
-                    SELECT * FROM line_items
-                    WHERE list_id = ?
-                      AND COALESCE(is_deleted, 0) = 0
-                      AND order_no = ?
-                    ORDER BY order_no, item_no, id
-                    """,
-                    (list_id, row["order_no"]),
-                ).fetchall()
+            group_rows = con.execute(
+                """
+                SELECT * FROM line_items
+                WHERE list_id = ?
+                  AND COALESCE(is_deleted, 0) = 0
+                  AND order_no = ?
+                ORDER BY order_no, item_no, id
+                """,
+                (list_id, row["order_no"]),
+            ).fetchall()
             group_rows = group_rows or [row]
             group_ids = [item["id"] for item in group_rows]
             placeholders = ",".join("?" for _ in group_ids)
@@ -17594,7 +17816,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "SELECT * FROM bays WHERE id = ?",
                     (existing_group_assignment["bay_id"],),
                 ).fetchone()
-                receive_reason = "Received at Indian Trail with existing job bay"
+                receive_reason = "Received at Indian Trail with existing order bay"
             elif self.bay_type_requires_manual_assignment(con, suggested_bay_type):
                 # Tall and oversize pieces still receive a concrete suggested bay so
                 # the timed placement popup can tell the operator where to put them.
@@ -17688,6 +17910,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     },
                     "lastScan": last,
                 }
+
+            if target_bay:
+                self.ensure_bay_accepts_order(con, target_bay, row["order_no"], group_ids)
 
             timestamp = now_iso()
             qty_delta = 0 if returned_to_bay else 1
@@ -17907,6 +18132,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     if is_scanned_row:
                         scanned_assignment_id = assignment_id
 
+            if isinstance(last.get("item"), dict):
+                last["item"]["bayCode"] = bay_code
+                last["item"]["bayName"] = str(row_value(target_bay, "display_name", "") or bay_code) if target_bay else ""
+
             used_override = bool(override_bay)
             audit_action = (
                 "indian_trail_receive_rush_direct_to_truck"
@@ -17964,7 +18193,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
         elif existing_group_assignment:
             message = (
-                f"Order {row['order_no']} / Item {row['item_no']} received into existing Job Bay {bay_code}."
+                f"Order {row['order_no']} / Item {row['item_no']} received into existing Order Bay {bay_code}."
             )
         else:
             message = (
@@ -18043,6 +18272,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 raise ValueError("Assignment not found")
             previous_context = self._bay_assignment_audit_context(con, assignment_id)
             new_bay = self.get_bay_by_code(con, new_bay_code)
+            line_item = con.execute("SELECT * FROM line_items WHERE id = ?", (assignment["line_item_id"],)).fetchone()
+            if not line_item:
+                raise ValueError("Assignment line item not found")
+            self.ensure_bay_accepts_order(con, new_bay, line_item["order_no"], [assignment["line_item_id"]])
             previous_status = str(assignment["status"] or "Assigned")
             # A PreAssigned row reserves a destination but does not prove that the
             # glass was physically scanned into a bay. Preserve that distinction
@@ -18164,6 +18397,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             bay = con.execute("SELECT * FROM bays WHERE id = ?", (row["bay_id"],)).fetchone()
             if not bay:
                 raise ValueError("Assignment bay not found")
+            line_item = con.execute("SELECT * FROM line_items WHERE id = ?", (row["line_item_id"],)).fetchone()
+            if not line_item:
+                raise ValueError("Assignment line item not found")
+            self.ensure_bay_accepts_order(con, bay, line_item["order_no"], [row["line_item_id"]])
             con.execute(
                 "UPDATE bay_assignments SET status = 'Assigned', cleared_by = '', cleared_at = '', reason = ? WHERE id = ?",
                 (reason, assignment_id),
@@ -18644,6 +18881,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             has_indian_trail_destination = bool(seed_rows)
             direct_to_truck_value = 1 if order_type == "Rush" and truck_exempt and has_indian_trail_destination else 0
             target_bay = self.get_bay_by_code(con, bay_code) if bay_code and not direct_to_truck_value else None
+            if target_bay:
+                target_orders = {
+                    str(row["order_no"] or "").strip()
+                    for row in seed_rows
+                    if str(row["order_no"] or "").strip()
+                }
+                if len(target_orders) > 1:
+                    raise ValueError("A bay can contain only one Order Nr. Select one exact order before choosing a Rush bay.")
+                if target_orders:
+                    self.ensure_bay_accepts_order(
+                        con,
+                        target_bay,
+                        next(iter(target_orders)),
+                        [str(row["id"]) for row in seed_rows],
+                    )
             removed_from_bay = 0
             created_preassignments = 0
             primary_assignment_id = assignment_id
