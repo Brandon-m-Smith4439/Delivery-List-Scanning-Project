@@ -1,18 +1,30 @@
 **# Delivery List Scanner**
 
-Current maintained release: **v0.322**. SQLite remains the active/default backend.
+Current maintained release: **v0.323**. SQLite remains the active/default backend.
 
-v0.322 restores contained vertical scrolling across the longer Automated DL Import workspaces while preserving Import History's dedicated results scroller.
+v0.323 makes Automated DL Import schedule installation self-healing for local/network-folder deployments by synchronizing the complete scheduler runtime before Windows tasks are installed.
 
-**## Install v0.322**
+**## Install v0.323**
 
 1\. Stop the Delivery List Scanner if it is running.
-2\. Extract the v0.322 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
-3\. Preserve the existing `data` folder and database files.
+2\. Extract the v0.323 changed-files ZIP directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
+3\. Preserve the existing `data` folder, database files, and `C:\DeliveryListAutomation` configuration/state folders.
 4\. Start the scanner manually with `py -3 server.py`.
-5\. Hard-refresh the browser (`Ctrl+F5`) once so the v0.322 CSS/JavaScript cache keys are loaded.
+5\. Hard-refresh the browser (`Ctrl+F5`) once so the v0.323 cache keys are loaded.
+6\. In Automated DL Import, save the network-folder settings and choose **Save & Install Schedule** again. The server now deploys the scheduler runtime and command wrappers automatically before Task Scheduler installation.
 
 No database migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **11**.
+
+**## v0.323 highlights**
+
+- Expands the browser-controlled runtime synchronization from four run-time reconciliation files to the complete maintained scheduler/runtime dependency set, including the install/remove/status/verification PowerShell scripts and scanner compatibility helpers.
+- Self-heals a partially installed local runtime under `C:\DeliveryListAutomation` before installing or removing the Windows schedule.
+- Materializes the current saved automation settings to the stable installed `Scripts\sql-export.config.json` path without resetting the selected network folder, automation mode, notification choices, or schedule values.
+- Creates or refreshes `Run-Incremental.cmd` and `Run-Full.cmd` automatically so Task Scheduler never fails immediately after the missing installer script is repaired.
+- Reuses the Python interpreter running the scanner when a floor-computer config has no Python path yet, allowing the folder-import compatibility preflight to run without requiring A+W SQL access.
+- Keeps `ScheduleEnabled` aligned with the real Windows task state if installation fails; it is marked enabled only after the installer returns successfully.
+- Preserves the folder-import-only preflight, which validates network-folder read access and scanner compatibility without querying A+W SQL.
+- Advances `APPLICATION_VERSION` to 323 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
 **## v0.322 highlights**
 

@@ -1,5 +1,16 @@
 # Delivery List Scanner Changelog
 
+## v0.323 - Self-Healing Automated Import Schedule Runtime
+
+- Fixed **Save & Install Schedule** on local/network-folder scanner installations where `C:\DeliveryListAutomation\Scripts\Install-DeliveryListSqlAutomationTasks.ps1` had never been deployed.
+- Expanded runtime synchronization to include the maintained scheduler installer/remover/status/verification scripts, workbook/import helpers, notification publisher, compatibility validator, and verified-source exclusions.
+- Added schedule-runtime preparation that writes the current saved settings to the stable installed config path and creates `Run-Incremental.cmd` / `Run-Full.cmd` before invoking Task Scheduler.
+- Preserved existing automation settings and database/state files; the runtime refresh does not replace the operator's selected network folder, mode, schedule window, or notification settings with defaults.
+- Uses the scanner's active Python interpreter when a floor-folder configuration has not yet recorded a Python path, allowing the no-SQL compatibility preflight to complete.
+- Keeps the saved `ScheduleEnabled` flag aligned with the actual Windows task state when installation fails, then marks it enabled only after a successful installer return.
+- Preserved the folder-import-only scheduler preflight so floor computers verify shared-folder read access and scanner compatibility without querying A+W SQL.
+- Advanced `APPLICATION_VERSION` to 323 while preserving SQLite schema version 11. No migration or database reset is included.
+
 ## v0.322 - Automated DL Import Tab Scrolling
 
 - Restored contained vertical scrolling to the Automated DL Import **Run Now**, **Schedule**, and **Status** workspaces so longer tab content and bottom actions remain reachable.

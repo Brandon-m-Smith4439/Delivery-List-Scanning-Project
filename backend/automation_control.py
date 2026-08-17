@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -33,13 +34,23 @@ RUN_ACTIONS = {
     "sql-export-and-import": "SqlExportAndImport",
 }
 
-# The browser control plane deploys only the runtime files that participate in
-# authoritative import reconciliation. Keeping this list explicit prevents the
-# web server from overwriting local configuration or setup-only scripts.
+# The browser control plane refreshes the complete installed automation runtime
+# required by manual runs and Windows Task Scheduler. Configuration is excluded
+# intentionally: saved settings are copied separately so a runtime refresh never
+# replaces the operator's current network folder, schedule, or automation mode.
 AUTOMATION_RUNTIME_FILES = (
     "Run-DeliveryListSqlAutomation.ps1",
+    "Initialize-DeliveryListSqlAutomation.ps1",
+    "Install-DeliveryListSqlAutomationTasks.ps1",
+    "Remove-DeliveryListSqlAutomationTasks.ps1",
+    "Show-DeliveryListSqlAutomationStatus.ps1",
+    "Verify-DeliveryListSqlAutomation.ps1",
+    "build_delivery_workbook.py",
     "import_delivery_folder.py",
     "delivery_import_safety.py",
+    "publish_automation_notification.py",
+    "validate_scanner_compatibility.py",
+    "verify_delivery_import.py",
     "verified-source-exclusions.json",
 )
 
@@ -163,6 +174,22 @@ class DeliveryAutomationController:
         temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, path)
 
+    def _set_schedule_enabled_in_config_path(self, path: Path, enabled: bool) -> None:
+        """Persist the scheduler flag to an explicit config without resetting it."""
+        payload = self._read_json_file(path)
+        if not payload:
+            raise FileNotFoundError(f"Automation configuration could not be read: {path}")
+        payload.setdefault("Automation", {})["ScheduleEnabled"] = bool(enabled)
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
     def _runtime_paths(self, config: dict[str, Any]) -> dict[str, Path]:
         working_root = Path(str(config.get("WorkingRoot") or r"C:\DeliveryListAutomation"))
         script_root = working_root / "Scripts"
@@ -225,6 +252,122 @@ class DeliveryAutomationController:
             synchronized.append(file_name)
 
         return synchronized
+
+    def _ensure_installed_runtime_config(self, config: dict[str, Any]) -> Path:
+        """Write the current saved settings to the stable installed runtime path.
+
+        A local scanner can initially run from the project copy of
+        ``sql-export.config.json`` before C:\\DeliveryListAutomation has been fully
+        installed. Scheduled tasks need a stable config path outside the project
+        tree, so materialize the currently active settings without resetting any
+        operator choices.
+        """
+        paths = self._runtime_paths(config)
+        target = paths["script_root"] / "sql-export.config.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        payload = json.loads(json.dumps(config))
+        payload["ProjectRoot"] = str(self.project_root)
+        payload["WorkingRoot"] = str(paths["working_root"])
+        runtime = payload.setdefault("Runtime", {})
+        if not str(runtime.get("PowerShellPath") or "").strip():
+            runtime["PowerShellPath"] = self._power_shell(payload)
+        if not str(runtime.get("PythonPath") or "").strip():
+            python_path = Path(sys.executable).resolve()
+            if python_path.is_file():
+                runtime["PythonPath"] = str(python_path)
+                runtime["PythonArguments"] = []
+        elif "PythonArguments" not in runtime:
+            runtime["PythonArguments"] = []
+
+        temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, target)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+        return target
+
+    def _ensure_schedule_command_wrappers(
+        self,
+        config: dict[str, Any],
+        runtime_config_path: Path,
+    ) -> list[str]:
+        """Create the two command files Windows Task Scheduler actually runs."""
+        paths = self._runtime_paths(config)
+        working_root = paths["working_root"]
+        working_root.mkdir(parents=True, exist_ok=True)
+        runner = paths["runner"]
+        power_shell = self._power_shell(config)
+        synchronized: list[str] = []
+
+        for file_name, mode in (("Run-Incremental.cmd", "Incremental"), ("Run-Full.cmd", "Full")):
+            target = working_root / file_name
+            content = (
+                "@echo off\r\n"
+                f'"{power_shell}" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass '
+                f'-WindowStyle Hidden -File "{runner}" -Mode {mode} -RunAction Configured '
+                f'-ConfigPath "{runtime_config_path}"\r\n'
+                "exit /b %errorlevel%\r\n"
+            )
+            encoded = content.encode("utf-8")
+            if target.is_file() and target.read_bytes() == encoded:
+                continue
+            temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                temporary.write_bytes(encoded)
+                os.replace(temporary, target)
+            finally:
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
+            synchronized.append(file_name)
+
+        return synchronized
+
+    def _prepare_schedule_runtime(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Self-heal the installed scheduler runtime before install/remove actions."""
+        if self._runtime_lock_busy(config):
+            raise RuntimeError(
+                "A delivery-list automation run is active. Wait for it to finish before changing the schedule."
+            )
+
+        synchronized_files = self._sync_runtime_scripts(config)
+        runtime_config_path = self._ensure_installed_runtime_config(config)
+        synchronized_commands = self._ensure_schedule_command_wrappers(config, runtime_config_path)
+        paths = self._runtime_paths(config)
+        required_paths = (
+            paths["runner"],
+            paths["installer"],
+            paths["remover"],
+            runtime_config_path,
+            paths["working_root"] / "Run-Incremental.cmd",
+            paths["working_root"] / "Run-Full.cmd",
+        )
+        missing = [str(path) for path in required_paths if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(
+                "Automation schedule runtime could not be prepared. Missing: " + ", ".join(missing)
+            )
+
+        synchronized = [*synchronized_files, *synchronized_commands]
+        self._runtime_sync_status = {
+            "attempted": True,
+            "ok": True,
+            "deferred": False,
+            "schedulePrepared": True,
+            "synchronizedFiles": synchronized,
+            "configPath": str(runtime_config_path),
+            "error": "",
+        }
+        return {
+            "configPath": runtime_config_path,
+            "synchronizedFiles": synchronized,
+        }
 
     def _runtime_lock_busy(self, config: dict[str, Any]) -> bool:
         """Return True when PowerShell currently owns the shared automation lock."""
@@ -1428,10 +1571,11 @@ class DeliveryAutomationController:
 
     def _run_schedule_script(self, script_name: str) -> dict[str, Any]:
         config = self._read_config(required=True)
+        prepared = self._prepare_schedule_runtime(config)
         paths = self._runtime_paths(config)
         script = paths[script_name]
         if not script.is_file():
-            raise FileNotFoundError(f"Scheduled-task script is missing: {script}")
+            raise FileNotFoundError(f"Scheduled-task script is missing after runtime refresh: {script}")
         result = subprocess.run(
             [
                 self._power_shell(config),
@@ -1441,7 +1585,7 @@ class DeliveryAutomationController:
                 "-File",
                 str(script),
                 "-ConfigPath",
-                str(self.config_path()),
+                str(prepared["configPath"]),
             ],
             cwd=str(paths["script_root"]),
             capture_output=True,
@@ -1456,17 +1600,33 @@ class DeliveryAutomationController:
         return {
             "ok": True,
             "message": (result.stdout or "Scheduled-task settings updated.").strip(),
+            "synchronizedRuntimeFiles": prepared["synchronizedFiles"],
+            "runtimeConfigPath": str(prepared["configPath"]),
             "dashboard": self.get_dashboard(),
         }
 
     def install_schedule(self) -> dict[str, Any]:
+        # Keep the saved flag aligned with the real Windows task state if setup
+        # fails. The PowerShell installer turns it on only after both tasks are
+        # created, verified, and successfully launched.
+        config = self._read_config(required=True)
+        config.setdefault("Automation", {})["ScheduleEnabled"] = self._schedule_installed()
+        self._write_config(config)
+        result = self._run_schedule_script("installer")
+        runtime_config_path = Path(str(result.get("runtimeConfigPath") or ""))
+        if runtime_config_path.is_file():
+            self._set_schedule_enabled_in_config_path(runtime_config_path, True)
         config = self._read_config(required=True)
         config.setdefault("Automation", {})["ScheduleEnabled"] = True
         self._write_config(config)
-        return self._run_schedule_script("installer")
+        result["dashboard"] = self.get_dashboard()
+        return result
 
     def remove_schedule(self) -> dict[str, Any]:
         result = self._run_schedule_script("remover")
+        runtime_config_path = Path(str(result.get("runtimeConfigPath") or ""))
+        if runtime_config_path.is_file():
+            self._set_schedule_enabled_in_config_path(runtime_config_path, False)
         config = self._read_config(required=True)
         config.setdefault("Automation", {})["ScheduleEnabled"] = False
         self._write_config(config)
