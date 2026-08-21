@@ -25973,3 +25973,336 @@ body[data-page="scan"] .app-header {
     bottom: calc(4px + env(safe-area-inset-bottom)) !important;
   }
 }
+
+/* ========================================================================== */
+/* v0.326 Global Search placement, scroll containment, and blocked actions    */
+/* ========================================================================== */
+
+/* Only real overflow owners should contain their own boundary gesture.
+   Applying overscroll containment to every descendant prevents the document
+   from scrolling when the pointer is over an ordinary card, heading, or panel. */
+html,
+body {
+  overscroll-behavior-y: auto;
+}
+
+.header-search-results {
+  max-height: min(520px, calc(100dvh - 112px)) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable;
+}
+
+.global-result-status-row {
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.global-result-scan-time-v321 {
+  grid-column: auto;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin: 0 0 0 auto;
+  padding-left: 10px;
+  color: #6a7890;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* Modal content panes that actually own vertical overflow keep their scroll
+   boundary contained. Static modal headers/actions remain transparent to wheel
+   scrolling instead of acting like dead zones. */
+.modal-panel #adminModalBody,
+.modal-panel #operationsModalBody {
+  overscroll-behavior: contain;
+}
+
+/* Action-history lists are not always scroll owners. Admin history, for
+   example, scrolls the complete tab so its search controls move with results. */
+#operationsModal .modal-action-history-list {
+  overscroll-behavior: contain;
+}
+
+button.is-blocked,
+button[aria-disabled="true"][data-blocked-reason] {
+  border-color: #c9d1dc !important;
+  background: #edf0f4 !important;
+  color: #7a8594 !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+  opacity: .82;
+  transform: none !important;
+}
+
+button.is-blocked:hover,
+button.is-blocked:focus-visible,
+button[aria-disabled="true"][data-blocked-reason]:hover,
+button[aria-disabled="true"][data-blocked-reason]:focus-visible {
+  border-color: #aeb8c6 !important;
+  background: #e5e9ee !important;
+  color: #626e7d !important;
+  box-shadow: 0 0 0 3px rgba(104, 119, 137, .1) !important;
+  outline: none !important;
+  transform: none !important;
+}
+
+.rack-scope-move-button.is-blocked,
+.rack-scope-move-button[aria-disabled="true"][data-blocked-reason] {
+  opacity: .78;
+}
+
+.action-feedback-shell.warning .action-feedback-icon,
+.action-feedback-shell.error .action-feedback-icon {
+  position: relative;
+  border-color: #e1bd69;
+  background: linear-gradient(145deg, #fff9e9, #fff1c7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 10px 24px rgba(172, 117, 12, .14);
+}
+
+.action-feedback-shell.error .action-feedback-icon {
+  border-color: #e4a3a3;
+  background: linear-gradient(145deg, #fff3f3, #ffe1e1);
+}
+
+.action-feedback-shell.warning .action-feedback-icon i,
+.action-feedback-shell.error .action-feedback-icon i {
+  width: 5px;
+  height: 27px;
+  border: 0;
+  border-radius: 999px;
+  background: #a56b08;
+  transform: none;
+}
+
+.action-feedback-shell.warning .action-feedback-icon i::after,
+.action-feedback-shell.error .action-feedback-icon i::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 11px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #a56b08;
+  transform: translateX(-50%);
+}
+
+.action-feedback-shell.error .action-feedback-icon i,
+.action-feedback-shell.error .action-feedback-icon i::after {
+  background: #a93636;
+}
+
+.action-feedback-shell.warning .action-feedback-copy > small {
+  color: #8b5e08;
+}
+
+.action-feedback-shell.error .action-feedback-copy > small {
+  color: #a93636;
+}
+
+@media (max-width: 620px) {
+  .global-result-status-row {
+    align-items: flex-start;
+  }
+
+  .global-result-scan-time-v321 {
+    width: 100%;
+    margin-left: 0;
+    padding-left: 0;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.328 Sticky-header transparent hit-area correction                       */
+/* ========================================================================== */
+/* The sticky header visually overlaps page content while scrolling, but its
+   transparent/background area must not steal hover/clicks from page controls.
+   Actual header controls opt back into hit testing below. */
+body:not(.modal-scroll-locked) .app-header {
+  pointer-events: none;
+}
+
+body:not(.modal-scroll-locked) .app-header :is(
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  label,
+  [role="button"],
+  [role="combobox"],
+  .custom-select-menu,
+  .header-search-results,
+  .sidebar-user-menu
+) {
+  pointer-events: auto;
+}
+
+
+/* ==========================================================================
+   v0.354 MODAL PERFORMANCE OWNERSHIP
+   --------------------------------------------------------------------------
+   Large operational GUIs previously blurred both the full viewport backdrop
+   and the live application header. Those effects force continuous GPU
+   recomposition during scrolling and are especially expensive on floor PCs.
+   Keep the same visual separation with opaque/translucent surfaces, isolate
+   modal painting, and keep hover feedback short enough to track the pointer.
+   ========================================================================== */
+body.modal-scroll-locked :is(.app-header, .app-sidebar) {
+  filter: none !important;
+  opacity: .56 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: opacity 90ms ease !important;
+}
+
+body.modal-scroll-locked [class*="backdrop"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.modal-scroll-locked :is(
+  .modal-panel,
+  .print-options-panel,
+  [class*="print-preset-modal"],
+  .action-feedback-panel,
+  [role="dialog"][aria-modal="true"]
+) {
+  contain: layout paint;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.modal-scroll-locked .custom-select-menu {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.modal-scroll-locked :is(
+  #adminModalBody,
+  #operationsModalBody,
+  .bay-operation-view,
+  .sdi-current-list,
+  .sdi-item-selection-list,
+  .stale-bay-list,
+  .modal-action-history-list,
+  .recent-table-wrap.expanded
+) {
+  contain: layout paint style;
+  scroll-behavior: auto !important;
+}
+
+body.modal-scroll-locked :is(.modal-panel, .print-options-panel, [class*="print-preset-modal"], .action-feedback-panel, [role="dialog"][aria-modal="true"]) :is(
+  button,
+  summary,
+  [role="button"],
+  .tool-button,
+  .custom-select-option,
+  article
+) {
+  transition-duration: 80ms !important;
+}
+
+body.modal-scroll-locked :is(.modal-panel, .print-options-panel, [class*="print-preset-modal"], .action-feedback-panel, [role="dialog"][aria-modal="true"]) :is(
+  button,
+  summary,
+  [role="button"],
+  .tool-button,
+  .custom-select-option
+):hover {
+  filter: none !important;
+}
+
+/* ========================================================================== */
+/* v0.357 Shared page-header geometry                                         */
+/* ========================================================================== */
+/* Page-specific colors/icons stay with their owning page stylesheet. This
+   contract only normalizes the top-level header rhythm so Home, Statistics,
+   Scan, Racks, Rejects, Bay Map, and Admin feel like one application. */
+.app-page-header-v357 {
+  box-sizing: border-box !important;
+  min-height: 116px !important;
+  padding: 20px 24px !important;
+  border-radius: 16px !important;
+}
+
+.home-page > .app-page-header-v357,
+.statistics-page > .app-page-header-v357,
+.scan-page > .app-page-header-v357,
+.racks-page > .app-page-header-v357,
+.admin-page > .app-page-header-v357 {
+  margin-top: 0 !important;
+  margin-bottom: 16px !important;
+}
+
+.app-page-header-v357 h1 {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  font-size: clamp(30px, 2.55vw, 36px) !important;
+  line-height: 1.04 !important;
+  letter-spacing: -0.032em !important;
+}
+
+.app-page-header-v357 p {
+  max-width: 800px !important;
+  margin-top: 7px !important;
+  margin-bottom: 0 !important;
+  font-size: 13px !important;
+  font-weight: 650 !important;
+  line-height: 1.42 !important;
+}
+
+.app-page-header-v357 :is(.page-eyebrow, .statistics-page-eyebrow-v0258, .bay-page-eyebrow) {
+  margin-bottom: 5px !important;
+  font-size: 10px !important;
+  font-weight: 950 !important;
+  letter-spacing: .09em !important;
+  line-height: 1.2 !important;
+  text-transform: uppercase !important;
+}
+
+.app-page-header-v357 .app-page-eyebrow-v357 {
+  display: block !important;
+  width: fit-content !important;
+  color: var(--workspace-accent, #315f99) !important;
+}
+
+.home-page > .app-page-header-v357,
+.scan-page > .app-page-header-v357,
+.racks-page > .app-page-header-v357,
+.admin-page > .app-page-header-v357 {
+  align-items: center !important;
+}
+
+/* Rejects and Bay Map keep their established red/navy identities, but match
+   the same header height, typography, padding, and corner geometry. */
+.reject-page-heading-v151.app-page-header-v357 {
+  min-height: 116px !important;
+  padding: 20px 24px 20px 30px !important;
+}
+
+.bay-title-card-wide-v181.app-page-header-v357 {
+  min-height: 116px !important;
+  padding: 20px 24px !important;
+}
+
+.statistics-command-header-v0258.app-page-header-v357 {
+  min-height: 116px !important;
+  padding: 20px 24px !important;
+}
+
+@media (max-width: 900px) {
+  .app-page-header-v357 {
+    min-height: 0 !important;
+    padding: 18px 18px !important;
+  }
+
+  .app-page-header-v357 h1 {
+    font-size: clamp(27px, 7vw, 32px) !important;
+  }
+}

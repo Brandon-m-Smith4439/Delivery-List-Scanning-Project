@@ -480,7 +480,7 @@ def rack_public_label(rack_code: Any, display_name: Any = "", rack_type: Any = "
     code = normalize_rack_code(str(rack_code or ""))
     if code == "T":
         return "Truck 1"
-    numbered = re.fullmatch(r"T(\d+)", code)
+    numbered = re.fullmatch(r"(?:R?T)(\d+)", code)
     if numbered:
         return f"Truck {int(numbered.group(1))}"
     name = str(display_name or "").strip()
@@ -664,6 +664,37 @@ def parse_dimension_number(part: str) -> float:
 # These values are expressed in dollars per square foot. v0.261 keeps the defaults
 # in code for a safe fallback, while administrator overrides are persisted in the
 # existing admin_lookup_values table so no database migration is required.
+PRIORITY_REASON_SEEDS = (
+    "Measured Wrong",
+    "Damaged on Install",
+    "Ordered Wrong",
+    "Entered Wrong",
+    "Improper Fabrication",
+    "Broke At Barefoot",
+    "Damaged At Barefoot",
+    "Damaged On Job Site",
+    "Broke On Our Truck",
+    "Lost By Warehouse",
+    "Supplier Defect",
+    "Staged Wrong And Thrown Away",
+    "Thrown Away By Installer",
+    "Robbed For Another Job",
+    "Came In Bowed",
+    "Lights Are Too Low",
+    "Not Entered On Sg",
+    "Right Notch Broke At Barefoot",
+    "2 And 3 Ordered Wrong",
+)
+
+PRIORITY_RESPONSIBLE_SEEDS = (
+    "Airport", "Barefoot", "Builder", "Purchasing",
+    "AG", "Chris C", "Emil", "Isaac", "Issac", "Jamie D", "Jeremy", "Joel",
+    "John", "John R", "Juan", "Kevin B", "Mark", "Moreno", "Nate", "PeeWee",
+    "Raul", "Ray", "Ronnie", "Santos", "Saulo", "Sean", "Sean W", "Shawn",
+    "Shawn W", "Tony", "Unknown", "Wes",
+)
+
+
 GLASS_COST_PER_SQFT = {
     "3/8 Clear": 1.83,
     "1/2 Clear": 2.11,
@@ -1606,19 +1637,48 @@ def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
             "rackCode": row_value(row, "rack_code", ""),
             "rackName": row_value(row, "rack_name", ""),
             "rackStatus": row_value(row, "rack_status", ""),
+            "lastRackCode": row_value(row, "last_rack_code", ""),
+            "lastRackName": row_value(row, "last_rack_name", ""),
+            "lastRackType": row_value(row, "last_rack_type", ""),
+            "lastRackItemStatus": row_value(row, "last_rack_item_status", ""),
             "bayCode": row_value(row, "bay_code", ""),
             "bayName": row_value(row, "bay_name", ""),
+            "lastBayCode": row_value(row, "last_bay_code", ""),
+            "lastBayName": row_value(row, "last_bay_name", ""),
+            "lastBayAssignmentStatus": row_value(row, "last_bay_assignment_status", ""),
+            # v0.352: preserve the physical location that was active when the
+            # event happened. All Scans can therefore show Truck 1 on the old
+            # scan even after the same glass is later moved to Steel 1.
+            "eventRackCode": row_value(row, "event_rack_code", ""),
+            "eventRackName": row_value(row, "event_rack_name", ""),
+            "eventRackType": row_value(row, "event_rack_type", ""),
+            "eventBayCode": row_value(row, "event_bay_code", ""),
+            "eventBayName": row_value(row, "event_bay_name", ""),
             "outboundScanned": bool(row_value(row, "outbound_scanned", 0)),
             "listStage": row_value(row, "list_stage", ""),
         }
+    rack_move_from = ""
+    rack_move_to = ""
+    if str(row["event_type"] or "").lower() == "rack_move":
+        move_reason = str(row["reason"] or "").strip()
+        match = re.match(r"^Moved from (.+?) to (.+)$", move_reason, flags=re.IGNORECASE)
+        if match:
+            rack_move_from = match.group(1).strip()
+            rack_move_to = match.group(2).strip()
+
     return {
-        "ok": row["event_type"] in {"scan", "manual_scan", "undo", "redo", "import", "update"},
+        "ok": row["event_type"] in {"scan", "manual_scan", "undo", "redo", "import", "update", "rack_move"},
         "isManual": row["event_type"] == "manual_scan",
         "barcode": row["canonical_barcode"] or row["barcode"],
         "raw": row["barcode"],
         "item": item,
         "message": row["message"],
         "reason": row["reason"],
+        # v0.353: expose the logged source/destination directly. The All Scans
+        # Location cell uses the destination for rack_move rows instead of
+        # reconstructing direction from rack-history timestamp boundaries.
+        "rackMoveFrom": rack_move_from,
+        "rackMoveTo": rack_move_to,
         "time": row["created_at"],
         "user": row["user_name"],
         "station": row["station"],
@@ -1662,6 +1722,20 @@ def request_station(data: dict[str, Any]) -> str:
     Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
     """
     return str(data.get("station") or "").strip()[:80]
+
+
+def request_scan_quantity(data: dict[str, Any], maximum: int = 999) -> int:
+    """Return the validated number of physical pieces represented by one scan action."""
+    raw = data.get("scanQty", 1)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        raw = 1
+    try:
+        quantity = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Scan quantity must be a whole number") from exc
+    if quantity < 1 or quantity > maximum:
+        raise ValueError(f"Scan quantity must be between 1 and {maximum}")
+    return quantity
 
 
 class BaseDeliveryStore:
@@ -3647,7 +3721,7 @@ class BaseDeliveryStore:
                 return ""
             if clean_code == "T":
                 return "Truck 1"
-            if re.fullmatch(r"T\d+", clean_code):
+            if re.fullmatch(r"(?:R?T)\d+", clean_code):
                 return f"Truck {clean_code[1:]}"
             return f"Rack {clean_code}"
 
@@ -4685,6 +4759,26 @@ class BaseDeliveryStore:
         This read-only workspace keeps the SDI modal grounded in Indian Trail destination
         rows so the browser can distinguish physically present items from missing items.
         """
+        raise NotImplementedError
+
+    def create_priority_intake_request(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Pre-register one Rush or Remake request before its A+W order exists."""
+        raise NotImplementedError
+
+    def update_priority_intake_request(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Update an existing Rush/Remake request without deleting its audit history."""
+        raise NotImplementedError
+
+    def cancel_priority_intake_request(self, request_id: str, user: str) -> dict[str, Any]:
+        """Cancel a pending or matched priority-intake request without deleting its history."""
+        raise NotImplementedError
+
+    def priority_intake_requests(self, include_cancelled: bool = False) -> list[dict[str, Any]]:
+        """Return durable Rush/Remake intake requests reconstructed from immutable audit events."""
+        raise NotImplementedError
+
+    def priority_intake_options(self) -> dict[str, Any]:
+        """Return reusable Rush/Remake reason, responsibility, and recipient choices."""
         raise NotImplementedError
 
     def get_bay_layout(self) -> dict[str, Any]:
@@ -5938,6 +6032,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             route = inferred or ("IT" if job_number_route_hint(item) is not None else "")
         product = str(item.get("product", ""))
         dimensions = str(item.get("dimensions", ""))
+        imported_process_state = imported_nonpriority_state(item.get("processState", ""))
+        priority_intake_type = str(item.get("priorityIntakeType") or "").strip().title()
+        if priority_intake_type in {"Rush", "Remake"} and not re.search(
+            rf"\b{re.escape(priority_intake_type)}\b", imported_process_state, flags=re.IGNORECASE
+        ):
+            imported_process_state = " ".join(part for part in (imported_process_state, priority_intake_type) if part).strip()
         return {
             "id": f"{list_id}-{index:04d}-{order_no}-{item_no}",
             "source_id": str(item.get("id") or f"{order_no}-{item_no}"),
@@ -5951,7 +6051,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "source_route": str(item.get("sourceRoute", item.get("route", ""))),
             "job": str(item.get("job", "")),
             "product": product,
-            "process_state": imported_nonpriority_state(item.get("processState", "")),
+            "process_state": imported_process_state,
             "queue_state": imported_nonpriority_state(item.get("queueState", "")),
             "suggested_bay": suggested_bay(product, dimensions, route, auto_assign_settings),
         }
@@ -7605,14 +7705,40 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rack_history_by_item = {row["target_id"]: row for row in rack_history_rows}
             bay_rows = con.execute(
                 """
-                SELECT ba.line_item_id, b.bay_code
+                SELECT ba.line_item_id, b.bay_code, b.display_name AS bay_name
                 FROM bay_assignments ba
                 JOIN bays b ON b.id = ba.bay_id
                 WHERE ba.delivery_list_id = ? AND ba.status NOT IN ('Cleared', 'Cancelled')
                 """,
                 (list_id,),
             ).fetchall()
-            bay_by_item = {row["line_item_id"]: row["bay_code"] for row in bay_rows}
+            bay_by_item = {row["line_item_id"]: row for row in bay_rows}
+            bay_history_rows = con.execute(
+                """
+                WITH bay_history AS (
+                    SELECT ba.line_item_id,
+                           b.bay_code,
+                           b.display_name AS bay_name,
+                           ba.status AS bay_assignment_status,
+                           ba.assigned_at,
+                           ba.cleared_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY ba.line_item_id
+                               ORDER BY CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN 0 ELSE 1 END,
+                                        CASE WHEN COALESCE(ba.cleared_at, '') <> '' THEN ba.cleared_at ELSE ba.assigned_at END DESC,
+                                        ba.id DESC
+                           ) AS history_rank
+                    FROM bay_assignments ba
+                    JOIN bays b ON b.id = ba.bay_id
+                    WHERE ba.delivery_list_id = ?
+                )
+                SELECT line_item_id, bay_code, bay_name, bay_assignment_status, assigned_at, cleared_at
+                FROM bay_history
+                WHERE history_rank = 1
+                """,
+                (list_id,),
+            ).fetchall()
+            bay_history_by_item = {row["line_item_id"]: row for row in bay_history_rows}
             for item in items:
                 rack = rack_by_item.get(item["id"])
                 rack_history = rack_history_by_item.get(item["id"])
@@ -7624,7 +7750,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         rack_public_label(rack_code, rack["rack_name"], rack_type)
                         if (
                             rack_code.upper() == "T"
-                            or re.fullmatch(r"T\d+", rack_code.upper())
+                            or re.fullmatch(r"(?:R?T)\d+", rack_code.upper())
                             or "TRUCK" in rack_type.upper()
                         )
                         else (rack["rack_name"] or rack_code)
@@ -7638,7 +7764,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         rack_public_label(last_rack_code, rack_history["rack_name"], last_rack_type)
                         if (
                             last_rack_code.upper() == "T"
-                            or re.fullmatch(r"T\d+", last_rack_code.upper())
+                            or re.fullmatch(r"(?:R?T)\d+", last_rack_code.upper())
                             or "TRUCK" in last_rack_type.upper()
                         )
                         else str(rack_history["rack_name"] or last_rack_code)
@@ -7654,8 +7780,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     item["lastRackItemStatus"] = ""
                     item["lastRackAddedAt"] = ""
                     item["lastRackRemovedAt"] = ""
-                if item["id"] in bay_by_item:
-                    item["bayCode"] = bay_by_item[item["id"]]
+                bay = bay_by_item.get(item["id"])
+                if bay:
+                    item["bayCode"] = str(bay["bay_code"] or "")
+                    item["bayName"] = str(bay["bay_name"] or bay["bay_code"] or "")
+                else:
+                    item["bayCode"] = ""
+                    item["bayName"] = ""
+
+                bay_history = bay_history_by_item.get(item["id"])
+                if bay_history:
+                    item["lastBayCode"] = str(bay_history["bay_code"] or "")
+                    item["lastBayName"] = str(bay_history["bay_name"] or bay_history["bay_code"] or "")
+                    item["lastBayAssignmentStatus"] = str(bay_history["bay_assignment_status"] or "")
+                    item["lastBayAssignedAt"] = str(bay_history["assigned_at"] or "")
+                    item["lastBayClearedAt"] = str(bay_history["cleared_at"] or "")
+                else:
+                    item["lastBayCode"] = ""
+                    item["lastBayName"] = ""
+                    item["lastBayAssignmentStatus"] = ""
+                    item["lastBayAssignedAt"] = ""
+                    item["lastBayClearedAt"] = ""
 
             receipt_rows = con.execute(
                 """
@@ -7808,6 +7953,56 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                        SELECT r.rack_code
                        FROM rack_items ri
                        JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                         AND COALESCE(ri.added_at, '') <= se.created_at
+                         AND (COALESCE(ri.removed_at, '') = '' OR ri.removed_at > se.created_at)
+                       ORDER BY ri.added_at DESC, ri.id DESC
+                       LIMIT 1
+                   ) AS event_rack_code,
+                   (
+                       SELECT r.display_name
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                         AND COALESCE(ri.added_at, '') <= se.created_at
+                         AND (COALESCE(ri.removed_at, '') = '' OR ri.removed_at > se.created_at)
+                       ORDER BY ri.added_at DESC, ri.id DESC
+                       LIMIT 1
+                   ) AS event_rack_name,
+                   (
+                       SELECT r.rack_type
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                         AND COALESCE(ri.added_at, '') <= se.created_at
+                         AND (COALESCE(ri.removed_at, '') = '' OR ri.removed_at > se.created_at)
+                       ORDER BY ri.added_at DESC, ri.id DESC
+                       LIMIT 1
+                   ) AS event_rack_type,
+                   (
+                       SELECT b.bay_code
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                         AND COALESCE(ba.assigned_at, '') <= se.created_at
+                         AND (COALESCE(ba.cleared_at, '') = '' OR ba.cleared_at > se.created_at)
+                       ORDER BY ba.assigned_at DESC, ba.id DESC
+                       LIMIT 1
+                   ) AS event_bay_code,
+                   (
+                       SELECT b.display_name
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                         AND COALESCE(ba.assigned_at, '') <= se.created_at
+                         AND (COALESCE(ba.cleared_at, '') = '' OR ba.cleared_at > se.created_at)
+                       ORDER BY ba.assigned_at DESC, ba.id DESC
+                       LIMIT 1
+                   ) AS event_bay_name,
+                   (
+                       SELECT r.rack_code
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
                        WHERE ri.line_item_id = li.id AND ri.status = 'Active' AND r.active = 1
                        ORDER BY ri.added_at DESC, ri.id DESC
                        LIMIT 1
@@ -7846,6 +8041,76 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                        ORDER BY ba.assigned_at DESC, ba.id DESC
                        LIMIT 1
                    ) AS bay_name,
+                   (
+                       SELECT r.rack_code
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                       ORDER BY CASE WHEN ri.status = 'Active' THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ri.removed_at, '') <> '' THEN ri.removed_at ELSE ri.added_at END DESC,
+                                ri.id DESC
+                       LIMIT 1
+                   ) AS last_rack_code,
+                   (
+                       SELECT r.display_name
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                       ORDER BY CASE WHEN ri.status = 'Active' THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ri.removed_at, '') <> '' THEN ri.removed_at ELSE ri.added_at END DESC,
+                                ri.id DESC
+                       LIMIT 1
+                   ) AS last_rack_name,
+                   (
+                       SELECT r.rack_type
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                       ORDER BY CASE WHEN ri.status = 'Active' THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ri.removed_at, '') <> '' THEN ri.removed_at ELSE ri.added_at END DESC,
+                                ri.id DESC
+                       LIMIT 1
+                   ) AS last_rack_type,
+                   (
+                       SELECT ri.status
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                       ORDER BY CASE WHEN ri.status = 'Active' THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ri.removed_at, '') <> '' THEN ri.removed_at ELSE ri.added_at END DESC,
+                                ri.id DESC
+                       LIMIT 1
+                   ) AS last_rack_item_status,
+                   (
+                       SELECT b.bay_code
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                       ORDER BY CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ba.cleared_at, '') <> '' THEN ba.cleared_at ELSE ba.assigned_at END DESC,
+                                ba.id DESC
+                       LIMIT 1
+                   ) AS last_bay_code,
+                   (
+                       SELECT b.display_name
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                       ORDER BY CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ba.cleared_at, '') <> '' THEN ba.cleared_at ELSE ba.assigned_at END DESC,
+                                ba.id DESC
+                       LIMIT 1
+                   ) AS last_bay_name,
+                   (
+                       SELECT ba.status
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                       ORDER BY CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ba.cleared_at, '') <> '' THEN ba.cleared_at ELSE ba.assigned_at END DESC,
+                                ba.id DESC
+                       LIMIT 1
+                   ) AS last_bay_assignment_status,
                    EXISTS(
                        SELECT 1
                        FROM delivery_lists outbound_list
@@ -9534,6 +9799,632 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return [row for row in destination_rows if str(row["list_id"] or "") == best_list and str(row["order_no"] or "") == digits]
         return [best]
 
+    @staticmethod
+    def priority_intake_job_parts(value: Any) -> dict[str, str | bool]:
+        """Normalize Smart Glazier/A+W Job Nr. text for Rush/Remake matching.
+
+        A plain numeric suffix such as ``.2`` is normal Smart Glazier job/version
+        syntax and MUST NOT classify the job as a remake. Only a terminal
+        ``.<number>R`` suffix (``.2R``, ``.3R``, ``.4R``...) is a remake
+        generation. Explicit A+W RM/Remake markers are handled separately.
+        """
+        raw = " ".join(str(value or "").strip().upper().split())
+        normalized = normalized_match_text(raw)
+        token = (raw.split(" ", 1)[0] if raw else "").rstrip(".")
+        token = re.sub(r"[^A-Z0-9_.-]+$", "", token)
+        remake_match = re.match(r"^(.*?)(?:\.(\d+)R)$", token, flags=re.IGNORECASE)
+        remake_suffix = bool(remake_match and remake_match.group(2))
+        root = (remake_match.group(1) if remake_suffix else token).rstrip(".")
+        return {
+            "raw": raw,
+            "normalized": normalized,
+            "token": token,
+            "root": root,
+            "remakeSuffix": remake_suffix,
+            "remakeGeneration": str(remake_match.group(2) if remake_suffix else ""),
+        }
+
+    def _priority_intake_requests_con(self, con: Any, include_cancelled: bool = False) -> list[dict[str, Any]]:
+        """Rebuild priority-intake state from its append-only audit ledger."""
+        rows = con.execute(
+            """
+            SELECT id, entity_id, action, user_name, reason, payload_json, created_at
+            FROM audit_events
+            WHERE entity_type = 'priority_intake'
+              AND action IN (
+                  'priority_intake_created',
+                  'priority_intake_email',
+                  'priority_intake_matched',
+                  'priority_intake_updated',
+                  'priority_intake_cancelled'
+              )
+            ORDER BY id
+            """
+        ).fetchall()
+        requests: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            request_id = str(row["entity_id"] or "").strip()
+            if not request_id:
+                continue
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            action = str(row["action"] or "")
+            if action == "priority_intake_created":
+                request = {
+                    "requestId": request_id,
+                    "priorityType": str(payload.get("priorityType") or "Rush"),
+                    "jobNumber": str(payload.get("jobNumber") or ""),
+                    "reason": str(payload.get("reason") or row["reason"] or ""),
+                    "responsible": str(payload.get("responsible") or ""),
+                    "emailMode": str(payload.get("emailMode") or "none"),
+                    "recipients": [str(value) for value in (payload.get("recipients") or []) if str(value).strip()],
+                    "fromEmail": str(payload.get("fromEmail") or ""),
+                    "createdBy": str(row["user_name"] or payload.get("createdBy") or ""),
+                    "createdAt": str(row["created_at"] or ""),
+                    "status": "pending",
+                    "emailStatus": "not_requested",
+                    "matchedAt": "",
+                    "matchedJob": "",
+                    "matchedDeliveryDate": "",
+                    "matchedOrders": [],
+                    "matchedSourceKeys": [],
+                    "matchedLineCount": 0,
+                    "matchedPieceQty": 0,
+                    "cancelledAt": "",
+                    "cancelledBy": "",
+                }
+                requests[request_id] = request
+                continue
+            request = requests.get(request_id)
+            if not request:
+                continue
+            if action == "priority_intake_updated":
+                for key, payload_key in (("priorityType", "priorityType"), ("jobNumber", "jobNumber"), ("reason", "reason"), ("responsible", "responsible"), ("emailMode", "emailMode")):
+                    if payload_key in payload:
+                        request[key] = str(payload.get(payload_key) or request.get(key) or "")
+                if "recipients" in payload:
+                    request["recipients"] = [str(value) for value in (payload.get("recipients") or []) if str(value).strip()]
+                request["updatedAt"] = str(row["created_at"] or "")
+                request["updatedBy"] = str(row["user_name"] or "")
+            elif action == "priority_intake_email":
+                request["emailStatus"] = str(payload.get("status") or "not_requested")
+                request["emailError"] = str(payload.get("error") or "")
+                request["emailOutboxId"] = int(payload.get("outboxId") or 0)
+            elif action == "priority_intake_matched":
+                request["status"] = "matched"
+                request["matchedAt"] = str(row["created_at"] or "")
+                request["matchedJob"] = str(payload.get("matchedJob") or "")
+                request["matchedDeliveryDate"] = str(payload.get("deliveryDate") or "")
+                request["matchedOrders"] = [str(value) for value in (payload.get("orders") or []) if str(value).strip()]
+                request["matchedSourceKeys"] = [str(value) for value in (payload.get("sourceKeys") or []) if str(value).strip()]
+                request["matchedLineCount"] = int(payload.get("lineCount") or 0)
+                request["matchedPieceQty"] = int(payload.get("pieceQty") or 0)
+            elif action == "priority_intake_cancelled":
+                request["status"] = "cancelled"
+                request["cancelledAt"] = str(row["created_at"] or "")
+                request["cancelledBy"] = str(row["user_name"] or "")
+                request["cancelReason"] = str(payload.get("reason") or row["reason"] or "")
+        result = list(requests.values())
+        # Matched requests expose the current imported order/item facts directly in
+        # Work Center so users do not have to jump to another screen to understand it.
+        for request in result:
+            request["matchedItems"] = []
+            orders = [str(value).strip() for value in (request.get("matchedOrders") or []) if str(value).strip()]
+            matched_job = str(request.get("matchedJob") or "").strip()
+            if request.get("status") != "matched" or (not orders and not matched_job):
+                continue
+            clauses = []
+            params: list[Any] = []
+            if orders:
+                clauses.append("li.order_no IN (%s)" % ",".join("?" for _ in orders))
+                params.extend(orders)
+            if matched_job:
+                clauses.append("li.job = ?")
+                params.append(matched_job)
+            item_rows = con.execute(
+                f"""
+                SELECT li.id, li.source_id, li.order_no, li.item_no, li.job, li.customer, li.product,
+                       li.dimensions, li.qty, li.scanned_qty, li.route, li.process_state,
+                       dl.delivery_date, dl.stage
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE COALESCE(li.is_deleted, 0) = 0 AND ({' OR '.join(clauses)})
+                ORDER BY li.order_no, li.item_no, dl.delivery_date, dl.stage
+                """,
+                params,
+            ).fetchall()
+            logical: dict[str, dict[str, Any]] = {}
+            for item_row in item_rows:
+                key = str(item_row["source_id"] or "").strip() or f"{item_row['order_no']}::{item_row['item_no']}"
+                current = logical.get(key)
+                candidate = {
+                    "lineItemId": str(item_row["id"] or ""),
+                    "order": str(item_row["order_no"] or ""),
+                    "item": str(item_row["item_no"] or ""),
+                    "job": str(item_row["job"] or ""),
+                    "customer": str(item_row["customer"] or ""),
+                    "product": str(item_row["product"] or ""),
+                    "dimensions": str(item_row["dimensions"] or ""),
+                    "qty": int(item_row["qty"] or 0),
+                    "scannedQty": int(item_row["scanned_qty"] or 0),
+                    "route": str(item_row["route"] or ""),
+                    "processState": str(item_row["process_state"] or ""),
+                    "deliveryDate": str(item_row["delivery_date"] or ""),
+                    "stage": str(item_row["stage"] or ""),
+                }
+                if current is None or candidate["scannedQty"] >= int(current.get("scannedQty") or 0):
+                    logical[key] = candidate
+            request["matchedItems"] = list(logical.values())
+            if request["matchedItems"]:
+                request["matchedCustomer"] = next((item["customer"] for item in request["matchedItems"] if item.get("customer")), "")
+                request["matchedRoute"] = next((item["route"] for item in request["matchedItems"] if item.get("route")), "")
+        if not include_cancelled:
+            result = [request for request in result if request.get("status") != "cancelled"]
+        result.sort(key=lambda request: (request.get("status") == "cancelled", request.get("status") == "matched", str(request.get("createdAt") or "")), reverse=False)
+        return result
+
+    def priority_intake_requests(self, include_cancelled: bool = False) -> list[dict[str, Any]]:
+        """Return durable Rush/Remake intake requests without adding another mutable schema table."""
+        with self.connect() as con:
+            return self._priority_intake_requests_con(con, include_cancelled=include_cancelled)
+
+    def priority_intake_options(self) -> dict[str, Any]:
+        """Build reusable intake choices from maintained seeds, history, and active scanner users.
+
+        Custom reasons and responsible people become reusable automatically after
+        they are saved on a request, so Order Entry can extend the library without
+        a new schema table. Recipient choices expose only active users with valid
+        saved email addresses.
+        """
+        reasons = {value for value in PRIORITY_REASON_SEEDS if value}
+        responsible_people = {value for value in PRIORITY_RESPONSIBLE_SEEDS if value}
+        recipient_users: list[dict[str, str]] = []
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT payload_json
+                FROM audit_events
+                WHERE (
+                    entity_type = 'priority_intake'
+                    AND action IN ('priority_intake_created', 'priority_existing_rush_email')
+                ) OR (
+                    entity_type = 'line_item'
+                    AND action = 'mark_rush_sdi'
+                )
+                ORDER BY id DESC
+                """
+            ).fetchall()
+            for row in rows:
+                try:
+                    payload = json.loads(row["payload_json"] or "{}")
+                except Exception:
+                    payload = {}
+                if not isinstance(payload, dict):
+                    continue
+                reason = " ".join(str(payload.get("reason") or "").split())[:500]
+                responsible = " ".join(str(payload.get("responsible") or "").split())[:180]
+                if reason:
+                    reasons.add(reason)
+                if responsible:
+                    responsible_people.add(responsible)
+
+            user_rows = con.execute(
+                """
+                SELECT username, email, display_name
+                FROM users
+                WHERE active = 1 AND TRIM(COALESCE(email, '')) <> ''
+                ORDER BY COALESCE(NULLIF(display_name, ''), username), username
+                """
+            ).fetchall()
+            for row in user_rows:
+                email = str(row["email"] or "").strip().lower()
+                if not is_valid_email(email):
+                    continue
+                recipient_users.append({
+                    "username": str(row["username"] or ""),
+                    "displayName": str(row["display_name"] or row["username"] or email),
+                    "email": email,
+                })
+
+        return {
+            "reasons": sorted(reasons, key=lambda value: value.lower()),
+            "responsiblePeople": sorted(responsible_people, key=lambda value: value.lower()),
+            "recipientUsers": recipient_users,
+        }
+
+    @staticmethod
+    def _priority_intake_recipients(value: Any) -> list[str]:
+        """Normalize comma/semicolon/newline separated BFS recipients."""
+        if isinstance(value, (list, tuple, set)):
+            values = [str(item or "") for item in value]
+        else:
+            values = re.split(r"[,;\n]+", str(value or ""))
+        result: list[str] = []
+        for item in values:
+            email = item.strip().lower()
+            if not email:
+                continue
+            if not is_valid_email(email):
+                raise ValueError(f"Invalid email address: {email}")
+            if email not in result:
+                result.append(email)
+        return result
+
+    def create_priority_intake_request(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Create one pre-import Rush/Remake request and optionally send or prepare its email."""
+        priority_type = str(data.get("priorityType") or data.get("orderType") or "Rush").strip().title()
+        if priority_type not in {"Rush", "Remake"}:
+            raise ValueError("Priority type must be Rush or Remake")
+        job_number = " ".join(str(data.get("jobNumber") or data.get("job") or "").split())[:180]
+        reason = " ".join(str(data.get("reason") or "").split())[:500]
+        responsible = " ".join(str(data.get("responsible") or "").split())[:180]
+        email_mode = str(data.get("emailMode") or "none").strip().lower()
+        if email_mode not in {"system", "draft", "none"}:
+            raise ValueError("Email action must be Send from system, Create user draft, or No email")
+        if not job_number:
+            raise ValueError("Job Nr. is required")
+        if not reason:
+            raise ValueError(f"{priority_type} reason is required")
+        if not responsible:
+            raise ValueError("Person responsible is required")
+        recipients = self._priority_intake_recipients(data.get("recipients"))
+        if email_mode == "system" and not recipients:
+            raise ValueError("Select at least one recipient before sending from the system")
+
+        request_id = f"priority-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
+        user_email = ""
+        email_status = "not_requested"
+        email_error = ""
+        outbox_id = 0
+        draft: dict[str, Any] | None = None
+        created_at = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            user_row = self.get_user_by_username(con, user)
+            if user_row:
+                user_email = str(row_value(user_row, "email", "") or "").strip().lower()
+
+            new_job = self.priority_intake_job_parts(job_number)
+            for existing in self._priority_intake_requests_con(con, include_cancelled=False):
+                if str(existing.get("priorityType") or "").lower() != priority_type.lower():
+                    continue
+                if existing.get("status") not in {"pending", "matched"}:
+                    continue
+                current_job = self.priority_intake_job_parts(existing.get("jobNumber"))
+                same_request_job = new_job["normalized"] == current_job["normalized"]
+                if priority_type == "Remake" and new_job["root"] and current_job["root"]:
+                    same_request_job = same_request_job or new_job["root"] == current_job["root"]
+                if same_request_job:
+                    raise ValueError(
+                        f"An active {priority_type} request already exists for Job Nr. {existing.get('jobNumber') or job_number}."
+                    )
+
+            payload = {
+                "priorityType": priority_type,
+                "jobNumber": job_number,
+                "reason": reason,
+                "responsible": responsible,
+                "emailMode": email_mode,
+                "recipients": recipients,
+                "fromEmail": user_email if email_mode == "draft" else "",
+                "createdBy": user,
+            }
+            self.insert_audit(
+                con, "priority_intake", request_id, "priority_intake_created", user, "", reason, payload
+            )
+
+            subject = f"{priority_type} Request - Job {job_number}"
+            body = "\n".join([
+                f"{priority_type} request",
+                "",
+                f"Job Nr.: {job_number}",
+                f"Reason: {reason}",
+                f"Person responsible: {responsible}",
+                f"Submitted by: {user}",
+                "",
+                "The Delivery List Scanner will watch future A+W imports and attach this request when the matching Job Nr. arrives.",
+            ])
+            if email_mode == "system":
+                email_status = "sent"
+                sent_at = ""
+                try:
+                    self.try_send_email(recipients, [], subject, body)
+                    sent_at = now_iso()
+                except RuntimeError as exc:
+                    email_status = "draft"
+                    email_error = str(exc)
+                except Exception as exc:
+                    email_status = "failed"
+                    email_error = str(exc)
+                cur = con.execute(
+                    """
+                    INSERT INTO email_outbox (
+                        email_type, customer_name, customer_pattern, delivery_date,
+                        to_emails, cc_emails, subject, body, status, created_at,
+                        sent_at, error, payload_json
+                    ) VALUES (?, ?, '', '', ?, '[]', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"priority_{priority_type.lower()}", job_number,
+                        json.dumps(recipients), subject, body, email_status,
+                        created_at, sent_at, email_error,
+                        json.dumps({"requestId": request_id, "priorityType": priority_type, "responsible": responsible}, separators=(",", ":")),
+                    ),
+                )
+                outbox_id = int(cur.lastrowid or 0)
+            elif email_mode == "draft":
+                email_status = "user_draft"
+                cur = con.execute(
+                    """
+                    INSERT INTO email_outbox (
+                        email_type, customer_name, customer_pattern, delivery_date,
+                        to_emails, cc_emails, subject, body, status, created_at,
+                        sent_at, error, payload_json
+                    ) VALUES (?, ?, '', '', ?, '[]', ?, ?, 'user_draft', ?, '', '', ?)
+                    """,
+                    (
+                        f"priority_{priority_type.lower()}", job_number,
+                        json.dumps(recipients), subject, body, created_at,
+                        json.dumps({"requestId": request_id, "priorityType": priority_type, "responsible": responsible, "fromEmail": user_email}, separators=(",", ":")),
+                    ),
+                )
+                outbox_id = int(cur.lastrowid or 0)
+                draft = {
+                    "preferredUserEmail": user_email,
+                    "toEmails": recipients,
+                    "ccEmails": [],
+                    "subject": subject,
+                    "body": body,
+                }
+            self.insert_audit(
+                con,
+                "priority_intake",
+                request_id,
+                "priority_intake_email",
+                user,
+                "",
+                "",
+                {"mode": email_mode, "status": email_status, "error": email_error, "outboxId": outbox_id},
+            )
+            con.commit()
+
+        return {
+            "ok": True,
+            "requestId": request_id,
+            "emailStatus": email_status,
+            "emailError": email_error,
+            "draft": draft,
+            "requests": self.priority_intake_requests(),
+        }
+
+    def update_priority_intake_request(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Update an existing Rush/Remake request while preserving its audit history."""
+        request_id = str(data.get("requestId") or "").strip()
+        if not request_id:
+            raise ValueError("Priority request id is required")
+        priority_type = str(data.get("priorityType") or "Rush").strip().title()
+        job_number = " ".join(str(data.get("jobNumber") or "").split())[:180]
+        reason = " ".join(str(data.get("reason") or "").split())[:500]
+        responsible = " ".join(str(data.get("responsible") or "").split())[:180]
+        email_mode = str(data.get("emailMode") or "none").strip().lower()
+        recipients = self._priority_intake_recipients(data.get("recipients"))
+        if priority_type not in {"Rush", "Remake"}:
+            raise ValueError("Priority type must be Rush or Remake")
+        if not job_number or not reason or not responsible:
+            raise ValueError("Job Nr., reason, and person responsible are required")
+        if email_mode not in {"system", "draft", "none"}:
+            raise ValueError("Invalid email action")
+        if email_mode == "system" and not recipients:
+            raise ValueError("Select at least one recipient before sending from the system")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            requests = {request["requestId"]: request for request in self._priority_intake_requests_con(con, include_cancelled=True)}
+            current = requests.get(request_id)
+            if not current or current.get("status") == "cancelled":
+                raise ValueError("Priority request is no longer editable")
+            payload = {
+                "priorityType": priority_type, "jobNumber": job_number, "reason": reason,
+                "responsible": responsible, "emailMode": email_mode, "recipients": recipients,
+            }
+            self.insert_audit(con, "priority_intake", request_id, "priority_intake_updated", user, "", reason, payload)
+            con.commit()
+        return {"ok": True, "requestId": request_id, "requests": self.priority_intake_requests()}
+
+    def cancel_priority_intake_request(self, request_id: str, user: str) -> dict[str, Any]:
+        """Close a Rush/Remake intake request while preserving its complete audit trail."""
+        clean_id = str(request_id or "").strip()
+        if not clean_id:
+            raise ValueError("Priority request id is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            requests = {request["requestId"]: request for request in self._priority_intake_requests_con(con, include_cancelled=True)}
+            request = requests.get(clean_id)
+            if not request:
+                raise ValueError("Priority request was not found")
+            if request.get("status") == "cancelled":
+                raise ValueError("Priority request is already cancelled")
+            reason = f"{request.get('priorityType') or 'Priority'} intake request cancelled"
+            self.insert_audit(
+                con,
+                "priority_intake",
+                clean_id,
+                "priority_intake_cancelled",
+                user,
+                "",
+                reason,
+                {"reason": reason, "jobNumber": request.get("jobNumber"), "priorityType": request.get("priorityType")},
+            )
+            con.commit()
+        return {"ok": True, "requests": self.priority_intake_requests()}
+
+    def _priority_intake_matches_item(self, request: dict[str, Any], item: dict[str, Any]) -> bool:
+        """Return whether one A+W source row belongs to a registered Rush/Remake request."""
+        request_job = self.priority_intake_job_parts(request.get("jobNumber"))
+        item_job = self.priority_intake_job_parts(item.get("job"))
+        if not request_job["root"] or not item_job["root"]:
+            return False
+        source_key = self.import_order_item_key(item.get("id"), item.get("order"), item.get("item"))
+        if request.get("status") == "matched":
+            source_keys = {str(value) for value in (request.get("matchedSourceKeys") or [])}
+            if source_key in source_keys:
+                return True
+            matched_job = self.priority_intake_job_parts(request.get("matchedJob"))
+            return bool(matched_job["normalized"] and matched_job["normalized"] == item_job["normalized"])
+
+        priority_type = str(request.get("priorityType") or "Rush").lower()
+        if priority_type == "rush":
+            return bool(
+                request_job["normalized"] == item_job["normalized"]
+                or request_job["token"] == item_job["token"]
+            )
+        # A plain .2/.3/.4 job suffix is normal work and is never sufficient.
+        # Remakes require a terminal .<number>R generation (for example .2R,
+        # .3R, .4R) or an explicit source RM/Remake marker.
+        if request_job["remakeSuffix"]:
+            return request_job["token"] == item_job["token"]
+        if item_job["remakeSuffix"]:
+            return request_job["token"] == item_job["root"]
+        return bool(request_job["token"] == item_job["token"] and is_remake_item(item))
+
+    def apply_priority_intake_requests_to_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Overlay durable Rush/Remake pre-registration decisions onto each authoritative A+W import."""
+        requests = [request for request in self.priority_intake_requests() if request.get("status") in {"pending", "matched"}]
+        if not requests:
+            return payload
+        next_payload = dict(payload)
+        next_items: list[dict[str, Any]] = []
+        matches: dict[str, dict[str, Any]] = {}
+        delivery_date = str(payload.get("deliveryDate") or "")
+        for raw_item in payload.get("items") or []:
+            if not isinstance(raw_item, dict):
+                continue
+            item = dict(raw_item)
+            for request in requests:
+                if not self._priority_intake_matches_item(request, item):
+                    continue
+                priority_type = str(request.get("priorityType") or "Rush").title()
+                item["priorityIntakeType"] = priority_type
+                item["priorityIntakeRequestId"] = str(request.get("requestId") or "")
+                state_text = str(item.get("processState") or "")
+                if not re.search(rf"\b{re.escape(priority_type)}\b", state_text, flags=re.IGNORECASE):
+                    item["processState"] = " ".join(part for part in (state_text, priority_type) if part).strip()
+                source_key = self.import_order_item_key(item.get("id"), item.get("order"), item.get("item"))
+                match = matches.setdefault(
+                    str(request.get("requestId") or ""),
+                    {
+                        "requestId": str(request.get("requestId") or ""),
+                        "priorityType": priority_type,
+                        "jobNumber": str(request.get("jobNumber") or ""),
+                        "reason": str(request.get("reason") or ""),
+                        "responsible": str(request.get("responsible") or ""),
+                        "createdBy": str(request.get("createdBy") or ""),
+                        "deliveryDate": delivery_date,
+                        "matchedJob": str(item.get("job") or ""),
+                        "orders": [],
+                        "sourceKeys": [],
+                        "lineCount": 0,
+                        "pieceQty": 0,
+                        "items": [],
+                        "products": [],
+                    },
+                )
+                order_no = str(item.get("order") or "")
+                item_no = str(item.get("item") or "").zfill(3)
+                if order_no and order_no not in match["orders"]:
+                    match["orders"].append(order_no)
+                if source_key and source_key not in match["sourceKeys"]:
+                    match["sourceKeys"].append(source_key)
+                match["lineCount"] += 1
+                match["pieceQty"] += max(int(item.get("qty") or 0), 0)
+                item_label = f"{order_no}-{item_no}" if order_no else item_no
+                if item_label not in match["items"]:
+                    match["items"].append(item_label)
+                product = str(item.get("product") or "").strip()
+                if product and product not in match["products"]:
+                    match["products"].append(product)
+                break
+            next_items.append(item)
+        next_payload["items"] = next_items
+        next_payload["priorityIntakeMatches"] = list(matches.values())
+        return next_payload
+
+    def finalize_priority_intake_matches(
+        self,
+        con: Any,
+        payload: dict[str, Any],
+        definitions: list[tuple[Any, ...]],
+    ) -> list[dict[str, Any]]:
+        """Persist newly matched intake requests and publish operator-visible arrival notifications."""
+        matches = [dict(value) for value in (payload.get("priorityIntakeMatches") or []) if isinstance(value, dict)]
+        if not matches:
+            return []
+        requests = {request["requestId"]: request for request in self._priority_intake_requests_con(con, include_cancelled=True)}
+        affected_lists = [
+            {"id": str(row[0]), "label": str(row[1]), "stage": str(row[2]), "scanner": str(row[3])}
+            for row in definitions
+            if row
+        ]
+        newly_matched: list[dict[str, Any]] = []
+        for match in matches:
+            request_id = str(match.get("requestId") or "")
+            request = requests.get(request_id)
+            if not request or request.get("status") != "pending":
+                continue
+            payload_details = {
+                "matchedJob": str(match.get("matchedJob") or ""),
+                "deliveryDate": str(match.get("deliveryDate") or payload.get("deliveryDate") or ""),
+                "orders": list(match.get("orders") or []),
+                "sourceKeys": list(match.get("sourceKeys") or []),
+                "lineCount": int(match.get("lineCount") or 0),
+                "pieceQty": int(match.get("pieceQty") or 0),
+                "priorityType": str(match.get("priorityType") or request.get("priorityType") or "Rush"),
+                "reason": str(request.get("reason") or ""),
+                "responsible": str(request.get("responsible") or ""),
+            }
+            self.insert_audit(
+                con,
+                "priority_intake",
+                request_id,
+                "priority_intake_matched",
+                str(request.get("createdBy") or "system"),
+                "",
+                f"{payload_details['priorityType']} request matched A+W import",
+                payload_details,
+            )
+            priority_type = payload_details["priorityType"].title()
+            notification_payload = {
+                "source": "priority-intake-match",
+                "requestId": request_id,
+                "job": payload_details["matchedJob"] or str(request.get("jobNumber") or ""),
+                "order": (payload_details["orders"] or [""])[0],
+                "orders": payload_details["orders"],
+                "deliveryDate": payload_details["deliveryDate"],
+                "items": payload_details["lineCount"],
+                "itemLabels": list(match.get("items") or []),
+                "products": list(match.get("products") or []),
+                "reason": str(request.get("reason") or ""),
+                "responsible": str(request.get("responsible") or ""),
+                "submittedBy": str(request.get("createdBy") or ""),
+                "affectedLists": affected_lists,
+            }
+            self.create_app_notification(
+                con,
+                "rush" if priority_type == "Rush" else "notice",
+                f"{priority_type} Order Imported",
+                f"Job {notification_payload['job'] or request.get('jobNumber')} arrived from A+W and was automatically marked {priority_type}.",
+                str(request.get("createdBy") or "system"),
+                notification_payload,
+                expires_in_hours=24,
+                acknowledge_creator=False,
+            )
+            match["newlyMatched"] = True
+            newly_matched.append(match)
+        return newly_matched
+
     def get_sdi_workspace(self, query: str = "", bay_code: str = "") -> dict[str, Any]:
         """Build the predictive SDI modal workspace from live Indian Trail item state.
 
@@ -9702,12 +10593,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
         )
 
+        intake_requests = self.priority_intake_requests()
+        pending_requests = [request for request in intake_requests if request.get("status") == "pending"]
         return {
             "query": clean_query,
             "bayCode": clean_bay,
             "suggestions": suggestions[:12],
             "items": selected_items,
             "currentGroups": current_groups,
+            "intakeRequests": intake_requests,
+            "intakeSummary": {
+                "pending": len(pending_requests),
+                "rush": sum(1 for request in intake_requests if request.get("priorityType") == "Rush"),
+                "remake": sum(1 for request in intake_requests if request.get("priorityType") == "Remake"),
+            },
+            "intakeOptions": self.priority_intake_options(),
+            "emailTransport": self.get_email_transport_config(),
         }
 
     def expand_priority_line_items(self, con: Any, seed_rows: list[Any]) -> list[Any]:
@@ -10149,9 +11050,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return next_payload
 
     def prepare_import_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Apply persistent decisions and then resolve normal customer/job routes."""
+        """Apply persistent decisions, priority intake overlays, then normal route rules."""
         decided_payload = self.apply_persistent_import_decisions_to_payload(payload)
-        return self.apply_customer_route_rules_to_payload(decided_payload)
+        priority_payload = self.apply_priority_intake_requests_to_payload(decided_payload)
+        return self.apply_customer_route_rules_to_payload(priority_payload)
 
     def resolve_item_route(self, item: dict[str, Any], rules: list[dict[str, Any]]) -> str:
         """Resolve one item using the authoritative route order.
@@ -10408,6 +11310,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         ),
                     )
 
+            priority_intake_matches = self.finalize_priority_intake_matches(con, payload, definitions)
             logical_change_metrics = self.canonical_source_change_metrics(stage_summaries)
             change_summary = {
                 "sourceName": source_name,
@@ -10433,6 +11336,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 **logical_change_metrics,
                 "stages": stage_summaries,
                 "changedListIds": changed_list_ids,
+                "priorityIntakeMatches": priority_intake_matches,
             }
             con.execute("UPDATE imports SET change_summary = ? WHERE id = ?", (json.dumps(change_summary, separators=(",", ":")), import_cur.lastrowid))
             # Queue customer manifests for every import/update attempt, not only when rows changed.
@@ -10465,6 +11369,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "updatedCount": updated_count,
             "changedListIds": changed_list_ids,
             "stageSummaries": stage_summaries,
+            "priorityIntakeMatches": priority_intake_matches,
             **self.canonical_source_change_metrics(stage_summaries),
             "printCandidates": self.print_candidates_from_payload(payload, changed_list_ids, source_name, stage_summaries),
         }
@@ -11773,6 +12678,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         user = request_user_name(scan_request)
         station = request_station(scan_request)
         is_manual = str(scan_request.get("isManual") or "").lower() in {"1", "true", "yes"}
+        requested_scan_qty = request_scan_quantity(scan_request)
         if not list_id or not barcode.strip():
             raise ValueError("listId and barcode are required")
         rack_code, _rack_delivery_date = parse_rack_barcode(barcode)
@@ -11826,7 +12732,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 con.commit()
                 return self._get_payload(con, list_id, last)
 
-            outbound_gate_payload = self.outbound_scan_gate(con, list_id, row, barcode, canonical, user, station, scan_request)
+            remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
+            scan_qty = min(requested_scan_qty, remaining_qty)
+            effective_scan_request = dict(scan_request)
+            effective_scan_request["_effectiveScanQty"] = scan_qty
+            outbound_gate_payload = self.outbound_scan_gate(con, list_id, row, barcode, canonical, user, station, effective_scan_request)
             if outbound_gate_payload is not None:
                 con.commit()
                 return outbound_gate_payload
@@ -11927,7 +12837,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if mismatch:
                     destination_override = rack_destination
 
-            con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
+            con.execute("UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?", (scan_qty, row["id"]))
             if rack_for_scan:
                 con.execute(
                     """
@@ -11935,10 +12845,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         rack_id, line_item_id, qty, status, added_by, added_at,
                         reason, destination_override
                     )
-                    VALUES (?, ?, 1, 'Active', ?, ?, ?, ?)
+                    VALUES (?, ?, ?, 'Active', ?, ?, ?, ?)
                     ON CONFLICT(rack_id, line_item_id) DO UPDATE SET
                         qty = CASE
-                            WHEN rack_items.status = 'Active' THEN MIN(rack_items.qty + 1, (SELECT qty FROM line_items WHERE id = excluded.line_item_id))
+                            WHEN rack_items.status = 'Active' THEN MIN(rack_items.qty + excluded.qty, (SELECT qty FROM line_items WHERE id = excluded.line_item_id))
                             ELSE excluded.qty
                         END,
                         status = 'Active',
@@ -11952,6 +12862,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     (
                         rack_for_scan["id"],
                         row["id"],
+                        scan_qty,
                         user,
                         now_iso(),
                         "Scanned on staging with destination override" if destination_override else "Scanned on staging",
@@ -11960,7 +12871,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 )
                 self.refresh_rack_destination(con, rack_for_scan["id"])
             preassigned_bay = self.preassign_bay_for_outbound(con, list_id, row, user, station)
-            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "manual_scan" if is_manual else "scan", reason, "", 1)
+            last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "manual_scan" if is_manual else "scan", reason, "", scan_qty)
             if preassigned_bay:
                 self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "notice", "Indian Trail bay preassigned", f"Preassigned to Bay {preassigned_bay}")
             self.insert_audit(
@@ -11971,7 +12882,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 user,
                 station,
                 reason,
-                {"barcode": barcode, "canonical": canonical, "manual": is_manual},
+                {"barcode": barcode, "canonical": canonical, "manual": is_manual, "qtyDelta": scan_qty},
             )
             self.queue_ready_email_if_customer_complete(con, list_id, row, user)
             con.commit()
@@ -12212,7 +13123,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return payload
 
         if needs_staging and staging_row:
-            self.auto_stage_for_outbound(con, list_id, outbound_row, barcode, canonical, user, station)
+            self.auto_stage_for_outbound(
+                con,
+                list_id,
+                outbound_row,
+                barcode,
+                canonical,
+                user,
+                station,
+                qty_delta=max(int(scan_request.get("_effectiveScanQty") or 1), 1),
+            )
         if staging_row and requested_rack_code and needs_transportation:
             assigned_code = self.assign_transportation_from_outbound_override(con, staging_row, requested_rack_code, user, station)
         else:
@@ -12244,6 +13164,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         canonical: str,
         user: str,
         station: str,
+        qty_delta: int = 1,
     ) -> bool:
         """Purpose: Run the auto stage for outbound workflow for the delivery-list scanner.
 
@@ -12284,7 +13205,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not staging_row:
             return False
 
-        target_qty = min(int(outbound_row["scanned_qty"]) + 1, int(outbound_row["qty"]))
+        target_qty = min(int(outbound_row["scanned_qty"]) + max(int(qty_delta or 1), 1), int(outbound_row["qty"]))
         delta = min(target_qty - int(staging_row["scanned_qty"]), int(staging_row["qty"]) - int(staging_row["scanned_qty"]))
         if delta <= 0:
             return False
@@ -13085,7 +14006,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             clean_code = normalize_rack_code(str(code or ""))
             if not clean_code:
                 return ""
-            if clean_code == "T" or re.fullmatch(r"T\d+", clean_code):
+            if clean_code == "T" or re.fullmatch(r"(?:R?T)\d+", clean_code):
                 return rack_public_label(clean_code)
             return f"Rack {clean_code}"
 
@@ -13715,10 +14636,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         rack = con.execute("SELECT * FROM racks WHERE UPPER(rack_code) = UPPER(?) AND active = 1", (clean,)).fetchone()
         if rack:
             self.validate_rack_destination_for_item(con, rack, row)
+            # v0.353: use one transition timestamp for the destination add and
+            # source removal. This makes event-time history deterministic and
+            # prevents a move from appearing to run backwards at timestamp ties.
+            transition_at = now_iso()
             previous_rack_ids = [item["rack_id"] for item in con.execute("SELECT DISTINCT rack_id FROM rack_items WHERE line_item_id = ? AND rack_id <> ? AND status = 'Active'", (line_item_id, rack["id"])).fetchall()]
             con.execute(
                 "UPDATE bay_assignments SET status = 'Cleared', cleared_by = ?, cleared_at = ?, reason = 'Moved to rack from manual edit' WHERE line_item_id = ? AND status NOT IN ('Cleared', 'Cancelled')",
-                (user, now_iso(), line_item_id),
+                (user, transition_at, line_item_id),
             )
             qty = max(1, min(int(row["qty"] or 1), int(row["scanned_qty"] or row["qty"] or 1)))
             con.execute(
@@ -13734,11 +14659,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     added_by = excluded.added_by,
                     added_at = excluded.added_at
                 """,
-                (rack["id"], line_item_id, qty, user, now_iso()),
+                (rack["id"], line_item_id, qty, user, transition_at),
             )
             con.execute(
                 "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Moved to another rack from manual edit' WHERE line_item_id = ? AND rack_id <> ? AND status = 'Active'",
-                (user, now_iso(), line_item_id, rack["id"]),
+                (user, transition_at, line_item_id, rack["id"]),
             )
             for rack_id in previous_rack_ids:
                 self.refresh_rack_destination(con, rack_id)
@@ -14056,6 +14981,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 audit_params,
             ).fetchone()[0]
             sdi_count = con.execute("SELECT COUNT(*) FROM bay_assignments WHERE status = 'SDIOverride'").fetchone()[0]
+            priority_remake_audit_rows = con.execute(
+                """
+                SELECT entity_id, payload_json, created_at
+                FROM audit_events
+                WHERE entity_type = 'priority_intake'
+                  AND action = 'priority_intake_matched'
+                ORDER BY id
+                """
+            ).fetchall()
 
             # Pull only fields required for production/breakage analytics, then
             # deduplicate stage copies in Python. This avoids counting the same
@@ -14310,6 +15244,53 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "withExternalSqft": round(combined_total_sqft, 2),
         }
 
+        remake_accountability_reasons: dict[str, dict[str, int]] = {}
+        remake_accountability_responsible: dict[str, dict[str, int]] = {}
+        tracked_remake_requests = 0
+        tracked_remake_pieces = 0
+        for audit_row in priority_remake_audit_rows:
+            try:
+                audit_payload = json.loads(audit_row["payload_json"] or "{}")
+            except Exception:
+                audit_payload = {}
+            if not isinstance(audit_payload, dict) or str(audit_payload.get("priorityType") or "").lower() != "remake":
+                continue
+            matched_date = str(audit_payload.get("deliveryDate") or "").strip()
+            if date_from and matched_date and matched_date < date_from:
+                continue
+            if date_to and matched_date and matched_date > date_to:
+                continue
+            piece_qty = max(int(audit_payload.get("pieceQty") or 0), 0)
+            tracked_remake_requests += 1
+            tracked_remake_pieces += piece_qty
+            reason_label = str(audit_payload.get("reason") or "Unspecified reason").strip() or "Unspecified reason"
+            responsible_label = str(audit_payload.get("responsible") or "Unassigned").strip() or "Unassigned"
+            reason_bucket = remake_accountability_reasons.setdefault(reason_label, {"requests": 0, "pieces": 0})
+            reason_bucket["requests"] += 1
+            reason_bucket["pieces"] += piece_qty
+            responsible_bucket = remake_accountability_responsible.setdefault(responsible_label, {"requests": 0, "pieces": 0})
+            responsible_bucket["requests"] += 1
+            responsible_bucket["pieces"] += piece_qty
+
+        external_remake_accountability = {
+            "requestCount": tracked_remake_requests,
+            "pieceQty": tracked_remake_pieces,
+            "byReason": sorted(
+                [
+                    {"reason": label, "requestCount": values["requests"], "pieces": values["pieces"]}
+                    for label, values in remake_accountability_reasons.items()
+                ],
+                key=lambda row: (-int(row["requestCount"]), -int(row["pieces"]), str(row["reason"]).lower()),
+            ),
+            "byResponsible": sorted(
+                [
+                    {"responsible": label, "requestCount": values["requests"], "pieces": values["pieces"]}
+                    for label, values in remake_accountability_responsible.items()
+                ],
+                key=lambda row: (-int(row["requestCount"]), -int(row["pieces"]), str(row["responsible"]).lower()),
+            ),
+        }
+
         glass_quantity_by_type = [
             {
                 "glassType": label,
@@ -14360,6 +15341,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "internalByGlass": internal_glass_rows,
                 "internalReasonsByMachine": internal_reason_rows,
                 "externalRemakesByGlass": bucket_rows(external_by_glass, "glassType"),
+                "externalRemakeAccountability": external_remake_accountability,
             },
         }
 
@@ -14474,7 +15456,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "racks-history": ({"rack", "rack_item", "rack_set", "packing_list_print"}, ("rack", "packing_list", "outbound_override_transportation")),
             "packing-history": ({"packing_list_print"}, ("packing_list",)),
             "oldBays": ({"bay_assignment", "bay"}, ("snooze_stale_bay", "bay_check_", "clear_bay")),
-            "rush": ({"line_item", "bay_assignment"}, ("mark_rush", "change_priority_delivery_date", "clear_rush_priority", "remove_rush_preassign", "remove_sdi")),
+            "rush": ({"line_item", "bay_assignment", "priority_intake"}, ("mark_rush", "mark_remake", "change_priority_delivery_date", "clear_rush_priority", "remove_rush_preassign", "remove_sdi", "priority_intake_")),
             "manageBayItems": ({"bay_assignment", "bay"}, ("move_bay", "clear_bay_assignment", "restore_bay_assignment", "assign_bay")),
             "editBays": ({"bay", "bay_group"}, ("create_bays", "delete_bay", "delete_bay_group", "move_bay_group", "set_bay_", "update_bay_layout")),
         }
@@ -15248,10 +16230,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rows = con.execute(
                 """
                 SELECT ba.id AS assignment_id, ba.assigned_at, ba.assigned_qty, ba.status AS assignment_status,
-                       b.bay_code, b.display_name AS bay_display, b.map_section, b.bay_category,
+                       li.list_id, b.id AS bay_id, b.bay_code, b.display_name AS bay_display, b.map_section, b.bay_category,
                        li.order_no, li.item_no, li.customer, li.dimensions, li.product, li.job,
                        dl.delivery_date, dl.stage,
-                       bss.snoozed_until,
+                       bss.snoozed_until, bss.updated_at AS snoozed_at,
                        (
                         SELECT se.created_at
                         FROM scan_events se
@@ -15269,6 +16251,86 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ORDER BY ba.assigned_at ASC, b.bay_code
                 """
             ).fetchall()
+            list_ids = sorted({str(row["list_id"] or "") for row in rows if str(row["list_id"] or "")})
+            sibling_rows = []
+            if list_ids:
+                sibling_rows = con.execute(
+                    f"""
+                    SELECT li.id, li.list_id, li.order_no, li.item_no, li.job, li.customer, li.product, li.dimensions,
+                           li.qty, li.scanned_qty,
+                           COALESCE((SELECT SUM(ba2.assigned_qty) FROM bay_assignments ba2 WHERE ba2.line_item_id = li.id AND ba2.status NOT IN ('Cleared','Cancelled')), 0) AS in_bay_qty,
+                           (SELECT se.created_at FROM scan_events se WHERE se.line_item_id = li.id AND se.qty_delta > 0 ORDER BY se.created_at DESC, se.id DESC LIMIT 1) AS last_scanned_at
+                    FROM line_items li
+                    WHERE COALESCE(li.is_deleted, 0) = 0 AND li.list_id IN ({','.join('?' for _ in list_ids)})
+                    ORDER BY li.order_no, li.item_no
+                    """, list_ids
+                ).fetchall()
+
+            # Old Bay review needs the complete physical bay picture, not only
+            # the rows that crossed the stale threshold. This lets an operator
+            # see newer neighboring orders sharing the same bay before clearing it.
+            bay_ids = sorted({int(row["bay_id"]) for row in rows if row["bay_id"] is not None})
+            bay_content_rows = []
+            if bay_ids:
+                bay_content_rows = con.execute(
+                    f"""
+                    SELECT ba.bay_id, ba.assigned_at, ba.assigned_qty,
+                           li.id, li.order_no, li.item_no, li.job, li.customer, li.product, li.dimensions,
+                           li.qty, li.scanned_qty, dl.delivery_date,
+                           (SELECT se.created_at FROM scan_events se WHERE se.line_item_id = li.id AND se.qty_delta > 0 ORDER BY se.created_at DESC, se.id DESC LIMIT 1) AS last_scanned_at
+                    FROM bay_assignments ba
+                    JOIN line_items li ON li.id = ba.line_item_id
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE ba.status NOT IN ('Cleared','Cancelled')
+                      AND COALESCE(li.is_deleted, 0) = 0
+                      AND ba.bay_id IN ({','.join('?' for _ in bay_ids)})
+                    ORDER BY ba.bay_id, li.order_no, li.item_no
+                    """,
+                    bay_ids,
+                ).fetchall()
+        order_items: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for sibling in sibling_rows:
+            qty = int(sibling["qty"] or 0)
+            in_bay_qty = int(sibling["in_bay_qty"] or 0)
+            order_items.setdefault((str(sibling["list_id"] or ""), str(sibling["order_no"] or "")), []).append({
+                "lineItemId": str(sibling["id"] or ""),
+                "item": str(sibling["item_no"] or ""),
+                "job": str(sibling["job"] or ""),
+                "customer": str(sibling["customer"] or ""),
+                "product": str(sibling["product"] or ""),
+                "dimensions": str(sibling["dimensions"] or ""),
+                "qty": qty,
+                "scannedQty": int(sibling["scanned_qty"] or 0),
+                "inBayQty": in_bay_qty,
+                "missingQty": max(qty - in_bay_qty, 0),
+                "lastScannedAt": str(sibling["last_scanned_at"] or ""),
+            })
+
+        bay_orders: dict[int, dict[str, dict[str, Any]]] = {}
+        for content in bay_content_rows:
+            bay_id = int(content["bay_id"] or 0)
+            order_no = str(content["order_no"] or "")
+            order_map = bay_orders.setdefault(bay_id, {})
+            order = order_map.setdefault(order_no, {
+                "order": order_no,
+                "job": str(content["job"] or ""),
+                "customer": str(content["customer"] or ""),
+                "deliveryDate": str(content["delivery_date"] or ""),
+                "lastScannedAt": "",
+                "items": [],
+            })
+            last_scanned = str(content["last_scanned_at"] or "")
+            if last_scanned and last_scanned > str(order.get("lastScannedAt") or ""):
+                order["lastScannedAt"] = last_scanned
+            order["items"].append({
+                "lineItemId": str(content["id"] or ""),
+                "item": str(content["item_no"] or ""),
+                "product": str(content["product"] or ""),
+                "dimensions": str(content["dimensions"] or ""),
+                "qty": int(content["qty"] or 0),
+                "inBayQty": int(content["assigned_qty"] or 0),
+                "lastScannedAt": last_scanned,
+            })
         result = []
         for row in rows:
             assigned_at = str(row["assigned_at"] or "")
@@ -15311,7 +16373,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "lastScannedAt": row["last_scanned_at"],
                     "daysOld": days_old,
                     "snoozedUntil": snoozed_until,
+                    "snoozedAt": str(row["snoozed_at"] or ""),
                     "status": row["assignment_status"],
+                    "orderItems": order_items.get((str(row["list_id"] or ""), str(row["order_no"] or "")), []),
+                    "bayOrders": list(bay_orders.get(int(row["bay_id"] or 0), {}).values()),
+                    "bayOrderCount": len(bay_orders.get(int(row["bay_id"] or 0), {})),
                 }
             )
         return result
@@ -15327,24 +16393,59 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ids = [data.get("assignmentId")]
         assignment_ids = [int(value) for value in ids if str(value or "").strip()]
         days = max(1, min(int(data.get("days") or 1), 365))
-        snoozed_until = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat(timespec="seconds")
         if not assignment_ids:
             raise ValueError("At least one stale bay assignment is required")
+        request_time = datetime.now(timezone.utc)
+        updated_snoozes: dict[int, str] = {}
+        extended_count = 0
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             audit_assignments = [self._bay_assignment_audit_context(con, assignment_id) for assignment_id in assignment_ids]
             for assignment_id in assignment_ids:
-                con.execute(
-                    """
-                    INSERT INTO bay_stale_snoozes (assignment_id, snoozed_until, snoozed_by, updated_at)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(assignment_id) DO UPDATE SET
-                        snoozed_until = excluded.snoozed_until,
-                        snoozed_by = excluded.snoozed_by,
-                        updated_at = excluded.updated_at
-                    """,
-                    (assignment_id, snoozed_until, user, now_iso()),
-                )
+                existing = con.execute(
+                    "SELECT snoozed_until, updated_at FROM bay_stale_snoozes WHERE assignment_id = ?",
+                    (assignment_id,),
+                ).fetchone()
+                base_time = request_time
+                is_extension = False
+                if existing and str(existing["snoozed_until"] or "").strip():
+                    try:
+                        existing_until = parse_iso(str(existing["snoozed_until"]))
+                        if existing_until.tzinfo is None:
+                            existing_until = existing_until.replace(tzinfo=timezone.utc)
+                        if existing_until > request_time:
+                            base_time = existing_until
+                            is_extension = True
+                            extended_count += 1
+                    except Exception:
+                        base_time = request_time
+                snoozed_until = (base_time + timedelta(days=days)).isoformat(timespec="seconds")
+                updated_snoozes[assignment_id] = snoozed_until
+                if is_extension:
+                    # Preserve the original snooze-start timestamp so the Zzz
+                    # ribbon continues to show total elapsed snooze time after an
+                    # extension instead of jumping back to 0 seconds.
+                    con.execute(
+                        """
+                        UPDATE bay_stale_snoozes
+                        SET snoozed_until = ?, snoozed_by = ?
+                        WHERE assignment_id = ?
+                        """,
+                        (snoozed_until, user, assignment_id),
+                    )
+                else:
+                    con.execute(
+                        """
+                        INSERT INTO bay_stale_snoozes (assignment_id, snoozed_until, snoozed_by, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(assignment_id) DO UPDATE SET
+                            snoozed_until = excluded.snoozed_until,
+                            snoozed_by = excluded.snoozed_by,
+                            updated_at = excluded.updated_at
+                        """,
+                        (assignment_id, snoozed_until, user, now_iso()),
+                    )
+            action_label = "Extended" if extended_count else "Snoozed"
             self.insert_audit(
                 con,
                 "bay_assignment",
@@ -15352,11 +16453,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "snooze_stale_bay",
                 user,
                 "",
-                f"Snoozed {days} day(s)",
-                {"days": days, "assignments": audit_assignments},
+                f"{action_label} by {days} day(s)",
+                {
+                    "days": days,
+                    "extendedCount": extended_count,
+                    "assignments": audit_assignments,
+                    "snoozedUntilByAssignment": {str(key): value for key, value in updated_snoozes.items()},
+                },
             )
             con.commit()
-        return {"ok": True, "snoozedUntil": snoozed_until, "orders": self.get_stale_bay_orders()}
+        latest_until = max(updated_snoozes.values(), default="")
+        return {
+            "ok": True,
+            "snoozedUntil": latest_until,
+            "snoozedUntilByAssignment": {str(key): value for key, value in updated_snoozes.items()},
+            "orders": self.get_stale_bay_orders(include_snoozed=True),
+        }
 
     def received_qty_for_rack_item(
         self,
@@ -15463,7 +16575,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             # Truck 2, etc. even if an older database still carries a legacy name.
             "name": rack_public_label(rack["rack_code"], rack["display_name"], rack["rack_type"])
             if str(rack["rack_code"] or "").upper() == "T"
-            or re.fullmatch(r"T\d+", str(rack["rack_code"] or "").upper())
+            or re.fullmatch(r"(?:R?T)\d+", str(rack["rack_code"] or "").upper())
             or "TRUCK" in str(rack["rack_type"] or "").upper()
             else (rack["display_name"] or rack["rack_code"]),
             "type": rack["rack_type"],
@@ -15716,10 +16828,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             line_item = con.execute("SELECT * FROM line_items WHERE id = ?", (item["line_item_id"],)).fetchone()
             if not line_item:
                 raise ValueError("Rack line item not found")
-            self.validate_rack_destination_for_item(con, target, line_item)
             old_rack_id = item["rack_id"]
-            source = con.execute("SELECT rack_code FROM racks WHERE id = ?", (old_rack_id,)).fetchone()
+            source = con.execute("SELECT rack_code, status FROM racks WHERE id = ?", (old_rack_id,)).fetchone()
             source_rack_code = str(source["rack_code"] or "") if source else ""
+            if source and str(source["status"] or "").strip().lower() == "in transit":
+                raise ValueError("Return or mark the source rack Not On The Way before moving its contents")
+            self.validate_rack_destination_for_item(con, target, line_item)
             con.execute("UPDATE rack_items SET rack_id = ?, reason = 'Moved between racks' WHERE id = ?", (target["id"], rack_item_id))
             self.refresh_rack_destination(con, old_rack_id)
             self.refresh_rack_destination(con, target["id"])
@@ -15906,7 +17020,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("BEGIN IMMEDIATE")
             item = con.execute(
                 """
-                SELECT ri.*, r.rack_code, li.order_no, li.item_no
+                SELECT ri.*, r.rack_code, r.status AS rack_status, li.order_no, li.item_no
                 FROM rack_items ri
                 JOIN racks r ON r.id = ri.rack_id
                 JOIN line_items li ON li.id = ri.line_item_id
@@ -15918,6 +17032,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchone()
             if not item:
                 raise ValueError("Rack item not found")
+            if str(item["rack_status"] or "").strip().lower() == "in transit":
+                raise ValueError("Return or mark the rack Not On The Way before clearing its contents")
             con.execute(
                 "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Individually cleared from rack' WHERE id = ?",
                 (user, now_iso(), rack_item_id),
@@ -15946,6 +17062,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rack = self.get_rack_by_code(con, rack_code)
+            if str(rack["status"] or "").strip().lower() == "in transit":
+                raise ValueError("Return or mark the rack Not On The Way before clearing its contents")
             con.execute("UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Rack cleared' WHERE rack_id = ? AND status = 'Active'", (user, now_iso(), rack["id"]))
             con.execute("UPDATE racks SET status = 'Open', destination = '', completed_at = '', departed_at = '', returned_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), rack["id"]))
             self.insert_audit(con, "rack", rack["rack_code"], "clear_rack", user, "", "", {})
@@ -16250,6 +17368,155 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         )
         return payload
 
+    def mark_rack_on_way(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Manually depart one completed rack through the maintained Outbound workflow.
+
+        The rack stays physically loaded. This applies only the still-remaining
+        Outbound quantities represented by the rack contents, creates the same
+        rack-scoped scan events used by barcode departure, performs Indian Trail
+        bay preassignment when appropriate, then marks the rack In Transit.
+        """
+        rack_code = normalize_rack_code(str(data.get("rackCode") or ""))
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            rack = self.get_rack_by_code(con, rack_code)
+            status = str(rack["status"] or "").strip().lower()
+            if status not in {"closed", "complete", "completed"}:
+                raise ValueError("Complete the rack before marking it On The Way")
+
+            active_rows = con.execute(
+                """
+                SELECT ri.id AS rack_item_id
+                FROM rack_items ri
+                JOIN line_items src_li ON src_li.id = ri.line_item_id
+                WHERE ri.rack_id = ?
+                  AND ri.status = 'Active'
+                  AND COALESCE(src_li.is_deleted, 0) = 0
+                ORDER BY ri.id
+                """,
+                (rack["id"],),
+            ).fetchall()
+            if not active_rows:
+                raise ValueError("Rack must have active pieces before it can be marked On The Way")
+
+            matches = con.execute(
+                """
+                SELECT
+                    ri.id AS rack_item_id,
+                    ri.qty AS rack_qty,
+                    out_dl.id AS outbound_list_id,
+                    out_li.*
+                FROM rack_items ri
+                JOIN line_items src_li ON src_li.id = ri.line_item_id
+                JOIN delivery_lists src_dl ON src_dl.id = src_li.list_id
+                JOIN delivery_lists out_dl
+                  ON out_dl.delivery_date = src_dl.delivery_date
+                 AND out_dl.status = 'active'
+                 AND LOWER(out_dl.stage) LIKE '%outbound%'
+                JOIN line_items out_li
+                  ON out_li.list_id = out_dl.id
+                 AND COALESCE(out_li.is_deleted, 0) = 0
+                 AND (
+                    (COALESCE(src_li.source_id, '') <> '' AND out_li.source_id = src_li.source_id)
+                    OR (out_li.order_no = src_li.order_no AND out_li.item_no = src_li.item_no)
+                 )
+                WHERE ri.rack_id = ?
+                  AND ri.status = 'Active'
+                  AND COALESCE(src_li.is_deleted, 0) = 0
+                ORDER BY ri.id, out_li.id
+                """,
+                (rack["id"],),
+            ).fetchall()
+            matched_rack_items = {int(row["rack_item_id"]) for row in matches}
+            active_rack_items = {int(row["rack_item_id"]) for row in active_rows}
+            if matched_rack_items != active_rack_items:
+                missing = len(active_rack_items.difference(matched_rack_items))
+                raise ValueError(
+                    f"{missing} rack item{'s' if missing != 1 else ''} do not have a matching active Outbound line. "
+                    "Refresh the delivery list before manually marking this rack On The Way."
+                )
+
+            targets: dict[str, dict[str, Any]] = {}
+            for row in matches:
+                key = str(row["id"])
+                if key not in targets:
+                    targets[key] = {"row": row, "rackQty": 0}
+                targets[key]["rackQty"] += max(int(row["rack_qty"] or 1), 1)
+
+            canonical = f"RACK-{rack['rack_code']}"
+            timestamp = now_iso()
+            scanned_count = 0
+            capped_count = 0
+            touched_lists: set[str] = set()
+            for target in targets.values():
+                row = target["row"]
+                rack_qty = max(int(target["rackQty"] or 0), 0)
+                remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
+                delta = min(rack_qty, remaining_qty)
+                if delta <= 0:
+                    continue
+                if delta < rack_qty:
+                    capped_count += 1
+                con.execute(
+                    "UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?",
+                    (delta, row["id"]),
+                )
+                self.preassign_bay_for_outbound(con, row["outbound_list_id"], row, user, "")
+                self.insert_event(
+                    con,
+                    row["outbound_list_id"],
+                    row["id"],
+                    canonical,
+                    canonical,
+                    user,
+                    "",
+                    "scan",
+                    f"Manual outbound rack departure {rack['rack_code']}",
+                    "Rack manually marked On The Way from rack details.",
+                    delta,
+                )
+                touched_lists.add(str(row["outbound_list_id"]))
+                scanned_count += delta
+
+            con.execute(
+                "UPDATE racks SET status = 'In Transit', departed_at = ?, returned_at = '', updated_at = ? WHERE id = ?",
+                (timestamp, timestamp, rack["id"]),
+            )
+            self.insert_audit(
+                con,
+                "rack",
+                rack["rack_code"],
+                "rack_mark_on_way",
+                user,
+                "",
+                "Completed rack manually marked On The Way",
+                {
+                    "scannedCount": scanned_count,
+                    "cappedRows": capped_count,
+                    "departedAt": timestamp,
+                    "outboundListIds": sorted(touched_lists),
+                },
+            )
+            rack_label = (
+                rack_public_label(rack["rack_code"], rack["display_name"], rack["rack_type"])
+                or f"Rack {rack['rack_code']}"
+            )
+            con.commit()
+
+        payload = self.get_racks()
+        payload.update(
+            {
+                "ok": True,
+                "message": (
+                    f"{rack_label} is On The Way. Applied {scanned_count} outbound piece scan"
+                    f"{'s' if scanned_count != 1 else ''}."
+                ),
+                "outboundScannedQty": scanned_count,
+                "departedAt": timestamp,
+            }
+        )
+        return payload
+
     def assign_line_item_to_rack(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Purpose: Run the assign line item to rack workflow for the delivery-list scanner.
 
@@ -16329,7 +17596,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 WHERE ri.line_item_id = ?
                   AND ri.status = 'Active'
                   AND r.active = 1
-                ORDER BY CASE WHEN r.rack_code = 'T' THEN 9999 ELSE r.sort_order END, r.rack_code
+                ORDER BY COALESCE(ri.added_at, '') DESC, ri.id DESC
                 LIMIT 1
                 """,
                 (target_row["id"],),
@@ -16347,23 +17614,58 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "Use the rack lifecycle controls first."
                     )
 
+            rack = None
             if rack_code:
                 rack = self.get_rack_by_code(con, rack_code)
                 target_lock_message = rack_assignment_lock_message(rack["rack_code"], rack["status"])
                 if target_lock_message:
                     raise ValueError(target_lock_message)
+
+            previous_label = (
+                rack_public_label(
+                    current_rack["rack_code"],
+                    row_value(current_rack, "display_name"),
+                    row_value(current_rack, "rack_type"),
+                )
+                if current_rack else "No rack"
+            )
+            next_label = (
+                rack_public_label(
+                    rack["rack_code"],
+                    row_value(rack, "display_name"),
+                    row_value(rack, "rack_type"),
+                )
+                if rack else "No rack"
+            )
             self.update_line_item_location(con, target_row, rack_code, user)
-            payload = self._get_payload(con, target_row["list_id"])
+
+            # v0.352: manual Location-cell moves are first-class scanner history.
+            # Combined with event-time rack lookup, All Scans now documents the
+            # original rack and each later move instead of showing only current state.
+            self.insert_event(
+                con,
+                target_row["list_id"],
+                target_row["id"],
+                str(target_row["barcode"] or ""),
+                str(target_row["barcode"] or ""),
+                user,
+                str(data.get("station") or "").strip(),
+                "rack_move",
+                "Rack location changed",
+                f"Moved from {previous_label} to {next_label}",
+                0,
+            )
             self.insert_audit(
                 con,
                 "line_item",
                 target_row["id"],
                 "rack_location_recovery",
                 user,
-                "",
+                str(data.get("station") or "").strip(),
                 "Supervisor/Admin rack location assignment from scan table",
-                {"rackCode": rack_code},
+                {"rackCode": rack_code, "previousRack": previous_label, "newRack": next_label},
             )
+            payload = self._get_payload(con, target_row["list_id"])
             con.commit()
         racks_payload = self.get_racks()
         payload["racks"] = racks_payload.get("racks", [])
@@ -17260,7 +18562,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 rack_code = str(rack["rack_code"] or "").strip()
                 rack_type = str(rack["rack_type"] or "").strip() or "Rack"
                 rack_name = str(rack["rack_name"] or rack_code).strip() or rack_code
-                if rack_code == "T" or re.fullmatch(r"T\d+", rack_code) or "TRUCK" in rack_type.upper():
+                if rack_code == "T" or re.fullmatch(r"(?:R?T)\d+", rack_code) or "TRUCK" in rack_type.upper():
                     rack_name = rack_public_label(rack_code, rack_name, rack_type)
                     rack_type = rack_type or "Truck"
                 flat_rows.append(
@@ -17518,7 +18820,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """
                 rack_code = str(row.get("rackCode") or "").upper()
                 rack_type = str(row.get("rackType") or "").upper()
-                return rack_code == "T" or re.fullmatch(r"T\d+", rack_code) is not None or "TRUCK" in rack_type
+                return rack_code == "T" or re.fullmatch(r"(?:R?T)\d+", rack_code) is not None or "TRUCK" in rack_type
 
             indian_trail_truck_qty = sum(int(row.get("qty") or 0) for row in transit_rows if transit_row_is_truck(row))
             indian_trail_rack_qty = sum(
@@ -17775,7 +19077,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                             if row["rack_code"]
                             and (
                                 str(row["rack_code"] or "").upper() == "T"
-                                or re.fullmatch(r"T\d+", str(row["rack_code"] or "").upper())
+                                or re.fullmatch(r"(?:R?T)\d+", str(row["rack_code"] or "").upper())
                                 or "TRUCK" in str(row["rack_type"] or "").upper()
                             )
                             else row["rack_name"]
@@ -17984,6 +19286,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         barcode = str(data.get("barcode") or "").strip()
         requested_bay_code = str(data.get("bayCode") or "").strip()
         is_manual = str(data.get("isManual") or "").lower() in {"1", "true", "yes"}
+        requested_scan_qty = request_scan_quantity(data)
         outbound_override = str(data.get("outboundOverride") or "").lower() in {"1", "true", "yes"}
         allow_received_override = str(data.get("allowReceivedOverride") or "").lower() in {"1", "true", "yes"}
 
@@ -18281,9 +19584,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 self.ensure_bay_accepts_order(con, target_bay, row["order_no"], group_ids)
 
             timestamp = now_iso()
-            qty_delta = 0 if returned_to_bay else 1
+            remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
+            qty_delta = 0 if returned_to_bay else min(requested_scan_qty, remaining_qty)
             if qty_delta:
-                con.execute("UPDATE line_items SET scanned_qty = scanned_qty + 1 WHERE id = ?", (row["id"],))
+                con.execute("UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?", (qty_delta, row["id"]))
                 con.execute(
                     """
                     UPDATE rack_items
@@ -19181,6 +20485,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         truck_exempt = bool(data.get("truckExempt"))
         raw_type = str(data.get("orderType") or data.get("type") or "").strip()
         raw_reason = str(data.get("reason") or "Same-day install").strip()
+        responsible = " ".join(str(data.get("responsible") or "").split())[:180]
+        email_mode = str(data.get("emailMode") or "none").strip().lower()
+        if email_mode not in {"system", "draft", "none"}:
+            raise ValueError("Email action must be Send from system, Create user draft, or No email")
+        recipients = self._priority_intake_recipients(data.get("recipients"))
+        if email_mode == "system" and not recipients:
+            raise ValueError("Select at least one recipient before sending from the system")
         requested_delivery_date = str(data.get("deliveryDate") or "").strip()
         raw_ids = data.get("lineItemIds") or data.get("lineItemId") or []
         if isinstance(raw_ids, (str, int)):
@@ -19419,6 +20730,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "dimensions": str(row["dimensions"] or ""),
                         "deliveryDate": str(row_value(row, "delivery_date") or ""),
                         "priorityDeliveryDate": requested_delivery_date or str(row_value(row, "priority_delivery_date") or row_value(row, "delivery_date") or ""),
+                        "reason": raw_reason,
+                        "responsible": responsible,
+                        "emailMode": email_mode,
+                        "recipients": recipients,
                     },
                 )
 
@@ -19517,6 +20832,82 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     acknowledge_creator=False,
                 )
 
+            email_status = "not_requested"
+            email_error = ""
+            outbox_id = 0
+            draft: dict[str, Any] | None = None
+            if order_type == "Rush" and email_mode != "none":
+                first_email_row = affected_rows[0] if affected_rows else seed_rows[0]
+                email_job = str(first_email_row["job"] or lookup_text or "").strip()
+                subject = f"Missing Glass Rush - Job {email_job or lookup_text}"
+                body = "\n".join([
+                    "Missing Glass Rush request",
+                    "",
+                    f"Job Nr.: {email_job or lookup_text}",
+                    f"Reason: {raw_reason or 'Rush'}",
+                    f"Person responsible: {responsible or 'Not specified'}",
+                    f"Selected glass items: {len(logical_item_keys)}",
+                    f"Priority delivery date: {effective_delivery_date or 'Unchanged'}",
+                    f"Submitted by: {user}",
+                    "",
+                    "The selected missing glass was marked Rush in the Delivery List Scanner.",
+                ])
+                sent_at = ""
+                if email_mode == "system":
+                    email_status = "sent"
+                    try:
+                        self.try_send_email(recipients, [], subject, body)
+                        sent_at = now_iso()
+                    except RuntimeError as exc:
+                        email_status = "draft"
+                        email_error = str(exc)
+                    except Exception as exc:
+                        email_status = "failed"
+                        email_error = str(exc)
+                else:
+                    email_status = "user_draft"
+                    draft = {
+                        "toEmails": recipients,
+                        "ccEmails": [],
+                        "subject": subject,
+                        "body": body,
+                    }
+                cur = con.execute(
+                    """
+                    INSERT INTO email_outbox (
+                        email_type, customer_name, customer_pattern, delivery_date,
+                        to_emails, cc_emails, subject, body, status, created_at,
+                        sent_at, error, payload_json
+                    ) VALUES (?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "priority_missing_rush", email_job or lookup_text, effective_delivery_date or "",
+                        json.dumps(recipients), subject, body, email_status, now_iso(), sent_at, email_error,
+                        json.dumps({
+                            "job": email_job or lookup_text,
+                            "reason": raw_reason,
+                            "responsible": responsible,
+                            "affectedItems": len(logical_item_keys),
+                            "emailMode": email_mode,
+                        }, separators=(",", ":")),
+                    ),
+                )
+                outbox_id = int(cur.lastrowid or 0)
+                self.insert_audit(
+                    con, "priority_intake", f"missing-rush-{outbox_id or secrets.token_hex(4)}",
+                    "priority_existing_rush_email", user, "", raw_reason,
+                    {
+                        "priorityType": "Rush",
+                        "jobNumber": email_job or lookup_text,
+                        "reason": raw_reason,
+                        "responsible": responsible,
+                        "emailMode": email_mode,
+                        "recipients": recipients,
+                        "status": email_status,
+                        "outboxId": outbox_id,
+                    },
+                )
+
             con.commit()
 
         first_row = affected_rows[0] if affected_rows else None
@@ -19549,6 +20940,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "previousDeliveryDate": previous_delivery_date if first_row else "",
             "lookup": lookup_text,
             "notificationId": notification_id,
+            "responsible": responsible,
+            "emailStatus": email_status,
+            "emailError": email_error,
+            "draft": draft,
             "message": f"{order_type} marked for {target_label} across {len(affected_lists)} applicable stage(s).",
         }
 

@@ -1084,42 +1084,222 @@ class OperationsFeatureService:
         return {"ok": True, "historyId": history_id, "printedAt": printed_at}
 
     def packing_history(self, limit: int = 250) -> dict[str, Any]:
+        """Return searchable packing snapshots without exposing raw snapshot JSON."""
         self._require_sqlite()
         with self.store.connect() as con:
             rows = con.execute(
                 """
-                SELECT id, rack_code, rack_name, delivery_date, printed_at, printed_by, piece_qty, line_count
+                SELECT id, rack_code, rack_name, delivery_date, printed_at, printed_by,
+                       piece_qty, line_count, snapshot_json
                 FROM packing_list_prints ORDER BY printed_at DESC, id DESC LIMIT ?
                 """,
                 (max(1, min(int(limit or 250), 1000)),),
             ).fetchall()
-        return {"history": [dict(row) for row in rows]}
+
+        history: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            raw_snapshot = str(item.pop("snapshot_json", "") or "")
+            try:
+                snapshot = json.loads(raw_snapshot) if raw_snapshot else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                snapshot = {}
+            snapshot_items = [
+                dict(value)
+                for value in (snapshot.get("items") or [])
+                if isinstance(value, dict)
+            ] if isinstance(snapshot, dict) else []
+            order_numbers = sorted({
+                clean_text(value.get("order_no") or value.get("order") or "", 80)
+                for value in snapshot_items
+                if clean_text(value.get("order_no") or value.get("order") or "", 80)
+            })
+            job_numbers = sorted({
+                clean_text(value.get("job") or value.get("job_no") or "", 160)
+                for value in snapshot_items
+                if clean_text(value.get("job") or value.get("job_no") or "", 160)
+            })
+            item_dates = sorted({
+                clean_text(value.get("delivery_date") or value.get("deliveryDate") or "", 40)
+                for value in snapshot_items
+                if clean_text(value.get("delivery_date") or value.get("deliveryDate") or "", 40)
+            })
+            item["order_numbers"] = order_numbers
+            item["job_numbers"] = job_numbers
+            item["order_count"] = len(order_numbers)
+            item["job_count"] = len(job_numbers)
+            item["search_text"] = " ".join(
+                value
+                for value in [
+                    str(item.get("rack_code") or ""),
+                    str(item.get("rack_name") or ""),
+                    str(item.get("delivery_date") or ""),
+                    str(item.get("printed_at") or ""),
+                    str(item.get("printed_by") or ""),
+                    *order_numbers,
+                    *job_numbers,
+                    *item_dates,
+                ]
+                if value
+            )
+            history.append(item)
+        return {"history": history}
 
     def packing_history_print_html(self, history_id: int) -> str:
+        """Render one immutable packing-list snapshot with print-friendly branding."""
         self._require_sqlite()
         with self.store.connect() as con:
             row = con.execute("SELECT * FROM packing_list_prints WHERE id = ?", (int(history_id),)).fetchone()
         if not row:
             raise KeyError("Packing-list history record not found")
+
         snapshot = json.loads(str(row["snapshot_json"] or "{}"))
-        items = snapshot.get("items") or []
-        title = f"Historical Packing List - {snapshot.get('rackName') or snapshot.get('rackCode') or ''}"
+        items = [dict(item) for item in (snapshot.get("items") or []) if isinstance(item, dict)]
+        rack_code = str(snapshot.get("rackCode") or row["rack_code"] or "").strip()
+        rack_name = str(snapshot.get("rackName") or row["rack_name"] or rack_code).strip()
+        rack_type = str(snapshot.get("rackType") or "Rack").strip() or "Rack"
+        rack_status = str(snapshot.get("rackStatus") or "Recorded").strip() or "Recorded"
+        printed_by = str(snapshot.get("printedBy") or row["printed_by"] or "system").strip() or "system"
+        raw_printed_at = str(snapshot.get("printedAt") or row["printed_at"] or "").strip()
+        delivery_date = str(snapshot.get("deliveryDate") or row["delivery_date"] or "").strip()
+        piece_qty = int(row["piece_qty"] or 0)
+        line_count = int(row["line_count"] or len(items))
+
+        def display_datetime(value: str) -> str:
+            text_value = str(value or "").strip()
+            if not text_value:
+                return "Not recorded"
+            try:
+                parsed = datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                local = parsed.astimezone()
+                clock = local.strftime("%I:%M %p").lstrip("0")
+                return f"{local.month}/{local.day}/{local.year} {clock}"
+            except ValueError:
+                return text_value
+
+        def display_date(value: str) -> str:
+            clean = str(value or "").strip()
+            try:
+                parsed = date.fromisoformat(clean)
+                return f"{parsed.month}/{parsed.day}/{parsed.year}"
+            except ValueError:
+                return clean or "Mixed dates"
+
+        def route_label(value: Any) -> str:
+            clean = str(value or "").strip()
+            if not clean:
+                return "IT"
+            if re.search(r"green|gnv", clean, flags=re.IGNORECASE):
+                return "GNV"
+            if re.search(r"deliver to customer|\bdtc\b", clean, flags=re.IGNORECASE):
+                return "DTC"
+            if re.search(r"customer pick|\bcpu\b", clean, flags=re.IGNORECASE):
+                return "CPU"
+            if re.search(r"indian|trail|\bit\b", clean, flags=re.IGNORECASE):
+                return "IT"
+            return clean
+
+        routes = sorted({route_label(item.get("route")) for item in items if route_label(item.get("route"))})
+        route_summary = routes[0] if len(routes) == 1 else ("Mixed" if routes else "IT")
+        printed_at = display_datetime(raw_printed_at)
+        delivery_label = display_date(delivery_date)
+        title = f"Historical Packing List - {rack_name or rack_code}"
+
         lines = "".join(
             "<tr>"
+            f"<td>{html.escape(display_date(str(item.get('delivery_date') or delivery_date)))}</td>"
+            f"<td>{html.escape(str(item.get('job') or item.get('product') or ''))}</td>"
             f"<td>{html.escape(str(item.get('order_no') or ''))}</td>"
             f"<td>{html.escape(str(item.get('item_no') or ''))}</td>"
-            f"<td>{html.escape(str(item.get('rack_qty') or ''))}</td>"
-            f"<td>{html.escape(str(item.get('customer') or ''))}</td>"
-            f"<td>{html.escape(str(item.get('job') or item.get('product') or ''))}</td>"
+            f"<td class='qty-cell'>{html.escape(str(item.get('rack_qty') or ''))}</td>"
             f"<td>{html.escape(str(item.get('dimensions') or ''))}</td>"
-            f"<td>{html.escape(str(item.get('delivery_date') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('customer') or ''))}</td>"
+            f"<td class='route-cell'>{html.escape(route_label(item.get('route')))}</td>"
+            "<td class='check-cell'>&#9744;</td>"
             "</tr>"
             for item in items
-        )
-        return f"""<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>
-<style>body{{font:14px Arial;margin:24px;color:#10213d}}h1{{margin:0 0 6px}}p{{margin:3px 0 14px}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid #9aa8bd;padding:7px;text-align:left}}th{{background:#eaf1fb}}@media print{{button{{display:none}}body{{margin:0}}}}</style></head><body>
-<button onclick='window.print()'>Print</button><h1>{html.escape(title)}</h1>
-<p>Original print: {html.escape(str(snapshot.get('printedAt') or row['printed_at']))} by {html.escape(str(snapshot.get('printedBy') or row['printed_by']))}</p>
-<p>Delivery date: {html.escape(str(snapshot.get('deliveryDate') or 'Mixed dates'))} &middot; Pieces: {html.escape(str(row['piece_qty']))}</p>
-<table><thead><tr><th>Order</th><th>Item</th><th>Qty</th><th>Customer</th><th>Job / Glass</th><th>Dimensions</th><th>Delivery Date</th></tr></thead><tbody>{lines}</tbody></table>
-<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));</script></body></html>"""
+        ) or "<tr><td colspan='9' class='empty-row'>No pieces were stored in this snapshot.</td></tr>"
+
+        logo_src = "/static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260820-v0.351"
+        return f"""<!doctype html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <title>{html.escape(title)}</title>
+  <style>
+    *{{box-sizing:border-box}}
+    :root{{--navy:#071f3f;--blue:#135cff;--teal:#0f8a85;--ink:#10213d;--muted:#60728a;--line:#cbd7e5;--soft:#f4f7fb}}
+    body{{margin:20px;background:#edf2f7;color:var(--ink);font:13px Arial,Helvetica,sans-serif}}
+    .print-action{{margin:0 0 12px;border:0;border-radius:8px;background:var(--blue);color:#fff;padding:9px 16px;font-weight:800;cursor:pointer}}
+    .packing-sheet{{max-width:1200px;margin:0 auto;background:#fff;border:1px solid #c5d2e1;border-radius:14px;box-shadow:0 18px 42px rgba(9,34,64,.13);overflow:hidden}}
+    .document-accent{{height:7px;background:linear-gradient(90deg,var(--navy),var(--blue) 55%,var(--teal))}}
+    .packing-header{{display:grid;grid-template-columns:190px minmax(0,1fr);gap:20px;align-items:center;padding:20px 22px 16px;border-bottom:2px solid var(--navy)}}
+    .packing-logo-box{{display:flex;align-items:center;min-height:82px}}
+    .packing-logo{{width:178px;max-height:94px;object-fit:contain;object-position:left center}}
+    .packing-logo-fallback{{display:none;font-size:18px;font-weight:900;color:var(--navy)}}
+    .document-kicker{{margin:0 0 4px;color:var(--teal);font-size:10px;font-weight:900;letter-spacing:.1em;text-transform:uppercase}}
+    h1{{margin:0;color:var(--navy);font-size:27px;line-height:1.08}}
+    .snapshot-line{{margin:7px 0 0;color:var(--muted);font-size:12px;font-weight:700}}
+    .meta-grid{{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;padding:14px 22px;background:linear-gradient(180deg,#f8fbfe,#f1f5f9);border-bottom:1px solid var(--line)}}
+    .meta-card{{min-width:0;border:1px solid #d7e1ec;border-radius:8px;background:#fff;padding:8px 9px}}
+    .meta-card small{{display:block;color:var(--muted);font-size:8px;font-weight:900;letter-spacing:.07em;text-transform:uppercase}}
+    .meta-card strong{{display:block;margin-top:3px;color:var(--navy);font-size:13px;overflow-wrap:anywhere}}
+    .table-wrap{{padding:16px 22px 20px}}
+    table{{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:11px;border:1px solid #aebdce;border-radius:8px;overflow:hidden}}
+    th{{background:var(--navy);color:#fff;padding:8px 6px;text-align:left;font-size:9px;letter-spacing:.035em;text-transform:uppercase}}
+    td{{border-top:1px solid #d3dde8;padding:7px 6px;vertical-align:top;overflow-wrap:anywhere}}
+    tbody tr:nth-child(even) td{{background:#f8fafc}}
+    th:nth-child(1),td:nth-child(1){{width:10%}}
+    th:nth-child(2),td:nth-child(2){{width:18%}}
+    th:nth-child(3),td:nth-child(3){{width:9%}}
+    th:nth-child(4),td:nth-child(4){{width:7%}}
+    th:nth-child(5),td:nth-child(5){{width:5%}}
+    th:nth-child(6),td:nth-child(6){{width:13%}}
+    th:nth-child(7),td:nth-child(7){{width:23%}}
+    th:nth-child(8),td:nth-child(8){{width:7%}}
+    th:nth-child(9),td:nth-child(9){{width:5%}}
+    .qty-cell,.route-cell,.check-cell{{text-align:center;font-weight:800}}
+    .check-cell{{font-size:18px;line-height:1}}
+    .empty-row{{padding:22px;text-align:center;color:var(--muted)}}
+    .document-footer{{display:flex;justify-content:space-between;gap:16px;padding:10px 22px 14px;border-top:1px solid #d8e1eb;color:#718198;font-size:10px;font-weight:700}}
+    @page{{size:landscape;margin:.28in}}
+    @media print{{body{{margin:0;background:#fff}}.print-action{{display:none}}.packing-sheet{{max-width:none;border:0;border-radius:0;box-shadow:none}}.packing-header{{padding-top:12px}}.meta-grid{{break-inside:avoid}}}}
+  </style>
+</head>
+<body>
+  <button class='print-action' onclick='window.print()'>Print Snapshot</button>
+  <section class='packing-sheet'>
+    <div class='document-accent'></div>
+    <header class='packing-header'>
+      <div class='packing-logo-box'>
+        <img class='packing-logo' src='{logo_src}' alt='Barefoot &amp; Company' onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+        <span class='packing-logo-fallback'>Barefoot &amp; Company</span>
+      </div>
+      <div>
+        <p class='document-kicker'>Packing List History · Immutable Snapshot</p>
+        <h1>{html.escape(rack_name or rack_code)} Packing List</h1>
+        <p class='snapshot-line'>Original print: <strong>{html.escape(printed_at)}</strong> by <strong>{html.escape(printed_by)}</strong></p>
+      </div>
+    </header>
+    <section class='meta-grid'>
+      <div class='meta-card'><small>Rack</small><strong>{html.escape(rack_code)}</strong></div>
+      <div class='meta-card'><small>Rack Type</small><strong>{html.escape(rack_type)}</strong></div>
+      <div class='meta-card'><small>Status at Print</small><strong>{html.escape(rack_status)}</strong></div>
+      <div class='meta-card'><small>Route</small><strong>{html.escape(route_summary)}</strong></div>
+      <div class='meta-card'><small>Delivery Date</small><strong>{html.escape(delivery_label)}</strong></div>
+      <div class='meta-card'><small>Contents</small><strong>{piece_qty} pcs · {line_count} lines</strong></div>
+    </section>
+    <div class='table-wrap'>
+      <table>
+        <thead><tr><th>Delivery Date</th><th>Job Nr.</th><th>Order Nr.</th><th>Item Nr.</th><th>Qty</th><th>Dimensions</th><th>Customer</th><th>Route</th><th>Check</th></tr></thead>
+        <tbody>{lines}</tbody>
+      </table>
+    </div>
+    <footer class='document-footer'><span>Historical packing-list snapshot #{int(history_id)}</span><span>Saved exactly from the original rack contents</span></footer>
+  </section>
+  <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));</script>
+</body>
+</html>"""
+

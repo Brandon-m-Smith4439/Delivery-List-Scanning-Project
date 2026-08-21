@@ -52,6 +52,21 @@ const SCAN_FILTER_LABELS = Object.freeze({
   "greenville-route": "Greenville",
 });
 
+// v0.329: Column metadata keeps Scan-page sorting centralized so the desktop
+// table and mobile cards always use the same table-wide ordered dataset.
+const SCAN_TABLE_COLUMNS = Object.freeze({
+  job: Object.freeze({ label: "Job Nr.", type: "text" }),
+  order: Object.freeze({ label: "Order Nr.", type: "number" }),
+  item: Object.freeze({ label: "Item", type: "number" }),
+  qty: Object.freeze({ label: "Qty.", type: "number" }),
+  dimensions: Object.freeze({ label: "Dimensions", type: "text" }),
+  customer: Object.freeze({ label: "Customer", type: "text" }),
+  flags: Object.freeze({ label: "Flags", type: "text" }),
+  route: Object.freeze({ label: "Route", type: "text" }),
+  location: Object.freeze({ label: "Location", type: "text" }),
+  progress: Object.freeze({ label: "Progress", type: "number" }),
+});
+
 const state = {
   page: "home",
   sidebarPreference: "collapsed",
@@ -66,6 +81,8 @@ const state = {
   selectedId: null,
   activeFilters: new Set(),
   glassTypeFilters: new Set(),
+  scanSortKey: "",
+  scanSortDirection: "asc",
   search: "",
   pageIndex: 1,
   pageSize: 25,
@@ -87,7 +104,9 @@ const state = {
   staleBayQuery: "",
   staleBayAgeFilter: "all",
   staleBaySort: "age-desc",
+  staleBayView: "all",
   staleBaySelectedIds: new Set(),
+  staleBaySnoozeTimer: 0,
   selectedBayCode: "",
   bayEditMode: false,
   pendingBayMove: null,
@@ -119,7 +138,7 @@ const state = {
   rackManagerEditingSetLabel: "",
   expandedRackManagerGroups: new Set(),
   packingHistoryPage: 1,
-  packingHistoryDaysPerPage: 25,
+  packingHistoryWeeksPerPage: 5,
   packingHistoryQuery: "",
   packingHistorySearchTimer: null,
   rackStatusFilter: "all",
@@ -255,7 +274,10 @@ const state = {
   sdiExpandedCurrentGroups: new Set(),
   sdiExpandedCurrentDates: new Set(),
   sdiCurrentQuery: "",
+  priorityIntakeQuery: "",
+  priorityNewRequestMode: "rush",
   sdiCurrentTypeFilter: "all",
+  priorityIntakeEditingRequestId: "",
   sdiCurrentFilterTimer: null,
   sdiCurrentGroupsInitialized: false,
   sdiLookupTimer: null,
@@ -994,6 +1016,7 @@ const els = {
   manualScanForm: document.getElementById("manualScanForm"),
   manualOrderInput: document.getElementById("manualOrderInput"),
   manualItemInput: document.getElementById("manualItemInput"),
+  manualScanQtyInput: document.getElementById("manualScanQtyInput"),
   manualAssignPanel: document.getElementById("manualAssignPanel"),
   manualAssignForm: document.getElementById("manualAssignForm"),
   manualAssignOrderInput: document.getElementById("manualAssignOrderInput"),
@@ -1149,10 +1172,32 @@ const els = {
   sdiSelectMissingBtn: document.getElementById("sdiSelectMissingBtn"),
   sdiTruckExemptInput: document.getElementById("sdiTruckExemptInput"),
   sdiReasonInput: document.getElementById("sdiReasonInput"),
+  sdiReasonCustom: document.getElementById("sdiReasonCustom"),
+  sdiResponsibleInput: document.getElementById("sdiResponsibleInput"),
+  sdiResponsibleCustom: document.getElementById("sdiResponsibleCustom"),
+  sdiEmailMode: document.getElementById("sdiEmailMode"),
+  sdiRecipientUsers: document.getElementById("sdiRecipientUsers"),
+  sdiRecipientsField: document.getElementById("sdiRecipientsField"),
+  sdiRecipients: document.getElementById("sdiRecipients"),
+  sdiEmailHint: document.getElementById("sdiEmailHint"),
   sdiDeliveryDateInput: document.getElementById("sdiDeliveryDateInput"),
   sdiTypeInput: document.getElementById("sdiTypeInput"),
   sdiCurrentList: document.getElementById("sdiCurrentList"),
   sdiSelectionSummary: document.getElementById("sdiSelectionSummary"),
+  priorityIntakeForm: document.getElementById("priorityIntakeForm"),
+  priorityIntakeJob: document.getElementById("priorityIntakeJob"),
+  priorityIntakeReason: document.getElementById("priorityIntakeReason"),
+  priorityIntakeReasonCustom: document.getElementById("priorityIntakeReasonCustom"),
+  priorityIntakeResponsible: document.getElementById("priorityIntakeResponsible"),
+  priorityIntakeResponsibleCustom: document.getElementById("priorityIntakeResponsibleCustom"),
+  priorityIntakeEmailMode: document.getElementById("priorityIntakeEmailMode"),
+  priorityIntakeRecipientUsers: document.getElementById("priorityIntakeRecipientUsers"),
+  priorityIntakeRecipients: document.getElementById("priorityIntakeRecipients"),
+  priorityIntakeRecipientsField: document.getElementById("priorityIntakeRecipientsField"),
+  priorityIntakeEmailHint: document.getElementById("priorityIntakeEmailHint"),
+  priorityIntakeSearch: document.getElementById("priorityIntakeSearch"),
+  priorityIntakeList: document.getElementById("priorityIntakeList"),
+  priorityIntakeTabCount: document.getElementById("priorityIntakeTabCount"),
   manageItemsPanel: document.getElementById("manageItemsPanel"),
   manageItemsBackdrop: document.getElementById("manageItemsBackdrop"),
   manageItemsCloseBtn: document.getElementById("manageItemsCloseBtn"),
@@ -1178,15 +1223,16 @@ const els = {
   staleBayPanel: document.getElementById("staleBayPanel"),
   staleBayList: document.getElementById("staleBayList"),
   staleBayCloseBtn: document.getElementById("staleBayCloseBtn"),
-  staleBayOkBtn: document.getElementById("staleBayOkBtn"),
   staleBayPrintBtn: document.getElementById("staleBayPrintBtn"),
   staleBaySnoozeAllBtn: document.getElementById("staleBaySnoozeAllBtn"),
   staleBaySnoozeAllDays: document.getElementById("staleBaySnoozeAllDays"),
   staleBaySearchInput: document.getElementById("staleBaySearchInput"),
+  staleBayStateFilter: document.getElementById("staleBayStateFilter"),
   staleBayAgeFilter: document.getElementById("staleBayAgeFilter"),
   staleBaySortSelect: document.getElementById("staleBaySortSelect"),
   staleBaySelectionCount: document.getElementById("staleBaySelectionCount"),
   staleBaySelectVisibleBtn: document.getElementById("staleBaySelectVisibleBtn"),
+  staleBayClearSelectedBtn: document.getElementById("staleBayClearSelectedBtn"),
   bayLayoutManager: document.getElementById("bayLayoutManager"),
   bayLayoutSelect: document.getElementById("bayLayoutSelect"),
   bayLayoutDisplayInput: document.getElementById("bayLayoutDisplayInput"),
@@ -1295,6 +1341,8 @@ const els = {
   operationsModalEyebrow: document.getElementById("operationsModalEyebrow"),
   operationsModalDescription: document.getElementById("operationsModalDescription"),
   operationsModalStatusText: document.getElementById("operationsModalStatusText"),
+  operationsModalRackStatus: document.getElementById("operationsModalRackStatus"),
+  operationsModalRackRoute: document.getElementById("operationsModalRackRoute"),
   rejectOperationsTabs: document.getElementById("rejectOperationsTabs"),
   operationsRackTabs: document.getElementById("operationsRackTabs"),
   operationsRackHistoryCount: document.getElementById("operationsRackHistoryCount"),
@@ -2957,8 +3005,12 @@ const SPANISH_UI_V105 = new Map([
   ["Bay A-Z", "Bahía A-Z"],
   ["Select visible", "Seleccionar visibles"],
   ["Clear visible", "Quitar visibles"],
+  ["Select All", "Seleccionar todo"],
+  ["Clear Selected", "Quitar selección"],
+  ["Selected", "Seleccionado"],
   ["Snooze days", "Días de pausa"],
   ["Snooze selected", "Posponer seleccionadas"],
+  ["Snooze Selected", "Posponer seleccionadas"],
   ["Select verified rows before using the bulk snooze action.", "Seleccione las filas verificadas antes de usar la pausa masiva."],
   ["Visible rows", "Filas visibles"],
   ["Needs physical review", "Requiere revisión física"],
@@ -3229,6 +3281,7 @@ const SPANISH_PLACEHOLDERS = new Map([
 
 const languageUi = {
   observer: null,
+  observing: false,
 };
 
 const SPANISH_BAY_CATEGORY_LABELS = {
@@ -3540,8 +3593,11 @@ function shouldSkipUiTranslation(element) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function applyLanguageToRoot(root = document.body) {
+function applyLanguageToRoot(root = document.body, force = false) {
   if (!root) return;
+  // v0.353: English is authored directly in the DOM. Unless a language switch
+  // is actively restoring translated nodes, English render paths do no text walk.
+  if (state.language !== "es" && !force) return;
 
   if (root.nodeType === Node.TEXT_NODE) {
     if (!shouldSkipUiTranslation(root.parentElement)) translateUiTextNode(root);
@@ -3594,8 +3650,9 @@ function setAppLanguage(language) {
   } catch {
     // Language persistence is optional in restricted browser modes.
   }
-  applyLanguageToRoot(document.body);
+  applyLanguageToRoot(document.body, true);
   syncLanguageControls();
+  syncLanguageMutationObserver();
   syncAllCustomSelects();
   window.requestAnimationFrame(() => fitBayLastLocationText());
 }
@@ -3614,11 +3671,26 @@ function toggleAppLanguage() {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function syncLanguageMutationObserver() {
+  if (!languageUi.observer || !document.body) return;
+  const shouldObserve = state.language === "es";
+  if (shouldObserve === languageUi.observing) return;
+  languageUi.observer.disconnect();
+  languageUi.observing = false;
+  if (!shouldObserve) return;
+  languageUi.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  languageUi.observing = true;
+}
+
 function initLanguageSystem() {
   if (languageUi.observer) return;
   applyLanguageToRoot(document.body);
   syncLanguageControls();
 
+  // v0.354: English is the source markup, so there is no reason to keep a
+  // document-wide MutationObserver running for normal English sessions. The
+  // observer is connected only while Spanish is active and disconnected again
+  // immediately when the operator returns to English.
   languageUi.observer = new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
       if (mutation.type === "characterData") {
@@ -3628,7 +3700,7 @@ function initLanguageSystem() {
       mutation.addedNodes.forEach((node) => applyLanguageToRoot(node));
     });
   });
-  languageUi.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  syncLanguageMutationObserver();
 }
 
 /**
@@ -3912,7 +3984,7 @@ function customSelectAccessibleLabel(select) {
  */
 function customSelectSelectedText(select) {
   const option = select.selectedOptions?.[0] || select.options?.[select.selectedIndex];
-  return option?.textContent?.trim() || select.getAttribute("placeholder") || "Choose an option";
+  return option?.dataset.selectedLabel?.trim() || option?.textContent?.trim() || select.getAttribute("placeholder") || "Choose an option";
 }
 
 function customSelectUpdateIndicatorTitle(select, option, indicatorCount) {
@@ -3943,11 +4015,27 @@ function syncCustomSelect(select) {
 
   trigger.className = "custom-select-trigger";
   sourceClasses.forEach((name) => trigger.classList.add(name));
+  const rackStatusCue = String(option?.dataset.rackStatus || "").trim();
+  const rackRouteCue = String(option?.dataset.rackRoute || "").trim();
+  const rackSetColor = String(option?.dataset.rackColor || "").trim();
+  if (rackStatusCue) trigger.classList.add(`rack-select-status-${rackStatusCue}`);
+  if (rackRouteCue) trigger.classList.add(`rack-select-route-${rackRouteCue}`);
+  if (rackSetColor) trigger.style.setProperty("--rack-location-color", rackSetColor);
+  else trigger.style.removeProperty("--rack-location-color");
   trigger.disabled = disabled;
   trigger.setAttribute("aria-disabled", disabled ? "true" : "false");
   trigger.setAttribute("aria-expanded", customSelectUi.openSelect === select ? "true" : "false");
   trigger.title = option?.textContent?.trim() || customSelectAccessibleLabel(select);
-  value.textContent = customSelectSelectedText(select);
+  const selectedText = customSelectSelectedText(select);
+  const rackRouteLabel = String(option?.dataset.rackRouteLabel || "").trim();
+  // v0.352: operational rack selectors mirror the opened option row. Route is
+  // a colored cue at the front, followed by the full rack summary. Inline
+  // Location editors keep their compact display through data-selected-label.
+  if (rackStatusCue && rackRouteCue && rackRouteLabel) {
+    value.innerHTML = `<span class="rack-selected-option-v352"><b class="rack-select-option-route-v345 rack-select-route-${escapeHtml(rackRouteCue)}">${escapeHtml(rackRouteLabel)}</b><span class="rack-selected-option-summary-v352">${escapeHtml(selectedText)}</span></span>`;
+  } else {
+    value.textContent = selectedText;
+  }
   const indicator = trigger.querySelector(".custom-select-value-indicator");
   const indicatorKind = String(option?.dataset.customIndicator || "").trim();
   const indicatorCount = Math.max(Number(option?.dataset.customIndicatorCount || 0), 0);
@@ -4006,15 +4094,32 @@ function positionCustomSelectMenu() {
   const contentWidth = Math.min(420, Math.max(210, longestOptionLength * 7.2 + 58));
   const isScanDateSelect = select.id === "deliveryDateSelect";
   const isScanStageSelect = select.id === "deliveryStageSelect";
+  const isInlineRackSelect = select.matches?.("[data-line-rack-select]");
+  const isRackSelect = [...select.options].some((option) => Boolean(option.dataset.rackStatus));
   const isScanContextSelect = isScanDateSelect || isScanStageSelect;
   // The stage menu should follow its trigger exactly; the date menu needs a
   // little extra width so Monday-Friday headers remain readable on one line.
+  // v0.350: operational rack menus intentionally open 30% smaller than the
+  // previous 430px presentation. The trigger can remain full-width while the
+  // body-mounted menu is a compact, scrollable operator list.
+  // v0.351: expand the v0.350 compact rack menu by 13% without returning to
+  // the former oversized menu. 0.791 = 0.70 * 1.13.
+  const rackMenuScale = 0.791;
+  const rackOpenMenuWidth = Math.max(294, Math.min(340, Math.round(rect.width * rackMenuScale)));
   const preferredWidth = isScanDateSelect
     ? Math.max(rect.width, 244)
     : isScanStageSelect
       ? rect.width
-      : Math.max(rect.width, contentWidth);
-  const minimumWidth = isScanDateSelect ? Math.max(rect.width, 220) : (isScanStageSelect ? rect.width : 210);
+      : isRackSelect
+        ? rackOpenMenuWidth
+        : Math.max(rect.width, contentWidth);
+  const minimumWidth = isScanDateSelect
+    ? Math.max(rect.width, 220)
+    : isScanStageSelect
+      ? rect.width
+      : isRackSelect
+        ? Math.min(294, rackOpenMenuWidth)
+        : 210;
   const availableWidth = Math.max(160, window.innerWidth - viewportPadding * 2);
   const menuWidth = Math.min(Math.max(preferredWidth, Math.min(minimumWidth, availableWidth)), availableWidth);
 
@@ -4027,9 +4132,13 @@ function positionCustomSelectMenu() {
   const openAbove = spaceBelow < Math.min(menuHeight, 280) && spaceAbove > spaceBelow;
 
   menu.classList.toggle("opens-above", openAbove);
-  menu.style.maxHeight = `${Math.max(160, openAbove ? spaceAbove : spaceBelow)}px`;
+  const availableVertical = Math.max(160, openAbove ? spaceAbove : spaceBelow);
+  const menuVerticalLimit = isRackSelect
+    ? Math.max(181, Math.floor(availableVertical * rackMenuScale))
+    : availableVertical;
+  menu.style.maxHeight = `${menuVerticalLimit}px`;
   menu.style.top = openAbove
-    ? `${Math.max(viewportPadding, rect.top - Math.min(menuHeight, spaceAbove) - 7)}px`
+    ? `${Math.max(viewportPadding, rect.top - Math.min(menuHeight, menuVerticalLimit) - 7)}px`
     : `${Math.min(window.innerHeight - viewportPadding, rect.bottom + 7)}px`;
 }
 
@@ -4143,10 +4252,37 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     button.setAttribute("aria-selected", row.index === select.selectedIndex ? "true" : "false");
     button.classList.toggle("is-selected", row.index === select.selectedIndex);
     button.classList.toggle("is-date-option", select.id === "deliveryDateSelect" || select.dataset.deliveryDateSelect === "true");
+    const rackStatusCue = String(row.option.dataset.rackStatus || "").trim();
+    const rackRouteCue = String(row.option.dataset.rackRoute || "").trim();
+    const rackSetColor = String(row.option.dataset.rackColor || "").trim();
+    if (rackStatusCue) button.classList.add(`rack-select-status-${rackStatusCue}`);
+    if (rackRouteCue) button.classList.add(`rack-select-route-${rackRouteCue}`);
+    if (rackSetColor) {
+      button.dataset.rackColor = rackSetColor;
+      button.style.setProperty("--rack-location-color", rackSetColor);
+    }
 
     const label = document.createElement("span");
     label.className = "custom-select-option-label";
     label.textContent = row.text;
+
+    const rackCueWrap = rackStatusCue || rackRouteCue ? document.createElement("span") : null;
+    if (rackCueWrap) {
+      rackCueWrap.className = "rack-select-option-cues-v345";
+      if (rackStatusCue) {
+        const statusCueDot = document.createElement("i");
+        statusCueDot.className = `rack-select-option-status-v345 rack-select-status-${rackStatusCue}`;
+        statusCueDot.title = String(row.option.dataset.rackStatusLabel || "Rack status");
+        rackCueWrap.append(statusCueDot);
+      }
+      const routeLabel = String(row.option.dataset.rackRouteLabel || "").trim();
+      if (rackRouteCue && routeLabel) {
+        const routeCuePill = document.createElement("b");
+        routeCuePill.className = `rack-select-option-route-v345 rack-select-route-${rackRouteCue}`;
+        routeCuePill.textContent = routeLabel;
+        rackCueWrap.append(routeCuePill);
+      }
+    }
 
     const check = document.createElement("span");
     check.className = "custom-select-option-check";
@@ -4163,6 +4299,7 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
       ? customSelectUpdateIndicatorTitle(select, row.option, indicatorCount)
       : "";
 
+    if (rackCueWrap) button.append(rackCueWrap);
     button.append(label, indicator, check);
     const deleteAction = String(row.option.dataset.customDeleteAction || "").trim();
     const optionRow = deleteAction ? document.createElement("div") : null;
@@ -4245,7 +4382,13 @@ function openCustomSelect(select) {
   const menu = document.createElement("div");
   const timedConfirmationShell = select.closest("[data-timed-scan-confirmation]");
   const scanContextMenu = select.id === "deliveryDateSelect" || select.id === "deliveryStageSelect";
-  menu.className = `custom-select-menu${timedConfirmationShell ? " is-timed-confirmation-menu" : ""}${scanContextMenu ? " is-scan-context-menu" : ""}`;
+  const rackSelectMenu = [...select.options].some((option) => Boolean(option.dataset.rackStatus));
+  const rackTransferMenu = Boolean(select.closest(".rack-transfer-dialog-v356"));
+  menu.className = `custom-select-menu${timedConfirmationShell ? " is-timed-confirmation-menu" : ""}${scanContextMenu ? " is-scan-context-menu" : ""}${rackSelectMenu ? " is-rack-select-menu-v351" : ""}${rackTransferMenu ? " is-rack-transfer-menu-v357" : ""}`;
+  // v0.357: Move Rack lives inside the Operations modal, but its shared menu is
+  // mounted under <body>. Give that menu an explicit top-level stack so it can
+  // never render behind the modal panel or its backdrop.
+  if (rackTransferMenu) menu.style.zIndex = "60000";
   menu._timedConfirmationShell = timedConfirmationShell || null;
   timedConfirmationShell?._setCustomSelectOpen?.(true);
   menu.id = `${select.id || `customSelect${Date.now()}`}Menu`;
@@ -4426,14 +4569,20 @@ function initCustomSelectSystem() {
     mutations.forEach((mutation) => {
       if (mutation.type === "childList") {
         mutation.addedNodes.forEach((node) => {
-          if (node instanceof Element) enhanceCustomSelects(node);
+          if (!(node instanceof Element)) return;
+          if (node instanceof HTMLSelectElement || node.matches?.("select")) {
+            enhanceCustomSelect(node);
+            return;
+          }
+          // v0.354: most modal/card mutations contain no selects. Avoid a
+          // querySelectorAll() walk for every inserted row unless a select is
+          // actually present in that subtree.
+          if (node.querySelector?.("select")) enhanceCustomSelects(node);
         });
       }
 
-      const select = mutation.target instanceof HTMLSelectElement
-        ? mutation.target
-        : mutation.target.closest?.("select");
-      if (select) {
+      if (mutation.target instanceof HTMLSelectElement) {
+        const select = mutation.target;
         if (select.dataset.customSelectEnhanced === "true") syncCustomSelect(select);
         else enhanceCustomSelect(select);
       }
@@ -4444,7 +4593,9 @@ function initCustomSelectSystem() {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["class", "disabled", "hidden"],
+    // v0.353: ignore unrelated class churn from modal animations and card
+    // state changes. The enhanced select only needs availability changes here.
+    attributeFilter: ["disabled", "hidden"],
   });
 
   document.addEventListener("click", (event) => {
@@ -4464,6 +4615,11 @@ function initCustomSelectSystem() {
     if (event.target.dataset.customSelectEnhanced !== "true") void playAppSound("collapse_close");
   }, true);
   window.addEventListener("resize", () => customSelectUi.openSelect && positionCustomSelectMenu());
+  window.addEventListener("scroll", () => {
+    if (["deliveryDateSelect", "deliveryStageSelect"].includes(customSelectUi.openSelect?.id)) {
+      window.requestAnimationFrame(positionCustomSelectMenu);
+    }
+  }, { passive: true });
   document.addEventListener("scroll", (event) => {
     if (!customSelectUi.openSelect || customSelectUi.menu?.contains(event.target)) return;
     // Date and Stage live inside the sticky Scan panel. Closing their menu on
@@ -5076,29 +5232,86 @@ function waitForNextPaint() {
  * Effects: Updates visible dom state, may call the backend api, may update shared client state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+const APP_MODAL_STATE_SELECTOR = [
+  ".modal-panel",
+  "[role='dialog'][aria-modal='true']",
+  "#emailDraftPreviewShell",
+  "#actionFeedbackShell",
+  "#rushAlertShell",
+  "#indianTrailOutboundOverrideShell",
+  ".action-confirm-backdrop",
+  ".rack-transfer-backdrop",
+].join(",");
+
+function modalNodeIsOpen(panel) {
+  if (!panel || !panel.isConnected || panel.hidden) return false;
+  if (panel.getAttribute?.("aria-hidden") === "true") return false;
+  const hiddenAncestor = panel.closest?.("[hidden]");
+  return !hiddenAncestor || hiddenAncestor === panel;
+}
+
+function appModalUiIsOpen() {
+  return document.body?.classList.contains("modal-scroll-locked")
+    || [...document.querySelectorAll(APP_MODAL_STATE_SELECTOR)].some(modalNodeIsOpen);
+}
+
+/** Remove body-mounted dropdown layers whose source control is no longer usable. */
+function cleanupTransientUiLayers() {
+  const openSelect = customSelectUi.openSelect;
+  const hiddenOwner = openSelect?.closest?.("[hidden], [aria-hidden='true']");
+  if (openSelect && (!openSelect.isConnected || hiddenOwner)) closeCustomSelect(false);
+
+  // A custom-select menu is portaled to <body>. If a GUI disappears during an
+  // async render, an orphan menu could otherwise remain over Rack page actions
+  // and steal pointer events even though no visible dropdown remains.
+  document.querySelectorAll(".custom-select-menu").forEach((menu) => {
+    if (menu !== customSelectUi.menu) menu.remove();
+  });
+}
+
 function updateModalScrollLock() {
-  const panelIsActuallyVisible = (panel) => {
-    if (!panel || !panel.isConnected || panel.hidden) return false;
-    const style = window.getComputedStyle(panel);
-    return style.display !== "none" && style.visibility !== "hidden" && panel.getClientRects().length > 0;
-  };
-  const modalIsOpen = [
-    els.adminModal,
-    els.printOptionsPanel,
-    els.baySelectedModal,
-    els.staleBayPanel,
-    els.sdiPanel,
-    els.manageItemsPanel,
-    els.bayEditorPanel,
-    document.getElementById("emailDraftPreviewShell"),
-    document.getElementById("actionFeedbackShell"),
-    document.getElementById("rushAlertShell"),
-    document.getElementById("indianTrailOutboundOverrideShell"),
-    document.querySelector(".action-confirm-backdrop"),
-  ].some(panelIsActuallyVisible);
+  cleanupTransientUiLayers();
+
+  // v0.353: avoid getComputedStyle()/getClientRects() here. Those layout reads
+  // were being repeated for every mutation while a GUI rendered and caused the
+  // large application-wide slowdown seen immediately after opening a modal.
+  const modalIsOpen = [...document.querySelectorAll(APP_MODAL_STATE_SELECTOR)].some(modalNodeIsOpen);
+  const wasLocked = document.body.classList.contains("modal-scroll-locked");
 
   document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
+  if (wasLocked && !modalIsOpen && state.page === "racks") scheduleRackHeadingHitTargetRepair();
 }
+
+let modalScrollLockObserver = null;
+function installModalScrollLockObserver() {
+  if (modalScrollLockObserver || !document.body) return;
+  let pending = false;
+  modalScrollLockObserver = new MutationObserver((mutations) => {
+    const changesModalState = mutations.some((mutation) => {
+      const target = mutation.target instanceof Element ? mutation.target : null;
+      if (mutation.type === "attributes") {
+        return Boolean(target?.matches?.(APP_MODAL_STATE_SELECTOR));
+      }
+      return [...mutation.addedNodes, ...mutation.removedNodes].some((node) => (
+        node instanceof Element
+        && (node.matches?.(APP_MODAL_STATE_SELECTOR) || node.querySelector?.(APP_MODAL_STATE_SELECTOR))
+      ));
+    });
+    if (!changesModalState || pending) return;
+    pending = true;
+    window.requestAnimationFrame(() => {
+      pending = false;
+      updateModalScrollLock();
+    });
+  });
+  modalScrollLockObserver.observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ["hidden", "aria-hidden"],
+  });
+}
+installModalScrollLockObserver();
 
 /**
  * Purpose: Load the fetch JSON workflow using the existing shared UI state.
@@ -5644,6 +5857,7 @@ async function removeStation(name) {
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
 function applyBackendPayload(payload) {
+  const previousSelectedId = String(state.selectedId || "");
   const items = cloneItems(payload.items || []);
   const computedTotalQty = pieceCount(items);
   const computedManualItems = items.filter((item) => item.manualOnly || String(item.manualSource || "").trim());
@@ -5671,7 +5885,12 @@ function applyBackendPayload(payload) {
   state.recent = payload.recent || [];
   state.errors = payload.errors || [];
   state.lastScan = payload.lastScan || state.recent[0] || null;
-  state.selectedId = state.lastScan?.item?.id || state.selectedId;
+  // v0.352: polling and background refreshes must never steal a line that the
+  // operator deliberately selected. Fall back to the latest scan only when the
+  // former selection no longer exists in the refreshed list.
+  const selectedStillExists = previousSelectedId
+    && items.some((item) => String(item.id || "") === previousSelectedId);
+  state.selectedId = selectedStillExists ? previousSelectedId : (state.lastScan?.item?.id || null);
 
   const catalogIndex = state.lists.findIndex((list) => String(list.id || "") === String(meta.id || ""));
   if (catalogIndex >= 0) {
@@ -6480,6 +6699,86 @@ function syncScanFilterButtons() {
   renderActiveScanFilters();
 }
 
+/** Return the visible markers owned by the Scan table Flag column. */
+function scanFlagLabels(item) {
+  if (!item) return [];
+  return [
+    isRemakeItem(item) ? "Remake" : "",
+    isRushItem(item) ? "Rush" : "",
+    Number(item.internalRejectCount || 0) > 0 ? "Internal Reject" : "",
+    item.manualOnly ? "Manual scan only" : "",
+  ].filter(Boolean);
+}
+
+/** Return one stable display/sort value for a Scan-page column. */
+function scanColumnValue(item, key) {
+  if (!item) return "";
+  if (key === "job") return `${item.job || ""} ${item.product || ""}`.trim();
+  if (key === "order") return Number(item.order || 0);
+  if (key === "item") return Number(item.item || 0);
+  if (key === "qty") return Number(item.qty || 0);
+  if (key === "dimensions") return String(item.dimensions || "");
+  if (key === "customer") return String(item.customer || "");
+  if (key === "flags") return scanFlagLabels(item).join(" ");
+  if (key === "route") return routeLabel(item) || "Indian Trail";
+  if (key === "location") return scanLocationPresentation(item).label || "";
+  if (key === "progress") {
+    const qty = Math.max(Number(item.qty || 0), 0);
+    return qty ? Math.min(Math.max(Number(item.scanned || 0), 0), qty) / qty : 0;
+  }
+  return "";
+}
+
+/** Sort the filtered Scan-page rows by the active clickable column header. */
+function sortScanItems(items) {
+  const key = String(state.scanSortKey || "");
+  const column = SCAN_TABLE_COLUMNS[key];
+  if (!column) return items.slice();
+  const direction = state.scanSortDirection === "desc" ? -1 : 1;
+  return items.slice().sort((left, right) => {
+    if (key === "flags") {
+      const leftFlags = scanFlagLabels(left);
+      const rightFlags = scanFlagLabels(right);
+      const leftHasFlags = leftFlags.length > 0;
+      const rightHasFlags = rightFlags.length > 0;
+      if (leftHasFlags !== rightHasFlags) {
+        // The first/ascending click intentionally puts flagged rows at the top.
+        return (leftHasFlags ? -1 : 1) * direction;
+      }
+      const flagDifference = leftFlags.join(" ").localeCompare(rightFlags.join(" "), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+      if (flagDifference) return flagDifference * direction;
+    } else {
+      const a = scanColumnValue(left, key);
+      const b = scanColumnValue(right, key);
+      if (column.type === "number") {
+        const difference = Number(a || 0) - Number(b || 0);
+        if (difference) return difference * direction;
+      } else {
+        const difference = String(a || "").localeCompare(String(b || ""), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+        if (difference) return difference * direction;
+      }
+    }
+    return String(left.id || "").localeCompare(String(right.id || ""), undefined, { numeric: true }) * direction;
+  });
+}
+
+function syncScanTableHeaders() {
+  document.querySelectorAll(".delivery-table thead th[data-scan-column]").forEach((header) => {
+    const key = header.dataset.scanColumn || "";
+    const sorted = state.scanSortKey === key;
+    header.classList.toggle("is-sorted", sorted);
+    header.setAttribute("aria-sort", sorted ? (state.scanSortDirection === "desc" ? "descending" : "ascending") : "none");
+    const indicator = header.querySelector("[data-scan-sort-indicator]");
+    if (indicator) indicator.textContent = sorted ? (state.scanSortDirection === "desc" ? "↓" : "↑") : "";
+  });
+}
+
 /** Render active filter chips, including every selected glass type. */
 function renderActiveScanFilters() {
   const selected = Object.values(SCAN_FILTER_GROUPS)
@@ -6508,6 +6807,9 @@ function renderActiveScanFilters() {
     ...selectedGlassTypes.map(
       (label) => `<button class="scan-filter-chip is-glass" type="button" data-remove-glass-filter="${escapeHtml(label)}"><i aria-hidden="true"></i><span>${escapeHtml(label)}</span><b aria-hidden="true">&times;</b></button>`,
     ),
+    ...(state.scanSortKey && SCAN_TABLE_COLUMNS[state.scanSortKey]
+      ? [`<button class="scan-filter-chip is-sort-v328" type="button" data-clear-scan-sort><i aria-hidden="true"></i><span>${escapeHtml(SCAN_TABLE_COLUMNS[state.scanSortKey].label)} ${state.scanSortDirection === "desc" ? "↓" : "↑"}</span><b aria-hidden="true">&times;</b></button>`]
+      : []),
   ].join("");
 }
 
@@ -6577,15 +6879,14 @@ function groupItemsByGlass(items) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function getPagedItems() {
-  const rows = filteredItems();
-  const groups = groupItemsByGlass(rows);
+  const rows = sortScanItems(filteredItems());
+  const groups = state.scanSortKey ? [] : groupItemsByGlass(rows);
 
-  const orderedEntries = groups.flatMap((group) =>
-    group.items.map((item) => ({
-      label: group.label,
-      item,
-    })),
-  );
+  // A user-selected column sort is a true table-wide sort. The default view
+  // retains the familiar glass-type grouping when no explicit sort is active.
+  const orderedEntries = state.scanSortKey
+    ? rows.map((item) => ({ label: "", item, flat: true }))
+    : groups.flatMap((group) => group.items.map((item) => ({ label: group.label, item, flat: false })));
 
   const totalPages = Math.max(1, Math.ceil(orderedEntries.length / state.pageSize));
   state.pageIndex = Math.min(Math.max(state.pageIndex, 1), totalPages);
@@ -6597,11 +6898,12 @@ function getPagedItems() {
   for (const entry of pageEntries) {
     const lastGroup = pageGroups[pageGroups.length - 1];
 
-    if (lastGroup && lastGroup.label === entry.label) {
+    if (lastGroup && lastGroup.label === entry.label && Boolean(lastGroup.flat) === Boolean(entry.flat)) {
       lastGroup.items.push(entry.item);
     } else {
       pageGroups.push({
         label: entry.label,
+        flat: Boolean(entry.flat),
         items: [entry.item],
       });
     }
@@ -6640,42 +6942,82 @@ function renderProcessState(item) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function locationLabel(item) {
-  if (item?.received === true || Number(item?.receivedQty || 0) > 0) return "Received";
-  const stageText = `${state.meta?.stage || ""} ${state.meta?.scanner || ""}`.toLowerCase();
-  const rackCode = String(item.rackCode || "").trim().toUpperCase();
-  if (stageText.includes("indian trail") && item.bayCode) return `Bay ${item.bayCode}`;
-  if (rackCode === "T" || /^T\d+$/i.test(rackCode) || /truck|no rack/i.test(`${item.rackName || ""} ${item.rackType || ""}`)) {
-    return rackLocationDisplayLabel(rackCode, item.rackName, item.rackType);
-  }
-  if (rackCode) return rackCode;
+function scanLocationPresentation(item) {
+  const currentItem = item || {};
+  const indianTrailStage = isIndianTrailScanContext();
+  const stagingOrOutboundStage = isStagingScanContext() || isOutboundScanContext();
 
-  // v0.269: once a rack assignment is cleared, keep the most recent transport
-  // rack visible as history. The row renderer gives this fallback a muted style
-  // so operators can distinguish prior transportation from the current location.
-  const previousRackCode = String(item.lastRackCode || "").trim().toUpperCase();
-  if (previousRackCode === "T" || /^T\d+$/i.test(previousRackCode) || /truck|no rack/i.test(`${item.lastRackName || ""} ${item.lastRackType || ""}`)) {
-    return rackLocationDisplayLabel(previousRackCode, item.lastRackName, item.lastRackType);
+  // Bay locations belong only to the Indian Trail receiving stage. Once a bay
+  // assignment is cleared/cancelled, keep the most recent bay visible as muted
+  // history so operators can still see where the glass was physically stored.
+  if (indianTrailStage) {
+    const currentBay = bayLocationDisplayLabel(currentItem.bayCode, currentItem.bayName);
+    if (currentBay) {
+      return {
+        label: currentBay,
+        kind: "bay",
+        historical: false,
+        title: `Current Indian Trail location: ${currentBay}`,
+      };
+    }
+    const previousBay = bayLocationDisplayLabel(currentItem.lastBayCode, currentItem.lastBayName);
+    if (previousBay) {
+      return {
+        label: previousBay,
+        kind: "bay",
+        historical: true,
+        title: `Previously stored in ${previousBay}; the bay assignment has been removed.`,
+      };
+    }
+    return { label: "", kind: "bay", historical: false, title: "" };
   }
-  if (previousRackCode) return previousRackCode;
-  return "";
+
+  // Staging/Outbound should continue to show the transport rack, not the later
+  // Indian Trail bay. After receipt, the rack remains useful history and is
+  // deliberately rendered in gray instead of being replaced with "Received".
+  const rackCode = String(currentItem.rackCode || "").trim().toUpperCase();
+  const currentRack = rackCode
+    ? rackLocationDisplayLabel(rackCode, currentItem.rackName, currentItem.rackType)
+    : "";
+  if (currentRack) {
+    const receivedDownstream = stagingOrOutboundStage
+      && (currentItem.received === true || Number(currentItem.receivedQty || 0) > 0);
+    return {
+      label: currentRack,
+      kind: /^truck/i.test(currentRack) ? "truck" : "rack",
+      historical: receivedDownstream,
+      title: receivedDownstream
+        ? `Previously transported in ${currentRack}; this item has been received downstream.`
+        : `Current rack location: ${currentRack}`,
+    };
+  }
+
+  const previousRack = rackHistoryLocationLabel(currentItem);
+  if (previousRack) {
+    return {
+      label: previousRack,
+      kind: /^truck/i.test(previousRack) ? "truck" : "rack",
+      historical: true,
+      title: `Previously transported in ${previousRack}.`,
+    };
+  }
+
+  return { label: "", kind: "rack", historical: false, title: "" };
+}
+
+function locationLabel(item) {
+  return scanLocationPresentation(item).label;
 }
 
 function rackHistoryLocationLabel(item) {
   const previousRackCode = String(item?.lastRackCode || "").trim().toUpperCase();
   if (!previousRackCode) return "";
-  if (previousRackCode === "T" || /^T\d+$/i.test(previousRackCode) || /truck|no rack/i.test(`${item?.lastRackName || ""} ${item?.lastRackType || ""}`)) {
-    return rackLocationDisplayLabel(previousRackCode, item?.lastRackName, item?.lastRackType);
-  }
-  return previousRackCode;
+  return rackLocationDisplayLabel(previousRackCode, item?.lastRackName, item?.lastRackType);
 }
 
 function locationIsRackHistory(item) {
-  return Boolean(
-    item
-    && !String(item.rackCode || "").trim()
-    && String(item.lastRackCode || "").trim()
-  );
+  const presentation = scanLocationPresentation(item);
+  return presentation.historical && presentation.kind !== "bay";
 }
 
 /**
@@ -6741,6 +7083,7 @@ function rackForCode(code) {
 function itemCanShowRackLocationDropdown(item) {
   if (!canAssignRackLocation() || item.id !== state.selectedId) return false;
   if (itemScannedPieceQty(item) <= 0) return false;
+  if (item?.received === true || Number(item?.receivedQty || 0) > 0) return false;
 
   const currentRackCode = String(item.rackCode || "").trim();
   if (!currentRackCode) return true;
@@ -6773,47 +7116,58 @@ function locationBadgeClass(location) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function rackLocationDropdown(item, currentLocation = "") {
-  const historical = locationIsRackHistory(item);
-  const historyLocation = historical ? rackHistoryLocationLabel(item) : "";
-  const historyTitle = historyLocation
-    ? `Previously transported in ${String(item.lastRackName || item.lastRackCode || historyLocation).trim()}`
+  const presentation = scanLocationPresentation(item);
+  const displayLocation = presentation.label || currentLocation || "";
+  const currentRack = rackForCode(item.rackCode);
+  const rackComplete = Boolean(currentRack && rackStatusClassName(currentRack) === "complete");
+  const rackColor = currentRack ? rackSetDisplayColor(rackGroupLabel(currentRack)) : "";
+  const resolvedRackColor = rackComplete ? "#2fa84f" : rackColor;
+  const rackStyle = resolvedRackColor ? ` style="--rack-location-color:${escapeHtml(resolvedRackColor)}"` : "";
+  const historyClass = presentation.historical
+    ? ` is-location-history${presentation.kind === "bay" ? " is-bay-history" : " is-rack-history"}`
     : "";
-  const historyBadge = historyLocation
-    ? `<span class="${escapeHtml(locationBadgeClass(historyLocation))} is-rack-history" title="${escapeHtml(historyTitle)}">${escapeHtml(historyLocation)}</span>`
+  const displayBadge = displayLocation
+    ? `<span class="${escapeHtml(locationBadgeClass(displayLocation))}${historyClass}${rackColor ? " rack-location-accent-v349" : ""}" title="${escapeHtml(presentation.title || displayLocation)}">${escapeHtml(displayLocation)}</span>`
     : "";
 
+  const wrapRackLocation = (content) => resolvedRackColor
+    ? `<span class="location-rack-cell-v349${rackComplete ? " is-rack-complete-v353" : ""}"${rackStyle}>${content}</span>`
+    : content;
+
   if (!itemCanShowRackLocationDropdown(item)) {
-    if (!currentLocation && !historyBadge) return "";
-    const currentIsHistory = Boolean(historyLocation && String(currentLocation || "") === historyLocation);
-    const currentBadge = currentLocation && !currentIsHistory
-      ? `<span class="${escapeHtml(locationBadgeClass(currentLocation))}">${escapeHtml(currentLocation)}</span>`
-      : "";
-    if (currentBadge && historyBadge) {
-      return `<span class="location-history-stack-v269">${currentBadge}${historyBadge}</span>`;
-    }
-    return currentBadge || historyBadge;
+    return wrapRackLocation(displayBadge);
   }
 
   const currentRackCode = String(item.rackCode || "").trim().toUpperCase() === "T" ? "T" : String(item.rackCode || "").trim();
-  /**
-   * Purpose: Run the assignable racks workflow for the browser application.
-   * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
-   * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
-   */
   const assignableRacks = (state.racks || []).filter((rack) => !rackIsLockedForLineAssignment(rack));
-  const rackOptions = groupedRackOptionsHtml(assignableRacks, currentRackCode);
+  const rackOptions = groupedRackOptionsHtml(assignableRacks, currentRackCode, { compactSelected: true });
+  const currentRackLabel = currentRackCode
+    ? rackLocationDisplayLabel(currentRackCode, item.rackName, item.rackType)
+    : "";
+  const editorLabel = currentRackLabel || "No rack";
+  const editorBadgeClass = currentRackLabel
+    ? locationBadgeClass(currentRackLabel)
+    : "location-badge rack location-badge-empty-v350";
 
+  // v0.350: keep the normal Location badge visible while editing. The shared
+  // custom-select trigger is a transparent hit target over the badge, so the
+  // cell does not morph into a form control when a line is selected.
   const control = `
-    <label class="line-rack-location-control" title="Supervisor/Admin rack recovery assignment">
-      <span>Rack</span>
-      <select data-line-rack-select="${escapeHtml(item.id)}" ${rackOptions ? "" : "disabled"}>
+    <label class="line-rack-location-control rack-location-editor-v350" title="Change rack location">
+      <span class="${escapeHtml(editorBadgeClass)}${rackColor ? " rack-location-accent-v349" : ""} line-rack-location-display-v350">${escapeHtml(editorLabel)}</span>
+      <span class="sr-only">Rack location</span>
+      <select data-line-rack-select="${escapeHtml(item.id)}" aria-label="Change rack location" ${rackOptions ? "" : "disabled"}>
         <option value="">${rackOptions ? "No rack" : "Loading racks..."}</option>
         ${rackOptions}
       </select>
     </label>`;
-  return historyBadge
-    ? `<span class="location-history-stack-v269 is-editable">${control}${historyBadge}</span>`
+
+  // When only historical rack information remains, show it beneath the normal
+  // editable current-location badge instead of presenting history as current.
+  const content = presentation.historical && displayBadge && !currentRackLabel
+    ? `<span class="location-history-stack-v269 is-editable">${control}${displayBadge}</span>`
     : control;
+  return wrapRackLocation(content);
 }
 
 /**
@@ -7240,12 +7594,14 @@ function renderTable() {
   if (!els.listRows) return;
   const { rows, pageGroups, totalPages } = getPagedItems();
   renderPagers(rows.length, totalPages);
+  syncScanTableHeaders();
   if (!pageGroups.length) {
     els.listRows.innerHTML = `<tr><td colspan="10">No rows match the current filters.</td></tr>`;
     return;
   }
   els.listRows.innerHTML = pageGroups
-    .map(({ label, items: groupItems }) => {
+    .map(({ label, flat, items: groupItems }) => {
+      if (flat) return groupItems.map(renderItemRow).join("");
       const totalQty = groupItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
       const scannedQty = groupItems.reduce((sum, item) => sum + Math.min(Number(item.scanned || 0), Number(item.qty || 0)), 0);
       const updatedCount = groupItems.filter(isNewOrUpdatedItem).length;
@@ -7288,6 +7644,7 @@ async function refreshRacksPage() {
     state.rackSummary = payload.summary || null;
   }
   renderRacksPage();
+  scheduleRackHeadingHitTargetRepair();
 }
 
 /**
@@ -7358,6 +7715,17 @@ function rackSetExplicitVisual(value) {
 
 function rackSetVisualColor(value) {
   return rackSetExplicitVisual(value).color || "";
+}
+
+/**
+ * Return the exact rack-set accent used by the Racks page, including the
+ * deterministic hue fallback when an older rack set has no saved custom color.
+ * Keeping this helper shared prevents Scan Location cells and selectors from
+ * drifting away from the rack-set color operators already recognize.
+ */
+function rackSetDisplayColor(value) {
+  const explicit = rackSetVisualColor(value);
+  return explicit || `hsl(${rackSetVisualHue(value)} 48% 42%)`;
 }
 
 function nextRackSetVisualColor() {
@@ -7519,7 +7887,7 @@ function rackFormExistingSetRacksHtml(type = "", currentCode = "") {
   if (!racks.length) return `<span class="rack-set-existing-empty-v308">No racks exist in this set yet.</span>`;
   return racks.map((rack) => {
     const current = rackDraftCode(rack.code) === cleanCurrent;
-    return `<span class="rack-set-existing-rack-v308 ${current ? "is-current" : ""}"><b>${escapeHtml(rack.code)}</b><small>${escapeHtml(rack.name || rack.type || "Rack")}</small><i class="${escapeHtml(rackStatusClassName(rack))}">${escapeHtml(rackStatusLabel(rack))}</i></span>`;
+    return `<span class="rack-set-existing-rack-v308 ${current ? "is-current" : ""}"><b>${escapeHtml(rack.code)}</b><small>${escapeHtml(rackOperatorDisplayName(rack))}</small><i class="${escapeHtml(rackStatusClassName(rack))}">${escapeHtml(rackStatusLabel(rack))}</i></span>`;
   }).join("");
 }
 
@@ -7654,8 +8022,11 @@ function applyRackOperationsVisual(rack) {
   const rackSet = rackGroupLabel(rack);
   els.operationsModal.dataset.rackSet = rackSet;
   els.operationsModal.dataset.rackIcon = rackSetVisualIcon(rackSet);
-  els.operationsModal.style.setProperty("--rack-set-hue", String(rackSetVisualHue(rackSet)));
+  const setHue = rackSetVisualHue(rackSet);
+  els.operationsModal.style.setProperty("--rack-set-hue", String(setHue));
   const setColor = rackSetVisualColor(rackSet);
+  const modalAccent = setColor || `hsl(${setHue} 48% 42%)`;
+  els.operationsModal.style.setProperty("--rack-modal-accent", modalAccent);
   if (setColor) els.operationsModal.style.setProperty("--rack-set-icon-color", setColor);
   else els.operationsModal.style.removeProperty("--rack-set-icon-color");
 }
@@ -7675,6 +8046,7 @@ function clearRackOperationsVisual() {
   delete els.operationsModal.dataset.rackIcon;
   els.operationsModal.style.removeProperty("--rack-set-hue");
   els.operationsModal.style.removeProperty("--rack-set-icon-color");
+  els.operationsModal.style.removeProperty("--rack-modal-accent");
 }
 
 /**
@@ -7682,34 +8054,58 @@ function clearRackOperationsVisual() {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function groupedRackOptionsHtml(racks = [], selectedCode = "", options = {}) {
-  const includeNoRack = Boolean(options.includeNoRack);
-  const disableLocked = Boolean(options.disableLocked);
-  const noRackOption = includeNoRack
-    ? `<option value="${NO_RACK_SELECTION}" ${selectedCode === NO_RACK_SELECTION ? "selected" : ""}>No Rack - Leave location blank</option>`
-    : "";
+function rackSelectorGroups(racks = []) {
   const groups = new Map();
   for (const rack of racks) {
     const label = rackGroupLabel(rack);
     if (!groups.has(label)) groups.set(label, []);
     groups.get(label).push(rack);
   }
+  return [...groups.entries()]
+    .sort(([labelA], [labelB]) => {
+      if (labelA === "Truck") return -1;
+      if (labelB === "Truck") return 1;
+      return labelA.localeCompare(labelB, undefined, { numeric: true, sensitivity: "base" });
+    })
+    .map(([label, groupRacks]) => [
+      label,
+      groupRacks.slice().sort((rackA, rackB) => rackOperatorDisplayName(rackA).localeCompare(rackOperatorDisplayName(rackB), undefined, { numeric: true, sensitivity: "base" })),
+    ]);
+}
 
-  const groupEntries = [...groups.entries()].sort(([labelA], [labelB]) => {
-    if (labelA === "Truck") return -1;
-    if (labelB === "Truck") return 1;
-    return labelA.localeCompare(labelB, undefined, { numeric: true, sensitivity: "base" });
-  });
+function groupedRackOptionsHtml(racks = [], selectedCode = "", options = {}) {
+  const includeNoRack = Boolean(options.includeNoRack);
+  const disableLocked = Boolean(options.disableLocked);
+  const allowCompleted = Boolean(options.allowCompleted);
+  const compactSelected = Boolean(options.compactSelected);
+  const noRackOption = includeNoRack
+    ? `<option value="${NO_RACK_SELECTION}" ${selectedCode === NO_RACK_SELECTION ? "selected" : ""}>No Rack - Leave location blank</option>`
+    : "";
+  const groupEntries = rackSelectorGroups(racks);
 
   const groupedOptions = groupEntries
     .map(([label, groupRacks]) => `
       <optgroup label="${escapeHtml(label)}">
         ${groupRacks
           .slice()
-          .sort((rackA, rackB) => String(rackA.code || "").localeCompare(String(rackB.code || ""), undefined, { numeric: true, sensitivity: "base" }))
+          .sort((rackA, rackB) => rackOperatorDisplayName(rackA).localeCompare(rackOperatorDisplayName(rackB), undefined, { numeric: true, sensitivity: "base" }))
           .map((rack) => {
-            const locked = disableLocked && rackIsLockedForLineAssignment(rack);
-            return `<option value="${escapeHtml(rack.code)}" ${String(rack.code) === String(selectedCode) ? "selected" : ""} ${locked ? "disabled" : ""}>${rackOptionLabel(rack)}</option>`;
+            const status = rackStatusValue(rack);
+            const completed = ["closed", "complete", "completed"].includes(status);
+            const locked = disableLocked && rackIsLockedForLineAssignment(rack) && !(allowCompleted && completed);
+            const statusCue = rackStatusClassName(rack);
+            const routeCue = rackDestinationClass(rackResolvedDestination(rack));
+            const statusLabel = rackStatusLabel(rack);
+            const routeLabel = rackResolvedDestination(rack) ? rackDestinationLabel(rackResolvedDestination(rack)) : "";
+            const rackColor = rackSetDisplayColor(rackGroupLabel(rack));
+            // Inline Location keeps the compact display name only. Operational
+            // selectors retain the full rack summary; syncCustomSelect renders
+            // the route separately as the leading colored pill.
+            const selectedText = compactSelected
+              ? rackOperatorDisplayName(rack)
+              : rackOptionLabel(rack);
+            const selectedLabel = ` data-selected-label="${escapeHtml(selectedText)}"`;
+            return `<option value="${escapeHtml(rack.code)}"${selectedLabel} data-rack-status="${escapeHtml(statusCue)}" data-rack-status-label="${escapeHtml(statusLabel)}" data-rack-route="${escapeHtml(routeCue)}" data-rack-route-label="${escapeHtml(routeLabel)}" data-rack-color="${escapeHtml(rackColor)}" ${String(rack.code) === String(selectedCode) ? "selected" : ""} ${locked ? "disabled" : ""}>${escapeHtml(rackOptionLabel(rack))}</option>`;
           })
           .join("")}
       </optgroup>
@@ -7729,24 +8125,76 @@ function rackCodeForScan(value) {
   return selectedCode === NO_RACK_SELECTION ? "" : selectedCode;
 }
 
+/**
+ * Normalize a persisted rack name for operator-facing UI without changing the
+ * stored rack identity. Older data may contain names such as "Rack 1 Steel";
+ * the maintained display convention is "Steel 1" / "Wood 1".
+ */
+function normalizeRackDisplayName(name = "", type = "") {
+  const cleanType = String(type || "").replace(/\s+/g, " ").trim();
+  let text = String(name || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+
+  text = text.replace(/\bracks?\b/gi, " ").replace(/\s+/g, " ").trim();
+  const numberFirst = text.match(/^(\d+)\s+(.+)$/);
+  if (numberFirst) text = `${numberFirst[2].trim()} ${Number(numberFirst[1])}`;
+
+  // A legacy name may be only "Rack 1" while the set/type carries "Steel".
+  // In that case use the type as the human-readable identity instead of "1".
+  if (/^\d+$/.test(text) && cleanType && !/truck/i.test(cleanType)) {
+    const typeLabel = cleanType.replace(/\bracks?\b/gi, " ").replace(/\s+/g, " ").trim();
+    if (typeLabel) return `${typeLabel} ${Number(text)}`;
+  }
+  return text;
+}
+
 /** Return a stable operator label from the persisted truck/rack identity. */
 function rackDisplayLabelFromParts(code = "", name = "", type = "") {
   const cleanCode = String(code || "").trim().toUpperCase();
-  if (cleanCode === "T") return "Truck 1";
-  const numberedTruck = cleanCode.match(/^T(\d+)$/);
-  if (numberedTruck) return `Truck ${Number(numberedTruck[1])}`;
   const cleanName = String(name || "").trim();
+  if (cleanCode === "T") return cleanName || "Truck 1";
+  const numberedTruck = cleanCode.match(/^(?:R?T)(\d+)$/);
+  if (numberedTruck) return cleanName || `Truck ${Number(numberedTruck[1])}`;
   if (/truck/i.test(`${cleanName} ${type || ""}`)) return cleanName || cleanCode || "Truck";
-  return cleanName || cleanCode;
+  return normalizeRackDisplayName(cleanName, type) || cleanCode;
+}
+
+function rackDisplayCode(rack = {}) {
+  const code = String(rack?.code || "").trim().toUpperCase();
+  if (code === "T") return "RT1";
+  if (/^T\d+$/.test(code)) return `R${code}`;
+  return code || "Rack";
+}
+
+function rackOperatorDisplayName(rack = {}) {
+  return rackDisplayLabelFromParts(rack?.code, rack?.name, rack?.type) || rackDisplayCode(rack);
 }
 
 /** Return the concise current-location label used in scanner/order tables. */
 function rackLocationDisplayLabel(code = "", name = "", type = "") {
-  const cleanCode = String(code || "").trim().toUpperCase();
-  if (cleanCode === "T" || /^T\d+$/.test(cleanCode) || /truck/i.test(`${name || ""} ${type || ""}`)) {
-    return rackDisplayLabelFromParts(cleanCode, name, type);
-  }
-  return cleanCode || String(name || "").trim();
+  return rackDisplayLabelFromParts(code, name, type);
+}
+
+/** Return the compact operator-facing bay label without exposing internal T-BAY prefixes. */
+function bayLocationDisplayLabel(code = "", name = "") {
+  const cleanCode = String(code || "").trim();
+  const cleanName = String(name || "").trim();
+
+  const compactCanonical = (value) => {
+    let text = String(value || "").trim();
+    if (!text) return "";
+    text = text.replace(/^BAY\s+/i, "").trim();
+    const match = text.match(/^(?:[A-Z]+-)?BAY[-\s]*(\d+(?:-\d+)*)$/i)
+      || text.match(/^(\d+(?:-\d+)*)$/);
+    return match ? `Bay ${match[1]}` : "";
+  };
+
+  const compactName = compactCanonical(cleanName);
+  if (compactName) return compactName;
+  const compactCode = compactCanonical(cleanCode);
+  if (compactCode) return compactCode;
+  if (cleanName) return /^bay\b/i.test(cleanName) ? cleanName.replace(/^bay\b/i, "Bay") : `Bay ${cleanName}`;
+  return cleanCode ? `Bay ${cleanCode}` : "";
 }
 
 /**
@@ -7755,7 +8203,7 @@ function rackLocationDisplayLabel(code = "", name = "", type = "") {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function isTruckRack(rack) {
-  return Boolean(rack && (rack.code === "T" || /^T\d+$/i.test(String(rack.code || "")) || /truck/i.test(rack.type || "")));
+  return Boolean(rack && (rack.code === "T" || /^(?:R?T)\d+$/i.test(String(rack.code || "")) || /truck/i.test(rack.type || "")));
 }
 
 /**
@@ -7765,11 +8213,14 @@ function isTruckRack(rack) {
  */
 function nextTruckRackDefaults() {
   const truckRacks = (state.racks || []).filter(isTruckRack);
-  const usedCodes = new Set(truckRacks.map((rack) => String(rack.code || "").toUpperCase()));
+  const usedNumbers = new Set(truckRacks.map((rack) => {
+    const match = String(rack.code || "").toUpperCase().match(/^(?:R?T)(\d+)$/);
+    return match ? Number(match[1]) : String(rack.code || "").toUpperCase() === "T" ? 1 : 0;
+  }).filter(Boolean));
   let number = 2;
-  while (usedCodes.has(`T${number}`)) number += 1;
+  while (usedNumbers.has(number)) number += 1;
   return {
-    code: `T${number}`,
+    code: `RT${number}`,
     name: `Truck ${number}`,
     type: "Truck",
   };
@@ -7820,12 +8271,10 @@ function rackStatusClassName(rack) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function rackOptionLabel(rack) {
-  const code = String(rack?.code || "").trim() || "Rack";
-  const display = rackDisplayLabelFromParts(code, rack?.name, rack?.type) || code;
-  const codeText = display !== code ? ` [${code}]` : "";
-  const qty = Number(rack?.qty || 0);
-  const qtyText = qty ? ` ${qty}pcs` : "";
-  return `${escapeHtml(display)}${escapeHtml(codeText)}${escapeHtml(qtyText)} (${escapeHtml(rackStatusLabel(rack))})`;
+  const name = rackOperatorDisplayName(rack);
+  const qty = Math.max(Number(rack?.qty || 0), 0);
+  const pieces = qty > 0 ? `${qty}PC${qty === 1 ? "" : "s"}` : "";
+  return [name, pieces, rackStatusLabel(rack)].filter(Boolean).join(" | ");
 }
 
 /**
@@ -7837,9 +8286,9 @@ function rackDestinationLabel(value) {
   const text = String(value || "Indian Trail").trim();
   if (/^cpu$/i.test(text)) return "CPU";
   if (/^dtc$/i.test(text)) return "DTC";
-  if (/green|gnv/i.test(text)) return "Greenville";
-  if (/indian|trail|^it$/i.test(text)) return "Indian Trail";
-  return text || "Indian Trail";
+  if (/green|gnv/i.test(text)) return "GNV";
+  if (/indian|trail|^it$/i.test(text)) return "IT";
+  return text || "IT";
 }
 
 /**
@@ -7848,11 +8297,31 @@ function rackDestinationLabel(value) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function rackDestinationClass(value) {
-  const text = rackDestinationLabel(value).toLowerCase();
+  const raw = String(value || "").trim();
+  if (!raw || /^(mixed|not set|unassigned)$/i.test(raw)) return "unassigned";
+  const text = rackDestinationLabel(raw).toLowerCase();
   if (text.includes("cpu")) return "cpu";
-  if (text.includes("green")) return "greenville";
+  if (text.includes("green") || text === "gnv") return "greenville";
   if (text.includes("dtc")) return "dtc";
   return "indian-trail";
+}
+
+/** Resolve the route shown in an individual rack header from stable rack data. */
+function rackResolvedDestination(rack) {
+  const explicit = String(rack?.destination || "").trim();
+  if (explicit) return explicit;
+
+  const itemDestinations = [...new Set(
+    (Array.isArray(rack?.items) ? rack.items : [])
+      .map((item) => String(item?.route || item?.destination || "").trim())
+      .filter(Boolean)
+      .map((value) => rackDestinationLabel(value)),
+  )];
+  if (itemDestinations.length === 1) return itemDestinations[0];
+  if (itemDestinations.length > 1) return "Mixed";
+
+  // A populated rack with no explicit route is the legacy/default Indian Trail case.
+  return Number(rack?.qty || 0) > 0 ? "Indian Trail" : "";
 }
 
 /**
@@ -7955,6 +8424,17 @@ function renderRacksPage() {
   const renderRackItem = (item, currentRackCode = "") => {
     const rackItemId = String(item.rackItemId || "");
     const itemLabel = `${item.order}-${item.item}`;
+    const sourceRack = state.racks.find((rack) => String(rack.code) === String(currentRackCode));
+    const sourceOnTheWay = String(sourceRack?.status || "").trim().toLowerCase() === "in transit";
+    const blockedReason = sourceOnTheWay
+      ? `${rackOptionLabel(sourceRack)} is On the Way. Mark it Not On The Way or Returned before moving or clearing its contents.`
+      : "";
+    const moveBlockedAttrs = blockedReason
+      ? `aria-disabled="true" data-blocked-reason="${escapeHtml(blockedReason)}" title="${escapeHtml(blockedReason)}"`
+      : `title="Move piece"`;
+    const clearBlockedAttrs = blockedReason
+      ? `aria-disabled="true" data-blocked-reason="${escapeHtml(blockedReason)}" title="${escapeHtml(blockedReason)}"`
+      : `title="Clear piece"`;
     return `
       <article class="rack-item">
         <div>
@@ -7967,19 +8447,19 @@ function renderRacksPage() {
           <div class="rack-item-actions">
             <button
               type="button"
-              class="icon-only icon-move rack-scope-move-button"
+              class="icon-only icon-move rack-scope-move-button${blockedReason ? " is-blocked" : ""}"
               data-rack-move-item="${escapeHtml(rackItemId)}"
               data-source-rack="${escapeHtml(currentRackCode)}"
               data-rack-item-label="${escapeHtml(itemLabel)}"
-              title="Move piece"
+              ${moveBlockedAttrs}
               aria-label="Move ${escapeHtml(itemLabel)}"
             ></button>
             <button
               type="button"
-              class="icon-only icon-trash danger"
+              class="icon-only icon-trash danger${blockedReason ? " is-blocked" : ""}"
               data-rack-clear-item="${escapeHtml(rackItemId)}"
               data-rack-clear-label="${escapeHtml(itemLabel)}"
-              title="Clear piece"
+              ${clearBlockedAttrs}
               aria-label="Clear ${escapeHtml(itemLabel)}"
             ></button>
           </div>` : ""}
@@ -7998,7 +8478,7 @@ function renderRacksPage() {
       return `<p class="admin-empty">No pieces assigned.</p>`;
     }
 
-    const isTruck = rack.code === "T" || /truck/i.test(rack.type || "");
+    const isTruck = isTruckRack(rack);
     const rackState = String(rack.status || "").toLowerCase();
     const isComplete = rackState === "closed" || rackState === "in transit";
 
@@ -8057,6 +8537,13 @@ function renderRacksPage() {
     const rackHasMoveOpen = (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
     const rackOpen = state.expandedRackCodes.has(rack.code) || rackHasMoveOpen;
 
+    const rackBlockedReason = isInTransit
+      ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before clearing its contents.`
+      : "";
+    const rackClearAttrs = rackBlockedReason
+      ? `aria-disabled="true" data-blocked-reason="${escapeHtml(rackBlockedReason)}" title="${escapeHtml(rackBlockedReason)}"`
+      : `title="Clear rack"`;
+
     const adminActions = hasPermission("manage_racks")
       ? `<span class="rack-summary-actions">
           <button
@@ -8068,9 +8555,9 @@ function renderRacksPage() {
           ></button>
           <button
             type="button"
-            class="icon-only icon-trash danger"
+            class="icon-only icon-trash danger${rackBlockedReason ? " is-blocked" : ""}"
             data-rack-clear="${escapeHtml(rack.code)}"
-            title="Clear rack"
+            ${rackClearAttrs}
             aria-label="Clear ${escapeHtml(rack.code)}"
           ></button>
         </span>`
@@ -8079,15 +8566,15 @@ function renderRacksPage() {
     const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
     const printAction =
       hasItems && (isComplete || isInTransit)
-        ? `<button type="button" data-rack-print="${escapeHtml(rack.code)}">${printLabel}</button>`
+        ? `<button type="button" class="rack-card-lifecycle-action-v342 is-print" data-rack-print="${escapeHtml(rack.code)}">${rackModalActionIconSvg("print")}<span>${printLabel}</span></button>`
         : "";
 
     return `
       <details class="rack-card ${rackVisualClass(rack)}" data-rack-code="${escapeHtml(rack.code)}" ${rackOpen ? "open" : ""}>
         <summary>
           <span class="rack-summary-main">
-            <strong>${escapeHtml(rack.code)}</strong>
-            <small>${escapeHtml(rack.name)}</small>
+            <strong>${escapeHtml(rackOperatorDisplayName(rack))}</strong>
+            <small>${escapeHtml(rackDisplayCode(rack))}</small>
           </span>
           <span class="rack-summary-qty">${escapeHtml(rack.qty || 0)} pcs</span>
           ${adminActions}
@@ -8101,8 +8588,8 @@ function renderRacksPage() {
                       ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
                       : `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" data-rack-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>`
                     : isComplete
-                      ? `<button type="button" data-rack-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>`
-                      : `<button type="button" data-rack-complete="${escapeHtml(rack.code)}">Complete Rack</button>`
+                      ? `<button type="button" class="rack-card-lifecycle-action-v342 is-uncomplete" data-rack-uncomplete="${escapeHtml(rack.code)}">${rackModalActionIconSvg("uncomplete")}<span>Uncomplete Rack</span></button>`
+                      : `<button type="button" class="rack-card-lifecycle-action-v342 is-complete" data-rack-complete="${escapeHtml(rack.code)}">${rackModalActionIconSvg("complete")}<span>Complete Rack</span></button>`
                 }`
               : ""
           }
@@ -8162,9 +8649,8 @@ function renderRacksPage() {
     const destinationPill = rack.destination
       ? `<small class="rack-destination-pill ${escapeHtml(rackDestinationClass(rack.destination))}">${escapeHtml(rackDestinationLabel(rack.destination))}</small>`
       : "";
-    const rackIdentity = isTruck
-      ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type)
-      : rack.code;
+    const rackIdentity = rackOperatorDisplayName(rack);
+    const rackCodeLabel = rackDisplayCode(rack);
 
     return `
       <article
@@ -8179,7 +8665,7 @@ function renderRacksPage() {
         ${destinationPill}
         <div class="rack-board-card-main">
           <strong>${escapeHtml(rackIdentity)}</strong>
-          <span>${escapeHtml(isTruck ? `Code ${rack.code}` : (rack.name || rack.type || ""))}</span>
+          <span>${escapeHtml(rackCodeLabel)}</span>
         </div>
 
         <div class="rack-board-card-meta">
@@ -8192,7 +8678,11 @@ function renderRacksPage() {
           }
           ${
             hasPermission("manage_racks")
-              ? `<button type="button" class="icon-only icon-reset" data-rack-clear="${escapeHtml(rack.code)}" title="Clear rack" aria-label="Clear ${escapeHtml(rack.code)}"></button>`
+              ? (() => {
+                  const onTheWay = String(rack.status || "").trim().toLowerCase() === "in transit";
+                  const reason = onTheWay ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before clearing its contents.` : "";
+                  return `<button type="button" class="icon-only icon-reset${onTheWay ? " is-blocked" : ""}" data-rack-clear="${escapeHtml(rack.code)}" ${reason ? `aria-disabled="true" data-blocked-reason="${escapeHtml(reason)}" title="${escapeHtml(reason)}"` : `title="Clear rack"`} aria-label="Clear ${escapeHtml(rack.code)}"></button>`;
+                })()
               : ""
           }
         </div>
@@ -8277,7 +8767,8 @@ function renderRacksPage() {
     const setHue = rackSetVisualHue(label);
     const setIcon = rackSetVisualIcon(label);
     const setColor = rackSetVisualColor(label);
-    const visualStyle = `--rack-set-hue:${setHue}${setColor ? `;--rack-set-icon-color:${setColor}` : ""}`;
+    const setAccent = setColor || `hsl(${setHue} 48% 42%)`;
+    const visualStyle = `--rack-set-hue:${setHue};--rack-set-accent:${setAccent}${setColor ? `;--rack-set-icon-color:${setColor}` : ""}`;
 
     return `
       <button type="button" class="rack-set-card ${escapeHtml(setClass)} ${selected ? "is-selected" : ""}" data-rack-set-select="${escapeHtml(label)}" data-rack-icon="${escapeHtml(setIcon)}" style="${escapeHtml(visualStyle)}">
@@ -8305,6 +8796,11 @@ function renderRacksPage() {
    */
   const selectedSetQty = selectedGroupAllRacks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
   const visibleSetQty = selectedGroupRacks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
+  const selectedSetHue = rackSetVisualHue(selectedGroupLabel);
+  const selectedSetColor = rackSetVisualColor(selectedGroupLabel);
+  const selectedSetAccent = selectedSetColor || `hsl(${selectedSetHue} 48% 42%)`;
+  const selectedSetIcon = rackSetVisualIcon(selectedGroupLabel);
+  const selectedSetVisualStyle = `--selected-rack-set-hue:${selectedSetHue};--selected-rack-set-accent:${selectedSetAccent}${selectedSetColor ? `;--rack-set-icon-color:${selectedSetColor}` : ""}`;
 
   els.rackGrid.innerHTML = `
     <aside class="rack-sets-sidebar">
@@ -8317,7 +8813,7 @@ function renderRacksPage() {
       </div>
     </aside>
 
-    <section class="rack-center-panel">
+    <section class="rack-center-panel" data-rack-icon="${escapeHtml(selectedSetIcon)}" style="${escapeHtml(selectedSetVisualStyle)}">
       <div class="rack-center-heading">
         <div>
           <h2>${escapeHtml(selectedGroupLabel || "Racks")}</h2>
@@ -8344,7 +8840,6 @@ function renderRacksPage() {
               <option value="status" ${state.rackSort === "status" ? "selected" : ""}>Status</option>
             </select>
           </label>
-          <button type="button" class="icon-only icon-reset" data-rack-set-clear="${escapeHtml(selectedGroupLabel)}" ${hasPermission("manage_racks") ? "" : "hidden"} title="Clear selected rack set" aria-label="Clear selected rack set"></button>
         </div>
       </div>
 
@@ -8448,7 +8943,7 @@ async function chooseRackDestination(rack) {
         <label class="rack-destination-field">
           <span>Destination</span>
           <select id="rackDestinationSelect">
-            ${["Indian Trail", "CPU", "Greenville", "DTC"].map((value) => `<option value="${escapeHtml(value)}" ${rackDestinationLabel(value) === currentDestination ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+            ${["Indian Trail", "CPU", "Greenville", "DTC"].map((value) => `<option value="${escapeHtml(value)}" ${rackDestinationLabel(value) === currentDestination ? "selected" : ""}>${escapeHtml(rackDestinationLabel(value))}</option>`).join("")}
           </select>
         </label>
         <div class="rack-destination-actions">
@@ -8465,7 +8960,7 @@ async function chooseRackDestination(rack) {
      */
     const close = (value = "") => {
       shell.remove();
-      document.body.classList.remove("modal-scroll-locked");
+      updateModalScrollLock();
       resolve(value);
     };
 
@@ -8498,6 +8993,7 @@ async function completeRack(code) {
   showFloatingNotice(payload.message || `Rack ${code} completed with automatic destination.`, "success");
   renderRacksPage();
   renderScanRackTools();
+  if (state.page === "scan") renderScanPage();
 }
 
 /**
@@ -8512,6 +9008,7 @@ async function uncompleteRack(code) {
   playAppSound("rack_reopened");
   renderRacksPage();
   renderScanRackTools();
+  if (state.page === "scan") renderScanPage();
 }
 
 /**
@@ -8534,6 +9031,7 @@ async function returnRack(code) {
   playAppSound("rack_returned", { force: true });
   renderRacksPage();
   renderScanRackTools();
+  if (state.page === "scan") renderScanPage();
   showActionFeedback({
     eyebrow: "Rack updated",
     title: `${code} is ready for reuse`,
@@ -8568,8 +9066,48 @@ async function markRackNotOnTheWay(code) {
   state.rackSummary = payload.summary || null;
   renderRacksPage();
   renderScanRackTools();
+  if (state.page === "scan") renderScanPage();
   playAppSound("rack_reopened", { force: true });
   showFloatingNotice(payload.message || `Rack ${code} is open again and outbound rack scans were reversed.`, "success");
+}
+
+/**
+ * Purpose: Manually depart one completed rack when the physical rack is leaving without a rack-barcode scan.
+ * Effects: Confirms the action, applies maintained Outbound quantities, and marks the rack On The Way.
+ */
+async function markRackOnTheWay(code) {
+  const rack = state.racks.find((candidate) => String(candidate.code) === String(code));
+  const label = rackOptionLabel(rack || { code }) || code;
+  const confirmed = await confirmWebAppAction({
+    title: "Mark rack On The Way?",
+    message: `Confirm that <strong>${escapeHtml(label)}</strong> is physically leaving now.`,
+    details: "This applies the rack's remaining Outbound scan quantities, performs any maintained Indian Trail preassignment, and marks the completed rack On The Way.",
+    confirmLabel: "Mark On The Way",
+    danger: false,
+  });
+  if (!confirmed) return;
+
+  const payload = await fetchJson("/api/racks/on-way", {
+    method: "POST",
+    body: JSON.stringify({ rackCode: code }),
+  });
+  state.racks = payload.racks || [];
+  state.rackSummary = payload.summary || null;
+  renderRacksPage();
+  renderScanRackTools();
+  if (state.page === "scan") renderScanPage();
+  playAppSound("rack_complete", { force: true });
+  showActionFeedback({
+    eyebrow: "Rack departed",
+    title: `${label} is On The Way`,
+    message: payload.message || "The rack was manually marked On The Way.",
+    details: [
+      { label: "Rack", value: label },
+      { label: "Status", value: "On The Way" },
+      { label: "Outbound quantity", value: Number(payload.outboundScannedQty || 0) },
+    ],
+    secondaryLabel: "Done",
+  });
 }
 
 /**
@@ -8580,7 +9118,7 @@ async function markRackNotOnTheWay(code) {
 async function assignLineItemToRack(lineItemId, rackCode, options = {}) {
   const payload = await fetchJson("/api/racks/assign-line-item", {
     method: "POST",
-    body: JSON.stringify({ lineItemId, rackCode }),
+    body: JSON.stringify({ lineItemId, rackCode, ...requestContext() }),
   });
 
   if (payload.racks) {
@@ -8598,7 +9136,8 @@ async function assignLineItemToRack(lineItemId, rackCode, options = {}) {
   if (state.page === "racks") renderRacksPage();
   if (!options.quiet) {
     playAppSound(rackCode ? "rack_item_added" : "destructive_action", { force: !rackCode });
-    showFloatingNotice(rackCode ? `Line item assigned to rack ${rackCode}.` : "Line item rack location cleared.", "success");
+    const assignedRack = rackCode ? rackForCode(rackCode) : null;
+    showFloatingNotice(rackCode ? `Line item assigned to ${rackOperatorDisplayName(assignedRack || { code: rackCode })}.` : "Line item rack location cleared.", "success");
   }
 }
 
@@ -8642,6 +9181,14 @@ async function clearRackSet(label) {
    */
   const racks = (state.racks || []).filter((rack) => rackGroupLabel(rack) === label);
   if (!racks.length) return;
+  const onTheWayRack = racks.find((rack) => String(rack.status || "").trim().toLowerCase() === "in transit");
+  if (onTheWayRack) {
+    showBlockedAction(
+      `${rackOptionLabel(onTheWayRack)} is On the Way. Mark it Not On The Way or Returned before clearing this rack set.`,
+      "Rack set cannot be cleared",
+    );
+    return;
+  }
   const confirmed = await confirmWebAppAction({
     title: "Clear rack set?",
     message: `Clear all active pieces from every rack in <strong>${escapeHtml(label)}</strong>?`,
@@ -9061,6 +9608,7 @@ function scanEntryEventLabel(entry) {
   if (type === "update") return "Update";
   if (type === "undo") return "Undo";
   if (type === "redo") return "Redo";
+  if (type === "rack_move") return "Rack moved";
   if (type === "error") return "Scan error";
   if (type === "notice") return "Notice";
   return type === "scan" ? "Scan" : String(entry?.message || "Activity");
@@ -9109,6 +9657,7 @@ function scanEntryCompactMessage(entry) {
   }
   if (type === "import") return "Delivery list imported successfully";
   if (type === "update") return "Delivery list updated successfully";
+  if (type === "rack_move") return reason || message || "Rack location changed";
   if (type === "duplicate") return message || "Item already complete";
   return [scanEntryIsManual(entry) ? "Manual Scan" : "", message].filter(Boolean).join(" - ") || reason;
 }
@@ -9119,6 +9668,12 @@ function scanEntryCompactMessage(entry) {
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
 function scanEntryFullDetail(entry) {
+  const eventType = String(entry?.eventType || "").toLowerCase();
+  const moveFrom = String(entry?.rackMoveFrom || "").trim();
+  const moveTo = String(entry?.rackMoveTo || "").trim();
+  if (eventType === "rack_move" && (moveFrom || moveTo)) {
+    return `<strong>Rack moved</strong><span>${escapeHtml(moveFrom || "No rack")} → ${escapeHtml(moveTo || "No rack")}</span>`;
+  }
   const message = String(entry?.message || "").trim();
   const reason = String(entry?.reason || "").trim();
   const raw = String(entry?.raw || "").trim();
@@ -9152,6 +9707,87 @@ function scanEntryRowClass(entry) {
  * Effects: May call the backend api, may update shared client state.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
+function scanEntryDisplayItem(entry) {
+  const eventItem = entry?.item;
+  if (!eventItem) return null;
+  const currentItem = (state.items || []).find((item) => String(item.id || "") === String(eventItem.id || ""));
+  if (!currentItem) return eventItem;
+  return { ...eventItem, ...currentItem };
+}
+
+function scanQuantityRemaining(item) {
+  const qty = Math.max(Number(item?.qty || 0), 0);
+  const scanned = Math.min(Math.max(Number(item?.scanned || 0), 0), qty);
+  return Math.max(qty - scanned, 0);
+}
+
+function scanQuantityDeliveryDateIsActive(deliveryDate = state.meta?.deliveryDate || "") {
+  const cleanDate = String(deliveryDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) return false;
+  return cleanDate >= printCalendarDateKey(new Date());
+}
+
+function canIncreaseScanQuantity(entry, item) {
+  const type = String(entry?.eventType || "").toLowerCase();
+  return Boolean(
+    entry?.ok &&
+    item &&
+    Number(item.qty || 0) > 1 &&
+    scanQuantityRemaining(item) > 0 &&
+    scanQuantityDeliveryDateIsActive(item.deliveryDate || state.meta?.deliveryDate) &&
+    ["scan", "manual_scan"].includes(type)
+  );
+}
+
+function scanQuantityBoostMarkup(entry, item, context = {}) {
+  if (!canIncreaseScanQuantity(entry, item)) return "";
+  const remaining = scanQuantityRemaining(item);
+  const barcode = String(entry?.barcode || entry?.raw || "").trim();
+  if (!barcode) return "";
+  return `
+    <div class="scan-quantity-boost-v328" data-scan-quantity-boost
+      data-scan-quantity-barcode="${escapeHtml(barcode)}"
+      data-scan-quantity-manual="${scanEntryIsManual(entry) ? "true" : "false"}"
+      data-scan-quantity-remaining="${escapeHtml(remaining)}"
+      data-scan-quantity-rack="${escapeHtml(context.rackCode || item.rackCode || "")}"
+      data-scan-quantity-bay="${escapeHtml(context.bayCode || item.bayCode || "")}">
+      <div class="scan-quantity-boost-copy-v328"><small>Multiple pieces?</small><strong>${escapeHtml(remaining)} remaining</strong></div>
+      <label><span>Additional Qty</span><input type="number" min="1" max="${escapeHtml(remaining)}" step="1" value="1" data-scan-quantity-input></label>
+      <button type="button" class="app-primary-button" data-scan-quantity-add>Add Qty</button>
+      <button type="button" class="app-primary-button" data-scan-quantity-all>Scan Remaining</button>
+    </div>`;
+}
+
+async function submitScanQuantityBoost(control, allRemaining = false) {
+  if (!control) return;
+  const barcode = String(control.dataset.scanQuantityBarcode || "").trim();
+  const remaining = Math.max(Number(control.dataset.scanQuantityRemaining || 0), 0);
+  const input = control.querySelector("[data-scan-quantity-input]");
+  const requested = allRemaining ? remaining : Number(input?.value || 1);
+  const scanQty = Math.min(Math.max(Math.trunc(requested || 1), 1), remaining);
+  if (!barcode || !remaining || !scanQty) return;
+  control.querySelectorAll("button, input").forEach((node) => { node.disabled = true; });
+  try {
+    await processScan(barcode, {
+      isManual: control.dataset.scanQuantityManual === "true",
+      scanQty,
+      ...(control.dataset.scanQuantityRack ? { rackCode: control.dataset.scanQuantityRack } : {}),
+      ...(control.dataset.scanQuantityBay ? { bayCode: control.dataset.scanQuantityBay } : {}),
+    });
+    if (els.adminModal?.dataset.kind === "recentScans" && !els.adminModal.hidden && els.adminModalBody) {
+      els.adminModalBody.innerHTML = recentScansModalHtml();
+      applyLanguageToRoot(els.adminModalBody);
+    }
+  } catch (error) {
+    control.querySelectorAll("button, input").forEach((node) => { node.disabled = false; });
+    showScanFailureConfirmation(error.message, {
+      stageLabel: stageLabel(state.meta || {}) || state.meta?.stage || "Scan page",
+      rawScan: barcode,
+      title: "Quantity update not accepted",
+    });
+  }
+}
+
 function setLastScan(entry) {
   if (!entry || !els.lastCard) return;
   state.lastScan = entry;
@@ -9160,20 +9796,41 @@ function setLastScan(entry) {
   if (els.lastScanTime) els.lastScanTime.textContent = entry.ok ? "Just now" : entry.eventType === "duplicate" ? "Notice" : "Needs review";
   const manualPrefix = scanEntryIsManual(entry) ? "Manual Scan · " : "";
   const compactMessage = scanEntryCompactMessage(entry);
-  if (els.lastJob) els.lastJob.textContent = !entry.ok || !entry.item
+  const displayItem = scanEntryDisplayItem(entry);
+  if (els.lastJob) els.lastJob.textContent = !entry.ok || !displayItem
     ? compactMessage
-    : `${manualPrefix}Job Nr. ${entry.item.job || "-"}`;
+    : `${manualPrefix}Job Nr. ${displayItem.job || "-"}`;
   if (els.lastBay) {
-    const bayCode = String(entry.item?.bayCode || "").trim();
-    els.lastBay.textContent = bayCode ? `Bay ${bayCode}` : "-";
-    const bayLocation = els.lastBay.closest(".last-bay-location-v321");
-    if (bayLocation) bayLocation.hidden = !bayCode;
+    const location = displayItem ? scanLocationPresentation(displayItem) : { label: "", kind: "", historical: false };
+    els.lastBay.textContent = location.label || "-";
+    const locationCard = els.lastBay.closest(".last-bay-location-v321");
+    if (locationCard) {
+      locationCard.hidden = !location.label;
+      locationCard.classList.toggle("is-history", Boolean(location.historical));
+      locationCard.classList.toggle("is-bay", location.kind === "bay");
+      locationCard.classList.toggle("is-rack", location.kind === "rack" || location.kind === "truck");
+      const locationRackCode = location.historical
+        ? String(displayItem?.lastRackCode || "").trim()
+        : String(displayItem?.rackCode || "").trim();
+      const locationRack = (location.kind === "rack" || location.kind === "truck") ? rackForCode(locationRackCode) : null;
+      const locationRackComplete = Boolean(locationRack && rackStatusClassName(locationRack) === "complete" && !location.historical);
+      const fallbackRackSet = location.kind === "truck"
+        ? "Truck"
+        : String(location.historical ? (displayItem?.lastRackType || "") : (displayItem?.rackType || "")).trim();
+      const locationRackColor = locationRack
+        ? (locationRackComplete ? "#2fa84f" : rackSetDisplayColor(rackGroupLabel(locationRack)))
+        : (fallbackRackSet ? rackSetDisplayColor(fallbackRackSet) : "");
+      locationCard.classList.toggle("has-rack-color-v355", Boolean(locationRackColor));
+      if (locationRackColor) locationCard.style.setProperty("--last-scan-location-accent", locationRackColor);
+      else locationCard.style.removeProperty("--last-scan-location-accent");
+      locationCard.title = location.title || location.label || "";
+    }
   }
-  if (els.lastOrder) els.lastOrder.textContent = entry.item ? entry.item.order : "-";
-  if (els.lastItem) els.lastItem.textContent = entry.item ? entry.item.item : "-";
-  if (els.lastQty) els.lastQty.textContent = entry.item ? String(entry.item.scanned) : "-";
-  if (els.lastDims) els.lastDims.textContent = entry.item ? entry.item.dimensions : "-";
-  if (els.lastCustomer) els.lastCustomer.textContent = entry.item ? entry.item.customer : "-";
+  if (els.lastOrder) els.lastOrder.textContent = displayItem ? displayItem.order : "-";
+  if (els.lastItem) els.lastItem.textContent = displayItem ? displayItem.item : "-";
+  if (els.lastQty) els.lastQty.textContent = displayItem ? `${Number(displayItem.scanned || 0)} / ${Number(displayItem.qty || 0)}` : "-";
+  if (els.lastDims) els.lastDims.textContent = displayItem ? displayItem.dimensions : "-";
+  if (els.lastCustomer) els.lastCustomer.textContent = displayItem ? displayItem.customer : "-";
 }
 
 /**
@@ -9191,8 +9848,13 @@ function renderLastScan() {
   if (els.lastJob) els.lastJob.textContent = "No scans yet";
   if (els.lastBay) {
     els.lastBay.textContent = "-";
-    const bayLocation = els.lastBay.closest(".last-bay-location-v321");
-    if (bayLocation) bayLocation.hidden = true;
+    const locationCard = els.lastBay.closest(".last-bay-location-v321");
+    if (locationCard) {
+      locationCard.hidden = true;
+      locationCard.classList.remove("is-history", "is-bay", "is-rack", "has-rack-color-v355");
+      locationCard.style.removeProperty("--last-scan-location-accent");
+      locationCard.removeAttribute("title");
+    }
   }
   if (els.lastOrder) els.lastOrder.textContent = "-";
   if (els.lastItem) els.lastItem.textContent = "-";
@@ -9231,7 +9893,7 @@ function scanEntryIsManual(entry) {
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
 function mainScanRecentLimit() {
-  return document.fullscreenElement && state.page === "scan" ? 5 : 2;
+  return document.fullscreenElement && state.page === "scan" ? 4 : 1;
 }
 
 /**
@@ -9259,14 +9921,21 @@ function renderRecent() {
   els.recentRows.innerHTML = rows.length
     ? rows
         .map((entry) => {
-          const item = entry.item;
+          const item = scanEntryDisplayItem(entry);
+          const location = item ? scanLocationPresentation(item) : { label: "", kind: "", historical: false };
           const time = new Date(entry.time);
           const compactNote = scanEntryCompactMessage(entry);
           const primaryText = item ? (item.job || item.product || "-") : scanEntryEventLabel(entry);
+          const locationClass = [
+            "recent-bay-cell-v321",
+            "recent-location-cell-v325",
+            location.kind ? `is-${location.kind}` : "",
+            location.historical ? "is-history" : "",
+          ].filter(Boolean).join(" ");
           return `
             <tr class="${scanEntryRowClass(entry)}">
               <td><strong>${escapeHtml(primaryText)}</strong>${compactNote ? `<small class="scan-row-note">${escapeHtml(compactNote)}</small>` : ""}</td>
-              <td class="recent-bay-cell-v321">${item?.bayCode ? `Bay ${escapeHtml(item.bayCode)}` : "-"}</td>
+              <td class="${escapeHtml(locationClass)}" title="${escapeHtml(location.title || location.label || "")}">${location.label ? escapeHtml(location.label) : "-"}</td>
               <td>${item ? escapeHtml(item.order) : "-"}</td>
               <td>${item ? escapeHtml(item.item) : "-"}</td>
               <td>${item ? item.scanned : Math.abs(Number(entry.qtyDelta || 0)) || "-"}</td>
@@ -9284,68 +9953,92 @@ function renderRecent() {
  * Effects: Updates visible dom state, may call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
-function allScansRackControl(item) {
-  if (!item) return `<span class="all-scans-rack-note">-</span>`;
-  const currentCode = String(item.rackCode || "").trim().toUpperCase();
-  const currentRack = rackForCode(currentCode);
-  const currentLocked = rackIsLockedForLineAssignment(currentRack) || item.outboundScanned;
-  const canEdit = canAssignRackLocation() && !currentLocked;
-  if (!canEdit) {
-    const label = currentCode || "No rack";
-    const reason = item.outboundScanned
-      ? "Locked after Outbound scan"
-      : rackIsLockedForLineAssignment(currentRack)
-        ? `Rack is ${currentRack?.status || "closed"}`
-        : "View only";
-    return `<span class="all-scans-rack-note ${currentCode ? "has-rack" : ""}"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(reason)}</small></span>`;
-  }
-
-  const options = (state.racks || [])
-    .filter((rack) => rack.active !== false)
-    .map((rack) => {
-      const code = String(rack.code || "").trim().toUpperCase();
-      const locked = rackIsLockedForLineAssignment(rack) && code !== currentCode;
-      return `<option value="${escapeHtml(code)}" ${code === currentCode ? "selected" : ""} ${locked ? "disabled" : ""}>${escapeHtml(rackOptionLabel(rack))}${locked ? " (closed)" : ""}</option>`;
-    })
-    .join("");
-  return `
-    <label class="all-scans-rack-editor">
-      <span class="sr-only">Rack for Order ${escapeHtml(item.order)} Item ${escapeHtml(item.item)}</span>
-      <select data-scan-event-rack="${escapeHtml(item.id)}" data-current-rack="${escapeHtml(currentCode)}">
-        <option value="" ${currentCode ? "" : "selected"}>No rack</option>
-        ${options}
-      </select>
-    </label>
-  `;
+async function openRecentScansModal() {
+  openAdminModal("recentScans");
 }
 
-async function openRecentScansModal() {
-  if (isStagingScanContext() && canAssignRackLocation()) await ensureRacksLoaded().catch(() => {});
-  openAdminModal("recentScans");
+/**
+ * Resolve where an item physically was when this history event occurred.
+ * New backend payloads provide event-time rack/bay assignments; the fallback
+ * keeps older stored events readable until they are naturally replaced.
+ */
+function scanEventLocationPresentation(entry) {
+  const item = entry?.item || {};
+  const eventType = String(entry?.eventType || "").toLowerCase();
+  const moveDestination = String(entry?.rackMoveTo || "").trim();
+  if (eventType === "rack_move" && moveDestination) {
+    if (/^no rack$/i.test(moveDestination)) {
+      return { label: "No rack", kind: "location", rackColor: "", title: `Rack move destination: ${moveDestination}` };
+    }
+    const destinationRack = (state.racks || []).find((rack) => (
+      rackOperatorDisplayName(rack).toLowerCase() === moveDestination.toLowerCase()
+      || String(rack.name || "").trim().toLowerCase() === moveDestination.toLowerCase()
+    ));
+    return {
+      label: destinationRack ? rackOperatorDisplayName(destinationRack) : moveDestination,
+      kind: destinationRack && isTruckRack(destinationRack) ? "truck" : "rack",
+      rackColor: destinationRack ? rackSetDisplayColor(rackGroupLabel(destinationRack)) : "",
+      title: `Rack move destination: ${moveDestination}`,
+    };
+  }
+  const eventRackCode = String(item.eventRackCode || "").trim();
+  if (eventRackCode) {
+    const label = rackLocationDisplayLabel(eventRackCode, item.eventRackName, item.eventRackType);
+    const rack = rackForCode(eventRackCode);
+    return {
+      label,
+      kind: /^truck/i.test(label) ? "truck" : "rack",
+      rackColor: rack ? rackSetDisplayColor(rackGroupLabel(rack)) : "",
+      title: `Location at this event: ${label}`,
+    };
+  }
+  const eventBay = bayLocationDisplayLabel(item.eventBayCode, item.eventBayName);
+  if (eventBay) {
+    return { label: eventBay, kind: "bay", rackColor: "", title: `Location at this event: ${eventBay}` };
+  }
+  const fallback = scanLocationPresentation(item);
+  return { ...fallback, rackColor: "" };
 }
 
 function recentScansModalHtml() {
   const rows = state.recent || [];
-  const stagingView = isStagingScanContext();
+  // v0.354: size Location from the actual longest rendered location instead
+  // of allowing one narrow-column override to distort neighboring columns.
+  const locationColumnCh = Math.min(22, Math.max(9, ...rows.map((entry) => {
+    const item = scanEntryDisplayItem(entry);
+    return item ? String(scanEventLocationPresentation(entry).label || "No location").length : 0;
+  })));
   return `
-    <div class="recent-scans-modal full-scans-modal">
+    <div class="recent-scans-modal full-scans-modal" style="--all-scans-location-ch:${escapeHtml(locationColumnCh)}">
       <div class="modal-list-heading">
         <div>
           <strong>${escapeHtml(state.meta?.label || state.meta?.stage || "Current stage")}</strong>
-          <small>Complete scan, error, import, and update details for this stage</small>
+          <small>Complete scan, movement, error, import, and update history for this stage</small>
         </div>
         <span>${escapeHtml(rows.length)} recent event${rows.length === 1 ? "" : "s"}</span>
       </div>
       <div class="recent-table-wrap expanded">
-        <table class="recent-table all-scans-table ${stagingView ? "has-rack-column" : ""}">
+        <table class="recent-table all-scans-table">
+          <colgroup>
+            <col class="all-scans-col-event">
+            <col class="all-scans-col-source">
+            <col class="all-scans-col-item">
+            <col class="all-scans-col-qty">
+            <col class="all-scans-col-customer">
+            <col class="all-scans-col-location">
+            <col class="all-scans-col-details">
+            <col class="all-scans-col-user">
+            <col class="all-scans-col-time">
+            <col class="all-scans-col-check">
+          </colgroup>
           <thead>
             <tr>
               <th>Event</th>
               <th>Barcode / Source</th>
               <th>Order / Item / Job Nr.</th>
               <th>Qty</th>
-              ${stagingView ? "<th>Rack</th>" : ""}
               <th>Customer</th>
+              <th>Location</th>
               <th>Full details</th>
               <th>User / Station</th>
               <th>Date & Time</th>
@@ -9357,25 +10050,36 @@ function recentScansModalHtml() {
               rows.length
                 ? rows
                     .map((entry) => {
-                      const item = entry.item;
+                      const item = scanEntryDisplayItem(entry);
                       const time = new Date(entry.time);
                       const eventLabel = scanEntryEventLabel(entry);
                       const eventType = String(entry.eventType || "").toLowerCase();
                       const sourceLabel = ["import", "update"].includes(eventType)
                         ? String(entry.reason || "").split("|")[0].trim() || eventLabel
                         : entry.barcode || entry.raw || "SYSTEM";
-                      const quantity = item ? `${escapeHtml(item.scanned)}/${escapeHtml(item.qty || item.scanned || "-")}` : Math.abs(Number(entry.qtyDelta || 0)) || "-";
+                      const quantity = eventType === "rack_move"
+                        ? `<span class="all-scans-no-quantity-v353">—</span>`
+                        : item
+                          ? `<strong>${escapeHtml(item.scanned)}/${escapeHtml(item.qty || item.scanned || "-")}</strong>`
+                          : Math.abs(Number(entry.qtyDelta || 0)) || "-";
                       const jobOrderItem = item
                         ? `<strong>Order ${escapeHtml(item.order)} / Item ${escapeHtml(item.item)}</strong><span>Job Nr. ${escapeHtml(item.job || "Not provided")}</span>`
                         : `<strong>${escapeHtml(eventLabel)}</strong><span>No line item attached</span>`;
+                      const eventLocation = item ? scanEventLocationPresentation(entry) : { label: "", kind: "", rackColor: "", title: "" };
+                      const locationStyle = eventLocation.rackColor
+                        ? ` style="--rack-location-color:${escapeHtml(eventLocation.rackColor)}"`
+                        : "";
+                      const locationMarkup = eventLocation.label
+                        ? `<span class="all-scans-location-v352 is-${escapeHtml(eventLocation.kind || "location")}"${locationStyle} title="${escapeHtml(eventLocation.title || eventLocation.label)}">${escapeHtml(eventLocation.label)}</span>`
+                        : `<span class="all-scans-location-v352 is-empty">No location</span>`;
                       return `
                         <tr class="${scanEntryRowClass(entry)}">
                           <td data-label="Event"><span class="scan-event-badge event-${escapeHtml(eventType || "activity")}">${escapeHtml(eventLabel)}</span></td>
                           <td data-label="Barcode / Source"><strong>${escapeHtml(sourceLabel)}</strong>${!["import", "update"].includes(eventType) && entry.raw && entry.raw !== entry.barcode ? `<small>Raw: ${escapeHtml(entry.raw)}</small>` : ""}</td>
                           <td data-label="Order / Item / Job Nr."><div class="all-scans-item-cell">${jobOrderItem}</div></td>
                           <td data-label="Quantity">${quantity}</td>
-                          ${stagingView ? `<td data-label="Rack">${allScansRackControl(item)}</td>` : ""}
                           <td data-label="Customer">${item ? escapeHtml(item.customer || "-") : "-"}</td>
+                          <td data-label="Location">${locationMarkup}</td>
                           <td data-label="Full details"><div class="all-scans-detail-cell">${scanEntryFullDetail(entry) || `<span>${escapeHtml(scanEntryCompactMessage(entry) || "No additional details")}</span>`}</div></td>
                           <td data-label="User / Station"><strong>${escapeHtml(entry.user || "System")}</strong><span>${escapeHtml(entry.station || "No station")}</span></td>
                           <td data-label="Date & Time">${Number.isNaN(time.getTime()) ? "" : time.toLocaleString()}</td>
@@ -9384,7 +10088,7 @@ function recentScansModalHtml() {
                       `;
                     })
                     .join("")
-                : `<tr><td colspan="${stagingView ? 10 : 9}">No scans yet</td></tr>`
+                : `<tr><td colspan="10">No scans yet</td></tr>`
             }
           </tbody>
         </table>
@@ -9662,6 +10366,10 @@ async function ensureRacksLoaded(force = false) {
   state.rackSummary = payload.summary || null;
   renderScanRackTools();
   renderOutboundRackStatusTools();
+  // Rack lifecycle/status is also visual state for the Scan Location column.
+  // Repaint immediately when a forced/background rack refresh returns instead
+  // of waiting for a row click or the next delivery-list render.
+  if (state.page === "scan") renderScanPage();
 }
 
 /**
@@ -9687,39 +10395,47 @@ function renderScanRackTools() {
   if (state.selectedScanRackCode !== NO_RACK_SELECTION && !selectedRack) {
     state.selectedScanRackCode = NO_RACK_SELECTION;
     selectionNotice = "The previous rack selection is no longer available. No Rack is selected.";
-  } else if (selectedRack && rackIsLockedForLineAssignment(selectedRack)) {
+  }
+  let selectedRackState = String(selectedRack?.status || "").toLowerCase();
+  let selectedClosed = ["closed", "complete", "completed"].includes(selectedRackState);
+  let selectedInTransit = ["in transit", "on the way"].includes(selectedRackState);
+  if (selectedRack && rackIsLockedForLineAssignment(selectedRack) && !selectedClosed) {
     const lockedLabel = rackDisplayLabelFromParts(selectedRack.code, selectedRack.name, selectedRack.type) || selectedRack.code;
     selectionNotice = `${lockedLabel} is ${rackStatusLabel(selectedRack)} and cannot receive staging scans. The selection was cleared.`;
     state.selectedScanRackCode = NO_RACK_SELECTION;
     selectedRack = null;
+    selectedRackState = "";
+    selectedClosed = false;
+    selectedInTransit = false;
   }
   const noRackSelected = state.selectedScanRackCode === NO_RACK_SELECTION;
-  const selectedRackState = String(selectedRack?.status || "").toLowerCase();
-  const selectedClosed = selectedRackState === "closed";
-  const selectedInTransit = selectedRackState === "in transit";
   els.scanRackPanel.classList.toggle("selected-no-rack", noRackSelected);
   els.scanRackPanel.classList.toggle("selected-rack-complete", selectedClosed);
   els.scanRackPanel.classList.toggle("selected-rack-in-transit", selectedInTransit);
   els.scanRackPanel.classList.toggle("selected-rack-loaded", Boolean(selectedRack && Number(selectedRack.qty || 0) > 0 && !selectedClosed && !selectedInTransit));
   if (els.scanRackSelect) {
-    els.scanRackSelect.innerHTML = groupedRackOptionsHtml(state.racks, state.selectedScanRackCode, { includeNoRack: true, disableLocked: true });
+    els.scanRackSelect.innerHTML = groupedRackOptionsHtml(state.racks, state.selectedScanRackCode, { includeNoRack: true, disableLocked: true, allowCompleted: true });
     els.scanRackSelect.value = state.selectedScanRackCode;
     syncCustomSelect(els.scanRackSelect);
   }
   if (els.scanRackCompleteBtn) {
-    els.scanRackCompleteBtn.textContent = selectedInTransit ? "Mark Returned" : selectedClosed ? "Uncomplete" : "Complete";
+    const actionKind = selectedInTransit ? "returned" : selectedClosed ? "uncomplete" : "complete";
+    const actionLabel = selectedInTransit ? "Mark Returned" : selectedClosed ? "Uncomplete" : "Complete";
+    els.scanRackCompleteBtn.innerHTML = `${rackModalActionIconSvg(actionKind)}<span>${actionLabel}</span>`;
+    els.scanRackCompleteBtn.dataset.rackActionState = actionKind;
     els.scanRackCompleteBtn.disabled = noRackSelected || !selectedRack;
   }
   if (els.scanRackPrintBtn) {
-    els.scanRackPrintBtn.textContent = selectedInTransit ? "Not On The Way" : "Print Packing List";
+    const actionKind = selectedInTransit ? "notOnWay" : "print";
+    const actionLabel = selectedInTransit ? "Not On The Way" : "Print Packing List";
+    els.scanRackPrintBtn.innerHTML = `${rackModalActionIconSvg(actionKind)}<span>${actionLabel}</span>`;
+    els.scanRackPrintBtn.dataset.rackActionState = actionKind;
     els.scanRackPrintBtn.disabled = noRackSelected || !selectedRack || (selectedInTransit ? false : !selectedClosed || Number(selectedRack.qty || 0) <= 0);
   }
   if (els.scanRackStatus) {
-    const statusMessage = selectionNotice || (noRackSelected
-      ? "No Rack is selected. The scanned line will keep a blank Location value."
-      : selectedInTransit
-        ? "This rack is marked on the way. Return it to clear it, or mark Not On The Way to reopen it and undo this rack's outbound scans."
-        : "");
+    const statusMessage = selectionNotice || (selectedInTransit
+      ? "This rack is marked on the way. Return it to clear it, or mark Not On The Way to reopen it and undo this rack's outbound scans."
+      : "");
     els.scanRackStatus.textContent = statusMessage;
     els.scanRackStatus.hidden = !statusMessage;
   }
@@ -9774,28 +10490,7 @@ function outboundRackStatusMeta(rack) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function outboundRackStatusOptionsHtml(racks = [], selectedCode = "") {
-  const groups = new Map();
-  for (const rack of racks) {
-    const groupLabel = String(rack.type || "Other").trim() || "Other";
-    if (!groups.has(groupLabel)) groups.set(groupLabel, []);
-    groups.get(groupLabel).push(rack);
-  }
-  return [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
-    .map(([label, groupRacks]) => `
-      <optgroup label="${escapeHtml(label)}">
-        ${groupRacks
-          .slice()
-          .sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true }))
-          .map((rack) => {
-            const meta = outboundRackStatusMeta(rack);
-            const selected = String(rack.code || "") === String(selectedCode || "") ? " selected" : "";
-            return `<option value="${escapeHtml(rack.code || "")}"${selected}>${escapeHtml(rack.code || "")} - ${escapeHtml(rack.name || rack.code || "Rack")} - ${escapeHtml(meta.label)}</option>`;
-          })
-          .join("")}
-      </optgroup>
-    `)
-    .join("");
+  return groupedRackOptionsHtml(racks, selectedCode);
 }
 
 /**
@@ -9955,7 +10650,7 @@ function renderScanBayOverrideTools() {
       options.push(`
         <optgroup label="${escapeHtml(label)}">
           ${bays.map((bay) => {
-            const name = bay.displayName || bay.bayCode;
+            const name = bayLocationDisplayLabel(bay.bayCode, bay.displayName);
             const status = bay.status ? ` - ${bay.status}` : "";
             return `<option value="${escapeHtml(bay.bayCode)}">${escapeHtml(name)}${escapeHtml(status)}</option>`;
           }).join("")}
@@ -9970,7 +10665,7 @@ function renderScanBayOverrideTools() {
 
   if (els.scanBayOverrideSelected) {
     els.scanBayOverrideSelected.textContent = state.bayOverrideMode === "manual"
-      ? (selectedBay ? `Manual bay: ${selectedBay.displayName || selectedBay.bayCode}` : "Manual mode - choose a bay")
+      ? (selectedBay ? `Manual bay: ${bayLocationDisplayLabel(selectedBay.bayCode, selectedBay.displayName)}` : "Manual mode - choose a bay")
       : "Auto suggested bay";
   }
 }
@@ -10314,6 +11009,7 @@ function statisticsBreakagePayload() {
     internalByGlass: [],
     internalReasonsByMachine: [],
     externalRemakesByGlass: [],
+    externalRemakeAccountability: { requestCount: 0, pieceQty: 0, byReason: [], byResponsible: [] },
     pricingPerSqft: [],
   };
 }
@@ -10732,7 +11428,16 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
     if (machineMetric) {
       rows = (breakage.internalByMachine || []).map((row) => ({ ...row, label: row.machine || "Unknown machine", source: "Internal rejects" }));
       if (includeExternal && (Number(external.pieces || 0) > 0 || Number(external.sqft || 0) > 0)) {
-        rows.push({ ...external, label: "External remakes", source: "External remakes", glassTypes: breakage.externalRemakesByGlass || [], reasons: [] });
+        const accountability = breakage.externalRemakeAccountability || {};
+        rows.push({
+          ...external,
+          label: "External remakes",
+          source: "External remakes",
+          glassTypes: breakage.externalRemakesByGlass || [],
+          reasons: (accountability.byReason || []).map((row) => ({ reason: row.reason, eventCount: row.requestCount, pieces: row.pieces })),
+          responsibles: accountability.byResponsible || [],
+          trackedRequests: Number(accountability.requestCount || 0),
+        });
       }
     } else {
       rows = statisticsBreakageGlassRows(includeExternal).map((row) => ({
@@ -10749,10 +11454,11 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
         label: row.label, value: Number(row[measure] || 0),
         pieces: Number(row.pieces || 0), sqft: Number(row.sqft || 0), estimatedCost: Number(row.estimatedCost || 0), eventCount: Number(row.eventCount || 0),
         unpricedPieces: Number(row.unpricedPieces || 0), missingDimensionPieces: Number(row.missingDimensionPieces || 0),
-        glassTypes: Array.isArray(row.glassTypes) ? row.glassTypes : [], machines: Array.isArray(row.machines) ? row.machines : [], reasons: Array.isArray(row.reasons) ? row.reasons : [],
+        glassTypes: Array.isArray(row.glassTypes) ? row.glassTypes : [], machines: Array.isArray(row.machines) ? row.machines : [], reasons: Array.isArray(row.reasons) ? row.reasons : [], responsibles: Array.isArray(row.responsibles) ? row.responsibles : [],
+        trackedRequests: Number(row.trackedRequests || 0),
         source: row.source || "Internal rejects",
-        searchText: `${row.label || ""} ${(row.glassTypes || []).map((entry) => entry.glassType || "").join(" ")} ${(row.machines || []).map((entry) => entry.machine || "").join(" ")} ${(row.reasons || []).map((entry) => entry.reason || "").join(" ")}`,
-        detail: `${Number(row.pieces || 0)} pieces · ${Number(row.sqft || 0).toFixed(1)} ft² · ${statisticsFormatChartValue({ format: "currency" }, row.estimatedCost || 0)} · ${Number(row.eventCount || 0)} reject event${Number(row.eventCount || 0) === 1 ? "" : "s"}${statisticsBreakageCoverageDetail(row)} · ${row.source || "Internal rejects"}`,
+        searchText: `${row.label || ""} ${(row.glassTypes || []).map((entry) => entry.glassType || "").join(" ")} ${(row.machines || []).map((entry) => entry.machine || "").join(" ")} ${(row.reasons || []).map((entry) => entry.reason || "").join(" ")} ${(row.responsibles || []).map((entry) => entry.responsible || "").join(" ")}`,
+        detail: `${Number(row.pieces || 0)} pieces · ${Number(row.sqft || 0).toFixed(1)} ft² · ${statisticsFormatChartValue({ format: "currency" }, row.estimatedCost || 0)} · ${row.source === "External remakes" && Number(row.trackedRequests || 0) ? `${Number(row.trackedRequests)} tracked remake request${Number(row.trackedRequests) === 1 ? "" : "s"}` : `${Number(row.eventCount || 0)} reject event${Number(row.eventCount || 0) === 1 ? "" : "s"}`}${statisticsBreakageCoverageDetail(row)} · ${row.source || "Internal rejects"}`,
       })),
     };
   }
@@ -11992,62 +12698,52 @@ function resetPageScrollPosition() {
   }
 }
 
-/** Keep Rack heading actions clear of the sticky shell after async page renders.
+/**
+ * Keep Rack Overview heading actions entirely below the sticky application header.
  *
- * Racks refreshes after page visibility changes. Chrome can restore/anchor a few
- * pixels after that asynchronous DOM replacement, which lets the transparent
- * portion of the sticky header sit over the upper edge of the two action buttons.
- * Re-check the actual geometry after the rack data paint instead of assuming the
- * initial page-switch scroll reset is still authoritative.
+ * Async rack refreshes, modal scrollbar restoration, fullscreen changes, and browser
+ * scroll anchoring can occasionally retain only a few pixels of document scroll. The
+ * buttons still look normal in that state, but their upper edge sits underneath live
+ * header controls and loses hover/click hit testing. Repair the geometry after layout
+ * settles instead of forwarding clicks or adding oversized invisible hit targets.
  */
-function stabilizeRackHeadingActions() {
-  if (state.page !== "racks") return;
-  const heading = document.querySelector("#racksPage > .page-heading");
-  const appHeader = els.appHeader || document.querySelector(".app-header");
-  if (!heading || !appHeader || heading.getClientRects().length === 0) return;
+let rackHeadingRepairFrame = 0;
 
-  const headerBottom = Math.ceil(appHeader.getBoundingClientRect().bottom || 0);
-  const headingTop = Math.floor(heading.getBoundingClientRect().top || 0);
-  const desiredTop = headerBottom + 8;
-  if (headingTop < desiredTop) {
-    const delta = desiredTop - headingTop;
-    window.scrollBy({ top: -delta, left: 0, behavior: "auto" });
-    document.documentElement.scrollTop = Math.max(0, document.documentElement.scrollTop - delta);
-    document.body.scrollTop = Math.max(0, document.body.scrollTop - delta);
-  }
-}
+function rackHeadingActionNeedsRepair() {
+  if (state.page !== "racks") return false;
+  const header = document.querySelector(".app-header");
+  const buttons = [els.rackPackingHistoryBtn, els.rackEditOpenBtn].filter((button) => button && button.isConnected && !button.hidden);
+  if (!header || !buttons.length) return false;
 
-function scheduleRackHeadingStabilization() {
-  if (state.page !== "racks") return;
-  window.requestAnimationFrame(() => {
-    stabilizeRackHeadingActions();
-    window.setTimeout(stabilizeRackHeadingActions, 80);
-    window.setTimeout(stabilizeRackHeadingActions, 260);
+  const headerRect = header.getBoundingClientRect();
+  const headerBottom = headerRect.bottom;
+  return buttons.some((button) => {
+    const rect = button.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
+    const geometryOverlap = rect.top < headerBottom && rect.bottom > headerBottom;
+    if (geometryOverlap) return true;
+
+    const x = rect.left + (rect.width / 2);
+    const topY = rect.top + Math.min(6, rect.height * 0.2);
+    const bottomY = rect.bottom - Math.min(6, rect.height * 0.2);
+    const topHit = document.elementFromPoint(x, topY);
+    const bottomHit = document.elementFromPoint(x, bottomY);
+    const ownsHit = (node) => Boolean(node && (node === button || button.contains(node)));
+    const topBlockedByHeader = !ownsHit(topHit) && Boolean(topHit?.closest?.(".app-header"));
+    return topBlockedByHeader && ownsHit(bottomHit);
   });
 }
 
-/**
- * Capture clicks that land inside the visible Rack action rectangles even if a
- * stale transparent shell layer wins normal hit testing. This is intentionally
- * limited to the two Rack Overview heading actions and only runs on the Racks page.
- */
-function forwardRackHeadingActionClick(event) {
-  if (state.page !== "racks" || event.defaultPrevented) return;
-  if (event.target?.closest?.("#rackPackingHistoryBtn, #rackEditOpenBtn")) return;
-
-  const buttons = [els.rackPackingHistoryBtn, els.rackEditOpenBtn].filter(Boolean);
-  for (const button of buttons) {
-    if (button.disabled || button.getClientRects().length === 0) continue;
-    const rect = button.getBoundingClientRect();
-    const inside = event.clientX >= rect.left && event.clientX <= rect.right
-      && event.clientY >= rect.top && event.clientY <= rect.bottom;
-    if (!inside) continue;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    button.click();
-    return;
-  }
+function scheduleRackHeadingHitTargetRepair() {
+  if (state.page !== "racks") return;
+  window.cancelAnimationFrame(rackHeadingRepairFrame);
+  rackHeadingRepairFrame = window.requestAnimationFrame(() => {
+    rackHeadingRepairFrame = window.requestAnimationFrame(() => {
+      rackHeadingRepairFrame = 0;
+      if (!rackHeadingActionNeedsRepair()) return;
+      resetPageScrollPosition();
+    });
+  });
 }
 
 /**
@@ -12056,6 +12752,8 @@ function forwardRackHeadingActionClick(event) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function showPage(page) {
+  cleanupTransientUiLayers();
+  if (customSelectUi.openSelect) closeCustomSelect(false);
   if (state.bayEditMode && state.bayHoldingSections.size && page !== "bays") {
     showFloatingNotice("Move all grouped bays out of the temporary holding area before leaving the Bay Map.", "error");
     return;
@@ -12074,7 +12772,10 @@ function showPage(page) {
   });
   resetPageScrollPosition();
   requestAnimationFrame(() => {
-    if (state.page === page) resetPageScrollPosition();
+    if (state.page === page) {
+      resetPageScrollPosition();
+      if (page === "racks") scheduleRackHeadingHitTargetRepair();
+    }
   });
   if (page === "bays") scheduleBayScannerStickyUpdateV155();
   else resetBayScannerStickyV155();
@@ -12087,9 +12788,7 @@ function showPage(page) {
   if (page === "statistics") renderStatisticsPage();
   if (page === "scan") renderScanPage();
   if (page === "racks") {
-    refreshRacksPage()
-      .then(() => scheduleRackHeadingStabilization())
-      .catch((error) => showInlineError(error.message, true));
+    refreshRacksPage().catch((error) => showInlineError(error.message, true));
   }
   // Reject history is refreshed on every page entry, replacing the old manual Refresh button.
   if (page === "rejects") refreshRejectPage().catch((error) => showInlineError(error.message, true));
@@ -12157,7 +12856,7 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
           <span>Transportation method for this piece</span>
           <select id="outboundOverrideRackSelect">
             <option value="">Choose an open rack or truck...</option>
-            ${racks.map((rack) => `<option value="${escapeHtml(rack.code)}" ${rack.code === defaultRack ? "selected" : ""}>${rackOptionLabel(rack)}</option>`).join("")}
+            ${groupedRackOptionsHtml(racks, defaultRack)}
           </select>
         </label>
         <div class="outbound-override-actions">
@@ -12228,7 +12927,7 @@ function indianTrailBayOptionsHtml(selectedCode = "") {
   }
   return [...grouped.entries()].map(([label, bays]) => `
     <optgroup label="${escapeHtml(label)}">
-      ${bays.map((bay) => `<option value="${escapeHtml(bay.bayCode)}" ${bay.bayCode === selectedCode ? "selected" : ""}>${escapeHtml(bay.displayName || bay.bayCode)}${bay.status ? ` - ${escapeHtml(bay.status)}` : ""}</option>`).join("")}
+      ${bays.map((bay) => `<option value="${escapeHtml(bay.bayCode)}" ${bay.bayCode === selectedCode ? "selected" : ""}>${escapeHtml(bayLocationDisplayLabel(bay.bayCode, bay.displayName))}${bay.status ? ` - ${escapeHtml(bay.status)}` : ""}</option>`).join("")}
     </optgroup>
   `).join("");
 }
@@ -12600,6 +13299,7 @@ function showStageScanConfirmation(result, options = {}) {
             </label>
           ` : ""}
         </div>
+        ${scanQuantityBoostMarkup(entry, scanEntryDisplayItem(entry) || item, { rackCode: currentRackCode })}
 
         <footer class="indian-trail-placement-actions scan-result-actions">
           <span class="timed-scan-open-hint">Select the card for All Scans</span>
@@ -12672,6 +13372,8 @@ async function showIndianTrailPlacementPrompt(result) {
     ? availableIndianTrailBays(result.bayCode).find((bay) => /oversize/i.test(`${bay.bayType || ""} ${bay.bayCategory || ""} ${bay.mapSection || ""} ${bay.displayName || ""}`))
     : null;
   const selectedCode = oversizeBay?.bayCode || result.bayCode || "";
+  const placementBayLabel = bayLocationDisplayLabel(result.bayCode, result.bayDisplay || result.bayName);
+  const placementBayShort = placementBayLabel.replace(/^Bay\s+/i, "") || String(result.bayCode || "").trim();
   const eyebrow = isRush
     ? (spanish ? "ARTICULO URGENTE RECIBIDO" : "RUSH ITEM RECEIVED")
     : result.returnedToBay
@@ -12680,8 +13382,8 @@ async function showIndianTrailPlacementPrompt(result) {
   const title = directToTruck
     ? (spanish ? `Enviar ${itemLabel} directamente al camion del instalador` : `Send ${itemLabel} straight to the installer truck`)
     : isRush
-      ? (spanish ? `Coloque urgente ${itemLabel} en la bahia ${result.bayCode}` : `Rush ${itemLabel} into Bay ${result.bayCode}`)
-      : (spanish ? `Coloque ${itemLabel} en la bahia ${result.bayCode}` : `Place ${itemLabel} in Bay ${result.bayCode}`);
+      ? (spanish ? `Coloque urgente ${itemLabel} en la bahia ${placementBayShort}` : `Rush ${itemLabel} into ${placementBayLabel}`)
+      : (spanish ? `Coloque ${itemLabel} en la bahia ${placementBayShort}` : `Place ${itemLabel} in ${placementBayLabel}`);
   const descriptionParts = [item.customer || ""];
   if (priorityDate && isRush) descriptionParts.push(`${spanish ? "Entrega prioritaria" : "Priority delivery"}: ${priorityDate}`);
   if (directToTruck) {
@@ -12711,7 +13413,7 @@ async function showIndianTrailPlacementPrompt(result) {
         ` : `
           <div class="indian-trail-placement-destination-v321">
             <small>${spanish ? "COLOQUE ESTA ORDEN EN" : "PLACE THIS ORDER IN"}</small>
-            <strong>${spanish ? "BAHIA" : "BAY"} ${escapeHtml(result.bayCode)}</strong>
+            <strong>${spanish ? "BAHIA" : "BAY"} ${escapeHtml(placementBayShort)}</strong>
             <span>${spanish ? "Orden" : "Order"} ${escapeHtml(item.order || "-")} · Job Nr. ${escapeHtml(item.job || "-")}</span>
           </div>
           <label class="indian-trail-placement-field">
@@ -12721,6 +13423,7 @@ async function showIndianTrailPlacementPrompt(result) {
             </select>
           </label>
         `}
+        ${scanQuantityBoostMarkup(result.lastScan || {}, scanEntryDisplayItem(result.lastScan || {}) || item, { bayCode: result.bayCode || "" })}
         <div class="indian-trail-placement-actions">
           ${directToTruck ? "" : `<button type="button" data-placement-move ${result.assignmentId ? "" : "disabled"}>${isRush ? (spanish ? "Mover a bahia urgente seleccionada" : "Move to selected Rush bay") : (spanish ? "Mover a la bahia seleccionada" : "Move to selected bay")}</button>`}
           <span class="timed-scan-open-hint">${spanish ? "Haga clic en el aviso para abrir Todos los escaneos" : "Click the notice to open All Scans"}</span>
@@ -12938,6 +13641,7 @@ async function processScanInternal(rawScan, options = {}) {
           outboundOverride: Boolean(options.outboundOverride),
           allowReceivedOverride: Boolean(options.allowReceivedOverride),
           isManual: Boolean(options.isManual),
+          scanQty: Math.max(1, Math.trunc(Number(options.scanQty || 1))),
           crossDateListId: options.crossDateListId || "",
           crossDateConfirmed: Boolean(options.crossDateConfirmed),
           ...requestContext(),
@@ -13011,6 +13715,7 @@ async function processScanInternal(rawScan, options = {}) {
         outboundOverride: Boolean(options.outboundOverride),
         destinationOverride: Boolean(options.destinationOverride),
         isManual: Boolean(options.isManual),
+        scanQty: Math.max(1, Math.trunc(Number(options.scanQty || 1))),
         crossDateListId: options.crossDateListId || "",
         crossDateConfirmed: Boolean(options.crossDateConfirmed),
         ...requestContext(),
@@ -13060,7 +13765,10 @@ async function processScanInternal(rawScan, options = {}) {
     } else if (outboundRackDeparture) {
       await ensureRacksLoaded(true).catch(() => {});
     } else if ((isStagingScanContext() || isOutboundScanContext()) && state.racks.length) {
-      void ensureRacksLoaded(isOutboundScanContext()).catch(() => {});
+      // A scan can complete/reopen a rack server-side even when the scan payload
+      // omits the rack catalog. Always refresh the cached lifecycle state so the
+      // Location color/status reflects the backend immediately.
+      void ensureRacksLoaded(true).catch(() => {});
     }
     const acceptedRackBarcode = Boolean(
       isRackBarcodeScan(scanText) &&
@@ -13103,9 +13811,14 @@ async function submitManualScan() {
   if (!/^\d{1,3}$/.test(item)) {
     throw new Error("Manual scan item numbers must contain one to three digits.");
   }
-  await processScan(canonicalBarcode(order, item), { isManual: true });
+  const scanQty = Math.trunc(Number(els.manualScanQtyInput?.value || 1));
+  if (!Number.isFinite(scanQty) || scanQty < 1 || scanQty > 999) {
+    throw new Error("Manual scan quantity must be between 1 and 999.");
+  }
+  await processScan(canonicalBarcode(order, item), { isManual: true, scanQty });
   if (els.manualOrderInput) els.manualOrderInput.value = "";
   if (els.manualItemInput) els.manualItemInput.value = "";
+  if (els.manualScanQtyInput) els.manualScanQtyInput.value = "1";
   els.scanInput?.focus();
 }
 
@@ -13149,9 +13862,12 @@ function processLocalScan(scanText, options = {}) {
     showStageScanConfirmation(entry, { local: true });
     return;
   }
-  item.scanned += 1;
+  const requestedQty = Math.max(1, Math.trunc(Number(options.scanQty || 1)));
+  const qtyDelta = Math.min(requestedQty, Math.max(Number(item.qty || 0) - Number(item.scanned || 0), 0));
+  item.scanned += qtyDelta;
   state.selectedId = item.id;
-  const entry = { ok: true, eventType: options.isManual ? "manual_scan" : "scan", isManual: Boolean(options.isManual), barcode: recovered.barcode, raw: scanText, item, message: recovered.reason, time: timestamp };  state.recent.unshift(entry);
+  const entry = { ok: true, eventType: options.isManual ? "manual_scan" : "scan", isManual: Boolean(options.isManual), barcode: recovered.barcode, raw: scanText, qtyDelta, item, message: recovered.reason, time: timestamp };
+  state.recent.unshift(entry);
   state.lastScan = entry;
   scanFlash("success", scanSoundKind(entry));
   saveState();
@@ -13256,9 +13972,24 @@ function showInlineError(message, needsReview = false) {
   if (needsReview) state.errors.unshift(entry);
   state.recent.unshift(entry);
   state.lastScan = entry;
-  scanFlash(needsReview ? "error" : "notice");
-  showFloatingNotice(message, needsReview ? "error" : "notice");
-  renderScanPage();
+
+  if (state.page === "scan") {
+    scanFlash(needsReview ? "error" : "notice");
+    showFloatingNotice(message, needsReview ? "error" : "notice");
+    renderScanPage();
+    // User-triggered rack/location and configuration failures must not hide in
+    // Last Scan. A blocking error now receives the same plain-language popup
+    // used elsewhere, while lightweight notices remain nonmodal.
+    if (!needsReview) return;
+  }
+
+  showActionFeedback({
+    kind: needsReview ? "error" : "warning",
+    eyebrow: needsReview ? "Action failed" : "Action unavailable",
+    title: needsReview ? "Could not complete that action" : "That action is blocked",
+    message,
+    secondaryLabel: "Got it",
+  });
 }
 
 /**
@@ -13343,7 +14074,7 @@ function showActionFeedback({
   `;
 
   document.body.appendChild(shell);
-  applyLanguageToRoot(shell);
+  if (state.language === "es") applyLanguageToRoot(shell);
   updateModalScrollLock();
 
   /**
@@ -13370,6 +14101,67 @@ function showActionFeedback({
   });
   shell.querySelector("[data-action-feedback-primary], [data-action-feedback-secondary]")?.focus();
 }
+
+function showBlockedAction(message, title = "That action is blocked") {
+  showActionFeedback({
+    kind: "warning",
+    eyebrow: "Action unavailable",
+    title,
+    message: String(message || "This action is not available in the rack's current state."),
+    secondaryLabel: "Got it",
+  });
+}
+
+document.addEventListener("click", (event) => {
+  const blockedControl = event.target.closest?.("[data-blocked-reason]");
+  if (!blockedControl) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  showBlockedAction(
+    blockedControl.dataset.blockedReason || "This action is currently unavailable.",
+    blockedControl.dataset.blockedTitle || "That action is blocked",
+  );
+}, true);
+
+// v0.353: last-resort UI error boundary. Individual workflows still provide
+// specific validation messages, while unexpected runtime/promise failures now
+// produce an operator-readable in-app popup instead of silently stopping work.
+const unexpectedErrorUi = { handling: false, lastKey: "", lastShownAt: 0 };
+
+function showUnexpectedAppError(error, context = "Application error") {
+  if (unexpectedErrorUi.handling) return;
+  const rawMessage = error instanceof Error ? error.message : String(error || "Unexpected application error");
+  const message = rawMessage.trim() || "The action stopped before it could finish.";
+  const key = `${context}::${message}`;
+  const now = Date.now();
+  if (key === unexpectedErrorUi.lastKey && now - unexpectedErrorUi.lastShownAt < 2500) return;
+
+  unexpectedErrorUi.handling = true;
+  unexpectedErrorUi.lastKey = key;
+  unexpectedErrorUi.lastShownAt = now;
+  try {
+    console.error(context, error);
+    showActionFeedback({
+      kind: "error",
+      eyebrow: "Something went wrong",
+      title: "The action could not finish",
+      message,
+      details: [{ label: "Where", value: context }],
+      secondaryLabel: "Got it",
+    });
+  } finally {
+    unexpectedErrorUi.handling = false;
+  }
+}
+
+window.addEventListener("error", (event) => {
+  if (!event?.error && !event?.message) return;
+  showUnexpectedAppError(event.error || event.message, "Web app runtime");
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  showUnexpectedAppError(event?.reason, "Background action");
+});
 
 /**
  * Purpose: Confirm that an explicit save/create action completed successfully.
@@ -13579,10 +14371,17 @@ function showRushAlert(notification) {
       .map((list) => stageLabel(list))
       .filter(Boolean),
   )].join(" → ");
-  const title = spanish ? "Nueva orden urgente" : "New Rush Submitted";
+  const importedFromIntake = String(details.source || "").toLowerCase() === "priority-intake-match";
+  const title = spanish
+    ? (importedFromIntake ? "Orden urgente importada" : "Nueva orden urgente")
+    : (importedFromIntake ? "Rush Order Imported" : "New Rush Submitted");
   const message = spanish
-    ? `${job || order || lookup || "Este trabajo"} fue marcado como urgente${customer ? ` para ${customer}` : ""}${deliveryDateLabel ? ` para la nueva fecha de entrega ${deliveryDateLabel}` : ""}. Priorice este trabajo.`
-    : `${job || order || lookup || "This work"} was marked as Rush${customer ? ` for ${customer}` : ""}${deliveryDateLabel ? ` for the new delivery date ${deliveryDateLabel}` : ""}. Prioritize this work.`;
+    ? (importedFromIntake
+      ? `${job || order || lookup || "Este trabajo"} llegó desde A+W y se marcó automáticamente como urgente. Priorice este trabajo.`
+      : `${job || order || lookup || "Este trabajo"} fue marcado como urgente${customer ? ` para ${customer}` : ""}${deliveryDateLabel ? ` para la nueva fecha de entrega ${deliveryDateLabel}` : ""}. Priorice este trabajo.`)
+    : (importedFromIntake
+      ? `${job || order || lookup || "This work"} arrived from A+W and was automatically marked Rush. Prioritize this work.`
+      : `${job || order || lookup || "This work"} was marked as Rush${customer ? ` for ${customer}` : ""}${deliveryDateLabel ? ` for the new delivery date ${deliveryDateLabel}` : ""}. Prioritize this work.`);
 
   const shell = document.createElement("div");
   shell.id = "rushAlertShell";
@@ -13609,6 +14408,7 @@ function showRushAlert(notification) {
         ${affectsIndianTrail ? `<div class="rush-alert-wide-detail ${directToTruck ? "rush-alert-truck-detail" : ""}"><small>${spanish ? "Manejo en Indian Trail" : "Indian Trail handling"}</small><strong>${escapeHtml(directToTruck ? (spanish ? "Enviar directamente al camion del instalador; no colocar en una bahia" : "Send straight to installer truck; do not place in a bay") : (spanish ? "Acelerar hacia la bahia prioritaria indicada" : "Expedite into the assigned priority bay"))}</strong></div>` : ""}
         ${productSummary ? `<div class="rush-alert-wide-detail"><small>${spanish ? "Productos / tamaños" : "Products / sizes"}</small><strong>${escapeHtml(productSummary)}</strong></div>` : ""}
         ${reason ? `<div class="rush-alert-wide-detail"><small>${spanish ? "Motivo" : "Reason"}</small><strong>${escapeHtml(reason)}</strong></div>` : ""}
+        ${details.responsible ? `<div><small>${spanish ? "Responsable" : "Responsible"}</small><strong>${escapeHtml(details.responsible)}</strong></div>` : ""}
         <div><small>${spanish ? "Artículos prioritarios" : "Priority items"}</small><strong>${escapeHtml(itemCount)}</strong></div>
         ${submittedBy ? `<div><small>${spanish ? "Enviado por" : "Submitted by"}</small><strong>${escapeHtml(submittedBy)}</strong></div>` : ""}
       </div>
@@ -13620,7 +14420,9 @@ function showRushAlert(notification) {
   state.activeNotificationId = notificationId;
   updateModalScrollLock();
   shell.querySelector("[data-rush-alert-acknowledge]")?.addEventListener("click", (event) => {
-    acknowledgeRushAndOpen(notification, event.currentTarget).catch(() => {});
+    acknowledgeRushAndOpen(notification, event.currentTarget).catch((error) => {
+      showInlineError(error?.message || "The Rush request could not be opened.", true);
+    });
   });
   els.scanInput?.focus();
   return true;
@@ -13648,7 +14450,10 @@ function presentNextUserNotification() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function pollUserNotifications() {
-  if (!state.backend || !state.authenticated || document.hidden) return;
+  // Modal workspaces are interaction-heavy. Defer background notification
+  // fetch/render work until the GUI closes so it cannot steal a frame or open
+  // a competing popup while the operator is scrolling or editing.
+  if (!state.backend || !state.authenticated || document.hidden || appModalUiIsOpen()) return;
   try {
     const payload = await fetchJson("/api/notifications/pending");
     const knownIds = new Set([
@@ -13903,8 +14708,10 @@ function renderGlobalSearchResults(results) {
           </div>
           <span class="global-result-job">${escapeHtml(result.job || result.product || "No job/product")}</span>
           <span class="global-result-meta">${escapeHtml(destinationLabel)}${result.deliveryDate ? ` • ${escapeHtml(formatDisplayDate(result.deliveryDate))}` : ""}</span>
-          <div class="global-result-status-row">${globalSearchStatusBadges(result)}</div>
-          ${result.lastScanTime ? `<time class="global-result-scan-time-v321" datetime="${escapeHtml(result.lastScanTime)}">Scanned ${escapeHtml(formatDateTime(result.lastScanTime))}</time>` : ""}
+          <div class="global-result-status-row">
+            ${globalSearchStatusBadges(result)}
+            ${result.lastScanTime ? `<time class="global-result-scan-time-v321" datetime="${escapeHtml(result.lastScanTime)}">Scanned ${escapeHtml(formatDateTime(result.lastScanTime))}</time>` : ""}
+          </div>
         </button>
       `;
       },
@@ -14061,6 +14868,7 @@ function renderBayRouteFlow(summary) {
 
     <button class="flow-lane flow-lane-v2 transit-lane-button transit-lane-polished" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest">
       <span class="flow-truck"><b>${escapeHtml(inTransitPieceLabel)}</b></span>
+      ${rackLine ? `<span class="flow-rack-line flow-rack-line-v2"><b>Racks:</b><span>${escapeHtml(rackLine)}</span></span>` : ""}
       <span class="transit-animation transit-animation-v59 transit-animation-truck" aria-hidden="true">
         <span class="transit-route-node transit-route-node-start"></span>
         <span class="transit-route-line"></span>
@@ -14079,7 +14887,6 @@ function renderBayRouteFlow(summary) {
         <span class="transit-route-node transit-route-node-end"></span>
       </span>
       ${bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTotal, { celebrate: celebrateRouteCompletion, context: "transit" })}
-      ${rackLine ? `<span class="flow-rack-line flow-rack-line-v2"><b>Racks:</b><span>${escapeHtml(rackLine)}</span></span>` : ""}
       <span class="transit-open-action"><b>Open manifest</b><i aria-hidden="true"></i></span>
     </button>
 
@@ -14153,10 +14960,8 @@ function transitManifestRowHtml(item) {
  */
 function transitRackDisplayName(rack) {
   if (!rack) return "Needs transportation";
-  if (rack.code === "T") return "Truck";
-  if (/^T\d+$/i.test(String(rack.code || "")) || /truck/i.test(rack.type || "")) return rack.name || `Truck ${String(rack.code || "").replace(/^T/i, "")}`;
   if (rack.code === "UNASSIGNED") return "Needs transportation";
-  return rack.code || rack.name || "Rack";
+  return rackOperatorDisplayName(rack);
 }
 
 /**
@@ -14343,7 +15148,7 @@ function transitManifestHtml(payload) {
               <span class="rack-set-visual-icon-v269 transit-rack-icon" data-rack-icon="${escapeHtml(transitRackIconClass(rack))}" style="${escapeHtml(transitRackIconStyle(rack))}" aria-hidden="true"></span>
               <div>
                 <strong>${escapeHtml(transitRackDisplayName(rack))}</strong>
-                <small>${escapeHtml(rack.name && rack.name !== rack.code ? rack.name : rack.type || "Transportation method")}</small>
+                <small>${escapeHtml(rackDisplayCode(rack))}</small>
                 <time class="transit-rack-departed">${rack.departedAt ? `Scanned outbound ${escapeHtml(formatDateTime(rack.departedAt))}` : "Outbound rack scan time not recorded"}</time>
               </div>
               <b>${escapeHtml(rack.totalQty)} pcs</b>
@@ -15791,9 +16596,40 @@ function renderBaySidePanels() {
  * Effects: May call the backend api, may update shared client state.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
+function compactBaySnoozeDuration(milliseconds) {
+  const totalSeconds = Math.max(Math.floor(Number(milliseconds || 0) / 1000), 0);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  // Seconds help when a snooze is close to changing state, but become visual
+  // noise on hour/day-scale windows. Show them only while under one hour.
+  if (days) return `${days}d ${hours}h ${minutes}m`;
+  if (hours) return `${hours}h ${minutes}m`;
+  if (minutes) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  return `${seconds}s`;
+}
+
+function staleBaySnoozeMeta(order, nowMs = Date.now()) {
+  const untilMs = Date.parse(String(order?.snoozedUntil || ""));
+  const startedMs = Date.parse(String(order?.snoozedAt || ""));
+  if (!Number.isFinite(untilMs) || untilMs <= Number(nowMs || 0)) {
+    return { active: false, elapsedMs: 0, remainingMs: 0, totalMs: 0 };
+  }
+  const safeStartedMs = Number.isFinite(startedMs) && startedMs < untilMs ? startedMs : Number(nowMs || 0);
+  return {
+    active: true,
+    elapsedMs: Math.max(Number(nowMs || 0) - safeStartedMs, 0),
+    remainingMs: Math.max(untilMs - Number(nowMs || 0), 0),
+    totalMs: Math.max(untilMs - safeStartedMs, 0),
+  };
+}
+
 function staleBayOrderCount(orders = state.staleBayOrders) {
   const uniqueOrders = new Set();
   for (const order of Array.isArray(orders) ? orders : []) {
+    if (staleBaySnoozeMeta(order).active) continue;
     const orderNumber = String(order?.order || "").trim();
     const deliveryDate = String(order?.deliveryDate || "").trim();
     const fallback = String(order?.assignmentId || "").trim();
@@ -15844,7 +16680,7 @@ function showOldBayReviewNotice(count) {
   notice.querySelector("[data-old-bay-review]")?.addEventListener("click", async () => {
     closeOldBayReviewNotice();
     try {
-      const orders = await loadStaleBayOrders(false);
+      const orders = await loadStaleBayOrders(true);
       openStaleBayPanel(orders);
     } catch (error) {
       showInlineError(error.message, true);
@@ -15861,9 +16697,10 @@ function showOldBayReviewNotice(count) {
   notice._hideTimer = window.setTimeout(closeOldBayReviewNotice, timeoutMs);
 }
 
-async function loadStaleBayOrders(includeSnoozed = false, claimAlert = false) {
+async function loadStaleBayOrders(includeSnoozed = false, claimAlert = false, options = {}) {
+  const preserveWorkspaceRows = Boolean(options.preserveWorkspaceRows);
   if (!state.backend) {
-    state.staleBayOrders = [];
+    if (!preserveWorkspaceRows) state.staleBayOrders = [];
     state.staleBayAlertShouldNotify = false;
     updateOldBayAttentionBadge([]);
     return [];
@@ -15873,10 +16710,11 @@ async function loadStaleBayOrders(includeSnoozed = false, claimAlert = false) {
   if (claimAlert) params.set("claimAlert", "1");
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const payload = await fetchJson(`/api/indian-trail/stale-bays${suffix}`);
-  state.staleBayOrders = payload.orders || [];
+  const rows = payload.orders || [];
+  if (!preserveWorkspaceRows) state.staleBayOrders = rows;
   state.staleBayAlertShouldNotify = Boolean(payload.alert?.shouldNotify);
-  updateOldBayAttentionBadge(state.staleBayOrders);
-  return state.staleBayOrders;
+  updateOldBayAttentionBadge(rows);
+  return rows;
 }
 
 /**
@@ -15886,7 +16724,12 @@ async function loadStaleBayOrders(includeSnoozed = false, claimAlert = false) {
  */
 async function maybeShowStaleBayAlert() {
   if (state.page !== "bays" || !hasPermission("view_bays")) return;
-  const orders = await loadStaleBayOrders(false, true);
+  const orders = await loadStaleBayOrders(false, true, {
+    // Bay-map refreshes claim the attention alert with unsnoozed rows only.
+    // Never let that background request replace the open Old Bays workspace,
+    // which intentionally keeps actively snoozed rows visible for review.
+    preserveWorkspaceRows: Boolean(els.staleBayPanel && !els.staleBayPanel.hidden),
+  });
   const count = staleBayOrderCount(orders);
   if (!count) {
     closeOldBayReviewNotice();
@@ -15907,14 +16750,20 @@ function openStaleBayPanel(orders = state.staleBayOrders) {
   state.staleBayQuery = "";
   state.staleBayAgeFilter = "all";
   state.staleBaySort = "age-desc";
+  state.staleBayView = "all";
   state.staleBaySelectedIds = new Set();
   if (els.staleBaySearchInput) els.staleBaySearchInput.value = "";
+  if (els.staleBayStateFilter) els.staleBayStateFilter.value = "all";
   if (els.staleBayAgeFilter) els.staleBayAgeFilter.value = "all";
   if (els.staleBaySortSelect) els.staleBaySortSelect.value = "age-desc";
   renderStaleBayPanel(state.staleBayOrders);
+  window.clearInterval(state.staleBaySnoozeTimer);
+  state.staleBaySnoozeTimer = window.setInterval(() => {
+    if (els.staleBayPanel?.hidden) return;
+    refreshStaleBaySnoozeCountdowns();
+  }, 1000);
   els.staleBayPanel.hidden = false;
   setBayModalSection("stale", "workspace");
-  void loadBayModalActionHistory("stale");
   els.staleBayBackdrop.hidden = false;
   updateModalScrollLock();
   window.setTimeout(() => els.staleBaySearchInput?.focus(), 0);
@@ -15926,6 +16775,8 @@ function openStaleBayPanel(orders = state.staleBayOrders) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function closeStaleBayPanel() {
+  window.clearInterval(state.staleBaySnoozeTimer);
+  state.staleBaySnoozeTimer = 0;
   if (els.staleBayPanel) els.staleBayPanel.hidden = true;
   if (els.staleBayBackdrop) els.staleBayBackdrop.hidden = true;
   updateModalScrollLock();
@@ -15936,10 +16787,40 @@ function closeStaleBayPanel() {
  * Effects: Performs an in-memory calculation without changing backend data.
  * Flow: Applies search and age filters, then sorts the visible rows for review.
  */
+function updateStaleBayViewFilter() {
+  if (els.staleBayStateFilter) {
+    els.staleBayStateFilter.value = String(state.staleBayView || "all");
+  }
+}
+
+function refreshStaleBaySnoozeCountdowns() {
+  if (!els.staleBayList) return;
+  let shouldRerender = false;
+  const orderById = new Map((state.staleBayOrders || []).map((order) => [String(order.assignmentId || ""), order]));
+  els.staleBayList.querySelectorAll("[data-stale-snooze-ribbon]").forEach((ribbon) => {
+    const assignmentId = String(ribbon.dataset.staleSnoozeRibbon || "");
+    const order = orderById.get(assignmentId);
+    if (!order) return;
+    const snooze = staleBaySnoozeMeta(order);
+    if (!snooze.active) {
+      shouldRerender = true;
+      return;
+    }
+    const elapsed = ribbon.querySelector("[data-stale-snooze-elapsed]");
+    const remaining = ribbon.querySelector("[data-stale-snooze-remaining]");
+    if (elapsed) elapsed.textContent = compactBaySnoozeDuration(snooze.elapsedMs);
+    if (remaining) remaining.textContent = compactBaySnoozeDuration(snooze.remainingMs);
+  });
+  if (shouldRerender) renderStaleBayPanel(state.staleBayOrders);
+}
+
 function filteredStaleBayOrders(orders = state.staleBayOrders) {
   const query = String(state.staleBayQuery || "").trim().toLowerCase();
   const minimumAge = state.staleBayAgeFilter === "all" ? 0 : Number(state.staleBayAgeFilter || 0);
   const rows = (Array.isArray(orders) ? orders : []).filter((order) => {
+    const snoozed = staleBaySnoozeMeta(order).active;
+    if (state.staleBayView === "live" && snoozed) return false;
+    if (state.staleBayView === "snoozed" && !snoozed) return false;
     if (minimumAge && Number(order.daysOld || 0) < minimumAge) return false;
     if (!query) return true;
     const haystack = [
@@ -15957,6 +16838,9 @@ function filteredStaleBayOrders(orders = state.staleBayOrders) {
   });
 
   rows.sort((left, right) => {
+    const leftSnoozed = staleBaySnoozeMeta(left).active ? 1 : 0;
+    const rightSnoozed = staleBaySnoozeMeta(right).active ? 1 : 0;
+    if (leftSnoozed !== rightSnoozed) return leftSnoozed - rightSnoozed;
     if (state.staleBaySort === "age-asc") return Number(left.daysOld || 0) - Number(right.daysOld || 0);
     if (state.staleBaySort === "bay") {
       return String(left.bayDisplay || left.bayCode || "").localeCompare(String(right.bayDisplay || right.bayCode || ""), undefined, { numeric: true });
@@ -15972,21 +16856,41 @@ function filteredStaleBayOrders(orders = state.staleBayOrders) {
  * Flow: Prunes unavailable selections, updates counts, and enables safe bulk actions.
  */
 function updateStaleBaySelectionControls(visibleOrders = filteredStaleBayOrders()) {
-  const validIds = new Set((state.staleBayOrders || []).map((order) => String(order.assignmentId || "")).filter(Boolean));
-  state.staleBaySelectedIds = new Set([...state.staleBaySelectedIds].filter((id) => validIds.has(String(id))));
-  const selectedCount = state.staleBaySelectedIds.size;
+  const orderById = new Map(
+    (state.staleBayOrders || [])
+      .map((order) => [String(order.assignmentId || ""), order])
+      .filter(([id]) => Boolean(id))
+  );
+  state.staleBaySelectedIds = new Set([...state.staleBaySelectedIds].filter((id) => orderById.has(String(id))));
+  const selectedRows = [...state.staleBaySelectedIds]
+    .map((id) => orderById.get(String(id)))
+    .filter(Boolean);
+  const selectedCount = selectedRows.length;
+  const selectedPieces = selectedRows.reduce((sum, order) => sum + Math.max(Number(order.qty || 0), 0), 0);
   const visibleIds = visibleOrders.map((order) => String(order.assignmentId || "")).filter(Boolean);
   const allVisibleSelected = Boolean(visibleIds.length) && visibleIds.every((id) => state.staleBaySelectedIds.has(id));
 
-  if (els.staleBaySelectionCount) els.staleBaySelectionCount.textContent = `${selectedCount} selected`;
+  if (els.staleBaySelectionCount) {
+    els.staleBaySelectionCount.textContent = `${selectedCount} selected · ${selectedPieces} pcs`;
+  }
   if (els.staleBaySelectVisibleBtn) {
-    els.staleBaySelectVisibleBtn.disabled = !visibleIds.length;
-    els.staleBaySelectVisibleBtn.textContent = allVisibleSelected ? "Clear visible" : "Select visible";
-    els.staleBaySelectVisibleBtn.dataset.selectionState = allVisibleSelected ? "clear" : "select";
+    els.staleBaySelectVisibleBtn.disabled = !visibleIds.length || allVisibleSelected;
+  }
+  if (els.staleBayClearSelectedBtn) {
+    els.staleBayClearSelectedBtn.disabled = selectedCount === 0;
   }
   if (els.staleBaySnoozeAllBtn) {
     els.staleBaySnoozeAllBtn.disabled = selectedCount === 0;
-    els.staleBaySnoozeAllBtn.textContent = selectedCount ? `Snooze ${selectedCount} selected` : "Snooze selected";
+    const selectedSnoozedCount = selectedRows.filter((order) => staleBaySnoozeMeta(order).active).length;
+    const bulkSnoozeLabel = els.staleBaySnoozeAllBtn.querySelector("[data-stale-bulk-snooze-label]");
+    if (bulkSnoozeLabel) {
+      bulkSnoozeLabel.textContent = selectedCount && selectedSnoozedCount === selectedCount
+        ? "Extend Snooze"
+        : selectedSnoozedCount
+          ? "Snooze / Extend"
+          : "Snooze Selected";
+    }
+    els.staleBaySnoozeAllBtn.classList.toggle("is-extend", selectedSnoozedCount > 0);
   }
 }
 
@@ -15995,92 +16899,144 @@ function updateStaleBaySelectionControls(visibleOrders = filteredStaleBayOrders(
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
+function staleBayAgeAccent(daysOld = 0) {
+  const days = Math.max(Number(daysOld || 0), 0);
+  // Old Bays begins at >10 days. Map the first review days to orange, then
+  // steadily deepen through red until 30+ days reaches the dark-red ceiling.
+  const progress = Math.max(0, Math.min((days - 11) / 19, 1));
+  const hue = Math.round(30 * (1 - progress));
+  const lightness = Math.round(50 - (progress * 18));
+  return `hsl(${hue} 86% ${lightness}%)`;
+}
+
 function renderStaleBayPanel(orders) {
   if (!els.staleBayList) return;
   const list = Array.isArray(orders) ? orders : [];
   const visible = filteredStaleBayOrders(list);
-  const oldestDays = list.reduce((max, order) => Math.max(max, Number(order.daysOld || 0)), 0);
-  const bayCount = new Set(list.map((order) => order.bayCode || order.bayDisplay).filter(Boolean)).size;
-
   if (els.staleBaySearchInput && els.staleBaySearchInput.value !== state.staleBayQuery) els.staleBaySearchInput.value = state.staleBayQuery;
   if (els.staleBayAgeFilter) els.staleBayAgeFilter.value = state.staleBayAgeFilter;
   if (els.staleBaySortSelect) els.staleBaySortSelect.value = state.staleBaySort;
+  updateStaleBayViewFilter();
 
   if (!list.length) {
     els.staleBayList.innerHTML = `
-      <section class="stale-bay-summary-cards stale-bay-summary-cards-v105">
-        <article><small>Old bay rows</small><strong>0</strong><span>Nothing needs review</span></article>
-        <article><small>Bays affected</small><strong>0</strong><span>Clear right now</span></article>
-        <article><small>Oldest row</small><strong>0 days</strong><span>No aged rows</span></article>
-      </section>
-      <div class="stale-bay-empty stale-bay-empty-v105">
+      <div class="stale-bay-empty stale-bay-empty-v105 stale-bay-empty-v352">
         <span class="stale-bay-empty-icon-v105" aria-hidden="true"></span>
         <strong>No old bay orders right now.</strong>
         <span>Indian Trail bay assignments older than 10 days will appear here.</span>
-      </div>
-    `;
+      </div>`;
     updateStaleBaySelectionControls([]);
     return;
   }
 
-  const cards = visible.map((order) => {
-    const assignmentId = String(order.assignmentId || "");
-    const daysOld = Number(order.daysOld || 0);
-    const urgency = daysOld >= 30 ? "is-critical" : daysOld >= 14 ? "is-warning" : "is-attention";
-    const checked = state.staleBaySelectedIds.has(assignmentId) ? "checked" : "";
-    return `
-      <article class="stale-bay-order stale-bay-order-v105 ${urgency} ${checked ? "is-selected" : ""}" data-stale-assignment-row="${escapeHtml(assignmentId)}">
-        <label class="stale-bay-select-control-v105" title="Select row">
-          <input type="checkbox" data-stale-select="${escapeHtml(assignmentId)}" ${checked}>
-          <span aria-hidden="true"></span>
-          <small>Select</small>
-        </label>
-        <div class="stale-bay-main stale-bay-main-v105">
-          <div class="stale-bay-title-row stale-bay-title-row-v105">
-            <div class="stale-bay-identity">
-              <span class="stale-bay-id-line">
-                <strong>Order ${escapeHtml(order.order)} · Item ${escapeHtml(order.item)}</strong>
-                <span class="stale-age-pill">${escapeHtml(daysOld)} days old</span>
-              </span>
-              <span class="stale-bay-customer">${escapeHtml(order.customer || "No customer listed")}</span>
+  const bayGroups = new Map();
+  visible.forEach((order) => {
+    const bayKey = String(order.bayCode || order.bayDisplay || "Unknown bay");
+    if (!bayGroups.has(bayKey)) bayGroups.set(bayKey, { bayCode: order.bayCode, bayDisplay: order.bayDisplay, orders: new Map() });
+    const bayGroup = bayGroups.get(bayKey);
+    const orderKey = String(order.order || order.assignmentId || "Unknown order");
+    if (!bayGroup.orders.has(orderKey)) bayGroup.orders.set(orderKey, []);
+    bayGroup.orders.get(orderKey).push(order);
+  });
+
+  const groupsMarkup = [...bayGroups.values()].map((bayGroup) => {
+    const groupedRows = [...bayGroup.orders.values()];
+    const firstBayRow = groupedRows.flat()[0] || {};
+    const physicalBayOrders = Array.isArray(firstBayRow.bayOrders) ? firstBayRow.bayOrders : [];
+    const staleOrderKeys = new Set([...bayGroup.orders.keys()].map(String));
+    const neighboringOrders = physicalBayOrders.filter((order) => !staleOrderKeys.has(String(order.order || "")));
+    const bayDisplay = bayLocationDisplayLabel(bayGroup.bayCode, bayGroup.bayDisplay) || bayGroup.bayDisplay || bayGroup.bayCode || "Bay";
+    let bayPieces = 0;
+    let bayMissing = 0;
+    let baySelected = 0;
+
+    const orderMarkup = [...bayGroup.orders.entries()].map(([orderKey, orderRows]) => {
+      const first = orderRows[0] || {};
+      const assignmentIds = orderRows.map((row) => String(row.assignmentId || "")).filter(Boolean);
+      const selected = assignmentIds.length && assignmentIds.every((id) => state.staleBaySelectedIds.has(id));
+      if (selected) baySelected += 1;
+      const snooze = staleBaySnoozeMeta(first);
+      const daysOld = Math.max(...orderRows.map((row) => Number(row.daysOld || 0)), 0);
+      const ageAccent = staleBayAgeAccent(daysOld);
+      const items = Array.isArray(first.orderItems) && first.orderItems.length
+        ? first.orderItems
+        : orderRows.map((row) => ({ item: row.item, job: row.job, product: row.product, dimensions: row.dimensions, qty: row.qty, inBayQty: row.qty, missingQty: 0, lastScannedAt: row.lastScannedAt }));
+      const orderPieces = items.reduce((sum, item) => sum + Math.max(Number(item.inBayQty || 0), 0), 0);
+      const missingPieces = items.reduce((sum, item) => sum + Math.max(Number(item.missingQty || 0), 0), 0);
+      bayPieces += orderPieces;
+      bayMissing += missingPieces;
+      const lastScannedAt = items.map((item) => item.lastScannedAt).filter(Boolean).sort().at(-1) || first.lastScannedAt || "";
+      const jobNumber = first.job || items.find((item) => item.job)?.job || "-";
+
+      const itemRows = items.map((item) => {
+        const missingQty = Math.max(Number(item.missingQty || 0), 0);
+        const inBayQty = Math.max(Number(item.inBayQty || 0), 0);
+        const totalQty = Math.max(Number(item.qty || 0), 0);
+        return `<div class="stale-bay-line-v353 ${missingQty ? "is-missing" : "is-old"}">
+          <span class="stale-bay-line-item-v353"><small>ITEM</small><strong>${escapeHtml(item.item || "-")}</strong></span>
+          <span class="stale-bay-line-description-v353"><strong>${escapeHtml(item.product || "Glass")}</strong><small>${escapeHtml(item.dimensions || "Size not listed")}</small></span>
+          <span class="stale-bay-line-count-v353"><small>IN BAY</small><strong>${escapeHtml(inBayQty)} / ${escapeHtml(totalQty)}</strong></span>
+          <span class="stale-bay-line-missing-v353 ${missingQty ? "has-missing" : "is-clear"}"><small>MISSING</small><strong>${escapeHtml(missingQty)}</strong></span>
+          <span class="stale-bay-line-state-v353 ${missingQty ? "is-missing" : "is-accounted"}"><b>${escapeHtml(missingQty ? "MISSING" : "ACCOUNTED")}</b></span>
+        </div>`;
+      }).join("");
+
+      const stateRibbon = snooze.active
+        ? `<div class="stale-bay-order-state-v355 is-snoozed" data-stale-snooze-ribbon="${escapeHtml(assignmentIds[0] || "")}">
+            <div class="stale-bay-order-state-left-v355">
+              <span class="stale-bay-age-chip-v355"><b>${escapeHtml(daysOld)}</b> days old</span>
+              <span class="stale-bay-snoozed-chip-v355"><i aria-hidden="true">Zz</i>Snoozed</span>
+              <span class="stale-bay-snooze-left-v355"><strong data-stale-snooze-remaining>${escapeHtml(compactBaySnoozeDuration(snooze.remainingMs))}</strong> left</span>
             </div>
-            <span class="stale-bay-bay-pill">Bay ${escapeHtml(order.bayDisplay || order.bayCode)}</span>
+            <span class="stale-bay-snoozed-at-v355"><small>Snoozed</small><strong>${escapeHtml(formatDateTime(first.snoozedAt) || "Unknown time")}</strong></span>
+          </div>`
+        : `<div class="stale-bay-order-state-v355"><div class="stale-bay-order-state-left-v355"><span class="stale-bay-age-chip-v355"><b>${escapeHtml(daysOld)}</b> days old</span><span class="stale-bay-active-chip-v355">Needs review</span></div></div>`;
+
+      return `<article class="stale-bay-order-v353 stale-bay-order-v355 ${selected ? "is-selected" : ""} ${snooze.active ? "is-snoozed" : ""}" style="--stale-age-accent:${escapeHtml(ageAccent)}" data-stale-assignment-group="${escapeHtml(assignmentIds.join("|"))}">
+        ${stateRibbon}
+        <header class="stale-bay-order-command-v353 stale-bay-order-command-v355">
+          <label class="stale-bay-select-v352" title="Select order"><input type="checkbox" data-stale-select-group="${escapeHtml(assignmentIds.join("|"))}" ${selected ? "checked" : ""}><span aria-hidden="true"></span></label>
+          <div class="stale-bay-order-identifiers-v353">
+            <span><small>JOB NR.</small><strong>${escapeHtml(jobNumber)}</strong></span>
+            <span><small>ORDER</small><strong>${escapeHtml(orderKey)}</strong></span>
+            <b>${escapeHtml(first.customer || "No customer")}</b>
           </div>
-          <div class="stale-bay-meta-grid stale-bay-meta-grid-v105">
-            <small><b>Glass / Job</b>${escapeHtml(order.job || order.product || "-")}</small>
-            <small><b>Size</b>${escapeHtml(order.dimensions || "-")}</small>
-            <small><b>Delivery</b>${escapeHtml(formatDisplayDate(order.deliveryDate || ""))}</small>
-            <small><b>Last scanned</b>${escapeHtml(formatDateTime(order.lastScannedAt) || "Not scanned")}</small>
-          </div>
+        </header>
+        <div class="stale-bay-order-body-v353">
+          <section class="stale-bay-lines-v353" aria-label="Order ${escapeHtml(orderKey)} item status">
+            <header><span>Item</span><span>Glass / size</span><span>In bay</span><span>Missing</span><span>Status</span></header>
+            ${itemRows}
+          </section>
+          <aside class="stale-bay-order-summary-v353">
+            <span><small>LAST PHYSICAL SCAN</small><strong>${escapeHtml(formatDateTime(lastScannedAt) || "Not scanned")}</strong></span>
+            <span><small>PIECES IN BAY</small><strong>${escapeHtml(orderPieces)}</strong></span>
+            <span class="${missingPieces ? "has-missing" : ""}"><small>MISSING PIECES</small><strong>${escapeHtml(missingPieces)}</strong></span>
+          </aside>
         </div>
-        <div class="stale-snooze-row stale-snooze-row-v105">
-          <label>
-            <span>Snooze this row</span>
-            <select data-stale-days="${escapeHtml(assignmentId)}" aria-label="Snooze days">
-              <option value="1">1 day</option>
-              <option value="3">3 days</option>
-              <option value="7">1 week</option>
-              <option value="14">2 weeks</option>
-              <option value="30">30 days</option>
-            </select>
-          </label>
-          <button type="button" data-stale-snooze="${escapeHtml(assignmentId)}">Snooze</button>
-        </div>
-      </article>
-    `;
+        <footer class="stale-bay-order-footer-v353">
+          <span class="stale-bay-order-footer-note-v353">Postpone this order only after the physical bay is verified.</span>
+          <label><small>${snooze.active ? "EXTEND" : "SNOOZE FOR"}</small><select data-stale-days-group="${escapeHtml(assignmentIds.join("|"))}"><option value="1">1 day</option><option value="3">3 days</option><option value="7">1 week</option><option value="14">2 weeks</option><option value="30">30 days</option></select></label>
+          <button type="button" class="stale-bay-row-snooze-v339 stale-bay-bulk-snooze-v340 stale-bay-bulk-snooze-v341 stale-bay-bulk-snooze-v343 stale-bay-bulk-snooze-v344 stale-bay-bulk-snooze-v345 stale-bay-order-snooze-v353" data-stale-snooze-group="${escapeHtml(assignmentIds.join("|"))}"><span class="stale-bay-row-snooze-icon-v339" aria-hidden="true">Zz</span><span>${snooze.active ? "Extend Snooze" : "Snooze Order"}</span></button>
+        </footer>
+      </article>`;
+    }).join("");
+
+    const neighborMarkup = neighboringOrders.length
+      ? `<details class="stale-bay-neighbors-v352"><summary><span>Other active orders in ${escapeHtml(bayDisplay)}</span><b>${neighboringOrders.length}</b></summary><div>${neighboringOrders.map((order) => `<span><strong>Order ${escapeHtml(order.order || "-")}</strong><b>${escapeHtml(order.customer || "No customer")}</b><small>${escapeHtml((order.items || []).reduce((sum, item) => sum + Number(item.inBayQty || 0), 0))} pcs · ${escapeHtml(formatDateTime(order.lastScannedAt) || "No scan time")}</small></span>`).join("")}</div></details>`
+      : "";
+
+    return `<section class="stale-bay-group-v353">
+      <header class="stale-bay-group-header-v353">
+        <div><small>PHYSICAL BAY</small><strong>${escapeHtml(bayDisplay)}</strong></div>
+        <div class="stale-bay-group-summary-v353"><span><b>${bayGroup.orders.size}</b> old</span><span><b>${bayPieces}</b> pcs</span><span class="${bayMissing ? "has-missing" : ""}"><b>${bayMissing}</b> missing</span><span class="${baySelected ? "is-selected" : ""}"><b>${baySelected}</b> selected</span></div>
+      </header>
+      <div class="stale-bay-group-orders-v353">${orderMarkup}${neighborMarkup}</div>
+    </section>`;
   }).join("");
 
-  els.staleBayList.innerHTML = `
-    <section class="stale-bay-summary-cards stale-bay-summary-cards-v105">
-      <article><small>Old bay rows</small><strong>${escapeHtml(list.length)}</strong><span>Needs physical review</span></article>
-      <article><small>Bays affected</small><strong>${escapeHtml(bayCount)}</strong><span>Physical locations</span></article>
-      <article><small>Oldest row</small><strong>${escapeHtml(oldestDays)} days</strong><span>Assigned age</span></article>
-      <article><small>Visible rows</small><strong>${escapeHtml(visible.length)}</strong><span>Current filters</span></article>
-    </section>
-    ${visible.length
-      ? `<div class="stale-bay-card-list stale-bay-card-list-v105">${cards}</div>`
-      : `<div class="stale-bay-empty stale-bay-empty-v105"><span class="stale-bay-empty-icon-v105" aria-hidden="true"></span><strong>No old bay rows match these filters.</strong><span>Try a different search, age range, or sort order.</span></div>`}
-  `;
+  els.staleBayList.innerHTML = visible.length
+    ? `<div class="stale-bay-normalized-v353"><header class="stale-bay-normalized-heading-v353"><div><small>OLD BAY REVIEW</small><strong>${escapeHtml(visible.length)} old order${visible.length === 1 ? "" : "s"}</strong><span>Bay → order → glass. Orange is newly old, red deepens with age, and purple means temporarily snoozed.</span></div></header>${groupsMarkup}</div>`
+    : `<div class="stale-bay-empty stale-bay-empty-v352"><strong>No matching old bay orders.</strong><span>Adjust Search, Status, Age, or Sort to broaden the review.</span></div>`;
   updateStaleBaySelectionControls(visible);
 }
 
@@ -16096,6 +17052,10 @@ async function snoozeStaleBayOrders(assignmentIds, days) {
   });
   for (const assignmentId of assignmentIds || []) state.staleBaySelectedIds.delete(String(assignmentId));
   state.staleBayOrders = payload.orders || [];
+  // A snoozed row leaves the Live stale subset by definition. Switch back to
+  // All so the operator can immediately see that the row stayed in the queue
+  // and moved into the snoozed group instead of appearing to disappear.
+  if (state.staleBayView === "live") state.staleBayView = "all";
   updateOldBayAttentionBadge(state.staleBayOrders);
   renderStaleBayPanel(state.staleBayOrders);
   await refreshBayMapPage();
@@ -16146,54 +17106,6 @@ function bayEventTone(event) {
   if (text.includes("error") || text.includes("blocked") || text.includes("needs")) return "error";
   if (text.includes("hold") || text.includes("move") || text.includes("sdi") || text.includes("layout") || text.includes("available")) return "notice";
   return "ok";
-}
-
-/**
- * Purpose: Run the bay event move options HTML workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function bayEventMoveOptionsHtml(currentBayCode = "") {
-  const options = availableIndianTrailBays().map((bay) => `
-    <option value="${escapeHtml(bay.bayCode)}" ${bay.bayCode === currentBayCode ? "selected" : ""}>${escapeHtml(bay.displayName || bay.bayCode)}</option>
-  `).join("");
-  return `<option value="">Choose new bay...</option>${options}`;
-}
-
-/**
- * Purpose: Run the bay event move control HTML workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
- */
-function bayEventMoveControlHtml(event, compact = false) {
-  const assignmentId = Number(event?.assignmentId || 0);
-  const currentBayCode = event?.currentBayCode || "";
-  const currentBayDisplay = event?.currentBayDisplay || currentBayCode || "";
-  const orderLabel = event?.order ? `${event.order}-${event.item || ""}` : "item";
-  const canMove = hasPermission("move_bay") || hasPermission("indian_trail_receive");
-
-  if (!assignmentId || !currentBayCode) {
-    return `<span class="bay-event-move-unavailable" title="Current item is no longer assigned to a bay">${compact ? "Not in bay" : "Current item is no longer assigned to a bay"}</span>`;
-  }
-  if (!canMove) {
-    return `<span class="bay-event-move-unavailable" title="${escapeHtml(currentBayDisplay)}">View only</span>`;
-  }
-
-  return `
-    <label class="bay-event-location-editor ${compact ? "is-compact" : ""}">
-      ${compact ? "" : "<span>Change Location</span>"}
-      <select
-        class="bay-event-move-select ${compact ? "is-compact" : ""}"
-        data-bay-event-move
-        data-assignment-id="${escapeHtml(assignmentId)}"
-        data-current-bay="${escapeHtml(currentBayCode)}"
-        data-order-label="${escapeHtml(orderLabel)}"
-        aria-label="Change ${escapeHtml(orderLabel)} from ${escapeHtml(currentBayDisplay)} to another bay"
-      >
-        ${bayEventMoveOptionsHtml(currentBayCode)}
-      </select>
-    </label>
-  `;
 }
 
 /**
@@ -16909,7 +17821,9 @@ function renderManageItemsPanel() {
   if (els.manageItemsFilter) els.manageItemsFilter.value = state.manageItemsFilter || "all";
 
   if (els.manageItemsList) {
-    const visibleCount = manageVisibleEntries(rows).length;
+    const visibleEntries = manageVisibleEntries(rows);
+    const visibleCount = visibleEntries.length;
+    const selectedQty = selectedEntries.reduce((sum, { assignment }) => sum + Number(assignment.assignedQty || assignment.qty || 0), 0);
     const listMarkup = rows.map((row) => {
       const ids = (row.entries || []).map(({ assignment }) => String(assignment.id || "")).filter(Boolean);
       const selectedCount = ids.filter((id) => selectedIds.has(id)).length;
@@ -16918,58 +17832,51 @@ function renderManageItemsPanel() {
       const active = (row.entries || []).some(({ assignment }) => String(assignment.id || "") === String(state.manageItemsSelectedId || ""));
       const locations = [...new Set((row.entries || []).map(({ bay }) => manageBayLocationLabel(bay)).filter(Boolean))];
       const locationSummary = locations.length === 1 ? locations[0] : `${locations.length} bay locations`;
+      const itemMarkup = (row.entries || []).map(({ bay, assignment }) => {
+        const id = String(assignment.id || "");
+        const checked = selectedIds.has(id);
+        const status = String(assignment.status || "Assigned");
+        const statusClass = status.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        return `
+          <div class="manage-inventory-line-v355 ${checked ? "is-selected" : ""}" data-manage-item-select="${escapeHtml(id)}" role="button" tabindex="0" aria-label="Select Order ${escapeHtml(assignment.order)} Item ${escapeHtml(assignment.item)}">
+            <label class="manage-inventory-check-v355" title="Select this exact item">
+              <input type="checkbox" data-manage-item-checkbox="${escapeHtml(id)}" ${checked ? "checked" : ""}>
+              <span aria-hidden="true"></span>
+            </label>
+            <span class="manage-inventory-id-v355"><small>ORDER / ITEM</small><strong>${escapeHtml(assignment.order || "-")} / ${escapeHtml(assignment.item || "-")}</strong></span>
+            <span class="manage-inventory-glass-v355"><small>GLASS / SIZE</small><strong>${escapeHtml(assignment.product || "Glass item")}</strong><b>${escapeHtml(assignment.dimensions || "Size not listed")}</b></span>
+            <span class="manage-inventory-location-v355"><small>LOCATION</small><strong>${escapeHtml(manageBayLocationLabel(bay))}</strong></span>
+            <span class="manage-inventory-status-v355 status-${escapeHtml(statusClass)}">${escapeHtml(status)}</span>
+          </div>`;
+      }).join("");
+
       return `
-        <article class="manage-item-job-card ${active ? "is-active" : ""} ${allSelected ? "is-selected" : ""} ${partiallySelected ? "is-partial" : ""}" data-manage-group-card="${escapeHtml(row.key)}">
-          <div class="manage-item-job-head" data-manage-group-select="${escapeHtml(row.key)}" role="button" tabindex="0" aria-label="Select all items for ${escapeHtml(row.jobLabel)}">
-            <label class="manage-item-select-box" title="Select all items in this job">
+        <article class="manage-inventory-job-v355 ${active ? "is-active" : ""} ${allSelected ? "is-selected" : ""} ${partiallySelected ? "is-partial" : ""}" data-manage-group-card="${escapeHtml(row.key)}">
+          <header class="manage-inventory-job-head-v355" data-manage-group-select="${escapeHtml(row.key)}" role="button" tabindex="0" aria-label="Select all items for ${escapeHtml(row.jobLabel)}">
+            <label class="manage-inventory-check-v355" title="Select all items in this job">
               <input type="checkbox" data-manage-group-checkbox="${escapeHtml(row.key)}" ${allSelected ? "checked" : ""}>
               <span aria-hidden="true"></span>
             </label>
-            <div class="manage-item-job-identity">
-              <small>Job Nr.</small>
-              <strong>${escapeHtml(row.jobLabel)}</strong>
-              <span>${escapeHtml(row.customer || "No customer listed")}</span>
+            <div class="manage-inventory-job-identity-v355"><small>JOB NR.</small><strong>${escapeHtml(row.jobLabel)}</strong><span>${escapeHtml(row.customer || "No customer listed")}</span></div>
+            <div class="manage-inventory-job-metrics-v355">
+              <span><b>${escapeHtml(row.itemCount)}</b><small>items</small></span>
+              <span><b>${escapeHtml(row.totalQty)}</b><small>qty</small></span>
+              <span class="is-location"><b>${escapeHtml(locationSummary)}</b><small>location</small></span>
             </div>
-            <div class="manage-item-job-summary">
-              <b>${escapeHtml(row.itemCount)} item${row.itemCount === 1 ? "" : "s"} · Qty ${escapeHtml(row.totalQty)}</b>
-              <small>${escapeHtml(locationSummary)}</small>
-            </div>
-          </div>
-          <div class="manage-item-exact-list">
-            ${(row.entries || []).map(({ bay, assignment }) => {
-              const id = String(assignment.id || "");
-              const checked = selectedIds.has(id);
-              const status = String(assignment.status || "Assigned");
-              return `
-                <div class="manage-item-exact-row ${checked ? "is-selected" : ""}" data-manage-item-select="${escapeHtml(id)}" role="button" tabindex="0" aria-label="Select Order ${escapeHtml(assignment.order)} Item ${escapeHtml(assignment.item)}">
-                  <label class="manage-item-select-box" title="Select this exact item">
-                    <input type="checkbox" data-manage-item-checkbox="${escapeHtml(id)}" ${checked ? "checked" : ""}>
-                    <span aria-hidden="true"></span>
-                  </label>
-                  <div class="manage-item-exact-identity">
-                    <strong>Order ${escapeHtml(assignment.order)} · Item ${escapeHtml(assignment.item)}</strong>
-                    <span>${escapeHtml(assignment.product || "Glass item")}${assignment.dimensions ? ` · ${escapeHtml(assignment.dimensions)}` : ""}</span>
-                  </div>
-                  <div class="manage-item-location">
-                    <small>Current location</small>
-                    <strong>${escapeHtml(manageBayLocationLabel(bay))}</strong>
-                  </div>
-                  <span class="manage-item-status status-${escapeHtml(String(status).toLowerCase())}">${escapeHtml(status)}</span>
-                </div>`;
-            }).join("")}
+          </header>
+          <div class="manage-inventory-lines-v355">
+            <div class="manage-inventory-line-head-v355"><span></span><span>Order / Item</span><span>Glass / Size</span><span>Location</span><span>Status</span></div>
+            ${itemMarkup}
           </div>
         </article>`;
     }).join("");
 
     els.manageItemsList.innerHTML = `
-      <div class="manage-items-selection-toolbar">
-        <span><strong>${escapeHtml(selectedEntries.length)} selected</strong><small>${escapeHtml(visibleCount)} visible item${visibleCount === 1 ? "" : "s"}</small></span>
-        <div>
-          <button type="button" data-manage-selection-action="all" ${visibleCount ? "" : "disabled"}>Select All</button>
-          <button type="button" data-manage-selection-action="clear" ${selectedEntries.length ? "" : "disabled"}>Clear Selection</button>
-        </div>
+      <div class="manage-inventory-toolbar-v355">
+        <span><strong>${escapeHtml(selectedEntries.length)} selected</strong><small>${escapeHtml(selectedQty)} qty selected · ${escapeHtml(visibleCount)} visible item${visibleCount === 1 ? "" : "s"}</small></span>
+        <div><button type="button" data-manage-selection-action="all" ${visibleCount ? "" : "disabled"}>Select All</button><button type="button" data-manage-selection-action="clear" ${selectedEntries.length ? "" : "disabled"}>Clear</button></div>
       </div>
-      ${rows.length ? listMarkup : `<div class="manage-items-empty"><strong>No bay items found.</strong><span>Adjust the search or filters and try again.</span></div>`}`;
+      ${rows.length ? listMarkup : `<div class="manage-items-empty-v355"><span aria-hidden="true"></span><strong>No bay items found</strong><small>Adjust Search or Status to broaden the inventory view.</small></div>`}`;
   }
 
   if (els.manageItemsTargetBay) {
@@ -16977,37 +17884,34 @@ function renderManageItemsPanel() {
     const selectedValue = els.manageItemsTargetBay.value || currentBay;
     els.manageItemsTargetBay.innerHTML = bayOptionGroups(selectedValue);
     if (selectedValue) els.manageItemsTargetBay.value = selectedValue;
+    if (els.manageItemsTargetBay.dataset.customSelectEnhanced === "true") syncCustomSelect(els.manageItemsTargetBay);
   }
 
   if (els.manageItemsSelected) {
     if (!selectedEntries.length) {
       els.manageItemsSelected.innerHTML = `
-        <div class="manage-items-empty manage-items-empty-selection">
-          <strong>Select a job or exact item</strong>
-          <span>Click a job card to select all of its items, or click an exact item row to move only that piece to another bay.</span>
+        <div class="manage-selection-empty-v355">
+          <span aria-hidden="true"></span>
+          <strong>Nothing selected</strong>
+          <small>Select a whole Job Nr. or one exact glass line from Bay Inventory.</small>
         </div>`;
     } else {
       const totalQty = selectedEntries.reduce((sum, { assignment }) => sum + Number(assignment.assignedQty || assignment.qty || 0), 0);
       const jobs = new Set(selectedEntries.map(({ assignment }) => assignmentJobLabel(assignment)));
       const locations = new Set(selectedEntries.map(({ bay }) => manageBayLocationLabel(bay)));
       els.manageItemsSelected.innerHTML = `
-        <article class="manage-selected-card manage-selected-card-v318">
-          <div class="manage-selected-overview">
-            <span class="bay-page-eyebrow">Manual item management</span>
-            <h3>${escapeHtml(selectedEntries.length)} selected item${selectedEntries.length === 1 ? "" : "s"}</h3>
-            <p>Exact-item moves are supported. Sibling items from the same order can remain in different grouped bay sets.</p>
+        <article class="manage-selection-card-v355">
+          <div class="manage-selection-summary-v355">
+            <span><b>${escapeHtml(selectedEntries.length)}</b><small>Items</small></span>
+            <span><b>${escapeHtml(totalQty)}</b><small>Total Qty</small></span>
+            <span><b>${escapeHtml(jobs.size)}</b><small>Jobs</small></span>
+            <span><b>${escapeHtml(locations.size)}</b><small>Locations</small></span>
           </div>
-          <div class="manage-selected-stats">
-            ${miniStat("Jobs", jobs.size)}
-            ${miniStat("Items", selectedEntries.length)}
-            ${miniStat("Total Qty", totalQty)}
-            ${miniStat("Locations", locations.size)}
-          </div>
-          <div class="manage-selected-item-list">
+          <div class="manage-selection-lines-v355">
             ${selectedEntries.map(({ bay, assignment }) => `
-              <div class="manage-selected-item-line">
-                <span><strong>Order ${escapeHtml(assignment.order)} · Item ${escapeHtml(assignment.item)}</strong><small>${escapeHtml(assignment.product || "Glass item")}${assignment.dimensions ? ` · ${escapeHtml(assignment.dimensions)}` : ""}</small></span>
-                <span><small>Current bay</small><b>${escapeHtml(manageBayLocationLabel(bay))}</b></span>
+              <div class="manage-selection-line-v355">
+                <span><strong>${escapeHtml(assignment.order || "-")} / ${escapeHtml(assignment.item || "-")}</strong><small>${escapeHtml(assignment.product || "Glass item")}${assignment.dimensions ? ` · ${escapeHtml(assignment.dimensions)}` : ""}</small></span>
+                <span><small>Current Bay</small><b>${escapeHtml(manageBayLocationLabel(bay))}</b></span>
               </div>`).join("")}
           </div>
         </article>`;
@@ -17017,17 +17921,18 @@ function renderManageItemsPanel() {
   const actionCount = selectedEntries.length;
   if (els.manageItemsMoveBtn) {
     els.manageItemsMoveBtn.disabled = !actionCount;
-    els.manageItemsMoveBtn.textContent = actionCount === 1 ? "Move Item" : `Move ${actionCount} Items`;
+    els.manageItemsMoveBtn.textContent = actionCount === 1 ? "Move Selected Item" : `Move ${actionCount} Selected Items`;
   }
   if (els.manageItemsClearBtn) {
     els.manageItemsClearBtn.disabled = !actionCount;
-    els.manageItemsClearBtn.textContent = actionCount === 1 ? "Clear Item" : `Clear ${actionCount} Items`;
+    els.manageItemsClearBtn.textContent = actionCount === 1 ? "Clear Selected Item" : `Clear ${actionCount} Selected Items`;
   }
+  if (els.manageItemsScannerBtn) els.manageItemsScannerBtn.disabled = !actionCount;
   if (els.manageItemsSdiBtn) els.manageItemsSdiBtn.disabled = actionCount !== 1;
   if (els.manageItemsStatus) {
     els.manageItemsStatus.textContent = actionCount
-      ? `${actionCount} exact item${actionCount === 1 ? " is" : "s are"} selected. Choose a destination bay for a manual move.`
-      : "Select a job or exact item to begin.";
+      ? `${actionCount} exact item${actionCount === 1 ? " is" : "s are"} selected. Choose the destination and action.`
+      : "Select a whole job or exact item to begin.";
   }
 }
 
@@ -17041,7 +17946,6 @@ function openManageItemsPanel(assignmentId = "") {
   renderManageItemsPanel();
   els.manageItemsPanel.hidden = false;
   setBayModalSection("manage", "workspace");
-  void loadBayModalActionHistory("manage");
   els.manageItemsBackdrop.hidden = false;
   updateModalScrollLock();
   els.manageItemsSearch?.focus();
@@ -17410,7 +18314,6 @@ function openBayEditorPanel(groupLabel = "") {
   renderBayEditorPanel();
   els.bayEditorPanel.hidden = false;
   setBayModalSection("editor", "workspace");
-  void loadBayModalActionHistory("editor");
   els.bayEditorBackdrop.hidden = false;
   updateModalScrollLock();
 }
@@ -17765,11 +18668,10 @@ function renderBayAllScansPage(payload) {
             <td data-label="Details" title="${escapeHtml(event.reason || "")}"><span class="bay-all-scans-detail-v159">${escapeHtml(event.reason || "No additional details")}</span></td>
             <td data-label="User"><span class="bay-all-scans-user-v159">${escapeHtml(event.user || "-")}</span></td>
             <td data-label="Time"><time class="bay-all-scans-time-v159">${escapeHtml(time)}</time></td>
-            <td data-label="Change Location">${bayEventMoveControlHtml(event)}</td>
           </tr>
         `;
       }).join("")
-    : '<tr class="bay-all-scans-empty-row-v159"><td colspan="11"><div><span aria-hidden="true">✓</span><strong>No retained Bay Map scans</strong><small>New physical bay movements will appear here for seven days.</small></div></td></tr>';
+    : '<tr class="bay-all-scans-empty-row-v159"><td colspan="10"><div><span aria-hidden="true">✓</span><strong>No retained Bay Map scans</strong><small>New physical bay movements will appear here for seven days.</small></div></td></tr>';
 
   const pageButtons = bayAllScansPageNumbers(page, totalPages).map((pageNumber) => `
     <button type="button" data-bay-all-scans-page="${pageNumber}" ${pageNumber === page ? 'class="is-active" aria-current="page"' : ""}>${pageNumber}</button>
@@ -17784,7 +18686,6 @@ function renderBayAllScansPage(payload) {
     body: `
       <div class="full-scans-modal bay-full-scans-modal bay-full-scans-modal-v159">
         <div class="bay-all-scans-topline-v317">
-          <p class="bay-all-scans-guidance-v317"><strong>Location corrections:</strong> Use Change Location only when the physical piece is currently assigned to the wrong bay.</p>
           <div class="bay-all-scans-summary-strip-v316" aria-label="Bay scan history summary">
             <span><small>Retained</small><strong>7 days</strong></span>
             <span><small>Total scans</small><strong>${escapeHtml(total)}</strong></span>
@@ -17794,7 +18695,7 @@ function renderBayAllScansPage(payload) {
 
         <div class="admin-table full-scans-table bay-full-scans-table-v159">
           <table>
-            <thead><tr><th>Check</th><th>Action</th><th>Order</th><th>Item</th><th>Job Nr.</th><th>Current Bay</th><th>Customer</th><th>Details</th><th>User</th><th>Time</th><th>Change Location</th></tr></thead>
+            <thead><tr><th>Check</th><th>Action</th><th>Order</th><th>Item</th><th>Job Nr.</th><th>Current Bay</th><th>Customer</th><th>Details</th><th>User</th><th>Time</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
@@ -17876,6 +18777,274 @@ async function openBayAllScansModal(page = 1) {
  * Effects: Rebuilds the existing bay select options and synchronizes its custom-select presentation.
  * Flow: Filters active non-spacer bays, sorts by display name, restores a valid selection, and refreshes the shared select UI.
  */
+function setPriorityNewRequestMode(mode = "rush") {
+  const requested = String(mode || "rush").trim().toLowerCase();
+  const normalized = requested === "missing" ? "missing" : requested === "remake" ? "remake" : "rush";
+  state.priorityNewRequestMode = normalized;
+
+  document.querySelectorAll('input[name="priorityNewRequestType"]').forEach((input) => {
+    input.checked = String(input.dataset.priorityRequestMode || "rush") === normalized;
+  });
+  document.querySelectorAll("[data-priority-new-panel]").forEach((panel) => {
+    const visiblePanel = normalized === "missing" ? "missing" : "priority";
+    panel.hidden = panel.dataset.priorityNewPanel !== visiblePanel;
+  });
+  updatePriorityIntakeEmailMode();
+}
+
+function priorityIntakeType() {
+  return state.priorityNewRequestMode === "remake" ? "Remake" : "Rush";
+}
+
+function priorityIntakeStatusLabel(request) {
+  const status = String(request?.status || "pending").toLowerCase();
+  if (status === "matched") return "Matched to A+W";
+  if (status === "cancelled") return "Cancelled";
+  return "Waiting for A+W";
+}
+
+function priorityIntakeOptions() {
+  return state.sdiWorkspace?.intakeOptions || { reasons: [], responsiblePeople: [], recipientUsers: [] };
+}
+
+function priorityChoiceValue(select, customInput) {
+  if (!select) return "";
+  if (select.value === "__custom__") return String(customInput?.value || "").trim();
+  return String(select.value || "").trim();
+}
+
+function setPriorityChoiceValue(select, customInput, value = "") {
+  if (!select) return;
+  const clean = String(value || "").trim();
+  const matching = [...select.options].find((option) => String(option.value || "").toLowerCase() === clean.toLowerCase());
+  if (matching && matching.value !== "__custom__") {
+    select.value = matching.value;
+    if (customInput) { customInput.hidden = true; customInput.value = ""; }
+    syncCustomSelect(select);
+    return;
+  }
+  if (clean) {
+    select.value = "__custom__";
+    if (customInput) { customInput.hidden = false; customInput.value = clean; }
+  } else {
+    select.value = "";
+    if (customInput) { customInput.hidden = true; customInput.value = ""; }
+  }
+  syncCustomSelect(select);
+}
+
+function populatePriorityChoiceSelect(select, customInput, values = []) {
+  if (!select) return;
+  const current = priorityChoiceValue(select, customInput);
+  const label = /Responsible/i.test(select.id) ? "Choose a person..." : "Choose a reason...";
+  const unique = [...new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+  select.innerHTML = `<option value="">${escapeHtml(label)}</option>${unique.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}<option value="__custom__">+ Add custom...</option>`;
+  setPriorityChoiceValue(select, customInput, current);
+}
+
+function updatePriorityChoiceVisibility(select, customInput, focus = false) {
+  if (!customInput || !select) return;
+  const custom = select.value === "__custom__";
+  customInput.hidden = !custom;
+  if (custom && focus) customInput.focus();
+}
+
+function selectedPriorityRecipientEmails(host) {
+  return [...(host?.querySelectorAll("[data-priority-recipient-email]:checked") || [])]
+    .map((input) => String(input.dataset.priorityRecipientEmail || "").trim())
+    .filter(Boolean);
+}
+
+function renderPriorityRecipientUsers(host, users = []) {
+  if (!host) return;
+  const selected = new Set(selectedPriorityRecipientEmails(host).map((email) => email.toLowerCase()));
+  const rows = Array.isArray(users) ? users : [];
+  host.innerHTML = rows.length ? rows.map((entry) => {
+    const email = String(entry.email || "").trim();
+    const display = String(entry.displayName || entry.username || email).trim();
+    return `<label class="priority-user-recipient-v347"><input type="checkbox" data-priority-recipient-email="${escapeHtml(email)}" ${selected.has(email.toLowerCase()) ? "checked" : ""}><span><strong>${escapeHtml(display)}</strong><small>${escapeHtml(email)}</small></span></label>`;
+  }).join("") : `<small class="priority-user-recipient-empty-v347">No active scanner users have a saved email address yet.</small>`;
+}
+
+function priorityRecipients(host, manualInput) {
+  const values = selectedPriorityRecipientEmails(host);
+  String(manualInput?.value || "").split(/[,;\n]+/).map((value) => value.trim()).filter(Boolean).forEach((email) => {
+    if (!values.some((value) => value.toLowerCase() === email.toLowerCase())) values.push(email);
+  });
+  return values;
+}
+
+function rememberPriorityOption(kind, value) {
+  const clean = String(value || "").trim();
+  if (!clean) return;
+  const options = { ...priorityIntakeOptions() };
+  const key = kind === "responsible" ? "responsiblePeople" : "reasons";
+  const values = [...(options[key] || [])];
+  if (!values.some((item) => String(item).toLowerCase() === clean.toLowerCase())) values.push(clean);
+  options[key] = values.sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+  state.sdiWorkspace = { ...(state.sdiWorkspace || {}), intakeOptions: options };
+}
+
+function renderPriorityIntakeOptions() {
+  const options = priorityIntakeOptions();
+  populatePriorityChoiceSelect(els.priorityIntakeReason, els.priorityIntakeReasonCustom, options.reasons);
+  populatePriorityChoiceSelect(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom, options.responsiblePeople);
+  populatePriorityChoiceSelect(els.sdiReasonInput, els.sdiReasonCustom, options.reasons);
+  populatePriorityChoiceSelect(els.sdiResponsibleInput, els.sdiResponsibleCustom, options.responsiblePeople);
+  renderPriorityRecipientUsers(els.priorityIntakeRecipientUsers, options.recipientUsers);
+  renderPriorityRecipientUsers(els.sdiRecipientUsers, options.recipientUsers);
+  updatePriorityIntakeEmailMode();
+  updateSdiEmailMode();
+}
+
+function updatePriorityIntakeEmailMode() {
+  const mode = String(els.priorityIntakeEmailMode?.value || "draft");
+  if (els.priorityIntakeRecipientsField) els.priorityIntakeRecipientsField.hidden = mode === "none";
+  if (!els.priorityIntakeEmailHint) return;
+  const transport = state.sdiWorkspace?.emailTransport || {};
+  if (mode === "draft") {
+    els.priorityIntakeEmailHint.innerHTML = `<strong>Draft in your email app</strong><span>The scanner writes the subject and message, then opens your default mail application for you to choose the From account, adjust recipients, and send.</span>`;
+    return;
+  }
+  if (mode === "none") {
+    els.priorityIntakeEmailHint.innerHTML = `<strong>No email</strong><span>The request is still saved, matched, and audited without creating a message.</span>`;
+    return;
+  }
+  els.priorityIntakeEmailHint.innerHTML = `<strong>${escapeHtml(transport.transportLabel || "System email")}</strong><span>${transport.configured ? `Sends immediately from <b>${escapeHtml(transport.from || "the configured scanner mailbox")}</b>.` : "The scanner email transport is not configured, so system sending may fall back to an auditable draft state."}</span>`;
+}
+
+function updateSdiEmailMode() {
+  const mode = String(els.sdiEmailMode?.value || "draft");
+  if (els.sdiRecipientsField) els.sdiRecipientsField.hidden = mode === "none";
+  if (!els.sdiEmailHint) return;
+  const transport = state.sdiWorkspace?.emailTransport || {};
+  if (mode === "draft") {
+    els.sdiEmailHint.innerHTML = `<strong>Draft in your email app</strong><span>Opens a prepared Missing Glass Rush message for you to review, address, and send.</span>`;
+  } else if (mode === "none") {
+    els.sdiEmailHint.innerHTML = `<strong>No email</strong><span>The selected glass is still marked Rush and fully audited.</span>`;
+  } else {
+    els.sdiEmailHint.innerHTML = `<strong>${escapeHtml(transport.transportLabel || "System email")}</strong><span>${transport.configured ? `Sends immediately from <b>${escapeHtml(transport.from || "the configured scanner mailbox")}</b>.` : "System email transport is not currently configured."}</span>`;
+  }
+}
+
+function renderPriorityIntakeRequests() {
+  if (!els.priorityIntakeList) return;
+  const requests = Array.isArray(state.sdiWorkspace?.intakeRequests) ? state.sdiWorkspace.intakeRequests : [];
+  const pendingCount = requests.filter((request) => String(request.status || "pending") === "pending").length;
+  if (els.priorityIntakeTabCount) els.priorityIntakeTabCount.textContent = String(pendingCount);
+  const query = String(state.priorityIntakeQuery || "").trim().toLowerCase();
+  const filtered = requests.filter((request) => {
+    if (!query) return true;
+    return [
+      request.priorityType, request.jobNumber, request.reason, request.responsible,
+      request.createdBy, request.status, request.matchedJob, request.matchedDeliveryDate,
+      ...(request.matchedOrders || []),
+    ].join(" ").toLowerCase().includes(query);
+  });
+  if (!filtered.length) {
+    els.priorityIntakeList.innerHTML = `<div class="priority-intake-empty-v346"><strong>${requests.length ? "No requests match this search." : "No Rush or Remake requests yet."}</strong><span>Create a request before the A+W order arrives and it will appear here.</span></div>`;
+    return;
+  }
+  els.priorityIntakeList.innerHTML = filtered.map((request) => {
+    const matched = String(request.status || "") === "matched";
+    const type = String(request.priorityType || "Rush");
+    const emailStatus = String(request.emailStatus || "not_requested").replaceAll("_", " ");
+    const matchedOrders = (request.matchedOrders || []).join(", ");
+    return `<article class="priority-intake-request-v346 is-${escapeHtml(type.toLowerCase())} ${matched ? "is-matched" : "is-pending"}">
+      <header><span class="priority-intake-request-icon-v346" aria-hidden="true">${type === "Remake" ? "RM" : "!"}</span><div><small>${escapeHtml(type)} request</small><strong>${escapeHtml(request.jobNumber || "Job not supplied")}</strong></div><b class="priority-intake-status-v346">${escapeHtml(priorityIntakeStatusLabel(request))}</b></header>
+      <div class="priority-intake-request-facts-v346">
+        <span><small>Reason</small><strong>${escapeHtml(request.reason || "-")}</strong></span>
+        <span><small>Responsible</small><strong>${escapeHtml(request.responsible || "-")}</strong></span>
+        <span><small>Submitted by</small><strong>${escapeHtml(request.createdBy || "-")}</strong></span>
+        <span><small>Email</small><strong>${escapeHtml(emailStatus)}</strong></span>
+        ${matched ? `<span><small>Matched Job</small><strong>${escapeHtml(request.matchedJob || request.jobNumber || "-")}</strong></span><span><small>Delivery date</small><strong>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : "-")}</strong></span><span><small>Orders</small><strong>${escapeHtml(matchedOrders || "-")}</strong></span><span><small>Matched pieces</small><strong>${escapeHtml(request.matchedPieceQty || 0)}</strong></span>` : ""}
+      </div>
+      <footer><span>${matched ? `Matched ${escapeHtml(formatDateTime(request.matchedAt))}` : `Queued ${escapeHtml(formatDateTime(request.createdAt))}`}</span><button type="button" class="priority-intake-cancel-v346" data-priority-intake-cancel="${escapeHtml(request.requestId)}">${matched ? "Close tracking" : "Cancel request"}</button></footer>
+    </article>`;
+  }).join("");
+}
+
+function openPriorityIntakeDraft(draft) {
+  if (!draft) return;
+  const to = (draft.toEmails || []).join(",");
+  const cc = (draft.ccEmails || []).join(",");
+  const params = [mailtoParam("subject", draft.subject || ""), mailtoParam("body", draft.body || "")];
+  if (cc) params.push(mailtoParam("cc", cc));
+  window.location.href = `mailto:${encodeURIComponent(to)}?${params.join("&")}`;
+}
+
+async function submitPriorityIntakeRequest(event) {
+  event?.preventDefault?.();
+  const payload = {
+    priorityType: priorityIntakeType(),
+    jobNumber: els.priorityIntakeJob?.value || "",
+    reason: priorityChoiceValue(els.priorityIntakeReason, els.priorityIntakeReasonCustom),
+    responsible: priorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom),
+    emailMode: els.priorityIntakeEmailMode?.value || "draft",
+    recipients: priorityRecipients(els.priorityIntakeRecipientUsers, els.priorityIntakeRecipients),
+    requestId: state.priorityIntakeEditingRequestId || "",
+  };
+  const submitButton = document.getElementById("priorityIntakeSubmitBtn");
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const result = await fetchJson("/api/indian-trail/priority-intake", { method: "POST", body: JSON.stringify(payload) });
+    state.sdiWorkspace = { ...(state.sdiWorkspace || {}), intakeRequests: result.requests || [], intakeSummary: state.sdiWorkspace?.intakeSummary || {} };
+    rememberPriorityOption("reason", payload.reason);
+    rememberPriorityOption("responsible", payload.responsible);
+    if (els.priorityIntakeJob) els.priorityIntakeJob.value = "";
+    state.priorityIntakeEditingRequestId = "";
+    if (submitButton) submitButton.querySelector("span").textContent = "Save & Queue Request";
+    setPriorityChoiceValue(els.priorityIntakeReason, els.priorityIntakeReasonCustom, "");
+    setPriorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom, "");
+    if (els.priorityIntakeRecipients) els.priorityIntakeRecipients.value = "";
+    els.priorityIntakeRecipientUsers?.querySelectorAll("[data-priority-recipient-email]").forEach((input) => { input.checked = false; });
+    renderPriorityIntakeOptions();
+    if (result.draft) openPriorityIntakeDraft(result.draft);
+    renderPriorityIntakeRequests();
+    setBayModalSection("rush", "requests");
+    void loadBayModalActionHistory("rush");
+    const emailNote = result.emailStatus === "sent" ? "Email sent." : result.emailStatus === "user_draft" ? "Email draft opened." : result.emailStatus === "not_requested" ? "No email requested." : `Email status: ${String(result.emailStatus || "saved").replaceAll("_", " ")}.`;
+    showFloatingNotice(`${payload.priorityType} request queued for Job Nr. ${payload.jobNumber}. ${emailNote}`, "success");
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+function beginPriorityIntakeEdit(requestId) {
+  const request = (state.sdiWorkspace?.intakeRequests || []).find((row) => String(row.requestId) === String(requestId));
+  if (!request) { showInlineError("Priority request not found.", false); return; }
+  state.priorityIntakeEditingRequestId = String(request.requestId || "");
+  setPriorityNewRequestMode(String(request.priorityType || "Rush").toLowerCase() === "remake" ? "remake" : "rush");
+  if (els.priorityIntakeJob) els.priorityIntakeJob.value = request.jobNumber || "";
+  setPriorityChoiceValue(els.priorityIntakeReason, els.priorityIntakeReasonCustom, request.reason || "");
+  setPriorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom, request.responsible || "");
+  if (els.priorityIntakeEmailMode) els.priorityIntakeEmailMode.value = request.emailMode || "none";
+  const selectedRecipients = new Set((request.recipients || []).map((email) => String(email).toLowerCase()));
+  els.priorityIntakeRecipientUsers?.querySelectorAll("[data-priority-recipient-email]").forEach((input) => { input.checked = selectedRecipients.has(String(input.dataset.priorityRecipientEmail || "").toLowerCase()); });
+  if (els.priorityIntakeRecipients) els.priorityIntakeRecipients.value = (request.recipients || []).filter((email) => ![...(els.priorityIntakeRecipientUsers?.querySelectorAll("[data-priority-recipient-email]") || [])].some((input) => String(input.dataset.priorityRecipientEmail || "").toLowerCase() === String(email).toLowerCase())).join("; ");
+  const submitButton = document.getElementById("priorityIntakeSubmitBtn");
+  if (submitButton) submitButton.querySelector("span").textContent = "Save Changes";
+  updatePriorityIntakeEmailMode();
+  setBayModalSection("rush", "intake");
+  els.priorityIntakeJob?.focus();
+}
+
+async function cancelPriorityIntakeRequest(requestId) {
+  const request = (state.sdiWorkspace?.intakeRequests || []).find((row) => String(row.requestId) === String(requestId));
+  const confirmed = await confirmWebAppAction({
+    title: request?.status === "matched" ? "Close priority tracking?" : "Cancel priority request?",
+    message: `${escapeHtml(request?.priorityType || "Priority")} request for <strong>${escapeHtml(request?.jobNumber || "this Job Nr.")}</strong> will stop applying to future imports.`,
+    details: "Existing scan and audit history will remain intact.",
+    confirmLabel: request?.status === "matched" ? "Close Tracking" : "Cancel Request",
+  });
+  if (!confirmed) return;
+  const result = await fetchJson("/api/indian-trail/priority-intake/cancel", { method: "POST", body: JSON.stringify({ requestId }) });
+  state.sdiWorkspace = { ...(state.sdiWorkspace || {}), intakeRequests: result.requests || [] };
+  renderPriorityIntakeRequests();
+  void loadBayModalActionHistory("rush");
+}
+
 function populateSdiBayOptions(preferredBayCode = "") {
   if (!els.sdiBayInput) return;
   const current = preferredBayCode || els.sdiBayInput.value || "";
@@ -17905,9 +19074,11 @@ function renderSdiLookupResults() {
   }
   els.sdiLookupResults.hidden = false;
   els.sdiLookupResults.innerHTML = suggestions.map((suggestion) => `
-    <button type="button" data-sdi-lookup="${escapeHtml(suggestion.lookup)}">
-      <span><strong>${escapeHtml(suggestion.job || suggestion.order)}</strong><small>${escapeHtml(suggestion.customer || "No customer")}</small></span>
-      <span><b>${escapeHtml(suggestion.missingCount)} missing</b><small>${escapeHtml(suggestion.itemCount)} item${Number(suggestion.itemCount) === 1 ? "" : "s"}${suggestion.bayCodes?.length ? ` · ${escapeHtml(suggestion.bayCodes.join(", "))}` : ""}</small></span>
+    <button type="button" class="missing-glass-lookup-row-v351" data-sdi-lookup="${escapeHtml(suggestion.lookup)}">
+      <span class="missing-glass-lookup-identity-v351"><small>Job / Order</small><strong>${escapeHtml(suggestion.job || suggestion.order)}</strong><b>${escapeHtml(suggestion.customer || "No customer")}</b></span>
+      <span class="missing-glass-lookup-metrics-v351"><b>${escapeHtml(suggestion.missingCount)}</b><small>missing</small></span>
+      <span class="missing-glass-lookup-context-v351"><strong>${escapeHtml(suggestion.itemCount)} item${Number(suggestion.itemCount) === 1 ? "" : "s"}</strong><small>${suggestion.bayCodes?.length ? escapeHtml(suggestion.bayCodes.join(", ")) : "No bay filter"}</small></span>
+      <span class="missing-glass-lookup-arrow-v351" aria-hidden="true">›</span>
     </button>
   `).join("");
 }
@@ -17953,11 +19124,23 @@ function updateSdiSelectionSummary() {
   const selected = selectedSdiItems();
   const rushSelected = selected.filter((item) => item.rush && !item.remake);
   const missingSelected = selected.filter((item) => Number(item.missingQty || 0) > 0);
+  const selectedMissingPieces = missingSelected.reduce((sum, item) => sum + Math.max(Number(item.missingQty || 0), 0), 0);
   if (els.sdiSelectionSummary) {
     els.sdiSelectionSummary.textContent = selected.length
-      ? `${selected.length} item${selected.length === 1 ? "" : "s"} selected · ${missingSelected.length} missing · Rush`
+      ? `${selected.length} line${selected.length === 1 ? "" : "s"} selected · ${selectedMissingPieces} missing piece${selectedMissingPieces === 1 ? "" : "s"}`
       : "No items selected";
   }
+
+  // Keep the visual workflow rail synchronized with actual progress without
+  // changing the existing backend contract or submission behavior.
+  const railSteps = [...document.querySelectorAll(".missing-glass-step-rail-v351 > span")];
+  const hasLoadedItems = Boolean((state.sdiWorkspace?.items || []).length);
+  const activeStep = selected.length ? 2 : hasLoadedItems ? 1 : 0;
+  railSteps.forEach((step, index) => {
+    step.classList.toggle("is-active", index === activeStep);
+    step.classList.toggle("is-complete", index < activeStep);
+  });
+
   const markButton = els.sdiForm?.querySelector('[data-sdi-action="mark"]');
   if (markButton) markButton.disabled = !selected.length;
   if (els.sdiClearBtn) {
@@ -17979,33 +19162,56 @@ function renderSdiItemSelection() {
   if (!els.sdiItemSelectionList) return;
   const items = state.sdiWorkspace?.items || [];
   if (!items.length) {
-    els.sdiItemSelectionList.innerHTML = `<span class="admin-empty">Choose a predictive job or order result to review exact items.</span>`;
+    els.sdiItemSelectionList.innerHTML = `<div class="missing-glass-empty-v356"><span aria-hidden="true"></span><strong>No imported job loaded</strong><small>Search by Job Nr., Order Nr., SO, or barcode above. The exact imported glass lines will appear here for selection.</small></div>`;
     updateSdiSelectionSummary();
     return;
   }
-  els.sdiItemSelectionList.innerHTML = items.map((item) => {
+
+  const missingLines = items.filter((item) => Number(item.missingQty || 0) > 0);
+  const missingPieces = missingLines.reduce((sum, item) => sum + Math.max(Number(item.missingQty || 0), 0), 0);
+  const accountedPieces = items.reduce((sum, item) => sum + Math.max(Number(item.inBayQty || 0), 0), 0);
+  const expectedPieces = items.reduce((sum, item) => sum + Math.max(Number(item.qty || 0), 0), 0);
+  const selectedLines = items.filter((item) => state.sdiSelectedLineItemIds.has(String(item.lineItemId))).length;
+  const first = items[0] || {};
+  const jobLabel = first.job || first.order || "Imported work";
+  const customerLabel = first.customer || "Customer not listed";
+
+  // v0.356: The Missing Glass selector is intentionally card-based instead of
+  // another compressed table. Each exact imported line carries its own labels,
+  // so long glass descriptions or bay names cannot shift neighboring columns.
+  const cards = items.map((item) => {
     const complete = Boolean(item.complete);
     const disabled = complete && !item.rush;
     const checked = state.sdiSelectedLineItemIds.has(String(item.lineItemId)) && !disabled;
-    const location = item.bayDisplay || item.bayCode || "Not assigned to a bay";
-    const fulfillment = complete ? `In bay ${item.inBayQty}/${item.qty}` : `${item.missingQty} missing · In bay ${item.inBayQty}/${item.qty}`;
-    const note = item.rush
-      ? "This item is already marked Rush and can be updated or cleared."
-      : complete
-        ? "Already fulfilled in a bay; protected from a new Rush mark."
-        : "Selected by default because this item is still missing from the bay.";
-    return `
-      <label class="sdi-item-row ${complete ? "is-complete" : "is-missing"} ${disabled ? "is-disabled" : ""}">
-        <input type="checkbox" data-sdi-line-item-id="${escapeHtml(item.lineItemId)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
-        <span class="sdi-item-main">
-          <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)} ${item.rush ? `<b>Rush</b>` : ""}</strong>
-          <small>${escapeHtml(item.product || "Glass item")} ${item.dimensions ? `· ${escapeHtml(item.dimensions)}` : ""}</small>
-          <em>${escapeHtml(note)}</em>
-        </span>
-        <span class="sdi-item-status"><strong>${escapeHtml(fulfillment)}</strong><small>${escapeHtml(location)}</small></span>
-      </label>
-    `;
+    const missingQty = Math.max(Number(item.missingQty || 0), 0);
+    const inBayQty = Math.max(Number(item.inBayQty || 0), 0);
+    const totalQty = Math.max(Number(item.qty || 0), 0);
+    const location = item.bayDisplay || item.bayCode || "No bay";
+    const stateLabel = item.rush && !item.remake ? "RUSH ACTIVE" : missingQty > 0 ? "MISSING" : "ACCOUNTED";
+    const stateClass = item.rush && !item.remake ? "is-rush" : missingQty > 0 ? "is-missing" : "is-accounted";
+    return `<label class="missing-glass-item-card-v356 ${stateClass} ${checked ? "is-selected" : ""} ${disabled ? "is-disabled" : ""}">
+      <span class="missing-glass-item-check-v356"><input type="checkbox" data-sdi-line-item-id="${escapeHtml(item.lineItemId)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}><i aria-hidden="true"></i></span>
+      <span class="missing-glass-item-identity-v356"><small>ORDER / ITEM</small><strong>${escapeHtml(item.order || "-")} / ${escapeHtml(item.item || "-")}</strong><b>Job ${escapeHtml(item.job || "-")}</b></span>
+      <span class="missing-glass-item-description-v356"><small>GLASS / SIZE</small><strong>${escapeHtml(item.product || "Glass")}</strong><b>${escapeHtml(item.dimensions || "Size not listed")}</b></span>
+      <span class="missing-glass-item-location-v356"><small>PHYSICAL BAY</small><strong>${escapeHtml(location)}</strong></span>
+      <span class="missing-glass-item-metrics-v356">
+        <span><small>EXPECTED</small><strong>${escapeHtml(totalQty)}</strong></span>
+        <span><small>ACCOUNTED</small><strong>${escapeHtml(inBayQty)}</strong></span>
+        <span class="${missingQty ? "has-missing" : ""}"><small>MISSING</small><strong>${escapeHtml(missingQty)}</strong></span>
+      </span>
+      <span class="missing-glass-item-status-v356 ${stateClass}">${escapeHtml(stateLabel)}</span>
+    </label>`;
   }).join("");
+
+  els.sdiItemSelectionList.innerHTML = `
+    <section class="missing-glass-loaded-job-v356">
+      <div class="missing-glass-loaded-identity-v356"><small>LOADED IMPORTED JOB</small><strong>${escapeHtml(jobLabel)}</strong><span>${escapeHtml(customerLabel)}</span></div>
+      <div class="missing-glass-loaded-counts-v356"><span><b>${expectedPieces}</b><small>Expected</small></span><span><b>${accountedPieces}</b><small>Accounted</small></span><span class="${missingPieces ? "has-missing" : ""}"><b>${missingPieces}</b><small>Missing</small></span><span><b>${selectedLines}</b><small>Selected</small></span></div>
+    </section>
+    <section class="missing-glass-selector-v356">
+      <header class="missing-glass-selector-heading-v356"><div><small>EXACT ITEM SELECTOR</small><strong>Choose only the glass that needs Rush handling</strong><span>Each card is one imported order/item line. Quantity status is shown on the same card so selection cannot drift out of alignment.</span></div><b>${escapeHtml(items.length)} line${items.length === 1 ? "" : "s"}</b></header>
+      <div class="missing-glass-item-cards-v356">${cards}</div>
+    </section>`;
   updateSdiSelectionSummary();
 }
 
@@ -18068,10 +19274,12 @@ async function beginPriorityWorkEdit(lineItemIds, lookup = "") {
   if (els.sdiTruckExemptInput) els.sdiTruckExemptInput.checked = selected.some((item) => Boolean(item.priorityDirectToTruck));
   if (els.sdiReasonInput) {
     const reason = String(first.priorityReason || "").replace(/^\s*(?:Rush|SDI)\s*-\s*/i, "").trim();
-    els.sdiReasonInput.value = reason || "Rush work updated";
+    setPriorityChoiceValue(els.sdiReasonInput, els.sdiReasonCustom, reason || "Rush work updated");
   }
   renderSdiItemSelection();
   updateSdiSelectionSummary();
+  setBayModalSection("rush", "intake");
+  setPriorityNewRequestMode("missing");
   document.querySelector("#sdiPanel .sdi-action-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
   showFloatingNotice(`${selected.length} Rush item${selected.length === 1 ? " is" : "s are"} ready to edit.`, "notice");
 }
@@ -18101,109 +19309,76 @@ async function clearPriorityWorkItems(lineItemIds, label = "selected priority wo
  */
 function renderSdiCurrentList() {
   if (!els.sdiCurrentList) return;
-  const allGroups = (state.sdiWorkspace?.currentGroups || [])
-    .map((group) => ({ ...group, items: (group.items || []).filter((item) => item.rush && !item.remake) }))
-    .filter((group) => group.items.length);
-  const groups = filteredSdiCurrentGroups(allGroups);
-  const validGroupKeys = new Set(allGroups.map((group) => String(group.key || "")));
-  state.sdiExpandedCurrentGroups = new Set([...state.sdiExpandedCurrentGroups].filter((key) => validGroupKeys.has(String(key))));
+  const query = String(state.sdiCurrentQuery || "").trim().toLowerCase();
+  const typeFilter = String(state.sdiCurrentTypeFilter || "all");
+  const intakeRequests = (state.sdiWorkspace?.intakeRequests || []).filter((request) => request.status !== "cancelled");
+  const rushRequests = intakeRequests.filter((request) => String(request.priorityType || "Rush").toLowerCase() === "rush");
+  const remakeRequests = intakeRequests.filter((request) => String(request.priorityType || "").toLowerCase() === "remake");
+  const missingItems = currentPriorityItems();
 
-  const dateMap = new Map();
-  for (const group of groups) {
-    const dateKey = String(group.deliveryDate || "").trim() || "undated";
-    if (!dateMap.has(dateKey)) dateMap.set(dateKey, []);
-    dateMap.get(dateKey).push(group);
-  }
-  const dateEntries = [...dateMap.entries()].sort(([left], [right]) => left === "undated" ? 1 : right === "undated" ? -1 : left.localeCompare(right));
-  const validDates = new Set(dateEntries.map(([date]) => date));
-  state.sdiExpandedCurrentDates = new Set([...state.sdiExpandedCurrentDates].filter((date) => validDates.has(String(date))));
-  if (dateEntries.length && !state.sdiCurrentGroupsInitialized) {
-    const [firstDate, firstGroups] = dateEntries[0];
-    state.sdiExpandedCurrentDates.add(firstDate);
-    if (firstGroups[0]) state.sdiExpandedCurrentGroups.add(String(firstGroups[0].key || ""));
-    state.sdiCurrentGroupsInitialized = true;
-  } else if (!allGroups.length) {
-    state.sdiCurrentGroupsInitialized = false;
-  }
+  const requestMatches = (request) => !query || [
+    request.jobNumber, request.reason, request.responsible, request.createdBy,
+    request.status, request.matchedJob, request.matchedDeliveryDate, ...(request.matchedOrders || []),
+  ].join(" ").toLowerCase().includes(query);
+  const itemMatches = (item) => !query || [
+    item.order, item.item, item.job, item.groupJob, item.customer, item.product,
+    item.dimensions, item.bayDisplay, item.bayCode, item.priorityReason,
+  ].join(" ").toLowerCase().includes(query);
 
-  const allItems = currentPriorityItems(allGroups);
-  const visibleItems = currentPriorityItems(groups);
-  const markedCount = allItems.length;
+  const visibleRush = rushRequests.filter(requestMatches);
+  const visibleRemakes = remakeRequests.filter(requestMatches);
+  const visibleMissing = missingItems.filter(itemMatches);
+  const totalCount = intakeRequests.length + missingItems.length;
   const currentTabCount = document.getElementById("sdiCurrentTabCount");
-  if (currentTabCount) currentTabCount.textContent = String(markedCount);
+  if (currentTabCount) currentTabCount.textContent = String(totalCount);
 
-  const renderJobGroup = (group, groupIndex, dateIndex) => {
-    const key = String(group.key || "");
-    const expanded = state.sdiExpandedCurrentGroups.has(key);
-    const panelId = `sdi-current-group-${dateIndex}-${groupIndex}`;
-    const completeGroup = allGroups.find((candidate) => String(candidate.key || "") === key) || group;
-    const itemIds = (completeGroup.items || []).map((item) => String(item.lineItemId || "")).filter(Boolean).join("|");
-    const priorityDate = group.deliveryDate ? formatNumericDeliveryDate(group.deliveryDate) : "No priority date";
-    const originalDate = group.originalDeliveryDate ? formatNumericDeliveryDate(group.originalDeliveryDate) : "Not recorded";
-    const markedAt = group.markedAt ? formatDateTime(group.markedAt) : "Legacy mark / time unavailable";
-    return `
-      <article class="sdi-current-group ${expanded ? "is-expanded" : ""}">
-        <button type="button" class="sdi-current-group-toggle" data-sdi-current-group="${escapeHtml(key)}" aria-expanded="${expanded}" aria-controls="${panelId}">
-          <span class="sdi-current-job"><strong>${escapeHtml(group.job || "Unknown job")}</strong><small>${escapeHtml(group.customer || "No customer")}</small></span>
-          <span class="sdi-current-summary"><b>${group.items.length} Rush item${group.items.length === 1 ? "" : "s"}</b><small>New delivery ${escapeHtml(priorityDate)}</small></span>
-          <span class="sdi-current-mark-summary"><b>Marked ${escapeHtml(markedAt)}</b><small>${group.markedBy ? `by ${escapeHtml(group.markedBy)}` : "Priority work"}</small></span>
-          <span class="sdi-current-chevron" aria-hidden="true">⌄</span>
-        </button>
-        <div class="sdi-current-group-items" id="${panelId}" ${expanded ? "" : "hidden"}>
-          <div class="sdi-current-priority-facts">
-            <span><small>Original delivery</small><strong>${escapeHtml(originalDate)}</strong></span>
-            <span><small>Priority delivery</small><strong>${escapeHtml(priorityDate)}</strong></span>
-            <span><small>Marked</small><strong>${escapeHtml(markedAt)}</strong></span>
-            <span><small>Marked by</small><strong>${escapeHtml(group.markedBy || "Not recorded")}</strong></span>
-          </div>
-          <div class="sdi-current-group-actions">
-            <button type="button" data-sdi-edit-group="${escapeHtml(itemIds)}" data-sdi-edit-lookup="${escapeHtml(group.job || group.items[0]?.order || "")}">Edit order</button>
-            <button type="button" class="is-danger" data-sdi-clear-group="${escapeHtml(itemIds)}" data-sdi-clear-label="${escapeHtml(group.job || group.items[0]?.order || "order")}">Remove order</button>
-          </div>
-          <div class="sdi-current-priority-items">
-            ${group.items.map((item) => {
-              const itemPriorityDate = item.priorityDeliveryDate || item.deliveryDate || "";
-              const previousDate = item.priorityPreviousDeliveryDate || item.deliveryDate || "";
-              const bayLabel = item.bayDisplay || item.bayCode || "Not in bay";
-              return `
-                <article class="sdi-current-item sdi-current-item-v318">
-                  <div class="sdi-current-item-identity">
-                    <span><strong>Order ${escapeHtml(item.order)} · Item ${escapeHtml(item.item)}</strong><small>${escapeHtml(item.product || "Glass item")}${item.dimensions ? ` · ${escapeHtml(item.dimensions)}` : ""}</small></span>
-                    <span class="sdi-current-item-type is-rush">Rush</span>
-                  </div>
-                  <div class="sdi-current-item-facts">
-                    <span><small>Bay</small><strong>${escapeHtml(bayLabel)}</strong></span>
-                    <span><small>Original date</small><strong>${escapeHtml(formatNumericDeliveryDate(item.deliveryDate || previousDate))}</strong></span>
-                    <span><small>New date</small><strong>${escapeHtml(formatNumericDeliveryDate(itemPriorityDate))}</strong></span>
-                    <span><small>Marked</small><strong>${escapeHtml(item.priorityMarkedAt ? formatDateTime(item.priorityMarkedAt) : markedAt)}</strong></span>
-                    ${item.priorityDirectToTruck ? `<span><small>Handling</small><strong>Direct to truck</strong></span>` : ""}
-                  </div>
-                  ${item.priorityReason ? `<p class="sdi-current-item-reason"><strong>Reason:</strong> ${escapeHtml(item.priorityReason)}</p>` : ""}
-                  <span class="sdi-current-item-actions"><button type="button" data-sdi-edit-line-item="${escapeHtml(item.lineItemId)}" data-sdi-edit-lookup="${escapeHtml(group.job || `${item.order}-${item.item}`)}">Edit</button><button type="button" class="is-danger" data-sdi-clear-line-item="${escapeHtml(item.lineItemId)}">Remove</button></span>
-                </article>`;
-            }).join("")}
-          </div>
-        </div>
-      </article>`;
-  };
+  const requestCards = (rows, kind) => rows.map((request) => {
+    const matched = String(request.status || "pending") === "matched";
+    const items = Array.isArray(request.matchedItems) ? request.matchedItems : [];
+    const customer = request.matchedCustomer || items.find((item) => item.customer)?.customer || "";
+    const route = request.matchedRoute || items.find((item) => item.route)?.route || "";
+    const orders = [...new Set(items.map((item) => item.order).filter(Boolean).concat(request.matchedOrders || []))];
+    const itemRows = items.length ? `<div class="priority-work-request-items-v348">${items.map((item) => `<span><b>Order ${escapeHtml(item.order || "-")} · Item ${escapeHtml(item.item || "-")}</b><small>${escapeHtml(item.product || "Glass")} · ${escapeHtml(item.dimensions || "-")} · ${escapeHtml(item.qty || 0)} pcs</small><small>${escapeHtml(item.route || "No route")} · ${escapeHtml(item.stage || "No stage")}${item.processState ? ` · ${escapeHtml(item.processState)}` : ""}${item.deliveryDate ? ` · ${escapeHtml(formatDisplayDate(item.deliveryDate))}` : ""}</small></span>`).join("")}</div>` : "";
+    return `<article class="priority-work-request-card-v347 priority-work-request-card-v348 is-${kind} ${matched ? "is-matched" : "is-pending"}">
+      <span class="priority-work-card-icon-v347" aria-hidden="true">${kind === "remake" ? "RM" : "!"}</span>
+      <div class="priority-work-card-copy-v347"><small>${kind === "remake" ? "Remake" : "Rush"}</small><strong>${escapeHtml(request.jobNumber || "Job Nr. pending")}</strong>${customer ? `<span>${escapeHtml(customer)}</span>` : ""}</div>
+      <div class="priority-work-card-meta-v347"><b>${escapeHtml(priorityIntakeStatusLabel(request))}</b><span>${escapeHtml(request.reason || "No reason")}</span><small>${escapeHtml(request.responsible || "No responsible person")}</small></div>
+      <div class="priority-work-request-facts-v348"><span><small>Orders</small><b>${escapeHtml(orders.join(", ") || "Waiting")}</b></span><span><small>Route</small><b>${escapeHtml(route || "-")}</b></span><span><small>Delivery</small><b>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : "-")}</b></span><span><small>Email</small><b>${escapeHtml(String(request.emailStatus || "not requested").replaceAll("_", " "))}</b></span></div>
+      ${itemRows}
+      <footer class="priority-work-request-actions-v348"><span>${escapeHtml(request.createdBy || "")} · ${escapeHtml(formatDateTime(request.updatedAt || request.createdAt) || "")}</span><button type="button" data-priority-current-edit-request="${escapeHtml(request.requestId || "")}">Edit</button><button type="button" class="is-danger" data-priority-intake-cancel="${escapeHtml(request.requestId || "")}">${matched ? "Close" : "Cancel"}</button></footer>
+    </article>`;
+  }).join("");
 
+  const missingByJob = new Map();
+  visibleMissing.forEach((item) => {
+    const key = String(item.groupKey || item.groupJob || item.job || item.order || "Missing Glass Rush");
+    if (!missingByJob.has(key)) missingByJob.set(key, []);
+    missingByJob.get(key).push(item);
+  });
+  const missingCards = [...missingByJob.entries()].map(([key, items]) => {
+    const first = items[0] || {};
+    const ids = items.map((item) => String(item.lineItemId || "")).filter(Boolean).join("|");
+    const pieces = items.reduce((sum, item) => sum + Math.max(Number(item.qty || item.missingQty || 1), 1), 0);
+    return `<article class="priority-work-missing-card-v347">
+      <header><span class="priority-work-card-icon-v347" aria-hidden="true">!</span><div><small>Missing Glass Rush</small><strong>${escapeHtml(first.groupJob || first.job || first.order || key)}</strong><span>${escapeHtml(first.groupCustomer || first.customer || "No customer")}</span></div><b>${items.length} line${items.length === 1 ? "" : "s"} · ${pieces} pcs</b></header>
+      <div class="priority-work-missing-lines-v347">${items.map((item) => `<span><strong>Order ${escapeHtml(item.order || "-")} · Item ${escapeHtml(item.item || "-")}</strong><small>${escapeHtml(item.product || "Glass")}${item.dimensions ? ` · ${escapeHtml(item.dimensions)}` : ""} · ${escapeHtml(item.qty || 0)} pcs</small><small>${escapeHtml(item.route || "No route")}${item.priorityDeliveryDate || item.deliveryDate ? ` · ${escapeHtml(formatDisplayDate(item.priorityDeliveryDate || item.deliveryDate))}` : ""}${item.bayDisplay || item.bayCode ? ` · ${escapeHtml(item.bayDisplay || item.bayCode)}` : ""}</small></span>`).join("")}</div>
+      <footer><span>${escapeHtml(first.priorityReason || "Rush handling active")}</span><button type="button" data-sdi-edit-group="${escapeHtml(ids)}" data-sdi-edit-lookup="${escapeHtml(first.groupJob || first.job || first.order || "")}">Edit</button><button type="button" class="is-danger" data-sdi-clear-group="${escapeHtml(ids)}" data-sdi-clear-label="${escapeHtml(first.groupJob || first.job || first.order || "priority work")}">Clear Rush</button></footer>
+    </article>`;
+  }).join("");
+
+  const sectionVisible = (kind) => typeFilter === "all" || typeFilter === kind;
   els.sdiCurrentList.innerHTML = `
-    <div class="sdi-current-heading"><span><small>Current priority work</small><strong>Rush items</strong></span><b>${markedCount} marked item${markedCount === 1 ? "" : "s"}</b></div>
-    <p class="sdi-current-help">Only intentionally marked Rush work appears here. Imported RM remake markers are not counted.</p>
-    <div class="sdi-current-toolbar sdi-current-toolbar-rush-v181">
-      <label class="sdi-current-search"><span>Filter Rush work</span><input type="search" data-sdi-current-search value="${escapeHtml(state.sdiCurrentQuery)}" placeholder="Order, job, customer, product, or bay"></label>
-      <span class="sdi-current-visible-count">${visibleItems.length} shown</span>
-      <button type="button" class="sdi-current-clear-all" data-sdi-clear-all ${markedCount ? "" : "disabled"}>Clear all</button>
+    <section class="priority-work-hero-v347 priority-work-hero-v348">
+      <div><strong>Work Center</strong></div>
+      <div class="priority-work-stat-grid-v347"><button type="button" data-sdi-current-type="rush"><b>${rushRequests.length}</b><span>Rush requests</span></button><button type="button" data-sdi-current-type="remake"><b>${remakeRequests.length}</b><span>Remake requests</span></button><button type="button" data-sdi-current-type="missing"><b>${missingItems.length}</b><span>Missing Glass Rush</span></button></div>
+    </section>
+    <div class="priority-work-toolbar-v347">
+      <label class="search-box"><span class="search-icon"></span><input type="search" data-sdi-current-search value="${escapeHtml(state.sdiCurrentQuery)}" placeholder="Search Job Nr., order, customer, reason, or responsible person..."></label>
+      <div class="priority-work-filter-pills-v347"><button type="button" data-sdi-current-type="all" class="${typeFilter === "all" ? "is-active" : ""}">All</button><button type="button" data-sdi-current-type="rush" class="${typeFilter === "rush" ? "is-active" : ""}">Rush</button><button type="button" data-sdi-current-type="remake" class="${typeFilter === "remake" ? "is-active" : ""}">Remakes</button><button type="button" data-sdi-current-type="missing" class="${typeFilter === "missing" ? "is-active" : ""}">Missing Glass</button></div>
     </div>
-    <div class="sdi-current-date-groups">
-      ${dateEntries.length ? dateEntries.map(([dateKey, dateGroups], dateIndex) => {
-        const expanded = state.sdiExpandedCurrentDates.has(dateKey);
-        const datePanelId = `sdi-current-date-${dateIndex}`;
-        const dateItems = currentPriorityItems(dateGroups);
-        const dateLabel = dateKey === "undated" ? "No priority date" : formatNumericDeliveryDate(dateKey);
-        return `<article class="sdi-current-date-group ${expanded ? "is-expanded" : ""}"><button type="button" class="sdi-current-date-toggle" data-sdi-current-date="${escapeHtml(dateKey)}" aria-expanded="${expanded}" aria-controls="${datePanelId}"><span><small>Priority date</small><strong>${escapeHtml(dateLabel)}</strong></span><span><b>${dateItems.length} Rush item${dateItems.length === 1 ? "" : "s"}</b><small>Needs priority handling</small></span><i aria-hidden="true">⌄</i></button><div class="sdi-current-date-body" id="${datePanelId}" ${expanded ? "" : "hidden"}>${dateGroups.map((group, groupIndex) => renderJobGroup(group, groupIndex, dateIndex)).join("")}</div></article>`;
-      }).join("") : `<span class="admin-empty">${allGroups.length ? "No Rush work matches the current filter." : "No current Rush items."}</span>`}
-    </div>`;
+    ${sectionVisible("rush") ? `<section class="priority-work-section-v347 is-rush"><header><div><strong>Rush</strong></div><b>${visibleRush.length}</b></header><div class="priority-work-card-list-v347">${requestCards(visibleRush, "rush") || `<span class="admin-empty">No Rush requests match this view.</span>`}</div></section>` : ""}
+    ${sectionVisible("remake") ? `<section class="priority-work-section-v347 is-remake"><header><div><strong>Remakes</strong></div><b>${visibleRemakes.length}</b></header><div class="priority-work-card-list-v347">${requestCards(visibleRemakes, "remake") || `<span class="admin-empty">No Remake requests match this view.</span>`}</div></section>` : ""}
+    ${sectionVisible("missing") ? `<section class="priority-work-section-v347 is-missing"><header><div><strong>Missing Glass Rush</strong></div><b>${visibleMissing.length}</b></header><div class="priority-work-card-list-v347">${missingCards || `<span class="admin-empty">No existing-order Missing Glass Rush work matches this view.</span>`}</div></section>` : ""}`;
 }
 
 
@@ -18218,7 +19393,7 @@ async function loadSdiWorkspace(query = "", { preserveSelection = false } = {}) 
   if (query) params.set("q", query);
   if (els.sdiBayInput?.value) params.set("bayCode", els.sdiBayInput.value);
   const payload = await fetchJson(`/api/indian-trail/sdi-workspace?${params.toString()}`);
-  state.sdiWorkspace = payload || { suggestions: [], items: [], currentGroups: [] };
+  state.sdiWorkspace = payload || { suggestions: [], items: [], currentGroups: [], intakeRequests: [] };
   state.sdiCurrentGroupsInitialized = false;
   if (!preserveSelection) {
     state.sdiSelectedLineItemIds = new Set(
@@ -18228,6 +19403,8 @@ async function loadSdiWorkspace(query = "", { preserveSelection = false } = {}) 
   renderSdiLookupResults();
   renderSdiItemSelection();
   renderSdiCurrentList();
+  renderPriorityIntakeRequests();
+  renderPriorityIntakeOptions();
 }
 
 /**
@@ -18263,20 +19440,29 @@ function openSdiPanel(assignmentId = "") {
   if (els.sdiOrderInput) els.sdiOrderInput.value = assignmentLookup;
   if (els.sdiReasonInput) {
     const rushReason = assignment && isRushItem(assignment) && !isRemakeItem(assignment) ? assignment.reason : "";
-    els.sdiReasonInput.value = String(rushReason || "Same-day install").replace(/^\s*(?:Rush|SDI)\s*-\s*/i, "");
+    setPriorityChoiceValue(els.sdiReasonInput, els.sdiReasonCustom, String(rushReason || "").replace(/^\s*(?:Rush|SDI)\s*-\s*/i, ""));
   }
   if (els.sdiDeliveryDateInput) els.sdiDeliveryDateInput.value = assignment?.deliveryDate || assignment?.originalDeliveryDate || "";
   if (els.sdiTruckExemptInput) els.sdiTruckExemptInput.checked = Boolean(assignment?.priorityDirectToTruck);
   if (els.sdiTypeInput) els.sdiTypeInput.value = "Rush";
+  if (els.priorityIntakeResponsible && !priorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom)) {
+    setPriorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom, state.user?.displayName || state.user?.username || "");
+  }
+  if (els.sdiResponsibleInput && !priorityChoiceValue(els.sdiResponsibleInput, els.sdiResponsibleCustom)) {
+    setPriorityChoiceValue(els.sdiResponsibleInput, els.sdiResponsibleCustom, state.user?.displayName || state.user?.username || "");
+  }
+  if (els.priorityIntakeSearch) els.priorityIntakeSearch.value = state.priorityIntakeQuery || "";
+  updatePriorityIntakeEmailMode();
   state.sdiSelectedLineItemIds = new Set();
   state.sdiExpandedCurrentGroups = new Set();
   state.sdiExpandedCurrentDates = new Set();
   state.sdiCurrentGroupsInitialized = false;
   updateSdiSelectionSummary();
-  setBayModalSection("rush", "workspace");
-  void loadBayModalActionHistory("rush");
+  setBayModalSection("rush", "intake");
+  setPriorityNewRequestMode(assignment ? "missing" : "rush");
   loadSdiWorkspace(assignmentLookup).catch((error) => showInlineError(error.message, true));
-  els.sdiOrderInput?.focus();
+  if (assignment) els.sdiOrderInput?.focus();
+  else els.priorityIntakeJob?.focus();
 }
 
 /**
@@ -18303,6 +19489,16 @@ async function submitSdi(mark = true, options = {}) {
   const orderType = "Rush";
   const lookupText = options.lookup || els.sdiOrderInput?.value.trim() || "";
   const lineItemIds = options.lineItemIds || [...state.sdiSelectedLineItemIds];
+  const selectedReason = options.reason || priorityChoiceValue(els.sdiReasonInput, els.sdiReasonCustom) || "";
+  const selectedResponsible = priorityChoiceValue(els.sdiResponsibleInput, els.sdiResponsibleCustom);
+  if (mark && !selectedReason) {
+    showInlineError("Choose a Rush reason or add a custom reason.", false);
+    return;
+  }
+  if (mark && !selectedResponsible) {
+    showInlineError("Choose the person responsible or add a custom person.", false);
+    return;
+  }
   const payload = {
     lineItemIds,
     orderNo: lookupText,
@@ -18311,7 +19507,10 @@ async function submitSdi(mark = true, options = {}) {
     truckExempt: Boolean(els.sdiTruckExemptInput?.checked),
     orderType,
     deliveryDate: els.sdiDeliveryDateInput?.value || "",
-    reason: options.reason || els.sdiReasonInput?.value || (mark ? "Same-day install" : "Rush cleared"),
+    reason: selectedReason || (mark ? "Same-day install" : "Rush cleared"),
+    responsible: selectedResponsible,
+    emailMode: mark ? (els.sdiEmailMode?.value || "draft") : "none",
+    recipients: mark ? priorityRecipients(els.sdiRecipientUsers, els.sdiRecipients) : [],
     rushOnly: !mark,
   };
   if (!lineItemIds.length) {
@@ -18320,6 +19519,11 @@ async function submitSdi(mark = true, options = {}) {
   }
 
   const result = await postBayAction(mark ? "/api/indian-trail/mark-sdi" : "/api/indian-trail/remove-sdi", payload);
+  if (mark) {
+    rememberPriorityOption("reason", payload.reason);
+    rememberPriorityOption("responsible", payload.responsible);
+    if (result?.draft) openPriorityIntakeDraft(result.draft);
+  }
   if (!mark) playAppSound("destructive_action", { force: true });
   void loadBayModalActionHistory("rush");
   const affectedItems = Number(result?.affectedItems || 0);
@@ -18398,7 +19602,7 @@ async function runBayAction(action) {
     return;
   }
   if (action === "old-bays") {
-    const orders = await loadStaleBayOrders(false);
+    const orders = await loadStaleBayOrders(true);
     openStaleBayPanel(orders);
     return;
   }
@@ -19008,7 +20212,7 @@ function selectedPrintGlassTypeValues() {
   return state.printAllGlass === false ? [...(state.printGlassTypes || [])] : [];
 }
 
-/** Keep All Glass mutually exclusive with exact glass-type choices. */
+/** Keep All Glass mutually exclusive without collapsing a deliberate all-detail selection. */
 function syncPrintAllGlassChoice(changed) {
   const allInput = els.printOptionsGlassType?.querySelector('input[data-print-all-glass]');
   const detailInputs = selectedPrintGlassInputs();
@@ -19019,16 +20223,10 @@ function syncPrintAllGlassChoice(changed) {
     return;
   }
   if (changed.checked) allInput.checked = false;
-  const enabledDetails = detailInputs.filter((input) => !input.disabled);
-  if (enabledDetails.length && enabledDetails.every((input) => input.checked)) {
-    allInput.checked = true;
-    detailInputs.forEach((input) => { input.checked = false; });
-    return;
-  }
   if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
 }
 
-/** Keep one All choice mutually exclusive with its detailed choices. */
+/** Keep one All choice mutually exclusive without replacing explicit detailed selections. */
 function syncPrintAllFilterChoice(container, changed, allSelector, detailSelector) {
   if (!container || !changed) return;
   const allInput = container.querySelector(allSelector);
@@ -19040,34 +20238,22 @@ function syncPrintAllFilterChoice(container, changed, allSelector, detailSelecto
     return;
   }
   if (changed.checked) allInput.checked = false;
-  const enabledDetails = detailInputs.filter((input) => !input.disabled);
-  if (enabledDetails.length && enabledDetails.every((input) => input.checked)) {
-    allInput.checked = true;
-    detailInputs.forEach((input) => { input.checked = false; });
-    return;
-  }
   if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
 }
 
-/** Collapse every available detailed route back to Airport, the maintained all-routes choice. */
+/** Keep Airport as the explicit all-routes shortcut without collapsing all detailed routes into it. */
 function syncPrintAllRouteChoice(container, changed) {
   if (!container || !changed) return;
   const routeInputs = [...container.querySelectorAll('input[data-print-route-group]')];
   const airport = routeInputs.find((input) => input.value === "airport");
   if (!airport) return;
   const detailInputs = routeInputs.filter((input) => input !== airport);
-  const enabledDetails = detailInputs.filter((input) => !input.disabled);
   if (changed === airport) {
     if (airport.checked) detailInputs.forEach((input) => { input.checked = false; });
     else if (!detailInputs.some((input) => input.checked)) airport.checked = true;
     return;
   }
   if (changed.checked) airport.checked = false;
-  if (enabledDetails.length && enabledDetails.every((input) => input.checked)) {
-    airport.checked = true;
-    detailInputs.forEach((input) => { input.checked = false; });
-    return;
-  }
   if (!routeInputs.some((input) => input.checked)) airport.checked = true;
 }
 
@@ -20362,7 +21548,7 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
   const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260812-v0.310", window.location.href).href;
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260820-v0.352", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
@@ -20960,12 +22146,7 @@ function handlePrintPresetBuilderChange(event) {
       else if (!routeDetails.some((input) => input.checked)) airport.checked = true;
     } else {
       if (changed.checked && airport) airport.checked = false;
-      if (routeDetails.length && routeDetails.every((input) => input.checked)) {
-        if (airport) airport.checked = true;
-        routeDetails.forEach((input) => { input.checked = false; });
-      } else if (!detailInputs.some((input) => input.checked) && airport) {
-        airport.checked = true;
-      }
+      if (!detailInputs.some((input) => input.checked) && airport) airport.checked = true;
     }
     updatePrintPresetBuilderGroupSummary(groupName);
     return;
@@ -20993,17 +22174,7 @@ function handlePrintPresetBuilderChange(event) {
     } else {
       if (changed.checked && allInput) allInput.checked = false;
       syncFamilyDetails();
-      const categorySections = [...els.printPresetSummary.querySelectorAll('[data-preset-glass-category]')];
-      const everyCategoryCovered = categorySections.length > 0 && categorySections.every((category) => {
-        const familyInput = category.querySelector('input[data-preset-glass-family]');
-        const categoryDetails = [...category.querySelectorAll('input[data-preset-value="glass"]')];
-        return Boolean(familyInput?.checked) || (categoryDetails.length > 0 && categoryDetails.every((input) => input.checked));
-      });
-      if (everyCategoryCovered) {
-        if (allInput) allInput.checked = true;
-        familyInputs.forEach((input) => { input.checked = false; });
-        detailInputs.forEach((input) => { input.checked = false; input.disabled = false; });
-      } else if (allInput && !familyInputs.some((input) => input.checked) && !detailInputs.some((input) => input.checked)) {
+      if (allInput && !familyInputs.some((input) => input.checked) && !detailInputs.some((input) => input.checked)) {
         allInput.checked = true;
       }
     }
@@ -21017,12 +22188,7 @@ function handlePrintPresetBuilderChange(event) {
     else if (!detailInputs.some((input) => input.checked)) allInput.checked = true;
   } else {
     if (changed.checked && allInput) allInput.checked = false;
-    if (detailInputs.length && detailInputs.every((input) => input.checked)) {
-      if (allInput) allInput.checked = true;
-      detailInputs.forEach((input) => { input.checked = false; });
-    } else if (allInput && !detailInputs.some((input) => input.checked)) {
-      allInput.checked = true;
-    }
+    if (allInput && !detailInputs.some((input) => input.checked)) allInput.checked = true;
   }
   updatePrintPresetBuilderGroupSummary(groupName);
 }
@@ -21243,8 +22409,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260812-v0.310", window.location.href).href,
-    new URL("static/css/print.css?v=20260812-v0.310", window.location.href).href,
+    new URL("static/css/styles.css?v=20260820-v0.352", window.location.href).href,
+    new URL("static/css/print.css?v=20260820-v0.352", window.location.href).href,
   ];
 }
 
@@ -21321,7 +22487,7 @@ function launchLocalPrintPackage(preview) {
  * Excel handles the resulting workbook without a server round trip.
  */
 const PRINT_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260810-v0.268";
+const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260820-v0.352";
 
 function printExportFileStem(preview = {}) {
   const route = printSheetRouteLabel().replace(/\s*\|\s*/g, "-");
@@ -21434,17 +22600,26 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
   const title = `${String(sheet.titleLabel || printSheetTitleLabel())}${badge}`;
   const dateLabel = String(sheet.dateLabel || printSheetDateLabel(sheet.deliveryDate || ""));
   const filterSummary = String(sheet.filterSummary || printCurrentFilterSummary());
+  const generatedLabel = `Prepared ${printPreviewTimestamp(generatedAt)}`;
   const rowXml = [];
-  const merges = ["C1:H1", "C2:H2", "C3:H3", "C4:H4", "F5:H5"];
+  const merges = ["C1:H1", "C2:H2", "C3:E3", "F3:H3", "C4:H4", "A5:E5", "F5:H5"];
 
-  rowXml.push(xlsxRowXml(1, [xlsxInlineCell("C1", title, 1)], { height: 26 }));
-  rowXml.push(xlsxRowXml(2, [xlsxInlineCell("C2", dateLabel, 2)], { height: 20 }));
-  rowXml.push(xlsxRowXml(3, [xlsxInlineCell("C3", `Rows: ${rows.length} | Orders: ${totalOrders} | QTY: ${totalQty}`, 3)], { height: 18 }));
-  rowXml.push(xlsxRowXml(4, [xlsxInlineCell("C4", filterSummary, 4)], { height: 20 }));
-  rowXml.push(xlsxRowXml(5, [xlsxInlineCell("F5", "Checked By: ____________________", 13)], { height: 20 }));
+  // Rows 1-5 form a branded document header. A:B are intentionally reserved
+  // for the logo so the image never competes with title/meta copy for space.
+  rowXml.push(xlsxRowXml(1, [xlsxInlineCell("C1", title, 15)], { height: 30 }));
+  rowXml.push(xlsxRowXml(2, [xlsxInlineCell("C2", dateLabel, 16)], { height: 24 }));
+  rowXml.push(xlsxRowXml(3, [
+    xlsxInlineCell("C3", `Orders: ${totalOrders}`, 17),
+    xlsxInlineCell("F3", `Rows: ${rows.length}   |   QTY: ${totalQty}`, 17),
+  ], { height: 22 }));
+  rowXml.push(xlsxRowXml(4, [xlsxInlineCell("C4", filterSummary, 18)], { height: 30 }));
+  rowXml.push(xlsxRowXml(5, [
+    xlsxInlineCell("A5", generatedLabel, 14),
+    xlsxInlineCell("F5", "Checked By: ____________________", 13),
+  ], { height: 22 }));
 
   const headers = ["Job Nr.", "Order", "Item", "QTY", "Dimensions", "Customer", "Route", "Check"];
-  rowXml.push(xlsxRowXml(6, headers.map((label, index) => xlsxInlineCell(`${xlsxColumnName(index + 1)}6`, label, 5)), { height: 22 }));
+  rowXml.push(xlsxRowXml(6, headers.map((label, index) => xlsxInlineCell(`${xlsxColumnName(index + 1)}6`, label, 5)), { height: 24 }));
 
   let excelRow = 7;
   let visibleRowIndex = 0;
@@ -21452,7 +22627,7 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
   for (const row of rows) {
     const glass = String(row.glassType || "Unspecified Glass");
     if (glass !== currentGlass) {
-      rowXml.push(xlsxRowXml(excelRow, [xlsxInlineCell(`A${excelRow}`, glass, 6)], { height: 19 }));
+      rowXml.push(xlsxRowXml(excelRow, [xlsxInlineCell(`A${excelRow}`, glass, 6)], { height: 21 }));
       merges.push(`A${excelRow}:H${excelRow}`);
       excelRow += 1;
       currentGlass = glass;
@@ -21474,16 +22649,17 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
     const cells = values.map((value, index) => {
       const reference = `${xlsxColumnName(index + 1)}${excelRow}`;
       if (index === 3) return xlsxNumberCell(reference, value, centeredStyle);
+      if (index === 6) return xlsxInlineCell(reference, value, centeredStyle);
       if (index === 7) return xlsxInlineCell(reference, value, checkStyle);
       return xlsxInlineCell(reference, value, textStyle);
     });
-    rowXml.push(xlsxRowXml(excelRow, cells, { height: 18 }));
+    rowXml.push(xlsxRowXml(excelRow, cells, { height: 20 }));
     excelRow += 1;
     visibleRowIndex += 1;
   }
 
   const footerRow = excelRow + 1;
-  rowXml.push(xlsxRowXml(footerRow, [xlsxInlineCell(`A${footerRow}`, `Printed at: ${printPreviewTimestamp(generatedAt)}`, 14)], { height: 18 }));
+  rowXml.push(xlsxRowXml(footerRow, [xlsxInlineCell(`A${footerRow}`, "Delivery List Scanner · Builders FirstSource", 14)], { height: 18 }));
   merges.push(`A${footerRow}:H${footerRow}`);
 
   const printArea = `'${sheetName.replace(/'/g, "''")}'!$A$1:$H$${footerRow}`;
@@ -21495,15 +22671,17 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
   <sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="6" topLeftCell="A7" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
   <sheetFormatPr defaultRowHeight="18"/>
   <cols>
-    <col min="1" max="1" width="24" customWidth="1"/><col min="2" max="2" width="14" customWidth="1"/>
+    <col min="1" max="1" width="30" customWidth="1"/><col min="2" max="2" width="14" customWidth="1"/>
     <col min="3" max="3" width="10" customWidth="1"/><col min="4" max="4" width="8" customWidth="1"/>
-    <col min="5" max="5" width="17" customWidth="1"/><col min="6" max="6" width="25" customWidth="1"/>
-    <col min="7" max="7" width="15" customWidth="1"/><col min="8" max="8" width="9" customWidth="1"/>
+    <col min="5" max="5" width="18" customWidth="1"/><col min="6" max="6" width="31" customWidth="1"/>
+    <col min="7" max="7" width="13" customWidth="1"/><col min="8" max="8" width="9" customWidth="1"/>
   </cols>
   <sheetData>${rowXml.join("")}</sheetData>
   <mergeCells count="${merges.length}">${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>
-  <pageMargins left="0.25" right="0.25" top="0.35" bottom="0.35" header="0.15" footer="0.15"/>
+  <printOptions horizontalCentered="1"/>
+  <pageMargins left="0.25" right="0.25" top="0.35" bottom="0.35" header="0.15" footer="0.22"/>
   <pageSetup paperSize="1" orientation="${orientation}" fitToWidth="1" fitToHeight="0" horizontalDpi="300" verticalDpi="300"/>
+  <headerFooter><oddFooter>&amp;LDelivery List Scanner&amp;C${xlsxXmlEscape(sheetName)}&amp;RPage &amp;P of &amp;N</oddFooter></headerFooter>
   <drawing r:id="rId1"/>
 </worksheet>`;
   return { worksheet, footerRow, printArea, printTitles, sheetIndex };
@@ -21512,20 +22690,22 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
 function xlsxStylesDocument() {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="6">
+  <fonts count="7">
     <font><sz val="10"/><name val="Aptos"/><family val="2"/></font>
     <font><b/><sz val="17"/><color rgb="FF17395F"/><name val="Aptos Display"/><family val="2"/></font>
     <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/><family val="2"/></font>
     <font><b/><sz val="10"/><color rgb="FF17395F"/><name val="Aptos"/><family val="2"/></font>
     <font><sz val="9"/><color rgb="FF3E536D"/><name val="Aptos"/><family val="2"/></font>
     <font><i/><sz val="9"/><color rgb="FF526078"/><name val="Aptos"/><family val="2"/></font>
+    <font><b/><sz val="17"/><color rgb="FFFFFFFF"/><name val="Aptos Display"/><family val="2"/></font>
   </fonts>
-  <fills count="6">
+  <fills count="7">
     <fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FF1D4F91"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFDCE9F5"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFDDEEDF"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFF4F7FA"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFEAF2FB"/><bgColor indexed="64"/></patternFill></fill>
   </fills>
   <borders count="3">
     <border><left/><right/><top/><bottom/><diagonal/></border>
@@ -21533,7 +22713,7 @@ function xlsxStylesDocument() {
     <border><left/><right/><top/><bottom style="medium"><color rgb="FF1D4F91"/></bottom><diagonal/></border>
   </borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="15">
+  <cellXfs count="19">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="0" borderId="2" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
     <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
@@ -21549,26 +22729,42 @@ function xlsxStylesDocument() {
     <xf numFmtId="0" fontId="3" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
     <xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="6" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" indent="1"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="6" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" indent="1"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="5" fillId="6" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1" indent="1"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
   <dxfs count="0"/>
-  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotTableStyleLight16"/>
 </styleSheet>`;
 }
 
-function xlsxDrawingDocument(imageId = 1) {
+function xlsxDrawingDocument(imageId = 1, logoMetrics = {}) {
+  const naturalWidth = Math.max(Number(logoMetrics.width || 1), 1);
+  const naturalHeight = Math.max(Number(logoMetrics.height || 1), 1);
+  const aspect = naturalWidth / naturalHeight;
+  const emuPerInch = 914400;
+  const maxWidth = Math.round(2.35 * emuPerInch);
+  const maxHeight = Math.round(0.95 * emuPerInch);
+  let width = maxWidth;
+  let height = Math.round(width / aspect);
+  if (height > maxHeight) {
+    height = maxHeight;
+    width = Math.round(height * aspect);
+  }
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <xdr:twoCellAnchor editAs="oneCell">
-    <xdr:from><xdr:col>0</xdr:col><xdr:colOff>50000</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>30000</xdr:rowOff></xdr:from>
-    <xdr:to><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>4</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
+  <xdr:oneCellAnchor>
+    <xdr:from><xdr:col>0</xdr:col><xdr:colOff>90000</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>90000</xdr:rowOff></xdr:from>
+    <xdr:ext cx="${width}" cy="${height}"/>
     <xdr:pic>
-      <xdr:nvPicPr><xdr:cNvPr id="${imageId}" name="Barefoot Company and Builders FirstSource logo"/><xdr:cNvPicPr/></xdr:nvPicPr>
+      <xdr:nvPicPr><xdr:cNvPr id="${imageId}" name="Barefoot Company and Builders FirstSource logo"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>
       <xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>
       <xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>
     </xdr:pic>
     <xdr:clientData/>
-  </xdr:twoCellAnchor>
+  </xdr:oneCellAnchor>
 </xdr:wsDr>`;
 }
 
@@ -21669,7 +22865,7 @@ function xlsxStoredZip(entries) {
 }
 
 /** Build one logo-bearing, print-configured worksheet for each printable sheet. */
-function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "portrait") {
+function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "portrait", logoMetrics = {}) {
   const sheets = Array.isArray(preview.previewSheets) && preview.previewSheets.length
     ? preview.previewSheets
     : buildLocalPrintSheets(printFilteredRows());
@@ -21711,7 +22907,7 @@ function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "por
 </cp:coreProperties>` });
   entries.push({ name: "docProps/app.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>Delivery List Scanner</Application><AppVersion>0.268</AppVersion><Company>Builders FirstSource</Company>
+  <Application>Delivery List Scanner</Application><AppVersion>0.339</AppVersion><Company>Builders FirstSource</Company>
   <TitlesOfParts><vt:vector size="${sheetRecords.length}" baseType="lpstr">${sheetRecords.map(({ name }) => `<vt:lpstr>${xlsxXmlEscape(name)}</vt:lpstr>`).join("")}</vt:vector></TitlesOfParts>
 </Properties>` });
 
@@ -21735,7 +22931,7 @@ function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "por
     entries.push({ name: `xl/worksheets/sheet${index}.xml`, data: record.worksheet });
     entries.push({ name: `xl/worksheets/_rels/sheet${index}.xml.rels`, data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${index}.xml"/></Relationships>` });
-    entries.push({ name: `xl/drawings/drawing${index}.xml`, data: xlsxDrawingDocument(index) });
+    entries.push({ name: `xl/drawings/drawing${index}.xml`, data: xlsxDrawingDocument(index, logoMetrics) });
     entries.push({ name: `xl/drawings/_rels/drawing${index}.xml.rels`, data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.png"/></Relationships>` });
   }
@@ -21746,9 +22942,24 @@ async function exportFormattedPrintXlsx(preview = {}) {
   const logoUrl = new URL(PRINT_XLSX_LOGO_PATH, window.location.href).href;
   const logoResponse = await fetch(logoUrl, { cache: "force-cache" });
   if (!logoResponse.ok) throw new Error("The delivery-list logo could not be loaded for the Excel workbook.");
-  const logoBytes = new Uint8Array(await logoResponse.arrayBuffer());
+  const logoBlob = await logoResponse.blob();
+  const logoBytes = new Uint8Array(await logoBlob.arrayBuffer());
+  const logoMetrics = await new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(logoBlob);
+    const image = new Image();
+    const finish = () => {
+      resolve({ width: Math.max(image.naturalWidth || 1, 1), height: Math.max(image.naturalHeight || 1, 1) });
+      URL.revokeObjectURL(objectUrl);
+    };
+    image.addEventListener("load", finish, { once: true });
+    image.addEventListener("error", () => {
+      resolve({ width: 4, height: 1 });
+      URL.revokeObjectURL(objectUrl);
+    }, { once: true });
+    image.src = objectUrl;
+  });
   const orientation = String(els.printOrientation?.value || "portrait") === "landscape" ? "landscape" : "portrait";
-  const workbookBytes = buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation);
+  const workbookBytes = buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation, logoMetrics);
   downloadGeneratedFile(new Blob([workbookBytes], { type: PRINT_XLSX_CONTENT_TYPE }), `${printExportFileStem(preview)}.xlsx`);
 }
 
@@ -22690,6 +23901,34 @@ function actionHistoryLabel(action = "") {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+/** Return a purpose-specific icon/color family for every Action History event. */
+function actionHistoryVisual(event = {}) {
+  const action = String(event.action || "").trim().toLowerCase();
+  const entity = String(event.entityType || "").trim().toLowerCase();
+  const text = `${action} ${entity}`;
+
+  if (/priority_intake|rush|remake/.test(text)) return { kind: "priority", icon: '<path d="m13 2-8 11h6l-1 9 9-13h-6z"></path>' };
+  if (/snooze|sleep/.test(text)) return { kind: "snooze", icon: '<path d="M5 7h7l-7 8h7"></path><path d="M14 10h5l-5 6h5"></path>' };
+  if (/print|packing|export/.test(text)) return { kind: "print", icon: '<path d="M7 8V3h10v5"></path><path d="M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><path d="M7 14h10v7H7z"></path>' };
+  if (/move|transfer|assign|preassign|route/.test(text)) return { kind: "move", icon: '<path d="M4 8h12"></path><path d="m13 5 3 3-3 3"></path><path d="M20 16H8"></path><path d="m11 13-3 3 3 3"></path>' };
+  if (/scan|receive|outbound|inbound/.test(text)) return { kind: "scan", icon: '<path d="M5 5v4M5 15v4M19 5v4M19 15v4"></path><path d="M8 7v10M11 7v10M14 7v10M17 7v10"></path>' };
+  if (/uncomplete|not_on_way|reopen|undo|redo/.test(text)) return { kind: "rollback", icon: '<path d="M4 7v5h5"></path><path d="M5.8 16.2A8 8 0 1 0 6.4 6.4L4 9"></path>' };
+  if (/complete|approve|review|acknowledge|restore|returned|return_rack/.test(text)) return { kind: "success", icon: '<circle cx="12" cy="12" r="8.5"></circle><path d="m8 12 2.6 2.8L16.5 9"></path>' };
+  if (/delete|remove|clear|cancel|retire/.test(text)) return { kind: "remove", icon: '<path d="M5 7h14M9 7V4h6v3M8 10v8M12 10v8M16 10v8M7 7l1 14h8l1-14"></path>' };
+  if (/reject|error|block|fail|warning/.test(text)) return { kind: "warning", icon: '<path d="M12 3 2.8 20h18.4z"></path><path d="M12 9v5M12 17.2v.2"></path>' };
+  if (/create|add|import|new_/.test(text)) return { kind: "create", icon: '<circle cx="12" cy="12" r="8.5"></circle><path d="M12 8v8M8 12h8"></path>' };
+  if (/edit|update|change|set_|layout|rename|configure|config/.test(text)) return { kind: "edit", icon: '<path d="m5 16.5-.8 3.3 3.3-.8L18 8.5 15.5 6z"></path><path d="m14.5 7 2.5 2.5"></path>' };
+  if (/user|role|permission|login|session/.test(text)) return { kind: "security", icon: '<circle cx="12" cy="8" r="3"></circle><path d="M6.5 19c.7-3.2 2.5-5 5.5-5s4.8 1.8 5.5 5"></path>' };
+  if (/bay/.test(text)) return { kind: "bay", icon: '<path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11z"></path><circle cx="12" cy="10" r="2"></circle>' };
+  if (/rack/.test(text)) return { kind: "rack", icon: '<path d="M4 5h16v14H4zM4 11h16M9 5v14M15 5v14"></path>' };
+  return { kind: "history", icon: '<circle cx="12" cy="12" r="8.5"></circle><path d="M12 7v5l3.2 2"></path>' };
+}
+
+function actionHistoryIconMarkup(event = {}) {
+  const visual = actionHistoryVisual(event);
+  return `<span class="modal-action-history-icon has-action-icon-v342 is-${escapeHtml(visual.kind)}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${visual.icon}</svg></span>`;
+}
+
 function actionHistoryDateTime(value = "") {
   if (!value) return "Unknown time";
   const date = new Date(value);
@@ -22731,6 +23970,23 @@ function actionHistoryDetail(event = {}) {
     const location = bayLabel(payload.bayGroup, payload.bayDisplay, payload.bayCode);
     const verb = action === "assign_bay" ? "Assigned" : action === "restore_bay_assignment" ? "Restored" : "Cleared";
     return `${workRef || "Bay item"}${location ? ` · ${verb} ${location}` : ` · ${verb}`}${payload.assignedQty ? ` · Qty ${payload.assignedQty}` : ""}`;
+  }
+  if (action.startsWith("priority_intake_")) {
+    const priorityType = payload.priorityType || "Priority";
+    const jobNumber = payload.jobNumber || payload.matchedJob || event.entityId || "";
+    if (action === "priority_intake_created") {
+      return `${priorityType} request · Job ${jobNumber}${payload.responsible ? ` · Responsible: ${payload.responsible}` : ""}${event.reason ? ` · ${event.reason}` : ""}`;
+    }
+    if (action === "priority_intake_matched") {
+      const orders = Array.isArray(payload.orders) ? payload.orders.join(", ") : "";
+      return `${priorityType} matched · Job ${payload.matchedJob || jobNumber}${orders ? ` · Orders ${orders}` : ""}${payload.deliveryDate ? ` · ${formatNumericDeliveryDate(payload.deliveryDate)}` : ""}${payload.responsible ? ` · Responsible: ${payload.responsible}` : ""}`;
+    }
+    if (action === "priority_intake_email") {
+      return `Priority request email · ${actionHistoryLabel(payload.mode || "none")} · ${actionHistoryLabel(payload.status || "saved")}${payload.error ? ` · ${payload.error}` : ""}`;
+    }
+    if (action === "priority_intake_cancelled") {
+      return `${priorityType} request closed · Job ${jobNumber}${event.reason ? ` · ${event.reason}` : ""}`;
+    }
   }
   if (["mark_rush_sdi", "change_priority_delivery_date", "clear_rush_priority", "clear_rush_remake_sdi"].includes(action)) {
     const newDate = payload.priorityDeliveryDate || payload.deliveryDate || "";
@@ -22834,6 +24090,46 @@ function actionHistoryScope(scope, context = "") {
 
 function actionHistoryFiltersActive(filters = {}) {
   return Boolean(filters.query || filters.user || filters.action || filters.dateFrom || filters.dateTo);
+}
+
+/**
+ * Preserve a live search/text control when a filtered results renderer replaces
+ * its toolbar markup. Dynamic search should never force the operator to click
+ * back into the field between keystrokes.
+ */
+function captureEditableControlFocus(root = document) {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) return null;
+  if (root instanceof Element && !root.contains(active)) return null;
+
+  let selector = "";
+  if (active.id) selector = `#${CSS.escape(active.id)}`;
+  else if (active.dataset.actionHistoryFilter) selector = `[data-action-history-filter="${CSS.escape(active.dataset.actionHistoryFilter)}"]`;
+  else if (active.dataset.rackHistoryFilter) selector = `[data-rack-history-filter="${CSS.escape(active.dataset.rackHistoryFilter)}"]`;
+  else if (active.name) selector = `[name="${CSS.escape(active.name)}"]`;
+  if (!selector) return null;
+
+  return {
+    selector,
+    start: Number.isInteger(active.selectionStart) ? active.selectionStart : null,
+    end: Number.isInteger(active.selectionEnd) ? active.selectionEnd : null,
+    direction: active.selectionDirection || "none",
+  };
+}
+
+function restoreEditableControlFocus(snapshot, root = document) {
+  if (!snapshot?.selector) return;
+  const scope = root instanceof Element || root instanceof Document ? root : document;
+  const control = scope.querySelector(snapshot.selector);
+  if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement)) return;
+  control.focus({ preventScroll: true });
+  if (snapshot.start === null || snapshot.end === null || typeof control.setSelectionRange !== "function") return;
+  const length = String(control.value || "").length;
+  control.setSelectionRange(
+    Math.min(snapshot.start, length),
+    Math.min(snapshot.end, length),
+    snapshot.direction,
+  );
 }
 
 function actionHistoryToolbarMarkup(entry) {
@@ -22949,7 +24245,7 @@ function actionHistoryRowsMarkup(rows = [], hasEvents = false, loading = false) 
     ].filter(Boolean).join("");
     return `
       <article class="modal-action-history-row rack-history-event-row">
-        <span class="modal-action-history-icon" aria-hidden="true"></span>
+        ${actionHistoryIconMarkup(event)}
         <div class="rack-history-event-copy">
           <strong>${escapeHtml(actionHistoryLabel(event.action))}</strong>
           <span>${escapeHtml(actionHistoryDetail(event))}</span>
@@ -22988,8 +24284,10 @@ function renderActionHistoryScope(scope) {
   const entry = actionHistoryUi.scopes.get(scope);
   if (!entry?.refs) return;
   const toolbar = ensureActionHistoryToolbar(scope, entry);
+  const focusSnapshot = toolbar ? captureEditableControlFocus(toolbar) : null;
   if (toolbar) toolbar.innerHTML = actionHistoryToolbarMarkup(entry);
   renderActionHistoryScopeRows(scope);
+  if (focusSnapshot && toolbar) restoreEditableControlFocus(focusSnapshot, toolbar);
 }
 
 function setActionHistoryScope(scope, context, payload, refs, rackCode = "") {
@@ -23128,6 +24426,7 @@ async function loadBayModalActionHistory(kind) {
     await loadActionHistoryScope(config.scope);
   } catch (error) {
     list.innerHTML = `<div class="admin-empty review">Action history could not be loaded. ${escapeHtml(error.message)}</div>`;
+    showInlineError(error?.message || "Action History could not be loaded.", true);
   }
 }
 
@@ -23144,6 +24443,15 @@ function setBayModalSection(kind, section = "workspace") {
     view.hidden = view.dataset.bayModalView !== section;
   });
   if (kind === "rush" && section === "current") renderSdiCurrentList();
+  if (kind === "stale") {
+    if (section === "workspace") updateStaleBayViewFilter();
+    else {
+      modal.querySelectorAll("[data-stale-bay-view]").forEach((button) => {
+        button.classList.remove("is-active");
+        button.setAttribute("aria-selected", "false");
+      });
+    }
+  }
   if (section === "history") void loadBayModalActionHistory(kind);
 }
 
@@ -23484,12 +24792,11 @@ const ADMIN_MODAL_PROFILES = {
     group: "racks",
   },
   recentScans: {
-    showStatus: true,
+    showStatus: false,
     title: "All Scans",
     eyebrow: "Scan Audit",
     description: "Review recent scan activity, operational outcomes, and maintained location-correction controls.",
     context: "Scan history",
-    status: "Live audit data",
     group: "records",
   },
 };
@@ -23525,7 +24832,10 @@ function setAdminModalSection(section = "workspace") {
   if (els.adminModalBody) els.adminModalBody.hidden = historySelected;
   if (els.adminModalHistory) els.adminModalHistory.hidden = !historySelected;
   if (historySelected && els.adminModal?.dataset.kind) {
-    loadModalActionHistory(els.adminModal.dataset.kind, "admin").catch(() => renderModalActionHistory([], "admin"));
+    loadModalActionHistory(els.adminModal.dataset.kind, "admin").catch((error) => {
+      renderModalActionHistory([], "admin");
+      showInlineError(error?.message || "Action History could not be loaded.", true);
+    });
   }
 }
 
@@ -23560,11 +24870,13 @@ function openAdminModal(kind, options = null) {
   const actionHistoryEnabled = !["deliveryUpdatePreview", "recentScans", "rackForm", "rackSetForm"].includes(kind);
   if (els.adminModalSectionTabs) els.adminModalSectionTabs.hidden = !actionHistoryEnabled;
   els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
-  applyLanguageToRoot(els.adminModal);
+  if (state.language === "es") applyLanguageToRoot(els.adminModal);
   setAdminModalSection("workspace");
   if (actionHistoryEnabled) {
+    // v0.353: Action History is loaded only if the operator opens that tab.
+    // Avoiding this hidden render removes one API request and a large DOM build
+    // from every Admin GUI open.
     renderModalActionHistory([], "admin");
-    loadModalActionHistory(kind, "admin").catch(() => renderModalActionHistory([], "admin"));
   } else if (els.adminModalHistory) {
     els.adminModalHistory.hidden = true;
   }
@@ -24254,7 +25566,7 @@ function rackManagerRackEditHtml() {
     <form id="rackManagerInlineEditForm" class="rack-manager-set-edit rack-manager-rack-edit">
       <input id="rackManagerInlineOldCode" type="hidden" value="${escapeHtml(rack.code)}">
       <div class="rack-manager-quick-copy">
-        <strong>Edit ${escapeHtml(isTruckRack(rack) ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : rack.code)}</strong>
+        <strong>Edit ${escapeHtml(rackOperatorDisplayName(rack))}</strong>
         <span>Change the coded rack name, display name, or rack set/type from the same edit area used for rack sets.</span>
       </div>
 
@@ -24462,6 +25774,7 @@ async function saveRackSetQuickEdit() {
     latestPayload = await fetchJson("/api/racks", {
       method: "POST",
       body: JSON.stringify({
+        oldRackCode: rack.code,
         rackCode: rack.code,
         name: nextName,
         type: nextType,
@@ -24561,7 +25874,7 @@ function rackManagerModalHtml() {
                         <div class="rack-manager-group-actions">
                           <button type="button" class="icon-only icon-plus" data-rack-manager-add-to-set="${escapeHtml(label)}" title="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}" aria-label="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}"></button>
                           <button type="button" class="icon-only icon-pencil" data-rack-set-edit="${escapeHtml(label)}" title="Edit ${escapeHtml(label)} set" aria-label="Edit ${escapeHtml(label)} set"></button>
-                          <button type="button" class="icon-only icon-trash danger" data-rack-set-delete="${escapeHtml(label)}" ${canDeleteSet ? "" : "disabled"} title="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `Clear all ${escapeHtml(label)} racks before deleting this set`}" aria-label="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `${escapeHtml(label)} rack set cannot be deleted until every rack is empty`}"></button>
+                          <button type="button" class="icon-only icon-trash danger${canDeleteSet ? "" : " is-blocked"}" data-rack-set-delete="${escapeHtml(label)}" ${canDeleteSet ? "" : `aria-disabled="true" data-blocked-reason="Clear all ${escapeHtml(label)} racks before deleting this set."`} title="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `Clear all ${escapeHtml(label)} racks before deleting this set`}" aria-label="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `${escapeHtml(label)} rack set cannot be deleted until every rack is empty`}"></button>
                         </div>
                       </summary>
 
@@ -24582,13 +25895,13 @@ function rackManagerModalHtml() {
                             return `
                               <article class="rack-manager-row ${isEditing ? "is-editing" : ""}">
                                 <div>
-                                  <strong>${escapeHtml(isTruck ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : rack.code)}</strong>
-                                  <span>${escapeHtml(rack.name || rack.type || "")}</span>
+                                  <strong>${escapeHtml(rackOperatorDisplayName(rack))}</strong>
+                                  <span>${escapeHtml(rackDisplayCode(rack))}</span>
                                 </div>
                                 <span class="rack-status-badge ${escapeHtml(statusClass)}">${escapeHtml(status)}</span>
                                 <b>${escapeHtml(qty)} pcs</b>
                                 <button type="button" class="icon-only icon-pencil" data-rack-edit="${escapeHtml(rack.code)}" title="Edit rack" aria-label="Edit ${escapeHtml(rack.code)}"></button>
-                                <button type="button" class="icon-only icon-trash danger" data-rack-delete="${escapeHtml(rack.code)}" ${canDelete ? "" : "disabled"} title="Delete empty rack" aria-label="Delete ${escapeHtml(rack.code)}"></button>
+                                <button type="button" class="icon-only icon-trash danger${canDelete ? "" : " is-blocked"}" data-rack-delete="${escapeHtml(rack.code)}" ${canDelete ? "" : `aria-disabled="true" data-blocked-reason="Clear all pieces from ${escapeHtml(rack.code)} before deleting this rack."`} title="${canDelete ? "Delete empty rack" : "Clear all pieces before deleting this rack"}" aria-label="Delete ${escapeHtml(rack.code)}"></button>
                               </article>
                             `;
                           })
@@ -24646,7 +25959,7 @@ function rackFormModalHtml() {
               </label>
               <label>
                 <span>Display name</span>
-                <input id="rackModalName" type="text" autocomplete="off" value="${escapeHtml(rack.name || "")}" placeholder="Rack 11 Steel">
+                <input id="rackModalName" type="text" autocomplete="off" value="${escapeHtml(rack.name || "")}" placeholder="Steel 11">
                 <small>Friendly name shown throughout the webapp.</small>
               </label>
             </div>
@@ -29413,15 +30726,9 @@ function manualEditLocationOptions(item) {
 
     if (!code) continue;
 
-    const name = rack.name || rack.type || "Rack";
-    const qty = Number(rack.qty || 0);
-    const status = rackStatusLabel(rack);
-
     options.push([
       code,
-      isTruckRack(rack)
-        ? `${rackDisplayLabelFromParts(code, name, rack.type)} [${code}] (${qty} pcs, ${status})`
-        : `${code} - ${name} (${qty} pcs, ${status})`,
+      rackOptionLabel(rack),
     ]);
   }
 
@@ -30058,7 +31365,7 @@ function exportStaticCsv() {
 const OPERATIONS_MODAL_PROFILES = {
   "rack-details": {
     controlCenter: true,
-    showStatus: true,
+    showStatus: false,
     eyebrow: "Rack Operations",
     description: "Review assigned pieces, current rack status, packing actions, and controlled rack recovery from one live workspace.",
     context: "Individual rack workspace",
@@ -30083,6 +31390,11 @@ function applyOperationsModalProfile(kind, options = {}) {
     els.operationsModal.dataset.kind = kind;
     els.operationsModal.dataset.group = profile.group || "operations";
     els.operationsModal.classList.toggle("is-control-center", controlCenter);
+    if (kind === "rack-details" && profile.rackStatusClass) {
+      els.operationsModal.dataset.rackStatus = profile.rackStatusClass;
+    } else {
+      delete els.operationsModal.dataset.rackStatus;
+    }
   }
   if (els.operationsModalEyebrow) els.operationsModalEyebrow.textContent = profile.eyebrow || "Operations";
   if (els.operationsModalTitle) els.operationsModalTitle.textContent = profile.title || "Operations";
@@ -30091,6 +31403,33 @@ function applyOperationsModalProfile(kind, options = {}) {
     els.operationsModalStatusText.textContent = profile.status || "Live operations";
     const statusPill = els.operationsModalStatusText.closest(".operations-modal-health-pill");
     if (statusPill) statusPill.hidden = !Boolean(profile.showStatus);
+  }
+  if (els.operationsModalRackStatus) {
+    const showRackStatus = kind === "rack-details" && Boolean(profile.rackStatus);
+    els.operationsModalRackStatus.hidden = !showRackStatus;
+    els.operationsModalRackStatus.className = `operations-modal-rack-status-v326 ${escapeHtml(profile.rackStatusClass || "open")}`;
+    els.operationsModalRackStatus.replaceChildren();
+    if (showRackStatus) {
+      const statusLabel = document.createElement("small");
+      statusLabel.textContent = "Rack Status";
+      const statusValue = document.createElement("strong");
+      statusValue.textContent = profile.rackStatus;
+      els.operationsModalRackStatus.append(statusLabel, statusValue);
+    }
+  }
+  if (els.operationsModalRackRoute) {
+    const showRackRoute = kind === "rack-details" && Boolean(profile.rackRoute);
+    const rackRouteClass = String(profile.rackRouteClass || "unassigned").trim().toLowerCase();
+    els.operationsModalRackRoute.hidden = !showRackRoute;
+    els.operationsModalRackRoute.className = `operations-modal-rack-route-v329 is-${rackRouteClass}`;
+    els.operationsModalRackRoute.replaceChildren();
+    if (showRackRoute) {
+      const routeLabel = document.createElement("small");
+      routeLabel.textContent = "Route";
+      const routeValue = document.createElement("strong");
+      routeValue.textContent = profile.rackRoute;
+      els.operationsModalRackRoute.append(routeLabel, routeValue);
+    }
   }
   if (els.rejectOperationsTabs) els.rejectOperationsTabs.hidden = kind !== "reject-log";
   if (els.operationsRackTabs) els.operationsRackTabs.hidden = kind !== "rack-details";
@@ -30114,6 +31453,10 @@ function openOperationsModal({
   status = "",
   showStatus = null,
   group = "",
+  rackStatus = "",
+  rackStatusClass = "",
+  rackRoute = "",
+  rackRouteClass = "",
   body = "",
 } = {}) {
   if (!els.operationsModal || !els.operationsModalBody) return;
@@ -30127,10 +31470,14 @@ function openOperationsModal({
     ...(status ? { status } : {}),
     ...(showStatus !== null ? { showStatus: Boolean(showStatus) } : {}),
     ...(group ? { group } : {}),
+    ...(rackStatus ? { rackStatus } : {}),
+    ...(rackStatusClass ? { rackStatusClass } : {}),
+    ...(rackRoute ? { rackRoute } : {}),
+    ...(rackRouteClass ? { rackRouteClass } : {}),
   });
   els.operationsModalBody.innerHTML = body;
   els.operationsModalBody.hidden = false;
-  applyLanguageToRoot(els.operationsModal);
+  if (state.language === "es") applyLanguageToRoot(els.operationsModal);
   const isRackDetails = kind === "rack-details";
   const isRackHistory = kind === "rack-history";
   const showActionHistory = !isRackHistory;
@@ -30154,8 +31501,11 @@ function openOperationsModal({
     els.operationsModalRackActions.replaceChildren();
   }
   renderModalActionHistory([], "operations");
-  if (showActionHistory) {
-    loadModalActionHistory(kind, "operations").catch(() => renderModalActionHistory([], "operations"));
+  if (showActionHistory && !isRackDetails) {
+    loadModalActionHistory(kind, "operations").catch((error) => {
+      renderModalActionHistory([], "operations");
+      showInlineError(error?.message || "Action History could not be loaded.", true);
+    });
   }
   els.operationsModal.hidden = false;
   els.operationsModal.setAttribute("aria-hidden", "false");
@@ -30202,6 +31552,17 @@ function closeOperationsModal() {
 function compactRackItemHtml(item, currentRackCode = state.selectedRackOverviewCode) {
   const rackItemId = String(item.rackItemId || "");
   const itemLabel = `${item.order}-${item.item}`;
+  const sourceRack = state.racks.find((rack) => String(rack.code) === String(currentRackCode));
+  const sourceOnTheWay = String(sourceRack?.status || "").trim().toLowerCase() === "in transit";
+  const sourceBlockedReason = sourceOnTheWay
+    ? `${rackOptionLabel(sourceRack)} is On the Way. Mark it Not On The Way or Returned before moving or clearing its contents.`
+    : "";
+  const blockedAttrs = sourceBlockedReason
+    ? `class="icon-only icon-move rack-scope-move-button is-blocked" aria-disabled="true" data-blocked-reason="${escapeHtml(sourceBlockedReason)}" title="${escapeHtml(sourceBlockedReason)}"`
+    : `class="icon-only icon-move rack-scope-move-button" title="Move item"`;
+  const clearBlockedAttrs = sourceBlockedReason
+    ? `class="icon-only icon-trash danger is-blocked" aria-disabled="true" data-blocked-reason="${escapeHtml(sourceBlockedReason)}" title="${escapeHtml(sourceBlockedReason)}"`
+    : `class="icon-only icon-trash danger" title="Clear item"`;
   return `
     <article class="rack-modal-line">
       <div class="rack-modal-line-primary">
@@ -30217,12 +31578,12 @@ function compactRackItemHtml(item, currentRackCode = state.selectedRackOverviewC
       ${item.rackAddedAt ? `<small class="rack-modal-line-time">Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}</small>` : ""}
       ${hasPermission("manage_racks") ? `
         <div class="rack-modal-line-actions">
-          <button class="icon-only icon-move rack-scope-move-button" type="button"
+          <button ${blockedAttrs} type="button"
             data-rack-modal-move-item="${escapeHtml(rackItemId)}"
             data-source-rack="${escapeHtml(currentRackCode)}"
             data-rack-item-label="${escapeHtml(itemLabel)}"
-            title="Move item" aria-label="Move ${escapeHtml(itemLabel)}"></button>
-          <button class="icon-only icon-trash danger" type="button" data-rack-modal-clear-item="${escapeHtml(rackItemId)}" data-rack-modal-clear-label="${escapeHtml(itemLabel)}" title="Clear item" aria-label="Clear ${escapeHtml(itemLabel)}"></button>
+            aria-label="Move ${escapeHtml(itemLabel)}"></button>
+          <button ${clearBlockedAttrs} type="button" data-rack-modal-clear-item="${escapeHtml(rackItemId)}" data-rack-modal-clear-label="${escapeHtml(itemLabel)}" aria-label="Clear ${escapeHtml(itemLabel)}"></button>
         </div>` : ""}
     </article>`;
 }
@@ -30237,6 +31598,18 @@ function rackTransferOptions(currentRackCode) {
     .join("");
 }
 
+function rackModalActionIconSvg(kind) {
+  const paths = {
+    complete: '<path d="M5 12.5 9.2 17 19 7"></path><circle cx="12" cy="12" r="9"></circle>',
+    onWay: '<path d="M4 16h11"></path><path d="m12 11 5 5-5 5"></path><path d="M5 8h5"></path><circle cx="18" cy="7" r="2.2"></circle>',
+    uncomplete: '<path d="M4 7v5h5"></path><path d="M5.6 16.4A8 8 0 1 0 6.3 6.3L4 9"></path>',
+    returned: '<path d="M20 7v5h-5"></path><path d="M18.4 16.4A8 8 0 1 1 17.7 6.3L20 9"></path>',
+    notOnWay: '<path d="M10 7 5 12l5 5"></path><path d="M5 12h9a5 5 0 0 1 5 5v1"></path>',
+    print: '<path d="M7 8V3h10v5"></path><path d="M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><path d="M7 14h10v7H7z"></path><path d="M17 11h1"></path>',
+  };
+  return `<svg class="rack-modal-action-icon-v341" viewBox="0 0 24 24" aria-hidden="true">${paths[kind] || paths.complete}</svg>`;
+}
+
 function rackModalHeaderActionsHtml(rack) {
   if (!rack) return "";
   const isTruck = isTruckRack(rack);
@@ -30245,12 +31618,21 @@ function rackModalHeaderActionsHtml(rack) {
   const canTransfer = hasPermission("transfer_rack_contents") || hasPermission("manage_racks");
   const transferOptions = rackTransferOptions(rack.code);
   const printLabel = isTruck ? "Print Truck Packing Slip" : "Print Packing Slip";
+  const sourceOnTheWay = statusLower === "in transit";
+  const moveBlockedReason = sourceOnTheWay
+    ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before moving its contents.`
+    : !transferOptions
+      ? "No open destination racks are available for this transfer."
+      : "";
+  const moveBlockedAttrs = moveBlockedReason
+    ? `aria-disabled="true" data-blocked-reason="${escapeHtml(moveBlockedReason)}" title="${escapeHtml(moveBlockedReason)}"`
+    : `title="Move all rack contents"`;
   return `
-    ${hasItems && statusLower === "open" ? `<button class="app-primary-button" type="button" data-rack-modal-complete="${escapeHtml(rack.code)}">Complete Rack</button>` : ""}
-    ${hasItems && statusLower === "closed" ? `<button class="app-primary-button" type="button" data-rack-modal-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : ""}
-    ${statusLower === "in transit" ? `<button class="app-primary-button" type="button" data-rack-modal-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" class="secondary" data-rack-modal-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>` : ""}
-    <button class="app-primary-button" type="button" data-rack-modal-print="${escapeHtml(rack.code)}" ${hasItems && ["closed", "in transit"].includes(statusLower) ? "" : "disabled"}>${printLabel}</button>
-    ${canTransfer && hasItems ? `<button class="icon-only icon-move rack-scope-move-button rack-move-all-icon" type="button" data-rack-modal-move-all="${escapeHtml(rack.code)}" ${transferOptions ? "" : "disabled"} title="Move all rack contents" aria-label="Move all contents from rack ${escapeHtml(rack.code)}"></button>` : ""}`;
+    ${hasItems && statusLower === "open" ? `<button class="app-primary-button rack-modal-state-action-v341 is-complete" type="button" data-rack-modal-complete="${escapeHtml(rack.code)}">${rackModalActionIconSvg("complete")}<span>Complete Rack</span></button>` : ""}
+    ${hasItems && statusLower === "closed" ? `<button class="app-primary-button rack-modal-state-action-v341 is-on-way" type="button" data-rack-modal-on-way="${escapeHtml(rack.code)}">${rackModalActionIconSvg("onWay")}<span>Mark On The Way</span></button><button class="secondary rack-lifecycle-secondary-v340 is-uncomplete rack-lifecycle-action-v341" type="button" data-rack-modal-uncomplete="${escapeHtml(rack.code)}">${rackModalActionIconSvg("uncomplete")}<span>Uncomplete Rack</span></button>` : ""}
+    ${statusLower === "in transit" ? `<button class="app-primary-button rack-modal-state-action-v341 is-returned" type="button" data-rack-modal-return="${escapeHtml(rack.code)}">${rackModalActionIconSvg("returned")}<span>Mark Returned</span></button><button type="button" class="secondary rack-lifecycle-secondary-v340 is-not-on-way rack-lifecycle-action-v341" data-rack-modal-not-on-way="${escapeHtml(rack.code)}">${rackModalActionIconSvg("notOnWay")}<span>Not On The Way</span></button>` : ""}
+    <button class="app-primary-button rack-modal-state-action-v341 is-print" type="button" data-rack-modal-print="${escapeHtml(rack.code)}" ${hasItems && ["closed", "in transit"].includes(statusLower) ? "" : `aria-disabled="true" data-blocked-reason="${escapeHtml(hasItems ? "Complete the rack before printing its packing slip." : "Add pieces to the rack before printing its packing slip.")}"`}>${rackModalActionIconSvg("print")}<span>${printLabel}</span></button>
+    ${canTransfer && hasItems ? `<button class="icon-only icon-move rack-scope-move-button rack-move-all-icon${moveBlockedReason ? " is-blocked" : ""}" type="button" data-rack-modal-move-all="${escapeHtml(rack.code)}" ${moveBlockedAttrs} aria-label="Move all contents from rack ${escapeHtml(rack.code)}"></button>` : ""}`;
 }
 
 function updateRackModalHeaderActions(rack) {
@@ -30266,6 +31648,12 @@ function rackDetailsModalHtml(rack) {
   const items = rack.items || [];
   const canTransfer = hasPermission("transfer_rack_contents") || hasPermission("manage_racks");
   const transferOptions = rackTransferOptions(rack.code);
+  const sourceOnTheWay = String(rack.status || "").trim().toLowerCase() === "in transit";
+  const moveBlockedReason = sourceOnTheWay
+    ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before moving its contents.`
+    : !transferOptions
+      ? "No open destination racks are available for this transfer."
+      : "";
   const dateGroups = new Map();
   for (const item of items) {
     const key = String(item.deliveryDate || "No delivery date");
@@ -30281,21 +31669,15 @@ function rackDetailsModalHtml(rack) {
           <summary>
             <strong>${escapeHtml(deliveryDate === "No delivery date" ? deliveryDate : formatDisplayDate(deliveryDate))}</strong>
             <span>${escapeHtml(rows.length)} lines · ${escapeHtml(pieceQty)} pcs</span>
-            ${canTransfer && deliveryDate !== "No delivery date" ? `<button class="icon-only icon-move rack-scope-move-button" type="button" data-rack-modal-move-date="${escapeHtml(deliveryDate)}" data-source-rack="${escapeHtml(rack.code)}" ${transferOptions ? "" : "disabled"} title="Move this delivery date" aria-label="Move all items for ${escapeHtml(formatDisplayDate(deliveryDate))}"></button>` : ""}
+            ${canTransfer && deliveryDate !== "No delivery date" ? `<button class="icon-only icon-move rack-scope-move-button${moveBlockedReason ? " is-blocked" : ""}" type="button" data-rack-modal-move-date="${escapeHtml(deliveryDate)}" data-source-rack="${escapeHtml(rack.code)}" ${moveBlockedReason ? `aria-disabled="true" data-blocked-reason="${escapeHtml(moveBlockedReason)}" title="${escapeHtml(moveBlockedReason)}"` : `title="Move this delivery date"`} aria-label="Move all items for ${escapeHtml(formatDisplayDate(deliveryDate))}"></button>` : ""}
           </summary>
           <div class="rack-modal-date-lines">${rows.map((item) => compactRackItemHtml(item, rack.code)).join("")}</div>
         </details>`;
     }).join("");
 
-  const statusLabel = rackStatusLabel(rack);
   const statusClass = rackStatusClassName(rack);
-  const destinationText = rack.destination ? ` · ${rackDestinationLabel(rack.destination)}` : "";
   return `
     <section class="rack-details-modal-shell rack-details-modal-v184 ${escapeHtml(statusClass)}">
-      <div class="rack-details-status-banner-v308 ${escapeHtml(statusClass)}">
-        <span aria-hidden="true"></span>
-        <div><small>Rack status</small><strong>${escapeHtml(statusLabel)}</strong><p>${escapeHtml(Number(rack.qty || 0))} pieces${escapeHtml(destinationText)}</p></div>
-      </div>
       <div class="rack-details-modal-list" aria-label="Assigned rack pieces">${itemHtml || `<div class="admin-empty">No pieces are assigned.</div>`}</div>
     </section>`;
 }
@@ -30317,67 +31699,58 @@ function chooseRackTransferDestination(sourceRackCode, options = {}) {
   return new Promise((resolve) => {
     document.querySelector(".rack-transfer-backdrop")?.remove();
     const shell = document.createElement("div");
-    shell.className = "rack-transfer-backdrop";
+    shell.className = "rack-transfer-backdrop rack-transfer-backdrop-v356";
     const scopeText = rackItemId
       ? (itemLabel || "this rack item")
       : deliveryDate
         ? `all items dated ${formatDisplayDate(deliveryDate)}`
         : "every active item on this rack";
     shell.innerHTML = `
-      <section class="rack-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="rackTransferTitle">
+      <section class="rack-transfer-dialog rack-transfer-dialog-v356" role="dialog" aria-modal="true" aria-labelledby="rackTransferTitle">
         <button class="modal-close-x gui-close-button rack-transfer-close" type="button" data-rack-transfer-cancel aria-label="Close">&times;</button>
         <div class="rack-transfer-dialog-copy">
           <small>Rack transfer</small>
           <h2 id="rackTransferTitle">Move ${escapeHtml(scopeText)}</h2>
-          <p>Choose an open destination rack. The destination is validated before anything moves.</p>
+          <p>Choose an open destination rack. This uses the same route, rack-status, and rack-set presentation as the Scan page.</p>
         </div>
-        <div class="rack-transfer-dialog-field">
+        <label class="rack-transfer-dialog-field rack-transfer-dialog-field-v356">
           <span>Destination rack</span>
-          <div class="rack-transfer-combobox" data-rack-transfer-combobox>
-            <button type="button" class="rack-transfer-combobox-trigger" data-rack-transfer-trigger aria-haspopup="listbox" aria-expanded="false">
-              <span data-rack-transfer-selection>Select destination rack...</span>
-              <i aria-hidden="true"></i>
-            </button>
-            <div class="rack-transfer-combobox-menu" data-rack-transfer-menu role="listbox" hidden>
-              ${destinations.map((rack) => `<button type="button" role="option" data-rack-transfer-option="${escapeHtml(rack.code)}">${escapeHtml(rackOptionLabel(rack))}</button>`).join("")}
-            </div>
-          </div>
-        </div>
-        <div class="rack-transfer-dialog-actions">
-          <button type="button" class="secondary" data-rack-transfer-cancel>Cancel</button>
-          <button type="button" data-rack-transfer-confirm disabled>Continue</button>
+          <select class="rack-transfer-select-v356" data-rack-transfer-select aria-label="Destination rack">
+            <option value="" selected disabled>Select destination rack...</option>
+            ${groupedRackOptionsHtml(destinations, "", { includeNoRack: false, compactSelected: false })}
+          </select>
+        </label>
+        <div class="rack-transfer-dialog-actions rack-transfer-dialog-actions-v347">
+          <button type="button" class="secondary rack-transfer-cancel-v347" data-rack-transfer-cancel><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg><span>Cancel</span></button>
+          <button type="button" class="app-primary-button rack-transfer-continue-v347" data-rack-transfer-confirm disabled><span>Continue</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
         </div>
       </section>`;
 
-    const trigger = shell.querySelector("[data-rack-transfer-trigger]");
-    const menu = shell.querySelector("[data-rack-transfer-menu]");
-    const selection = shell.querySelector("[data-rack-transfer-selection]");
+    document.body.appendChild(shell);
+    const destinationSelect = shell.querySelector("[data-rack-transfer-select]");
     const confirm = shell.querySelector("[data-rack-transfer-confirm]");
     let selectedCode = "";
-    const setMenuOpen = (open) => {
-      if (!menu || !trigger) return;
-      menu.hidden = !open;
-      trigger.setAttribute("aria-expanded", String(open));
-      shell.classList.toggle("is-dropdown-open", open);
-      if (open) menu.querySelector("[data-rack-transfer-option]")?.focus();
-    };
+
+    // Reuse the application-wide custom-select system. Its menu is mounted on
+    // document.body and positions above/below the trigger from viewport space,
+    // so the rack list can never be clipped by the transfer dialog.
+    if (destinationSelect) {
+      enhanceCustomSelect(destinationSelect);
+      syncCustomSelect(destinationSelect);
+      destinationSelect.addEventListener("change", () => {
+        selectedCode = String(destinationSelect.value || "");
+        if (confirm) confirm.disabled = !selectedCode;
+      });
+    }
+
     const close = (value = "") => {
+      if (customSelectUi.openSelect === destinationSelect) closeCustomSelect(false);
       shell.remove();
-      document.body.classList.remove("modal-scroll-locked");
+      updateModalScrollLock();
       resolve(value);
     };
-    trigger?.addEventListener("click", () => setMenuOpen(menu?.hidden !== false));
+
     shell.addEventListener("click", (event) => {
-      const option = event.target.closest("[data-rack-transfer-option]");
-      if (option) {
-        selectedCode = option.dataset.rackTransferOption || "";
-        if (selection) selection.textContent = option.textContent?.trim() || selectedCode;
-        if (confirm) confirm.disabled = !selectedCode;
-        menu?.querySelectorAll("[data-rack-transfer-option]").forEach((row) => row.setAttribute("aria-selected", String(row === option)));
-        setMenuOpen(false);
-        trigger?.focus();
-        return;
-      }
       if (event.target === shell || event.target.closest("[data-rack-transfer-cancel]")) {
         close("");
         return;
@@ -30385,14 +31758,10 @@ function chooseRackTransferDestination(sourceRackCode, options = {}) {
       if (event.target.closest("[data-rack-transfer-confirm]")) close(selectedCode);
     });
     shell.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        if (menu && !menu.hidden) setMenuOpen(false);
-        else close("");
-      }
+      if (event.key === "Escape" && customSelectUi.openSelect !== destinationSelect) close("");
     });
-    document.body.appendChild(shell);
-    document.body.classList.add("modal-scroll-locked");
-    trigger?.focus();
+    updateModalScrollLock();
+    destinationSelect?.closest(".custom-select-shell")?.querySelector(".custom-select-trigger")?.focus();
   });
 }
 
@@ -30422,13 +31791,17 @@ function openRackDetailsModal(rackCode) {
   const rack = state.racks.find((item) => String(item.code) === String(rackCode));
   if (!rack) return;
   state.selectedRackOverviewCode = rack.code;
+  const resolvedDestination = rackResolvedDestination(rack);
   openOperationsModal({
     kind: "rack-details",
     eyebrow: rackGroupLabel(rack),
-    title: isTruckRack(rack) ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : `Rack ${rack.code}`,
-    description: `${rack.name || rack.type || rackGroupLabel(rack)} · ${rackStatusLabel(rack)} · ${Number(rack.qty || 0)} pieces`,
-    context: isTruckRack(rack) ? `${rackDisplayLabelFromParts(rack.code, rack.name, rack.type)} loading workspace` : `${rack.type || "Rack"} workspace`,
-    status: rackStatusLabel(rack),
+    title: rackOperatorDisplayName(rack),
+    description: `${rackDisplayCode(rack)} · ${Number(rack.qty || 0)} pieces`,
+    context: `${rackGroupLabel(rack)} workspace`,
+    rackStatus: rackStatusLabel(rack),
+    rackStatusClass: rackStatusClassName(rack),
+    rackRoute: resolvedDestination ? rackDestinationLabel(resolvedDestination) : "Not set",
+    rackRouteClass: rackDestinationClass(resolvedDestination),
     body: rackDetailsModalHtml(rack),
   });
   applyRackOperationsVisual(rack);
@@ -30440,12 +31813,16 @@ async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode)
   renderRacksPage();
   const rack = state.racks.find((item) => String(item.code) === String(rackCode));
   if (rack && state.operationsModalKind === "rack-details") {
+    const resolvedDestination = rackResolvedDestination(rack);
     applyOperationsModalProfile("rack-details", {
       eyebrow: rackGroupLabel(rack),
-      title: isTruckRack(rack) ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : `Rack ${rack.code}`,
-      description: `${rack.name || rack.type || rackGroupLabel(rack)} · ${rackStatusLabel(rack)} · ${Number(rack.qty || 0)} pieces`,
-      context: isTruckRack(rack) ? `${rackDisplayLabelFromParts(rack.code, rack.name, rack.type)} loading workspace` : `${rack.type || "Rack"} workspace`,
-      status: rackStatusLabel(rack),
+      title: rackOperatorDisplayName(rack),
+      description: `${rackDisplayCode(rack)} · ${Number(rack.qty || 0)} pieces`,
+      context: `${rackGroupLabel(rack)} workspace`,
+      rackStatus: rackStatusLabel(rack),
+      rackStatusClass: rackStatusClassName(rack),
+      rackRoute: resolvedDestination ? rackDestinationLabel(resolvedDestination) : "Not set",
+      rackRouteClass: rackDestinationClass(resolvedDestination),
     });
     applyRackOperationsVisual(rack);
     els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
@@ -30455,16 +31832,59 @@ async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode)
   }
 }
 
-const PACKING_HISTORY_DAYS_PER_PAGE = 25;
+const PACKING_HISTORY_WEEKS_PER_PAGE = 5;
+
+function packingHistoryDateTokens(value = "") {
+  const clean = String(value || "").trim();
+  if (!clean) return [];
+  const tokens = new Set([clean.toLowerCase()]);
+  const isoDate = clean.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoDate) {
+    const [, year, monthText, dayText] = isoDate;
+    const monthNumber = Number(monthText);
+    const dayNumber = Number(dayText);
+    tokens.add(`${monthNumber}/${dayNumber}/${year}`);
+    tokens.add(`${monthText}/${dayText}/${year}`);
+    tokens.add(`${monthNumber}-${dayNumber}-${year}`);
+    tokens.add(`${monthText}-${dayText}-${year}`);
+  }
+  const parsed = parseAutomationDateValue(clean, { dateOnlyAtNoon: true });
+  if (!parsed) return [...tokens];
+  const month = parsed.getMonth() + 1;
+  const day = parsed.getDate();
+  const year = parsed.getFullYear();
+  tokens.add(`${month}/${day}/${year}`);
+  tokens.add(`${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}/${year}`);
+  tokens.add(`${month}-${day}-${year}`);
+  tokens.add(`${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}-${year}`);
+  tokens.add(parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }).toLowerCase());
+  tokens.add(parsed.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" }).toLowerCase());
+  return [...tokens];
+}
+
+function packingHistorySearchText(row = {}) {
+  return [
+    row.search_text,
+    row.rack_code,
+    row.rack_name,
+    row.delivery_date,
+    row.printed_by,
+    row.printed_at,
+    ...(Array.isArray(row.order_numbers) ? row.order_numbers : []),
+    ...(Array.isArray(row.job_numbers) ? row.job_numbers : []),
+    ...packingHistoryDateTokens(row.delivery_date),
+    ...packingHistoryDateTokens(row.printed_at),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
 
 function packingHistoryGroups(history = state.packingListHistory, query = state.packingHistoryQuery) {
   const cleanQuery = String(query || "").trim().toLowerCase();
   const groups = new Map();
   for (const row of Array.isArray(history) ? history : []) {
-    const searchText = [row.rack_code, row.rack_name, row.delivery_date, row.printed_by, row.printed_at]
-      .join(" ")
-      .toLowerCase();
-    if (cleanQuery && !searchText.includes(cleanQuery)) continue;
+    if (cleanQuery && !packingHistorySearchText(row).includes(cleanQuery)) continue;
     const day = String(row.printed_at || row.printedAt || "").slice(0, 10) || "Unknown date";
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(row);
@@ -30494,14 +31914,32 @@ function packingHistoryWeekGroups(dayGroups = []) {
     }));
 }
 
+function packingHistoryReferenceSummary(row = {}) {
+  const orderCount = Number(row.order_count || (Array.isArray(row.order_numbers) ? row.order_numbers.length : 0) || 0);
+  const jobCount = Number(row.job_count || (Array.isArray(row.job_numbers) ? row.job_numbers.length : 0) || 0);
+  const parts = [];
+  if (orderCount) parts.push(`${orderCount} order${orderCount === 1 ? "" : "s"}`);
+  if (jobCount) parts.push(`${jobCount} job${jobCount === 1 ? "" : "s"}`);
+  return parts.join(" · ") || "Snapshot contents indexed";
+}
+
 function packingHistoryRowHtml(row) {
+  const snapshotId = Number(row.id || 0);
+  const searchText = packingHistorySearchText(row);
   return `
-    <article class="packing-history-row packing-history-row-v272" data-packing-history-search="${escapeHtml([row.rack_code, row.rack_name, row.delivery_date, row.printed_by, row.printed_at].join(" ").toLowerCase())}">
-      <div class="packing-history-rack-v272"><strong>${escapeHtml(row.rack_name || row.rack_code)}</strong><span>${escapeHtml(row.rack_code)}</span></div>
-      <div><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Mixed")}</strong></div>
-      <div><small>Printed</small><strong>${escapeHtml(formatDateTime(row.printed_at))}</strong></div>
-      <div><small>Contents</small><strong>${escapeHtml(row.piece_qty)} pcs · ${escapeHtml(row.line_count)} lines</strong></div>
-      <div><small>Printed by</small><strong>${escapeHtml(row.printed_by || "system")}</strong></div>
+    <article class="packing-history-row packing-history-row-v272" data-packing-history-search="${escapeHtml(searchText)}">
+      <div class="packing-history-snapshot-identity-v333">
+        <span class="packing-history-document-icon-v333" aria-hidden="true"></span>
+        <div class="packing-history-rack-v272">
+          <small>Snapshot #${escapeHtml(snapshotId || "-")}</small>
+          <strong>${escapeHtml(row.rack_name || row.rack_code)}</strong>
+          <span>${escapeHtml(row.rack_code)} · ${escapeHtml(packingHistoryReferenceSummary(row))}</span>
+        </div>
+      </div>
+      <div class="packing-history-meta-cell-v333"><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Mixed")}</strong></div>
+      <div class="packing-history-meta-cell-v333"><small>Printed</small><strong>${escapeHtml(formatDateTime(row.printed_at))}</strong></div>
+      <div class="packing-history-meta-cell-v333"><small>Contents</small><strong>${escapeHtml(row.piece_qty)} pcs · ${escapeHtml(row.line_count)} lines</strong></div>
+      <div class="packing-history-meta-cell-v333"><small>Printed by</small><strong>${escapeHtml(row.printed_by || "system")}</strong></div>
       <div class="packing-history-row-actions-v272">
         <button type="button" class="secondary" data-packing-history-preview="${escapeHtml(row.id)}">Preview</button>
         <button type="button" class="app-primary-button" data-packing-history-print="${escapeHtml(row.id)}">Print Snapshot</button>
@@ -30511,34 +31949,44 @@ function packingHistoryRowHtml(row) {
 
 function packingHistoryModalHtml(history = state.packingListHistory) {
   const dayGroups = packingHistoryGroups(history);
-  const daysPerPage = Math.max(Number(state.packingHistoryDaysPerPage || PACKING_HISTORY_DAYS_PER_PAGE), 1);
-  const totalDays = dayGroups.length;
-  const totalPages = Math.max(Math.ceil(totalDays / daysPerPage), 1);
+  const allWeeks = packingHistoryWeekGroups(dayGroups);
+  // v0.357: Rack History pages by business week rather than raw print days.
+  // This keeps each page predictable even when one week has many print dates.
+  const weeksPerPage = Math.max(Number(state.packingHistoryWeeksPerPage || PACKING_HISTORY_WEEKS_PER_PAGE), 1);
+  const totalWeeks = allWeeks.length;
+  const totalPages = Math.max(Math.ceil(totalWeeks / weeksPerPage), 1);
   state.packingHistoryPage = Math.min(Math.max(Number(state.packingHistoryPage || 1), 1), totalPages);
-  const pageStartIndex = (state.packingHistoryPage - 1) * daysPerPage;
-  const pageDays = dayGroups.slice(pageStartIndex, pageStartIndex + daysPerPage);
-  const weeks = packingHistoryWeekGroups(pageDays);
-  const visibleSnapshotCount = pageDays.reduce((sum, group) => sum + group.rows.length, 0);
-  const startDay = totalDays ? pageStartIndex + 1 : 0;
-  const endDay = totalDays ? Math.min(pageStartIndex + pageDays.length, totalDays) : 0;
+  const pageStartIndex = (state.packingHistoryPage - 1) * weeksPerPage;
+  const weeks = allWeeks.slice(pageStartIndex, pageStartIndex + weeksPerPage);
+  const visibleSnapshotCount = weeks.reduce(
+    (sum, week) => sum + week.days.reduce((daySum, day) => daySum + day.rows.length, 0),
+    0,
+  );
+  const startWeek = totalWeeks ? pageStartIndex + 1 : 0;
+  const endWeek = totalWeeks ? Math.min(pageStartIndex + weeks.length, totalWeeks) : 0;
+  const cleanQuery = String(state.packingHistoryQuery || "").trim();
 
   return `
     <section class="packing-history-shell packing-history-shell-v184 packing-history-shell-v272" data-rack-history-panel="packing">
       <div class="packing-history-intro packing-history-intro-v272">
-        <div><strong>Previously printed packing lists</strong><span>Snapshots are grouped by print week. Expand a week to review its historical rack contents.</span></div>
-        <label class="search-box"><span class="search-icon"></span><input id="packingHistorySearch" type="search" autocomplete="off" value="${escapeHtml(state.packingHistoryQuery || "")}" placeholder="Search rack, date, or user..."></label>
+        <div class="packing-history-intro-copy-v333">
+          <span class="packing-history-intro-icon-v333" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M7 3.5h7l4 4v13H7z"></path><path d="M14 3.5v4h4M9.5 11h6M9.5 14.5h6M9.5 18h4.2M4 6.5v14h10"></path></svg></span>
+          <div><strong>Previously printed packing lists</strong><span>Search saved snapshots by print/delivery date, rack, Order Nr., Job Nr., or user.</span></div>
+        </div>
+        <label class="search-box"><span class="search-icon"></span><input id="packingHistorySearch" type="search" autocomplete="off" value="${escapeHtml(state.packingHistoryQuery || "")}" placeholder="Search date, rack, Order Nr., Job Nr., or user..."></label>
       </div>
       <div class="packing-history-page-summary-v272">
         <span class="packing-history-page-summary-copy-v273">
-          ${totalDays ? `<b>${escapeHtml(startDay)}-${escapeHtml(endDay)} of ${escapeHtml(totalDays)}</b> print days <i aria-hidden="true">&middot;</i> ` : ""}
-          <b>${escapeHtml(visibleSnapshotCount)}</b> snapshot${visibleSnapshotCount === 1 ? "" : "s"}${totalDays ? "" : " found"}
+          ${cleanQuery ? `<span class="packing-history-query-chip-v333">Matches for “${escapeHtml(cleanQuery)}”</span>` : ""}
+          ${totalWeeks ? `<b>${escapeHtml(startWeek)}-${escapeHtml(endWeek)} of ${escapeHtml(totalWeeks)}</b> business weeks <i aria-hidden="true">&middot;</i> ` : ""}
+          <b>${escapeHtml(visibleSnapshotCount)}</b> snapshot${visibleSnapshotCount === 1 ? "" : "s"}${totalWeeks ? "" : " found"}
         </span>
       </div>
       <div class="packing-history-groups packing-history-groups-v184 packing-history-groups-v272" id="packingHistoryGroups">
         ${weeks.length ? weeks.map((week) => {
           const weekSnapshots = week.days.reduce((sum, day) => sum + day.rows.length, 0);
           return `
-            <details class="packing-history-week-v272">
+            <details class="packing-history-week-v272" ${cleanQuery ? "open" : ""}>
               <summary>
                 <span class="packing-history-week-chevron-v272" aria-hidden="true"></span>
                 <div><strong>${escapeHtml(week.label)}</strong><span>${escapeHtml(week.days.length)} day${week.days.length === 1 ? "" : "s"} · ${escapeHtml(weekSnapshots)} snapshot${weekSnapshots === 1 ? "" : "s"}</span></div>
@@ -30547,14 +31995,14 @@ function packingHistoryModalHtml(history = state.packingListHistory) {
               <div class="packing-history-week-body-v272">
                 ${week.days.map((day) => `
                   <section class="packing-history-day-v272">
-                    <header><strong>${escapeHtml(day.date === "Unknown date" ? day.date : formatDisplayDate(day.date))}</strong><span>${escapeHtml(day.rows.length)} print${day.rows.length === 1 ? "" : "s"}</span></header>
+                    <header><span class="packing-history-day-marker-v333" aria-hidden="true"></span><strong>${escapeHtml(day.date === "Unknown date" ? day.date : formatDisplayDate(day.date))}</strong><span>${escapeHtml(day.rows.length)} print${day.rows.length === 1 ? "" : "s"}</span></header>
                     <div class="packing-history-day-rows-v272">${day.rows.map(packingHistoryRowHtml).join("")}</div>
                   </section>`).join("")}
               </div>
             </details>`;
         }).join("") : `<div class="admin-empty">${state.packingHistoryQuery ? "No packing-list snapshots match this search." : "No packing lists have been printed since history tracking was installed."}</div>`}
       </div>
-      <footer class="packing-history-pagination-v272" ${totalDays <= daysPerPage ? "hidden" : ""}>
+      <footer class="packing-history-pagination-v272" ${totalWeeks <= weeksPerPage ? "hidden" : ""}>
         <button type="button" class="secondary" data-packing-history-page="${Math.max(state.packingHistoryPage - 1, 1)}" ${state.packingHistoryPage <= 1 ? "disabled" : ""}>Previous</button>
         <strong>Page ${escapeHtml(state.packingHistoryPage)} of ${escapeHtml(totalPages)}</strong>
         <button type="button" class="secondary" data-packing-history-page="${Math.min(state.packingHistoryPage + 1, totalPages)}" ${state.packingHistoryPage >= totalPages ? "disabled" : ""}>Next</button>
@@ -30565,12 +32013,16 @@ function packingHistoryModalHtml(history = state.packingListHistory) {
 function renderPackingHistoryPanel({ focusSearch = false } = {}) {
   const panel = document.querySelector('[data-rack-history-panel="packing"]');
   if (!panel) return;
+  const focusSnapshot = captureEditableControlFocus(panel);
   panel.outerHTML = packingHistoryModalHtml();
   setRackHistoryView(state.rackHistoryView || "packing");
-  applyLanguageToRoot(document.querySelector('[data-rack-history-panel="packing"]'));
-  if (focusSearch) {
+  const nextPanel = document.querySelector('[data-rack-history-panel="packing"]');
+  applyLanguageToRoot(nextPanel);
+  if (focusSnapshot) {
+    restoreEditableControlFocus(focusSnapshot, nextPanel || document);
+  } else if (focusSearch) {
     const search = document.getElementById("packingHistorySearch");
-    search?.focus();
+    search?.focus({ preventScroll: true });
     const length = String(search?.value || "").length;
     search?.setSelectionRange?.(length, length);
   }
@@ -30738,9 +32190,7 @@ function rackHistoryFilterMarkup() {
     ...state.racks.map((rack) => rackGroupLabel(rack)),
   ].filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   const racks = rackHistorySortedRacks(filters.rackGroup);
-  const rackOptions = (selectedCode = "") => racks
-    .map((rack) => `<option value="${escapeHtml(rack.code)}" ${String(selectedCode) === String(rack.code) ? "selected" : ""}>${escapeHtml(rack.code)} · ${escapeHtml(rack.name || rack.type || rackGroupLabel(rack))}</option>`)
-    .join("");
+  const rackOptions = (selectedCode = "") => groupedRackOptionsHtml(racks, selectedCode);
   return `
     <section class="rack-history-filters" aria-label="Rack history filters">
       <div class="rack-history-filter-grid">
@@ -30774,7 +32224,7 @@ function rackHistoryRowsMarkup(events = []) {
     const groups = rackHistoryEventGroups(event);
     return `
       <article class="rack-history-event-row">
-        <span class="modal-action-history-icon" aria-hidden="true"></span>
+        ${actionHistoryIconMarkup(event)}
         <div class="rack-history-event-copy">
           <strong>${escapeHtml(actionHistoryLabel(event.action))}</strong>
           <span>${escapeHtml(actionHistoryDetail(event))}</span>
@@ -30818,7 +32268,7 @@ function syncRackHistoryRangeControls() {
   const validCodes = new Set(racks.map((rack) => String(rack.code)));
   if (filters.rackFrom && !validCodes.has(filters.rackFrom)) filters.rackFrom = "";
   if (filters.rackTo && !validCodes.has(filters.rackTo)) filters.rackTo = "";
-  const optionHtml = racks.map((rack) => `<option value="${escapeHtml(rack.code)}">${escapeHtml(rack.code)} · ${escapeHtml(rack.name || rack.type || rackGroupLabel(rack))}</option>`).join("");
+  const optionHtml = groupedRackOptionsHtml(racks, "");
   const from = document.querySelector('[data-rack-history-filter="rackFrom"]');
   const to = document.querySelector('[data-rack-history-filter="rackTo"]');
   if (from) {
@@ -30839,6 +32289,7 @@ function renderAllRacksHistoryResults() {
   const pageStart = total ? ((page - 1) * pageSize) + 1 : 0;
   const pageEnd = total ? Math.min(pageStart + rows.length - 1, total) : 0;
   const panel = document.getElementById("allRacksHistoryPanel");
+  const focusSnapshot = panel ? captureEditableControlFocus(panel) : null;
   if (panel) {
     const existingFilters = panel.querySelector(".rack-history-filters");
     if (existingFilters) existingFilters.outerHTML = rackHistoryFilterMarkup();
@@ -30853,6 +32304,7 @@ function renderAllRacksHistoryResults() {
   if (clear) clear.disabled = !rackHistoryFiltersActive();
   if (els.operationsAllRacksHistoryCount) els.operationsAllRacksHistoryCount.textContent = String(total);
   applyLanguageToRoot(panel);
+  if (focusSnapshot && panel) restoreEditableControlFocus(focusSnapshot, panel);
 }
 
 async function loadRackHistoryPage() {
@@ -30897,7 +32349,7 @@ async function openRacksHistoryModal() {
   const packingPayload = await fetchJson("/api/racks/packing-history?limit=1000");
   state.packingListHistory = packingPayload.history || [];
   state.packingHistoryPage = 1;
-  state.packingHistoryDaysPerPage = PACKING_HISTORY_DAYS_PER_PAGE;
+  state.packingHistoryWeeksPerPage = PACKING_HISTORY_WEEKS_PER_PAGE;
   state.packingHistoryQuery = "";
   state.rackHistoryEvents = [];
   state.rackHistoryFilters = rackHistoryDefaultFilters();
@@ -32075,14 +33527,6 @@ function openImportNotificationRun(notification) {
   }, 80);
 }
 
-function filterPackingHistoryRows(query = "") {
-  const clean = String(query || "").trim().toLowerCase();
-  document.querySelectorAll("[data-packing-history-search]").forEach((row) => {
-    row.hidden = Boolean(clean) && !String(row.dataset.packingHistorySearch || "").includes(clean);
-  });
-}
-
-
 function parseAutomationDateValue(value, { dateOnlyAtNoon = false } = {}) {
   const text = String(value || "").trim();
   if (!text) return null;
@@ -32259,26 +33703,41 @@ function initializeAutomationHistoryGrouping() {
     delete results.dataset.v249Grouped;
     window.queueMicrotask(() => enhanceAutomationImportHistoryResults(results));
   };
-  const observer = new MutationObserver((mutations) => {
-    const targets = new Set();
-    mutations.forEach((mutation) => {
-      const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
-      const owningResults = target?.id === "importHistoryResults" ? target : target?.closest?.("#importHistoryResults");
-      if (owningResults) targets.add(owningResults);
-      mutation.addedNodes.forEach((node) => {
-        if (!(node instanceof Element)) return;
-        if (node.id === "importHistoryResults") targets.add(node);
-        node.querySelectorAll?.("#importHistoryResults").forEach((results) => targets.add(results));
-      });
-    });
-    targets.forEach(regroup);
+  let resultsObserver = null;
+  const watchResults = (results) => {
+    if (!results || results.dataset.v354GroupingObserved === "true") return;
+    results.dataset.v354GroupingObserved = "true";
+    regroup(results);
+    resultsObserver?.disconnect();
+    resultsObserver = new MutationObserver(() => regroup(results));
+    resultsObserver.observe(results, { childList: true });
+  };
+
+  const existing = document.getElementById("importHistoryResults");
+  if (existing) {
+    watchResults(existing);
+    return;
+  }
+
+  // v0.354: the old observer watched every child mutation in the entire app
+  // forever. Only watch long enough to discover the lazily-created Import
+  // History host, then move observation onto that single result container.
+  const discoveryObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        const results = node.id === "importHistoryResults" ? node : node.querySelector?.("#importHistoryResults");
+        if (!results) continue;
+        discoveryObserver.disconnect();
+        watchResults(results);
+        return;
+      }
+    }
   });
-  observer.observe(document.body, { childList: true, subtree: true });
-  document.querySelectorAll("#importHistoryResults").forEach(regroup);
+  discoveryObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function wireV135OperationsEvents() {
-  document.addEventListener("click", forwardRackHeadingActionClick, true);
   els.operationsModalClose?.addEventListener("click", closeOperationsModal);
   els.operationsModalBackdrop?.addEventListener("click", closeOperationsModal);
   els.rackPackingHistoryBtn?.addEventListener("click", () => openRacksHistoryModal().catch((error) => showInlineError(error.message, true)));
@@ -32291,16 +33750,18 @@ function wireV135OperationsEvents() {
   });
   els.rejectSearchInput?.addEventListener("input", () => {
     window.clearTimeout(els.rejectSearchInput._timer);
-    els.rejectSearchInput._timer = window.setTimeout(() => refreshRejectPage().catch(() => {}), 250);
+    els.rejectSearchInput._timer = window.setTimeout(() => {
+      refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
+    }, 250);
   });
   els.rejectDatePreset?.addEventListener("change", () => setRejectDatePreset(els.rejectDatePreset.value));
   els.rejectDateFrom?.addEventListener("change", () => {
     markRejectDateRangeCustom();
-    refreshRejectPage().catch(() => {});
+    refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
   });
   els.rejectDateTo?.addEventListener("change", () => {
     markRejectDateRangeCustom();
-    refreshRejectPage().catch(() => {});
+    refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
   });
   els.rejectClearFiltersBtn?.addEventListener("click", clearRejectFilters);
   [els.rejectLocationFilter, els.rejectReasonFilter, els.rejectUserFilter].forEach((select) => {
@@ -32445,6 +33906,11 @@ function wireV135OperationsEvents() {
     const complete = event.target.closest("[data-rack-modal-complete]");
     if (complete) {
       completeRack(complete.dataset.rackModalComplete).then(() => refreshOpenRackDetails(complete.dataset.rackModalComplete)).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const onWay = event.target.closest("[data-rack-modal-on-way]");
+    if (onWay) {
+      markRackOnTheWay(onWay.dataset.rackModalOnWay).then(() => refreshOpenRackDetails(onWay.dataset.rackModalOnWay)).catch((error) => showInlineError(error.message, true));
       return;
     }
     const uncomplete = event.target.closest("[data-rack-modal-uncomplete]");
@@ -32616,7 +34082,10 @@ function wireV135OperationsEvents() {
 function startPolling() {
   stopPolling();
   state.pollTimer = window.setInterval(async () => {
-    if (!state.backend || document.hidden) return;
+    // v0.354: do not rerender the Scan/Bay page underneath a modal while the
+    // operator is scrolling or interacting with it. The next normal poll runs
+    // after the GUI closes, preserving live behavior without hidden paint work.
+    if (!state.backend || document.hidden || appModalUiIsOpen()) return;
     try {
       if (state.page === "bays") {
         await refreshBayRouteSummary();
@@ -32848,7 +34317,10 @@ function wireEvents() {
         els.operationsModalHistory.open = showHistory;
       }
       if (showHistory && state.operationsModalKind === "rack-details") {
-        loadModalActionHistory("rack-details", "operations").catch(() => renderModalActionHistory([], "operations"));
+        loadModalActionHistory("rack-details", "operations").catch((error) => {
+          renderModalActionHistory([], "operations");
+          showInlineError(error?.message || "Rack Action History could not be loaded.", true);
+        });
       }
       return;
     }
@@ -32986,6 +34458,7 @@ function wireEvents() {
     syncFullscreenStickyPanelOffset();
     fitBayLastLocationText();
     scheduleBayScannerStickyUpdateV155();
+    scheduleRackHeadingHitTargetRepair();
   });
   window.addEventListener("scroll", scheduleBayScannerStickyUpdateV155, { passive: true });
   if (window.ResizeObserver && els.bayScannerPanel && !state.bayScannerStickyResizeObserver) {
@@ -33007,6 +34480,7 @@ function wireEvents() {
     checkManagedPrintWindowClosed();
     void pollUserNotifications();
     void restorePrintWorkspaceAfterInactivity({ refreshIfHealthy: true });
+    scheduleRackHeadingHitTargetRepair();
   });
   window.addEventListener("pageshow", () => {
     void restorePrintWorkspaceAfterInactivity({ refreshIfHealthy: true });
@@ -33048,62 +34522,6 @@ function wireEvents() {
       return;
     }
 
-    const scanRackSelect = event.target.closest?.("[data-scan-event-rack]");
-    if (scanRackSelect) {
-      const lineItemId = scanRackSelect.dataset.scanEventRack || "";
-      const previousRack = scanRackSelect.dataset.currentRack || "";
-      const rackCode = scanRackSelect.value || "";
-      scanRackSelect.disabled = true;
-      try {
-        await assignLineItemToRack(lineItemId, rackCode, { quiet: true });
-        playAppSound(rackCode ? "rack_item_added" : "destructive_action", { force: !rackCode });
-        showFloatingNotice(rackCode ? `Rack changed to ${rackCode}.` : "Rack location cleared.", "success");
-        await openRecentScansModal();
-      } catch (error) {
-        scanRackSelect.value = previousRack;
-        syncCustomSelect(scanRackSelect);
-        scanRackSelect.disabled = false;
-        showFloatingNotice(error.message, "error");
-      }
-      return;
-    }
-
-    const moveSelect = event.target.closest?.("[data-bay-event-move]");
-    if (!moveSelect) return;
-    const assignmentId = Number(moveSelect.dataset.assignmentId || 0);
-    const currentBay = moveSelect.dataset.currentBay || "";
-    const newBayCode = moveSelect.value || "";
-    const label = moveSelect.dataset.orderLabel || "item";
-    if (!assignmentId || !newBayCode || newBayCode === currentBay) return;
-
-    const confirmed = await confirmWebAppAction({
-      title: "Move scanned item?",
-      message: `Move <strong>${escapeHtml(label)}</strong> from <strong>${escapeHtml(currentBay || "its current bay")}</strong> to <strong>${escapeHtml(newBayCode)}</strong>?`,
-      details: "This updates the current Bay Map assignment and keeps the movement in the bay history log.",
-      confirmLabel: "Move Item",
-      danger: false,
-    });
-    if (!confirmed) {
-      moveSelect.value = currentBay;
-      syncCustomSelect(moveSelect);
-      return;
-    }
-
-    try {
-      await postBayAction("/api/indian-trail/move", {
-        assignmentId,
-        newBayCode,
-        reason: `Moved from scan history selector (${currentBay || "unknown bay"})`,
-      });
-      playAppSound("bay_moved");
-      showFloatingNotice(`Moved ${label} to ${newBayCode}.`, "success");
-      renderBayRecentActions();
-      if (!els.adminModal?.hidden && els.adminModal?.dataset.customView === "bay-all-scans") await openBayAllScansModal(state.bayAllScansPage || 1);
-    } catch (error) {
-      moveSelect.value = currentBay;
-      syncCustomSelect(moveSelect);
-      showFloatingNotice(error.message, "error");
-    }
   });
 
   document.addEventListener("click", (event) => {
@@ -33238,6 +34656,15 @@ function wireEvents() {
   });
   els.viewAllRecent?.addEventListener("click", () => {
     openRecentScansModal().catch((error) => showFloatingNotice(error.message, "error"));
+  });
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const addButton = target?.closest("[data-scan-quantity-add], [data-scan-quantity-all]");
+    if (!addButton) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const control = addButton.closest("[data-scan-quantity-boost]");
+    submitScanQuantityBoost(control, addButton.hasAttribute("data-scan-quantity-all"));
   });
   els.globalPrintExportBtn?.addEventListener("click", () => {
     const date = state.page === "scan" ? state.meta?.deliveryDate : dashboardDateKey();
@@ -34471,13 +35898,25 @@ function wireEvents() {
     openSdiPanel(selectedEntries[0].assignment.id);
   });
   els.staleBayCloseBtn?.addEventListener("click", () => closeStaleBayPanel());
-  els.staleBayOkBtn?.addEventListener("click", () => closeStaleBayPanel());
   els.staleBayBackdrop?.addEventListener("click", () => closeStaleBayPanel());
-  els.staleBayPrintBtn?.addEventListener("click", () => launchManagedPrint("/api/indian-trail/stale-bays/print"));
+  els.staleBayPrintBtn?.addEventListener("click", () => {
+    const params = new URLSearchParams({
+      status: String(state.staleBayView || "all"),
+      age: String(state.staleBayAgeFilter || "all"),
+      sort: String(state.staleBaySort || "age-desc"),
+    });
+    const query = String(state.staleBayQuery || "").trim();
+    if (query) params.set("q", query);
+    launchManagedPrint(`/api/indian-trail/stale-bays/print?${params.toString()}`);
+  });
   els.adminModalClose?.addEventListener("click", () => closeAdminModal());
   els.adminModalBackdrop?.addEventListener("click", () => closeAdminModal());
   els.staleBaySearchInput?.addEventListener("input", () => {
     state.staleBayQuery = els.staleBaySearchInput.value;
+    renderStaleBayPanel(state.staleBayOrders);
+  });
+  els.staleBayStateFilter?.addEventListener("change", () => {
+    state.staleBayView = els.staleBayStateFilter.value || "all";
     renderStaleBayPanel(state.staleBayOrders);
   });
   els.staleBayAgeFilter?.addEventListener("change", () => {
@@ -34489,24 +35928,42 @@ function wireEvents() {
     renderStaleBayPanel(state.staleBayOrders);
   });
   els.staleBaySelectVisibleBtn?.addEventListener("click", () => {
-    const visible = filteredStaleBayOrders();
-    const visibleIds = visible.map((order) => String(order.assignmentId || "")).filter(Boolean);
-    const shouldClear = Boolean(visibleIds.length) && visibleIds.every((id) => state.staleBaySelectedIds.has(id));
-    for (const id of visibleIds) {
-      if (shouldClear) state.staleBaySelectedIds.delete(id);
-      else state.staleBaySelectedIds.add(id);
+    for (const order of filteredStaleBayOrders()) {
+      const assignmentId = String(order.assignmentId || "");
+      if (assignmentId) state.staleBaySelectedIds.add(assignmentId);
     }
     renderStaleBayPanel(state.staleBayOrders);
   });
-  els.staleBaySnoozeAllBtn?.addEventListener("click", () => {
+  els.staleBayClearSelectedBtn?.addEventListener("click", () => {
+    state.staleBaySelectedIds.clear();
+    renderStaleBayPanel(state.staleBayOrders);
+  });
+  els.staleBaySnoozeAllBtn?.addEventListener("click", async () => {
     const ids = [...state.staleBaySelectedIds];
     if (!ids.length) {
       showInlineError("Select at least one verified old-bay row first.", false);
       return;
     }
-    snoozeStaleBayOrders(ids, Number(els.staleBaySnoozeAllDays?.value || 1)).catch((error) => showInlineError(error.message, true));
+    const button = els.staleBaySnoozeAllBtn;
+    button.disabled = true;
+    button.classList.add("is-busy");
+    try {
+      await snoozeStaleBayOrders(ids, Number(els.staleBaySnoozeAllDays?.value || 1));
+    } catch (error) {
+      showInlineError(error.message, true);
+    } finally {
+      button.classList.remove("is-busy");
+      updateStaleBaySelectionControls(filteredStaleBayOrders());
+    }
   });
   els.staleBayList?.addEventListener("change", (event) => {
+    const groupCheckbox = event.target.closest("[data-stale-select-group]");
+    if (groupCheckbox) {
+      const ids = String(groupCheckbox.dataset.staleSelectGroup || "").split("|").filter(Boolean);
+      ids.forEach((id) => groupCheckbox.checked ? state.staleBaySelectedIds.add(id) : state.staleBaySelectedIds.delete(id));
+      updateStaleBaySelectionControls(filteredStaleBayOrders());
+      return;
+    }
     const checkbox = event.target.closest("[data-stale-select]");
     if (!checkbox) return;
     const assignmentId = String(checkbox.dataset.staleSelect || "");
@@ -34514,15 +35971,40 @@ function wireEvents() {
     else state.staleBaySelectedIds.delete(assignmentId);
     updateStaleBaySelectionControls(filteredStaleBayOrders());
   });
-  els.staleBayList?.addEventListener("click", (event) => {
+  els.staleBayList?.addEventListener("click", async (event) => {
+    const groupSnoozeButton = event.target.closest("[data-stale-snooze-group]");
+    if (groupSnoozeButton) {
+      const ids = String(groupSnoozeButton.dataset.staleSnoozeGroup || "").split("|").filter(Boolean);
+      const select = groupSnoozeButton.closest(".stale-snooze-row-v348")?.querySelector("[data-stale-days-group]");
+      const days = Number(select?.value || 1);
+      groupSnoozeButton.disabled = true;
+      try { await snoozeStaleBayOrders(ids, days); } catch (error) { groupSnoozeButton.disabled = false; showInlineError(error.message, true); }
+      return;
+    }
     const snoozeButton = event.target.closest("[data-stale-snooze]");
     if (snoozeButton) {
       const assignmentId = snoozeButton.dataset.staleSnooze;
       const days = Number(els.staleBayList.querySelector(`[data-stale-days="${CSS.escape(String(assignmentId))}"]`)?.value || 1);
-      snoozeStaleBayOrders([assignmentId], days).catch((error) => showInlineError(error.message, true));
+      snoozeButton.disabled = true;
+      snoozeButton.classList.add("is-busy");
+      try {
+        await snoozeStaleBayOrders([assignmentId], days);
+      } catch (error) {
+        snoozeButton.disabled = false;
+        snoozeButton.classList.remove("is-busy");
+        showInlineError(error.message, true);
+      }
       return;
     }
     if (event.target.closest("input, select, textarea, button, a, label")) return;
+    const groupRow = event.target.closest("[data-stale-assignment-group]");
+    if (groupRow) {
+      const ids = String(groupRow.dataset.staleAssignmentGroup || "").split("|").filter(Boolean);
+      const allSelected = ids.length && ids.every((id) => state.staleBaySelectedIds.has(id));
+      ids.forEach((id) => allSelected ? state.staleBaySelectedIds.delete(id) : state.staleBaySelectedIds.add(id));
+      renderStaleBayPanel(state.staleBayOrders);
+      return;
+    }
     const row = event.target.closest("[data-stale-assignment-row]");
     if (!row) return;
     const assignmentId = String(row.dataset.staleAssignmentRow || "");
@@ -34530,6 +36012,27 @@ function wireEvents() {
     if (state.staleBaySelectedIds.has(assignmentId)) state.staleBaySelectedIds.delete(assignmentId);
     else state.staleBaySelectedIds.add(assignmentId);
     renderStaleBayPanel(state.staleBayOrders);
+  });
+  els.priorityIntakeForm?.addEventListener("submit", (event) => {
+    submitPriorityIntakeRequest(event).catch((error) => showInlineError(error.message, true));
+  });
+  els.priorityIntakeEmailMode?.addEventListener("change", () => updatePriorityIntakeEmailMode());
+  els.priorityIntakeReason?.addEventListener("change", () => updatePriorityChoiceVisibility(els.priorityIntakeReason, els.priorityIntakeReasonCustom, true));
+  els.priorityIntakeResponsible?.addEventListener("change", () => updatePriorityChoiceVisibility(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom, true));
+  els.sdiReasonInput?.addEventListener("change", () => updatePriorityChoiceVisibility(els.sdiReasonInput, els.sdiReasonCustom, true));
+  els.sdiResponsibleInput?.addEventListener("change", () => updatePriorityChoiceVisibility(els.sdiResponsibleInput, els.sdiResponsibleCustom, true));
+  els.sdiEmailMode?.addEventListener("change", () => updateSdiEmailMode());
+  document.querySelectorAll('input[name="priorityNewRequestType"]').forEach((input) => input.addEventListener("change", () => {
+    setPriorityNewRequestMode(input.dataset.priorityRequestMode || "rush");
+  }));
+  els.priorityIntakeSearch?.addEventListener("input", () => {
+    state.priorityIntakeQuery = els.priorityIntakeSearch.value;
+    renderPriorityIntakeRequests();
+  });
+  els.priorityIntakeList?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-priority-intake-cancel]");
+    if (!button) return;
+    cancelPriorityIntakeRequest(button.dataset.priorityIntakeCancel || "").catch((error) => showInlineError(error.message, true));
   });
   els.sdiOrderInput?.addEventListener("input", () => {
     window.clearTimeout(state.sdiLookupTimer);
@@ -34562,9 +36065,26 @@ function wireEvents() {
     const id = String(checkbox.dataset.sdiLineItemId || "");
     if (checkbox.checked) state.sdiSelectedLineItemIds.add(id);
     else state.sdiSelectedLineItemIds.delete(id);
+    checkbox.closest(".missing-glass-item-card-v356")?.classList.toggle("is-selected", checkbox.checked);
     updateSdiSelectionSummary();
   });
   els.sdiCurrentList?.addEventListener("click", (event) => {
+    const typeButton = event.target.closest("[data-sdi-current-type]");
+    if (typeButton) {
+      state.sdiCurrentTypeFilter = typeButton.dataset.sdiCurrentType || "all";
+      renderSdiCurrentList();
+      return;
+    }
+    const editRequestButton = event.target.closest("[data-priority-current-edit-request]");
+    if (editRequestButton) {
+      beginPriorityIntakeEdit(editRequestButton.dataset.priorityCurrentEditRequest || "");
+      return;
+    }
+    const cancelRequestButton = event.target.closest("[data-priority-intake-cancel]");
+    if (cancelRequestButton) {
+      cancelPriorityIntakeRequest(cancelRequestButton.dataset.priorityIntakeCancel || "").catch((error) => showInlineError(error.message, true));
+      return;
+    }
     const editItemButton = event.target.closest("[data-sdi-edit-line-item]");
     if (editItemButton) {
       beginPriorityWorkEdit([editItemButton.dataset.sdiEditLineItem || ""], editItemButton.dataset.sdiEditLookup || "")
@@ -35118,6 +36638,17 @@ function wireEvents() {
       }, 350);
       return;
     }
+    const scanSortButton = event.target.closest("[data-scan-sort]");
+    if (scanSortButton) {
+      const key = scanSortButton.dataset.scanSort || "";
+      if (SCAN_TABLE_COLUMNS[key]) {
+        state.scanSortDirection = state.scanSortKey === key && state.scanSortDirection === "asc" ? "desc" : "asc";
+        state.scanSortKey = key;
+        state.pageIndex = 1;
+        scheduleScanRender();
+      }
+      return;
+    }
     const filterButton = event.target.closest("[data-filter]");
     if (filterButton) {
       toggleScanFilter(filterButton.dataset.filter || "all");
@@ -35133,6 +36664,12 @@ function wireEvents() {
       scheduleScanRender();
       return;
     }
+    if (event.target.closest("[data-clear-scan-sort]")) {
+      state.scanSortKey = "";
+      state.pageIndex = 1;
+      scheduleScanRender();
+      return;
+    }
     const removeGlassFilterButton = event.target.closest("[data-remove-glass-filter]");
     if (removeGlassFilterButton) {
       state.glassTypeFilters.delete(removeGlassFilterButton.dataset.removeGlassFilter || "");
@@ -35144,6 +36681,7 @@ function wireEvents() {
     if (event.target.closest("[data-clear-scan-filters]")) {
       state.activeFilters.clear();
       state.glassTypeFilters.clear();
+      state.scanSortKey = "";
       state.pageIndex = 1;
       state.lastGlassFilterSignature = "";
       syncScanFilterButtons();
@@ -35801,12 +37339,13 @@ init().catch((error) => {
     refreshDeliveryListCatalog(true);
     if (adminPageIsVisible()) refreshLatestImportResult(true);
     deliveryCatalogHeartbeat = window.setInterval(() => {
+      if (document.hidden || appModalUiIsOpen()) return;
       refreshDeliveryListCatalog(false);
       if (adminPageIsVisible()) refreshLatestImportResult(false);
     }, 10000);
 
     const refreshVisibleActiveList = () => {
-      if (document.visibilityState === "hidden") return;
+      if (document.visibilityState === "hidden" || appModalUiIsOpen()) return;
       refreshDeliveryListCatalog(true);
       const activeListId = String(state.activeListId || "");
       if (activeListId) dlsAutomationRefreshActiveListDetail(activeListId);
@@ -36557,6 +38096,7 @@ init().catch((error) => {
     backdrop.hidden = false;
     modal.hidden = false;
     document.body.classList.add("modal-open");
+    updateModalScrollLock();
     refreshDashboard();
     scheduleRecentImportsRefresh(0);
     const activeTab = modal.querySelector("[data-automation-tab].is-active")?.dataset.automationTab || "manual";
@@ -36569,6 +38109,7 @@ init().catch((error) => {
     backdrop.hidden = true;
     modal.hidden = true;
     document.body.classList.remove("modal-open");
+    updateModalScrollLock();
     refreshRecentImports({ refreshHistoryWindow: false });
     if (pollTimer) {
       clearTimeout(pollTimer);
@@ -37355,14 +38896,15 @@ init().catch((error) => {
     elements.control.dataset.updateKind = copy.kind;
     if (elements.summary) elements.summary.textContent = copy.summary;
     if (elements.review) {
-      elements.review.textContent = updatedFilterActive ? "Review Open" : copy.reviewLabel;
+      const reviewLabel = updatedFilterActive ? "Review Open" : copy.reviewLabel;
+      elements.review.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.2 18.2 2 2"></path></svg><span>${escapeHtml(reviewLabel)}</span>`;
       elements.review.disabled = updatedFilterActive;
       elements.review.onclick = () => reviewUpdates(flags);
     }
     if (elements.acknowledge) {
       elements.acknowledge.hidden = !updatedFilterActive;
       elements.acknowledge.disabled = !updatedFilterActive || !reviewComplete;
-      elements.acknowledge.textContent = "Mark Reviewed";
+      elements.acknowledge.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 7"></path></svg><span>Mark Reviewed</span>`;
       elements.acknowledge.title = reviewComplete
         ? "Mark the displayed delivery-list changes reviewed for your account"
         : "Review the new delivery-list work first";

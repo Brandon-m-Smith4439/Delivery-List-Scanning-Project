@@ -593,9 +593,10 @@ def render_rack_packing_list(payload: dict) -> str:
         """
         return f"""
       <section class="packing-sheet">
+        <div class="packing-document-accent"></div>
         <header class="packing-header">
           <div class="packing-logo-box">
-            <img class="packing-logo" src="/assets/barefoot-logo.jpg" alt="Barefoot & Company" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+            <img class="packing-logo" src="/static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260821-v0.357" alt="Barefoot & Company" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
             <span class="packing-logo-fallback" style="display:none;">Barefoot &amp; Company</span>
           </div>
           <div class="packing-title">
@@ -633,24 +634,25 @@ def render_rack_packing_list(payload: dict) -> str:
       <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
       <style>
         * {{ box-sizing: border-box; }}
-        body {{ font-family: Arial, sans-serif; color: #071633; margin: 22px; background: #fff; }}
-        button {{ margin-bottom: 12px; }}
-        .packing-sheet {{ page-break-after: always; }}
+        body {{ font-family: Arial, sans-serif; color: #071633; margin: 22px; background: #eef3f8; }}
+        button {{ margin-bottom: 12px; border: 0; border-radius: 8px; background: #135cff; color: #fff; padding: 9px 16px; font-weight: 900; cursor: pointer; }}
+        .packing-sheet {{ page-break-after: always; overflow: hidden; border: 1px solid #c4d1df; border-radius: 14px; background: #fff; box-shadow: 0 18px 42px rgba(9,34,64,.12); }}
         .packing-sheet:last-child {{ page-break-after: auto; }}
-        .packing-header {{ display: grid; grid-template-columns: 210px minmax(260px, 1fr) 300px; gap: 8px; align-items: start; border-bottom: 3px solid #071633; padding-bottom: 14px; }}
-        .packing-logo-box {{ min-height: 128px; display: grid; align-content: start; gap: 6px; }}
-        .packing-logo {{ width: 205px; max-width: 100%; max-height: 128px; object-fit: contain; object-position: left top; display: block; filter: drop-shadow(0 4px 7px rgba(5, 22, 48, 0.22)); }}
+        .packing-document-accent {{ height: 7px; background: linear-gradient(90deg, #071f3f, #135cff 55%, #0f8a85); }}
+        .packing-header {{ display: grid; grid-template-columns: 210px minmax(260px, 1fr) 300px; gap: 14px; align-items: start; border-bottom: 3px solid #071633; padding: 16px 18px 14px; }}
+        .packing-logo-box {{ min-height: 112px; display: grid; align-content: start; gap: 6px; }}
+        .packing-logo {{ width: 200px; max-width: 100%; max-height: 112px; object-fit: contain; object-position: left top; display: block; }}
         .packing-logo-fallback {{ color: #071633; font-size: 15px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; text-shadow: 0 3px 6px rgba(5, 22, 48, 0.18); }}
         .packing-title small {{ display: block; color: #526078; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }}
         h1 {{ margin: 3px 0 10px; font-size: 28px; line-height: 1.05; overflow-wrap: anywhere; }}
         p {{ margin: 4px 0; }}
         .rack-meta {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }}
-        .rack-meta span {{ border: 1px solid #d6deeb; border-radius: 6px; background: #f8fafc; padding: 6px 8px; font-size: 12px; }}
+        .rack-meta span {{ border: 1px solid #d6deeb; border-radius: 8px; background: linear-gradient(180deg, #fff, #f6f9fc); padding: 7px 9px; font-size: 12px; }}
         .rack-meta b {{ display: block; color: #526078; font-size: 10px; text-transform: uppercase; }}
-        .barcode-box {{ width: 100%; text-align: center; border: 1px solid #d6deeb; border-radius: 8px; padding: 10px; }}
+        .barcode-box {{ width: 100%; text-align: center; border: 1px solid #cbd7e5; border-radius: 10px; background: #fff; padding: 10px; box-shadow: inset 0 1px 0 #fff, 0 5px 14px rgba(7,31,63,.06); }}
         .rack-barcode {{ width: 100%; height: 72px; display: block; }}
         .barcode-text {{ margin-top: 5px; font-size: 18px; font-weight: 900; letter-spacing: 1px; }}
-        .destination-card {{ margin-top: 14px; display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 1.2fr); gap: 12px; border: 2px solid #071633; border-radius: 8px; padding: 10px 12px; }}
+        .destination-card {{ margin: 14px 18px 0; display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 1.2fr); gap: 12px; border: 1px solid #b9c8d8; border-left: 5px solid #0f8a85; border-radius: 10px; background: linear-gradient(90deg, #f6fbfb, #fff); padding: 10px 12px; }}
         .destination-card.destination-card-single {{ grid-template-columns: minmax(0, 1fr); }}
         .destination-card small {{ display: block; color: #526078; font-size: 10px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }}
         .destination-card strong {{ display: block; font-size: 18px; margin-top: 2px; }}
@@ -660,9 +662,10 @@ def render_rack_packing_list(payload: dict) -> str:
         .destination-stop {{ border-left: 4px solid #071633; padding-left: 8px; }}
         .destination-stop strong {{ font-size: 13px; }}
         .destination-stop span {{ font-size: 12px; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; table-layout: fixed; }}
-        th, td {{ border: 1px solid #222; padding: 6px; text-align: left; vertical-align: top; overflow: hidden; text-overflow: ellipsis; }}
-        th {{ background: #efefef; }}
+        table {{ width: calc(100% - 36px); border-collapse: separate; border-spacing: 0; margin: 16px 18px 0; font-size: 12px; table-layout: fixed; border: 1px solid #9fb0c3; border-radius: 9px; overflow: hidden; }}
+        th, td {{ border: 0; border-top: 1px solid #d5dee8; padding: 7px 6px; text-align: left; vertical-align: top; overflow: hidden; text-overflow: ellipsis; }}
+        thead th {{ border-top: 0; background: #071f3f; color: #fff; font-size: 10px; letter-spacing: .025em; text-transform: uppercase; }}
+        tbody tr:nth-child(even) td {{ background: #f8fafc; }}
         th:nth-child(1), td:nth-child(1) {{ width: 12%; white-space: nowrap; }}
         th:nth-child(2), td:nth-child(2) {{ width: 15%; }}
         th:nth-child(3), td:nth-child(3) {{ width: 9%; }}
@@ -674,10 +677,10 @@ def render_rack_packing_list(payload: dict) -> str:
         th:nth-child(9), td:nth-child(9) {{ width: 5%; text-align: center; }}
         th:nth-child(10), td:nth-child(10) {{ width: 5%; text-align: center; }}
         .check-cell {{ text-align: center; font-size: 20px; }}
-        .signature-section {{ margin-top: 18px; display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }}
+        .signature-section {{ margin: 18px; display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }}
         .signature-section div {{ min-height: 58px; border: 1px solid #222; padding: 8px; }}
         .signature-section span {{ display: block; height: 28px; border-bottom: 1px solid #222; margin-top: 12px; }}
-        @media print {{ body {{ margin: 0.25in; }} button {{ display: none; }} .packing-header {{ grid-template-columns: 190px minmax(250px, 1fr) 280px; gap: 7px; }} .packing-logo {{ width: 185px; max-height: 118px; }} .packing-logo-box {{ min-height: 118px; }} .barcode-box {{ padding: 8px; }} }}
+        @media print {{ body {{ margin: 0.25in; background: #fff; }} button {{ display: none; }} .packing-sheet {{ border: 0; border-radius: 0; box-shadow: none; }} .packing-header {{ grid-template-columns: 190px minmax(250px, 1fr) 280px; gap: 7px; }} .packing-logo {{ width: 185px; max-height: 105px; }} .packing-logo-box {{ min-height: 105px; }} .barcode-box {{ padding: 8px; }} }}
       </style>
     </head>
     <body>
@@ -784,73 +787,352 @@ def render_customer_email_manifest_pdf_page(email: dict) -> str:
 </body>
 </html>"""
 
-def render_stale_bay_report(rows: list[dict]) -> str:
-    """Purpose: Render stale bay report for the delivery-list scanner workflow.
+def filter_stale_bay_report_rows(rows: list[dict], params: dict[str, list[str]]) -> list[dict]:
+    """Apply the same Old Bays status/search/age/sort controls used by the browser."""
+    now = datetime.now().astimezone()
+    status = str((params.get("status") or ["all"])[0] or "all").strip().lower()
+    if status not in {"all", "live", "snoozed"}:
+        status = "all"
+    age_text = str((params.get("age") or ["all"])[0] or "all").strip().lower()
+    minimum_age = int(age_text) if age_text.isdigit() else 0
+    sort_key = str((params.get("sort") or ["age-desc"])[0] or "age-desc").strip().lower()
+    if sort_key not in {"age-desc", "age-asc", "bay"}:
+        sort_key = "age-desc"
+    query = " ".join(str((params.get("q") or [""])[0] or "").split()).casefold()
 
-    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-    Flow: Converts normalized records into the requested presentation or export format and returns the completed output.
-    """
-    body_rows = []
+    def snoozed(row: dict) -> bool:
+        text = str(row.get("snoozedUntil") or "").strip()
+        if not text:
+            return False
+        try:
+            value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=now.tzinfo)
+        return value.astimezone(now.tzinfo) > now
+
+    filtered: list[dict] = []
     for row in rows:
-        body_rows.append(
+        is_snoozed = snoozed(row)
+        if status == "live" and is_snoozed:
+            continue
+        if status == "snoozed" and not is_snoozed:
+            continue
+        if minimum_age and int(row.get("daysOld") or 0) < minimum_age:
+            continue
+        if query:
+            haystack = " ".join(
+                str(row.get(name) or "")
+                for name in (
+                    "order", "item", "customer", "bayCode", "bayDisplay", "job",
+                    "product", "dimensions", "deliveryDate",
+                )
+            ).casefold()
+            if query not in haystack:
+                continue
+        filtered.append(row)
+
+    def key(row: dict):
+        snooze_rank = 1 if snoozed(row) else 0
+        if sort_key == "age-asc":
+            return (snooze_rank, int(row.get("daysOld") or 0), str(row.get("bayDisplay") or row.get("bayCode") or ""))
+        if sort_key == "bay":
+            return (snooze_rank, tuple(int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", str(row.get("bayDisplay") or row.get("bayCode") or ""))), -int(row.get("daysOld") or 0))
+        return (snooze_rank, -int(row.get("daysOld") or 0), str(row.get("bayDisplay") or row.get("bayCode") or ""))
+
+    return sorted(filtered, key=key)
+
+
+def render_stale_bay_report(rows: list[dict]) -> str:
+    """Render a print-first mirror of the normalized Old Bays review workspace."""
+    now = datetime.now().astimezone()
+
+    def parse_datetime(value: object) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=now.tzinfo)
+        return parsed.astimezone(now.tzinfo)
+
+    def friendly_datetime(value: datetime | None) -> str:
+        if value is None:
+            return "Not scanned"
+        return f"{value.month}/{value.day}/{value.year} {value.strftime('%I:%M %p').lstrip('0')}"
+
+    def compact_duration(seconds: float) -> str:
+        minutes = max(int(seconds // 60), 0)
+        days, remainder = divmod(minutes, 1440)
+        hours, minutes = divmod(remainder, 60)
+        if days:
+            return f"{days}d" + (f" {hours}h" if hours else "")
+        if hours:
+            return f"{hours}h" + (f" {minutes}m" if minutes else "")
+        return f"{max(minutes, 1)}m"
+
+    def snooze_meta(row: dict) -> dict:
+        until = parse_datetime(row.get("snoozedUntil"))
+        started = parse_datetime(row.get("snoozedAt"))
+        active = bool(until and until > now)
+        return {
+            "active": active,
+            "remaining": compact_duration((until - now).total_seconds()) if active and until else "",
+            "started": friendly_datetime(started) if started else "Unknown time",
+        }
+
+    def age_accent(days_old: int) -> str:
+        days = max(int(days_old or 0), 0)
+        progress = max(0.0, min((days - 11) / 19, 1.0))
+        hue = round(30 * (1 - progress))
+        lightness = round(50 - (progress * 18))
+        return f"hsl({hue} 86% {lightness}%)"
+
+    # Preserve the exact filter/sort order supplied by filter_stale_bay_report_rows,
+    # while grouping contiguous rows into the same hierarchy operators see on screen.
+    bay_groups: dict[str, dict] = {}
+    for row in rows:
+        bay_key = str(row.get("bayCode") or row.get("bayDisplay") or "Unknown bay")
+        bay = bay_groups.setdefault(
+            bay_key,
+            {
+                "display": row.get("bayDisplay") or row.get("bayCode") or "Unknown bay",
+                "orders": {},
+            },
+        )
+        order_key = str(row.get("order") or row.get("assignmentId") or "Unknown order")
+        bay["orders"].setdefault(order_key, []).append(row)
+
+    live_count = 0
+    snoozed_count = 0
+    oldest_days = 0
+    printed_order_count = 0
+    bay_sections: list[str] = []
+
+    for bay in bay_groups.values():
+        order_cards: list[str] = []
+        bay_pieces = 0
+        bay_missing = 0
+        for order_key, order_rows in bay["orders"].items():
+            first = order_rows[0] if order_rows else {}
+            snooze = snooze_meta(first)
+            days_old = max((int(row.get("daysOld") or 0) for row in order_rows), default=0)
+            oldest_days = max(oldest_days, days_old)
+            printed_order_count += 1
+            if snooze["active"]:
+                snoozed_count += 1
+            else:
+                live_count += 1
+
+            source_items = first.get("orderItems") if isinstance(first.get("orderItems"), list) else None
+            items = source_items or [
+                {
+                    "item": row.get("item"),
+                    "job": row.get("job"),
+                    "product": row.get("product"),
+                    "dimensions": row.get("dimensions"),
+                    "qty": row.get("qty"),
+                    "inBayQty": row.get("qty"),
+                    "missingQty": 0,
+                    "lastScannedAt": row.get("lastScannedAt"),
+                }
+                for row in order_rows
+            ]
+            order_pieces = sum(max(int(item.get("inBayQty") or 0), 0) for item in items)
+            missing_pieces = sum(max(int(item.get("missingQty") or 0), 0) for item in items)
+            bay_pieces += order_pieces
+            bay_missing += missing_pieces
+            job_number = first.get("job") or next((item.get("job") for item in items if item.get("job")), "-")
+            scan_times = [
+                parsed
+                for parsed in (parse_datetime(item.get("lastScannedAt")) for item in items if item.get("lastScannedAt"))
+                if parsed is not None
+            ]
+            fallback_scan = parse_datetime(first.get("lastScannedAt"))
+            if fallback_scan is not None:
+                scan_times.append(fallback_scan)
+            last_scanned = max(scan_times) if scan_times else None
+
+            item_rows = []
+            for item in items:
+                expected = max(int(item.get("qty") or 0), 0)
+                in_bay = max(int(item.get("inBayQty") or 0), 0)
+                missing = max(int(item.get("missingQty") or 0), 0)
+                item_rows.append(
+                    f"""
+                    <div class="glass-line {'is-missing' if missing else 'is-accounted'}">
+                      <span><small>Item</small><strong>{esc(item.get('item') or '-')}</strong></span>
+                      <span class="glass-description"><small>Glass / size</small><strong>{esc(item.get('product') or 'Glass')}</strong><b>{esc(item.get('dimensions') or 'Size not listed')}</b></span>
+                      <span><small>In bay</small><strong>{esc(in_bay)} / {esc(expected)}</strong></span>
+                      <span class="missing-qty"><small>Missing</small><strong>{esc(missing)}</strong></span>
+                      <span class="line-status">{esc('MISSING' if missing else 'ACCOUNTED')}</span>
+                    </div>
+                    """
+                )
+
+            state_strip = (
+                f"""
+                <div class="order-state is-snoozed">
+                  <span class="age-chip"><b>{esc(days_old)}</b> days old</span>
+                  <span class="snooze-chip">SNOOZED</span>
+                  <span class="snooze-left"><b>{esc(snooze['remaining'])}</b> left</span>
+                  <span class="snoozed-at"><small>Snoozed</small><strong>{esc(snooze['started'])}</strong></span>
+                </div>
+                """
+                if snooze["active"]
+                else f"""
+                <div class="order-state">
+                  <span class="age-chip"><b>{esc(days_old)}</b> days old</span>
+                  <span class="review-chip">NEEDS REVIEW</span>
+                </div>
+                """
+            )
+            order_class = "order-card is-snoozed" if snooze["active"] else "order-card"
+            order_cards.append(
+                f"""
+                <article class="{order_class}" style="--age-accent:{age_accent(days_old)}">
+                  {state_strip}
+                  <header class="order-header">
+                    <div class="order-id"><span><small>Job Nr.</small><strong>{esc(job_number)}</strong></span><span><small>Order</small><strong>{esc(order_key)}</strong></span><b>{esc(first.get('customer') or 'No customer')}</b></div>
+                    <span class="bay-pill">{esc(bay['display'])}</span>
+                  </header>
+                  <section class="glass-ledger">
+                    <div class="glass-heading"><span>Item</span><span>Glass / size</span><span>In bay</span><span>Missing</span><span>Status</span></div>
+                    {''.join(item_rows)}
+                  </section>
+                  <div class="order-summary">
+                    <span><small>Last physical scan</small><strong>{esc(friendly_datetime(last_scanned))}</strong></span>
+                    <span><small>Pieces in bay</small><strong>{esc(order_pieces)}</strong></span>
+                    <span class="{'has-missing' if missing_pieces else ''}"><small>Missing pieces</small><strong>{esc(missing_pieces)}</strong></span>
+                  </div>
+                  <footer class="investigation-row"><span class="verify-box"></span><strong>Physically verified</strong><span class="notes-rule"><small>Investigation notes</small></span></footer>
+                </article>
+                """
+            )
+
+        bay_sections.append(
             f"""
-            <tr>
-              <td>{esc(row.get("daysOld"))} days</td>
-              <td>{esc(row.get("bayDisplay") or row.get("bayCode"))}</td>
-              <td>{esc(row.get("order"))}</td>
-              <td>{esc(row.get("item"))}</td>
-              <td>{esc(row.get("job") or row.get("product"))}</td>
-              <td>{esc(row.get("dimensions"))}</td>
-              <td>{esc(row.get("customer"))}</td>
-              <td>{esc(row.get("deliveryDate"))}</td>
-              <td>{esc(row.get("lastScannedAt"))}</td>
-              <td class="check-cell">&#9744;</td>
-            </tr>
+            <section class="bay-section">
+              <header class="bay-header"><div><small>Physical bay</small><strong>{esc(bay['display'])}</strong></div><div class="bay-metrics"><span><b>{esc(len(bay['orders']))}</b> old order{'s' if len(bay['orders']) != 1 else ''}</span><span><b>{esc(bay_pieces)}</b> pcs</span><span class="{'has-missing' if bay_missing else ''}"><b>{esc(bay_missing)}</b> missing</span></div></header>
+              <div class="bay-orders">{''.join(order_cards)}</div>
+            </section>
             """
         )
-    if not body_rows:
-        body_rows.append('<tr><td colspan="10">No bay orders are older than 10 days.</td></tr>')
-    return f"""
-    <!doctype html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Old Bay Orders</title>
-      <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
-      <style>
-        body {{ font-family: Arial, sans-serif; color: #071633; margin: 24px; }}
-        header {{ display: flex; justify-content: space-between; border-bottom: 3px solid #071633; padding-bottom: 12px; }}
-        .copy-box {{ border: 1px solid #222; padding: 7px 10px; font-weight: 800; display: flex; gap: 14px; align-items: center; white-space: nowrap; }}
-        .write-line {{ display: inline-block; height: 1em; border-bottom: 1px solid #222; vertical-align: -2px; }}
-        .checked-line {{ width: 82px; }}
-        .date-line {{ width: 112px; }}
-        h1 {{ margin: 0; font-size: 26px; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }}
-        th, td {{ border: 1px solid #222; padding: 6px; text-align: left; vertical-align: top; }}
-        th {{ background: #efefef; }}
-        .check-cell {{ width: 44px; text-align: center; font-size: 20px; }}
-        @media print {{ body {{ margin: 0.3in; }} button {{ display: none; }} }}
-      </style>
-    </head>
-    <body>
-      <button onclick="window.print()">Print</button>
-      <header>
-        <div>
-          <h1>Old Bay Orders</h1>
-          <p>Orders in Indian Trail bays more than 10 days.</p>
-        </div>
-        <div class="copy-box"><span>Checked By: <i class="write-line checked-line"></i></span><span>Date: <i class="write-line date-line"></i></span></div>
-      </header>
-      <table>
-        <thead>
-          <tr><th>Age</th><th>Bay</th><th>Order</th><th>Item</th><th>Job Nr.</th><th>Dimensions</th><th>Customer</th><th>Delivery</th><th>Last Scanned</th><th>Check</th></tr>
-        </thead>
-        <tbody>{''.join(body_rows)}</tbody>
-      </table>
-      {print_lifecycle_script(250)}
-    </body>
-    </html>
-    """
+
+    if not bay_sections:
+        bay_sections.append('<div class="empty-state"><strong>No matching Old Bay orders.</strong><span>The current investigation filters returned no work.</span></div>')
+
+    printed_at = friendly_datetime(now)
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Old Bay Investigation List</title>
+  <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
+  <style>
+    @page {{ size: letter landscape; margin: .30in; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; background: #edf3f8; color: #17344e; font-family: "Segoe UI", Arial, sans-serif; }}
+    .toolbar {{ width: min(1380px, calc(100% - 28px)); margin: 12px auto 0; text-align: right; }}
+    .toolbar button {{ min-height: 38px; border: 1px solid #123f73; border-radius: 9px; background: #123f73; color: #fff; padding: 0 16px; font-weight: 850; cursor: pointer; }}
+    .sheet {{ width: min(1380px, calc(100% - 28px)); margin: 10px auto 18px; padding: 16px; border: 1px solid #bacbd9; border-radius: 15px; background: #fff; box-shadow: 0 16px 42px rgba(12,43,76,.11); }}
+    .report-header {{ display: grid; grid-template-columns: 190px minmax(0,1fr) 285px; gap: 17px; align-items: center; padding-bottom: 12px; border-bottom: 4px solid #0b3c70; }}
+    .logo-box img {{ width: 178px; max-height: 84px; object-fit: contain; object-position: left center; }}
+    .logo-fallback {{ display: none; color: #0b315a; font-weight: 950; }}
+    .title-block small {{ color: #af6507; font-size: 9px; font-weight: 950; letter-spacing: .12em; text-transform: uppercase; }}
+    .title-block h1 {{ margin: 4px 0; color: #082d58; font-size: 27px; line-height: 1.05; }}
+    .title-block p {{ margin: 0; color: #61758a; font-size: 11px; font-weight: 700; line-height: 1.4; }}
+    .inspection-box {{ display: grid; gap: 7px; padding: 10px 11px; border: 1px solid #ccd7e2; border-radius: 11px; background: #f7fafc; }}
+    .inspection-box strong {{ color: #214965; font-size: 10px; }}
+    .inspection-line {{ display: grid; grid-template-columns: auto minmax(80px,1fr); gap: 7px; align-items: end; color: #64788b; font-size: 9px; font-weight: 850; }}
+    .inspection-line i {{ min-height: 15px; border-bottom: 1px solid #718496; }}
+    .report-meta {{ margin-top: 6px; color: #748699; font-size: 8.5px; text-align: right; }}
+    .summary-grid {{ display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; margin: 10px 0 12px; }}
+    .summary-card {{ min-height: 53px; display: grid; grid-template-columns: auto minmax(0,1fr); gap: 2px 8px; align-items: center; padding: 8px 10px; border: 1px solid #d3dee7; border-radius: 9px; background: #f8fbfd; }}
+    .summary-card b {{ grid-row: 1 / span 2; color: #0c467f; font-size: 21px; }}
+    .summary-card strong {{ color: #355771; font-size: 9px; text-transform: uppercase; }}
+    .summary-card span {{ color: #758596; font-size: 8px; }}
+    .summary-card.is-snoozed b {{ color: #7157a6; }}
+    .bay-section {{ margin-top: 10px; break-inside: auto; }}
+    .bay-header {{ min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 10px; border: 1px solid #c4d4e1; border-bottom: 0; border-radius: 10px 10px 0 0; background: #eaf2f8; }}
+    .bay-header > div:first-child {{ display: grid; gap: 0; }}
+    .bay-header small {{ color: #708496; font-size: 7.5px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }}
+    .bay-header strong {{ color: #123e63; font-size: 15px; }}
+    .bay-metrics {{ display: flex; gap: 5px; }}
+    .bay-metrics span {{ min-height: 25px; display: inline-flex; align-items: center; gap: 3px; border: 1px solid #cbd9e4; border-radius: 999px; background: #fff; color: #61788b; padding: 0 8px; font-size: 8px; font-weight: 850; }}
+    .bay-metrics b {{ color: #294f6d; font-size: 10px; }}
+    .bay-metrics .has-missing {{ border-color: #dfb572; background: #fff7e7; color: #865807; }}
+    .bay-orders {{ display: grid; gap: 7px; padding: 7px; border: 1px solid #c4d4e1; border-radius: 0 0 10px 10px; background: #f5f8fb; }}
+    .order-card {{ --age-accent:#d88920; overflow: hidden; border: 1px solid #d1dce5; border-left: 5px solid var(--age-accent); border-radius: 9px; background: #fff; break-inside: avoid; }}
+    .order-card.is-snoozed {{ border-left-color: #7258a8; background: #fbf9ff; }}
+    .order-state {{ min-height: 30px; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid #e1e7ed; background: color-mix(in srgb, var(--age-accent) 9%, #fff); }}
+    .order-state.is-snoozed {{ background: #f0eafb; }}
+    .age-chip,.review-chip,.snooze-chip,.snooze-left {{ min-height: 21px; display: inline-flex; align-items: center; gap: 3px; border-radius: 999px; padding: 0 7px; font-size: 8px; font-weight: 950; }}
+    .age-chip {{ border: 1px solid color-mix(in srgb,var(--age-accent) 55%,#d8e0e7); color: var(--age-accent); background: #fff; }}
+    .review-chip {{ color: #8e5007; background: #fff2d9; }}
+    .snooze-chip,.snooze-left {{ color: #624694; background: #fff; border: 1px solid #cfbee7; }}
+    .snoozed-at {{ margin-left: auto; display: grid; justify-items: end; gap: 0; }}
+    .snoozed-at small {{ color: #826eaa; font-size: 7px; font-weight: 900; text-transform: uppercase; }}
+    .snoozed-at strong {{ color: #5e478b; font-size: 8.5px; }}
+    .order-header {{ min-height: 43px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 9px; border-bottom: 1px solid #e1e7ed; }}
+    .order-id {{ min-width: 0; display: flex; align-items: center; gap: 10px; }}
+    .order-id > span {{ display: grid; gap: 0; }}
+    .order-id small {{ color: #738697; font-size: 7px; font-weight: 950; text-transform: uppercase; }}
+    .order-id strong {{ color: #173e5e; font-size: 12px; }}
+    .order-id > b {{ min-width: 0; overflow: hidden; color: #617789; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }}
+    .bay-pill {{ flex: 0 0 auto; border: 1px solid #bfd0dd; border-radius: 999px; background: #f3f8fb; color: #355e7a; padding: 4px 8px; font-size: 8px; font-weight: 950; }}
+    .glass-ledger {{ padding: 6px 8px; }}
+    .glass-heading,.glass-line {{ display: grid; grid-template-columns: 62px minmax(210px,1fr) 78px 68px 78px; gap: 6px; align-items: center; }}
+    .glass-heading {{ min-height: 22px; padding: 3px 5px; color: #718393; font-size: 7px; font-weight: 950; letter-spacing: .05em; text-transform: uppercase; }}
+    .glass-line {{ min-height: 34px; padding: 4px 5px; border-top: 1px solid #e7edf2; }}
+    .glass-line > span {{ min-width: 0; display: grid; gap: 0; }}
+    .glass-line small {{ color: #7a8b99; font-size: 6.8px; font-weight: 900; text-transform: uppercase; }}
+    .glass-line strong {{ overflow: hidden; color: #294e68; font-size: 9px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }}
+    .glass-description b {{ overflow: hidden; color: #748695; font-size: 8px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }}
+    .missing-qty strong {{ color: #526a7d; }}
+    .glass-line.is-missing .missing-qty strong {{ color: #a44d16; }}
+    .line-status {{ width: fit-content; display: inline-flex !important; align-items: center; border: 1px solid #bcd8c4; border-radius: 999px; background: #eef8f1; color: #39714a !important; padding: 3px 6px; font-size: 7px !important; font-weight: 950 !important; }}
+    .glass-line.is-missing .line-status {{ border-color: #e0b5a9; background: #fff0ed; color: #a33e28 !important; }}
+    .order-summary {{ display: grid; grid-template-columns: minmax(170px,1fr) 92px 92px; gap: 6px; padding: 6px 8px; border-top: 1px solid #e1e7ed; background: #fafcfd; }}
+    .order-summary > span {{ display: grid; gap: 1px; }}
+    .order-summary small {{ color: #788998; font-size: 7px; font-weight: 900; text-transform: uppercase; }}
+    .order-summary strong {{ color: #294e68; font-size: 9px; }}
+    .order-summary .has-missing strong {{ color: #a44d16; }}
+    .investigation-row {{ min-height: 31px; display: grid; grid-template-columns: 18px auto minmax(150px,1fr); align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid #e1e7ed; }}
+    .verify-box {{ width: 16px; height: 16px; border: 2px solid #567087; border-radius: 4px; background: #fff; }}
+    .investigation-row > strong {{ color: #526b7e; font-size: 8px; }}
+    .notes-rule {{ min-height: 18px; border-bottom: 1px solid #8294a4; }}
+    .notes-rule small {{ color: #8a99a7; font-size: 7px; }}
+    .empty-state {{ min-height: 150px; display: grid; place-items: center; align-content: center; gap: 4px; color: #718597; text-align: center; }}
+    .empty-state strong {{ color: #345873; font-size: 14px; }}
+    .footer-note {{ display: flex; justify-content: space-between; gap: 14px; margin-top: 8px; color: #7b8c9b; font-size: 8px; font-weight: 750; }}
+    @media print {{ body {{ background: #fff; }} .toolbar {{ display:none; }} .sheet {{ width:100%; margin:0; padding:0; border:0; border-radius:0; box-shadow:none; }} }}
+  </style>
+</head>
+<body>
+  <div class="toolbar"><button type="button" onclick="window.print()">Print Investigation List</button></div>
+  <main class="sheet">
+    <header class="report-header">
+      <div class="logo-box"><img src="/static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260821-v0.357" alt="Barefoot & Company / Builders FirstSource" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><span class="logo-fallback">Barefoot &amp; Company</span></div>
+      <div class="title-block"><small>Indian Trail inventory control</small><h1>Old Bay Investigation List</h1><p>Print mirror of the Old Bays Control Center. Review each physical bay, verify the complete order, then record investigation notes before moving, clearing, or extending a snooze.</p></div>
+      <div><div class="inspection-box"><strong>Walkthrough verification</strong><span class="inspection-line"><span>Checked by</span><i></i></span><span class="inspection-line"><span>Date</span><i></i></span><span class="inspection-line"><span>Area / shift</span><i></i></span></div><div class="report-meta">Generated {esc(printed_at)}</div></div>
+    </header>
+    <section class="summary-grid">
+      <article class="summary-card"><b>{live_count}</b><strong>Live stale</strong><span>Needs review now</span></article>
+      <article class="summary-card is-snoozed"><b>{snoozed_count}</b><strong>Snoozed</strong><span>Temporarily paused</span></article>
+      <article class="summary-card"><b>{len(bay_groups)}</b><strong>Bays affected</strong><span>Physical locations</span></article>
+      <article class="summary-card"><b>{oldest_days}</b><strong>Oldest age</strong><span>{printed_order_count} old orders</span></article>
+    </section>
+    {''.join(bay_sections)}
+    <div class="footer-note"><span>Age colors deepen from orange to dark red; purple identifies an active snooze.</span><span>Delivery List Scanner · Old Bay Control Center</span></div>
+  </main>
+  {print_lifecycle_script(250)}
+</body>
+</html>"""
 
 
 def render_print_package(package: dict) -> str:
@@ -1894,7 +2176,12 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/indian-trail/stale-bays/print":
             if not self.require_permission("view_bays"):
                 return
-            body = render_stale_bay_report(STORE.get_stale_bay_orders(include_snoozed=True)).encode("utf-8")
+            params = parse_qs(parsed.query)
+            rows = filter_stale_bay_report_rows(
+                STORE.get_stale_bay_orders(include_snoozed=True),
+                params,
+            )
+            body = render_stale_bay_report(rows).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -2712,6 +2999,23 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.delete_bay_group(data, user["username"]))
                 return
 
+            if parsed.path == "/api/indian-trail/priority-intake":
+                user = self.require_permission("mark_sdi")
+                if not user:
+                    return
+                if str(data.get("requestId") or "").strip():
+                    self.send_json(STORE.update_priority_intake_request(data, user["username"]))
+                else:
+                    self.send_json(STORE.create_priority_intake_request(data, user["username"]))
+                return
+
+            if parsed.path == "/api/indian-trail/priority-intake/cancel":
+                user = self.require_permission("remove_sdi")
+                if not user:
+                    return
+                self.send_json(STORE.cancel_priority_intake_request(str(data.get("requestId") or ""), user["username"]))
+                return
+
             if parsed.path == "/api/indian-trail/mark-sdi":
                 user = self.require_permission("mark_sdi")
                 if not user:
@@ -2769,6 +3073,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.return_rack(data, user["username"]))
+                return
+
+            if parsed.path == "/api/racks/on-way":
+                user = self.require_permission("scan_racks")
+                if not user:
+                    return
+                self.send_json(STORE.mark_rack_on_way(data, user["username"]))
                 return
 
             if parsed.path == "/api/racks/not-on-way":

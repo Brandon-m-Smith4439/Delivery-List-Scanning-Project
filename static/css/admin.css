@@ -11722,3 +11722,146 @@ button.custom-select-trigger:hover:not(:disabled),
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* ========================================================================== */
+/* v0.335 Admin Action History pinned controls and owned result scrolling     */
+/* ========================================================================== */
+/* Match Rack History: the heading/search/filter controls stay visible while
+   only the event records own vertical overflow. This prevents wheel gestures
+   over records from moving the whole editor and keeps filtering controls in
+   reach during long audits. */
+#adminModalHistory.modal-action-history:not([hidden]) {
+  min-height: 0;
+  overflow: hidden !important;
+  display: grid !important;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: stretch;
+  overscroll-behavior: contain;
+}
+
+#adminModalHistory .modal-action-history-heading {
+  margin-bottom: 12px;
+}
+
+#adminModalHistory .modal-action-history-filters {
+  position: relative !important;
+  z-index: 2;
+  margin-bottom: 12px;
+  background: #fbfdff;
+}
+
+#adminModalHistory .modal-action-history-list {
+  min-height: 0;
+  max-height: none !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding-right: 6px;
+}
+
+
+/* ========================================================================== */
+/* v0.336 Admin modal visibility guard                                        */
+/* ========================================================================== */
+/* A later grid rule must never override the native hidden state. Keeping the
+   history panel out of layout prevents Edit Racks from opening as a split view. */
+#adminModalHistory[hidden] {
+  display: none !important;
+}
+
+/* ========================================================================== */
+/* v0.342 Action History event icon language                                  */
+/* ========================================================================== */
+.modal-action-history-icon.has-action-icon-v342 {
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .75), 0 3px 8px rgba(22, 48, 78, .08);
+}
+
+.modal-action-history-icon.has-action-icon-v342::before {
+  display: none !important;
+}
+
+.modal-action-history-icon.has-action-icon-v342 > svg {
+  width: 17px;
+  height: 17px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: translateY(7px);
+}
+
+.modal-action-history-icon.has-action-icon-v342.is-history {
+  border-color: #c9d9eb;
+  background: linear-gradient(180deg, #f7fbff 0%, #e7f0fa 100%);
+  color: #376b9d;
+}
+.modal-action-history-icon.has-action-icon-v342.is-success,
+.modal-action-history-icon.has-action-icon-v342.is-create {
+  border-color: #b7dbc7;
+  background: linear-gradient(180deg, #f6fff9 0%, #e0f4e8 100%);
+  color: #2f7d50;
+}
+.modal-action-history-icon.has-action-icon-v342.is-rollback {
+  border-color: #e2c37e;
+  background: linear-gradient(180deg, #fffdf5 0%, #f8ebc5 100%);
+  color: #8b6415;
+}
+.modal-action-history-icon.has-action-icon-v342.is-remove,
+.modal-action-history-icon.has-action-icon-v342.is-warning {
+  border-color: #e7b9ad;
+  background: linear-gradient(180deg, #fff8f5 0%, #f8e1da 100%);
+  color: #a54f36;
+}
+.modal-action-history-icon.has-action-icon-v342.is-edit {
+  border-color: #cdbfe5;
+  background: linear-gradient(180deg, #fcfaff 0%, #eee8f8 100%);
+  color: #6d57a0;
+}
+.modal-action-history-icon.has-action-icon-v342.is-move,
+.modal-action-history-icon.has-action-icon-v342.is-bay {
+  border-color: #b7d9dc;
+  background: linear-gradient(180deg, #f6ffff 0%, #e0f3f4 100%);
+  color: #247c83;
+}
+.modal-action-history-icon.has-action-icon-v342.is-scan {
+  border-color: #b7d5eb;
+  background: linear-gradient(180deg, #f5fbff 0%, #dfeef9 100%);
+  color: #236fa4;
+}
+.modal-action-history-icon.has-action-icon-v342.is-print {
+  border-color: #b8cce4;
+  background: linear-gradient(180deg, #f8fbff 0%, #e4edf8 100%);
+  color: #285d91;
+}
+.modal-action-history-icon.has-action-icon-v342.is-snooze {
+  border-color: #ccbde5;
+  background: linear-gradient(180deg, #fdfaff 0%, #eee6f8 100%);
+  color: #7559a6;
+}
+.modal-action-history-icon.has-action-icon-v342.is-security {
+  border-color: #d1c4df;
+  background: linear-gradient(180deg, #fdfbff 0%, #eee8f4 100%);
+  color: #6d557f;
+}
+.modal-action-history-icon.has-action-icon-v342.is-rack {
+  border-color: #c8d3df;
+  background: linear-gradient(180deg, #fbfcfd 0%, #e8edf2 100%);
+  color: #536c83;
+}
+
+/* v0.346 Priority intake Action History icon family. */
+.modal-action-history-icon.has-action-icon-v342.is-priority {
+  border-color: #d99b35;
+  background: linear-gradient(180deg, #fff5dc 0%, #f7dfaa 100%);
+  color: #8b5a08;
+}

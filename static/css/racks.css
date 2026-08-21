@@ -5036,25 +5036,28 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
 #operationsModal[data-kind="rack-history"] .packing-history-intro-v272 {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(250px, 340px);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+  gap: 18px;
   align-items: center;
-  padding: 17px 18px;
-  border: 1px solid #cbd9e8;
+  padding: 18px 20px;
+  border: 1px solid #bed0e2;
   border-radius: 16px;
-  background: #fff;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(19, 92, 255, .08), transparent 30%),
+    linear-gradient(135deg, #ffffff 0%, #f7fbff 100%);
+  box-shadow: 0 10px 26px rgba(12, 46, 82, .07);
 }
 
 .packing-history-page-summary-v272 {
-  min-height: 38px;
+  min-height: 42px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
-  border: 1px solid #d5e1eb;
+  padding: 9px 13px;
+  border: 1px solid #d0deeb;
   border-radius: 11px;
-  background: #f8fbfd;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f9fc 100%);
   color: #526b82;
   font-size: 12px;
   font-weight: 800;
@@ -5068,10 +5071,17 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
 }
 
 .packing-history-week-v272 {
-  border: 1px solid #cbd9e8;
+  overflow: hidden;
+  border: 1px solid #c4d5e5;
   border-radius: 14px;
   background: #fff;
-  box-shadow: 0 7px 18px rgba(20, 48, 84, .045);
+  box-shadow: 0 8px 22px rgba(20, 48, 84, .06);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.packing-history-week-v272[open] {
+  border-color: #9ebbd6;
+  box-shadow: 0 12px 28px rgba(20, 58, 96, .09);
 }
 
 .packing-history-week-v272 > summary {
@@ -5146,13 +5156,23 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
 #operationsModal[data-kind="rack-history"] .packing-history-row-v272 {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(150px, 1.2fr) minmax(105px, .72fr) minmax(145px, .95fr) minmax(120px, .8fr) minmax(105px, .72fr) auto;
-  gap: 10px;
+  grid-template-columns: minmax(210px, 1.35fr) minmax(105px, .72fr) minmax(145px, .95fr) minmax(120px, .8fr) minmax(105px, .72fr) auto;
+  gap: 11px;
   align-items: center;
-  padding: 11px 12px;
-  border: 1px solid #d8e3ee;
-  border-radius: 11px;
-  background: #fff;
+  padding: 12px 13px;
+  border: 1px solid #d4e0ec;
+  border-left: 4px solid #2a6ea5;
+  border-radius: 12px;
+  background: linear-gradient(110deg, #ffffff 0%, #ffffff 72%, #f8fbfe 100%);
+  box-shadow: 0 5px 14px rgba(13, 44, 78, .045);
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-row-v272:hover {
+  transform: translateY(-1px);
+  border-color: #adc4db;
+  border-left-color: #135cff;
+  box-shadow: 0 9px 20px rgba(13, 44, 78, .09);
 }
 
 #operationsModal[data-kind="rack-history"] .packing-history-row-v272 > div { min-width: 0; }
@@ -5703,27 +5723,7 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
 .rack-set-existing-rack-v308 i.open { background: #edf4ff; color: #315f96; }
 .rack-set-existing-empty-v308 { color: #687d91; font-size: 11px; font-weight: 750; }
 
-.rack-details-status-banner-v308 {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
-  padding: 11px 13px;
-  border: 1px solid #b9cadb;
-  border-left: 6px solid #4b77a5;
-  border-radius: 11px;
-  background: #f7fafc;
-}
-.rack-details-status-banner-v308 > span { width: 12px; height: 12px; flex: 0 0 12px; border-radius: 50%; background: #4b77a5; box-shadow: 0 0 0 5px rgba(75,119,165,.12); }
-.rack-details-status-banner-v308 > div { min-width: 0; display: grid; grid-template-columns: auto auto; gap: 1px 8px; align-items: baseline; }
-.rack-details-status-banner-v308 small { color: #687c90; font-size: 9px; font-weight: 900; letter-spacing: .07em; text-transform: uppercase; }
-.rack-details-status-banner-v308 strong { color: #173d65; font-size: 17px; font-weight: 950; }
-.rack-details-status-banner-v308 p { grid-column: 1 / -1; margin: 0; color: #5a7085; font-size: 11px; font-weight: 800; }
-.rack-details-status-banner-v308.complete { border-left-color: #2f9560; background: #f2fbf6; }
-.rack-details-status-banner-v308.complete > span { background: #2f9560; box-shadow: 0 0 0 5px rgba(47,149,96,.12); }
-.rack-details-status-banner-v308.in-transit { border-left-color: #d49116; background: #fff9eb; }
-.rack-details-status-banner-v308.in-transit > span { background: #d49116; box-shadow: 0 0 0 5px rgba(212,145,22,.14); }
-.rack-details-status-banner-v308.received { border-left-color: #23897f; background: #effaf8; }
+
 
 
 /* v0.311 Rack history scrolling, route placement, and reliable actions ------
@@ -5776,31 +5776,793 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
   right: 9px !important;
 }
 
-/* v0.313 Rack heading action geometry -----------------------------------------
-   Page changes now reset scroll after visibility changes in app.js. Keep the
-   actual button rectangle as the only hit target so stale pseudo hit-areas or
-   sticky-header overlap cannot create a visible dead band after navigation. */
-.racks-page > .page-heading {
-  overflow: visible !important;
-  overflow-anchor: none;
+/* ========================================================================== */
+/* v0.326 Individual-rack header status and lifecycle-safe actions            */
+/* ========================================================================== */
+
+#operationsModal[data-kind="rack-details"] .operations-modal-health-pill {
+  display: none !important;
 }
 
-.racks-page > .page-heading::before,
-.racks-page > .page-heading::after {
+#operationsModal[data-kind="rack-details"] .operations-modal-title-row-v326 {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-title-row-v326 h2 {
+  min-width: 0;
+}
+
+.operations-modal-rack-status-v326 {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, .3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18);
+}
+
+.operations-modal-rack-status-v326.open {
+  border-color: #9ec6f1;
+  background: #eaf4ff;
+  color: #235d98;
+}
+
+.operations-modal-rack-status-v326.complete {
+  border-color: #8bd0a8;
+  background: #e9f8ef;
+  color: #256d43;
+}
+
+.operations-modal-rack-status-v326.in-transit {
+  border-color: #edc86c;
+  background: #fff3d9;
+  color: #865900;
+}
+
+.operations-modal-rack-status-v326.received {
+  border-color: #84d1ca;
+  background: #e8f8f6;
+  color: #176e68;
+}
+
+.operations-modal-rack-status-v326.empty {
+  border-color: #c5cfdb;
+  background: #eef2f6;
+  color: #5b6b7d;
+}
+
+#operationsModal[data-kind="rack-details"] #operationsModalBody,
+#operationsModal[data-kind="rack-details"] .rack-details-modal-list {
+  overscroll-behavior: contain !important;
+}
+
+/* ========================================================================== */
+/* v0.327 Rack modal lifecycle polish and status-color parity                 */
+/* ========================================================================== */
+
+/* Keep the rack title and lifecycle cell on one row whenever space allows.
+   The title may wrap/shrink first; the status cell sizes to its own content. */
+#operationsModal[data-kind="rack-details"] .operations-modal-title-row-v326 {
+  max-width: 100%;
+  flex-wrap: nowrap;
+  gap: 12px;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-title-row-v326 h2 {
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326 {
+  width: fit-content;
+  min-width: 92px;
+  max-width: 100%;
+  min-height: 30px;
+  display: inline-grid;
+  grid-template-columns: 8px minmax(0, max-content);
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  font-size: clamp(9px, .72vw, 10px);
+  font-weight: 950;
+  line-height: 1.05;
+  letter-spacing: .045em;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .82),
+    0 4px 12px rgba(10, 31, 58, .12);
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* These values intentionally match .rack-board-state-v307 on the Rack page. */
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.open {
+  border-color: #e5c47e;
+  background: #fff8e9;
+  color: #8b5b07;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.complete {
+  border-color: #9bc9a9;
+  background: #eff9f2;
+  color: #246b3c;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.in-transit {
+  border-color: #94b9de;
+  background: #eef6ff;
+  color: #235f9a;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.received {
+  border-color: #8ec8c1;
+  background: #edf9f7;
+  color: #236b65;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.empty {
+  border-color: #cbd5df;
+  background: #f5f7f9;
+  color: #667789;
+}
+
+@media (max-width: 620px) {
+  #operationsModal[data-kind="rack-details"] .operations-modal-title-row-v326 {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  #operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326 {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+  }
+}
+
+
+
+/* ========================================================================== */
+/* v0.328 Rack-set visual identity and glanceable lifecycle status            */
+/* ========================================================================== */
+#operationsModal[data-kind="rack-details"] {
+  --rack-modal-accent: hsl(var(--rack-set-hue, 211) 48% 42%);
+  border-color: color-mix(in srgb, var(--rack-modal-accent) 72%, #17344f) !important;
+  box-shadow:
+    0 30px 90px rgba(5, 25, 52, .34),
+    0 0 0 2px color-mix(in srgb, var(--rack-modal-accent) 28%, transparent) !important;
+}
+
+#operationsModal[data-kind="rack-details"] > .operations-modal-heading {
+  border-bottom-color: color-mix(in srgb, var(--rack-modal-accent) 62%, #102a48) !important;
+  background:
+    radial-gradient(circle at 88% -20%, color-mix(in srgb, var(--rack-modal-accent) 65%, white 10%), transparent 36%),
+    linear-gradient(118deg,
+      color-mix(in srgb, var(--rack-modal-accent) 58%, #102943) 0%,
+      color-mix(in srgb, var(--rack-modal-accent) 76%, #17385a) 58%,
+      color-mix(in srgb, var(--rack-modal-accent) 60%, #0d2949) 100%) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-visual-icon {
+  border-color: color-mix(in srgb, var(--rack-modal-accent) 44%, white) !important;
+  background: color-mix(in srgb, var(--rack-modal-accent) 22%, rgba(255, 255, 255, .16)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .28),
+    0 9px 22px color-mix(in srgb, var(--rack-modal-accent) 28%, transparent) !important;
+}
+
+#operationsModal[data-kind="rack-details"] #operationsModalBody {
+  background:
+    radial-gradient(circle at 96% 0%, color-mix(in srgb, var(--rack-modal-accent) 13%, transparent), transparent 28%),
+    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--rack-modal-accent) 8%, transparent), transparent 32%),
+    linear-gradient(180deg, #f7f9fc 0%, #edf2f7 100%) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .rack-modal-date-group > summary {
+  border-left-color: var(--rack-modal-accent) !important;
+  background: linear-gradient(180deg, #fff 0%, color-mix(in srgb, var(--rack-modal-accent) 7%, white) 100%) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-rack-tabs > button.is-active {
+  border-color: color-mix(in srgb, var(--rack-modal-accent) 70%, #214568) !important;
+  background: color-mix(in srgb, var(--rack-modal-accent) 11%, white) !important;
+  color: color-mix(in srgb, var(--rack-modal-accent) 78%, #102b47) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326 {
+  min-width: 152px;
+  min-height: 48px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 9px;
+  row-gap: 1px;
+  justify-items: start;
+  padding: 7px 13px;
+  border-width: 2px;
+  border-radius: 11px;
+  white-space: normal;
+  text-transform: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .86),
+    0 7px 18px rgba(6, 33, 66, .18);
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326::before {
+  grid-row: 1 / -1;
+  align-self: center;
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 13%, transparent);
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326 small {
+  color: currentColor;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: .07em;
+  opacity: .72;
+  text-transform: uppercase;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326 strong {
+  color: currentColor;
+  font-size: clamp(13px, 1vw, 16px);
+  font-weight: 1000;
+  line-height: 1.05;
+  letter-spacing: -.015em;
+}
+
+@media (max-width: 620px) {
+  #operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326 {
+    min-width: 132px;
+    min-height: 44px;
+  }
+}
+
+
+/* v0.328 Rack lifecycle is visible from the whole header, not only the badge. */
+#operationsModal[data-kind="rack-details"] {
+  --rack-lifecycle-accent: #667789;
+}
+
+#operationsModal[data-kind="rack-details"][data-rack-status="open"] { --rack-lifecycle-accent: #8b5b07; }
+#operationsModal[data-kind="rack-details"][data-rack-status="complete"] { --rack-lifecycle-accent: #246b3c; }
+#operationsModal[data-kind="rack-details"][data-rack-status="in-transit"] { --rack-lifecycle-accent: #235f9a; }
+#operationsModal[data-kind="rack-details"][data-rack-status="received"] { --rack-lifecycle-accent: #236b65; }
+#operationsModal[data-kind="rack-details"][data-rack-status="empty"] { --rack-lifecycle-accent: #667789; }
+
+#operationsModal[data-kind="rack-details"] > .operations-modal-heading {
+  box-shadow: inset 0 -5px 0 var(--rack-lifecycle-accent) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326 {
+  min-width: 164px;
+  outline: 3px solid color-mix(in srgb, currentColor 10%, transparent);
+  outline-offset: 1px;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326 strong {
+  font-size: clamp(15px, 1.15vw, 18px);
+}
+
+/* ========================================================================== */
+/* v0.329 Rack header route, exact custom colors, and complete icon parity    */
+/* ========================================================================== */
+/* The selected rack-set color is the canonical accent after creation. The
+   surrounding tints remain subtle, but the visible icon/border anchor uses the
+   exact saved hex value instead of a label-derived approximation. */
+.racks-page .rack-set-card[style*="--rack-set-accent"]:hover {
+  border-color: var(--rack-set-accent) !important;
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--rack-set-accent) 20%, transparent) !important;
+}
+
+.racks-page .rack-set-card[style*="--rack-set-accent"].is-selected {
+  border-color: var(--rack-set-accent) !important;
+  background: color-mix(in srgb, var(--rack-set-accent) 10%, white) !important;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--rack-set-accent) 13%, transparent),
+    0 13px 28px color-mix(in srgb, var(--rack-set-accent) 18%, transparent) !important;
+}
+
+body .rack-set-card[style*="--rack-set-accent"] .rack-set-icon {
+  border-color: color-mix(in srgb, var(--rack-set-accent) 38%, #cbd8e7) !important;
+  background: color-mix(in srgb, var(--rack-set-accent) 10%, white) !important;
+  color: var(--rack-set-icon-color, var(--rack-set-accent)) !important;
+}
+
+/* These five library choices already rendered correctly in the create/edit
+   picker. Give the Rack Overview card and individual-rack GUI the same artwork
+   so the saved selection cannot fall back to the generic rack glyph. */
+body .rack-set-card[data-rack-icon="glasscart"] .rack-set-icon::before,
+body .operations-modal-panel[data-rack-icon="glasscart"] .operations-modal-visual-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 2h2l5.45 13H21v2h-2.2a3 3 0 0 1-5.6 0h-2.4a3 3 0 0 1-5.6 0H3v-2h2.55L11 2Zm1 5.25L8.75 15h6.5L12 7.25ZM7.5 17.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z'/%3E%3C/svg%3E") !important;
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 2h2l5.45 13H21v2h-2.2a3 3 0 0 1-5.6 0h-2.4a3 3 0 0 1-5.6 0H3v-2h2.55L11 2Zm1 5.25L8.75 15h6.5L12 7.25ZM7.5 17.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z'/%3E%3C/svg%3E") !important;
+}
+
+body .rack-set-card[data-rack-icon="pallet"] .rack-set-icon::before,
+body .operations-modal-panel[data-rack-icon="pallet"] .operations-modal-visual-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7h18v3H3V7Zm1 5h4v4h8v-4h4v6H4v-6Zm-1 8h18v2H3v-2Z'/%3E%3C/svg%3E") !important;
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7h18v3H3V7Zm1 5h4v4h8v-4h4v6H4v-6Zm-1 8h18v2H3v-2Z'/%3E%3C/svg%3E") !important;
+}
+
+body .rack-set-card[data-rack-icon="dolly"] .rack-set-icon::before,
+body .operations-modal-panel[data-rack-icon="dolly"] .operations-modal-visual-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8 3h3v12h7v2H9V5H8V3Zm2 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm8-9h3v6h-3V9Z'/%3E%3C/svg%3E") !important;
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8 3h3v12h7v2H9V5H8V3Zm2 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm8-9h3v6h-3V9Z'/%3E%3C/svg%3E") !important;
+}
+
+body .rack-set-card[data-rack-icon="crate"] .rack-set-icon::before,
+body .operations-modal-panel[data-rack-icon="crate"] .operations-modal-visual-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5h18v15H3V5Zm3 3v2h12V8H6Zm0 5v4h3v-4H6Zm5 0v4h7v-4h-7Z'/%3E%3C/svg%3E") !important;
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5h18v15H3V5Zm3 3v2h12V8H6Zm0 5v4h3v-4H6Zm5 0v4h7v-4h-7Z'/%3E%3C/svg%3E") !important;
+}
+
+body .rack-set-card[data-rack-icon="warehouse"] .rack-set-icon::before,
+body .operations-modal-panel[data-rack-icon="warehouse"] .operations-modal-visual-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m2 9 10-6 10 6v12H2V9Zm3 2v7h3v-5h8v5h3v-7l-7-4.2L5 11Zm5 4v3h4v-3h-4Z'/%3E%3C/svg%3E") !important;
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m2 9 10-6 10 6v12H2V9Zm3 2v7h3v-5h8v5h3v-7l-7-4.2L5 11Zm5 4v3h4v-3h-4Z'/%3E%3C/svg%3E") !important;
+}
+
+/* Force status copy to the maintained lifecycle foreground colors. This wins
+   over generic white/light-blue heading typography without changing the status
+   palette used on the Rack Overview page. */
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.open,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.open :is(small, strong) { color: #8b5b07 !important; }
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.complete,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.complete :is(small, strong) { color: #246b3c !important; }
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.in-transit,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.in-transit :is(small, strong) { color: #235f9a !important; }
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.received,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.received :is(small, strong) { color: #236b65 !important; }
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.empty,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-status-v326.empty :is(small, strong) { color: #667789 !important; }
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329 {
+  --rack-route-border: #cbd5df;
+  --rack-route-background: #f5f7f9;
+  --rack-route-text: #667789;
+  min-width: 76px;
+  min-height: 48px;
+  display: inline-grid;
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-items: start;
+  flex: 0 0 auto;
+  gap: 2px;
+  border: 2px solid var(--rack-route-border);
+  border-radius: 11px;
+  background: var(--rack-route-background);
+  padding: 7px 13px;
+  color: var(--rack-route-text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    0 7px 18px rgba(6, 33, 66, .12);
+}
+
+/* Route identity is independent from rack material/set color. Match the route
+   palette already used on Rack Overview destination pills. */
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329.is-indian-trail {
+  --rack-route-border: #9bd1aa;
+  --rack-route-background: #ecf8ef;
+  --rack-route-text: #176b2d;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329.is-cpu {
+  --rack-route-border: #cbb5f3;
+  --rack-route-background: #f4ecff;
+  --rack-route-text: #56339a;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329.is-greenville {
+  --rack-route-border: #99d7df;
+  --rack-route-background: #e5fbfd;
+  --rack-route-text: #0a6f79;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329.is-dtc {
+  --rack-route-border: #f4b6d3;
+  --rack-route-background: #fff0f7;
+  --rack-route-text: #a02a68;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329 small {
+  color: inherit !important;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: .07em;
+  opacity: .72;
+  text-transform: uppercase;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329 strong {
+  color: inherit !important;
+  font-size: clamp(15px, 1.15vw, 18px);
+  font-weight: 1000;
+  line-height: 1.05;
+  letter-spacing: -.015em;
+}
+
+@media (max-width: 620px) {
+  #operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329 {
+    min-width: 70px;
+    min-height: 44px;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.332 Selected-set identity, rack route stability, and print preview polish */
+/* ========================================================================== */
+/* Keep the Rack Overview heading artwork inside its rounded title card. The
+   decorative circle previously escaped because an older hit-test workaround
+   changed this heading to overflow: visible. */
+.racks-page > .page-heading {
+  overflow: hidden !important;
+}
+
+/* Carry the selected rack-set/icon color into the workspace that owns the
+   individual rack cards. This is intentionally restrained so lifecycle colors
+   on each rack remain the primary status signal. */
+.racks-page .rack-center-panel[style*="--selected-rack-set-accent"] {
+  border-color: color-mix(in srgb, var(--selected-rack-set-accent) 26%, #cbd9e8) !important;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--selected-rack-set-accent) 5%, white) 0%,
+      #ffffff 32%,
+      #ffffff 100%);
+}
+
+.racks-page .rack-center-panel[style*="--selected-rack-set-accent"] .rack-center-heading {
+  border-bottom-color: color-mix(in srgb, var(--selected-rack-set-accent) 22%, #d8e2ee) !important;
+  background:
+    linear-gradient(110deg,
+      color-mix(in srgb, var(--selected-rack-set-accent) 10%, white) 0%,
+      rgba(255, 255, 255, .96) 48%,
+      color-mix(in srgb, var(--selected-rack-set-accent) 4%, white) 100%);
+}
+
+.racks-page .rack-center-panel[style*="--selected-rack-set-accent"] .rack-overview-card-grid {
+  background:
+    radial-gradient(circle at 92% 8%,
+      color-mix(in srgb, var(--selected-rack-set-accent) 18%, transparent) 0%,
+      transparent 36%),
+    linear-gradient(145deg,
+      color-mix(in srgb, var(--selected-rack-set-accent) 10%, #f8fbff) 0%,
+      #f8fbff 48%,
+      color-mix(in srgb, var(--selected-rack-set-accent) 5%, #f8fbff) 100%);
+}
+
+/* Route is a business-route signal, never a rack-material signal. Use direct
+   colors as the final owner so a later modal/header rule cannot gray out IT. */
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329.is-indian-trail {
+  border-color: #9bd1aa !important;
+  background: #ecf8ef !important;
+  color: #176b2d !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329.is-cpu {
+  border-color: #cbb5f3 !important;
+  background: #f4ecff !important;
+  color: #56339a !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329.is-greenville {
+  border-color: #99d7df !important;
+  background: #e5fbfd !important;
+  color: #0a6f79 !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-route-v329.is-dtc {
+  border-color: #f4b6d3 !important;
+  background: #fff0f7 !important;
+  color: #a02a68 !important;
+}
+
+/* Historical packing-list preview is a document workspace, not a plain iframe
+   wrapper. Give it the same visual hierarchy as the maintained rack dialogs. */
+.packing-snapshot-preview-dialog-v272 {
+  border: 1px solid #aebfd3 !important;
+  border-radius: 18px !important;
+  background: #f4f7fb !important;
+  box-shadow: 0 28px 72px rgba(4, 24, 51, .28) !important;
+  overflow: hidden;
+}
+
+.packing-snapshot-preview-dialog-v272 > header {
+  min-height: 86px;
+  padding: 16px 20px !important;
+  border-bottom: 4px solid #11857f;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(255,255,255,.12), transparent 28%),
+    linear-gradient(120deg, #071f3f 0%, #0a3f61 62%, #0b6f70 100%) !important;
+}
+
+.packing-snapshot-preview-dialog-v272 > header h2 {
+  font-size: 24px !important;
+  letter-spacing: -.02em;
+}
+
+.packing-snapshot-preview-frame-v272 {
+  padding: 14px !important;
+  background:
+    linear-gradient(180deg, #e9eff6 0%, #f4f7fb 100%) !important;
+}
+
+.packing-snapshot-preview-frame-v272 iframe {
+  border: 1px solid #c8d4e2 !important;
+  border-radius: 12px !important;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(16, 43, 75, .12);
+}
+
+.packing-snapshot-preview-dialog-v272 > footer {
+  padding: 12px 18px !important;
+  border-top: 1px solid #d3dde8;
+  background: #fff !important;
+}
+
+
+/* ========================================================================== */
+/* v0.333 Packing-list history clarity and live-search focus                  */
+/* ========================================================================== */
+.packing-history-intro-copy-v333 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.packing-history-intro-copy-v333 > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.packing-history-intro-copy-v333 strong {
+  color: #0c3159;
+  font-size: 16px;
+  line-height: 1.15;
+}
+
+.packing-history-intro-copy-v333 span {
+  color: #647a90;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.packing-history-intro-icon-v333,
+.packing-history-document-icon-v333 {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #0d3157 0%, #176b9b 100%);
+  box-shadow: 0 8px 18px rgba(11, 49, 87, .18);
+}
+
+.packing-history-intro-icon-v333 {
+  width: 40px;
+  height: 40px;
+  margin-left: -5px;
+}
+
+.packing-history-intro-icon-v333 > svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  overflow: visible;
+  transform: translate(1px, 7px);
+}
+
+.packing-history-document-icon-v333 {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+}
+
+.packing-history-document-icon-v333::before {
+  content: "";
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 2h8l4 4v16H6V2Zm7 1.8V7h3.2L13 3.8ZM8 10v2h8v-2H8Zm0 4v2h8v-2H8Zm0 4v2h6v-2H8Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 2h8l4 4v16H6V2Zm7 1.8V7h3.2L13 3.8ZM8 10v2h8v-2H8Zm0 4v2h8v-2H8Zm0 4v2h6v-2H8Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.packing-history-query-chip-v333 {
+  display: inline-flex;
+  align-items: center;
+  max-width: min(430px, 100%);
+  margin-right: 7px;
+  padding: 4px 8px;
+  border: 1px solid #b8cfe5;
+  border-radius: 999px;
+  background: #edf6ff;
+  color: #245a8a;
+  font-size: 10px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.packing-history-day-v272 {
+  padding: 8px;
+  border: 1px solid #dce6ef;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .72);
+}
+
+.packing-history-day-v272 > header {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  justify-content: stretch;
+  padding: 3px 6px 7px;
+}
+
+.packing-history-day-marker-v333 {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #14857f;
+  box-shadow: 0 0 0 4px rgba(20, 133, 127, .11);
+}
+
+.packing-history-snapshot-identity-v333 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 13px;
+  align-items: center;
+}
+
+.packing-history-document-icon-v333 {
+  transform: translateX(-3px);
+}
+
+.packing-history-rack-v272 {
+  min-width: 0;
+}
+
+.packing-history-rack-v272 small {
+  margin-bottom: 2px;
+  color: #668096 !important;
+  font-size: 9px !important;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.packing-history-rack-v272 strong {
+  color: #123b65 !important;
+  font-size: 14px !important;
+  line-height: 1.12;
+}
+
+.packing-history-rack-v272 span {
+  display: block;
+  margin-top: 3px;
+  color: #6a7d91;
+  font-size: 10px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packing-history-meta-cell-v333 {
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 1px solid #e2e9f1;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-meta-cell-v333 small {
+  color: #7890a5;
+  font-size: 9px;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+#operationsModal[data-kind="rack-history"] .packing-history-meta-cell-v333 strong {
+  margin-top: 2px;
+  color: #1a3c5d;
+  font-size: 11px;
+}
+
+@media (max-width: 1040px) {
+  #operationsModal[data-kind="rack-history"] .packing-history-row-v272 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .packing-history-snapshot-identity-v333 {
+    grid-column: 1 / -1;
+  }
+
+  .packing-history-meta-cell-v333 {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  #operationsModal[data-kind="rack-history"] .packing-history-intro-v272 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+}
+
+
+/* ========================================================================== */
+/* v0.337 Packing-history badge alignment and Rack heading hit-target stability */
+/* ========================================================================== */
+/* Rack Overview action buttons keep their real visible rectangle as the only
+   hit target. JS repairs the rare retained-scroll overlap after async refreshes
+   and modal transitions, so no click forwarding or pseudo-element hit areas are
+   needed here. */
+#racksPage,
+#racksPage > .page-heading,
+#racksPage .rack-grid {
+  overflow-anchor: none !important;
+}
+
+#racksPage > .page-heading {
+  overflow: hidden !important;
+}
+
+#racksPage > .page-heading::before,
+#racksPage > .page-heading::after {
   pointer-events: none !important;
 }
 
-.racks-page .rack-heading-actions,
-.racks-page .rack-create-actions {
+#racksPage .rack-heading-actions,
+#racksPage .rack-create-actions {
   position: relative !important;
   z-index: 3 !important;
   overflow: visible !important;
   pointer-events: auto !important;
+  isolation: isolate;
 }
 
-.racks-page .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn) {
+#racksPage .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn) {
   position: relative !important;
-  z-index: 4 !important;
+  z-index: 1 !important;
   min-height: 36px !important;
   height: 36px !important;
   padding: 0 12px !important;
@@ -5810,27 +6572,579 @@ details.rack-manager-group-v272[open] .rack-manager-expand-hint-v272 i::before {
   touch-action: manipulation;
 }
 
-.racks-page .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn)::before,
-.racks-page .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn)::after {
+#racksPage .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn)::before,
+#racksPage .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn)::after {
   content: none !important;
   pointer-events: none !important;
 }
 
 
-
-/* v0.314 Rack heading action hit-test stabilization -------------------------
-   Rack data refreshes asynchronously after page entry. Disable scroll anchoring
-   on this page so the sticky application header cannot reclaim a few pixels of
-   the heading after the first paint. app.js also verifies the geometry after
-   the refresh and forwards clicks that land inside either visible action box. */
-#racksPage,
-#racksPage > .page-heading,
-#racksPage .rack-grid {
-  overflow-anchor: none !important;
+/* ========================================================================== */
+/* v0.340 Individual-rack lifecycle rollback actions                           */
+/* ========================================================================== */
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340 {
+  min-height: 42px !important;
+  height: 42px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  overflow: hidden;
+  padding: 8px 14px !important;
+  border-radius: 10px !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  letter-spacing: .01em !important;
+  text-shadow: none !important;
+  cursor: pointer;
+  transition: transform 130ms ease, filter 130ms ease, box-shadow 130ms ease, border-color 130ms ease !important;
 }
 
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340 > svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340 > span {
+  pointer-events: none;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340.is-uncomplete {
+  border: 1px solid #a97820 !important;
+  border-bottom-color: #805912 !important;
+  background: linear-gradient(180deg, #fff9e9 0%, #f5dfad 52%, #e7c777 100%) !important;
+  color: #65450d !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.72), 0 3px 0 #b68c3c, 0 8px 15px rgba(123, 87, 22, .15) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340.is-uncomplete:hover,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340.is-uncomplete:focus-visible {
+  border-color: #8f6418 !important;
+  background: linear-gradient(180deg, #fffdf4 0%, #f8e7bd 52%, #edcf83 100%) !important;
+  color: #583a08 !important;
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.82), 0 4px 0 #ad812f, 0 11px 19px rgba(123, 87, 22, .20) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340.is-not-on-way {
+  border: 1px solid #a94e36 !important;
+  border-bottom-color: #803522 !important;
+  background: linear-gradient(180deg, #fff1eb 0%, #f4bea9 50%, #e89273 100%) !important;
+  color: #6f2d1c !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.68), 0 3px 0 #ad5d45, 0 8px 15px rgba(133, 62, 40, .16) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340.is-not-on-way:hover,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340.is-not-on-way:focus-visible {
+  border-color: #8c3e2a !important;
+  background: linear-gradient(180deg, #fff7f3 0%, #f7c9b8 50%, #ed9f82 100%) !important;
+  color: #612415 !important;
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.78), 0 4px 0 #a85038, 0 11px 19px rgba(133, 62, 40, .21) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-secondary-v340:active {
+  transform: translateY(2px) !important;
+  filter: brightness(.97);
+}
+
+/* ========================================================================== */
+/* v0.341 Rack action icons and lifecycle hover ownership                     */
+/* ========================================================================== */
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341 {
+  -webkit-text-fill-color: currentColor !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341:hover:not(:disabled),
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341:focus-visible:not(:disabled) {
+  text-shadow: none !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341.is-uncomplete,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341.is-uncomplete:hover:not(:disabled),
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341.is-uncomplete:focus-visible:not(:disabled) {
+  border-color: #8f6418 !important;
+  border-bottom-color: #74500f !important;
+  background-color: #f1d38b !important;
+  background-image: linear-gradient(180deg, #fffdf4 0%, #f8e7bd 50%, #e9c96f 100%) !important;
+  color: #593a08 !important;
+  -webkit-text-fill-color: #593a08 !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341.is-not-on-way,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341.is-not-on-way:hover:not(:disabled),
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341.is-not-on-way:focus-visible:not(:disabled) {
+  border-color: #8c3e2a !important;
+  border-bottom-color: #71301f !important;
+  background-color: #eca489 !important;
+  background-image: linear-gradient(180deg, #fff7f3 0%, #f6c8b7 49%, #eb987a 100%) !important;
+  color: #612415 !important;
+  -webkit-text-fill-color: #612415 !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341:hover:not(:disabled),
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341:focus-visible:not(:disabled) {
+  transform: translateY(-1px) !important;
+  filter: saturate(1.03) brightness(1.02) !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341 *,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341:hover:not(:disabled) *,
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-lifecycle-action-v341:focus-visible:not(:disabled) * {
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+.rack-modal-action-icon-v341,
+.rack-page-action-v341 > svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-modal-state-action-v341 {
+  gap: 8px !important;
+}
+
+#operationsModal[data-kind="rack-details"] .operations-modal-rack-actions > .rack-modal-state-action-v341 > span,
+.rack-page-action-v341 > span {
+  pointer-events: none;
+}
+
+#racksPage .rack-create-actions > .rack-page-action-v341 {
+  gap: 8px !important;
+}
+
+/* ========================================================================== */
+/* v0.342 Rack lifecycle icon continuity                                      */
+/* ========================================================================== */
+.rack-card-actions > .rack-card-lifecycle-action-v342 {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 7px !important;
+}
+
+.rack-card-actions > .rack-card-lifecycle-action-v342 > svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.rack-card-actions > .rack-card-lifecycle-action-v342 > span {
+  pointer-events: none;
+}
+
+/* ========================================================================== */
+/* v0.344 rack selector lifecycle and route cues                              */
+/* ========================================================================== */
+.rack-select-status-empty { --rack-select-status: #8795a4; --rack-select-status-soft: #f0f3f6; }
+.rack-select-status-open { --rack-select-status: #c78618; --rack-select-status-soft: #fff6df; }
+.rack-select-status-complete { --rack-select-status: #2d8a57; --rack-select-status-soft: #eaf7ef; }
+.rack-select-status-in-transit { --rack-select-status: #3479bd; --rack-select-status-soft: #eaf3fb; }
+.rack-select-status-received { --rack-select-status: #218b8b; --rack-select-status-soft: #e7f7f6; }
+
+.rack-select-route-unassigned { --rack-select-route: #a7b0b9; --rack-select-route-soft: #f4f5f6; }
+.rack-select-route-indian-trail { --rack-select-route: #3a915e; --rack-select-route-soft: #eef8f1; }
+.rack-select-route-cpu { --rack-select-route: #7950b7; --rack-select-route-soft: #f3eefb; }
+.rack-select-route-dtc { --rack-select-route: #c65371; --rack-select-route-soft: #fceff3; }
+.rack-select-route-greenville { --rack-select-route: #188b8f; --rack-select-route-soft: #eaf8f8; }
+
+.custom-select-trigger[class*="rack-select-status-"],
+.custom-select-option[class*="rack-select-status-"],
+.rack-transfer-option-v344,
+.rack-transfer-combobox-trigger[class*="rack-select-status-"] {
+  border-left: 4px solid var(--rack-select-status, #8795a4) !important;
+  border-right: 4px solid var(--rack-select-route, #a7b0b9) !important;
+  background:
+    linear-gradient(90deg,
+      var(--rack-select-status-soft, #f0f3f6) 0%,
+      #fff 32%,
+      #fff 68%,
+      var(--rack-select-route-soft, #f4f5f6) 100%) !important;
+}
+
+.custom-select-trigger[class*="rack-select-status-"]:hover:not(:disabled),
+.custom-select-trigger[class*="rack-select-status-"]:focus-visible,
+.custom-select-option[class*="rack-select-status-"].is-highlighted:not(:disabled),
+.rack-transfer-option-v344:hover:not(:disabled),
+.rack-transfer-option-v344:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--rack-select-status, #8795a4) 24%, transparent),
+    0 6px 16px rgba(22, 54, 84, .10) !important;
+}
+
+.custom-select-option[class*="rack-select-status-"] {
+  position: relative;
+  margin: 2px 5px;
+  border-top: 1px solid #e4ebf1 !important;
+  border-bottom: 1px solid #e4ebf1 !important;
+  border-radius: 8px;
+}
+
+.rack-transfer-option-v344 {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-top: 1px solid #e2e9f0;
+  border-bottom: 1px solid #e2e9f0;
+  border-radius: 8px;
+  color: #183b5c;
+  font-weight: 850;
+  text-align: left;
+}
+
+.rack-transfer-combobox-menu .rack-transfer-option-v344 + .rack-transfer-option-v344 {
+  margin-top: 5px;
+}
+
+
+/* ========================================================================== */
+/* v0.345 Rack selector grouping, visible dropdown cues, and history alignment */
+/* ========================================================================== */
+.custom-select-option[class*="rack-select-status-"] {
+  grid-template-columns: auto minmax(0, 1fr) auto auto !important;
+  column-gap: 8px !important;
+}
+
+.rack-select-option-cues-v345 {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 34px;
+}
+
+.rack-select-option-status-v345 {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border: 2px solid var(--rack-select-status, #8795a4);
+  border-radius: 999px;
+  background: var(--rack-select-status-soft, #f0f3f6);
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px color-mix(in srgb, var(--rack-select-status, #8795a4) 28%, transparent);
+}
+
+.rack-select-option-route-v345 {
+  min-width: 27px;
+  padding: 3px 5px;
+  border: 1px solid var(--rack-select-route, #a7b0b9);
+  border-radius: 999px;
+  background: var(--rack-select-route-soft, #f4f5f6);
+  color: var(--rack-select-route, #6d7781);
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
+}
+
+.custom-select-group {
+  margin-top: 6px;
+  padding: 7px 10px 4px !important;
+  color: #577086 !important;
+  font-size: 9px !important;
+  font-weight: 950 !important;
+  letter-spacing: .08em !important;
+  text-transform: uppercase !important;
+}
+
+.rack-transfer-group-v345 + .rack-transfer-group-v345 {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid #d8e2eb;
+}
+
+.rack-transfer-group-label-v345 {
+  padding: 0 6px 5px;
+  color: #60788e;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.rack-transfer-option-v345 {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.rack-transfer-option-cues-v345 {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Rack History uses the shared action icon but its row baseline is already lower.
+   Cancel only the global +7px optical shift inside this one GUI. */
+#operationsModal[data-kind="rack-history"] .rack-history-event-row .modal-action-history-icon.has-action-icon-v342 > svg {
+  transform: translateY(0) !important;
+}
+
+/* ========================================================================== */
+/* v0.347 rack transfer polish + route-as-cue selector clarity                 */
+/* ========================================================================== */
+.rack-transfer-dialog {
+  border: 1px solid #b9d1e3;
+  box-shadow: 0 24px 62px rgba(18, 47, 74, .24);
+}
+
+.rack-transfer-dialog-copy::before {
+  content: "";
+  display: block;
+  width: 42px;
+  height: 4px;
+  margin-bottom: 9px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #176fb4, #56a4dc);
+}
+
+.rack-transfer-combobox-trigger {
+  min-height: 42px;
+  border-color: #9bbbd2;
+  background: linear-gradient(180deg, #fff 0%, #f4f9fd 100%);
+  font-weight: 900;
+}
+
+.rack-transfer-combobox-menu {
+  border-color: #b6ccdc;
+  box-shadow: 0 14px 34px rgba(21, 61, 94, .18);
+}
+
+.rack-transfer-dialog-actions-v347 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.rack-transfer-dialog-actions-v347 svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rack-transfer-continue-v347 {
+  min-width: 118px;
+}
+
+.rack-transfer-cancel-v347:hover {
+  border-color: #9cb2c4 !important;
+  background: #eef3f7 !important;
+  color: #334c61 !important;
+}
+
+
+/* v0.348 Display-name-first rack selectors and consistent menu sizing */
+.custom-select-option[class*="rack-select-status-"]{min-height:44px}.custom-select-option[class*="rack-select-status-"] .custom-select-option-label{font-size:13px;font-weight:800;letter-spacing:.005em}.rack-transfer-combobox-trigger,.rack-transfer-combobox-menu{width:min(430px,calc(100vw - 40px))}.rack-transfer-option-copy-v345{font-size:13px;font-weight:800}.rack-summary-main strong{font-size:16px}.rack-summary-main small{font-weight:800;letter-spacing:.04em;color:#6d7f8b}
+
+
+/* v0.349 rack-set identity cue for shared operational selectors */
+.custom-select-option[data-rack-color],
+.custom-select-option[class*="rack-select-status-"] {
+  --rack-option-set-color: var(--rack-location-color, #7890a3);
+}
+
+.custom-select-option[class*="rack-select-status-"]::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--rack-location-color, transparent);
+}
+
+
+/* ========================================================================== */
+/* v0.350 compact opened rack dropdown                                         */
+/* The JS menu geometry is 70% of the former rack-menu width/height. These    */
+/* rules tighten only the opened list; closed operational selectors keep their */
+/* larger scanning-panel presentation.                                        */
+/* ========================================================================== */
+.custom-select-menu.is-rack-select-menu-v350 .custom-select-search {
+  margin: 5px 6px 3px;
+}
+
+.custom-select-menu.is-rack-select-menu-v350 .custom-select-search input {
+  min-height: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+
+.custom-select-menu.is-rack-select-menu-v350 .custom-select-group {
+  margin-top: 3px;
+  padding: 5px 8px 3px !important;
+}
+
+.custom-select-menu.is-rack-select-menu-v350 .custom-select-option[class*="rack-select-status-"] {
+  min-height: 32px;
+  margin: 1px 4px;
+  border-radius: 7px;
+}
+
+.custom-select-menu.is-rack-select-menu-v350 .custom-select-option[class*="rack-select-status-"] .custom-select-option-label {
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+/* ========================================================================== */
+/* v0.351 rack dropdown geometry                                              */
+/* v0.350 intentionally reduced the menu to 70% of its former size. v0.351   */
+/* increases that compact presentation by 13% while keeping it well below the */
+/* original oversized menu. Geometry is paired with the JS 0.791 scale.       */
+/* ========================================================================== */
+.custom-select-menu.is-rack-select-menu-v351 .custom-select-search {
+  margin: 6px 7px 4px;
+}
+
+.custom-select-menu.is-rack-select-menu-v351 .custom-select-search input {
+  min-height: 36px;
+  height: 36px;
+  font-size: 12.5px;
+}
+
+.custom-select-menu.is-rack-select-menu-v351 .custom-select-group {
+  margin-top: 4px;
+  padding: 6px 9px 4px !important;
+}
+
+.custom-select-menu.is-rack-select-menu-v351 .custom-select-option[class*="rack-select-status-"] {
+  min-height: 36px;
+  margin: 2px 5px;
+  border-radius: 8px;
+}
+
+.custom-select-menu.is-rack-select-menu-v351 .custom-select-option[class*="rack-select-status-"] .custom-select-option-label {
+  font-size: 12.5px;
+  line-height: 1.18;
+}
+
+/* ========================================================================== */
+/* v0.352 selected Transportation Method mirrors the opened rack option       */
+/* Route remains a separate colored cue instead of being repeated in text.   */
+/* ========================================================================== */
+.rack-selected-option-v352 {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rack-selected-option-v352 .rack-select-option-route-v345 {
+  flex: 0 0 auto;
+  min-width: 35px;
+  min-height: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 3px 6px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.rack-selected-option-summary-v352 {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ========================================================================== */
+/* v0.353 Rack Overview heading hit-target hardening                          */
+/* ========================================================================== */
+/* These actions remain above non-modal transient layers. Portaled dropdowns
+   are also cleaned in JavaScript when their owner GUI/page closes. */
 #racksPage .rack-heading-actions,
-#racksPage .rack-create-actions,
-#racksPage :is(#rackPackingHistoryBtn, #rackEditOpenBtn) {
+#racksPage .rack-create-actions {
+  z-index: 20 !important;
+}
+
+#racksPage .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn) {
+  z-index: 21 !important;
+  pointer-events: auto !important;
+  isolation: isolate;
+}
+
+/* Keep Rack page heading actions above the sticky header's edge if browser
+   scroll anchoring leaves the heading a few pixels high after closing a GUI. */
+#racksPage .rack-heading-actions,
+#racksPage .rack-create-actions { z-index: 120 !important; }
+#racksPage .rack-create-actions > :is(#rackPackingHistoryBtn, #rackEditOpenBtn) { z-index: 121 !important; }
+
+/* ========================================================================== */
+/* v0.356 Move Rack selector uses the shared body-mounted rack-select system   */
+/* ========================================================================== */
+.rack-transfer-dialog-v356 {
+  overflow: visible !important;
+}
+
+.rack-transfer-dialog-field-v356 {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.rack-transfer-dialog-field-v356 > span {
+  color: #526c82;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+
+.rack-transfer-dialog-field-v356 .custom-select-shell {
+  width: 100%;
+  min-width: 0;
+}
+
+.rack-transfer-dialog-field-v356 .custom-select-trigger.rack-transfer-select-v356 {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+}
+
+/* The actual menu is produced by openCustomSelect() and mounted to body, just
+   like Transportation Method and inline Location. Do not add a nested menu or
+   overflow owner here; viewport-aware positioning decides up/down placement. */
+
+/* ========================================================================== */
+/* v0.357 Move Rack body-mounted selector stacking                            */
+/* ========================================================================== */
+/* The Move Rack dialog uses the same shared selector as Scan. Its option menu
+   is appended to <body>, so it must explicitly sit above the Operations modal
+   stack rather than inheriting the normal page-level dropdown z-index. */
+.custom-select-menu.is-rack-transfer-menu-v357 {
+  z-index: 60000 !important;
   isolation: isolate;
 }

@@ -1,4 +1,390 @@
+# README Changelog
+
+## v0.357 - Move Rack Layering, Five-Week Packing History, and Shared Page Headers
+
+- Fixed the shared Move Rack destination selector rendering behind the Operations GUI. The body-mounted menu now receives a dedicated `is-rack-transfer-menu-v357` class and explicit top-level stack while preserving the exact Scan-page rack option presentation and automatic above/below placement.
+- Reworked Rack History packing-list pagination from 25 individual print days to **5 grouped business weeks per page**. Search filtering is applied before week grouping/paging, and the page summary now reports the visible week range rather than misleading print-day ranges.
+- Added `app-page-header-v357` as a shared geometry contract for Home, Statistics, Scan, Racks, Rejects, Bay Map, and Admin. Header height, padding, radius, H1 scale, description spacing, and eyebrow scale are normalized while each page keeps its existing color identity, icons, metadata, and actions.
+- Added lightweight page-eyebrow labels to Home, Scan, Racks, and Admin to align their information hierarchy with the existing Statistics, Rejects, and Bay Map header designs.
+- Added v0.357 regression coverage for Move Rack menu stacking, true five-week Rack History paging, seven-page header normalization, version/cache references, and schema continuity.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.357. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.356 - Missing Glass Item Selector, Old Bay Investigation Print, Shared Move Rack Selector, and Manage Items Readability
+
+- Threw out the v0.355 generated Missing Glass line ledger and rebuilt the exact-item selector as self-labelled cards. Each imported line now keeps Order/Item, Job Nr., Glass/Size, Physical Bay, Expected, Accounted, Missing, and Rush/Missing/Accounted status together, eliminating layout drift from variable-length content while preserving the exact `data-sdi-line-item-id` contract.
+- Completely rebuilt the Old Bays **Print Investigation List** around the same Physical Bay → Order → Glass hierarchy as the browser GUI. Printed orders carry age-derived severity or purple snooze state, snooze time-left/start information, Job Nr./Order/customer identity, aligned physical glass counts/status, Last Physical Scan, order totals, a verification checkbox, and an investigation-notes line. Current Status/Search/Age/Sort filters remain authoritative before rendering.
+- Replaced the Move Rack dialog's private nested combobox with the maintained shared custom-select system. Transfer destinations now use `groupedRackOptionsHtml()` and therefore display the same route pills, rack lifecycle cues, rack-set color metadata, and full rack summary as Scan Transportation Method. Because the shared menu is mounted to `document.body`, viewport-aware positioning can open above the dialog instead of clipping below it.
+- Normalized Bay Map **Manage Items** typography across headings, search/filter controls, Job Nr. groups, exact glass lines, status badges, selection summaries, destination controls, actions, and status messaging. The GUI dimensions and functional IDs/hooks are unchanged.
+- Added v0.356 regression coverage for the new Missing Glass cards, grouped Old Bay print report, shared Move Rack selector, Manage Items typography, version/cache references, and schema continuity.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.356. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.355 - Missing Glass Rebuild, Old Bay State Ribbon, Last Scan Rack Color, and Manage Items Redesign
+
+- Replaced the previous Missing Glass visual implementation with a clean isolated `missing-glass-workflow-v355` workspace. The form no longer carries the legacy `sdi-form` layout class, preventing old Rush/SDI grid ownership from displacing controls or creating the large empty regions seen in the prior GUI.
+- Reorganized Missing Glass into a focused main work area and compact handling rail: job/order search, Physical Bay filter, Select Missing action, loaded-job summary, shortage ledger, delivery date, reason, responsible person, direct-to-installer option, collapsible communication settings, and final actions now use one maintained v0.355 layout. Existing control IDs, exact line-item selection, backend requests, email modes, direct-to-truck behavior, and audit behavior are preserved.
+- Added a dedicated Old Bays order-state ribbon. Every old order exposes its age in days at the upper left; snoozed orders switch to the maintained purple state and show a live snooze countdown plus the exact snoozed-at date/time. When snooze expires, the order returns to its age-derived orange-to-red severity automatically.
+- Extended Last Scan rack presentation with `--last-scan-location-accent`, using the same resolved rack-set color as the rack/location interfaces. Current completed racks still take the maintained green completion color, while historical locations remain visually muted.
+- Completely rebuilt Bay Map **Manage Items** into a purpose-specific operator workspace with a search/filter command row, grouped Job Nr. inventory cards, aligned exact-line rows, a current-selection summary, destination/reason controls, and compact move/clear/open-scanner/open-SDI actions. Existing `data-manage-*` selection hooks and move/clear controls are retained.
+- Added responsive ownership for both rebuilt workspaces so the Missing Glass and Manage Items layouts collapse cleanly on narrower displays without falling back into older generic grid rules.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.355. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.354 - Normalized All Scans, Smooth GUIs, Visible Rack Errors, Live Rack Color, and Workflow Repair
+
+- Replaced the All Scans Location-only width override with an explicit ten-column table contract. Event, source, item, quantity, customer, Location, Details, user, time, and Check now retain stable proportions; Location still sizes from the longest rendered location label and the history viewport gains horizontal overflow only when necessary.
+- Removed the remaining high-cost modal rendering effects: GUI-open state no longer blurs the live application header, backdrops, modal panels, or body-portaled custom-select menus. Modal scroll owners are paint-contained and GUI hover/interaction transitions are shortened to keep pointer feedback synchronized with the cursor.
+- Paused Scan/Bay polling, pending-notification polling, delivery-catalog heartbeat refreshes, and focus-triggered catalog detail refresh while a GUI is open. Background work resumes after the modal closes instead of repainting hidden content underneath an active workspace.
+- Kept the optimized observer model: English does not keep the translation observer connected, custom-select discovery only inspects nodes that can contain a select, Import History observation moves from one-time discovery to its own result container, and modal observation only reacts to actual modal-state changes.
+- Ensured inline Location assignment failures produce the shared in-app error popup in addition to the Scan System notice. Rejected moves to completed racks, incompatible destinations, and other backend assignment blocks now give the operator a direct explanation.
+- Refreshes the Scan table immediately after rack lifecycle changes and forces a fresh rack-state read after scans whose response omits the rack catalog, so rack-set Location colors and the green Complete state update without requiring another row click.
+- Corrected Old Bays item presentation: only the main order card carries the age/snooze rail, zero-missing values are neutral, actual missing quantities receive limited warning emphasis, and non-missing item status is restored to `ACCOUNTED`.
+- Re-aligned Missing Glass by giving the ledger header and every line item one shared eight-column definition, restoring consistent 38px operator controls and preserving all existing field IDs, request APIs, line selection, email modes, and direct-to-truck behavior.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.354. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.353 - Accurate Rack Moves, Faster GUIs, Reliable Rack Actions, Old Bay Aging, and Compact Missing Glass
+
+- Corrected rack-move chronology by resolving the current rack from the newest active `rack_items` assignment rather than rack sort order. Moving `Steel 1` to `Steel 9` now records `Moved from Steel 1 to Steel 9` even when older active/history rows exist.
+- Made rack transition writes share one timestamp and changed event-time rack/bay history to treat removal/clear timestamps as exclusive boundaries. `rack_move` events also expose their parsed source/destination so All Scans displays the explicit destination instead of reconstructing move direction from a timestamp tie.
+- Reduced the All Scans **Location** column to intrinsic content width so it only occupies the space required by the largest visible location label.
+- Removed the largest GUI-open performance hot path: modal state detection no longer calls `getComputedStyle()` / `getClientRects()` for every mutation, the modal observer reacts only to actual modal-state additions/removals/visibility attributes, English no longer translates every inserted DOM node, and custom selects no longer observe unrelated class mutations. Hidden Admin/Bay Action History payloads are lazy-loaded when their history tab is opened.
+- Added transient-layer cleanup for body-portaled custom-select menus and strengthened Rack Overview heading action hit targets so **Racks History** and **Edit Racks** do not lose their upper click area after modal/dropdown activity.
+- Added an application-wide unexpected-error boundary for uncaught runtime errors and unhandled async failures. These failures now surface through the maintained in-app Action Feedback dialog with a simple operator-readable message/context instead of silently stopping an action.
+- Made completed racks override their set accent with the maintained green completion treatment in the Scan **Location** column.
+- Completely reformatted Old Bays again around compact identity and aligned item rows: Job Nr. now precedes Order and sits directly beside it; each glass row inherits an orange-to-red age accent that becomes dark red at 30+ days; status reads `MISSING` or `OLD BY X DAYS`; snoozed orders temporarily switch to the maintained purple snooze treatment.
+- Matched per-order snooze actions to the bulk snooze button styling, added live **Time Left** on the left and **Snoozed At** date/time on the right, and removed the redundant “active order physically assigned” sentence. Expired snoozes automatically return to their age-derived color.
+- Rebuilt Missing Glass into a denser floor workflow with a single search/filter/selection command row, compact physical-shortage ledger, one-line priority fields, collapsible communication settings, and smaller final actions. Existing element IDs, exact line selection, email behavior, direct-to-truck handling, clear behavior, and backend contracts remain unchanged.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.353. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.352 - Rack Route Selection, Historical Locations, Stable Row Selection, Old Bay Normalization, and Missing Glass Rework
+
+- Rebuilt the closed operational rack selection so **Transportation Method** uses the same visual language as the opened dropdown: the route is a leading colored pill and the remaining selected text is `Display Name | PCs | Status`. Route text is no longer duplicated at the end of the selected label.
+- Standardized Scan Location rack labels to uppercase across both passive and selected/editable rows while retaining the exact same 12px/850-weight typography.
+- Added **Location** to All Scans. Backend event retrieval now resolves the rack or bay active at the event timestamp using existing rack/bay assignment history, preserving historical movement context instead of showing only the current location.
+- Added explicit `rack_move` scanner-history events for manual Scan Location changes, including previous and new rack labels, station, user, and audit payload details. No schema change is required because the existing scan-event and assignment history tables are reused.
+- Fixed delivery-list row selection drift by preserving the operator-selected line ID across background payload refreshes whenever that row still exists. The latest scan is used only when there is no longer a valid selected row.
+- Completely reformatted Old Bays into a normalized Bay → Order → Glass review ledger with quieter bay summaries, one-line order identity/status/age, aligned glass rows, compact physical totals, prominent missing quantities, restrained snooze controls, and collapsible context for other active orders sharing the bay.
+- Completely rebuilt Missing Glass configuration around **Find Work → Verify & Select → Rush Handling**. The new item ledger shows Order/Item, Glass/Size, Bay, Expected, Accounted, Missing, and Status in aligned columns; production handling and communication settings are separated into clear cards with one final action bar. Existing line IDs, email modes, direct-to-truck handling, clear behavior, and audit/API contracts remain intact.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.352. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.351 - Rack Color Continuity, Transportation Route Detail, Old Bay Ledger, and Missing Glass Workflow
+
+- Locked Scan Location rack typography to the same 12px, 850-weight treatment in passive and editable states so selecting a row no longer changes the apparent Location font size.
+- Added a shared resolved rack-set display color that matches the Racks page exactly, including deterministic hue fallbacks for sets without an explicit saved color. Scan Location cells and rack-option metadata now use that same accent.
+- Strengthened the Location rack-cell tint/border treatment so the selected Steel, Wood, Truck, or custom rack set is immediately recognizable while preserving the normal table-cell presentation during inline reassignment.
+- Increased the v0.350 compact rack dropdown dimensions by 13% (0.70 → 0.791 of the former menu geometry) and proportionally relaxed opened search/option sizing without returning to the old oversized menu.
+- Added the resolved rack route to the closed operational selection text used by **Transportation Method**, while keeping open option labels focused on `Display Name | PCs | Status` and retaining route pills in the opened menu. Inline Location remains compact display-name-only.
+- Completely rebuilt Old Bays content as a physical verification ledger: bay headers now show old-order/piece/missing/selected metrics, order cards expose review state and age clearly, item rows use aligned Item/Glass/Physical Count/Status columns, and other active orders sharing the bay are isolated as physical context. Existing filtering, selection, snooze, printing, and history behavior is unchanged.
+- Completely rebuilt Missing Glass inside New Request as a guided **Find → Select → Prioritize** workflow. Predictive matches show missing context, loaded jobs expose missing/accounted/Rush/selected metrics, exact lines display physical bay counts and protection status, and priority/email controls are grouped into a cleaner action card. Existing APIs, exact line-item IDs, email modes, direct-to-truck behavior, clearing, and audit history remain intact.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.351. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.350 - Rack Name Correction, Compact Rack Menus, Stable Location Editing, and Unified Request Type
+
+- Corrected the shared rack display formatter so legacy persisted names such as `Rack 1 Steel` and `Rack 1 Wood` render everywhere as `Steel 1` and `Wood 1`. The correction is presentation-only and does not rewrite rack records or codes.
+- Preserved the shared operational rack option format as `Display Name | PCs | Status`; zero-piece racks continue to omit the `0PC` segment and show only the display name plus lifecycle status.
+- Reduced opened rack dropdown geometry by 30% from the prior presentation, including a 70%-sized menu width/available-height limit and tighter opened option rows. Closed Transportation Method and other operational rack selectors keep their full selected rack information.
+- Rebuilt Scan Location rack reassignment so the normal rack-colored Location badge remains visible before, during, and after editing. The custom select now overlays that badge transparently instead of visually replacing the cell when a line is selected.
+- Reworked **New Request** into one three-choice request selector: **Rush**, **Remake**, and **Missing Glass**. Missing Glass switches the same New Request workspace to the existing already-imported glass workflow rather than appearing as a separate mode/tab.
+- Renamed the modal heading to **Priority Work** while preserving Work Center, Action History, email behavior, intake APIs, Missing Glass item handling, and audit behavior.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.350. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.349 - Rack Selector Clarity, Rack-Color Locations, Unified New Request, and Old Bay Polish
+
+- Standardized every shared rack dropdown label around the operator display name: `Display Name | PCs | Status`. Route text is no longer duplicated in the label because the existing route pill remains visible in opened menus.
+- Suppressed zero-piece text for empty racks. Empty choices now read like `Wood 1 | Empty` instead of `Wood 1 | 0PCs | Empty`.
+- Corrected the shared selected-label behavior so only explicitly compact selectors collapse to the rack display name. **Transportation Method** and other operational selectors retain full rack information after selection; the Scan-table Location selector remains display-name-only while closed.
+- Added rack-set color metadata to shared rack options and reused the same saved Rack Overview color inside Scan Location rack cells. No parallel hard-coded rack color map was introduced.
+- Reworked inline Scan Location rack editing so the control reads as part of the normal table cell, uses the rack-set accent, and only reveals stronger editing affordance on hover/focus.
+- Reorganized the Old Bay command bar with Search on the left and Status/Age/Sort directly beside **Print Investigation List** on the right. **Select All** now sits immediately left of **Clear Selected**, followed by the selected count and bulk snooze controls.
+- Polished Old Bay Bay → Order → Item presentation with stronger physical-bay headers, cleaner selected-order treatment, bordered summary facts, denser item rows, and clearer missing-glass emphasis while retaining the existing grouping, snooze, print, and physical-neighbor data.
+- Removed the standalone **Missing Glass Rush** top tab and integrated it into **New Request**. New Request now contains a two-mode workflow: Rush/Remake pre-registration for work not yet imported, and Missing Glass Rush for exact already-imported glass.
+- Editing a queued Rush/Remake request returns to the Rush/Remake half of New Request; editing existing Missing Glass priority work returns directly to the Missing Glass half. Existing backend APIs, audit events, email modes, and Work Center behavior are unchanged.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.349. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.348 - Unified Priority Work, Display-Name Racks, and Grouped Old Bay Orders
+
+- Removed the Rush/Remake pre-registration explanation block and merged Requests with Priority Work into a single searchable **Work Center**. Existing requests can be edited without deleting their audit history, and matched requests expose current order/item/customer/route/stage/date/process information.
+- Added durable `priority_intake_updated` audit handling and server routing so Rush/Remake request edits update the existing request instead of creating duplicates.
+- Kept Priority Work content at a 12px minimum and simplified section copy. Missing Glass Rush remains editable/clearable in the same Work Center.
+- Switched operator-facing rack identity to display names across Scan Location, shared rack selectors, rack transfers, Rack Overview, and individual Rack details. Rack codes remain secondary technical identifiers.
+- Standardized rack option text as `Route Display Name | PCs | Status`, kept rack-set grouping and route/lifecycle cues, and standardized opened rack menus around 430px.
+- Presented legacy truck codes as `RT1`/`RT2` in operator-facing code labels and made newly created truck defaults use the `RT#` convention while retaining legacy database compatibility.
+- Removed rack editing from Scan All Scans and removed Bay Map All Scans location editing; both histories are read-only.
+- Rebuilt Old Bay content around Bay → Order → Items, including last-scan timing, missing item quantities, physical bay order counts, and compact visibility into other active orders sharing the same bay.
+- Widened Old Bay Age/Sort filters, reduced Search width, and aligned Clear Selected/selected totals immediately before the bulk snooze controls.
+- Advanced application/cache references to v0.348. SQLite schema remains version 11 with no migration.
+
+## v0.347 - Remake Accountability, Missing Glass Rush, and Rack Selector Cleanup
+
+- Corrected Smart Glazier Remake matching so ordinary numeric suffixes such as `.2`, `.3`, and `.4` are normal work. Remake intake now requires a terminal `.<number>R` generation such as `.2R`, `.3R`, or `.4R`, or an explicit A+W `RM` / `Remake` marker.
+- Added reusable Reason and Responsible Person libraries seeded from the supplied historical Remake tracking data. Custom values saved through Rush/Remake or Missing Glass Rush are recovered from the existing audit ledger and become reusable without a schema migration.
+- Added recipient selection from active scanner users with saved email addresses. Draft mode opens the user's default mail application with a prepared subject/body and optional recipients; system mode uses the maintained scanner transport; No email remains available.
+- Renamed and rebuilt Imported Rush Tools as **Missing Glass Rush** for already-imported jobs. Operators select exact missing pieces, reason, responsible person, optional priority date/direct-to-truck handling, and the same email workflow before applying Rush.
+- Rebuilt Current Priority Work as a categorized **Priority Work Center** covering Rush intake, Remake intake, and existing-order Missing Glass Rush with search and category filters.
+- Kept Old Bay Print Investigation List on the primary Search/Status/Age/Sort row and aligned it at the far right while preserving v0.346 filter-aware print behavior.
+- Removed route text duplication from rack option labels because the opened rack menus already render dedicated route pills. Rack labels now focus on rack code, piece count, and lifecycle state.
+- Added compact closed labels for inline rack assignment: the Scan-table selector shows only the rack code while its opened menu expands to the same broad grouped rack view used by operational scanning.
+- Polished rack-transfer destination selection with the same rack-set grouping/lifecycle-route cues, compact selected rack code, shared blue Continue action, icons, and maintained hover treatment.
+- Kept Transportation Method neutral gray across Complete/Incomplete/On-the-Way rack states and removed the redundant No Rack location explanation from the Scan panel.
+- Reduced retained Recent Scans rows from 2 to 1 in the normal Scan panel and from 5 to 4 in full screen.
+- Advanced application/cache references to v0.347 while preserving SQLite schema version 11. No migration or reset is included.
+- Added v0.347 regression coverage for remake matching, reusable intake choices, recipient/draft behavior, Missing Glass Rush/priority-work UI, compact rack selector labels, and Scan recent-row limits.
+
+## v0.346 - Filtered Old Bay Print and Rush / Remake Intake
+
+- Replaced the Old Bay Live stale / Snoozed workspace tabs with a compact **Status** selector immediately before Age, reduced Search width slightly, and widened the bulk Snooze control.
+- Made **Print Investigation List** honor the current Old Bay Status, Search, Age, and Sort state. The server applies the same queue filtering/sorting before rendering the printable physical-review sheet.
+- Rebuilt Rush / Remake around a pre-import Order Entry queue. A request records Priority Type, Job Nr., reason, responsible person, creator, timestamps, email choice, and recipients before the new A+W order exists.
+- Added durable priority-intake state on the existing append-only `audit_events` ledger rather than introducing a mutable schema table. Requests can remain Pending, become Matched when A+W imports the expected work, or be Cancelled while preserving history.
+- Rush intake matches the requested Job Nr. when it arrives. Remake intake follows the Job root and recognizes common Smart Glazier/A+W remake forms including `.2`, `.2R`, and RM/Remake source markers.
+- Applied priority-intake decisions inside the maintained import pipeline before route/stage generation. Matching source rows inherit Rush/Remake state, matched requests retain source/order/date details, and repeat imports continue to associate the same matched source identity.
+- Added automatic import attention: newly matched Rush requests publish the maintained Rush popup notification; Remake matches publish an in-app Remake notification with Job, orders, reason, responsible person, and affected-list context.
+- Added three communication modes to each request: **Send from system**, **Create draft in my email app**, and **No email**. System sends use the maintained email transport/outbox; user-draft mode prepares the message and opens the browser `mailto:` handoff using the logged-in user's saved BFS email as account context.
+- Added a polished searchable **Requests** tab while preserving Imported Rush Tools, Current Priority Work, and Action History for already-imported work and existing lifecycle management.
+- Extended Rush Action History to include priority-intake creation, email, match, and cancellation events with purpose-specific history details/icons.
+- Added external Remake accountability to Statistics reporting: matched intake requests aggregate request count, piece quantity, reason, and responsible person alongside the existing external-remake line/piece metrics.
+- Advanced application/cache references to v0.346 while preserving SQLite schema version 11. No database migration or reset is included.
+- Added v0.346 regression coverage for Old Bay print-state filtering, Rush/Remake intake UI/routes, import matching/notification ownership, email modes, and external-remake accountability.
+
+## v0.345 - Old Bay Tab Rail and Unified Rack Selector Menus
+
+- Moved All old bays, Live stale, and Snoozed into the Old Bay modal's top tab rail beside Action History. Selecting any queue tab returns the modal to the workspace while Action History cleanly clears the queue-tab active state.
+- Reorganized Old Bay tools into a two-row workflow: Search, Age, Sort, and Print Investigation List on the first row; Select All, Clear Selected, selected row/piece totals, Days, and Snooze/Extend on the second row. The Days field remains immediately left of the snooze action, which sits directly below Print.
+- Added one shared rack-set grouping helper for operator rack selectors. Scan, All Scans, outbound override/status, and rack-transfer destinations now group racks by set/type and sort rack codes naturally inside each group.
+- Added explicit lifecycle dots and route pills to the open custom-select rack options so lifecycle/route colors remain obvious inside the dropdown menu.
+- Updated rack-transfer menus to use the same set headings, rack-code labels, lifecycle colors, and route colors as the Scan selector.
+- Locked the Scan Complete/Uncomplete and Print/Not On The Way controls to stable desktop widths so state-label changes do not resize the scanning panel.
+- Applied a Rack History-only 7px upward SVG correction to its Action History rows, leaving the shared icon alignment unchanged in every other maintained Action History GUI.
+- Advanced application/cache references to v0.345. SQLite schema remains version 11 with no migration.
+- Added v0.345 regression coverage for Old Bay tab placement/layout, grouped and color-cued rack menus, stable Scan lifecycle button sizing, and the Rack History-only icon correction.
+
+## v0.344 - Persistent Snoozed Bays and Color-Coded Rack Selectors
+
+- Fixed the Old Bays disappearance regression caused by the Bay Map alert refresh replacing the open workspace with an unsnoozed-only result set. Background alert claims now preserve the open all-row workspace, and snoozing from Live stale returns the view to All so the row remains visibly present as snoozed.
+- Reorganized the Old Bay command center so Select All, Clear Selected, and selected row/piece totals sit above Search; Age and Sort sit directly beside Search; snooze days sit directly left of the right-aligned Snooze action; and Print Investigation List sits beneath the snooze action.
+- Updated the bulk Snooze button to show `Extend Snooze` for fully snoozed selections and `Snooze / Extend` for mixed live/snoozed selections.
+- Reversed the snooze ribbon emphasis so remaining time appears first and elapsed `Snoozed ... ago` time appears second.
+- Changed operator rack selectors from display names to rack codes while preserving shared compact quantity/route/status labels.
+- Added shared rack-selector lifecycle/route color cues to custom selects and the rack-transfer destination combobox. Lifecycle state owns the left color edge; route owns the right color edge.
+- Advanced application/cache references to v0.344. SQLite schema remains version 11 with no migration.
+- Added v0.344 regression coverage for snoozed-row persistence, Old Bay command hierarchy, adaptive bulk snooze wording, reversed snooze timing, rack-code labels, and rack selector color metadata.
+
+## v0.343 - Old Bay Single-Row Controls, Rack Selector Labels, and History Icon Alignment
+
+- Removed the Old Bay `Physical verification queue / Review and resolve old bay assignments` instructional header and merged Search, selected row/piece totals, Select All, Clear Selected, bulk snooze days, Snooze Selected, Age, Sort, and Print Investigation List into one compact desktop command row beneath the queue tabs.
+- Standardized the shared rack selector/transfer label format to operator-facing values such as `Coral 1 (Empty)`, `Coral 1 DTC 2pcs Incomplete`, and `Coral 1 IT 1pc Complete`; the same builder now feeds Staging Scan and rack-transfer choices.
+- Removed the completed-rack helper sentence while preserving completed-rack selection for the Uncomplete lifecycle action.
+- Aligned Complete/Uncomplete and Print/Not On The Way directly beside the Transportation selector on the Scan page at desktop widths.
+- Applied the requested 7px downward optical offset to the shared Action History SVG owner so every maintained Action History GUI receives the same correction.
+- Advanced application/cache references to v0.343. SQLite schema remains version 11 with no migration.
+- Added v0.343 regression coverage for the unified Old Bay row, shared rack labels, completed-rack helper removal, Scan rack-action alignment, and global history-icon offset.
+
 # Delivery List Scanner Changelog
+
+## v0.342 - Action History Icons, Completed Rack Lifecycle Access, and Old Bay Header Redesign
+
+- Added purpose-specific colored SVG icons to every maintained Action History event row, including shared Admin/Bay/Rack/Reject history views and the all-racks activity list. Event visuals now distinguish scan, move/assignment, print, complete/review, rollback, edit, snooze, removal/warning, create, security, bay, rack, and generic history actions.
+- Kept completed racks selectable from the Staging Scan rack selector so operators can reopen them without leaving the Scan page. Completed racks remain blocked from receiving new scans until **Uncomplete** is used.
+- Fixed the Staging rack lifecycle controls so dynamic rerenders preserve their icons for Complete, Uncomplete, Mark Returned, Print Packing List, and Not On The Way instead of replacing SVG markup with text-only labels.
+- Added the same icon continuity to legacy rack-card Complete, Uncomplete, and Print Packing List actions.
+- Fixed the Scan update-review renderer so **Review Updates / Review Changes / Review Open** and **Mark Reviewed** keep their requested icons after label/state updates.
+- Removed the redundant Old Bay metric-card strip for Live stale rows, Snoozed, Bays affected, and Oldest row; queue counts remain in the All / Live stale / Snoozed tabs.
+- Reworked the Old Bay search/control header into one polished physical-verification command center with a branded workflow intro, stronger queue tabs, prominent Search, grouped selection/snooze actions, and a clean Age/Sort/Print utility row.
+- Added v0.342 regression coverage for Action History event icons, completed-rack Staging selection/uncomplete behavior, dynamic Scan action icons, Scan review icons, Old Bay metric removal, and the redesigned command-center hierarchy.
+- SQLite schema remains version 11; no migration or database reset is required.
+
+## v0.341 - Rack Action Icons and Old Bay Selection Command Center
+
+- Locked the individual-rack **Uncomplete Rack** and **Not On The Way** rollback actions to their dedicated lifecycle palettes across normal, hover, focus, and nested icon/text states so later shared button rules cannot turn them blue with unreadable text.
+- Added purpose-specific SVG icons to every individual-rack lifecycle action: Complete Rack, Mark On The Way, Uncomplete Rack, Mark Returned, Not On The Way, and Print Packing Slip. Existing move/clear controls remain icon-only.
+- Added direct action icons to Rack Overview **Racks History** and **Edit Racks**.
+- Added compact icons to the Scan page's primary actions and semantic marker dots to its filter tabs while preserving click-to-sort column headers and existing Undo/Redo icon controls.
+- Added a magnifier/search SVG to Bay Map **Find Match**.
+- Reworked Old Bay queue tabs with distinct blue **All**, orange **Live stale**, and purple **Snoozed** identities plus stronger active states and matching tab icons.
+- Rebuilt the Old Bay command center so tabs remain above Search and Search shares the main row with a selected-row/piece summary, explicit **Select All**, **Clear Selected**, bulk snooze days, and the existing purple **Snooze Selected** action.
+- Changed bulk selection behavior so **Select All** always selects every row matching the current tab/search/filter and **Clear Selected** is a separate action. The summary now reports both selected rows and selected pieces.
+- Removed the verbose review-selection instructions and the redundant Old Bay Done button; Age, Sort, and Print Investigation List remain in a compact secondary tools row.
+- Added v0.341 regression coverage for lifecycle hover ownership, Rack/Scan/Bay button icons, colored Old Bay tabs, explicit selection controls, selected-piece totals, and the command-center hierarchy.
+- Advanced `APPLICATION_VERSION` to 341 while preserving SQLite schema version 11. No database migration or reset is included.
+
+## v0.340 - Unified Old Bay Command Center and Rack Lifecycle Action Polish
+
+- Moved the Packing List History intro document glyph an additional 3px downward while preserving its existing rightward optical correction.
+- Replaced the shared-blue **Uncomplete Rack** and **Not On The Way** buttons in the individual Rack GUI with distinct polished lifecycle rollback styles and purpose-specific SVG icons.
+- Rebuilt Old Bay controls as one unified command center: All / Live stale / Snoozed tabs sit above Search, while Search/Age/Sort, Investigation List printing, selection state, bulk snooze, and Done are grouped into a clearer hierarchy rather than equal-sized tiles.
+- Reused the same polished purple Zz action treatment for both per-row Snooze / Extend and the bulk **Snooze selected** action.
+- Simplified active snooze ribbons to show `Snoozed … ago` on the left and remaining time on the right; removed the redundant total-window line.
+- Reduced timer noise by showing seconds only while the elapsed/remaining duration is below one hour.
+- Added v0.340 regression coverage for the unified Old Bay control hierarchy, concise snooze timing, shared snooze-action styling, Packing History icon offset, and distinct rack rollback actions.
+- Advanced `APPLICATION_VERSION` to 340 while preserving SQLite schema version 11. No database migration or reset is included.
+
+## v0.339 - Old Bay Queue Tabs, Reliable Snooze Extensions, and Rack UI Consistency
+
+- Nudged the Packing List History intro document glyph an additional 2px downward while keeping the existing rightward optical correction.
+- Converted individual-rack **Not On The Way** to the shared blue primary-button treatment and removed the old rack-specific amber hover override.
+- Rebuilt the Old Bay action strip into evenly sized control tiles with All old bays / Live stale / Snoozed queue tabs, cleaner selection copy, and a direct SVG printer icon for Investigation List.
+- Added second-level snooze timing and replaced the previous full-list timer rerender with targeted countdown text updates so open search fields and duration selects remain stable.
+- Fixed snooze extension at the backend: extending an active snooze now adds the requested days to its current future expiration instead of resetting it from the current time. Bulk actions preserve the same extension semantics per assignment.
+- Moved Bay identity to the far left of each stale-order header, followed by Order Nr., Item Nr., and days old.
+- Polished the per-row Snooze / Extend control and clarified its wording so active rows explicitly extend by the selected duration.
+- Moved the Bay Map in-transit `Racks:` summary directly below the **Pieces on the way** status pill.
+- Added v0.339 regression coverage for queue tabs, second-level countdowns, extension semantics, bay-first order headers, shared Not On The Way styling, and in-transit rack-summary placement.
+- Advanced `APPLICATION_VERSION` to 339 while preserving SQLite schema version 11. No database migration or reset is included.
+
+## v0.338 - Manual Rack Departure and Old Bay Control Center Polish
+
+- Corrected the remaining optical alignment of the **Previously printed packing lists** heading icon by moving only the white document glyph slightly right and down inside its existing blue badge.
+- Added a confirmed **Mark On The Way** action to completed racks in the individual Rack GUI. The backend validates that the rack is complete and every active rack item has a matching active Outbound line before applying remaining quantities, Indian Trail preassignment, rack-scoped scan events, departure metadata, and `In Transit` status.
+- Added `/api/racks/on-way` as the maintained manual-departure endpoint; the existing **Not On The Way** reversal continues to recognize the same `RACK-<code>` scan events so a manual departure can be safely reopened.
+- Replaced the five Bay Map launcher pseudo-icons (**Old Bays, Rush, Manage Items, Edit Bays, Edit Map**) with direct SVG artwork for clearer and more consistent visual language.
+- Moved Old Bay review/bulk controls out of the bottom footer and into a polished action strip directly below Search/Age/Sort.
+- Old Bay Control Center now loads active snoozes as part of the review set, keeps them sorted below live or expired stale work, and shows a purple Zzz ribbon with elapsed snooze time, remaining time, and total snooze window. Existing snoozes use `bay_stale_snoozes.updated_at` as their start timestamp.
+- Kept the Old Bays attention badge and six-hour notification limited to unsnoozed work that actually needs review now.
+- Rebuilt the printable Old Bay Investigation List with the maintained Barefoot / Builders FirstSource print logo, landscape document framing, summary metrics, readable local timestamps, live/snoozed review-state styling, physical check boxes, and an investigation-notes column.
+- Advanced `APPLICATION_VERSION` to 338 while preserving SQLite schema version 11. No database migration or reset is included.
+
+## v0.337 - Notification-Only Multi-Quantity and Rack Hit-Target Stabilization
+
+- Removed persistent multi-quantity controls from **All Scans**. The current scanned/total quantity remains visible, while **Add Qty** and **Scan Remaining** are available only in the immediate successful scan notification.
+- Removed the All Scans green-dot **Live audit data** header status pill.
+- Consolidated the Packing List History heading artwork to one explicitly sized inline SVG, centered inside the blue badge and shifted slightly left as a complete icon/background unit. Existing per-snapshot paper-icon spacing remains intact.
+- Reworked the recurring Rack Overview **Racks History / Edit Racks** partial hit-target failure. The client now checks the real button/header geometry and browser hit test after rack refreshes, modal unlock, page entry, resize, and focus. If only the top portion has slipped under the sticky header, it repairs the retained scroll position before the dead band persists.
+- Removed the superseded Rack heading click-forwarding-era CSS ownership and replaced it with one v0.337 hit-target owner using only each button's visible rectangle.
+- `APPLICATION_VERSION` is now `337`; SQLite schema remains `11`.
+
+## v0.336 - All Scans Quantity Completion and UI Consistency Fixes
+
+- Removed multi-piece quantity controls from the Last Scan card. The existing successful scan confirmation can still offer immediate quantity completion, while persistent follow-up now lives in All Scans.
+- Added compact Add Qty / Scan Remaining controls to the newest eligible All Scans row for each line item. Eligibility requires a successful scan/manual-scan event, remaining unsatisfied quantity, and a delivery date that has not passed.
+- Refreshes an open All Scans GUI immediately after a quantity completion action so current scanned totals and remaining-action availability stay accurate.
+- Fixed the Edit Racks split-view regression introduced by the v0.335 Action History grid rule: the history panel now becomes a grid only when it is not hidden, and a final hidden-state guard keeps it completely out of Rack Manager layout.
+- Replaced the Packing List History intro badge pseudo-element with a real inline SVG document/history icon so affected browsers cannot render the heading as an empty blue block.
+- Left-aligned the Print / Export date selector text while preserving the dropdown affordance at the right edge.
+- Standardized formatted Excel rows 1–4 by removing the isolated title/metric outline borders; the branded header is now consistently borderless before the structured table begins.
+- Advanced `APPLICATION_VERSION` to 336 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.335 - Pinned Action History, Reliable Flag Sorting, and Polished Excel Export
+
+- Changed **Edit Racks → Action History** back to the intended split layout: the heading and search/filter toolbar remain at the top while only the history-result list owns vertical scrolling. This matches Rack History Action History and prevents controls from disappearing during long reviews.
+- Fixed Scan-page Flag sorting by replacing the undefined `isInternalRejectItem()` call with the same `internalRejectCount > 0` condition used by the visible Internal Reject flag. The first ascending Flag click now reliably groups flagged rows above rows with no flags.
+- Fixed the individual-rack Route status color on initial open by passing the already-resolved `rackRouteClass` through `openOperationsModal(...)`. IT/CPU/DTC/GNV no longer begin gray and then correct themselves only after Complete/Incomplete refreshes.
+- Preserved deliberate detailed Print / Export selections. Selecting every route/status/attention/glass detail no longer auto-replaces those choices with Airport, All Status, All Attention, or All Glass. The Create Preset builder uses the same non-collapsing behavior.
+- Rebuilt the formatted Excel workbook header so A:B are dedicated to the Barefoot / Builders FirstSource logo while C:H carry a branded title/date/metrics/filter-summary presentation. Increased useful column widths and row heights for a cleaner production document.
+- Replaced the Excel logo's fixed two-cell stretch with an aspect-ratio-preserving one-cell anchor bounded to a professional logo area, preventing the source artwork from appearing squished.
+- Added worksheet horizontal centering, repeatable table headings, hidden gridlines, page numbering/footer branding, and v0.335 document metadata while preserving the scanner's offline built-in OOXML writer.
+- Updated maintained web/print-logo cache references and added v0.335 regression coverage for Action History scroll ownership, Flag sorting dependencies, initial rack-route class forwarding, detailed-filter persistence, and the polished Excel structure.
+- Advanced `APPLICATION_VERSION` to 335 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.334 - Packing History Icons, Flag Sorting, and Action History Scrolling
+
+- Replaced the Packing List History heading badge's mask-only artwork with a direct white SVG document/history icon so the heading no longer appears as an empty blue block on affected browsers.
+- Shifted the per-snapshot paper icon slightly left and increased its grid spacing so the icon no longer crowds the rack/snapshot text.
+- Reworked Scan-page Flag sorting around the markers actually rendered in the Flag column: Remake, Rush, Internal Reject, and Manual scan only. The first Flag-header click groups flagged rows at the top and a second click reverses the grouping.
+- Removed process-state and queue-state text from Flag sorting so ordinary unflagged rows are no longer accidentally treated as flagged.
+- Fixed Edit Racks Action History scrolling by making the complete history tab the single vertical scroll owner and returning the result list to normal document flow. Wheel/touch input over rows now scrolls the tab and the search/filter controls travel with the history content.
+- Narrowed the v0.326 action-history overscroll rule so only actual Operations-modal history lists retain direct containment; Admin Action History relies on its parent tab scroller.
+- Updated maintained cache and print-logo references to the v0.334 release key.
+- Added v0.334 regression coverage for the robust Packing History icon, snapshot icon spacing, visible-flag sorting semantics, and Admin Action History scroll ownership.
+- Advanced `APPLICATION_VERSION` to 334 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.333 - Rack Set Editing and Searchable Packing History
+
+- Fixed existing grouped rack-set edits so each save request includes the rack's current `oldRackCode`. The backend therefore updates the existing rack definition instead of rejecting its unchanged code as a duplicate such as `R1M already exists`.
+- Added reusable focus/caret preservation for search/text controls whose history toolbar markup is rebuilt after asynchronous filtering. Rack History and shared Action History searches now keep accepting keystrokes while results refresh.
+- Removed the older duplicate `filterPackingHistoryRows()` function that had been overriding the grouped search renderer and only hiding snapshot rows while leaving empty print-date/week groups visible.
+- Reworked Packing List History filtering to search snapshots first and then rebuild week/day groups, so dates with no matches disappear completely and matching weeks auto-open while a query is active.
+- Expanded Packing List History search indexing to rack code/name, print time/date, delivery date, printed-by user, Order Nr., Job Nr., and delivery dates stored inside each immutable snapshot.
+- Added safe `order_numbers`, `job_numbers`, counts, and normalized `search_text` fields to the packing-history API without exposing raw `snapshot_json` to the browser.
+- Added common date-format tokens so operators can search equivalent dates using ISO, slash, dash, abbreviated-month, or full-month forms.
+- Polished Packing List History content with document icons, snapshot numbers, order/job counts, stronger week/day hierarchy, cleaner metadata columns, query context, and improved card hover/readability styling.
+- Updated maintained print-logo cache references to the v0.333 release key.
+- Added v0.333 regression coverage for existing rack-set update identity, single-owner packing-history filtering, Order/Job search indexing, focus restoration hooks, and the new history presentation.
+- Advanced `APPLICATION_VERSION` to 333 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.332 - Rack Set Workspace Identity and Packing List Polish
+
+- Added a selected-rack-set accent pipeline to the Rack Overview center panel. The saved grouped-set icon color now creates a subtle gradient behind the individual rack cards while each card keeps its own lifecycle status colors.
+- Restored `overflow: hidden` on the Rack Overview heading so the decorative top-right circle remains inside the rounded title section. The newer global header hit-testing fix remains responsible for button interaction, so the older overflow workaround is no longer needed.
+- Removed the duplicated route suffix from the individual-rack modal description; the header description now reports only the rack piece count because Route has its own dedicated status cell.
+- Added `rackResolvedDestination(...)` so the individual-rack Route cell uses the rack's explicit destination when present, otherwise derives one stable route from its contents, and treats populated legacy/no-destination racks as Indian Trail. Mixed-route racks remain neutral instead of being mislabeled.
+- Made the IT/CPU/GNV/DTC route palette the final CSS owner so rack-set/material colors cannot override the Route cell after modal refreshes.
+- Normalized historical packing-list `printedAt` values to a local `M/D/YYYY h:mm AM/PM` display instead of exposing raw ISO timestamps.
+- Rebuilt historical packing-list preview/print HTML with the maintained Barefoot/Builders FirstSource print logo, rack metadata cards, route summary, alternating rows, check boxes, and a print-safe landscape layout.
+- Polished the live rack packing-list document with the same maintained print logo, branded accent bar, cleaner metadata/barcode treatment, and a stronger table layout.
+- Added v0.332 regression coverage for selected-set gradient ownership, route resolution/final colors, title-card clipping, duplicate-route removal, timestamp normalization, and branded live/history packing-list output.
+- Advanced `APPLICATION_VERSION` to 332 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.331 - Scan Page Render and Route Status Color Fix
+
+- Restored the `sortScanItems()` helper that v0.329 accidentally removed together with the retired Scan column-filter popup implementation. `getPagedItems()` continued calling that helper, so the Scan page threw during render, appeared blank, and could flash the date-switch loading state without painting rows.
+- Preserved the simplified Scan header interaction: headers remain click-to-sort ascending/descending and the removed funnel buttons/filter popup stay removed.
+- Changed the individual-rack **Route** cell to use the same destination palette as Rack Overview instead of inheriting the rack set/material accent: **IT** green, **CPU** purple, **DTC** pink, and **GNV** teal. An unset route uses a neutral gray treatment.
+- Added v0.331 regression coverage for the Scan sorting dependency and route-derived rack header classes/colors.
+- Advanced `APPLICATION_VERSION` to 331 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.330 - Scan Startup Regression Fix
+
+- Removed the stale `closeScanColumnFilterMenu()` Escape, resize, and scroll listeners that remained after v0.329 intentionally removed the Scan column-filter popup. Those dangling references raised a `ReferenceError` during UI event binding and prevented the Delivery List from loading.
+- Removed the empty pointerdown handler left behind by the same retired column-filter implementation.
+- Preserved v0.329 behavior: Scan column headers remain click-to-sort controls with no per-column filter buttons or popup menu.
+- Added a static regression check that `app.js` contains no `closeScanColumnFilterMenu`, `openScanColumnFilterMenu`, or `scanColumnFilters` references.
+- Advanced `APPLICATION_VERSION` to 330 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.329 - Simplified Scan Sorting and Rack Visual Fidelity
+
+- Removed the Scan table's per-column funnel buttons, custom column-filter popup, column-filter state, and column-filter chips. Column headers remain directly clickable and toggle ascending/descending table-wide sorting.
+- Preserved the existing status, route, glass-type, free-text filters, active sort chip, paging, and grouped/flat table behavior.
+- Fixed individual-rack lifecycle text contrast with explicit lifecycle foreground colors so the status cannot inherit low-contrast heading typography.
+- Added a compact **Route** cell immediately to the right of **Rack Status** in the individual-rack GUI header, using the existing shortened rack destination labels.
+- Applied the shared blue `app-primary-button` style to the multi-quantity **Add Qty** action in successful scan notifications and Last Scan.
+- Completed grouped rack-set icon parity: Glass Cart, Pallet, Dolly, Crate, and Warehouse now render the selected icon on Rack Overview cards and individual-rack GUIs instead of falling back to the generic rack symbol.
+- Made the saved rack-set hex color the canonical post-creation visual accent for selected/hovered set cards and rack details, while keeping subtle tinting for backgrounds.
+- Advanced `APPLICATION_VERSION` to 329 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.328 - Scan Column Tools, Multi-Quantity Scanning, and Rack Visual Identity
+
+- Added sortable controls to every maintained Scan-page table column. Numeric columns support smallest/largest ordering while text columns support A/Z ordering, and an explicit sort is applied across the entire filtered table rather than inside individual glass-type groups.
+- Added custom per-column filters with text operators (**Contains**, **Equals**, **Starts with**, **Does not contain**) and numeric operators (**Equals**, **Not equal**, **Greater than**, **Greater than or equal**, **Less than**, **Less than or equal**).
+- Integrated column filters with existing Scan filters, glass-type filters, search, filter chips, paging, and Clear Filters behavior.
+- Added an operator Qty field beside Manual Scan Item Nr.; it defaults to 1, validates 1–999, and resets after a successful manual scan.
+- Added **Add Qty** and **Scan Remaining** controls to successful timed scan notifications and Last Scan when an item has Qty > 1 with unscanned pieces remaining.
+- Added `scanQty` handling to normal and Indian Trail scan APIs. The backend caps the accepted delta at the line's remaining quantity and carries that exact delta through line progress, Staging rack quantity, Outbound auto-stage quantity, Indian Trail receiving, scan events, and audit payloads.
+- Fixed the recurring top-half hover/click dead zone on the Rack Overview heading controls by removing pointer hit-testing from the sticky header's background layer while opting actual header controls back in. Removed the prior Rack-only geometry stabilization and click-forwarding workaround.
+- Applied each rack set's configured color to the individual-rack GUI; built-in material groups fall back to stable maintained hues, making wood, steel, aluminum, mirror, truck, and custom rack workspaces visually distinct at a glance.
+- Enlarged and structured the individual-rack lifecycle cell and added a matching lifecycle-colored edge across the rack header. Lifecycle colors remain identical to Rack Overview for **Incomplete**, **Complete**, **On the Way**, **Received**, and **Empty**.
+- Advanced `APPLICATION_VERSION` to 328 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.327 - Rack Status Polish and Natural Page Scrolling
+
+- Restyled the individual-rack header lifecycle cell with the exact Rack Overview lifecycle colors for **Incomplete**, **Complete**, **On the Way**, **Received**, and **Empty**.
+- Added a matching lifecycle dot, adaptive content sizing, improved padding/shadow, and responsive title-row wrapping so the status stays visually balanced and its text remains readable next to different rack names.
+- Removed the v0.326 `body * { overscroll-behavior: contain; }` rule that could prevent normal document scrolling whenever the pointer was over ordinary non-scrollable content.
+- Restricted modal overscroll containment to the actual Admin/Operations body scrollers and action-history list instead of static modal shells or generic history/results class names.
+- Removed the broad Scan-page overscroll selectors from non-scrollable scanner/bay panels; true overflow drawers/options continue to keep their existing local containment.
+- Advanced `APPLICATION_VERSION` to 327 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.326 - Global Search, Scroll Containment, and Rack Interaction Polish
+
+- Moved Global Search's latest scan date/time onto the same resolved status/location row and aligned it to the right, while adding a contained vertical scrollbar to Smart Results.
+- Added scroll-boundary containment across nested GUI/results scrollers and expanded the central modal body-lock detector to every visible shared modal plus rack-transfer dialogs, preventing continued wheel/touch input from moving the page behind a GUI.
+- Changed nested rack-transfer close handling to recalculate the shared modal lock instead of blindly unlocking the document while the parent rack workspace is still open.
+- Kept the Scan Date/Stage body-mounted custom-select menus positioned during window scrolling and lowered the sticky main scanner panel beneath the sticky application header.
+- Added a colored individual-rack lifecycle cell immediately beside the rack name and removed the duplicate rack health-dot presentation plus the body-level Rack Status banner.
+- Corrected **Not On The Way** hover/focus styling with a dedicated readable warning palette.
+- Disabled-looking move and clear controls now remain hoverable/clickable for explanation when an **On the Way** rack is lifecycle-locked. A shared blocked-action popup explains the required recovery action.
+- Added backend lifecycle guards for single rack-item moves, individual rack-item clears, and whole-rack clears so direct/stale requests cannot bypass the existing move-all **On the Way** protection.
+- Added a preflight block before clearing an entire rack set when any member rack is On the Way, preventing partial destructive processing.
+- Added explanatory blocked-state behavior to rack/rack-set deletion prerequisites and changed non-Scan errors to the shared action-feedback popup instead of forcing an unrelated Scan-page render.
+- Removed the duplicate **Clear selected rack set** reset control beside the Status/Sort filters.
+- Advanced `APPLICATION_VERSION` to 326 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.325 - Compact Bay Labels and Stage-Aware Location History
+
+- Added one operator-facing bay formatter that collapses canonical internal codes such as `T-BAY12-01` and repeated labels such as `BAY T-BAY12-01` to **Bay 12-01** without mutating the persisted bay code.
+- Changed the Scan-page Location column so only Indian Trail receiving shows bay locations; Staging and Outbound remain rack/truck-oriented.
+- Added latest bay-assignment history to delivery-list payloads and scan-event payloads. After a bay is cleared or cancelled, the former bay remains visible in a muted gray **prior** state instead of disappearing.
+- Replaced the generic **Received** location treatment on Staging/Outbound with the actual rack/truck. After downstream receipt, that transport location is shown in gray as history and is no longer offered as an editable staging rack assignment.
+- Updated Last Scan and Recent Scans to use the same stage-aware Location logic and compact bay labels.
+- Shortened rack destination display values to **IT**, **CPU**, **DTC**, and **GNV** while keeping the existing persisted destination values and route-class behavior intact.
+- Advanced `APPLICATION_VERSION` to 325 while preserving SQLite schema version 11. No migration or database reset is included.
 
 ## v0.324 - Persistent Manual Overrides and Superseded Order Enforcement
 
