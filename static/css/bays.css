@@ -20618,3 +20618,46 @@ body.bay-move-mode .bay-layout-drop-zone {
     height: min(390px, 48vh);
   }
 }
+
+/* ========================================================================== */
+/* v0.348 In-Transit / Delivery Manifest readability                          */
+/* ========================================================================== */
+
+/* The manifest is frequently read at standing/kiosk distance. Increase text
+   sizing without changing the existing rack/glass layout or table columns. */
+.transit-manifest-panel .transit-manifest-header small {
+  font-size: .78rem;
+}
+
+.transit-manifest-panel .transit-manifest-header span {
+  font-size: .92rem;
+}
+
+.transit-manifest-panel .transit-summary-row-v31 small {
+  font-size: .74rem;
+}
+
+.transit-manifest-panel .transit-summary-row-v31 strong {
+  font-size: 1.55rem;
+}
+
+.transit-manifest-panel .transit-rack-group-head strong {
+  font-size: 1.08rem;
+}
+
+.transit-manifest-panel .transit-glass-ribbon,
+.transit-manifest-panel .transit-glass-ribbon :where(strong, span, small) {
+  font-size: .84rem;
+}
+
+.transit-manifest-panel .transit-glass-table {
+  font-size: .84rem;
+}
+
+.transit-manifest-panel .transit-glass-table th {
+  font-size: .75rem;
+}
+
+.transit-manifest-panel .transit-glass-table td {
+  font-size: .84rem;
+}

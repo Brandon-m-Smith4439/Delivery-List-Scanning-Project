@@ -220,6 +220,35 @@
   white-space: nowrap;
 }
 
+/* v0.325: the same compact Last/Recent location area now follows the active
+   stage. Indian Trail shows bays; Staging/Outbound show racks. Downstream or
+   cleared locations remain visible in gray as physical-location history. */
+.scan-page .scanner-panel:not(.bay-scanner-panel) .last-bay-location-v321.is-rack:not(.is-history) {
+  border-color: #a7c2ef;
+  background: linear-gradient(180deg, #f4f8ff 0%, #eaf3ff 100%);
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .last-bay-location-v321.is-rack:not(.is-history) small,
+.scan-page .scanner-panel:not(.bay-scanner-panel) .last-bay-location-v321.is-rack:not(.is-history) b,
+.scan-page .scanner-panel:not(.bay-scanner-panel) .recent-location-cell-v325.is-rack:not(.is-history),
+.scan-page .scanner-panel:not(.bay-scanner-panel) .recent-location-cell-v325.is-truck:not(.is-history) {
+  color: #315f99;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .last-bay-location-v321.is-history {
+  border-color: #c0c8d2;
+  background: linear-gradient(180deg, #f5f6f7 0%, #eceff2 100%);
+  filter: grayscale(1);
+  box-shadow: none;
+  opacity: .86;
+}
+
+.scan-page .scanner-panel:not(.bay-scanner-panel) .last-bay-location-v321.is-history small,
+.scan-page .scanner-panel:not(.bay-scanner-panel) .last-bay-location-v321.is-history b,
+.scan-page .scanner-panel:not(.bay-scanner-panel) .recent-location-cell-v325.is-history {
+  color: #737f8c;
+}
+
 
 
 .scan-page .scanner-panel:not(.bay-scanner-panel) .compact-scan-history .last-fields {
@@ -3317,7 +3346,8 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   font-weight: 900;
 }
 
-.scan-page .delivery-table .location-badge.is-rack-history {
+.scan-page .delivery-table .location-badge.is-rack-history,
+.scan-page .delivery-table .location-badge.is-location-history {
   border-color: #c0c8d2 !important;
   background: #eef1f4 !important;
   color: #737f8c !important;
@@ -3327,7 +3357,8 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   text-decoration: none;
 }
 
-.scan-page .delivery-table .location-badge.is-rack-history::after {
+.scan-page .delivery-table .location-badge.is-rack-history::after,
+.scan-page .delivery-table .location-badge.is-location-history::after {
   content: " prior";
   margin-left: 3px;
   color: #8d97a2;
@@ -3631,3 +3662,19 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   overflow-wrap: normal !important;
   word-break: normal !important;
 }
+
+/* ========================================================================== */
+/* v0.326 Sticky Scan stacking and scroll-boundary containment                */
+/* ========================================================================== */
+
+/* The scanner remains sticky, but it must paint underneath the sticky app
+   header. Scan-context dropdowns are body-mounted at z-index 14000, so lowering
+   the panel itself does not reduce Stage/Date menu interactivity. */
+.scan-page .scanner-panel:not(.bay-scanner-panel) {
+  z-index: 28 !important;
+}
+
+/* Do not apply overscroll containment to the scanner panel or generic class
+   names. Non-scrollable scan cards must continue passing wheel movement to the
+   page. Dedicated drawers, option lists, and true overflow panes define their
+   own containment next to their overflow rules. */

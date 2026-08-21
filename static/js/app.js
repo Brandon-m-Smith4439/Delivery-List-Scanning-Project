@@ -31,6 +31,8 @@ const CUSTOMER_ROUTE_DEFAULT_ADDRESSES = {
 };
 const ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS = 21;
 const ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS = 7;
+const ADMIN_DELIVERY_LIST_WEEKS_PER_PAGE = 3;
+const MANUAL_EDIT_PAGE_SIZE = 20;
 const PRINT_DATE_HISTORY_BATCH_WEEKS = 2;
 const SCAN_FILTER_GROUPS = Object.freeze({
   status: Object.freeze(["remaining", "partial", "complete"]),
@@ -165,8 +167,16 @@ const state = {
   bayEditorSelectedBay: "",
   bayEditorSelectedBayCodes: new Set(),
   adminCustomerRouteRules: [],
+  customerRouteManagerRouteV350: "CPU",
+  customerRouteOverviewRouteV350: "CPU",
   customerEmailSettings: { contacts: [], cc: [], outbox: [] },
+  customerEmailActiveTab: "rules",
+  customerEmailRuleSearch: "",
+  customerEmailActivityFilter: "all",
+  customerEmailActivitySearch: "",
   bayScannerSettings: { manualRules: [], barcodeRules: [], destinationOverrideMinutes: 15 },
+  bayScannerRulesActiveTab: "rules",
+  scanPageSettingsActiveTab: "crossDate",
   crossDateScanSettings: { mode: "auto_unique", pastDays: 7, futureDays: 30 },
   bayAutoAssignSettings: {
     standardMaxInches: 59.99,
@@ -190,18 +200,24 @@ const state = {
   supersededReviewFilter: "open",
   adminListSearchTimer: null,
   adminDeliveryListVisiblePastDays: ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS,
+  adminDeliveryListWeekPage: 1,
+  adminDeliveryListCatalog: null,
+  adminDeliveryListCatalogRequestId: 0,
   rolePermissionOpenRoles: new Set(),
   rolePermissionOpenCategories: new Set(),
   rolePermissionScrollTop: 0,
-  manualEditLookups: { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] },
-  lookupManagerActiveType: "product",
+  manualEditLookups: { products: [], routes: [], processes: [], glassCosts: [], glassColors: [], stages: [] },
+  manualEditLookupLibraryLoadedAt: 0,
+  lookupManagerActiveType: "glass_profile",
   lookupManagerSearch: "",
+  lookupGlassFamilyV350: "Annealed",
   manualEditDirty: false,
   manualEditListId: "",
   manualEditQuery: "",
   manualEditResultRows: [],
   manualEditTotalRows: 0,
-  manualEditVisibleCount: 20,
+  manualEditVisibleCount: MANUAL_EDIT_PAGE_SIZE,
+  manualEditPage: 1,
   manualEditGlassTypes: [],
   manualEditFilters: { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] },
   manualEditSearchTimer: null,
@@ -1269,7 +1285,6 @@ const els = {
   printPresetConfirmBtn: document.getElementById("printPresetConfirmBtn"),
 
   adminPage: document.getElementById("adminPage"),
-  adminSummary: document.getElementById("adminSummary"),
   adminLastUpdated: document.getElementById("adminLastUpdated"),
   adminDeliveryLists: document.getElementById("adminDeliveryLists"),
   supersededOrderReviewCount: document.getElementById("supersededOrderReviewCount"),
@@ -1295,6 +1310,7 @@ const els = {
   operationsModalEyebrow: document.getElementById("operationsModalEyebrow"),
   operationsModalDescription: document.getElementById("operationsModalDescription"),
   operationsModalStatusText: document.getElementById("operationsModalStatusText"),
+  operationsModalRackStatus: document.getElementById("operationsModalRackStatus"),
   rejectOperationsTabs: document.getElementById("rejectOperationsTabs"),
   operationsRackTabs: document.getElementById("operationsRackTabs"),
   operationsRackHistoryCount: document.getElementById("operationsRackHistoryCount"),
@@ -4464,6 +4480,11 @@ function initCustomSelectSystem() {
     if (event.target.dataset.customSelectEnhanced !== "true") void playAppSound("collapse_close");
   }, true);
   window.addEventListener("resize", () => customSelectUi.openSelect && positionCustomSelectMenu());
+  window.addEventListener("scroll", () => {
+    if (["deliveryDateSelect", "deliveryStageSelect"].includes(customSelectUi.openSelect?.id)) {
+      window.requestAnimationFrame(positionCustomSelectMenu);
+    }
+  }, { passive: true });
   document.addEventListener("scroll", (event) => {
     if (!customSelectUi.openSelect || customSelectUi.menu?.contains(event.target)) return;
     // Date and Stage live inside the sticky Scan panel. Closing their menu on
@@ -4735,7 +4756,15 @@ function formatPercent(value) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function configuredStageDefinitionV346(list) {
+  const stageText = String(list?.stage || "").trim().toLowerCase();
+  return (state.manualEditLookups?.stages || []).find((definition) => String(definition.displayName || definition.label || "").trim().toLowerCase() === stageText) || null;
+}
+
 function stageCategory(list) {
+  const configured = configuredStageDefinitionV346(list);
+  const presetCategory = { airport_staging: "staged", airport_outbound: "outbound", indian_trail: "received", greenville: "greenville", cpu: "pickup", dtc: "dtc", custom_route: "staged" };
+  if (configured && presetCategory[configured.preset]) return presetCategory[configured.preset];
   const stage = `${list?.stage || ""} ${list?.scanner || ""}`.toLowerCase();
   if (stage.includes("outbound")) return "outbound";
   if (stage.includes("dtc") || stage.includes("deliver to customer")) return "dtc";
@@ -4745,12 +4774,83 @@ function stageCategory(list) {
   return "staged";
 }
 
+/** Shared route rows used by Delivery List Management and Automation Import History. */
+const DELIVERY_ROUTE_GROUP_DEFINITIONS = Object.freeze([
+  Object.freeze({ key: "airport", label: "Airport Road", printRouteGroup: "airport", sort: 0 }),
+  Object.freeze({ key: "indian_trail", label: "Indian Trail", printRouteGroup: "indian_trail", sort: 1 }),
+  Object.freeze({ key: "greenville", label: "Greenville", printRouteGroup: "greenville", sort: 2 }),
+  Object.freeze({ key: "cpu", label: "CPU", printRouteGroup: "cpu", sort: 3 }),
+  Object.freeze({ key: "dtc", label: "DTC", printRouteGroup: "dtc", sort: 4 }),
+]);
+
+/** Resolve one stage/stage-summary record into the maintained delivery-route row. */
+function deliveryRouteGroupForStage(record = {}) {
+  const category = stageCategory({
+    stage: record.stage || record.label || record.stageSheetName || "",
+    scanner: record.scanner || record.stageProfile || "",
+  });
+  const key = category === "received"
+    ? "indian_trail"
+    : category === "greenville"
+      ? "greenville"
+      : category === "pickup"
+        ? "cpu"
+        : category === "dtc"
+          ? "dtc"
+          : "airport";
+  return DELIVERY_ROUTE_GROUP_DEFINITIONS.find((definition) => definition.key === key)
+    || DELIVERY_ROUTE_GROUP_DEFINITIONS[0];
+}
+
+/** Choose one authoritative stage summary for each route without double-counting stage copies. */
+function condenseImportStageSummariesByRoute(stageSummaries = []) {
+  const groups = new Map(DELIVERY_ROUTE_GROUP_DEFINITIONS.map((definition) => [definition.key, []]));
+  for (const stage of Array.isArray(stageSummaries) ? stageSummaries : []) {
+    groups.get(deliveryRouteGroupForStage(stage).key)?.push(stage);
+  }
+
+  const summaryPriority = (stage, definition) => {
+    const category = stageCategory({ stage: stage.stage || stage.label || "", scanner: stage.stageProfile || stage.scanner || "" });
+    const changed = Number(stage.changedLineCount || 0)
+      + Number(stage.changedPieceQty || 0)
+      + Number(stage.updatedPieceQty || 0)
+      + Number(stage.addedPieceQty || stage.newPieceQty || 0)
+      + Number(stage.removedLineCount || 0)
+      + Number(stage.removedPieceQty || 0);
+    const authoritativeAirport = definition.key === "airport" && category === "outbound" ? 1_000_000_000 : 0;
+    return authoritativeAirport
+      + (changed ? 100_000_000 : 0)
+      + (stage.created || stage.reactivated ? 10_000_000 : 0)
+      + (changed * 10_000)
+      + Number(stage.totalQty || 0);
+  };
+
+  return DELIVERY_ROUTE_GROUP_DEFINITIONS.flatMap((definition) => {
+    const candidates = groups.get(definition.key) || [];
+    if (!candidates.length) return [];
+    const representative = candidates
+      .slice()
+      .sort((a, b) => summaryPriority(b, definition) - summaryPriority(a, definition))[0];
+    return [{
+      ...representative,
+      routeGroupKey: definition.key,
+      routeGroupLabel: definition.label,
+      routeStageCount: candidates.length,
+      // Preserve the source rows for diagnostics while rendering one route row.
+      // Airport intentionally uses Outbound as its authoritative all-order copy.
+      routeStageSummaries: candidates,
+    }];
+  });
+}
+
 /**
  * Purpose: Run the stage label workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function stageLabel(list) {
+  const configured = configuredStageDefinitionV346(list);
+  if (configured?.displayName) return configured.displayName;
   const category = stageCategory(list);
   if (category === "outbound") return "Outbound";
   if (category === "greenville") return "BFS Greenville";
@@ -4762,6 +4862,8 @@ function stageLabel(list) {
 
 /** Return the compact operational stage names used by the Scan panel. */
 function scanStageLabel(list) {
+  const configured = configuredStageDefinitionV346(list);
+  if (configured?.displayName) return configured.displayName;
   const category = stageCategory(list);
   if (category === "outbound") return "Outbound";
   if (category === "greenville") return "Greenville";
@@ -5082,8 +5184,12 @@ function updateModalScrollLock() {
     const style = window.getComputedStyle(panel);
     return style.display !== "none" && style.visibility !== "hidden" && panel.getClientRects().length > 0;
   };
-  const modalIsOpen = [
-    els.adminModal,
+
+  // Every visible GUI must own its scroll while it is open. Querying the shared
+  // modal class also protects newly added operations windows from accidentally
+  // leaving the document body scrollable underneath them.
+  const modalCandidates = [
+    ...document.querySelectorAll('.modal-panel, [role="dialog"][aria-modal="true"]'),
     els.printOptionsPanel,
     els.baySelectedModal,
     els.staleBayPanel,
@@ -5095,10 +5201,33 @@ function updateModalScrollLock() {
     document.getElementById("rushAlertShell"),
     document.getElementById("indianTrailOutboundOverrideShell"),
     document.querySelector(".action-confirm-backdrop"),
-  ].some(panelIsActuallyVisible);
+    document.querySelector(".rack-transfer-backdrop"),
+  ];
+  const modalIsOpen = modalCandidates.some(panelIsActuallyVisible);
 
   document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
 }
+
+let modalScrollLockObserver = null;
+function installModalScrollLockObserver() {
+  if (modalScrollLockObserver || !document.body) return;
+  let pending = false;
+  modalScrollLockObserver = new MutationObserver(() => {
+    if (pending) return;
+    pending = true;
+    window.requestAnimationFrame(() => {
+      pending = false;
+      updateModalScrollLock();
+    });
+  });
+  modalScrollLockObserver.observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ["hidden", "aria-hidden"],
+  });
+}
+installModalScrollLockObserver();
 
 /**
  * Purpose: Load the fetch JSON workflow using the existing shared UI state.
@@ -5120,13 +5249,23 @@ async function fetchJson(url, options = {}) {
     } catch {
       // Keep raw text when the server does not return JSON.
     }
-    if (response.status === 403) playAppSound("permission_denied", { force: true });
+    if (response.status === 403) {
+      // Authorization failures are action-level failures, not session failures.
+      // Keep the signed-in workspace open and let the caller show the shared
+      // access-denied popup instead of redirecting the user to Sign In.
+      playAppSound("permission_denied", { force: true });
+      if (/^permission denied$/i.test(String(message || "").trim())) {
+        message = "You do not have access to perform that action.";
+      }
+    }
     if (response.status === 401 && state.backend && url !== "/api/login") {
+      // A 401 means the session itself is no longer valid. v0.341 prevents
+      // role saves from manufacturing this condition by deleting live sessions.
       state.authenticated = false;
       state.user = null;
       state.permissions = [];
       stopNotificationPolling();
-      showLogin("Please sign in to continue.");
+      showLogin("Your session has ended. Please sign in again.");
     }
     throw new Error(message);
   }
@@ -5635,6 +5774,10 @@ async function removeStation(name) {
   state.stations = uniqueText([...DEFAULT_STATIONS, ...(payload.stations || [])]);
   renderStationOptions();
   renderAdminStations();
+  if (els.adminModal?.dataset.kind === "lookups" && state.lookupManagerActiveType === "station") {
+    renderLookupManagerModal();
+    configureAdminModalSectionTabsV345("lookups");
+  }
   playAppSound("destructive_action", { force: true });
 }
 
@@ -6640,42 +6783,82 @@ function renderProcessState(item) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function locationLabel(item) {
-  if (item?.received === true || Number(item?.receivedQty || 0) > 0) return "Received";
-  const stageText = `${state.meta?.stage || ""} ${state.meta?.scanner || ""}`.toLowerCase();
-  const rackCode = String(item.rackCode || "").trim().toUpperCase();
-  if (stageText.includes("indian trail") && item.bayCode) return `Bay ${item.bayCode}`;
-  if (rackCode === "T" || /^T\d+$/i.test(rackCode) || /truck|no rack/i.test(`${item.rackName || ""} ${item.rackType || ""}`)) {
-    return rackLocationDisplayLabel(rackCode, item.rackName, item.rackType);
-  }
-  if (rackCode) return rackCode;
+function scanLocationPresentation(item) {
+  const currentItem = item || {};
+  const indianTrailStage = isIndianTrailScanContext();
+  const stagingOrOutboundStage = isStagingScanContext() || isOutboundScanContext();
 
-  // v0.269: once a rack assignment is cleared, keep the most recent transport
-  // rack visible as history. The row renderer gives this fallback a muted style
-  // so operators can distinguish prior transportation from the current location.
-  const previousRackCode = String(item.lastRackCode || "").trim().toUpperCase();
-  if (previousRackCode === "T" || /^T\d+$/i.test(previousRackCode) || /truck|no rack/i.test(`${item.lastRackName || ""} ${item.lastRackType || ""}`)) {
-    return rackLocationDisplayLabel(previousRackCode, item.lastRackName, item.lastRackType);
+  // Bay locations belong only to the Indian Trail receiving stage. Once a bay
+  // assignment is cleared/cancelled, keep the most recent bay visible as muted
+  // history so operators can still see where the glass was physically stored.
+  if (indianTrailStage) {
+    const currentBay = bayLocationDisplayLabel(currentItem.bayCode, currentItem.bayName);
+    if (currentBay) {
+      return {
+        label: currentBay,
+        kind: "bay",
+        historical: false,
+        title: `Current Indian Trail location: ${currentBay}`,
+      };
+    }
+    const previousBay = bayLocationDisplayLabel(currentItem.lastBayCode, currentItem.lastBayName);
+    if (previousBay) {
+      return {
+        label: previousBay,
+        kind: "bay",
+        historical: true,
+        title: `Previously stored in ${previousBay}; the bay assignment has been removed.`,
+      };
+    }
+    return { label: "", kind: "bay", historical: false, title: "" };
   }
-  if (previousRackCode) return previousRackCode;
-  return "";
+
+  // Staging/Outbound should continue to show the transport rack, not the later
+  // Indian Trail bay. After receipt, the rack remains useful history and is
+  // deliberately rendered in gray instead of being replaced with "Received".
+  const rackCode = String(currentItem.rackCode || "").trim().toUpperCase();
+  const currentRack = rackCode
+    ? rackLocationDisplayLabel(rackCode, currentItem.rackName, currentItem.rackType)
+    : "";
+  if (currentRack) {
+    const receivedDownstream = stagingOrOutboundStage
+      && (currentItem.received === true || Number(currentItem.receivedQty || 0) > 0);
+    return {
+      label: currentRack,
+      kind: /^truck/i.test(currentRack) ? "truck" : "rack",
+      historical: receivedDownstream,
+      title: receivedDownstream
+        ? `Previously transported in ${currentRack}; this item has been received downstream.`
+        : `Current rack location: ${currentRack}`,
+    };
+  }
+
+  const previousRack = rackHistoryLocationLabel(currentItem);
+  if (previousRack) {
+    return {
+      label: previousRack,
+      kind: /^truck/i.test(previousRack) ? "truck" : "rack",
+      historical: true,
+      title: `Previously transported in ${previousRack}.`,
+    };
+  }
+
+  return { label: "", kind: "rack", historical: false, title: "" };
+}
+
+function locationLabel(item) {
+  return scanLocationPresentation(item).label;
 }
 
 function rackHistoryLocationLabel(item) {
   const previousRackCode = String(item?.lastRackCode || "").trim().toUpperCase();
   if (!previousRackCode) return "";
-  if (previousRackCode === "T" || /^T\d+$/i.test(previousRackCode) || /truck|no rack/i.test(`${item?.lastRackName || ""} ${item?.lastRackType || ""}`)) {
-    return rackLocationDisplayLabel(previousRackCode, item?.lastRackName, item?.lastRackType);
-  }
-  return previousRackCode;
+  return rackLocationDisplayLabel(previousRackCode, item?.lastRackName, item?.lastRackType);
 }
 
 function locationIsRackHistory(item) {
-  return Boolean(
-    item
-    && !String(item.rackCode || "").trim()
-    && String(item.lastRackCode || "").trim()
-  );
+  const presentation = scanLocationPresentation(item);
+  return presentation.historical && presentation.kind !== "bay";
 }
 
 /**
@@ -6741,6 +6924,7 @@ function rackForCode(code) {
 function itemCanShowRackLocationDropdown(item) {
   if (!canAssignRackLocation() || item.id !== state.selectedId) return false;
   if (itemScannedPieceQty(item) <= 0) return false;
+  if (item?.received === true || Number(item?.receivedQty || 0) > 0) return false;
 
   const currentRackCode = String(item.rackCode || "").trim();
   if (!currentRackCode) return true;
@@ -6773,25 +6957,17 @@ function locationBadgeClass(location) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function rackLocationDropdown(item, currentLocation = "") {
-  const historical = locationIsRackHistory(item);
-  const historyLocation = historical ? rackHistoryLocationLabel(item) : "";
-  const historyTitle = historyLocation
-    ? `Previously transported in ${String(item.lastRackName || item.lastRackCode || historyLocation).trim()}`
+  const presentation = scanLocationPresentation(item);
+  const displayLocation = presentation.label || currentLocation || "";
+  const historyClass = presentation.historical
+    ? ` is-location-history${presentation.kind === "bay" ? " is-bay-history" : " is-rack-history"}`
     : "";
-  const historyBadge = historyLocation
-    ? `<span class="${escapeHtml(locationBadgeClass(historyLocation))} is-rack-history" title="${escapeHtml(historyTitle)}">${escapeHtml(historyLocation)}</span>`
+  const displayBadge = displayLocation
+    ? `<span class="${escapeHtml(locationBadgeClass(displayLocation))}${historyClass}" title="${escapeHtml(presentation.title || displayLocation)}">${escapeHtml(displayLocation)}</span>`
     : "";
 
   if (!itemCanShowRackLocationDropdown(item)) {
-    if (!currentLocation && !historyBadge) return "";
-    const currentIsHistory = Boolean(historyLocation && String(currentLocation || "") === historyLocation);
-    const currentBadge = currentLocation && !currentIsHistory
-      ? `<span class="${escapeHtml(locationBadgeClass(currentLocation))}">${escapeHtml(currentLocation)}</span>`
-      : "";
-    if (currentBadge && historyBadge) {
-      return `<span class="location-history-stack-v269">${currentBadge}${historyBadge}</span>`;
-    }
-    return currentBadge || historyBadge;
+    return displayBadge;
   }
 
   const currentRackCode = String(item.rackCode || "").trim().toUpperCase() === "T" ? "T" : String(item.rackCode || "").trim();
@@ -6811,8 +6987,8 @@ function rackLocationDropdown(item, currentLocation = "") {
         ${rackOptions}
       </select>
     </label>`;
-  return historyBadge
-    ? `<span class="location-history-stack-v269 is-editable">${control}${historyBadge}</span>`
+  return presentation.historical && displayBadge
+    ? `<span class="location-history-stack-v269 is-editable">${control}${displayBadge}</span>`
     : control;
 }
 
@@ -7101,32 +7277,50 @@ function glassVisualFallbackColor(label, usedColors = new Set()) {
   return color;
 }
 
+function glassVisualLookupKeyV349(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[®™]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 function buildGlassVisualColorMap(extraLabels = []) {
   const rows = Array.isArray(state.manualEditLookups?.glassColors) ? state.manualEditLookups.glassColors : [];
   const costs = Array.isArray(state.manualEditLookups?.glassCosts) ? state.manualEditLookups.glassCosts : [];
   const labels = new Map();
   [...rows, ...costs].forEach((item) => {
     const label = String(item?.value || item?.label || "").trim();
-    if (label) labels.set(label.toLowerCase(), label);
+    if (label) labels.set(glassVisualLookupKeyV349(label), label);
   });
   (extraLabels || []).forEach((value) => {
     const label = String(value || "").trim();
-    if (label) labels.set(label.toLowerCase(), label);
+    if (label) labels.set(glassVisualLookupKeyV349(label), label);
   });
 
   const overrides = new Map();
   rows.forEach((item) => {
-    const key = String(item?.value || item?.label || "").trim().toLowerCase();
+    const label = String(item?.value || item?.label || "").trim();
+    const key = glassVisualLookupKeyV349(label);
+    const canonicalKey = glassVisualLookupKeyV349(glassProfileCanonicalLabelV350(label));
     const color = normalizeGlassVisualColor(item?.color);
     if (key && color) overrides.set(key, color);
+    // A canonical Glass Types profile (for example Mirror or 1/4 Clear
+    // Annealed) intentionally owns the visual color for all imported aliases.
+    if (canonicalKey && key === canonicalKey && color) overrides.set(`canonical:${canonicalKey}`, color);
   });
 
   const used = new Set([...overrides.values()]);
   const result = new Map();
   [...labels.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([key, label]) => {
-    const configured = overrides.get(key);
-    const color = configured || glassVisualFallbackColor(label, used);
+    const canonicalKey = glassVisualLookupKeyV349(glassProfileCanonicalLabelV350(label));
+    const configured = overrides.get(key) || overrides.get(`canonical:${canonicalKey}`);
+    const color = configured || glassVisualFallbackColor(glassProfileCanonicalLabelV350(label) || label, used);
     result.set(key, color);
+    result.set(String(label).trim().toLowerCase(), color);
+    if (canonicalKey) result.set(`canonical:${canonicalKey}`, color);
     if (!configured) used.add(color);
   });
   return result;
@@ -7134,21 +7328,58 @@ function buildGlassVisualColorMap(extraLabels = []) {
 
 function glassVisualColor(label, extraLabels = []) {
   const clean = String(label || "Other Glass").trim() || "Other Glass";
-  return buildGlassVisualColorMap([...(extraLabels || []), clean]).get(clean.toLowerCase())
+  const colorMap = buildGlassVisualColorMap([...(extraLabels || []), clean]);
+  return colorMap.get(clean.toLowerCase())
+    || colorMap.get(glassVisualLookupKeyV349(clean))
     || glassVisualFallbackColor(clean);
 }
 
 function glassVisualCssVariables(label, colorMap = null) {
   const clean = String(label || "Other Glass").trim() || "Other Glass";
-  const color = normalizeGlassVisualColor(colorMap?.get?.(clean.toLowerCase())) || glassVisualColor(clean);
+  const color = normalizeGlassVisualColor(
+    colorMap?.get?.(clean.toLowerCase())
+    || colorMap?.get?.(glassVisualLookupKeyV349(clean)),
+  ) || glassVisualColor(clean);
   const red = Number.parseInt(color.slice(1, 3), 16);
   const green = Number.parseInt(color.slice(3, 5), 16);
   const blue = Number.parseInt(color.slice(5, 7), 16);
   return [
     `--glass-type-color:${color}`,
-    `--glass-type-border:rgba(${red},${green},${blue},.38)`,
+    `--glass-type-border:rgba(${red},${green},${blue},.46)`,
     `--glass-type-soft:rgba(${red},${green},${blue},.10)`,
+    `--glass-type-row:rgba(${red},${green},${blue},.16)`,
+    `--glass-type-row-strong:rgba(${red},${green},${blue},.24)`,
     `--glass-type-ring:rgba(${red},${green},${blue},.16)`,
+  ].join(";");
+}
+
+/**
+ * Purpose: Give Delivery List Update Preview a quieter version of the shared glass palette.
+ * Effects: Keeps Lookup Manager hue identity while reducing saturation and row intensity so dense previews remain readable.
+ * Flow: Blends the configured hue toward its own luminance, then exposes preview-only CSS variables.
+ */
+function previewGlassVisualCssVariables(label, colorMap = null) {
+  const clean = String(label || "Other Glass").trim() || "Other Glass";
+  const color = normalizeGlassVisualColor(
+    colorMap?.get?.(clean.toLowerCase())
+    || colorMap?.get?.(glassVisualLookupKeyV349(clean)),
+  ) || glassVisualColor(clean);
+  const red = Number.parseInt(color.slice(1, 3), 16);
+  const green = Number.parseInt(color.slice(3, 5), 16);
+  const blue = Number.parseInt(color.slice(5, 7), 16);
+  const gray = Math.round((red * .299) + (green * .587) + (blue * .114));
+  const soften = (channel) => Math.round((channel * .68) + (gray * .32));
+  const mutedRed = soften(red);
+  const mutedGreen = soften(green);
+  const mutedBlue = soften(blue);
+  const mutedHex = `#${[mutedRed, mutedGreen, mutedBlue].map((value) => value.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+  return [
+    `--glass-type-color:${mutedHex}`,
+    `--glass-type-border:rgba(${mutedRed},${mutedGreen},${mutedBlue},.30)`,
+    `--glass-type-soft:rgba(${mutedRed},${mutedGreen},${mutedBlue},.06)`,
+    `--glass-type-row:rgba(${mutedRed},${mutedGreen},${mutedBlue},.08)`,
+    `--glass-type-row-strong:rgba(${mutedRed},${mutedGreen},${mutedBlue},.13)`,
+    `--glass-type-ring:rgba(${mutedRed},${mutedGreen},${mutedBlue},.09)`,
   ].join(";");
 }
 
@@ -7749,6 +7980,28 @@ function rackLocationDisplayLabel(code = "", name = "", type = "") {
   return cleanCode || String(name || "").trim();
 }
 
+/** Return the compact operator-facing bay label without exposing internal T-BAY prefixes. */
+function bayLocationDisplayLabel(code = "", name = "") {
+  const cleanCode = String(code || "").trim();
+  const cleanName = String(name || "").trim();
+
+  const compactCanonical = (value) => {
+    let text = String(value || "").trim();
+    if (!text) return "";
+    text = text.replace(/^BAY\s+/i, "").trim();
+    const match = text.match(/^(?:[A-Z]+-)?BAY[-\s]*(\d+(?:-\d+)*)$/i)
+      || text.match(/^(\d+(?:-\d+)*)$/);
+    return match ? `Bay ${match[1]}` : "";
+  };
+
+  const compactName = compactCanonical(cleanName);
+  if (compactName) return compactName;
+  const compactCode = compactCanonical(cleanCode);
+  if (compactCode) return compactCode;
+  if (cleanName) return /^bay\b/i.test(cleanName) ? cleanName.replace(/^bay\b/i, "Bay") : `Bay ${cleanName}`;
+  return cleanCode ? `Bay ${cleanCode}` : "";
+}
+
 /**
  * Purpose: Run the is truck rack workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -7837,9 +8090,9 @@ function rackDestinationLabel(value) {
   const text = String(value || "Indian Trail").trim();
   if (/^cpu$/i.test(text)) return "CPU";
   if (/^dtc$/i.test(text)) return "DTC";
-  if (/green|gnv/i.test(text)) return "Greenville";
-  if (/indian|trail|^it$/i.test(text)) return "Indian Trail";
-  return text || "Indian Trail";
+  if (/green|gnv/i.test(text)) return "GNV";
+  if (/indian|trail|^it$/i.test(text)) return "IT";
+  return text || "IT";
 }
 
 /**
@@ -7850,7 +8103,7 @@ function rackDestinationLabel(value) {
 function rackDestinationClass(value) {
   const text = rackDestinationLabel(value).toLowerCase();
   if (text.includes("cpu")) return "cpu";
-  if (text.includes("green")) return "greenville";
+  if (text.includes("green") || text === "gnv") return "greenville";
   if (text.includes("dtc")) return "dtc";
   return "indian-trail";
 }
@@ -7955,6 +8208,17 @@ function renderRacksPage() {
   const renderRackItem = (item, currentRackCode = "") => {
     const rackItemId = String(item.rackItemId || "");
     const itemLabel = `${item.order}-${item.item}`;
+    const sourceRack = state.racks.find((rack) => String(rack.code) === String(currentRackCode));
+    const sourceOnTheWay = String(sourceRack?.status || "").trim().toLowerCase() === "in transit";
+    const blockedReason = sourceOnTheWay
+      ? `${rackOptionLabel(sourceRack)} is On the Way. Mark it Not On The Way or Returned before moving or clearing its contents.`
+      : "";
+    const moveBlockedAttrs = blockedReason
+      ? `aria-disabled="true" data-blocked-reason="${escapeHtml(blockedReason)}" title="${escapeHtml(blockedReason)}"`
+      : `title="Move piece"`;
+    const clearBlockedAttrs = blockedReason
+      ? `aria-disabled="true" data-blocked-reason="${escapeHtml(blockedReason)}" title="${escapeHtml(blockedReason)}"`
+      : `title="Clear piece"`;
     return `
       <article class="rack-item">
         <div>
@@ -7967,19 +8231,19 @@ function renderRacksPage() {
           <div class="rack-item-actions">
             <button
               type="button"
-              class="icon-only icon-move rack-scope-move-button"
+              class="icon-only icon-move rack-scope-move-button${blockedReason ? " is-blocked" : ""}"
               data-rack-move-item="${escapeHtml(rackItemId)}"
               data-source-rack="${escapeHtml(currentRackCode)}"
               data-rack-item-label="${escapeHtml(itemLabel)}"
-              title="Move piece"
+              ${moveBlockedAttrs}
               aria-label="Move ${escapeHtml(itemLabel)}"
             ></button>
             <button
               type="button"
-              class="icon-only icon-trash danger"
+              class="icon-only icon-trash danger${blockedReason ? " is-blocked" : ""}"
               data-rack-clear-item="${escapeHtml(rackItemId)}"
               data-rack-clear-label="${escapeHtml(itemLabel)}"
-              title="Clear piece"
+              ${clearBlockedAttrs}
               aria-label="Clear ${escapeHtml(itemLabel)}"
             ></button>
           </div>` : ""}
@@ -8057,6 +8321,13 @@ function renderRacksPage() {
     const rackHasMoveOpen = (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
     const rackOpen = state.expandedRackCodes.has(rack.code) || rackHasMoveOpen;
 
+    const rackBlockedReason = isInTransit
+      ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before clearing its contents.`
+      : "";
+    const rackClearAttrs = rackBlockedReason
+      ? `aria-disabled="true" data-blocked-reason="${escapeHtml(rackBlockedReason)}" title="${escapeHtml(rackBlockedReason)}"`
+      : `title="Clear rack"`;
+
     const adminActions = hasPermission("manage_racks")
       ? `<span class="rack-summary-actions">
           <button
@@ -8068,9 +8339,9 @@ function renderRacksPage() {
           ></button>
           <button
             type="button"
-            class="icon-only icon-trash danger"
+            class="icon-only icon-trash danger${rackBlockedReason ? " is-blocked" : ""}"
             data-rack-clear="${escapeHtml(rack.code)}"
-            title="Clear rack"
+            ${rackClearAttrs}
             aria-label="Clear ${escapeHtml(rack.code)}"
           ></button>
         </span>`
@@ -8192,7 +8463,11 @@ function renderRacksPage() {
           }
           ${
             hasPermission("manage_racks")
-              ? `<button type="button" class="icon-only icon-reset" data-rack-clear="${escapeHtml(rack.code)}" title="Clear rack" aria-label="Clear ${escapeHtml(rack.code)}"></button>`
+              ? (() => {
+                  const onTheWay = String(rack.status || "").trim().toLowerCase() === "in transit";
+                  const reason = onTheWay ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before clearing its contents.` : "";
+                  return `<button type="button" class="icon-only icon-reset${onTheWay ? " is-blocked" : ""}" data-rack-clear="${escapeHtml(rack.code)}" ${reason ? `aria-disabled="true" data-blocked-reason="${escapeHtml(reason)}" title="${escapeHtml(reason)}"` : `title="Clear rack"`} aria-label="Clear ${escapeHtml(rack.code)}"></button>`;
+                })()
               : ""
           }
         </div>
@@ -8344,7 +8619,6 @@ function renderRacksPage() {
               <option value="status" ${state.rackSort === "status" ? "selected" : ""}>Status</option>
             </select>
           </label>
-          <button type="button" class="icon-only icon-reset" data-rack-set-clear="${escapeHtml(selectedGroupLabel)}" ${hasPermission("manage_racks") ? "" : "hidden"} title="Clear selected rack set" aria-label="Clear selected rack set"></button>
         </div>
       </div>
 
@@ -8448,11 +8722,11 @@ async function chooseRackDestination(rack) {
         <label class="rack-destination-field">
           <span>Destination</span>
           <select id="rackDestinationSelect">
-            ${["Indian Trail", "CPU", "Greenville", "DTC"].map((value) => `<option value="${escapeHtml(value)}" ${rackDestinationLabel(value) === currentDestination ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+            ${["Indian Trail", "CPU", "Greenville", "DTC"].map((value) => `<option value="${escapeHtml(value)}" ${rackDestinationLabel(value) === currentDestination ? "selected" : ""}>${escapeHtml(rackDestinationLabel(value))}</option>`).join("")}
           </select>
         </label>
         <div class="rack-destination-actions">
-          <button type="button" data-rack-destination-cancel>Cancel</button>
+          <button type="button" class="app-cancel-action-v343" data-rack-destination-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button type="button" data-rack-destination-confirm>Complete Rack</button>
         </div>
       </section>
@@ -8465,7 +8739,7 @@ async function chooseRackDestination(rack) {
      */
     const close = (value = "") => {
       shell.remove();
-      document.body.classList.remove("modal-scroll-locked");
+      updateModalScrollLock();
       resolve(value);
     };
 
@@ -8642,6 +8916,14 @@ async function clearRackSet(label) {
    */
   const racks = (state.racks || []).filter((rack) => rackGroupLabel(rack) === label);
   if (!racks.length) return;
+  const onTheWayRack = racks.find((rack) => String(rack.status || "").trim().toLowerCase() === "in transit");
+  if (onTheWayRack) {
+    showBlockedAction(
+      `${rackOptionLabel(onTheWayRack)} is On the Way. Mark it Not On The Way or Returned before clearing this rack set.`,
+      "Rack set cannot be cleared",
+    );
+    return;
+  }
   const confirmed = await confirmWebAppAction({
     title: "Clear rack set?",
     message: `Clear all active pieces from every rack in <strong>${escapeHtml(label)}</strong>?`,
@@ -9152,6 +9434,14 @@ function scanEntryRowClass(entry) {
  * Effects: May call the backend api, may update shared client state.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
+function scanEntryDisplayItem(entry) {
+  const eventItem = entry?.item;
+  if (!eventItem) return null;
+  const currentItem = (state.items || []).find((item) => String(item.id || "") === String(eventItem.id || ""));
+  if (!currentItem) return eventItem;
+  return { ...eventItem, ...currentItem };
+}
+
 function setLastScan(entry) {
   if (!entry || !els.lastCard) return;
   state.lastScan = entry;
@@ -9160,20 +9450,27 @@ function setLastScan(entry) {
   if (els.lastScanTime) els.lastScanTime.textContent = entry.ok ? "Just now" : entry.eventType === "duplicate" ? "Notice" : "Needs review";
   const manualPrefix = scanEntryIsManual(entry) ? "Manual Scan · " : "";
   const compactMessage = scanEntryCompactMessage(entry);
-  if (els.lastJob) els.lastJob.textContent = !entry.ok || !entry.item
+  const displayItem = scanEntryDisplayItem(entry);
+  if (els.lastJob) els.lastJob.textContent = !entry.ok || !displayItem
     ? compactMessage
-    : `${manualPrefix}Job Nr. ${entry.item.job || "-"}`;
+    : `${manualPrefix}Job Nr. ${displayItem.job || "-"}`;
   if (els.lastBay) {
-    const bayCode = String(entry.item?.bayCode || "").trim();
-    els.lastBay.textContent = bayCode ? `Bay ${bayCode}` : "-";
-    const bayLocation = els.lastBay.closest(".last-bay-location-v321");
-    if (bayLocation) bayLocation.hidden = !bayCode;
+    const location = displayItem ? scanLocationPresentation(displayItem) : { label: "", kind: "", historical: false };
+    els.lastBay.textContent = location.label || "-";
+    const locationCard = els.lastBay.closest(".last-bay-location-v321");
+    if (locationCard) {
+      locationCard.hidden = !location.label;
+      locationCard.classList.toggle("is-history", Boolean(location.historical));
+      locationCard.classList.toggle("is-bay", location.kind === "bay");
+      locationCard.classList.toggle("is-rack", location.kind === "rack" || location.kind === "truck");
+      locationCard.title = location.title || location.label || "";
+    }
   }
-  if (els.lastOrder) els.lastOrder.textContent = entry.item ? entry.item.order : "-";
-  if (els.lastItem) els.lastItem.textContent = entry.item ? entry.item.item : "-";
-  if (els.lastQty) els.lastQty.textContent = entry.item ? String(entry.item.scanned) : "-";
-  if (els.lastDims) els.lastDims.textContent = entry.item ? entry.item.dimensions : "-";
-  if (els.lastCustomer) els.lastCustomer.textContent = entry.item ? entry.item.customer : "-";
+  if (els.lastOrder) els.lastOrder.textContent = displayItem ? displayItem.order : "-";
+  if (els.lastItem) els.lastItem.textContent = displayItem ? displayItem.item : "-";
+  if (els.lastQty) els.lastQty.textContent = displayItem ? String(displayItem.scanned) : "-";
+  if (els.lastDims) els.lastDims.textContent = displayItem ? displayItem.dimensions : "-";
+  if (els.lastCustomer) els.lastCustomer.textContent = displayItem ? displayItem.customer : "-";
 }
 
 /**
@@ -9191,8 +9488,12 @@ function renderLastScan() {
   if (els.lastJob) els.lastJob.textContent = "No scans yet";
   if (els.lastBay) {
     els.lastBay.textContent = "-";
-    const bayLocation = els.lastBay.closest(".last-bay-location-v321");
-    if (bayLocation) bayLocation.hidden = true;
+    const locationCard = els.lastBay.closest(".last-bay-location-v321");
+    if (locationCard) {
+      locationCard.hidden = true;
+      locationCard.classList.remove("is-history", "is-bay", "is-rack");
+      locationCard.removeAttribute("title");
+    }
   }
   if (els.lastOrder) els.lastOrder.textContent = "-";
   if (els.lastItem) els.lastItem.textContent = "-";
@@ -9259,14 +9560,21 @@ function renderRecent() {
   els.recentRows.innerHTML = rows.length
     ? rows
         .map((entry) => {
-          const item = entry.item;
+          const item = scanEntryDisplayItem(entry);
+          const location = item ? scanLocationPresentation(item) : { label: "", kind: "", historical: false };
           const time = new Date(entry.time);
           const compactNote = scanEntryCompactMessage(entry);
           const primaryText = item ? (item.job || item.product || "-") : scanEntryEventLabel(entry);
+          const locationClass = [
+            "recent-bay-cell-v321",
+            "recent-location-cell-v325",
+            location.kind ? `is-${location.kind}` : "",
+            location.historical ? "is-history" : "",
+          ].filter(Boolean).join(" ");
           return `
             <tr class="${scanEntryRowClass(entry)}">
               <td><strong>${escapeHtml(primaryText)}</strong>${compactNote ? `<small class="scan-row-note">${escapeHtml(compactNote)}</small>` : ""}</td>
-              <td class="recent-bay-cell-v321">${item?.bayCode ? `Bay ${escapeHtml(item.bayCode)}` : "-"}</td>
+              <td class="${escapeHtml(locationClass)}" title="${escapeHtml(location.title || location.label || "")}">${location.label ? escapeHtml(location.label) : "-"}</td>
               <td>${item ? escapeHtml(item.order) : "-"}</td>
               <td>${item ? escapeHtml(item.item) : "-"}</td>
               <td>${item ? item.scanned : Math.abs(Number(entry.qtyDelta || 0)) || "-"}</td>
@@ -9592,11 +9900,11 @@ function applyPermissionUi() {
     const permissions = element.dataset.permissionAny.split(",").map((value) => value.trim());
     element.hidden = !hasAnyPermission(permissions);
   });
-  const canScan = hasPermission("scan") || hasPermission("indian_trail_receive");
+  const canScan = hasPermission("scan_delivery_lists") || hasPermission("receive_indian_trail");
   setControlAllowed(els.scanInput, canScan);
-  setControlAllowed(els.globalPrintExportBtn, hasPermission("export_reports"), true);
-  setControlAllowed(els.undoBtn, hasPermission("undo_scan"), true);
-  setControlAllowed(els.redoBtn, hasPermission("undo_scan"), true);
+  setControlAllowed(els.globalPrintExportBtn, hasPermission("print_export"), true);
+  setControlAllowed(els.undoBtn, hasPermission("correct_scans"), true);
+  setControlAllowed(els.redoBtn, hasPermission("correct_scans"), true);
   setControlAllowed(els.folderImportBtn, hasPermission("import_delivery_lists"), true);
   setControlAllowed(els.addStationBtn, hasPermission("manage_stations"));
   setControlAllowed(els.newStationInput, hasPermission("manage_stations"));
@@ -9805,7 +10113,7 @@ function outboundRackStatusOptionsHtml(racks = [], selectedCode = "") {
  */
 function renderOutboundRackStatusTools() {
   if (!els.outboundRackStatusPanel) return;
-  const visible = isOutboundScanContext() && hasPermission("scan");
+  const visible = isOutboundScanContext() && hasPermission("scan_delivery_lists");
   els.outboundRackStatusPanel.hidden = !visible;
   if (!visible) return;
   if (!state.racks.length) {
@@ -9874,7 +10182,7 @@ async function ensureScanBayOverrideBays() {
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
 function scanBayOverrideVisible() {
-  return state.backend && hasPermission("indian_trail_receive") && isIndianTrailScanContext();
+  return state.backend && hasPermission("receive_indian_trail") && isIndianTrailScanContext();
 }
 
 /**
@@ -9955,7 +10263,7 @@ function renderScanBayOverrideTools() {
       options.push(`
         <optgroup label="${escapeHtml(label)}">
           ${bays.map((bay) => {
-            const name = bay.displayName || bay.bayCode;
+            const name = bayLocationDisplayLabel(bay.bayCode, bay.displayName);
             const status = bay.status ? ` - ${bay.status}` : "";
             return `<option value="${escapeHtml(bay.bayCode)}">${escapeHtml(name)}${escapeHtml(status)}</option>`;
           }).join("")}
@@ -9970,7 +10278,7 @@ function renderScanBayOverrideTools() {
 
   if (els.scanBayOverrideSelected) {
     els.scanBayOverrideSelected.textContent = state.bayOverrideMode === "manual"
-      ? (selectedBay ? `Manual bay: ${selectedBay.displayName || selectedBay.bayCode}` : "Manual mode - choose a bay")
+      ? (selectedBay ? `Manual bay: ${bayLocationDisplayLabel(selectedBay.bayCode, selectedBay.displayName)}` : "Manual mode - choose a bay")
       : "Auto suggested bay";
   }
 }
@@ -12060,10 +12368,16 @@ function showPage(page) {
     showFloatingNotice("Move all grouped bays out of the temporary holding area before leaving the Bay Map.", "error");
     return;
   }
-  if (page === "admin" && !hasAnyPermission(["view_admin", "manage_users", "manage_stations", "edit_delivery_lists"])) page = "home";
+  if (page === "admin" && !hasAnyPermission([
+    "view_admin", "reset_delivery_lists", "import_delivery_lists", "edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items", "delete_delivery_lists",
+    "review_superseded_orders", "manage_users", "manage_user_access", "manage_user_assignments", "manage_roles", "view_sessions",
+    "manage_stations", "manage_route_rules", "manage_customer_emails", "manage_lookup_values", "manage_automation",
+    "manage_cross_date_scanning", "manage_reject_settings", "manage_bay_layout", "manage_bay_scanner_rules",
+    "manage_bay_auto_assigner", "manage_racks",
+  ])) page = "home";
   if (page === "bays" && !hasAnyPermission(["view_bays", "view_indian_trail"])) page = "home";
   if (page === "racks" && !hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) page = "home";
-  if (page === "rejects" && !hasAnyPermission(["view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records", "view_lists"])) page = "home";
+  if (page === "rejects" && !hasAnyPermission(["view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records", "view_delivery_lists"])) page = "home";
   const pageChanged = state.page !== page;
   if (page === "home") state.expandedDeliveryDate = "";
   state.page = page;
@@ -12161,7 +12475,7 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
           </select>
         </label>
         <div class="outbound-override-actions">
-          <button type="button" data-outbound-override-cancel>Cancel scan</button>
+          <button type="button" class="app-cancel-action-v343" data-outbound-override-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel scan</span></button>
           <button type="button" data-outbound-override-confirm>Override and scan outbound</button>
         </div>
       </section>
@@ -12228,7 +12542,7 @@ function indianTrailBayOptionsHtml(selectedCode = "") {
   }
   return [...grouped.entries()].map(([label, bays]) => `
     <optgroup label="${escapeHtml(label)}">
-      ${bays.map((bay) => `<option value="${escapeHtml(bay.bayCode)}" ${bay.bayCode === selectedCode ? "selected" : ""}>${escapeHtml(bay.displayName || bay.bayCode)}${bay.status ? ` - ${escapeHtml(bay.status)}` : ""}</option>`).join("")}
+      ${bays.map((bay) => `<option value="${escapeHtml(bay.bayCode)}" ${bay.bayCode === selectedCode ? "selected" : ""}>${escapeHtml(bayLocationDisplayLabel(bay.bayCode, bay.displayName))}${bay.status ? ` - ${escapeHtml(bay.status)}` : ""}</option>`).join("")}
     </optgroup>
   `).join("");
 }
@@ -12289,7 +12603,7 @@ async function showIndianTrailOutboundReceiveOverride(payload, scanText, options
           ${payload.preassignedBayCode ? `<small>${spanish ? "Bahía preasignada" : "Preassigned bay"}: ${escapeHtml(payload.preassignedBayCode)}</small>` : ""}
         </label>
         <div class="action-confirm-actions">
-          <button type="button" class="action-confirm-cancel" data-indian-trail-override-cancel>${spanish ? "Cancelar escaneo" : "Cancel scan"}</button>
+          <button type="button" class="action-confirm-cancel app-cancel-action-v343" data-indian-trail-override-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${spanish ? "Cancelar escaneo" : "Cancel scan"}</span></button>
           <button type="button" class="action-confirm-confirm" data-indian-trail-override-confirm>${spanish ? "Recibir en la bahía seleccionada" : "Receive in selected bay"}</button>
         </div>
       </section>
@@ -12672,6 +12986,8 @@ async function showIndianTrailPlacementPrompt(result) {
     ? availableIndianTrailBays(result.bayCode).find((bay) => /oversize/i.test(`${bay.bayType || ""} ${bay.bayCategory || ""} ${bay.mapSection || ""} ${bay.displayName || ""}`))
     : null;
   const selectedCode = oversizeBay?.bayCode || result.bayCode || "";
+  const placementBayLabel = bayLocationDisplayLabel(result.bayCode, result.bayDisplay || result.bayName);
+  const placementBayShort = placementBayLabel.replace(/^Bay\s+/i, "") || String(result.bayCode || "").trim();
   const eyebrow = isRush
     ? (spanish ? "ARTICULO URGENTE RECIBIDO" : "RUSH ITEM RECEIVED")
     : result.returnedToBay
@@ -12680,8 +12996,8 @@ async function showIndianTrailPlacementPrompt(result) {
   const title = directToTruck
     ? (spanish ? `Enviar ${itemLabel} directamente al camion del instalador` : `Send ${itemLabel} straight to the installer truck`)
     : isRush
-      ? (spanish ? `Coloque urgente ${itemLabel} en la bahia ${result.bayCode}` : `Rush ${itemLabel} into Bay ${result.bayCode}`)
-      : (spanish ? `Coloque ${itemLabel} en la bahia ${result.bayCode}` : `Place ${itemLabel} in Bay ${result.bayCode}`);
+      ? (spanish ? `Coloque urgente ${itemLabel} en la bahia ${placementBayShort}` : `Rush ${itemLabel} into ${placementBayLabel}`)
+      : (spanish ? `Coloque ${itemLabel} en la bahia ${placementBayShort}` : `Place ${itemLabel} in ${placementBayLabel}`);
   const descriptionParts = [item.customer || ""];
   if (priorityDate && isRush) descriptionParts.push(`${spanish ? "Entrega prioritaria" : "Priority delivery"}: ${priorityDate}`);
   if (directToTruck) {
@@ -12711,7 +13027,7 @@ async function showIndianTrailPlacementPrompt(result) {
         ` : `
           <div class="indian-trail-placement-destination-v321">
             <small>${spanish ? "COLOQUE ESTA ORDEN EN" : "PLACE THIS ORDER IN"}</small>
-            <strong>${spanish ? "BAHIA" : "BAY"} ${escapeHtml(result.bayCode)}</strong>
+            <strong>${spanish ? "BAHIA" : "BAY"} ${escapeHtml(placementBayShort)}</strong>
             <span>${spanish ? "Orden" : "Order"} ${escapeHtml(item.order || "-")} · Job Nr. ${escapeHtml(item.job || "-")}</span>
           </div>
           <label class="indian-trail-placement-field">
@@ -12813,7 +13129,7 @@ function showCrossDateScanSelection(payload) {
         </div>
         <footer class="cross-date-scan-footer">
           <span>Only the selected candidate will be scanned. Closing this window leaves the current delivery date unchanged.</span>
-          <button type="button" data-cross-date-cancel>Cancel Scan</button>
+          <button type="button" class="app-cancel-action-v343" data-cross-date-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel Scan</span></button>
         </footer>
       </section>
     `;
@@ -12920,7 +13236,7 @@ async function processScanInternal(rawScan, options = {}) {
   if (!scanText || !state.activeListId) return;
   if (state.backend) {
     const indianTrailReceive =
-      hasPermission("indian_trail_receive") &&
+      hasPermission("receive_indian_trail") &&
       /indian trail/i.test(`${state.meta?.stage || ""} ${currentScanStation()}`);
     if (indianTrailReceive) {
       const requestedBayCode = options.bayCode || (state.bayOverrideMode === "manual" ? state.selectedBayOverrideCode || "" : "");
@@ -13256,9 +13572,21 @@ function showInlineError(message, needsReview = false) {
   if (needsReview) state.errors.unshift(entry);
   state.recent.unshift(entry);
   state.lastScan = entry;
-  scanFlash(needsReview ? "error" : "notice");
-  showFloatingNotice(message, needsReview ? "error" : "notice");
-  renderScanPage();
+
+  if (state.page === "scan") {
+    scanFlash(needsReview ? "error" : "notice");
+    showFloatingNotice(message, needsReview ? "error" : "notice");
+    renderScanPage();
+    return;
+  }
+
+  showActionFeedback({
+    kind: needsReview ? "error" : "warning",
+    eyebrow: needsReview ? "Action failed" : "Action unavailable",
+    title: needsReview ? "Could not complete that action" : "That action is blocked",
+    message,
+    secondaryLabel: "Got it",
+  });
 }
 
 /**
@@ -13370,6 +13698,27 @@ function showActionFeedback({
   });
   shell.querySelector("[data-action-feedback-primary], [data-action-feedback-secondary]")?.focus();
 }
+
+function showBlockedAction(message, title = "That action is blocked") {
+  showActionFeedback({
+    kind: "warning",
+    eyebrow: "Action unavailable",
+    title,
+    message: String(message || "This action is not available in the rack's current state."),
+    secondaryLabel: "Got it",
+  });
+}
+
+document.addEventListener("click", (event) => {
+  const blockedControl = event.target.closest?.("[data-blocked-reason]");
+  if (!blockedControl) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  showBlockedAction(
+    blockedControl.dataset.blockedReason || "This action is currently unavailable.",
+    blockedControl.dataset.blockedTitle || "That action is blocked",
+  );
+}, true);
 
 /**
  * Purpose: Confirm that an explicit save/create action completed successfully.
@@ -13903,8 +14252,10 @@ function renderGlobalSearchResults(results) {
           </div>
           <span class="global-result-job">${escapeHtml(result.job || result.product || "No job/product")}</span>
           <span class="global-result-meta">${escapeHtml(destinationLabel)}${result.deliveryDate ? ` • ${escapeHtml(formatDisplayDate(result.deliveryDate))}` : ""}</span>
-          <div class="global-result-status-row">${globalSearchStatusBadges(result)}</div>
-          ${result.lastScanTime ? `<time class="global-result-scan-time-v321" datetime="${escapeHtml(result.lastScanTime)}">Scanned ${escapeHtml(formatDateTime(result.lastScanTime))}</time>` : ""}
+          <div class="global-result-status-row">
+            ${globalSearchStatusBadges(result)}
+            ${result.lastScanTime ? `<time class="global-result-scan-time-v321" datetime="${escapeHtml(result.lastScanTime)}">Scanned ${escapeHtml(formatDateTime(result.lastScanTime))}</time>` : ""}
+          </div>
         </button>
       `;
       },
@@ -16170,7 +16521,7 @@ function bayEventMoveControlHtml(event, compact = false) {
   const currentBayCode = event?.currentBayCode || "";
   const currentBayDisplay = event?.currentBayDisplay || currentBayCode || "";
   const orderLabel = event?.order ? `${event.order}-${event.item || ""}` : "item";
-  const canMove = hasPermission("move_bay") || hasPermission("indian_trail_receive");
+  const canMove = hasPermission("move_bay_items") || hasPermission("receive_indian_trail");
 
   if (!assignmentId || !currentBayCode) {
     return `<span class="bay-event-move-unavailable" title="Current item is no longer assigned to a bay">${compact ? "Not in bay" : "Current item is no longer assigned to a bay"}</span>`;
@@ -19135,9 +19486,34 @@ function selectedPrintListIds() {
 /** Load missing item detail for selected lists before building exact choices. */
 async function ensurePrintListDetails(listIds) {
   if (!state.backend) return;
-  const wanted = new Set(listIds);
+  const wanted = new Set((listIds || []).map(String).filter(Boolean));
+
+  // v0.341: a just-finished import can render Delivery List Management before
+  // the general list catalog heartbeat merges the new/updated Outbound list.
+  // Hydrate any exact fixed list IDs directly so Print / Export is immediately
+  // usable for dates that just gained orders instead of waiting for a catalog refresh.
+  const knownIds = new Set(state.lists.map((list) => String(list.id || "")));
+  const missingIds = [...wanted].filter((id) => !knownIds.has(id));
+  if (missingIds.length) {
+    const payloads = await Promise.all(missingIds.map((id) => fetchJson(`/api/delivery-lists/${encodeURIComponent(id)}`)));
+    payloads.forEach((payload) => {
+      const meta = payload?.meta || {};
+      const id = String(meta.id || "").trim();
+      if (!id) return;
+      const items = cloneItems(payload.items || []);
+      state.lists.push({
+        ...meta,
+        items,
+        itemCount: items.length,
+        totalQty: pieceCount(items),
+        scannedQty: items.reduce((sum, item) => sum + itemScannedPieceQty(item), 0),
+        _printItemsLoaded: true,
+      });
+    });
+  }
+
   const listsToLoad = state.lists.filter((list) => {
-    if (!wanted.has(list.id) || list._printItemsLoaded) return false;
+    if (!wanted.has(String(list.id || "")) || list._printItemsLoaded) return false;
     return !Array.isArray(list.items) || !list.items.length;
   });
   if (!listsToLoad.length) return;
@@ -19146,6 +19522,7 @@ async function ensurePrintListDetails(listIds) {
     const payload = await fetchJson(`/api/delivery-lists/${encodeURIComponent(list.id)}`);
     const items = cloneItems(payload.items || []);
     Object.assign(list, {
+      ...(payload.meta || {}),
       items,
       itemCount: items.length || list.itemCount || 0,
       totalQty: items.length ? pieceCount(items) : list.totalQty,
@@ -20746,15 +21123,16 @@ function adoptManualEditLookups(payload = {}) {
     processes: Array.isArray(payload.processes) ? payload.processes : [],
     glassCosts: Array.isArray(payload.glassCosts) ? payload.glassCosts : [],
     glassColors: Array.isArray(payload.glassColors) ? payload.glassColors : [],
+    stages: Array.isArray(payload.stages) ? payload.stages : [],
   };
   state.manualEditLookupsLoaded = true;
   return state.manualEditLookups;
 }
 
-/** Load only the small Lookup Manager library needed by Create Preset. */
+/** Load the shared Lookup Manager library used by print presets and preview colors. */
 async function ensurePrintProductLookupLibrary() {
   const currentProducts = Array.isArray(state.manualEditLookups?.products) ? state.manualEditLookups.products : [];
-  if (state.manualEditLookupsLoaded || currentProducts.length || !state.backend) return currentProducts;
+  if (state.manualEditLookupsLoaded || !state.backend) return currentProducts;
   if (!state.manualEditLookupsPromise) {
     state.manualEditLookupsPromise = fetchJson("/api/admin/manual-edit-lookups")
       .then((payload) => adoptManualEditLookups(payload).products)
@@ -21144,7 +21522,7 @@ function openPrintOptions(context = {}) {
   state.printWorkspaceReady = false;
   state.printDateHistoryWeeks = PRINT_DATE_HISTORY_BATCH_WEEKS;
   window.clearTimeout(state.printPreviewTimer);
-  if (!listsByDeliveryDate().length) {
+  if (!listsByDeliveryDate().length && !(context.fixedListIds && (context.listIds || []).length)) {
     showInlineError("No delivery lists are available to print.", false);
     return;
   }
@@ -21866,15 +22244,22 @@ async function importTempDeliveryFolder() {
 async function refreshAdminPage() {
   if (!state.backend) return;
   const requests = [];
-  requests.push(hasPermission("view_admin") ? fetchJson("/api/admin/summary") : Promise.resolve(null));
-  requests.push(hasPermission("manage_users") ? fetchJson("/api/admin/users") : Promise.resolve(null));
-  requests.push(hasPermission("view_active_sessions") ? fetchJson("/api/admin/sessions") : Promise.resolve(null));
-  requests.push(hasPermission("manage_customer_route_rules") ? fetchJson("/api/admin/customer-route-rules") : Promise.resolve(null));
-  requests.push(hasPermission("manage_customer_route_rules") ? fetchJson("/api/admin/customer-emails") : Promise.resolve(null));
-  requests.push(hasPermission("manage_bay_layout") ? fetchJson("/api/admin/bay-scanner-rules") : Promise.resolve(null));
-  requests.push(hasPermission("manage_bay_layout") ? fetchJson("/api/admin/bay-auto-assigner") : Promise.resolve(null));
-  requests.push(hasPermission("edit_delivery_lists") ? fetchJson("/api/admin/cross-date-scan-settings") : Promise.resolve(null));
-  requests.push(hasPermission("manage_roles") ? fetchJson("/api/admin/roles") : Promise.resolve(null));
+  const canOpenAdminDashboard = hasAnyPermission([
+    "view_admin", "reset_delivery_lists", "import_delivery_lists", "edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items", "delete_delivery_lists",
+    "review_superseded_orders", "manage_users", "manage_user_access", "manage_user_assignments", "manage_roles", "view_sessions",
+    "manage_stations", "manage_route_rules", "manage_customer_emails", "manage_lookup_values", "manage_automation",
+    "manage_cross_date_scanning", "manage_reject_settings", "manage_bay_layout", "manage_bay_scanner_rules",
+    "manage_bay_auto_assigner", "manage_racks",
+  ]);
+  requests.push(canOpenAdminDashboard ? fetchJson("/api/admin/summary") : Promise.resolve(null));
+  requests.push(hasAnyPermission(["manage_users", "manage_user_access", "manage_user_assignments"]) ? fetchJson("/api/admin/users") : Promise.resolve(null));
+  requests.push(hasPermission("view_sessions") ? fetchJson("/api/admin/sessions") : Promise.resolve(null));
+  requests.push(hasPermission("manage_route_rules") ? fetchJson("/api/admin/customer-route-rules") : Promise.resolve(null));
+  requests.push(hasPermission("manage_customer_emails") ? fetchJson("/api/admin/customer-emails") : Promise.resolve(null));
+  requests.push(hasPermission("manage_bay_scanner_rules") ? fetchJson("/api/admin/bay-scanner-rules") : Promise.resolve(null));
+  requests.push(hasPermission("manage_bay_auto_assigner") ? fetchJson("/api/admin/bay-auto-assigner") : Promise.resolve(null));
+  requests.push(hasPermission("manage_cross_date_scanning") ? fetchJson("/api/admin/cross-date-scan-settings") : Promise.resolve(null));
+  requests.push(hasAnyPermission(["manage_roles", "manage_user_assignments", "manage_users"]) ? fetchJson("/api/admin/roles") : Promise.resolve(null));
   const [summary, users, sessions, customerRules, customerEmails, bayScannerRules, bayAutoAssignSettings, crossDateScanSettings, roles] = await Promise.all(requests);
   if (summary) {
     state.adminSummary = summary;
@@ -21884,14 +22269,6 @@ async function refreshAdminPage() {
       keptSupersededOrderReviews: Number(summary.keptSupersededOrderReviews || 0),
     };
     renderSupersededReviewCount();
-  }
-  if (summary && els.adminSummary) {
-    els.adminSummary.innerHTML = [
-      miniStat("Active Delivery Lists", summary.activeDeliveryDates ?? summary.activeDeliveryLists ?? 0, `${summary.activeDeliveryLists ?? 0} active stages`),
-      miniStat("Scans Today", summary.scanEventsToday ?? summary.scanEvents ?? 0),
-      miniStat("Line Items", summary.lineItems ?? 0),
-      miniStat("Active Users", summary.activeUsers ?? 0),
-    ].join("");
   }
   if (els.adminLastUpdated) els.adminLastUpdated.textContent = `Last updated: ${new Date().toLocaleString()}`;
   if (summary) {
@@ -21986,17 +22363,16 @@ function adminDeliveryListModalResultsHtml(lists = state.lists, query = "") {
   const cleanQuery = String(query || "").trim();
 
   return deliveryListAdminRows(lists, 0, true, {
-    includeLoadMore: !cleanQuery,
     query: cleanQuery,
-    visiblePastDays: state.adminDeliveryListVisiblePastDays,
-    sourceCount: state.lists.length,
+    paginateByWeek: true,
+    weekPage: state.adminDeliveryListWeekPage,
+    weeksPerPage: ADMIN_DELIVERY_LIST_WEEKS_PER_PAGE,
   });
 }
 
 /**
- * Purpose: Render the render admin delivery list modal results workflow using the existing shared UI state.
- * Effects: Updates visible dom state, may update shared client state.
- * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
+ * Purpose: Render the Edit Delivery Lists browser without replacing the modal shell.
+ * Effects: Updates only the delivery-list results region and preserves the current search field.
  */
 function renderAdminDeliveryListModalResults(lists = state.lists, query = "") {
   const target = document.getElementById("adminDeliveryListModalResults");
@@ -22004,174 +22380,438 @@ function renderAdminDeliveryListModalResults(lists = state.lists, query = "") {
   if (!target) return;
 
   target.innerHTML = adminDeliveryListModalResultsHtml(lists, query);
+  renderAdminDeliveryListHeaderPaging(lists, query);
+  wireOwnedVerticalScroll(target);
+}
+
+/** Build the shared Edit Delivery Lists modal shell around a supplied result state. */
+function adminDeliveryListModalShellHtml(resultsHtml = adminDeliveryListModalResultsHtml()) {
+  return `
+    <section class="admin-delivery-list-controls-v338" aria-label="Delivery list search and paging">
+      <label class="admin-standard-search-v340" aria-label="Search all delivery lists">
+        <span class="admin-standard-search-icon-v340" aria-hidden="true"></span>
+        <input id="adminDeliveryListModalSearch" type="search" autocomplete="off" placeholder="Search delivery lists...">
+        <button type="button" class="admin-standard-search-clear-v340" data-admin-delivery-search-clear aria-label="Clear delivery list search" title="Clear search">×</button>
+      </label>
+      <div class="modal-action-history-filter-footer admin-delivery-list-paging-bar-v338">
+        <span id="adminDeliveryListPagingSummary">Loading delivery lists...</span>
+        <nav class="modal-action-history-pager app-numbered-pager-v337" id="adminDeliveryListHeaderPager" aria-label="Delivery list pages"></nav>
+        <span class="admin-delivery-list-page-range-v338" id="adminDeliveryListPageRange">Preparing date range...</span>
+      </div>
+    </section>
+    <div class="admin-table" id="adminDeliveryListModalResults">${resultsHtml}</div>
+  `;
+}
+
+/** Show immediate feedback while the current delivery-list catalog is being refreshed. */
+function adminDeliveryListModalLoadingHtml() {
+  return adminDeliveryListModalShellHtml(`
+    <div class="admin-empty loading admin-delivery-list-loading-v333">
+      <strong>Loading delivery lists...</strong>
+      <span>The window is ready. Current delivery dates and stage totals are being refreshed.</span>
+      <span class="loading-bar"><i></i></span>
+    </div>
+  `);
+}
+
+/** Merge one lightweight Admin catalog page into shared list metadata without
+ * discarding delivery lists already loaded for Home / scanning. */
+function mergeAdminDeliveryListCatalogIntoState(lists = []) {
+  if (!Array.isArray(lists) || !lists.length) return;
+  const byId = new Map(state.lists.map((list) => [String(list.id || ""), list]));
+  lists.forEach((list) => {
+    const id = String(list?.id || "");
+    if (!id) return;
+    byId.set(id, { ...(byId.get(id) || {}), ...list });
+  });
+  state.lists = [...byId.values()];
+}
+
+/** Render only the server-selected Edit Delivery Lists page. The backend has
+ * already chosen the three visible business weeks, so the browser never needs
+ * to download or regroup the entire active catalog just to open this GUI. */
+function adminDeliveryListCatalogResultsHtml(payload = state.adminDeliveryListCatalog || {}) {
+  const lists = Array.isArray(payload.lists) ? payload.lists : [];
+  const cleanQuery = String(payload.query || "").trim();
+  if (!lists.length) {
+    return `<div class="admin-empty">${escapeHtml(cleanQuery ? "No delivery lists match that search." : "No delivery lists were found for this page.")}</div>`;
+  }
+  const groups = deliveryDateGroupsByBusinessWeek(listsByDeliveryDate(lists));
+  return `<div class="admin-delivery-edit-list">${groups.map((week) => `
+    <section class="admin-delivery-week-v334" data-admin-delivery-week="${escapeHtml(week.weekKey)}">
+      <header class="admin-delivery-week-heading-v334">
+        <strong>${escapeHtml(adminDeliveryListWeekLabel(week.weekKey))}</strong>
+        <span>${escapeHtml(week.groups.length)} delivery date${week.groups.length === 1 ? "" : "s"}</span>
+      </header>
+      <div class="admin-delivery-week-list-v334">${week.groups.map((group) => adminDeliveryListDateGroupHtml(group, true)).join("")}</div>
+    </section>`).join("")}</div>`;
+}
+
+function renderAdminDeliveryListCatalog(payload = state.adminDeliveryListCatalog || {}) {
+  const target = document.getElementById("adminDeliveryListModalResults");
+  const pager = document.getElementById("adminDeliveryListHeaderPager");
+  const summary = document.getElementById("adminDeliveryListPagingSummary");
+  const range = document.getElementById("adminDeliveryListPageRange");
+  if (!target || !pager || !summary || !range) return;
+
+  const lists = Array.isArray(payload.lists) ? payload.lists : [];
+  const page = Math.max(Number(payload.page || 1), 1);
+  const totalPages = Math.max(Number(payload.totalPages || 1), 1);
+  const dateCount = Math.max(Number(payload.deliveryDateCount || 0), 0);
+  const pageStart = String(payload.pageStart || "");
+  const pageEnd = String(payload.pageEnd || "");
+  const query = String(payload.query || "").trim();
+
+  state.adminDeliveryListWeekPage = page;
+  state.adminDeliveryListCatalog = { ...payload, lists };
+  mergeAdminDeliveryListCatalogIntoState(lists);
+
+  target.innerHTML = adminDeliveryListCatalogResultsHtml(state.adminDeliveryListCatalog);
+  pager.innerHTML = sharedNumberedPagerMarkup(page, totalPages, "data-admin-delivery-week-page");
+  summary.textContent = `Page ${page} of ${totalPages} · ${dateCount} delivery date${dateCount === 1 ? "" : "s"}`;
+  range.textContent = pageStart && pageEnd
+    ? `${formatNumericDeliveryDate(pageStart)} - ${formatNumericDeliveryDate(pageEnd)}`
+    : query
+      ? `No dates match "${query}"`
+      : "No delivery dates on this page";
+  wireOwnedVerticalScroll(target);
+  applyLanguageToRoot(target);
+}
+
+/** Load one server-backed Edit Delivery Lists page. This is intentionally
+ * separate from loadDeliveryLists(), which hydrates richer Home/scanner state
+ * and is far more work than this Admin selector requires. */
+async function loadAdminDeliveryListCatalogPage(page = 1, query = "", options = {}) {
+  const requestId = ++state.adminDeliveryListCatalogRequestId;
+  const target = document.getElementById("adminDeliveryListModalResults");
+  const pager = document.getElementById("adminDeliveryListHeaderPager");
+  const summary = document.getElementById("adminDeliveryListPagingSummary");
+  const range = document.getElementById("adminDeliveryListPageRange");
+  const cleanQuery = String(query || "").trim();
+  const requestedPage = Math.max(Number(page || 1), 1);
+
+  if (options.showLoading !== false && target) {
+    target.innerHTML = `
+      <div class="admin-empty loading admin-delivery-list-loading-v339">
+        <strong>Loading this page...</strong>
+        <span>Fetching only the delivery lists needed for this three-week view.</span>
+        <span class="loading-bar"><i></i></span>
+      </div>`;
+  }
+  if (summary) summary.textContent = `Loading page ${requestedPage}...`;
+  if (range) range.textContent = cleanQuery ? "Searching delivery lists..." : "Preparing date range...";
+  if (pager) pager.setAttribute("aria-busy", "true");
+
+  const params = new URLSearchParams({ page: String(requestedPage) });
+  if (cleanQuery) params.set("q", cleanQuery);
+
+  try {
+    const payload = state.backend
+      ? await fetchJson(`/api/admin/delivery-list-catalog?${params.toString()}`)
+      : { lists: state.lists, page: 1, totalPages: 1, query: cleanQuery };
+    if (requestId !== state.adminDeliveryListCatalogRequestId) return null;
+    renderAdminDeliveryListCatalog(payload);
+    return payload;
+  } finally {
+    if (requestId === state.adminDeliveryListCatalogRequestId) {
+      pager?.removeAttribute("aria-busy");
+    }
+  }
 }
 
 /**
- * Purpose: Load the refresh admin delivery list modal workflow using the existing shared UI state.
- * Effects: Updates visible dom state.
- * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
+ * Purpose: Refresh Edit Delivery Lists with the current search and reset paging when needed.
+ * Effects: May request current search results and updates the visible week page.
  */
 async function refreshAdminDeliveryListModal() {
   const searchInput = document.getElementById("adminDeliveryListModalSearch");
   const query = searchInput?.value.trim() || "";
+  await loadAdminDeliveryListCatalogPage(state.adminDeliveryListWeekPage || 1, query);
+}
 
-  if (!query) {
-    renderAdminDeliveryListModalResults(state.lists, "");
-    return;
-  }
+/** Render one date and all of its stage controls inside Edit Delivery Lists. */
+function adminDeliveryListDateGroupHtml(group, editable = false) {
+  const totalQty = group.lists.reduce((sum, list) => sum + Number(list.totalQty ?? list.itemCount ?? 0), 0);
+  const scannedQty = group.lists.reduce((sum, list) => sum + Number(list.scannedQty || 0), 0);
+  const percent = totalQty ? Math.round((scannedQty / totalQty) * 100) : 0;
+  const compactDate = formatNumericDeliveryDate(group.date);
 
-  renderAdminDeliveryListModalResults(await searchAdminDeliveryLists(query), query);
+  return `
+    <details class="admin-delivery-date-group">
+      <summary class="admin-delivery-date-summary">
+        <span class="admin-delivery-date-main">
+          <strong>${escapeHtml(compactDate)}</strong>
+          <small>${escapeHtml(group.lists.length)} stage${group.lists.length === 1 ? "" : "s"} | ${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)} pcs | ${escapeHtml(percent)}%</small>
+        </span>
+
+        <span class="admin-delivery-date-progress">
+          <span class="progress-line"><i style="width: ${Math.min(percent, 100)}%"></i></span>
+        </span>
+
+        ${editable ? `<span class="admin-date-action-row">
+          ${hasPermission("reset_delivery_lists") ? `<button
+            type="button"
+            class="icon-only icon-reset"
+            data-admin-date-reset="${escapeHtml(group.date)}"
+            title="Reset all stages for ${escapeHtml(compactDate)}"
+            aria-label="Reset all stages for ${escapeHtml(compactDate)}"
+          ></button>` : ""}
+          ${hasPermission("delete_delivery_lists") ? `<button
+            type="button"
+            class="icon-only icon-trash danger"
+            data-admin-date-delete="${escapeHtml(group.date)}"
+            title="Delete all stages for ${escapeHtml(compactDate)}"
+            aria-label="Delete all stages for ${escapeHtml(compactDate)}"
+          ></button>` : ""}
+        </span>` : ""}
+      </summary>
+
+      <div class="admin-delivery-stage-list">
+        ${group.lists.map((list) => {
+          const listTotalQty = Number(list.totalQty ?? list.itemCount ?? 0);
+          const listScannedQty = Number(list.scannedQty || 0);
+          const listPercent = listTotalQty ? Math.round((listScannedQty / listTotalQty) * 100) : 0;
+
+          return `
+            <article class="admin-delivery-stage-row">
+              <span class="admin-delivery-stage-main">
+                <strong>${escapeHtml(list.stage || list.label || list.id)}</strong>
+                <small>${escapeHtml(list.scanner || "")}</small>
+              </span>
+
+              <span class="admin-delivery-stage-qty">
+                ${escapeHtml(listScannedQty)} / ${escapeHtml(listTotalQty)} pcs
+                <span class="progress-line"><i style="width: ${Math.min(listPercent, 100)}%"></i></span>
+              </span>
+
+              ${editable ? `<span class="admin-action-cell">
+                ${hasAnyPermission(["edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items"]) ? `<button
+                  type="button"
+                  class="icon-only icon-pencil"
+                  data-admin-list-edit="${escapeHtml(list.id)}"
+                  title="Open ${escapeHtml(list.label || list.id)}"
+                  aria-label="Open ${escapeHtml(list.label || list.id)}"
+                ></button>` : ""}
+                ${hasPermission("reset_delivery_lists") ? `<button
+                  type="button"
+                  class="icon-only icon-reset"
+                  data-admin-list-reset="${escapeHtml(list.id)}"
+                  title="Reset scans for ${escapeHtml(list.label || list.id)}"
+                  aria-label="Reset scans for ${escapeHtml(list.label || list.id)}"
+                ></button>` : ""}
+                ${hasPermission("delete_delivery_lists") ? `<button
+                  type="button"
+                  class="icon-only icon-trash danger"
+                  data-admin-list-delete="${escapeHtml(list.id)}"
+                  title="Delete ${escapeHtml(list.label || list.id)}"
+                  aria-label="Delete ${escapeHtml(list.label || list.id)}"
+                ></button>` : ""}
+              </span>` : ""}
+            </article>`;
+        }).join("")}
+      </div>
+    </details>`;
+}
+
+/** Return the Edit Delivery Lists week label while keeping its wording distinct from Home. */
+function adminDeliveryListWeekLabel(weekKey) {
+  return deliveryBusinessWeekLabel(weekKey).replace(/^Last Week/, "Previous Week");
 }
 
 /**
- * Purpose: Run the delivery list admin rows workflow for the browser application.
- * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
- * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
+ * Build the Edit Delivery Lists page model. The landing page is intentionally
+ * anchored around the operating window operators use most: Next Week, This
+ * Week, and Previous Week. Every later page moves backward in three-week
+ * blocks. Search results remain newest-first and also page in three-week blocks
+ * so an older match can never become unreachable because of the landing anchor.
+ */
+function adminDeliveryListWeekPages(weekGroups = [], query = "") {
+  const groups = Array.isArray(weekGroups) ? weekGroups : [];
+  const pageSize = ADMIN_DELIVERY_LIST_WEEKS_PER_PAGE;
+  const pages = [];
+
+  if (String(query || "").trim()) {
+    for (let index = 0; index < groups.length; index += pageSize) {
+      pages.push(groups.slice(index, index + pageSize));
+    }
+    return pages.length ? pages : [[]];
+  }
+
+  const currentStart = deliveryBusinessWeekStart(new Date());
+  const currentKey = deliveryDateKey(currentStart);
+  const nextStart = currentStart
+    ? new Date(currentStart.getFullYear(), currentStart.getMonth(), currentStart.getDate() + 7, 12, 0, 0, 0)
+    : null;
+  const previousStart = currentStart
+    ? new Date(currentStart.getFullYear(), currentStart.getMonth(), currentStart.getDate() - 7, 12, 0, 0, 0)
+    : null;
+  const nextKey = deliveryDateKey(nextStart);
+  const previousKey = deliveryDateKey(previousStart);
+  const byKey = new Map(groups.map((week) => [week.weekKey, week]));
+
+  // The operational landing page is deliberately fixed to exactly the three
+  // requested relative weeks. Farther-future dates remain discoverable by the
+  // global search instead of making the landing page grow unpredictably.
+  const landingWeeks = [
+    byKey.get(nextKey),
+    byKey.get(currentKey),
+    byKey.get(previousKey),
+  ].filter(Boolean);
+  pages.push(landingWeeks);
+
+  const olderWeeks = groups.filter((week) => previousKey && week.weekKey < previousKey);
+  for (let index = 0; index < olderWeeks.length; index += pageSize) {
+    pages.push(olderWeeks.slice(index, index + pageSize));
+  }
+
+  return pages.length ? pages : [[]];
+}
+
+
+/**
+ * Build the page model once so Edit Delivery Lists content and its fixed header
+ * pager cannot drift apart. The modal owns one scroll viewport; controls stay
+ * outside it and therefore never scroll behind the content.
+ */
+function adminDeliveryListPageModel(lists = state.lists, query = "", requestedPage = state.adminDeliveryListWeekPage) {
+  const cleanQuery = String(query || "").trim();
+  const sortedRows = (Array.isArray(lists) ? lists : [])
+    .slice()
+    .sort((a, b) => String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || "")) || stageSort(a) - stageSort(b));
+  const weekGroups = deliveryDateGroupsByBusinessWeek(listsByDeliveryDate(sortedRows));
+  const weekPages = adminDeliveryListWeekPages(weekGroups, cleanQuery);
+  const totalPages = Math.max(1, weekPages.length);
+  const page = Math.min(Math.max(Number(requestedPage || 1), 1), totalPages);
+  state.adminDeliveryListWeekPage = page;
+  const visibleWeeks = weekPages[page - 1] || [];
+  const rows = visibleWeeks.flatMap((week) => week.groups.flatMap((group) => group.lists));
+  const dates = visibleWeeks
+    .flatMap((week) => week.groups.map((group) => String(group.date || "")).filter(Boolean))
+    .sort();
+  const range = dates.length
+    ? `${formatNumericDeliveryDate(dates[0])} - ${formatNumericDeliveryDate(dates[dates.length - 1])}`
+    : cleanQuery
+      ? `No dates match "${cleanQuery}"`
+      : "No delivery dates on this page";
+  return { cleanQuery, sortedRows, weekGroups, weekPages, totalPages, page, visibleWeeks, rows, dates, range };
+}
+
+function renderAdminDeliveryListHeaderPaging(lists = state.lists, query = "") {
+  const pager = document.getElementById("adminDeliveryListHeaderPager");
+  const summary = document.getElementById("adminDeliveryListPagingSummary");
+  const range = document.getElementById("adminDeliveryListPageRange");
+  if (!pager || !summary || !range) return;
+
+  const model = adminDeliveryListPageModel(lists, query);
+  pager.innerHTML = sharedNumberedPagerMarkup(model.page, model.totalPages, "data-admin-delivery-week-page");
+  summary.textContent = `Page ${model.page} of ${model.totalPages} · ${model.dates.length} delivery date${model.dates.length === 1 ? "" : "s"}`;
+  range.textContent = model.range;
+}
+
+/**
+ * Ensure wheel/trackpad input always moves the intended content viewport.
+ * This prevents nested Admin containers from trapping scroll input on cards or
+ * disclosures while preserving natural scroll chaining at the viewport edges.
+ */
+function wireOwnedVerticalScroll(element) {
+  if (!element || element.dataset.ownedVerticalScrollV338 === "true") return;
+  element.dataset.ownedVerticalScrollV338 = "true";
+  element.addEventListener("wheel", (event) => {
+    if (!event.deltaY || element.scrollHeight <= element.clientHeight + 1) return;
+    const atTop = element.scrollTop <= 0;
+    const atBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
+    if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) return;
+    element.scrollTop += event.deltaY;
+    event.preventDefault();
+  }, { passive: false });
+}
+/**
+ * Purpose: Render delivery-list Admin rows with optional business-week paging.
+ * Effects: Reads shared paging state for Edit Delivery Lists but leaves legacy compact callers unchanged.
  */
 function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false, options = {}) {
   const cleanQuery = String(options.query || "").trim();
   const includeLoadMore = Boolean(options.includeLoadMore);
+  const paginateByWeek = Boolean(options.paginateByWeek);
   const visiblePastDays = Number(options.visiblePastDays || state.adminDeliveryListVisiblePastDays || ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS);
 
   const sortedRows = lists
     .slice()
     .sort((a, b) => String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || "")) || stageSort(a) - stageSort(b));
 
-  const hiddenOlderRows = includeLoadMore ? adminDeliveryListHiddenOlderRows(sortedRows, visiblePastDays) : [];
-  const visibleRows = includeLoadMore ? sortedRows.filter((list) => deliveryListIsInAdminWindow(list, visiblePastDays)) : sortedRows;
-  const limitedRows = limit ? visibleRows.slice(0, limit) : visibleRows;
-  const hiddenOlderDates = new Set(hiddenOlderRows.map((list) => list.deliveryDate).filter(Boolean));
+  let limitedRows = [];
+  let loadMoreHtml = "";
+  let pagerHtml = "";
+  let summaryLabel = "";
+
+  if (paginateByWeek) {
+    const model = adminDeliveryListPageModel(
+      sortedRows,
+      cleanQuery,
+      options.weekPage || state.adminDeliveryListWeekPage || 1,
+    );
+    limitedRows = model.rows;
+    summaryLabel = model.range;
+
+    // The Edit Delivery Lists modal renders its pager in the fixed controls
+    // header. Compact legacy callers can still request an inline pager.
+    if (!editable && model.weekGroups.length) {
+      pagerHtml = `
+        <nav class="admin-delivery-week-pager-v334 admin-delivery-week-pager-v335 app-numbered-pager-v337" aria-label="Delivery list pages">
+          ${sharedNumberedPagerMarkup(model.page, model.totalPages, "data-admin-delivery-week-page")}
+        </nav>`;
+    }
+  } else {
+    const hiddenOlderRows = includeLoadMore ? adminDeliveryListHiddenOlderRows(sortedRows, visiblePastDays) : [];
+    const visibleRows = includeLoadMore ? sortedRows.filter((list) => deliveryListIsInAdminWindow(list, visiblePastDays)) : sortedRows;
+    limitedRows = limit ? visibleRows.slice(0, limit) : visibleRows;
+    const hiddenOlderDates = new Set(hiddenOlderRows.map((list) => list.deliveryDate).filter(Boolean));
+    summaryLabel = cleanQuery ? `Search results for "${cleanQuery}"` : `Showing ${adminDeliveryListWindowLabel(visiblePastDays)}`;
+    loadMoreHtml = includeLoadMore && hiddenOlderRows.length
+      ? `
+        <div class="admin-delivery-load-more-wrap">
+          <button class="admin-delivery-load-more" type="button" data-admin-delivery-load-more>Load more older delivery lists</button>
+          <span>${escapeHtml(hiddenOlderDates.size)} older delivery date${hiddenOlderDates.size === 1 ? "" : "s"} hidden (${escapeHtml(hiddenOlderRows.length)} stage${hiddenOlderRows.length === 1 ? "" : "s"}).</span>
+        </div>`
+      : "";
+  }
+
   const shownDates = new Set(limitedRows.map((list) => list.deliveryDate).filter(Boolean));
-
-  const summaryHtml = editable
+  const summaryHtml = editable && !paginateByWeek
     ? `
-      <div class="admin-delivery-window-note">
-        <strong>${escapeHtml(cleanQuery ? `Search results for "${cleanQuery}"` : `Showing ${adminDeliveryListWindowLabel(visiblePastDays)}`)}</strong>
-        <span>${escapeHtml(shownDates.size)} delivery date${shownDates.size === 1 ? "" : "s"} / ${escapeHtml(limitedRows.length)} stage${limitedRows.length === 1 ? "" : "s"}${cleanQuery ? " found. Search checks every active delivery list, including older dates." : "."}</span>
-      </div>
-    `
-    : "";
-
-  const loadMoreHtml = includeLoadMore && hiddenOlderRows.length
-    ? `
-      <div class="admin-delivery-load-more-wrap">
-        <button class="admin-delivery-load-more" type="button" data-admin-delivery-load-more>
-          Load more older delivery lists
-        </button>
-        <span>${escapeHtml(hiddenOlderDates.size)} older delivery date${hiddenOlderDates.size === 1 ? "" : "s"} hidden (${escapeHtml(hiddenOlderRows.length)} stage${hiddenOlderRows.length === 1 ? "" : "s"}).</span>
-      </div>
-    `
+      <div class="admin-delivery-window-note admin-delivery-window-note-v336">
+        <span class="admin-delivery-window-copy-v336">
+          <strong>${escapeHtml(summaryLabel)}</strong>
+          <span>${escapeHtml(shownDates.size)} delivery date${shownDates.size === 1 ? "" : "s"} / ${escapeHtml(limitedRows.length)} stage${limitedRows.length === 1 ? "" : "s"}${cleanQuery ? " on this result page. Search checks every active delivery list." : "."}</span>
+        </span>
+      </div>`
     : "";
 
   if (!limitedRows.length) {
     return `
       ${summaryHtml}
-      <div class="admin-empty">${escapeHtml(cleanQuery ? "No delivery lists match that search." : "No delivery lists found in the current window.")}</div>
+      <div class="admin-empty">${escapeHtml(cleanQuery ? "No delivery lists match that search." : "No delivery lists found.")}</div>
+      ${pagerHtml}
       ${loadMoreHtml}
     `;
   }
 
   const groups = listsByDeliveryDate(limitedRows);
+  const contentHtml = paginateByWeek
+    ? deliveryDateGroupsByBusinessWeek(groups).map((week) => `
+        <section class="admin-delivery-week-v334" data-admin-delivery-week="${escapeHtml(week.weekKey)}">
+          <header class="admin-delivery-week-heading-v334">
+            <strong>${escapeHtml(adminDeliveryListWeekLabel(week.weekKey))}</strong>
+            <span>${escapeHtml(week.groups.length)} delivery date${week.groups.length === 1 ? "" : "s"}</span>
+          </header>
+          <div class="admin-delivery-week-list-v334">${week.groups.map((group) => adminDeliveryListDateGroupHtml(group, editable)).join("")}</div>
+        </section>`).join("")
+    : groups.map((group) => adminDeliveryListDateGroupHtml(group, editable)).join("");
 
   return `
     ${summaryHtml}
-    <div class="admin-delivery-edit-list">
-      ${groups
-        .map((group) => {
-          const totalQty = group.lists.reduce((sum, list) => sum + Number(list.totalQty ?? list.itemCount ?? 0), 0);
-          const scannedQty = group.lists.reduce((sum, list) => sum + Number(list.scannedQty || 0), 0);
-          const percent = totalQty ? Math.round((scannedQty / totalQty) * 100) : 0;
-
-          return `
-            <details class="admin-delivery-date-group">
-              <summary class="admin-delivery-date-summary">
-                <span class="admin-delivery-date-main">
-                  <strong>${escapeHtml(formatDisplayDate(group.date))}</strong>
-                  <small>${escapeHtml(group.lists.length)} stage${group.lists.length === 1 ? "" : "s"} | ${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)} pcs | ${escapeHtml(percent)}%</small>
-                </span>
-
-                <span class="admin-delivery-date-progress">
-                  <span class="progress-line"><i style="width: ${Math.min(percent, 100)}%"></i></span>
-                </span>
-
-                ${
-                  editable
-                    ? `<span class="admin-date-action-row">
-                        <button
-                          type="button"
-                          class="icon-only icon-reset"
-                          data-admin-date-reset="${escapeHtml(group.date)}"
-                          title="Reset all stages for ${escapeHtml(formatDisplayDate(group.date))}"
-                          aria-label="Reset all stages for ${escapeHtml(formatDisplayDate(group.date))}"
-                        ></button>
-                        <button
-                          type="button"
-                          class="icon-only icon-trash danger"
-                          data-admin-date-delete="${escapeHtml(group.date)}"
-                          title="Delete all stages for ${escapeHtml(formatDisplayDate(group.date))}"
-                          aria-label="Delete all stages for ${escapeHtml(formatDisplayDate(group.date))}"
-                        ></button>
-                      </span>`
-                    : ""
-                }
-              </summary>
-
-              <div class="admin-delivery-stage-list">
-                ${group.lists
-                  .map((list) => {
-                    const listTotalQty = Number(list.totalQty ?? list.itemCount ?? 0);
-                    const listScannedQty = Number(list.scannedQty || 0);
-                    const listPercent = listTotalQty ? Math.round((listScannedQty / listTotalQty) * 100) : 0;
-
-                    return `
-                      <article class="admin-delivery-stage-row">
-                        <span class="admin-delivery-stage-main">
-                          <strong>${escapeHtml(list.stage || list.label || list.id)}</strong>
-                          <small>${escapeHtml(list.scanner || "")}</small>
-                        </span>
-
-                        <span class="admin-delivery-stage-qty">
-                          ${escapeHtml(listScannedQty)} / ${escapeHtml(listTotalQty)} pcs
-                          <span class="progress-line"><i style="width: ${Math.min(listPercent, 100)}%"></i></span>
-                        </span>
-
-                        ${
-                          editable
-                            ? `<span class="admin-action-cell">
-                                <button
-                                  type="button"
-                                  class="icon-only icon-pencil"
-                                  data-admin-list-edit="${escapeHtml(list.id)}"
-                                  title="Edit ${escapeHtml(list.label || list.id)}"
-                                  aria-label="Edit ${escapeHtml(list.label || list.id)}"
-                                ></button>
-                                <button
-                                  type="button"
-                                  class="icon-only icon-reset"
-                                  data-admin-list-reset="${escapeHtml(list.id)}"
-                                  title="Reset scans for ${escapeHtml(list.label || list.id)}"
-                                  aria-label="Reset scans for ${escapeHtml(list.label || list.id)}"
-                                ></button>
-                                <button
-                                  type="button"
-                                  class="icon-only icon-trash danger"
-                                  data-admin-list-delete="${escapeHtml(list.id)}"
-                                  title="Delete ${escapeHtml(list.label || list.id)}"
-                                  aria-label="Delete ${escapeHtml(list.label || list.id)}"
-                                ></button>
-                              </span>`
-                            : ""
-                        }
-                      </article>
-                    `;
-                  })
-                  .join("")}
-              </div>
-            </details>
-          `;
-        })
-        .join("")}
-    </div>
+    <div class="admin-delivery-edit-list">${contentHtml}</div>
+    ${pagerHtml}
     ${loadMoreHtml}
   `;
 }
@@ -22256,7 +22896,6 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     return fieldDefinitions.map(([key]) => key).filter((key) => displayValue(previous, key) !== displayValue(item, key));
   };
   const previewLocationKey = (item) => deliveryUpdatePreviewLocationKey(item);
-  const previewGlassType = (item) => String(item.glassType || item.product || "").trim() || "Other Glass";
   const previewOrderKey = (item) => String(item.order || "Unknown order").trim() || "Unknown order";
   const changeTypeForItem = (item) => {
     const value = String(item.changeType || "").toLowerCase();
@@ -22267,26 +22906,18 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     updated: rows.filter((item) => changeTypeForItem(item) === "updated").length,
     removed: rows.filter((item) => changeTypeForItem(item) === "removed").length,
   });
-  const typeBadgeHtml = (counts) => `
-    ${counts.new ? `<b class="is-new">${escapeHtml(counts.new)} new</b>` : ""}
-    ${counts.updated ? `<b class="is-updated">${escapeHtml(counts.updated)} updated</b>` : ""}
-    ${counts.removed ? `<b class="is-removed">${escapeHtml(counts.removed)} removed</b>` : ""}`;
   const commonOrderValue = (rows, key) => {
     const values = [...new Set(rows.map((item) => String(item?.[key] || "").trim()).filter(Boolean))];
     return values.length === 1 ? values[0] : values.length > 1 ? "Multiple" : "—";
   };
-
-  // Resolve exact product colors through the shared Lookup Manager palette.
-  // Unconfigured glass still receives a stable, distinct fallback color.
-  const exactGlassColorMap = buildGlassVisualColorMap(items.map(previewGlassType));
+  const previewGlassColorMap = buildGlassVisualColorMap(
+    items.map((item) => String(item.product || item.glassType || item.glass || "").trim()).filter(Boolean),
+  );
 
   const itemRowHtml = (item) => {
     const type = changeTypeForItem(item);
-    const title = changeLabels[type];
     const previous = item.previous && typeof item.previous === "object" ? item.previous : {};
     const changedFields = type === "updated" ? changedFieldsForItem(item) : [];
-    const glassType = previewGlassType(item);
-    const glassColorStyle = glassVisualCssVariables(glassType, exactGlassColorMap);
     const diffHtml = changedFields.length
       ? `<div class="delivery-update-preview-diffs delivery-update-preview-item-diffs-v257 delivery-update-preview-item-diffs-v311">
           ${changedFields.map((key) => {
@@ -22300,13 +22931,16 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
           }).join("")}
         </div>`
       : "";
-    return `<article class="delivery-update-preview-item-row-v257 delivery-update-preview-item-row-v311 is-${type}" data-preview-change-type="${type}" data-preview-glass-type="${escapeHtml(glassType)}" style="${escapeHtml(glassColorStyle)}">
+    const glassType = String(item.product || item.glassType || item.glass || "").trim() || "—";
+    const glassVisualStyle = glassType === "—" ? "" : previewGlassVisualCssVariables(glassType, previewGlassColorMap);
+    // v0.343: Glass color owns the entire item row. Change type remains in the
+    // data/class contract for audit semantics, but no longer forces every new row green.
+    return `<article class="delivery-update-preview-item-row-v257 delivery-update-preview-item-row-v311 is-${type}" data-preview-change-type="${type}"${glassVisualStyle ? ` style="${escapeHtml(glassVisualStyle)}"` : ""}>
       <div class="delivery-update-preview-item-main-v311">
-        <span class="delivery-update-preview-item-number-v311"><small>Item</small><strong>${escapeHtml(item.item || "—")}</strong></span>
-        <span class="delivery-update-preview-item-glass-v311"><i aria-hidden="true"></i><small>Glass Type</small><strong>${escapeHtml(glassType)}</strong></span>
-        <span class="delivery-update-preview-item-size-v311"><small>Glass Size</small><strong>${escapeHtml(item.dimensions || "No dimensions")}</strong></span>
-        <span class="delivery-update-preview-item-qty-v311"><small>QTY</small><strong>${escapeHtml(Number(item.qty || 0))}</strong></span>
-        <span class="delivery-update-preview-item-change-v311 is-${type}">${escapeHtml(title)}</span>
+        <span class="delivery-update-preview-item-number-v311"><small>Item Nr.</small><strong>${escapeHtml(item.item || "—")}</strong></span>
+        <span class="delivery-update-preview-item-glass-v311 delivery-update-preview-item-glass-v335 delivery-update-preview-item-glass-v336"><small>Glass Type</small><strong>${escapeHtml(glassType)}</strong></span>
+        <span class="delivery-update-preview-item-size-v311"><small>Dimensions</small><strong>${escapeHtml(item.dimensions || "No dimensions")}</strong></span>
+        <span class="delivery-update-preview-item-qty-v311"><small>Quantity</small><strong>${escapeHtml(Number(item.qty || 0))}</strong></span>
       </div>
       ${diffHtml}
     </article>`;
@@ -22316,39 +22950,44 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     const sortedItems = orderItems.slice().sort((a, b) => (
       Number(a.item || 0) - Number(b.item || 0) || String(a.item || "").localeCompare(String(b.item || ""))
     ));
-    const counts = countTypes(sortedItems);
-    const pieces = sortedItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
     const customer = commonOrderValue(sortedItems, "customer");
     const job = commonOrderValue(sortedItems, "job");
-    const route = routeLabel({ route: commonOrderValue(sortedItems, "route") }) || commonOrderValue(sortedItems, "route");
+    const statusText = sortedItems.map((item) => `${item.processState || ""} ${item.queueState || ""}`).join(" ");
+    const flags = [
+      /\b(REMAKE|RM)\b/i.test(statusText) ? "RM" : "",
+      /\bRUSH\b/i.test(statusText) ? "Rush" : "",
+      /\bSDI\b/i.test(statusText) ? "SDI" : "",
+    ].filter(Boolean);
+    const flagsHtml = flags.length
+      ? flags.map((flag) => `<i>${escapeHtml(flag)}</i>`).join("")
+      : `<em>—</em>`;
     return `<section class="delivery-update-preview-order-block-v308 delivery-update-preview-order-block-v311">
       <header class="delivery-update-preview-order-header-v311">
         <div class="delivery-update-preview-order-identity-v311">
           <span><small>Order Nr.</small><strong>${escapeHtml(order)}</strong></span>
           <span><small>Job Nr.</small><strong>${escapeHtml(job)}</strong></span>
-        </div>
-        <div class="delivery-update-preview-order-totals-v311">
-          <strong>${escapeHtml(sortedItems.length)} line${sortedItems.length === 1 ? "" : "s"}</strong>
-          <span>${escapeHtml(pieces)} QTY</span>
-          <span class="delivery-update-preview-order-change-v311">${typeBadgeHtml(counts) || "No change label"}</span>
+          <span class="delivery-update-preview-order-customer-v333"><small>Customer</small><strong>${escapeHtml(customer)}</strong></span>
+          <span class="delivery-update-preview-order-flags-v333"><small>Flags</small><b>${flagsHtml}</b></span>
         </div>
       </header>
-      <div class="delivery-update-preview-order-meta-v311 delivery-update-preview-order-meta-v313">
-        <span><small>Customer</small><strong>${escapeHtml(customer)}</strong></span>
-        <span><small>Route</small><strong>${escapeHtml(route || "—")}</strong></span>
-      </div>
       <div class="delivery-update-preview-item-list-v311">${sortedItems.map(itemRowHtml).join("")}</div>
     </section>`;
   };
 
-  const locationHtml = locationDefinitions.map((location) => {
-    const locationItems = items
+  const locationItemsByKey = new Map(locationDefinitions.map((location) => [
+    location.key,
+    items
       .filter((item) => previewLocationKey(item) === location.key)
       .sort((a, b) => (
         Number(a.order || 0) - Number(b.order || 0)
         || String(a.order || "").localeCompare(String(b.order || ""))
         || Number(a.item || 0) - Number(b.item || 0)
-      ));
+      )),
+  ]));
+  const populatedLocationCount = [...locationItemsByKey.values()].filter((rows) => rows.length > 0).length;
+
+  const locationHtml = locationDefinitions.map((location) => {
+    const locationItems = locationItemsByKey.get(location.key) || [];
     if (!locationItems.length) return "";
     const orders = new Map();
     locationItems.forEach((item) => {
@@ -22363,8 +23002,9 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     const typeCounts = countTypes(locationItems);
     const changeKinds = ["new", "updated", "removed"].filter((type) => typeCounts[type] > 0);
     const changeWord = changeKinds.length === 1 ? changeLabels[changeKinds[0]] : "Changed";
-    const selectedRoute = String(payload.previewRouteGroup || "").trim();
-    const routeStartsOpen = Boolean(selectedRoute && selectedRoute !== "airport" && selectedRoute === location.key);
+    // A single-route preview opens immediately; multi-route whole-list previews
+    // start collapsed so the operator can choose the route to inspect.
+    const routeStartsOpen = populatedLocationCount === 1;
     return `<details class="delivery-update-preview-location-group is-${location.key} delivery-update-preview-location-group-v257 delivery-update-preview-location-group-v311" data-preview-location="${location.key}" ${routeStartsOpen ? "open" : ""}>
       <summary>
         <span class="delivery-update-preview-location-chevron" aria-hidden="true"></span>
@@ -22759,6 +23399,25 @@ function actionHistoryDetail(event = {}) {
     const result = payload.checkResult || action.replace("bay_check_", "");
     return `${location || `Bay ${event.entityId || ""}`} · Check: ${actionHistoryLabel(result)}${event.reason ? ` · ${event.reason}` : ""}`;
   }
+  if (action.startsWith("superseded_order_")) {
+    const delivery = payload.deliveryDate ? `Delivery ${formatDisplayDate(payload.deliveryDate)}` : "Superseded-order review";
+    const originalOrder = String(payload.originalOrder || "").trim();
+    const replacementOrder = String(payload.replacementOrder || "").trim();
+    const pair = originalOrder || replacementOrder ? ` · ${originalOrder || "?"} ↔ ${replacementOrder || "?"}` : "";
+    if (action === "superseded_order_approved") {
+      const removed = String(payload.removedOrder || "").trim();
+      const kept = String(payload.keptOrder || "").trim();
+      const removedPieces = Number(payload.removedPieceQty || 0);
+      const removedLines = Number(payload.removedLineCount || 0);
+      return `${delivery}${pair} · Removed order ${removed || "unknown"} · Kept order ${kept || "unknown"} · ${removedLines} row${removedLines === 1 ? "" : "s"} / ${removedPieces} pc${removedPieces === 1 ? "" : "s"}${event.reason ? ` · ${event.reason}` : ""}`;
+    }
+    if (action === "superseded_order_keep_both") {
+      return `${delivery}${pair} · Kept both orders${event.reason ? ` · ${event.reason}` : ""}`;
+    }
+    if (action === "superseded_order_review_later") {
+      return `${delivery}${pair} · Deferred for later review${event.reason ? ` · ${event.reason}` : ""}`;
+    }
+  }
   if (action === "clear_bay") {
     const location = bayLabel(payload.bayGroup, payload.displayName, payload.bayCode || event.entityId);
     const assignments = Array.isArray(payload.assignments) ? payload.assignments : [];
@@ -22832,6 +23491,34 @@ function actionHistoryScope(scope, context = "") {
   return entry;
 }
 
+function sharedPagerPageNumbers(page, totalPages) {
+  const current = Math.max(Number(page || 1), 1);
+  const total = Math.max(Number(totalPages || 1), 1);
+  const values = new Set([1, total, current - 2, current - 1, current, current + 1, current + 2]);
+  return [...values].filter((value) => value >= 1 && value <= total).sort((a, b) => a - b);
+}
+
+/**
+ * Build the numbered Previous / page / Next control shared by Admin pagers.
+ * The data attribute is supplied only by maintained callers in this file.
+ */
+function sharedNumberedPagerMarkup(page, totalPages, dataAttribute, disabledAll = false) {
+  const current = Math.max(Number(page || 1), 1);
+  const total = Math.max(Number(totalPages || 1), 1);
+  const values = sharedPagerPageNumbers(current, total);
+  const buttons = [
+    `<button type="button" ${dataAttribute}="${Math.max(1, current - 1)}"${disabledAll || current <= 1 ? " disabled" : ""}>Previous</button>`,
+  ];
+  let previous = 0;
+  values.forEach((value) => {
+    if (previous && value - previous > 1) buttons.push('<span class="app-numbered-pager-gap-v337">…</span>');
+    buttons.push(`<button type="button" ${dataAttribute}="${value}" class="${value === current ? "is-active" : ""}"${value === current ? ' aria-current="page"' : ""}${disabledAll ? " disabled" : ""}>${value}</button>`);
+    previous = value;
+  });
+  buttons.push(`<button type="button" ${dataAttribute}="${Math.min(total, current + 1)}"${disabledAll || current >= total ? " disabled" : ""}>Next</button>`);
+  return buttons.join("");
+}
+
 function actionHistoryFiltersActive(filters = {}) {
   return Boolean(filters.query || filters.user || filters.action || filters.dateFrom || filters.dateTo);
 }
@@ -22873,10 +23560,8 @@ function actionHistoryToolbarMarkup(entry) {
     </div>
     <div class="modal-action-history-filter-footer">
       <span data-action-history-filter-result></span>
-      <div class="modal-action-history-pager" aria-label="Action history pages">
-        <button type="button" class="secondary" data-action-history-page="${page - 1}" ${page <= 1 || entry.loading ? "disabled" : ""}>Previous</button>
-        <strong>Page ${page} of ${totalPages}</strong>
-        <button type="button" class="secondary" data-action-history-page="${page + 1}" ${page >= totalPages || entry.loading ? "disabled" : ""}>Next</button>
+      <div class="modal-action-history-pager app-numbered-pager-v337" aria-label="Action history pages" ${entry.loading ? 'aria-busy="true"' : ""}>
+        ${sharedNumberedPagerMarkup(page, totalPages, "data-action-history-page", entry.loading)}
       </div>
       <button type="button" class="secondary" data-action-history-clear ${actionHistoryFiltersActive(filters) ? "" : "disabled"}>Clear filters</button>
     </div>`;
@@ -23005,6 +23690,7 @@ function setActionHistoryScope(scope, context, payload, refs, rackCode = "") {
   entry.actions = Array.isArray(data.actions) ? data.actions : entry.actions;
   entry.refs = refs;
   entry.loading = false;
+  wireOwnedVerticalScroll(refs?.root);
   renderActionHistoryScope(scope);
   return entry.totalCount;
 }
@@ -23045,6 +23731,9 @@ function renderModalActionHistory(payload = [], target = "admin", context = "", 
   if (!details || !summary || !count || !list) return;
   const resolvedContext = context || (isOperations ? state.operationsModalKind : els.adminModal?.dataset.kind || "");
   const total = setActionHistoryScope(target, resolvedContext, payload, { root: details, summary, count, list }, rackCode);
+  // The history panel is the scroll owner. Capturing wheel input here keeps
+  // scrolling responsive even when the pointer is over a filter, card, or row.
+  wireOwnedVerticalScroll(details);
   if (isOperations && state.operationsModalKind === "reject-log") {
     const rejectTabCount = document.getElementById("rejectOperationsHistoryCount");
     if (rejectTabCount) rejectTabCount.textContent = String(total);
@@ -23156,7 +23845,7 @@ function renderSupersededReviewCount() {
 }
 
 async function refreshSupersededReviewSummary() {
-  if (!state.backend || !hasAnyPermission(["view_admin", "edit_delivery_lists"])) return;
+  if (!state.backend || !hasAnyPermission(["view_admin", "review_superseded_orders"])) return;
   try {
     const summary = await fetchJson("/api/admin/superseded-order-reviews/summary");
     state.supersededReviewSummary = {
@@ -23174,11 +23863,48 @@ function supersededReviewStatusLabel(status = "") {
   return ({ pending: "Needs review", review_later: "Review later", approved: "Removal approved", keep_both: "Keep both" })[status] || "Needs review";
 }
 
+const SUPERSEDED_DIMENSION_UNITS_PER_INCH = 32;
+
+function greatestCommonDivisor(left, right) {
+  let a = Math.abs(Math.trunc(Number(left) || 0));
+  let b = Math.abs(Math.trunc(Number(right) || 0));
+  while (b) {
+    [a, b] = [b, a % b];
+  }
+  return a || 1;
+}
+
+function formatSupersededDimensionUnit(value, unitsPerInch = SUPERSEDED_DIMENSION_UNITS_PER_INCH) {
+  // A+W PP_BREITE / PP_HOEHE are stored as whole source units. The maintained
+  // SQL export mapping currently defines 32 source units per inch, matching the
+  // workbook formatter. This is display-only so existing review fingerprints
+  // and approved removal decisions remain unchanged.
+  const units = Math.max(Math.round(Number(unitsPerInch) || SUPERSEDED_DIMENSION_UNITS_PER_INCH), 1);
+  const totalUnits = Math.max(Math.round(Number(value) || 0), 0);
+  const whole = Math.floor(totalUnits / units);
+  const remainder = totalUnits % units;
+  if (!remainder) return `${whole}"`;
+  const divisor = greatestCommonDivisor(remainder, units);
+  const numerator = remainder / divisor;
+  const denominator = units / divisor;
+  return whole ? `${whole} ${numerator}/${denominator}"` : `${numerator}/${denominator}"`;
+}
+
+function supersededReviewDimensions(item = {}) {
+  const widthUnits = Number(item.widthUnits || 0);
+  const heightUnits = Number(item.heightUnits || 0);
+  if (widthUnits || heightUnits) {
+    const unitsPerInch = Number(item.dimensionUnitsPerInch || SUPERSEDED_DIMENSION_UNITS_PER_INCH);
+    return `${formatSupersededDimensionUnit(widthUnits, unitsPerInch)} × ${formatSupersededDimensionUnit(heightUnits, unitsPerInch)}`;
+  }
+  return String(item.dimensions || "").trim() || "-";
+}
+
 function supersededReviewItemRows(items = []) {
   if (!items.length) return `<tr><td colspan="6">No item evidence was returned.</td></tr>`;
   return items.map((item) => {
     const batches = [item.productionBatch1, item.productionBatch2, item.productionBatch3].map((value) => Number(value || 0)).join("/");
-    const dimensions = item.dimensions || `${Number(item.widthUnits || 0)} × ${Number(item.heightUnits || 0)} source units`;
+    const dimensions = supersededReviewDimensions(item);
     return `<tr>
       <td>${escapeHtml(item.itemNumber || "")}</td>
       <td>${escapeHtml(item.product || item.job || "")}</td>
@@ -23195,63 +23921,71 @@ function supersededOrderReviewCardHtml(review = {}) {
   const replacementImpact = review.replacementImpact || {};
   const evidence = review.evidence || {};
   const status = String(review.status || "pending");
-  const suggestedOrder = String(review.originalOrderNumber || "");
+  const originalOrder = String(review.originalOrderNumber || "");
+  const replacementOrder = String(review.replacementOrderNumber || "");
+  const suggestedOrder = originalOrder;
   const approvedRemoveOrder = String(review.approvedRemoveOrderNumber || "");
   const selectedRemoveOrder = approvedRemoveOrder || suggestedOrder;
   const decisionCopy = review.decidedAt
     ? `<small>Decision: ${escapeHtml(supersededReviewStatusLabel(status))}${approvedRemoveOrder ? ` · removed order ${escapeHtml(approvedRemoveOrder)}` : ""} by ${escapeHtml(review.decidedBy || "unknown")} · ${escapeHtml(formatDisplayDate(review.decidedAt))}</small>`
     : `<small>Detected ${escapeHtml(formatDisplayDate(review.lastSeenAt || review.detectedAt || ""))}</small>`;
-  const impactMarkup = (label, orderNumber, impact) => `<span class="superseded-review-impact-option-v257">
-    <small>${escapeHtml(label)}</small>
-    <strong>Order ${escapeHtml(orderNumber)}</strong>
-    <em>${Number(impact.activeLineCount || 0)} rows · ${Number(impact.pieceQty || 0)} pcs · ${Number(impact.scannedQty || 0)} scanned</em>
-  </span>`;
+  const choiceMarkup = (orderNumber, keepOrderNumber, impact, suggested = false) => {
+    const scannedQty = Number(impact.scannedQty || 0);
+    const selected = selectedRemoveOrder === String(orderNumber);
+    return `<label class="superseded-review-choice-v328 ${suggested ? "is-suggested" : ""} ${scannedQty > 0 ? "has-scans" : ""} ${selected ? "is-selected" : ""}">
+      <input type="radio" name="superseded-remove-${escapeHtml(review.id)}" value="${escapeHtml(orderNumber)}" ${selected ? "checked" : ""}>
+      <span class="superseded-review-choice-copy-v328">
+        <span class="superseded-review-choice-heading-v328"><strong>Remove order ${escapeHtml(orderNumber)}</strong>${suggested ? '<b>Suggested</b>' : '<b class="alternative">Alternative</b>'}</span>
+        <small>Keep order ${escapeHtml(keepOrderNumber)}</small>
+        <span class="superseded-review-choice-metrics-v328">
+          <i><b>${Number(impact.activeLineCount || 0)}</b> rows</i>
+          <i><b>${Number(impact.pieceQty || 0)}</b> pcs</i>
+          <i class="${scannedQty > 0 ? "is-warning" : ""}"><b>${scannedQty}</b> scanned</i>
+        </span>
+      </span>
+    </label>`;
+  };
   return `<article class="superseded-review-card status-${escapeHtml(status)}" data-superseded-review-id="${escapeHtml(review.id)}">
     <header class="superseded-review-card-header">
       <div>
         <span class="superseded-review-eyebrow">${escapeHtml(formatDisplayDate(review.deliveryDate))} · A+W identity ${escapeHtml(review.headerIdentity || "not available")}</span>
-        <strong>Order ${escapeHtml(review.originalOrderNumber)} ↔ ${escapeHtml(review.replacementOrderNumber)}</strong>
+        <strong>Order ${escapeHtml(originalOrder)} ↔ ${escapeHtml(replacementOrder)}</strong>
         ${decisionCopy}
       </div>
       <span class="superseded-review-status">${escapeHtml(supersededReviewStatusLabel(status))}</span>
     </header>
-    <div class="superseded-review-evidence">
-      <span>Same A+W identity</span>
-      <span>${Number(evidence.exactItemOverlapCount || 0)} exact item match${Number(evidence.exactItemOverlapCount || 0) === 1 ? "" : "es"}</span>
-      <span>Suggested removal: order ${escapeHtml(suggestedOrder)}</span>
-      <span>Suggestion only — Admin chooses which order is removed</span>
-    </div>
-    <div class="superseded-review-impact ${Number(originalImpact.scannedQty || 0) + Number(replacementImpact.scannedQty || 0) > 0 ? "has-scans" : ""}">
-      <strong>Current scanner impact</strong>
-      <div class="superseded-review-impact-grid-v257">
-        ${impactMarkup("Original candidate", review.originalOrderNumber, originalImpact)}
-        ${impactMarkup("Replacement candidate", review.replacementOrderNumber, replacementImpact)}
+    <section class="superseded-review-recommendation-v328">
+      <div>
+        <small>Suggested removal</small>
+        <strong>Remove order ${escapeHtml(suggestedOrder)}</strong>
+        <span>Keep order ${escapeHtml(replacementOrder)}. Nothing is removed until an Admin approves the selection.</span>
       </div>
-    </div>
-    <div class="superseded-review-compare">
-      <section>
-        <h3>Original candidate · ${escapeHtml(review.originalOrderNumber)}</h3>
-        <table><thead><tr><th>Item</th><th>Product / Job</th><th>Dimensions</th><th>Qty</th><th>Status</th><th>Batches</th></tr></thead><tbody>${supersededReviewItemRows(review.originalItems)}</tbody></table>
-      </section>
-      <section>
-        <h3>Replacement candidate · ${escapeHtml(review.replacementOrderNumber)}</h3>
-        <table><thead><tr><th>Item</th><th>Product / Job</th><th>Dimensions</th><th>Qty</th><th>Status</th><th>Batches</th></tr></thead><tbody>${supersededReviewItemRows(review.replacementItems)}</tbody></table>
-      </section>
-    </div>
-    <div class="superseded-review-removal-choice-v257" role="radiogroup" aria-label="Choose which candidate order to remove">
-      <div><strong>Choose the order to remove</strong><small>The first choice is suggested from the A+W evidence, but either candidate may be retained.</small></div>
-      <label class="${selectedRemoveOrder === String(review.originalOrderNumber) ? "is-selected" : ""}">
-        <input type="radio" name="superseded-remove-${escapeHtml(review.id)}" value="${escapeHtml(review.originalOrderNumber)}" ${selectedRemoveOrder === String(review.originalOrderNumber) ? "checked" : ""}>
-        <span><strong>Remove order ${escapeHtml(review.originalOrderNumber)}</strong><small>Suggested · keep ${escapeHtml(review.replacementOrderNumber)}</small></span>
-      </label>
-      <label class="${selectedRemoveOrder === String(review.replacementOrderNumber) ? "is-selected" : ""}">
-        <input type="radio" name="superseded-remove-${escapeHtml(review.id)}" value="${escapeHtml(review.replacementOrderNumber)}" ${selectedRemoveOrder === String(review.replacementOrderNumber) ? "checked" : ""}>
-        <span><strong>Remove order ${escapeHtml(review.replacementOrderNumber)}</strong><small>Keep ${escapeHtml(review.originalOrderNumber)}</small></span>
-      </label>
+      <div class="superseded-review-match-summary-v328">
+        <span>Same A+W identity</span>
+        <span>${Number(evidence.exactItemOverlapCount || 0)} exact item match${Number(evidence.exactItemOverlapCount || 0) === 1 ? "" : "es"}</span>
+      </div>
+    </section>
+    <details class="superseded-review-evidence-details-v328" open>
+      <summary>Item evidence <span>${Number(review.originalItems?.length || 0)} original · ${Number(review.replacementItems?.length || 0)} replacement</span></summary>
+      <div class="superseded-review-compare">
+        <section>
+          <h3>Original candidate · ${escapeHtml(originalOrder)}</h3>
+          <table><thead><tr><th>Item</th><th>Product / Job</th><th>Dimensions</th><th>Qty</th><th>Status</th><th>Batches</th></tr></thead><tbody>${supersededReviewItemRows(review.originalItems)}</tbody></table>
+        </section>
+        <section>
+          <h3>Replacement candidate · ${escapeHtml(replacementOrder)}</h3>
+          <table><thead><tr><th>Item</th><th>Product / Job</th><th>Dimensions</th><th>Qty</th><th>Status</th><th>Batches</th></tr></thead><tbody>${supersededReviewItemRows(review.replacementItems)}</tbody></table>
+        </section>
+      </div>
+    </details>
+    <div class="superseded-review-removal-choice-v328" role="radiogroup" aria-label="Choose which candidate order to remove">
+      <div class="superseded-review-choice-intro-v328"><strong>Approve a removal</strong><small>The suggested order is preselected. Use the item evidence above to verify the recommendation before approving it.</small></div>
+      ${choiceMarkup(originalOrder, replacementOrder, originalImpact, true)}
+      ${choiceMarkup(replacementOrder, originalOrder, replacementImpact, false)}
     </div>
     ${review.decisionReason ? `<p class="superseded-review-reason"><strong>Decision note:</strong> ${escapeHtml(review.decisionReason)}</p>` : ""}
     <footer class="superseded-review-actions">
-      <button type="button" class="danger" data-superseded-decision="approve" data-review-id="${escapeHtml(review.id)}">Approve selected removal</button>
+      <button type="button" class="danger" data-superseded-decision="approve" data-review-id="${escapeHtml(review.id)}">Approve removal of order ${escapeHtml(selectedRemoveOrder)}</button>
       <button type="button" class="secondary" data-superseded-decision="keep_both" data-review-id="${escapeHtml(review.id)}">Keep both</button>
       <button type="button" class="secondary" data-superseded-decision="review_later" data-review-id="${escapeHtml(review.id)}">Review later</button>
     </footer>
@@ -23268,7 +24002,7 @@ function supersededOrderReviewModalHtml() {
   const summary = state.supersededReviewSummary || {};
   return `<div class="superseded-review-shell">
     <section class="superseded-review-hero">
-      <div><span>Safe local reconciliation</span><strong>Production status creates a review candidate—it never deletes a row.</strong><p>Approval stores exact delivery-date/order/item keys. Keep Both prevents the same unchanged pair from returning.</p></div>
+      <div><span>Superseded-order safety review</span><strong>Approve only the order that should disappear.</strong><p>The suggested removal is preselected. The retained order stays active and the approved source order is suppressed from future imports.</p></div>
       <div class="superseded-review-kpis"><span><small>Needs review</small><strong>${Number(summary.pendingSupersededOrderReviews || 0)}</strong></span><span><small>Approved</small><strong>${Number(summary.approvedSupersededOrderReviews || 0)}</strong></span><span><small>Kept</small><strong>${Number(summary.keptSupersededOrderReviews || 0)}</strong></span></div>
     </section>
     <nav class="superseded-review-tabs" aria-label="Superseded-order review filters">
@@ -23320,6 +24054,7 @@ async function decideSupersededOrderReview(reviewId, action) {
   if (els.adminModalBody && els.adminModal?.dataset.kind === "supersededOrders") {
     els.adminModalBody.innerHTML = supersededOrderReviewModalHtml();
     applyLanguageToRoot(els.adminModalBody);
+    await loadModalActionHistory("supersededOrders", "admin").catch(() => {});
   }
   await loadDeliveryLists(state.activeListId);
   state.adminTodayImportLoaded = false;
@@ -23329,12 +24064,12 @@ async function decideSupersededOrderReview(reviewId, action) {
 
 const ADMIN_MODAL_PROFILES = {
   deliveryLists: {
-    showStatus: true,
+    showStatus: false,
     title: "All Delivery Lists",
     eyebrow: "Delivery List Management",
     description: "Search active delivery dates, review stage progress, and open the maintained edit, reset, or delete actions.",
     context: "Delivery list workspace",
-    status: "Live delivery data",
+    status: "",
     group: "records",
   },
   deliveryActions: {
@@ -23362,12 +24097,12 @@ const ADMIN_MODAL_PROFILES = {
     group: "records",
   },
   manualEdit: {
-    showStatus: true,
+    showStatus: false,
     title: "Manual Delivery List Edit",
     eyebrow: "Delivery List Management",
     description: "Locate a list, review its line items, and apply intentional manual corrections without changing unrelated stages.",
     context: "Line-item editor",
-    status: "Unsaved changes protected",
+    status: "",
     group: "records",
   },
   users: {
@@ -23412,11 +24147,11 @@ const ADMIN_MODAL_PROFILES = {
     group: "routing",
   },
   customerEmails: {
-    title: "Customer Email Rules",
+    title: "Customer Email Center",
     eyebrow: "Customer Communications",
-    description: "Manage customer recipients, global CC addresses, test delivery, and retained email drafts.",
-    context: "Email workspace",
-    status: "Server-side credentials",
+    description: "Manage customer recipient rules, delivery readiness, test messages, and retained email activity from one focused workspace.",
+    context: "Email operations",
+    status: "Server-side delivery",
     group: "communications",
   },
   lookups: {
@@ -23436,25 +24171,25 @@ const ADMIN_MODAL_PROFILES = {
     group: "quality",
   },
   bayScannerRules: {
-    title: "Bay Scanner Rules",
-    eyebrow: "Bay Operations",
-    description: "Control manual and barcode-based bay classification rules while preserving the maintained scan workflow.",
-    context: "Rule workspace",
-    status: "Indian Trail rules",
+    title: "Bay Rules & Auto Assignment",
+    eyebrow: "Bay Configuration",
+    description: "Maintain accepted Bay Map scan rules and automatic bay-assignment behavior from one workspace.",
+    context: "Bay rules and assignment",
+    status: "Indian Trail configuration",
     group: "bay",
   },
   crossDateScanning: {
-    title: "Cross-Date Scanning",
-    eyebrow: "Scanner Safety",
-    description: "Control how the scanner handles a unique order/item found on another active delivery date.",
-    context: "Date-switch settings",
-    status: "Audited scanner behavior",
+    title: "Scan Page Settings",
+    eyebrow: "Scanner Configuration",
+    description: "Control cross-date scan behavior and the mixed-destination approval window used by the scanning workflow.",
+    context: "Scan page settings",
+    status: "Scanner behavior",
     group: "configuration",
   },
   bayAutoAssigner: {
     title: "Bay Auto Assigner",
     eyebrow: "Bay Operations",
-    description: "Tune bay classification thresholds and choose which glass categories require intentional manual assignment.",
+    description: "Control Outbound-to-Indian Trail bay preassignment with only the size thresholds and manual-placement safeguards that affect the live workflow.",
     context: "Auto-assignment settings",
     status: "Preassignment rules",
     group: "bay",
@@ -23512,20 +24247,155 @@ function adminModalProfile(kind, options = null) {
   return profile;
 }
 
-function setAdminModalSection(section = "workspace") {
-  const historySelected = section === "history";
-  if (els.adminModalWorkspaceTab) {
-    els.adminModalWorkspaceTab.classList.toggle("is-active", !historySelected);
-    els.adminModalWorkspaceTab.setAttribute("aria-selected", String(!historySelected));
+/**
+ * Purpose: Configure the shared Admin tab rail for editors that own multiple maintained workspaces.
+ * Effects: Reuses the same top tab strip as Action History instead of nesting a second tab system inside the modal body.
+ * Flow: Restores the default Workspace tab, then inserts Customer Email or Lookup library tabs immediately before Action History.
+ */
+function configureAdminModalSectionTabsV345(kind) {
+  if (!els.adminModalSectionTabs || !els.adminModalWorkspaceTab || !els.adminModalHistoryTab) return;
+  els.adminModalSectionTabs.querySelectorAll("[data-admin-custom-section-v345]").forEach((button) => button.remove());
+  els.adminModalWorkspaceTab.hidden = false;
+  els.adminModalWorkspaceTab.dataset.adminModalSection = "workspace";
+
+  const insertTab = (section, label, count = null) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.adminModalSection = section;
+    button.dataset.adminCustomSectionV345 = "true";
+    button.setAttribute("aria-selected", "false");
+    button.innerHTML = `<span>${escapeHtml(label)}</span>${count === null ? "" : `<b>${escapeHtml(count)}</b>`}`;
+    els.adminModalSectionTabs.insertBefore(button, els.adminModalHistoryTab);
+  };
+
+  if (kind === "customerEmails") {
+    const settings = state.customerEmailSettings || { contacts: [], outbox: [] };
+    const attention = (settings.outbox || []).filter((email) => ["draft", "queued", "failed"].includes(String(email.status || "").toLowerCase())).length;
+    els.adminModalWorkspaceTab.dataset.adminModalSection = "customerEmail:rules";
+    if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = "Customer Rules";
+    const workspaceBadge = els.adminModalWorkspaceTab.querySelector("b[data-admin-workspace-count-v345]") || document.createElement("b");
+    workspaceBadge.dataset.adminWorkspaceCountV345 = "true";
+    workspaceBadge.textContent = String((settings.contacts || []).length);
+    if (!workspaceBadge.isConnected) els.adminModalWorkspaceTab.appendChild(workspaceBadge);
+    insertTab("customerEmail:test", "Test Email");
+    insertTab("customerEmail:activity", "Email Activity", attention);
+    const selectedSection = `customerEmail:${state.customerEmailActiveTab || "rules"}`;
+    els.adminModalSectionTabs.querySelectorAll("[data-admin-modal-section]").forEach((button) => {
+      const selected = button.dataset.adminModalSection === selectedSection;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-selected", String(selected));
+    });
+    return;
   }
-  if (els.adminModalHistoryTab) {
-    els.adminModalHistoryTab.classList.toggle("is-active", historySelected);
-    els.adminModalHistoryTab.setAttribute("aria-selected", String(historySelected));
+
+  if (kind === "crossDateScanning") {
+    const canCrossDate = hasPermission("manage_cross_date_scanning");
+    const canMixedDestination = hasPermission("manage_bay_scanner_rules");
+    const availableTabs = [canCrossDate ? "crossDate" : "", canMixedDestination ? "mixedDestination" : ""].filter(Boolean);
+    if (!availableTabs.includes(state.scanPageSettingsActiveTab)) state.scanPageSettingsActiveTab = availableTabs[0] || "crossDate";
+    els.adminModalWorkspaceTab.dataset.adminModalSection = "scanPage:crossDate";
+    if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = "Cross-Date Scanning";
+    const workspaceBadge = els.adminModalWorkspaceTab.querySelector("b[data-admin-workspace-count-v345]") || document.createElement("b");
+    workspaceBadge.dataset.adminWorkspaceCountV345 = "true";
+    workspaceBadge.textContent = `${Number(state.crossDateScanSettings?.pastDays || 0)}/${Number(state.crossDateScanSettings?.futureDays || 0)}`;
+    workspaceBadge.title = "Past / future day window";
+    if (!workspaceBadge.isConnected) els.adminModalWorkspaceTab.appendChild(workspaceBadge);
+    if (!canCrossDate) els.adminModalWorkspaceTab.hidden = true;
+    if (canMixedDestination) insertTab("scanPage:mixedDestination", "Mixed Destination", Number(state.bayScannerSettings?.destinationOverrideMinutes || 15));
+    const selectedSection = `scanPage:${state.scanPageSettingsActiveTab}`;
+    els.adminModalSectionTabs.querySelectorAll("[data-admin-modal-section]").forEach((button) => {
+      const selected = button.dataset.adminModalSection === selectedSection;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-selected", String(selected));
+    });
+    return;
+  }
+
+  if (kind === "bayScannerRules") {
+    const settings = state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
+    const canRules = hasPermission("manage_bay_scanner_rules");
+    const canAuto = hasPermission("manage_bay_auto_assigner");
+    const availableTabs = [canRules ? "rules" : "", canAuto ? "auto" : ""].filter(Boolean);
+    if (!availableTabs.includes(state.bayScannerRulesActiveTab)) state.bayScannerRulesActiveTab = availableTabs[0] || "rules";
+    els.adminModalWorkspaceTab.dataset.adminModalSection = "bayConfig:rules";
+    if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = "Scanner Rules";
+    const workspaceBadge = els.adminModalWorkspaceTab.querySelector("b[data-admin-workspace-count-v345]") || document.createElement("b");
+    workspaceBadge.dataset.adminWorkspaceCountV345 = "true";
+    workspaceBadge.textContent = String(Number((settings.manualRules || []).length) + Number((settings.barcodeRules || []).length));
+    if (!workspaceBadge.isConnected) els.adminModalWorkspaceTab.appendChild(workspaceBadge);
+    if (!canRules) els.adminModalWorkspaceTab.hidden = true;
+    if (canAuto) insertTab("bayConfig:auto", "Auto Assignment");
+    const selectedSection = `bayConfig:${state.bayScannerRulesActiveTab}`;
+    els.adminModalSectionTabs.querySelectorAll("[data-admin-modal-section]").forEach((button) => {
+      const selected = button.dataset.adminModalSection === selectedSection;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-selected", String(selected));
+    });
+    return;
+  }
+
+  if (kind === "lookups") {
+    const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] };
+    const glassProfileCount = new Set([...(lookups.products || []), ...(lookups.glassCosts || []), ...(lookups.glassColors || [])].map((item) => String(item?.value || item?.label || "").trim().toLowerCase()).filter(Boolean)).size;
+    els.adminModalWorkspaceTab.dataset.adminModalSection = "lookup:glass_profile";
+    if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = "Glass Types";
+    const workspaceBadge = els.adminModalWorkspaceTab.querySelector("b[data-admin-workspace-count-v345]") || document.createElement("b");
+    workspaceBadge.dataset.adminWorkspaceCountV345 = "true";
+    workspaceBadge.textContent = String(glassProfileCount);
+    if (!workspaceBadge.isConnected) els.adminModalWorkspaceTab.appendChild(workspaceBadge);
+    insertTab("lookup:route", "Routes", (lookups.routes || []).length);
+    insertTab("lookup:process", "Process States", (lookups.processes || []).length);
+    if (hasPermission("manage_stations")) insertTab("lookup:station", "Stations", (state.stations || []).length);
+    insertTab("lookup:stage_definition", "Stages", (lookups.stages || []).length);
+    const selectedSection = `lookup:${state.lookupManagerActiveType || "glass_profile"}`;
+    els.adminModalSectionTabs.querySelectorAll("[data-admin-modal-section]").forEach((button) => {
+      const selected = button.dataset.adminModalSection === selectedSection;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-selected", String(selected));
+    });
+    return;
+  }
+
+  els.adminModalWorkspaceTab.querySelector("b[data-admin-workspace-count-v345]")?.remove();
+  const profile = adminModalProfile(kind);
+  if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = profile.title;
+  els.adminModalWorkspaceTab?.querySelector("b[data-admin-workspace-count-v345]")?.remove();
+}
+
+function setAdminModalSection(section = "workspace") {
+  const kind = els.adminModal?.dataset.kind || "";
+  const historySelected = section === "history";
+
+  if (!historySelected && section.startsWith("customerEmail:")) {
+    const tab = section.split(":", 2)[1] || "rules";
+    state.customerEmailActiveTab = ["rules", "test", "activity"].includes(tab) ? tab : "rules";
+    renderCustomerEmailModal();
+  } else if (!historySelected && section.startsWith("lookup:")) {
+    const type = section.split(":", 2)[1] || "glass_profile";
+    state.lookupManagerActiveType = ["glass_profile", "route", "process", "station", "stage_definition"].includes(type) ? type : "glass_profile";
+    state.lookupManagerSearch = "";
+    renderLookupManagerModal();
+  } else if (!historySelected && section.startsWith("scanPage:")) {
+    const tab = section.split(":", 2)[1] || "crossDate";
+    state.scanPageSettingsActiveTab = ["crossDate", "mixedDestination"].includes(tab) ? tab : "crossDate";
+    renderScanPageSettingsModalV350();
+  } else if (!historySelected && section.startsWith("bayConfig:")) {
+    const tab = section.split(":", 2)[1] || "rules";
+    state.bayScannerRulesActiveTab = ["rules", "auto"].includes(tab) ? tab : "rules";
+    renderBayScannerRulesModalV349();
+  }
+
+  if (els.adminModalSectionTabs) {
+    els.adminModalSectionTabs.querySelectorAll("[data-admin-modal-section]").forEach((button) => {
+      const selected = button.dataset.adminModalSection === section;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-selected", String(selected));
+    });
   }
   if (els.adminModalBody) els.adminModalBody.hidden = historySelected;
   if (els.adminModalHistory) els.adminModalHistory.hidden = !historySelected;
-  if (historySelected && els.adminModal?.dataset.kind) {
-    loadModalActionHistory(els.adminModal.dataset.kind, "admin").catch(() => renderModalActionHistory([], "admin"));
+  if (historySelected && kind) {
+    loadModalActionHistory(kind, "admin").catch(() => renderModalActionHistory([], "admin"));
   }
 }
 
@@ -23551,7 +24421,7 @@ function applyAdminModalProfile(kind, options = null) {
  */
 function openAdminModal(kind, options = null) {
   if (kind === "roles") {
-  resetRolePermissionUiSession();
+    resetRolePermissionUiSession();
   }
   if (!els.adminModal || !els.adminModalBody || !els.adminModalTitle) return;
   delete els.adminModal.dataset.customView;
@@ -23561,7 +24431,17 @@ function openAdminModal(kind, options = null) {
   if (els.adminModalSectionTabs) els.adminModalSectionTabs.hidden = !actionHistoryEnabled;
   els.adminModalBody.innerHTML = options?.body ?? adminModalContent(kind);
   applyLanguageToRoot(els.adminModal);
-  setAdminModalSection("workspace");
+  configureAdminModalSectionTabsV345(kind);
+  const initialSection = kind === "customerEmails"
+    ? `customerEmail:${state.customerEmailActiveTab || "rules"}`
+    : kind === "lookups"
+      ? `lookup:${state.lookupManagerActiveType || "glass_profile"}`
+      : kind === "crossDateScanning"
+        ? `scanPage:${state.scanPageSettingsActiveTab || "crossDate"}`
+        : kind === "bayScannerRules"
+          ? `bayConfig:${state.bayScannerRulesActiveTab || "rules"}`
+          : "workspace";
+  setAdminModalSection(initialSection);
   if (actionHistoryEnabled) {
     renderModalActionHistory([], "admin");
     loadModalActionHistory(kind, "admin").catch(() => renderModalActionHistory([], "admin"));
@@ -23585,15 +24465,17 @@ function openAdminModal(kind, options = null) {
     els.adminModalBackdrop.setAttribute("aria-hidden", "false");
   }
   updateModalScrollLock();
-  if (kind === "roles" && (!state.adminRoles.length || !state.allPermissions.length) && hasPermission("manage_roles")) {
+  const needsRoleDirectory = ["roles", "users"].includes(kind) && (!state.adminRoles.length || !state.allPermissions.length);
+  const canReadRoleDirectory = hasAnyPermission(["manage_roles", "manage_user_assignments", "manage_users"]);
+  if (needsRoleDirectory && canReadRoleDirectory) {
     fetchJson("/api/admin/roles")
       .then((payload) => {
         state.adminRoles = payload.roles || [];
         state.allPermissions = payload.permissions || [];
-        if (!els.adminModal.hidden) {
-          els.adminModalBody.innerHTML = adminModalContent("roles");
-          wireRolePermissionControls();
-        }
+        if (els.adminModal.hidden || els.adminModal.dataset.kind !== kind) return;
+        els.adminModalBody.innerHTML = adminModalContent(kind);
+        if (kind === "roles") wireRolePermissionControls();
+        if (kind === "users") wireUserManagerControls();
       })
       .catch((error) => showInlineError(error.message, true));
   }
@@ -23620,6 +24502,13 @@ async function closeAdminModal() {
   }
 
   state.manualEditDirty = false;
+
+  // v0.340 child creation dialogs belong to the Admin workspace and must never
+  // survive after their parent modal is dismissed.
+  closeRoleCreateModal();
+  closeUserCreateModal();
+  closeManualOrderCreateModal();
+  closeCustomerRouteCreateModal();
 
   if (els.adminModal) {
     els.adminModal.hidden = true;
@@ -23654,25 +24543,10 @@ function adminModalContent(kind) {
   if (kind === "supersededOrders") {
     return supersededOrderReviewModalHtml();
   }
-  if (kind === "deliveryLists") {
+  if (kind === "deliveryLists" || kind === "deliveryActions") {
     state.adminDeliveryListVisiblePastDays = ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS;
-    return `
-      <label class="search-box admin-modal-search">
-        <span class="search-icon"></span>
-        <input id="adminDeliveryListModalSearch" type="search" autocomplete="off" placeholder="Search date, Job Nr., order number, stage...">
-      </label>
-      <div class="admin-table" id="adminDeliveryListModalResults">${adminDeliveryListModalResultsHtml()}</div>
-    `;
-  }
-  if (kind === "deliveryActions") {
-    state.adminDeliveryListVisiblePastDays = ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS;
-    return `
-      <label class="search-box admin-modal-search">
-        <span class="search-icon"></span>
-        <input id="adminDeliveryListModalSearch" type="search" autocomplete="off" placeholder="Search date, Job Nr., order number, stage...">
-      </label>
-      <div class="admin-table" id="adminDeliveryListModalResults">${adminDeliveryListModalResultsHtml()}</div>
-    `;
+    state.adminDeliveryListWeekPage = 1;
+    return adminDeliveryListModalShellHtml();
   }
   if (kind === "users") {
     return userManagerModalHtml();
@@ -23770,6 +24644,8 @@ function lookupBucketForType(type) {
   if (clean === "process") return "processes";
   if (clean === "glass_cost") return "glassCosts";
   if (clean === "glass_color") return "glassColors";
+  if (clean === "stage_definition") return "stages";
+  if (clean === "station") return "stations";
   return "products";
 }
 
@@ -23779,7 +24655,9 @@ function lookupBucketForType(type) {
  * Flow: Resolves the maintained bucket name and returns a defensive array value.
  */
 function lookupItemsForType(type) {
-  const bucket = lookupBucketForType(type);
+  const clean = String(type || "").trim().toLowerCase();
+  if (clean === "station") return (state.stations || []).map((station) => ({ type: "station", value: station, label: station, source: DEFAULT_STATIONS.includes(station) ? "default" : "manual" }));
+  const bucket = lookupBucketForType(clean);
   return Array.isArray(state.manualEditLookups?.[bucket]) ? state.manualEditLookups[bucket] : [];
 }
 
@@ -23830,13 +24708,19 @@ function lookupEditorMeta(type) {
     return {
       type: "process",
       title: "Process state",
-      explanation: "Adds a consistent status choice for manual delivery-list edits, such as Rush, Remake, Updated, or Review.",
+      explanation: "Maintains workflow status choices. The importer applies Updated Line when A+W changes an existing source line; manual edits are tracked separately in Action History and highlighted in the editor immediately after save.",
       valueLabel: "Saved process value",
       valuePlaceholder: "Rush",
       labelPlaceholder: "Rush",
       example: "Rush → Rush",
       className: "processes",
     };
+  }
+  if (clean === "station") {
+    return { type: "station", title: "Station", explanation: "Maintain workstation names used for scan attribution and user assignments.", valueLabel: "Station name", valuePlaceholder: "Airport Scanner 4", labelPlaceholder: "Station", example: "Airport Scanner 4 → Station", className: "stations" };
+  }
+  if (clean === "stage_definition") {
+    return { type: "stage_definition", title: "Stage", explanation: "Rename, add, remove, or assign a maintained behavior preset to delivery-list stages.", valueLabel: "Stage key", valuePlaceholder: "quality-review", labelPlaceholder: "Quality Review", example: "quality-review → Quality Review", className: "stages" };
   }
   return {
     type: "product",
@@ -23855,69 +24739,124 @@ function lookupEditorMeta(type) {
  * Effects: Returns HTML only; it does not mutate lookup data.
  * Flow: Filters the active lookup rows by the maintained search term, then renders source, saved value, display label, route details, and a reusable edit action.
  */
+function lookupLibraryIconHtml(type, extraClass = "") {
+  const clean = String(type || "product").trim().toLowerCase();
+  const icons = {
+    product: '<path d="M5 8.5 12 4l7 4.5v8L12 21l-7-4.5z"/><path d="M12 12v9M5 8.5l7 3.5 7-3.5"/>',
+    route: '<path d="M5 19c4-7 5-11 10-11h4"/><path d="m16 5 3 3-3 3"/><circle cx="5" cy="19" r="2"/>',
+    process: '<path d="M7 6h10M7 12h10M7 18h10"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+    glass_cost: '<circle cx="12" cy="12" r="8"/><path d="M14.5 9.2c-.8-1.4-4.7-1.4-4.7.7 0 2.7 5.1 1.2 5.1 4 0 2.2-4.3 2.3-5.3.6M12 6.5v11"/>',
+    glass_color: '<path d="M12 4c4 0 8 3.2 8 7.2 0 2-1.2 3.1-2.8 3.1h-1.4c-.9 0-1.5.9-1.1 1.7.8 1.7-.4 3.6-2.3 3.6C7.7 19.6 4 16.2 4 12 4 7.6 7.6 4 12 4Z"/><circle cx="8" cy="10" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="15" cy="9" r="1"/>',
+    station: '<rect x="5" y="5" width="14" height="10" rx="2"/><path d="M9 19h6M12 15v4"/>',
+    stage_definition: '<path d="M6 5h12v4H6zM6 11h12v4H6zM6 17h12v2H6z"/>',
+  };
+  return `<span class="lookup-icon-tile-v346 is-${escapeHtml(clean.replace(/_/g, "-"))} ${escapeHtml(extraClass)}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${icons[clean] || icons.product}</svg></span>`;
+}
+
+function lookupActionIconHtmlV346(kind) {
+  const icons = {
+    edit: '<path d="M5 19h4l10-10-4-4L5 15v4Z"/><path d="m13.5 6.5 4 4"/>',
+    delete: '<path d="M5 7h14M9 7V4h6v3M8 10v7M12 10v7M16 10v7M7 7l1 13h8l1-13"/>',
+    save: '<path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4M8 20v-6h8v6"/>',
+    add: '<path d="M12 5v14M5 12h14"/>',
+    clear: '<path d="m7 7 10 10M17 7 7 17"/>',
+  };
+  return `<svg class="lookup-action-svg-v346" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icons[kind] || icons.edit}</svg>`;
+}
+
+function lookupPreviewIconHtmlV346() {
+  return '<span class="lookup-preview-icon-v346 lookup-preview-icon-v347" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="4" y="4.5" width="12" height="15" rx="2"/><path d="M7 8h6M7 11h4"/><circle cx="16.5" cy="15.5" r="3.2"/><path d="m18.8 17.8 2.2 2.2"/></svg></span>';
+}
+
+function lookupGlassFamilyV347(item = {}) {
+  const text = [item.value, item.label, item.category, item.matchTerms].join(" ").toUpperCase();
+  if (/\bMIRROR\b|\bMIR\b/.test(text)) return "Mirror";
+  if (/\bTEMPERED\b|\bTEMP\b|\bTEMPER\b/.test(text)) return "Tempered";
+  return "Annealed";
+}
+
+function lookupGlassGroupsV347(items = []) {
+  const order = ["Annealed", "Mirror", "Tempered"];
+  const buckets = new Map(order.map((label) => [label, []]));
+  items.forEach((item) => buckets.get(lookupGlassFamilyV347(item)).push(item));
+  return order.map((label) => ({ label, items: buckets.get(label) })).filter((group) => group.items.length);
+}
+
+function lookupRowHtmlV347(meta, item, visualColorMap = null) {
+  const isGlassCost = meta.type === "glass_cost";
+  const isGlassColor = meta.type === "glass_color";
+  const hasRate = item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate));
+  const rate = hasRate ? Number(item.rate) : 0;
+  const costText = hasRate ? `$${rate.toFixed(2)} / SQFT` : "Cost not configured";
+  const sourceLabel = String(item.source || "manual");
+  const glassColor = isGlassColor
+    ? (normalizeGlassVisualColor(item.color) || visualColorMap?.get(String(item.value || item.label || "").trim().toLowerCase()) || glassVisualFallbackColor(item.value || item.label))
+    : "";
+  return `
+    <article class="lookup-row" data-lookup-row data-lookup-search="${escapeHtml([item.label, item.value, item.category, item.matchTerms, sourceLabel, isGlassCost ? costText : "", isGlassColor ? glassColor : ""].join(" ").toLowerCase())}">
+      <div class="lookup-row-main">
+        <span class="lookup-row-heading">
+          <strong>${escapeHtml(item.label || item.value)}</strong>
+          <em class="lookup-source-badge ${sourceLabel.toLowerCase() === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(sourceLabel)}</em>
+        </span>
+        ${isGlassCost
+          ? `<span><b>Cost per SQFT:</b> ${escapeHtml(costText)}</span>${!hasRate ? "<small>Add a cost so breakage dollars can be calculated for this glass.</small>" : ""}`
+          : isGlassColor
+            ? `<span class="lookup-glass-color-row-v312"><i style="--lookup-glass-color:${escapeHtml(glassColor)}" aria-hidden="true"></i><b>${escapeHtml(glassColor)}</b><small>${normalizeGlassVisualColor(item.color) ? "Custom color" : "Automatic default"}</small></span>`
+            : `<span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
+               ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
+               ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`}
+      </div>
+      <div class="lookup-row-actions-v346">
+        <button type="button" class="lookup-use-button" data-lookup-use-type="${escapeHtml(meta.type)}" data-lookup-use-value="${escapeHtml(item.value || "")}">${lookupActionIconHtmlV346("edit")}<span>Use / edit</span></button>
+        <button type="button" class="lookup-delete-button-v346" data-remove-lookup-type="${escapeHtml(meta.type)}" data-remove-lookup-value="${escapeHtml(item.value || "")}" data-remove-lookup-label="${escapeHtml(item.label || item.value || "")}">${lookupActionIconHtmlV346("delete")}<span>Remove</span></button>
+      </div>
+    </article>`;
+}
+
 function lookupListHtml(type, items = []) {
   const meta = lookupEditorMeta(type);
   const visibleItems = items;
   const isGlassCost = meta.type === "glass_cost";
   const isGlassColor = meta.type === "glass_color";
+  const isGlassLibrary = ["product", "glass_cost", "glass_color"].includes(meta.type);
   const visualColorMap = isGlassColor ? buildGlassVisualColorMap(items.map((item) => item.value || item.label)) : null;
+  const libraryRows = visibleItems.length
+    ? (isGlassLibrary
+      ? lookupGlassGroupsV347(visibleItems).map((group) => `
+          <section class="lookup-glass-family-v347" data-lookup-group>
+            <header><span>${escapeHtml(group.label)}</span><b data-lookup-group-count>${escapeHtml(group.items.length)}</b></header>
+            <div class="lookup-glass-family-rows-v347">${group.items.map((item) => lookupRowHtmlV347(meta, item, visualColorMap)).join("")}</div>
+          </section>`).join("")
+      : visibleItems.map((item) => lookupRowHtmlV347(meta, item, visualColorMap)).join(""))
+    : `<div class="lookup-empty-state" data-lookup-empty-state><strong>No matching ${escapeHtml(meta.title.toLowerCase())} values</strong><span>Clear the search or save a new value with the editor.</span></div>`;
 
   return `
     <section class="lookup-manager-list lookup-library ${escapeHtml(meta.className)}">
       <header>
-        <span class="lookup-type-icon" aria-hidden="true"></span>
+        ${lookupLibraryIconHtml(meta.type)}
         <div>
-          <h3>${escapeHtml(meta.title)} library</h3>
-          <p>${escapeHtml(meta.explanation)}</p>
+          <h3>${escapeHtml(isGlassLibrary ? "Glass type" : meta.title)} library</h3>
+          <p>${escapeHtml(isGlassLibrary ? "Organized into Annealed, Mirror, and Tempered groups for faster scanning." : meta.explanation)}</p>
         </div>
         <strong data-lookup-visible-count>${escapeHtml(visibleItems.length)} / ${escapeHtml(items.length)}</strong>
       </header>
 
-      <div class="lookup-library-search">
-        <label class="search-box">
+      <div class="lookup-library-search lookup-library-search-v351">
+        <div class="lookup-search-copy-v351">
+          <small>Search library</small>
+          <strong>${escapeHtml(meta.type === "route" ? "Find a route" : meta.type === "process" ? "Find a process state" : "Find a saved value")}</strong>
+          <span>${escapeHtml(meta.type === "route" ? "Search route code, display label, category, or match terms." : meta.type === "process" ? "Search process-state name, saved value, category, or match terms." : "Search saved values, labels, categories, or match terms.")}</span>
+        </div>
+        <div class="lookup-search-field-v351">
           <span class="search-icon" aria-hidden="true"></span>
-          <input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="${isGlassCost ? "Search glass types or costs..." : isGlassColor ? "Search glass types or colors..." : "Search saved values, labels, categories, or match terms..."}">
-        </label>
+          <input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="${isGlassCost ? "Search glass types or costs..." : isGlassColor ? "Search glass types or colors..." : meta.type === "route" ? "Search routes..." : meta.type === "process" ? "Search process states..." : "Search lookup values..."}">
+          <button type="button" data-lookup-search-clear-v351 aria-label="Clear lookup search" ${state.lookupManagerSearch ? "" : "disabled"}>Clear</button>
+        </div>
       </div>
 
       <div class="lookup-row-list" data-lookup-row-list>
-        ${
-          visibleItems.length
-            ? visibleItems
-                .map((item) => {
-                  const hasRate = item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate));
-                  const rate = hasRate ? Number(item.rate) : 0;
-                  const costText = hasRate ? `$${rate.toFixed(2)} / SQFT` : "Cost not configured";
-                  const sourceLabel = String(item.source || "manual");
-                  const glassColor = isGlassColor
-                    ? (normalizeGlassVisualColor(item.color) || visualColorMap.get(String(item.value || item.label || "").trim().toLowerCase()) || glassVisualFallbackColor(item.value || item.label))
-                    : "";
-                  return `
-                  <article class="lookup-row" data-lookup-row data-lookup-search="${escapeHtml([item.label, item.value, item.category, item.matchTerms, sourceLabel, isGlassCost ? costText : "", isGlassColor ? glassColor : ""].join(" ").toLowerCase())}">
-                    <div class="lookup-row-main">
-                      <span class="lookup-row-heading">
-                        <strong>${escapeHtml(item.label || item.value)}</strong>
-                        <em class="lookup-source-badge ${sourceLabel.toLowerCase() === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(sourceLabel)}</em>
-                      </span>
-                      ${isGlassCost
-                        ? `<span><b>Cost per SQFT:</b> ${escapeHtml(costText)}</span>${!hasRate ? "<small>Add a cost so breakage dollars can be calculated for this glass.</small>" : ""}`
-                        : isGlassColor
-                          ? `<span class="lookup-glass-color-row-v312"><i style="--lookup-glass-color:${escapeHtml(glassColor)}" aria-hidden="true"></i><b>${escapeHtml(glassColor)}</b><small>${normalizeGlassVisualColor(item.color) ? "Custom color" : "Automatic default"}</small></span>`
-                          : `<span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
-                             ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
-                             ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`}
-                    </div>
-                    <button
-                      type="button"
-                      class="lookup-use-button"
-                      data-lookup-use-type="${escapeHtml(meta.type)}"
-                      data-lookup-use-value="${escapeHtml(item.value || "")}"
-                    >Use / edit</button>
-                  </article>`;
-                })
-                .join("")
-            : `<div class="lookup-empty-state" data-lookup-empty-state><strong>No matching ${escapeHtml(meta.title.toLowerCase())} values</strong><span>Clear the search or save a new value with the editor.</span></div>`
-        }
+        ${libraryRows}
       </div>
     </section>
   `;
@@ -23928,58 +24867,374 @@ function lookupListHtml(type, items = []) {
  * Effects: Returns modal HTML and reads the active type/search state without writing backend data.
  * Flow: Builds guided type tabs, a contextual editor with a live preview, and one focused searchable library instead of three competing columns.
  */
+function stationLookupManagerHtmlV346() {
+  const rows = lookupItemsForType("station");
+  return `<div class="lookup-manager-shell lookup-manager-v345 lookup-config-manager-v346 is-stations">
+    <section class="lookup-config-editor-v346">
+      <header>${lookupLibraryIconHtml("station")}<div><strong>Add a physical work station</strong><p>A Station is a scan/work area, not a workflow step. Name it for the physical place or team using the scanner, then assign users to it through User Access Management.</p></div></header>
+      <div class="station-add-row station-add-row-v346"><input id="newStationInputModal" type="text" autocomplete="off" placeholder="Example: Airport Scanner 4"><button id="addStationBtnModal" class="app-primary-button" type="button">${lookupActionIconHtmlV346("add")}<span>Add Station</span></button></div>
+    </section>
+    <section class="lookup-manager-list lookup-config-library-v346">
+      <header>${lookupLibraryIconHtml("station")}<div><h3>Station library</h3><p>Rename configured work areas here. Station names identify where work happens; Stage behavior is configured separately so future locations can reuse the same workflow.</p></div><strong>${escapeHtml(rows.length)}</strong></header>
+      <div class="lookup-row-list">${rows.length ? rows.map((item) => `<article class="lookup-row station-lookup-row-v346"><div class="lookup-row-main"><span class="lookup-row-heading"><strong>${escapeHtml(item.label)}</strong><em class="lookup-source-badge ${item.source === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(item.source)}</em></span><input data-station-name="${escapeHtml(item.value)}" type="text" value="${escapeHtml(item.value)}" aria-label="Station name"></div><div class="lookup-row-actions-v346"><button type="button" class="lookup-use-button" data-rename-station="${escapeHtml(item.value)}">${lookupActionIconHtmlV346("save")}<span>Save</span></button>${DEFAULT_STATIONS.includes(item.value) ? `<span class="lookup-protected-note-v346">Protected</span>` : `<button type="button" class="lookup-delete-button-v346" data-remove-station="${escapeHtml(item.value)}">${lookupActionIconHtmlV346("delete")}<span>Remove</span></button>`}</div></article>`).join("") : `<div class="lookup-empty-state"><strong>No stations configured</strong><span>Add the first station above.</span></div>`}</div>
+    </section>
+  </div>`;
+}
+
+function stagePresetOptionsV346(selected = "") {
+  const options = [
+    ["airport_staging", "Staging", "All orders; current Airport staging behavior"],
+    ["airport_outbound", "Outbound / Shipping", "All orders; outbound gates and transport flow"],
+    ["indian_trail", "Receiving + Bay Workflow", "Current Indian Trail receiving and bay behavior"],
+    ["greenville", "Branch Route", "Current Greenville/GNV route behavior"],
+    ["cpu", "Customer Pickup", "Pickup-route behavior"],
+    ["dtc", "Direct Customer Delivery", "Direct-delivery route behavior"],
+    ["custom_route", "Custom Route", "One administrator-defined route code"],
+  ];
+  return options.map(([value, label, note]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${escapeHtml(label)} — ${escapeHtml(note)}</option>`).join("");
+}
+
+function stageDefinitionManagerHtmlV346() {
+  const stages = lookupItemsForType("stage_definition");
+  return `<div class="lookup-manager-shell lookup-manager-v345 lookup-config-manager-v346 is-stages">
+    <section class="lookup-config-editor-v346">
+      <header>${lookupLibraryIconHtml("stage_definition")}<div><strong>Create or edit a workflow stage</strong><p>A Stage is a workflow step created for each delivery date. Its key is stable identity, its display name is operator-facing, its preset defines behavior, and its station/route connect that behavior to a location.</p></div></header>
+      <form id="stageDefinitionFormV346" class="stage-definition-form-v346">
+        <input id="stageDefinitionOriginalKeyV346" type="hidden" value="">
+        <label><span>Stage key</span><input id="stageDefinitionKeyV346" type="text" autocomplete="off" placeholder="quality-review" required><small>Stable lowercase identifier used in delivery-list IDs. Keep it short and unique.</small></label>
+        <label><span>Display name</span><input id="stageDefinitionDisplayV346" type="text" autocomplete="off" placeholder="Quality Review" required><small>The name operators see after new imports create this stage.</small></label>
+        <label class="wide"><span>Behavior preset</span><select id="stageDefinitionPresetV346">${stagePresetOptionsV346("airport_staging")}</select><small>The preset is the behavior layer. Current preset keys preserve today's production logic; future portability should generalize these behaviors without tying them to one facility name.</small></label>
+        <label><span>Scanner / area label</span><input id="stageDefinitionScannerV346" type="text" autocomplete="off" placeholder="Airport Rd"><small>Physical work area used for access and scan attribution. Keep this separate from the Stage display name so the same workflow can be reused at another site.</small></label>
+        <label><span>Route code</span><input id="stageDefinitionRouteV346" type="text" autocomplete="off" placeholder="Optional; required for Custom Route"><small>CPU, DTC, GNV, or a custom route code.</small></label>
+        <aside class="stage-preset-note-v346"><strong>Safe stage editing</strong><span>Removing a definition stops future imports from creating that stage. Existing historical or active delivery-list records are retained until they are intentionally removed through Delivery List Management.</span></aside>
+        <footer><button type="button" class="secondary lookup-clear-button-v346" data-stage-definition-clear-v346>${lookupActionIconHtmlV346("clear")}<span>Clear</span></button><button type="submit" class="app-primary-button">${lookupActionIconHtmlV346("save")}<span>Save Stage</span></button></footer>
+      </form>
+    </section>
+    <section class="lookup-manager-list lookup-config-library-v346">
+      <header>${lookupLibraryIconHtml("stage_definition")}<div><h3>Stage library</h3><p>Each stage combines stable identity, operator-facing wording, behavior, physical station, and optional route scope.</p></div><strong>${escapeHtml(stages.length)}</strong></header>
+      <div class="lookup-row-list">${stages.length ? stages.map((stage) => `<article class="lookup-row stage-definition-row-v346"><div class="lookup-row-main"><span class="lookup-row-heading"><strong>${escapeHtml(stage.displayName || stage.label || stage.key)}</strong><em class="lookup-source-badge ${stage.source === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(stage.source || "default")}</em></span><span><b>Key:</b> ${escapeHtml(stage.key || stage.value || "")}</span><small><b>Preset:</b> ${escapeHtml(String(stage.preset || "").replace(/_/g, " "))}${stage.routeCode ? ` · <b>Route:</b> ${escapeHtml(stage.routeCode)}` : ""}${stage.scanner ? ` · <b>Area:</b> ${escapeHtml(stage.scanner)}` : ""}</small></div><div class="lookup-row-actions-v346"><button type="button" class="lookup-use-button" data-stage-use-key-v346="${escapeHtml(stage.key || stage.value || "")}">${lookupActionIconHtmlV346("edit")}<span>Edit</span></button><button type="button" class="lookup-delete-button-v346" data-remove-lookup-type="stage_definition" data-remove-lookup-value="${escapeHtml(stage.key || stage.value || "")}" data-remove-lookup-label="${escapeHtml(stage.displayName || stage.label || stage.key || "")}">${lookupActionIconHtmlV346("delete")}<span>Remove</span></button></div></article>`).join("") : `<div class="lookup-empty-state"><strong>No active stage definitions</strong><span>Create a stage above or restore a built-in stage with its original key.</span></div>`}</div>
+    </section>
+  </div>`;
+}
+
+function glassProfileCanonicalLabelV350(value = "") {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+
+  // v0.353 treats common import abbreviations as aliases of the same physical
+  // glass. This prevents a discovered AN/ANN/TEMP spelling from creating a
+  // second library card beside the maintained/default spelling.
+  const annealedAlias = /\b(?:anneal(?:ed)?|ann)\b/gi;
+  const temperedAlias = /\b(?:temper(?:ed)?|temp)\b/gi;
+
+  // Mirror is a family, not one product. Preserve thickness, antique pattern,
+  // and other identifying wording while removing heat-treatment aliases that
+  // do not define a distinct mirror product.
+  if (/\bmirror\b/i.test(normalized)) {
+    return normalized
+      .replace(annealedAlias, " ")
+      .replace(temperedAlias, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  const tempered = /\b(?:temper(?:ed)?|temp)\b/i.test(normalized);
+  const base = normalized
+    .replace(annealedAlias, " ")
+    .replace(temperedAlias, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!base) return tempered ? "Tempered" : "Annealed";
+  return `${base} ${tempered ? "Tempered" : "Annealed"}`;
+}
+
+/**
+ * Return one punctuation/spacing-insensitive identity for a glass profile.
+ * Display wording remains human-readable, but aliases such as `Ultra Clear`
+ * and `UltraClear`, quote marks, casing, and import punctuation cannot produce
+ * duplicate Default/Discovered cards for the same normalized glass type.
+ */
+function glassProfileIdentityKeyV353(value = "") {
+  return glassProfileCanonicalLabelV350(value)
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/gi, "")
+    .toLowerCase();
+}
+
+function glassProfileFamilyV350(value = "") {
+  const canonical = glassProfileCanonicalLabelV350(value);
+  if (/\bmirror\b/i.test(canonical)) return "Mirror";
+  return /\bTempered$/i.test(canonical) ? "Tempered" : "Annealed";
+}
+
+/**
+ * Collapse only true naming aliases into operational glass profiles. Generic
+ * non-mirror values become Annealed, explicit Tempered values remain separate,
+ * and distinct mirror products (including antique patterns) remain independent
+ * profiles so their cost/color settings are never lost behind one Mirror row.
+ * Imported line-item text is not rewritten.
+ */
+function glassProfileItemsV349() {
+  const lookups = state.manualEditLookups || { products: [], glassCosts: [], glassColors: [] };
+  const sourceRows = new Map();
+  const ensureSource = (item = {}) => {
+    const value = String(item.value || item.label || "").replace(/\s+/g, " ").trim();
+    if (!value) return null;
+    const key = value.toLowerCase();
+    if (!sourceRows.has(key)) sourceRows.set(key, { value, label: value, rate: null, color: "", sources: new Set() });
+    return sourceRows.get(key);
+  };
+  (lookups.products || []).forEach((item) => {
+    const profile = ensureSource(item);
+    if (!profile) return;
+    profile.value = String(item.value || profile.value).trim() || profile.value;
+    profile.label = String(item.label || item.value || profile.label).trim() || profile.label;
+    profile.sources.add(String(item.source || "product"));
+  });
+  (lookups.glassCosts || []).forEach((item) => {
+    const profile = ensureSource(item);
+    if (!profile) return;
+    if (item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate))) profile.rate = Number(item.rate);
+    profile.sources.add(String(item.source || "cost"));
+  });
+  (lookups.glassColors || []).forEach((item) => {
+    const profile = ensureSource(item);
+    if (!profile) return;
+    profile.color = normalizeGlassVisualColor(item.color) || profile.color;
+    profile.sources.add(String(item.source || "color"));
+  });
+
+  const canonical = new Map();
+  for (const source of sourceRows.values()) {
+    const canonicalLabel = glassProfileCanonicalLabelV350(source.value);
+    if (!canonicalLabel) continue;
+    const key = glassProfileIdentityKeyV353(canonicalLabel);
+    if (!canonical.has(key)) canonical.set(key, {
+      value: canonicalLabel,
+      label: canonicalLabel,
+      family: glassProfileFamilyV350(canonicalLabel),
+      rate: null,
+      color: "",
+      sources: new Set(),
+      memberValues: [],
+      preferredScore: -1,
+      displayScore: -1,
+    });
+    const target = canonical.get(key);
+    target.memberValues.push(source.value);
+    source.sources.forEach((entry) => target.sources.add(entry));
+    // Prefer an exact canonical/manual row before falling back to an imported
+    // alias carrying settings. Distinct mirror products are already separated
+    // by glassProfileCanonicalLabelV350, so no mirror-specific priority is needed.
+    const exactCanonical = glassProfileIdentityKeyV353(source.value) === key;
+    const manual = source.sources.has("manual");
+    const maintainedDefault = source.sources.has("default");
+    const displayScore = (manual ? 12 : 0) + (maintainedDefault ? 8 : 0) + (exactCanonical ? 4 : 0);
+    if (displayScore > target.displayScore) {
+      target.value = canonicalLabel;
+      target.label = canonicalLabel;
+      target.family = glassProfileFamilyV350(canonicalLabel);
+      target.displayScore = displayScore;
+    }
+    const score = (exactCanonical ? 8 : 0) + (manual ? 4 : 0) + (source.rate !== null ? 2 : 0) + (source.color ? 1 : 0);
+    if (score >= target.preferredScore) {
+      if (source.rate !== null) target.rate = source.rate;
+      if (source.color) target.color = source.color;
+      target.preferredScore = score;
+    } else {
+      if (target.rate === null && source.rate !== null) target.rate = source.rate;
+      if (!target.color && source.color) target.color = source.color;
+    }
+  }
+
+  return [...canonical.values()]
+    .map((profile) => {
+      const sourceNames = [...profile.sources].filter(Boolean);
+      const source = sourceNames.includes("manual")
+        ? "manual"
+        : sourceNames.length > 1
+          ? "combined"
+          : sourceNames[0] || "discovered";
+      return {
+        ...profile,
+        source,
+        memberValues: [...new Set(profile.memberValues)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })),
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function glassProfileRowHtmlV349(profile, colorMap) {
+  const color = normalizeGlassVisualColor(profile.color) || colorMap.get(glassVisualLookupKeyV349(profile.value)) || glassVisualFallbackColor(profile.value);
+  const cost = Number.isFinite(Number(profile.rate)) && profile.rate !== null ? `$${Number(profile.rate).toFixed(2)} / SQFT` : "Cost not configured";
+  const aliasCount = Math.max(0, Number(profile.memberValues?.length || 0) - 1);
+  const sourceClass = profile.source === "manual" ? "is-manual" : profile.source === "combined" ? "is-combined" : "is-discovered";
+  return `
+    <article class="lookup-row glass-profile-row-v349" data-lookup-row data-lookup-search="${escapeHtml([profile.value, profile.label, profile.family, ...(profile.memberValues || []), cost, profile.source].join(" ").toLowerCase())}">
+      <span class="glass-profile-swatch-v349" style="--lookup-glass-color:${escapeHtml(color)}" aria-hidden="true"></span>
+      <div class="lookup-row-main">
+        <span class="lookup-row-heading"><strong>${escapeHtml(profile.label || profile.value)}</strong><em class="lookup-source-badge ${sourceClass}">${escapeHtml(profile.source)}</em></span>
+        <span><b>Family:</b> ${escapeHtml(profile.family)}${aliasCount ? ` · ${escapeHtml(aliasCount + 1)} source names combined` : ""}</span>
+        <small><b>Cost:</b> ${escapeHtml(cost)} · <b>Color:</b> ${escapeHtml(color)}</small>
+      </div>
+      <div class="lookup-row-actions-v346">
+        <button type="button" class="lookup-use-button" data-glass-profile-edit-v349="${escapeHtml(profile.value)}">${lookupActionIconHtmlV346("edit")}<span>Edit settings</span></button>
+        <button type="button" class="lookup-delete-button-v346" data-glass-profile-remove-v349="${escapeHtml(profile.value)}" data-glass-profile-label-v349="${escapeHtml(profile.label || profile.value)}">${lookupActionIconHtmlV346("delete")}<span>Remove</span></button>
+      </div>
+    </article>`;
+}
+
+function glassProfileManagerHtmlV349() {
+  const profiles = glassProfileItemsV349();
+  const colorMap = buildGlassVisualColorMap(profiles.map((profile) => profile.value));
+  const families = ["Annealed", "Mirror", "Tempered"];
+  let activeFamily = families.includes(state.lookupGlassFamilyV350) ? state.lookupGlassFamilyV350 : "Annealed";
+  if (!profiles.some((profile) => profile.family === activeFamily)) activeFamily = families.find((family) => profiles.some((profile) => profile.family === family)) || "Annealed";
+  state.lookupGlassFamilyV350 = activeFamily;
+  const visibleProfiles = profiles.filter((profile) => profile.family === activeFamily);
+  const defaultColor = glassVisualColor("New Glass Type", profiles.map((profile) => profile.value));
+  return `
+    <div class="lookup-manager-shell lookup-manager-modern lookup-manager-v066 lookup-manager-v345 lookup-manager-v349 lookup-manager-v350">
+      <div class="lookup-manager-workspace">
+        <section class="lookup-editor-card glass-profile-editor-v349">
+          <header>
+            ${lookupLibraryIconHtml("product", "is-editor")}
+            <div><strong>Glass type settings</strong><p>Edit the glass name, material cost, and preview color together from one profile.</p></div>
+          </header>
+          <form id="glassProfileFormV349" class="lookup-manager-form lookup-guided-form">
+            <input id="glassProfileOriginalV349" type="hidden">
+            <div class="lookup-form-grid glass-profile-form-grid-v349">
+              <label><span>Glass type</span><input id="glassProfileValueV349" type="text" autocomplete="off" placeholder="1/4 Clear Annealed" required><small>Generic non-mirror glass is normalized to Annealed; Tempered remains separate.</small></label>
+              <label><span>Display label</span><input id="glassProfileLabelV349" type="text" autocomplete="off" placeholder="1/4 Clear Annealed"><small>Friendly wording shown in Admin lookup choices.</small></label>
+              <label><span>Cost per SQFT</span><input id="glassProfileCostV349" type="number" min="0" step="0.01" inputmode="decimal" placeholder="1.83"><small>Leave blank when pricing is not configured yet.</small></label>
+              <label class="lookup-glass-color-field-v312"><span>Preview color</span><span class="lookup-glass-color-picker-v312"><input id="glassProfileColorV349" type="color" value="${escapeHtml(defaultColor)}"><b data-glass-profile-color-v349>${escapeHtml(defaultColor)}</b></span><small>This color drives glass-aware preview interfaces.</small></label>
+            </div>
+            <aside class="lookup-live-preview glass-profile-preview-v349" aria-live="polite">
+              ${lookupPreviewIconHtmlV346()}
+              <div><small>Glass profile preview</small><strong data-glass-profile-preview-label-v349>New Glass Type</strong><span><b>Cost:</b> <em data-glass-profile-preview-cost-v349>Not configured</em></span><p><span class="glass-profile-preview-swatch-v349" data-glass-profile-preview-swatch-v349 style="--lookup-glass-color:${escapeHtml(defaultColor)}"></span><span data-glass-profile-preview-color-v349>${escapeHtml(defaultColor)}</span></p></div>
+            </aside>
+            <footer class="lookup-form-actions"><button type="button" class="secondary" data-glass-profile-clear-v349>Clear form</button><button type="submit">Save glass settings</button></footer>
+          </form>
+        </section>
+        <section class="lookup-manager-list lookup-library glass-profile-library-v349 glass-profile-library-v350">
+          <header>${lookupLibraryIconHtml("product")}<div><h3>Glass type library</h3><p>Use the family tabs to manage one normalized glass profile at a time.</p></div><strong data-lookup-visible-count>${escapeHtml(visibleProfiles.length)} / ${escapeHtml(profiles.length)}</strong></header>
+          <div class="glass-profile-family-tabs-v350" role="tablist" aria-label="Glass type family">
+            ${families.map((family) => { const count = profiles.filter((profile) => profile.family === family).length; const selected = family === activeFamily; return `<button type="button" role="tab" aria-selected="${selected}" class="${selected ? "is-active" : ""}" data-glass-family-tab-v350="${escapeHtml(family)}"><span>${escapeHtml(family)}</span><b>${escapeHtml(count)}</b></button>`; }).join("")}
+          </div>
+          <div class="lookup-library-search lookup-library-search-v351">
+            <div class="lookup-search-copy-v351"><small>Search glass library</small><strong>Find a ${escapeHtml(activeFamily.toLowerCase())} glass type</strong><span>Search thickness, product name, source alias, cost, or color.</span></div>
+            <div class="lookup-search-field-v351"><span class="search-icon" aria-hidden="true"></span><input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="Search ${escapeHtml(activeFamily.toLowerCase())} glass types..."><button type="button" data-lookup-search-clear-v351 aria-label="Clear glass type search" ${state.lookupManagerSearch ? "" : "disabled"}>Clear</button></div>
+          </div>
+          <div class="lookup-row-list" data-lookup-row-list>${visibleProfiles.length ? visibleProfiles.map((profile) => glassProfileRowHtmlV349(profile, colorMap)).join("") : `<div class="lookup-empty-state"><strong>No ${escapeHtml(activeFamily)} glass types</strong><span>Save the first ${escapeHtml(activeFamily.toLowerCase())} profile using the editor.</span></div>`}</div>
+        </section>
+      </div>
+    </div>`;
+}
+
+function syncGlassProfilePreviewV349() {
+  const value = document.getElementById("glassProfileValueV349")?.value.trim() || "New Glass Type";
+  const label = document.getElementById("glassProfileLabelV349")?.value.trim() || value;
+  const costText = document.getElementById("glassProfileCostV349")?.value.trim() || "";
+  const color = normalizeGlassVisualColor(document.getElementById("glassProfileColorV349")?.value) || glassVisualColor(value);
+  const labelNode = document.querySelector("[data-glass-profile-preview-label-v349]");
+  const costNode = document.querySelector("[data-glass-profile-preview-cost-v349]");
+  const colorNode = document.querySelector("[data-glass-profile-preview-color-v349]");
+  const colorValue = document.querySelector("[data-glass-profile-color-v349]");
+  const swatch = document.querySelector("[data-glass-profile-preview-swatch-v349]");
+  if (labelNode) labelNode.textContent = label;
+  if (costNode) costNode.textContent = costText && Number.isFinite(Number(costText)) ? `$${Number(costText).toFixed(2)} / SQFT` : "Not configured";
+  if (colorNode) colorNode.textContent = color;
+  if (colorValue) colorValue.textContent = color;
+  if (swatch) swatch.style.setProperty("--lookup-glass-color", color);
+}
+
+function clearGlassProfileFormV349() {
+  const form = document.getElementById("glassProfileFormV349");
+  if (!form) return;
+  form.reset();
+  const original = document.getElementById("glassProfileOriginalV349");
+  if (original) original.value = "";
+  const color = document.getElementById("glassProfileColorV349");
+  if (color) color.value = glassVisualColor("New Glass Type", glassProfileItemsV349().map((profile) => profile.value));
+  syncGlassProfilePreviewV349();
+  document.getElementById("glassProfileValueV349")?.focus();
+}
+
+function editGlassProfileV349(value) {
+  const profile = glassProfileItemsV349().find((item) => String(item.value).toLowerCase() === String(value || "").toLowerCase());
+  if (!profile) return;
+  const original = document.getElementById("glassProfileOriginalV349");
+  const valueInput = document.getElementById("glassProfileValueV349");
+  const labelInput = document.getElementById("glassProfileLabelV349");
+  const costInput = document.getElementById("glassProfileCostV349");
+  const colorInput = document.getElementById("glassProfileColorV349");
+  if (original) original.value = profile.value;
+  if (valueInput) valueInput.value = profile.value;
+  if (labelInput) labelInput.value = profile.label || profile.value;
+  if (costInput) costInput.value = profile.rate === null || profile.rate === undefined ? "" : String(profile.rate);
+  if (colorInput) colorInput.value = normalizeGlassVisualColor(profile.color) || glassVisualColor(profile.value);
+  syncGlassProfilePreviewV349();
+  valueInput?.focus();
+  valueInput?.select();
+}
+
+async function saveGlassProfileV349() {
+  const original = document.getElementById("glassProfileOriginalV349")?.value.trim() || "";
+  const rawValue = document.getElementById("glassProfileValueV349")?.value.trim() || "";
+  const value = glassProfileCanonicalLabelV350(rawValue);
+  const rawLabel = document.getElementById("glassProfileLabelV349")?.value.trim() || "";
+  const label = !rawLabel || rawLabel.toLowerCase() === rawValue.toLowerCase() ? value : rawLabel;
+  const rate = document.getElementById("glassProfileCostV349")?.value.trim() || "";
+  const color = document.getElementById("glassProfileColorV349")?.value.trim() || "";
+  if (!value) throw new Error("Glass type is required.");
+  if (original && original.toLowerCase() !== value.toLowerCase()) {
+    throw new Error("Glass type identity cannot be renamed in place. Remove the old profile and save the new glass type instead.");
+  }
+  const payload = await fetchJson("/api/admin/manual-edit-lookups/glass-profile", { method: "POST", body: JSON.stringify({ value, label, rate, color }) });
+  adoptManualEditLookups(payload);
+  state.lookupManagerActiveType = "glass_profile";
+  renderLookupManagerModal();
+  await loadHomeReportSummary();
+  showSaveConfirmation(`${label || value} glass settings were saved.`);
+}
+
+async function removeGlassProfileV349(value, label = value) {
+  const confirmed = await confirmWebAppAction({
+    title: `Remove ${label}?`,
+    message: "This removes the active glass type, cost, and color settings together.",
+    details: "Historical delivery-list rows are not rewritten. The value can be restored later by saving it again.",
+    confirmLabel: "Remove Glass Type",
+    danger: true,
+  });
+  if (!confirmed) return;
+  const profile = glassProfileItemsV349().find((item) => String(item.value).toLowerCase() === String(value || "").toLowerCase());
+  const values = profile?.memberValues?.length ? profile.memberValues : [value];
+  const payload = await fetchJson("/api/admin/manual-edit-lookups/glass-profile/remove", { method: "POST", body: JSON.stringify({ value, values }) });
+  adoptManualEditLookups(payload);
+  renderLookupManagerModal();
+  await loadHomeReportSummary();
+  showSaveConfirmation(`${label || value} was removed from the active glass library.`);
+}
+
 function lookupManagerModalHtml() {
   const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] };
-  const supportedTypes = ["product", "route", "process", "glass_cost", "glass_color"];
+  const supportedTypes = ["glass_profile", "route", "process", "station", "stage_definition"];
   const activeType = supportedTypes.includes(state.lookupManagerActiveType)
     ? state.lookupManagerActiveType
-    : "product";
+    : "glass_profile";
+  if (activeType === "glass_profile") return glassProfileManagerHtmlV349();
+  if (activeType === "station") return stationLookupManagerHtmlV346();
+  if (activeType === "stage_definition") return stageDefinitionManagerHtmlV346();
   const meta = lookupEditorMeta(activeType);
-  const productCount = (lookups.products || []).length;
-  const routeCount = (lookups.routes || []).length;
-  const processCount = (lookups.processes || []).length;
-  const glassCostCount = (lookups.glassCosts || []).filter((item) => item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate))).length;
-  const glassCostTotal = (lookups.glassCosts || []).length;
-  const glassColorTotal = (lookups.glassColors || []).length;
   const isGlassCost = activeType === "glass_cost";
   const isGlassColor = activeType === "glass_color";
-  const tabs = [
-    ["product", "Products", productCount],
-    ["route", "Routes", routeCount],
-    ["process", "Process states", processCount],
-    ["glass_cost", "Glass costs", glassCostTotal],
-    ["glass_color", "Glass colors", glassColorTotal],
-  ];
 
   return `
-    <div class="lookup-manager-shell lookup-manager-modern lookup-manager-v066">
-      <section class="lookup-manager-hero">
-        <div>
-          <span class="lookup-hero-label">Lookup Manager</span>
-          <strong>Maintain editing choices, glass costs, and glass colors</strong>
-          <span>Choose one library and save updates in one place. Glass costs feed breakage reporting, while Glass Colors controls exact product colors used by preview interfaces.</span>
-        </div>
-        <div class="lookup-manager-kpis">
-          ${miniStat("Products", productCount)}
-          ${miniStat("Routes", routeCount)}
-          ${miniStat("Priced glass", `${glassCostCount}/${glassCostTotal}`)}
-          ${miniStat("Glass colors", glassColorTotal)}
-        </div>
-      </section>
-
-      <nav class="lookup-type-tabs" aria-label="Lookup type">
-        ${tabs.map(([type, label, count]) => `
-          <button type="button" data-lookup-manager-type="${escapeHtml(type)}" class="${activeType === type ? "is-active" : ""}">
-            <span>${escapeHtml(label)}</span>
-            <b>${escapeHtml(count)}</b>
-          </button>
-        `).join("")}
-      </nav>
-
+    <div class="lookup-manager-shell lookup-manager-modern lookup-manager-v066 lookup-manager-v345">
       <div class="lookup-manager-workspace">
         <section class="lookup-editor-card ${escapeHtml(meta.className)}">
           <header>
-            <span class="lookup-step-number">1</span>
+            ${lookupLibraryIconHtml(activeType, "is-editor")}
             <div>
               <strong>Add or update a ${escapeHtml(meta.title.toLowerCase())}</strong>
               <p>${escapeHtml(meta.explanation)}</p>
@@ -24030,7 +25285,7 @@ function lookupManagerModalHtml() {
             </div>
 
             <aside class="lookup-live-preview" aria-live="polite">
-              <span class="lookup-step-number">2</span>
+              ${lookupPreviewIconHtmlV346()}
               <div>
                 <small>Preview before saving</small>
                 <strong data-lookup-preview-label>${escapeHtml(meta.example.split(" → ")[1])}</strong>
@@ -24096,8 +25351,10 @@ function renderLookupManagerModal() {
   if (!els.adminModalBody || els.adminModal?.dataset.kind !== "lookups") return;
   els.adminModalBody.innerHTML = lookupManagerModalHtml();
   applyLanguageToRoot(els.adminModalBody);
-  syncLookupManagerFormGuidance();
+  if (state.lookupManagerActiveType === "glass_profile") syncGlassProfilePreviewV349();
+  else syncLookupManagerFormGuidance();
   filterLookupManagerLibrary(state.lookupManagerSearch || "");
+  configureAdminModalSectionTabsV345("lookups");
 }
 
 /**
@@ -24106,7 +25363,7 @@ function renderLookupManagerModal() {
  * Flow: Finds the requested row by type/value, activates the matching tab, re-renders once, then fills and focuses the editor for an upsert save.
  */
 function useLookupInEditor(type, value) {
-  const cleanType = ["product", "route", "process", "glass_cost", "glass_color"].includes(type) ? type : "product";
+  const cleanType = ["product", "route", "process", "glass_cost", "glass_color", "stage_definition"].includes(type) ? type : "product";
   const item = lookupItemsForType(cleanType).find((entry) => String(entry.value || "") === String(value || ""));
   if (!item) return;
 
@@ -24162,6 +25419,14 @@ function filterLookupManagerLibrary(query) {
   });
   const counter = document.querySelector("[data-lookup-visible-count]");
   if (counter) counter.textContent = `${visibleCount} / ${rows.length}`;
+
+  document.querySelectorAll("[data-lookup-group]").forEach((group) => {
+    const groupRows = [...group.querySelectorAll("[data-lookup-row]")];
+    const groupVisible = groupRows.filter((row) => !row.hidden).length;
+    group.hidden = groupVisible === 0;
+    const groupCounter = group.querySelector("[data-lookup-group-count]");
+    if (groupCounter) groupCounter.textContent = String(groupVisible);
+  });
 
   let empty = document.querySelector("[data-lookup-filter-empty]");
   const list = document.querySelector("[data-lookup-row-list]");
@@ -24231,6 +25496,84 @@ async function saveManualEditLookup() {
       : `${label || value} was saved to the Lookup Manager.`);
 }
 
+/** Remove one Lookup Manager row through the shared tombstone workflow. */
+async function removeManualEditLookupV346(type, value, label = value) {
+  const cleanType = String(type || "").trim();
+  const cleanValue = String(value || "").trim();
+  if (!cleanType || !cleanValue) return;
+  const stageRemoval = cleanType === "stage_definition";
+  const confirmed = await confirmWebAppAction({
+    title: stageRemoval ? `Remove stage ${label}?` : `Remove ${label}?`,
+    message: stageRemoval
+      ? "Future imports will stop creating this stage definition. Existing delivery-list records remain available until removed intentionally."
+      : "This value will be removed from the active Lookup Manager library. Historical delivery-list rows are not rewritten.",
+    details: stageRemoval ? "You can restore the stage later by saving the same stage key again." : "A discovered/default value is hidden with an administrator tombstone so it does not immediately reappear from historical imports.",
+    confirmLabel: stageRemoval ? "Remove Stage" : "Remove Value",
+    danger: true,
+  });
+  if (!confirmed) return;
+  const payload = await fetchJson("/api/admin/manual-edit-lookups/remove", {
+    method: "POST",
+    body: JSON.stringify({ type: cleanType, value: cleanValue }),
+  });
+  adoptManualEditLookups(payload);
+  renderLookupManagerModal();
+  configureAdminModalSectionTabsV345("lookups");
+  showSaveConfirmation(`${label || cleanValue} was removed from the active library.`);
+}
+
+function clearStageDefinitionFormV346() {
+  ["stageDefinitionOriginalKeyV346", "stageDefinitionKeyV346", "stageDefinitionDisplayV346", "stageDefinitionScannerV346", "stageDefinitionRouteV346"].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  });
+  const preset = document.getElementById("stageDefinitionPresetV346");
+  if (preset) preset.value = "airport_staging";
+  const key = document.getElementById("stageDefinitionKeyV346");
+  if (key) key.readOnly = false;
+  key?.focus();
+}
+
+function useStageDefinitionInEditorV346(key) {
+  const stage = (state.manualEditLookups?.stages || []).find((item) => String(item.key || item.value || "") === String(key || ""));
+  if (!stage) return;
+  const original = document.getElementById("stageDefinitionOriginalKeyV346");
+  const keyInput = document.getElementById("stageDefinitionKeyV346");
+  if (original) original.value = stage.key || stage.value || "";
+  if (keyInput) { keyInput.value = stage.key || stage.value || ""; keyInput.readOnly = true; }
+  const display = document.getElementById("stageDefinitionDisplayV346");
+  if (display) display.value = stage.displayName || stage.label || "";
+  const preset = document.getElementById("stageDefinitionPresetV346");
+  if (preset) preset.value = stage.preset || "airport_staging";
+  const scanner = document.getElementById("stageDefinitionScannerV346");
+  if (scanner) scanner.value = stage.scanner || "";
+  const route = document.getElementById("stageDefinitionRouteV346");
+  if (route) route.value = stage.routeCode || "";
+  display?.focus();
+  display?.select();
+}
+
+async function saveStageDefinitionV346() {
+  const originalKey = document.getElementById("stageDefinitionOriginalKeyV346")?.value.trim() || "";
+  const key = document.getElementById("stageDefinitionKeyV346")?.value.trim() || originalKey;
+  const displayName = document.getElementById("stageDefinitionDisplayV346")?.value.trim() || "";
+  const preset = document.getElementById("stageDefinitionPresetV346")?.value || "airport_staging";
+  const scanner = document.getElementById("stageDefinitionScannerV346")?.value.trim() || "";
+  const routeCode = document.getElementById("stageDefinitionRouteV346")?.value.trim().toUpperCase() || "";
+  if (!key) throw new Error("Stage key is required.");
+  if (!displayName) throw new Error("Stage display name is required.");
+  if (preset === "custom_route" && !routeCode) throw new Error("Custom Route stages require a route code.");
+  const payload = await fetchJson("/api/admin/manual-edit-lookups", {
+    method: "POST",
+    body: JSON.stringify({ type: "stage_definition", value: originalKey || key, label: displayName, preset, scanner, routeCode }),
+  });
+  adoptManualEditLookups(payload);
+  state.lookupManagerActiveType = "stage_definition";
+  renderLookupManagerModal();
+  configureAdminModalSectionTabsV345("lookups");
+  showSaveConfirmation(`${displayName} stage settings were saved.`);
+}
+
 /**
  * Purpose: Run the rack manager rack edit HTML workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -24274,7 +25617,7 @@ function rackManagerRackEditHtml() {
       </label>
 
       <div class="rack-manager-set-actions">
-        <button type="button" class="secondary" data-rack-inline-cancel>Cancel</button>
+        <button type="button" class="secondary app-cancel-action-v343" data-rack-inline-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
         <button type="submit">Save Rack</button>
       </div>
     </form>
@@ -24337,7 +25680,7 @@ function rackManagerSetEditHtml() {
       </label>
 
       <div class="rack-manager-set-actions">
-        <button type="button" class="secondary" data-rack-manager-set-cancel>Cancel</button>
+        <button type="button" class="secondary app-cancel-action-v343" data-rack-manager-set-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
         <button type="submit">Save Set</button>
       </div>
     </form>
@@ -24561,7 +25904,7 @@ function rackManagerModalHtml() {
                         <div class="rack-manager-group-actions">
                           <button type="button" class="icon-only icon-plus" data-rack-manager-add-to-set="${escapeHtml(label)}" title="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}" aria-label="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}"></button>
                           <button type="button" class="icon-only icon-pencil" data-rack-set-edit="${escapeHtml(label)}" title="Edit ${escapeHtml(label)} set" aria-label="Edit ${escapeHtml(label)} set"></button>
-                          <button type="button" class="icon-only icon-trash danger" data-rack-set-delete="${escapeHtml(label)}" ${canDeleteSet ? "" : "disabled"} title="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `Clear all ${escapeHtml(label)} racks before deleting this set`}" aria-label="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `${escapeHtml(label)} rack set cannot be deleted until every rack is empty`}"></button>
+                          <button type="button" class="icon-only icon-trash danger${canDeleteSet ? "" : " is-blocked"}" data-rack-set-delete="${escapeHtml(label)}" ${canDeleteSet ? "" : `aria-disabled="true" data-blocked-reason="Clear all ${escapeHtml(label)} racks before deleting this set."`} title="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `Clear all ${escapeHtml(label)} racks before deleting this set`}" aria-label="${canDeleteSet ? `Delete ${escapeHtml(label)} rack set` : `${escapeHtml(label)} rack set cannot be deleted until every rack is empty`}"></button>
                         </div>
                       </summary>
 
@@ -24588,7 +25931,7 @@ function rackManagerModalHtml() {
                                 <span class="rack-status-badge ${escapeHtml(statusClass)}">${escapeHtml(status)}</span>
                                 <b>${escapeHtml(qty)} pcs</b>
                                 <button type="button" class="icon-only icon-pencil" data-rack-edit="${escapeHtml(rack.code)}" title="Edit rack" aria-label="Edit ${escapeHtml(rack.code)}"></button>
-                                <button type="button" class="icon-only icon-trash danger" data-rack-delete="${escapeHtml(rack.code)}" ${canDelete ? "" : "disabled"} title="Delete empty rack" aria-label="Delete ${escapeHtml(rack.code)}"></button>
+                                <button type="button" class="icon-only icon-trash danger${canDelete ? "" : " is-blocked"}" data-rack-delete="${escapeHtml(rack.code)}" ${canDelete ? "" : `aria-disabled="true" data-blocked-reason="Clear all pieces from ${escapeHtml(rack.code)} before deleting this rack."`} title="${canDelete ? "Delete empty rack" : "Clear all pieces before deleting this rack"}" aria-label="Delete ${escapeHtml(rack.code)}"></button>
                               </article>
                             `;
                           })
@@ -24689,7 +26032,7 @@ function rackFormModalHtml() {
       <footer class="modal-actions rack-config-actions-v270">
         <div>${rack.code && rack.code !== "T" ? `<button type="button" class="danger" data-rack-delete="${escapeHtml(rack.code)}">Delete Rack</button>` : ""}</div>
         <div>
-          <button type="button" class="app-primary-button" data-rack-form-back>Cancel</button>
+          <button type="button" class="app-primary-button app-cancel-action-v343" data-rack-form-back><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button class="app-primary-button" type="submit">${isEditing ? "Save Rack" : "Create Rack"}</button>
         </div>
       </footer>
@@ -24791,7 +26134,7 @@ function rackSetFormModalHtml() {
       <footer class="modal-actions rack-config-actions-v270">
         <div></div>
         <div>
-          <button type="button" class="app-primary-button" data-rack-form-back>Cancel</button>
+          <button type="button" class="app-primary-button app-cancel-action-v343" data-rack-form-back><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button class="app-primary-button" type="submit">Create Rack Set</button>
         </div>
       </footer>
@@ -24814,40 +26157,48 @@ function permissionLabel(permission) {
 const PERMISSION_DESCRIPTIONS = {
   view_delivery_lists: "Open delivery lists and view line-item details.",
   scan_delivery_lists: "Scan barcodes and record piece activity on delivery lists.",
-  use_assigned_stations: "Use the scanning stations assigned to the signed-in account.",
+  use_assigned_stations: "Use only the scanning stations assigned to the signed-in account.",
   view_scan_history: "View recent scan history and operator activity.",
   correct_scans: "Undo or redo recent scans when a correction is needed.",
-  reset_delivery_lists: "Reset scanned quantities for an entire delivery list.",
+  reset_delivery_lists: "Reset scanned quantities for a delivery-list stage or delivery date.",
   manage_scan_exceptions: "Review, resolve, and manually correct scan exceptions.",
-  import_delivery_lists: "Import delivery-list files and apply updates.",
-  preview_delivery_imports: "Preview delivery-list changes before importing them.",
+  import_delivery_lists: "Run delivery-list imports and apply source updates.",
+  preview_delivery_imports: "Preview a delivery-list import before applying it.",
   preview_delivery_updates: "Open the newest new/updated item preview for a delivery-list stage.",
-  edit_delivery_lists: "Create and manually edit delivery-list rows.",
-  print_export: "Print or export delivery lists, packing lists, and reports.",
+  edit_delivery_list_items: "Edit existing delivery-list item fields and save synchronized corrections.",
+  create_delivery_list_orders: "Create a manual order/item and fan it out to Airport Staging, Airport Outbound, and the selected route.",
+  delete_delivery_list_items: "Delete a logical order/item from every synchronized stage copy for its delivery date.",
+  delete_delivery_lists: "Delete an entire delivery-list stage or all stages for a delivery date.",
+  review_superseded_orders: "Review A+W superseded-order candidates and approve or reject exact removals.",
+  print_export: "Print or export delivery lists, packing lists, manifests, and reports.",
   global_search: "Search across active delivery lists and operational records.",
   view_reports: "View statistics, charts, and operational reports.",
-  view_admin: "Open the Administration dashboard and permitted tools.",
-  manage_users: "Create and edit user accounts and assignments.",
-  manage_user_access: "Activate accounts, reset passwords, and maintain user access.",
-  manage_roles: "Create roles and change their permissions.",
-  view_sessions: "View users who are currently signed in.",
+  view_admin: "Open the Administration dashboard overview and non-destructive Admin summaries.",
+  manage_users: "Create and delete user profiles. Creating a profile also requires User Assignments because the new account receives an initial role and station.",
+  manage_user_access: "Activate/deactivate users and reset temporary passwords.",
+  manage_user_assignments: "Assign existing roles and workstation/station access to users. This can grant every permission contained in the selected role; role definitions themselves are managed separately.",
+  manage_roles: "Create roles and define the permissions contained in each role. This does not create user accounts.",
+  view_sessions: "View users who are currently signed in and their recent session activity.",
   manage_stations: "Add, rename, and remove scanning stations.",
-  manage_route_rules: "Add, edit, and remove customer route rules.",
-  manage_lookup_values: "Maintain product, route, and process lookup values.",
-  manage_automation: "Configure and run automated delivery-list imports.",
+  manage_route_rules: "Add, edit, and remove customer-to-route matching rules.",
+  manage_customer_emails: "Maintain customer email recipients, CC rules, tests, manifests, and retained email settings.",
+  manage_lookup_values: "Maintain product, route, process, glass-cost, and glass-color lookup values.",
+  manage_automation: "Configure, schedule, run, and troubleshoot automated delivery-list imports.",
+  manage_cross_date_scanning: "Configure how scanning behaves when a unique order/item belongs to another active delivery date.",
   view_indian_trail: "Open Indian Trail receiving and in-transit tools.",
   receive_indian_trail: "Scan and receive glass at Indian Trail.",
   view_bays: "Open the Bay Map and view bay contents and history.",
   assign_bay_items: "Assign missing or unassigned glass to a bay.",
   move_bay_items: "Move active glass assignments between bays.",
   clear_bay_items: "Remove glass from bays and control bay availability.",
-  manage_rush_work: "Create, edit, and remove intentional Rush work.",
+  manage_rush_work: "Create, edit, and remove intentional Rush/SDI work.",
   run_bay_checks: "Run bay checks and verify physical bay contents.",
-  view_bay_reports: "View and export Indian Trail receiving and bay reports.",
-  manage_bay_layout: "Create, edit, delete, and reorder bay groups and bays.",
+  manage_bay_layout: "Create, edit, delete, and reorder bay groups and physical bays.",
+  manage_bay_scanner_rules: "Maintain manual-input and barcode rules used to classify bay scanner entries.",
+  manage_bay_auto_assigner: "Configure Outbound-to-Indian Trail bay preassignment thresholds and manual-placement safeguards.",
   view_racks: "Open the rack overview and view rack contents.",
   scan_racks: "Scan rack barcodes for Staging and Outbound workflows.",
-  manage_racks: "Create, edit, delete, complete, and recover racks and rack sets.",
+  manage_racks: "Create, edit, delete, complete, recover, and configure racks and rack sets.",
   transfer_rack_contents: "Move all rack contents or a complete delivery-date group to another rack.",
   view_rejects: "Open Reject Tracking and review reject history.",
   log_rejects: "Record a new internal reject for a verified order and item.",
@@ -24867,23 +26218,33 @@ function permissionDescription(permission) {
 const PERMISSION_CATEGORIES = [
   {
     title: "Delivery Lists & Scanning",
-    description: "List visibility, scanner use, stations, history, corrections, resets, and exceptions.",
+    description: "List visibility, floor scanning, stations, scan history, corrections, resets, and exceptions.",
     permissions: ["view_delivery_lists", "scan_delivery_lists", "use_assigned_stations", "view_scan_history", "correct_scans", "reset_delivery_lists", "manage_scan_exceptions"],
   },
   {
-    title: "Imports, Editing & Output",
-    description: "Imports, update previews, manual editing, printing, reports, search, and automation.",
-    permissions: ["import_delivery_lists", "preview_delivery_imports", "preview_delivery_updates", "edit_delivery_lists", "print_export", "global_search", "view_reports", "manage_automation"],
+    title: "Delivery List Records",
+    description: "Import review plus granular authority to edit, create, delete, and approve delivery-list records.",
+    permissions: ["import_delivery_lists", "preview_delivery_imports", "preview_delivery_updates", "edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items", "delete_delivery_lists", "review_superseded_orders"],
   },
   {
-    title: "Administration & Access",
-    description: "Administration, users, access, roles, active sessions, stations, routes, and lookup values.",
-    permissions: ["view_admin", "manage_users", "manage_user_access", "manage_roles", "view_sessions", "manage_stations", "manage_route_rules", "manage_lookup_values"],
+    title: "Output, Search & Reporting",
+    description: "Printing/export, cross-list search, statistics, and operational reporting.",
+    permissions: ["print_export", "global_search", "view_reports"],
+  },
+  {
+    title: "Users, Roles & Security",
+    description: "User profiles, account status, user-to-role assignments, role definitions, and active sessions are intentionally separate.",
+    permissions: ["view_admin", "manage_users", "manage_user_access", "manage_user_assignments", "manage_roles", "view_sessions"],
+  },
+  {
+    title: "Admin Configuration & Automation",
+    description: "Stations, routing, customer email rules, lookups, automated imports, and cross-date scanner behavior.",
+    permissions: ["manage_stations", "manage_route_rules", "manage_customer_emails", "manage_lookup_values", "manage_automation", "manage_cross_date_scanning"],
   },
   {
     title: "Indian Trail & Bays",
-    description: "Receiving, Bay Map operations, Rush work, checks, reports, and physical layout.",
-    permissions: ["view_indian_trail", "receive_indian_trail", "view_bays", "assign_bay_items", "move_bay_items", "clear_bay_items", "manage_rush_work", "run_bay_checks", "view_bay_reports", "manage_bay_layout"],
+    description: "Receiving, Bay Map operations, Rush work, checks, reports, physical layout, scanner rules, and auto assignment.",
+    permissions: ["view_indian_trail", "receive_indian_trail", "view_bays", "assign_bay_items", "move_bay_items", "clear_bay_items", "manage_rush_work", "run_bay_checks", "manage_bay_layout", "manage_bay_scanner_rules", "manage_bay_auto_assigner"],
   },
   {
     title: "Racks & Transportation",
@@ -24997,7 +26358,7 @@ function restoreRolePermissionUiScroll() {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function rolePermissionCategoryHtml(roleName, category, selected) {
+function rolePermissionCategoryHtml(roleName, category, selected, locked = false) {
   const checkedCount = category.permissions.filter((permission) => selected.has(permission)).length;
   const categoryKey = rolePermissionCategoryKey(roleName, category.title);
   const open = state.rolePermissionOpenCategories.has(categoryKey);
@@ -25022,7 +26383,7 @@ function rolePermissionCategoryHtml(roleName, category, selected) {
           .map(
             (permission) => `
               <label class="${selected.has(permission) ? "is-checked" : ""}">
-                <input type="checkbox" value="${escapeHtml(permission)}" ${selected.has(permission) ? "checked" : ""}>
+                <input type="checkbox" value="${escapeHtml(permission)}" ${selected.has(permission) ? "checked" : ""} ${locked ? 'disabled aria-disabled="true"' : ""}>
                 <span class="permission-option-copy">
                   <strong>${escapeHtml(permissionLabel(permission))}</strong>
                   <small>${escapeHtml(permissionDescription(permission))}</small>
@@ -25099,58 +26460,113 @@ function rolePermissionsModalHtml() {
         </div>
       </section>
 
-      <section class="role-create-card is-open">
-        <header class="role-create-heading">
-          <span class="role-create-summary-icon" aria-hidden="true"></span>
-          <span><strong>Create a new role</strong><small>Name the role, describe its purpose, and choose only the permissions it needs.</small></span>
-        </header>
-        <form id="createRoleForm" class="role-create-form">
-          <div class="role-create-fields">
-            <label><span>Role name *</span><input id="newRoleName" name="name" type="text" maxlength="60" autocomplete="off" placeholder="Example: Shipping Lead" required></label>
-            <label><span>Description</span><input id="newRoleDescription" name="description" type="text" maxlength="240" autocomplete="off" placeholder="What this role is responsible for"></label>
-          </div>
-          <div class="role-create-permission-toolbar">
-            <div><strong>Starting permissions</strong><span>Unchecked permissions will not be granted.</span></div>
-            <div>
-              <button type="button" class="secondary" data-role-create-selection="all">Select all</button>
-              <button type="button" class="secondary" data-role-create-selection="none">Clear all</button>
-            </div>
-          </div>
-          <div class="role-create-permission-list">
-            ${categories.map(roleCreatePermissionCategoryHtml).join("")}
-          </div>
-          <footer class="role-create-footer">
-            <span id="createRoleStatus">A role may be created with no permissions and configured later.</span>
-            <button type="submit" class="primary">Create Role</button>
-          </footer>
-        </form>
+      <section class="role-manager-create-launch-v340">
+        <div>
+          <span class="role-manager-create-icon-v340" aria-hidden="true"></span>
+          <span><strong>Create a new role</strong><small>Build a role in its own focused workspace, then assign that role to users separately.</small></span>
+        </div>
+        <button type="button" class="app-primary-button role-manager-create-button-v340" data-open-create-role>
+          <span class="role-manager-create-button-icon-v340" aria-hidden="true"></span>
+          <span>Create New Role</span>
+        </button>
       </section>
 
       <section class="role-library">
         <header><div><strong>Existing roles</strong><span>Open a role, change permission selections, then save that role.</span></div><b>${escapeHtml(roles.length)} total</b></header>
         <div class="role-library-list">
           ${roles.map((role) => {
-            const selected = new Set(role.permissions || []);
+            const adminRoleLocked = String(role.name || "").trim().toLowerCase() === "admin";
+            const selected = new Set(adminRoleLocked ? permissions : (role.permissions || []));
             const roleOpen = state.rolePermissionOpenRoles.has(role.name);
             return `
-              <details class="role-permission-card" data-role-card="${escapeHtml(role.name)}" ${roleOpen ? "open" : ""}>
+              <details class="role-permission-card ${adminRoleLocked ? "is-system-admin-v341" : ""}" data-role-card="${escapeHtml(role.name)}" ${roleOpen ? "open" : ""}>
                 <summary class="role-permission-summary">
                   <span class="role-collapse-icon" aria-hidden="true"></span>
                   <span class="role-permission-title">
-                    <strong>${escapeHtml(role.name)}</strong>
-                    <small>${escapeHtml(role.description || permissionSummaryFromPermissions(role.permissions || []))}</small>
+                    <strong>${escapeHtml(role.name)}${adminRoleLocked ? `<span class="role-system-lock-v341">Full access</span>` : ""}</strong>
+                    <small>${escapeHtml(adminRoleLocked ? "System recovery role · always includes every application permission" : (role.description || permissionSummaryFromPermissions(role.permissions || [])))}</small>
                   </span>
-                  <span class="role-permission-count">${escapeHtml(rolePermissionCountText(role, permissions))}</span>
-                  <button type="button" class="role-permission-save" data-save-role-permissions="${escapeHtml(role.name)}" title="Save ${escapeHtml(role.name)} permissions">Save</button>
+                  <span class="role-permission-count">${escapeHtml(adminRoleLocked ? `${permissions.length} / ${permissions.length} permissions` : rolePermissionCountText(role, permissions))}</span>
+                  ${adminRoleLocked
+                    ? `<span class="role-admin-lock-note-v341" title="The Admin role always retains every permission."><span aria-hidden="true">●</span> Protected</span>`
+                    : `<button type="button" class="role-permission-save" data-save-role-permissions="${escapeHtml(role.name)}" title="Save ${escapeHtml(role.name)} permissions">Save</button>`}
                 </summary>
                 <div class="role-permission-body">
-                  ${categories.map((category) => rolePermissionCategoryHtml(role.name, category, selected)).join("")}
+                  ${categories.map((category) => rolePermissionCategoryHtml(role.name, category, selected, adminRoleLocked)).join("")}
                 </div>
               </details>`;
           }).join("")}
         </div>
       </section>
     </div>`;
+}
+
+function roleCreateDialogHtml() {
+  const permissions = state.allPermissions || [];
+  const categories = categorizedPermissions(permissions);
+  return `
+    <header class="role-create-modal-header-v340">
+      <div>
+        <small>Roles &amp; Permissions</small>
+        <h2 id="roleCreateModalTitleV340">Create New Role</h2>
+        <p>Define what the role can do here. Users are assigned to the finished role separately in User Access Management.</p>
+      </div>
+      <button type="button" class="gui-close-button" data-role-create-close aria-label="Close Create New Role">×</button>
+    </header>
+    <form id="createRoleForm" class="role-create-modal-form-v340">
+      <section class="role-create-modal-identity-v340">
+        <label><span>Role name <b class="required-mark-v340" aria-hidden="true">*</b></span><input id="newRoleName" name="name" type="text" maxlength="60" autocomplete="off" placeholder="Example: Shipping Lead" required></label>
+        <label><span>Description</span><input id="newRoleDescription" name="description" type="text" maxlength="240" autocomplete="off" placeholder="What this role is responsible for"></label>
+      </section>
+      <section class="role-create-modal-permissions-v340">
+        <header>
+          <div><strong>Starting permissions</strong><span>Select only the capabilities this role actually needs.</span></div>
+          <div>
+            <button type="button" class="secondary" data-role-create-selection="all">Select all</button>
+            <button type="button" class="secondary" data-role-create-selection="none">Clear all</button>
+          </div>
+        </header>
+        <div class="role-create-permission-list">${categories.map(roleCreatePermissionCategoryHtml).join("")}</div>
+      </section>
+      <footer class="role-create-modal-actions-v340">
+        <span id="createRoleStatus">A role may be created with no permissions and configured later.</span>
+        <div>
+          <button type="button" class="role-create-cancel-v340 app-cancel-action-v343" data-role-create-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="submit" class="app-primary-button role-create-submit-v340"><span class="role-manager-create-button-icon-v340" aria-hidden="true"></span><span>Create Role</span></button>
+        </div>
+      </footer>
+    </form>`;
+}
+
+function closeRoleCreateModal() {
+  document.getElementById("roleCreateModalV340")?.remove();
+  document.getElementById("roleCreateBackdropV340")?.remove();
+  updateModalScrollLock();
+}
+
+function openRoleCreateModal() {
+  closeRoleCreateModal();
+  const backdrop = document.createElement("div");
+  backdrop.id = "roleCreateBackdropV340";
+  backdrop.className = "admin-child-modal-backdrop-v340";
+  const dialog = document.createElement("section");
+  dialog.id = "roleCreateModalV340";
+  dialog.className = "admin-child-modal-v340 role-create-modal-v340";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-labelledby", "roleCreateModalTitleV340");
+  dialog.innerHTML = roleCreateDialogHtml();
+  document.body.append(backdrop, dialog);
+  backdrop.addEventListener("click", closeRoleCreateModal);
+  dialog.addEventListener("click", (event) => {
+    if (event.target.closest("[data-role-create-close]")) closeRoleCreateModal();
+  });
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeRoleCreateModal();
+  });
+  wireRolePermissionControls(dialog);
+  updateModalScrollLock();
+  window.requestAnimationFrame(() => dialog.querySelector("#newRoleName")?.focus());
 }
 
 function wireRolePermissionControls(root = els.adminModalBody) {
@@ -25217,6 +26633,7 @@ async function createRoleFromForm(form) {
     state.adminRoles = payload.roles || [];
     state.allPermissions = payload.permissions || state.allPermissions;
     state.rolePermissionOpenRoles.add(name);
+    closeRoleCreateModal();
     if (els.adminModalBody) {
       els.adminModalBody.innerHTML = adminModalContent("roles");
       wireRolePermissionControls();
@@ -25327,7 +26744,7 @@ async function saveRolePermissions(roleName) {
 
   await refreshAdminPage();
 
-  showSaveConfirmation(`${roleName} permissions were saved. Users with that role will sign in again to refresh access.`);
+  showSaveConfirmation(`${roleName} permissions were saved. Access updates apply immediately to signed-in users with that role.`);
 }
 
 /**
@@ -25367,7 +26784,7 @@ function manualEditStageSummary(listId) {
     return "No stage selected";
   }
 
-  return `${formatDisplayDate(list.deliveryDate)} - ${list.stage || "Stage"} - ${list.scanner || ""}`;
+  return `${formatNumericDeliveryDate(list.deliveryDate)} - ${list.stage || "Stage"}`;
 }
 
 /**
@@ -25479,7 +26896,6 @@ function refreshManualEditFilterDrawer(openState = null) {
 function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a delivery list to load editable rows.</div>`) {
   const selected = state.manualEditListId || state.activeListId || state.lists[0]?.id || "";
   const stageLists = manualEditStageListsForCurrentDelivery(selected);
-
   return `
     <div class="manual-edit-shell">
       <div class="manual-edit-nav-row">
@@ -25497,7 +26913,7 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
             ${stageLists
               .map(
                 (list) =>
-                  `<option value="${escapeHtml(list.id)}" ${list.id === selected ? "selected" : ""}>${escapeHtml(formatDisplayDate(list.deliveryDate))} - ${escapeHtml(list.stage)} - ${escapeHtml(list.scanner || "")}</option>`,
+                  `<option value="${escapeHtml(list.id)}" ${list.id === selected ? "selected" : ""}>${escapeHtml(formatNumericDeliveryDate(list.deliveryDate))} - ${escapeHtml(list.stage || "Stage")}</option>`,
               )
               .join("")}
           </select>
@@ -25512,31 +26928,11 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
         </div>
 
         <div class="manual-edit-tool-actions">
-          <button id="manualEditModalSearchBtn" type="button">Search</button>
+          <button id="manualEditModalSearchBtn" class="app-primary-button manual-edit-search-button-v334" type="button">Search</button>
           <button id="manualEditModalReloadBtn" class="secondary" type="button">Load All</button>
-          <button type="button" class="secondary manual-edit-create-order-button" data-manual-order-toggle>Create New Order</button>
+          ${hasPermission("create_delivery_list_orders") ? `<button type="button" class="app-primary-button manual-edit-create-order-button-v338" data-manual-order-toggle><span class="manual-edit-create-order-icon-v338" aria-hidden="true"></span><span>Create New Order</span></button>` : ""}
         </div>
       </div>
-
-      <details class="manual-order-create-panel" id="manualOrderCreatePanel">
-        <summary><span>+ Add an order manually</span><small>Uses the selected delivery date and requires an explicit route.</small></summary>
-        <form id="manualOrderCreateForm" class="manual-order-create-form">
-          <div class="manual-order-form-grid">
-            <label><span>Order # *</span><input name="order" inputmode="numeric" required></label>
-            <label><span>Item # *</span><input name="item" inputmode="numeric" required></label>
-            <label><span>Qty *</span><input name="qty" type="number" min="1" value="1" required></label>
-            <label><span>Route *</span><select name="route" required><option value="">Choose route...</option><option value="IT">Indian Trail</option><option value="CPU">Customer Pickup</option><option value="DTC">Deliver to Customer</option><option value="GNV">Greenville</option></select></label>
-            <label><span>Customer *</span><input name="customer" required></label>
-            <label><span>Job Nr.</span><input name="job"></label>
-            <label><span>Glass / Product *</span><input name="product" required></label>
-            <label><span>Dimensions *</span><input name="dimensions" placeholder="72 x 36" required></label>
-            <label><span>Process note</span><input name="processState" placeholder="Optional"></label>
-            <label class="manual-order-only-toggle"><input name="manualOnly" type="checkbox"><span><strong>Manual scanning item only</strong><small>Use when this order cannot be scanned by barcode.</small></span></label>
-            <label class="manual-order-only-toggle"><input name="protectFromAwImport" type="checkbox" checked><span><strong>Protect from A+W import</strong><small>Keep this manual order even if A+W later contains the same order and item.</small></span></label>
-          </div>
-          <div class="manual-order-create-actions"><button type="submit">Add Order to Workflow</button><span id="manualOrderCreateStatus"></span></div>
-        </form>
-      </details>
 
       <div id="manualEditModalResults" class="admin-table manual-edit-modal-results">${resultsHtml}</div>
     </div>
@@ -25551,10 +26947,15 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
 async function ensureManualEditLookupsLoaded() {
   if (!state.backend) return;
 
+  // Product/route/process lookup libraries change infrequently compared with
+  // physical rack/bay occupancy. Reuse that library briefly between editor
+  // opens while still refreshing live physical destinations every time.
+  const manualLibraryFresh = Boolean(state.manualEditLookupLibraryLoadedAt)
+    && Date.now() - state.manualEditLookupLibraryLoadedAt < 5 * 60 * 1000;
   const lookups = await Promise.allSettled([
     fetchJson("/api/racks"),
     fetchJson("/api/indian-trail/bays"),
-    fetchJson("/api/admin/manual-edit-lookups"),
+    manualLibraryFresh ? Promise.resolve(null) : fetchJson("/api/admin/manual-edit-lookups"),
   ]);
 
   const rackResult = lookups[0];
@@ -25573,8 +26974,9 @@ async function ensureManualEditLookupsLoaded() {
 
   const manualLookupResult = lookups[2];
 
-  if (manualLookupResult.status === "fulfilled") {
+  if (manualLookupResult.status === "fulfilled" && manualLookupResult.value) {
     adoptManualEditLookups(manualLookupResult.value);
+    state.manualEditLookupLibraryLoadedAt = Date.now();
   }
 }
 
@@ -25590,13 +26992,26 @@ async function openManualEditForList(listId) {
   state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
   state.manualEditResultRows = [];
   state.manualEditTotalRows = 0;
-  state.manualEditVisibleCount = 20;
+  state.manualEditVisibleCount = MANUAL_EDIT_PAGE_SIZE;
+  state.manualEditPage = 1;
   state.manualEditGlassTypes = [];
 
-  openAdminModal("manualEdit");
+  openAdminModal("manualEdit", {
+    body: manualEditModalHtml(`
+      <div class="manual-edit-loading">
+        <div class="admin-empty loading">
+          <strong>Loading editable rows...</strong>
+          <span>Preparing lookups and the selected delivery-list stage.</span>
+          <span class="loading-bar"><i></i></span>
+        </div>
+      </div>
+    `),
+  });
 
-  await ensureManualEditLookupsLoaded();
-  await runManualEditModalSearch(true);
+  // Racks/bays/lookups and the first result page are independent reads. Start
+  // them together so opening a stage is bounded by the slower request instead
+  // of paying both network/database costs serially.
+  await runManualEditModalSearch(true, 1, ensureManualEditLookupsLoaded());
 }
 
 /**
@@ -25635,7 +27050,7 @@ async function fetchManualEditResults(query, listId) {
  * Effects: Updates visible dom state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-async function runManualEditModalSearch(loadAll = false) {
+async function runManualEditModalSearch(loadAll = false, requestedPage = 1, parallelPreflight = null) {
   const requestId = ++state.manualEditSearchRequestId;
   const stage = document.getElementById("manualEditModalStage")?.value || state.manualEditListId || "";
   const query = loadAll ? "" : (document.getElementById("manualEditModalSearch")?.value.trim() || "");
@@ -25649,14 +27064,12 @@ async function runManualEditModalSearch(loadAll = false) {
 
   state.manualEditListId = stage;
   state.manualEditQuery = query;
+  state.manualEditPage = Math.max(Number(requestedPage || 1), 1);
 
   const currentStageLabel = document.querySelector(".manual-edit-current-stage");
-  if (currentStageLabel) {
-    currentStageLabel.textContent = manualEditStageSummary(stage);
-  }
+  if (currentStageLabel) currentStageLabel.textContent = manualEditStageSummary(stage);
 
   const target = document.getElementById("manualEditModalResults");
-
   if (target) {
     target.innerHTML = `
       <div class="manual-edit-loading">
@@ -25668,53 +27081,50 @@ async function runManualEditModalSearch(loadAll = false) {
     `;
   }
 
-  const resultPage = await fetchManualEditBatch(query, stage, 20, 0);
+  const offset = (state.manualEditPage - 1) * MANUAL_EDIT_PAGE_SIZE;
+  const resultPromise = fetchManualEditBatch(query, stage, MANUAL_EDIT_PAGE_SIZE, offset);
+  const [resultPageValue] = await Promise.all([
+    resultPromise,
+    parallelPreflight ? Promise.resolve(parallelPreflight) : Promise.resolve(),
+  ]);
+  let resultPage = resultPageValue;
   if (requestId !== state.manualEditSearchRequestId) return;
+
+  const totalPages = Math.max(1, Math.ceil(Number(resultPage.total || 0) / MANUAL_EDIT_PAGE_SIZE));
+  if (state.manualEditPage > totalPages) {
+    state.manualEditPage = totalPages;
+    resultPage = await fetchManualEditBatch(
+      query,
+      stage,
+      MANUAL_EDIT_PAGE_SIZE,
+      (state.manualEditPage - 1) * MANUAL_EDIT_PAGE_SIZE,
+    );
+    if (requestId !== state.manualEditSearchRequestId) return;
+  }
+
   state.manualEditResultRows = resultPage.results;
   state.manualEditTotalRows = resultPage.total;
-  state.manualEditVisibleCount = 20;
+  state.manualEditVisibleCount = resultPage.results.length;
   state.manualEditGlassTypes = Array.isArray(resultPage.filterOptions?.glassTypes)
     ? resultPage.filterOptions.glassTypes
     : [];
   const availableGlassTypes = new Set(state.manualEditGlassTypes.map((option) => String(option.label || "")));
   state.manualEditFilters.glassTypes = (state.manualEditFilters.glassTypes || []).filter((label) => availableGlassTypes.has(label));
   refreshManualEditFilterDrawer(false);
-  const html = manualEditResultsHtml(state.manualEditResultRows, state.manualEditVisibleCount, state.manualEditTotalRows);
+  const html = manualEditResultsHtml(state.manualEditResultRows, state.manualEditPage, state.manualEditTotalRows, true);
 
-  if (target) {
-    target.innerHTML = html;
-  }
-
-  if (els.manualEditResults) {
-    els.manualEditResults.innerHTML = html;
-  }
-
+  if (target) target.innerHTML = html;
+  if (els.manualEditResults) els.manualEditResults.innerHTML = html;
   state.manualEditDirty = false;
 }
 
-/** Reveal the next batch of editable rows without another server request. */
-async function loadMoreManualEditRows() {
-  state.manualEditResultRows = state.manualEditResultRows.filter((item) => !item._manualEditFilterMismatch);
-  const button = document.querySelector("[data-manual-edit-load-more]");
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Loading...";
-  }
-  const resultPage = await fetchManualEditBatch(
-    state.manualEditQuery,
-    state.manualEditListId,
-    20,
-    state.manualEditResultRows.length,
-  );
-  const knownIds = new Set(state.manualEditResultRows.map((item) => String(item.lineItemId || "")));
-  state.manualEditResultRows.push(
-    ...resultPage.results.filter((item) => !knownIds.has(String(item.lineItemId || ""))),
-  );
-  state.manualEditTotalRows = resultPage.total;
-  state.manualEditVisibleCount = state.manualEditResultRows.length;
-  const html = manualEditResultsHtml(state.manualEditResultRows, state.manualEditVisibleCount, state.manualEditTotalRows);
-  const target = document.getElementById("manualEditModalResults");
-  if (target) target.innerHTML = html;
+/** Move the manual editor to a server-backed result page instead of appending more rows. */
+async function goToManualEditPage(page) {
+  const totalPages = Math.max(1, Math.ceil(Number(state.manualEditTotalRows || 0) / MANUAL_EDIT_PAGE_SIZE));
+  const nextPage = Math.min(Math.max(Number(page || 1), 1), totalPages);
+  if (nextPage === state.manualEditPage) return;
+  await runManualEditModalSearch(false, nextPage);
+  document.getElementById("manualEditModalResults")?.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 /**
@@ -25729,7 +27139,7 @@ function renderManualEditStageOptions() {
     state.lists
       .slice()
       .sort((a, b) => String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || "")) || String(a.stage || "").localeCompare(String(b.stage || "")))
-      .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(formatDisplayDate(list.deliveryDate))} - ${escapeHtml(list.stage)}${list.scanner ? ` (${escapeHtml(list.scanner)})` : ""}</option>`),
+      .map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(formatNumericDeliveryDate(list.deliveryDate))} - ${escapeHtml(list.stage || "Stage")}</option>`),
   );
   els.manualEditStageSelect.innerHTML = options.join("");
   els.manualEditStageSelect.value = state.lists.some((list) => list.id === current) ? current : "";
@@ -26031,13 +27441,9 @@ function importHistoryRows(imports = []) {
     return [...byStage.values()];
   };
 
-  const managementStageDefinitions = {
-    airport: { key: "airport", label: "Airport Road", printRouteGroup: "airport", sort: 0 },
-    indian_trail: { key: "indian_trail", label: "Indian Trail", printRouteGroup: "indian_trail", sort: 1 },
-    greenville: { key: "greenville", label: "Greenville", printRouteGroup: "greenville", sort: 2 },
-    cpu: { key: "cpu", label: "CPU", printRouteGroup: "cpu", sort: 3 },
-    dtc: { key: "dtc", label: "DTC", printRouteGroup: "dtc", sort: 4 },
-  };
+  const managementStageDefinitions = Object.fromEntries(
+    DELIVERY_ROUTE_GROUP_DEFINITIONS.map((definition) => [definition.key, { ...definition }]),
+  );
 
   const stageSortForRow = (row) => {
     const list = state.lists.find((item) => item.id === row.listId);
@@ -26095,7 +27501,11 @@ function importHistoryRows(imports = []) {
       String(candidate.deliveryDate || "") === String(deliveryDate || "")
       && stageCategory(candidate) === "outbound"
     ));
-    return { row: row || null, list: list || null };
+    // Import history can arrive before the main delivery-list catalog refresh.
+    // Preserve the authoritative Outbound list ID from the import result so the
+    // Print / Export action remains available for dates that just gained orders.
+    const listId = String(list?.id || row?.listId || "").trim();
+    return { row: row || null, list: list || null, listId };
   };
 
   /** Restore every stage row while collapsing only Staging/Outbound into Airport Road. */
@@ -26147,13 +27557,10 @@ function importHistoryRows(imports = []) {
       // DTC, Indian Trail, or Airport orders by the item's actual route. This
       // avoids stale/retired destination-stage IDs such as an old CPU list.
       const previewSourceId = rowHasChanges
-        ? (outboundSource.list?.id
-            ? String(outboundSource.list.id)
-            : String(changeRow.listId || ""))
+        ? (outboundSource.listId || String(changeRow.listId || ""))
         : "";
-      const printSourceId = outboundSource.list?.id
-        ? String(outboundSource.list.id)
-        : (list && Number(list.totalQty || 0) > 0 ? String(list.id) : "");
+      const printSourceId = outboundSource.listId
+        || (list && Number(list.totalQty || 0) > 0 ? String(list.id) : "");
 
       return {
         ...definition,
@@ -26281,12 +27688,12 @@ function importHistoryRows(imports = []) {
             && changedManagementRows.every((row) => row.isNew)
             && changedManagementRows.some((row) => row.key === "airport");
           const outboundSource = outboundSourceForDate(group.deliveryDate, allStageRows);
-          const printableIds = outboundSource.list?.id ? [String(outboundSource.list.id)] : [];
+          const printableIds = outboundSource.listId ? [outboundSource.listId] : [];
           const fallbackPreviewIds = changedManagementRows
             .flatMap((row) => row.previewListIds)
             .filter(Boolean);
-          const previewListIds = outboundSource.list?.id
-            ? [String(outboundSource.list.id)]
+          const previewListIds = outboundSource.listId
+            ? [outboundSource.listId]
             : [...new Set(fallbackPreviewIds)];
           const outboundPreviewCount = outboundSource.row
             ? retainedPreviewCountForRow(outboundSource.row, outboundSource.list)
@@ -26878,7 +28285,7 @@ function userManagerActionButtonHtml({ tone = "secondary", attr = "", label = ""
 /**
  * Purpose: Build the complete Edit Users workspace without relying on a wide table.
  * Effects: Produces the modal markup from current user, session, role, and station state.
- * Flow: Shows a compact overview, an expandable create form, filters, and expandable user cards.
+ * Flow: Shows a compact overview, a dedicated Create User launcher, filters, and expandable user cards.
  */
 function userManagerModalHtml() {
   const users = state.adminUsers || [];
@@ -26903,118 +28310,50 @@ function userManagerModalHtml() {
         </div>
       </section>
 
-      <section class="user-manager-create-card">
-        <button id="userManagerCreateToggle" class="user-manager-create-toggle" type="button" aria-expanded="false" aria-controls="createUserFormModal">
-          <span class="user-manager-summary-icon" aria-hidden="true"><i class="user-action-icon icon-user-add"></i></span>
-          <span>
-            <strong>Add a new user</strong>
-            <small>Create a sign-in profile and assign its starting role and station.</small>
-          </span>
-          <i aria-hidden="true"></i>
+      ${hasPermission("manage_users") && hasPermission("manage_user_assignments") ? `<section class="user-manager-create-launch-v340">
+        <div>
+          <span class="user-manager-create-launch-icon-v340" aria-hidden="true"><i class="user-action-icon icon-user-add"></i></span>
+          <span><strong>Create a new user</strong><small>Create the profile in a focused window, then manage its role and access from the user directory.</small></span>
+        </div>
+        <button type="button" class="app-primary-button user-manager-create-button-v340" data-open-create-user>
+          <span class="user-action-icon icon-user-add" aria-hidden="true"></span>
+          <span>Create New User</span>
         </button>
-        <form id="createUserFormModal" class="admin-form admin-modal-create-user user-manager-create-form" hidden>
-          <div class="user-manager-create-layout">
-            <section class="user-manager-create-section is-profile">
-              <header>
-                <span class="user-manager-create-section-icon icon-user" aria-hidden="true"></span>
-                <div><strong>Account details</strong><small>Identity and sign-in information for the new profile.</small></div>
-              </header>
-              <div class="user-manager-create-profile-grid">
-                <label class="user-manager-field is-wide">
-                  <span>BFS email</span>
-                  <input id="newUserEmailModal" type="email" autocomplete="off" placeholder="name@barefootandcompany.com">
-                  <small>Used for sign-in and account identification.</small>
-                </label>
-                <label class="user-manager-field">
-                  <span>Username</span>
-                  <input id="newUserNameModal" type="text" autocomplete="off" placeholder="Defaults to BFS email">
-                  <small>Optional when the BFS email is used as the username.</small>
-                </label>
-                <label class="user-manager-field">
-                  <span>Display name</span>
-                  <input id="newUserDisplayModal" type="text" autocomplete="off" placeholder="First and last name">
-                  <small>Shown throughout the scanner app.</small>
-                </label>
-                <label class="user-manager-field is-wide">
-                  <span>Temporary password</span>
-                  <input id="newUserPasswordModal" type="password" autocomplete="new-password" placeholder="Enter a secure temporary password">
-                  <small>Give this password to the user through an approved internal channel.</small>
-                </label>
-              </div>
-            </section>
+      </section>` : ""}
 
-            <section class="user-manager-create-section is-access">
-              <header>
-                <span class="user-manager-create-section-icon icon-shield" aria-hidden="true"></span>
-                <div><strong>Starting access</strong><small>Choose the role and first workstation assignment.</small></div>
-              </header>
-              <div class="user-manager-create-access-grid">
-                <label class="user-manager-field">
-                  <span>Starting role</span>
-                  <select id="newUserRoleModal">
-                    ${availableRoleNames().map((role) => `<option>${escapeHtml(role)}</option>`).join("")}
-                  </select>
-                  <small>Controls permissions and page access.</small>
-                </label>
-                <label class="user-manager-field">
-                  <span>Starting station</span>
-                  <select id="newUserStationModal">
-                    <option value="">No assigned station</option>
-                    ${state.stations.map((station) => `<option value="${escapeHtml(station)}">${escapeHtml(station)}</option>`).join("")}
-                  </select>
-                  <small>Additional stations can be assigned after creation.</small>
-                </label>
-              </div>
-              <div class="user-manager-create-guidance">
-                <strong>Before creating</strong>
-                <span>Confirm the role is appropriate. Custom roles created in Roles &amp; Permissions appear here automatically.</span>
-              </div>
-            </section>
+      <section class="user-manager-directory user-manager-directory-v349">
+        <header class="user-manager-directory-header user-manager-directory-header-v349">
+          <div class="user-manager-directory-title-v349">
+            <span class="user-manager-directory-icon-v349" aria-hidden="true"><i class="user-action-icon icon-user"></i></span>
+            <div><span class="user-manager-eyebrow">User directory</span><strong>Current accounts</strong><small>Search the directory, then narrow by account status or assigned role.</small></div>
           </div>
-
-          <footer class="user-manager-create-actions">
-            <span id="createUserModalStatus">Required: username or BFS email, plus a password.</span>
-            <button type="submit" class="users-add-button">
-              <span class="user-action-icon icon-user-add" aria-hidden="true"></span>
-              <strong>Create user</strong>
-            </button>
-          </footer>
-        </form>
-      </section>
-
-      <section class="user-manager-directory">
-        <header class="user-manager-directory-header">
-          <div>
-            <span class="user-manager-eyebrow">User directory</span>
-            <strong>Current accounts</strong>
-            <small>Open a user to edit access, password, status, or account details.</small>
-          </div>
-          <div class="user-manager-toolbar">
-            <label class="user-manager-search">
-              <span class="search-icon" aria-hidden="true"></span>
-              <input id="userManagerSearch" type="search" autocomplete="off" placeholder="Search name, username, email, role, or station">
-            </label>
-            <label class="user-manager-toolbar-field">
-              <span>Status</span>
-              <select id="userManagerStatusFilter">
-                <option value="">All statuses</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="online">Signed in</option>
-                <option value="offline">Logged out</option>
-              </select>
-            </label>
-            <label class="user-manager-toolbar-field">
-              <span>Role</span>
-              <select id="userManagerRoleFilter">
-                <option value="">All roles</option>
-                ${availableRoleNames().map((role) => `<option value="${escapeHtml(role.toLowerCase())}">${escapeHtml(role)}</option>`).join("")}
-              </select>
-            </label>
-          </div>
+          <label class="user-manager-search user-manager-search-v349">
+            <span class="search-icon" aria-hidden="true"></span>
+            <input id="userManagerSearch" type="search" autocomplete="off" placeholder="Search users, email, role, or station...">
+          </label>
         </header>
+        <div class="user-manager-filter-panel-v349" aria-label="User directory filters">
+          <label class="user-manager-toolbar-field user-manager-filter-field-v349">
+            <span><i class="user-manager-filter-dot-v349 is-status" aria-hidden="true"></i>Status</span>
+            <select id="userManagerStatusFilter">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="online">Signed in</option>
+              <option value="offline">Logged out</option>
+            </select>
+          </label>
+          <label class="user-manager-toolbar-field user-manager-filter-field-v349">
+            <span><i class="user-manager-filter-dot-v349 is-role" aria-hidden="true"></i>Role</span>
+            <select id="userManagerRoleFilter">
+              <option value="">All roles</option>
+              ${availableRoleNames().map((role) => `<option value="${escapeHtml(role.toLowerCase())}">${escapeHtml(role)}</option>`).join("")}
+            </select>
+          </label>
+          <button type="button" class="user-manager-clear-filters-v349" data-clear-user-manager-filters><span aria-hidden="true">×</span><b>Clear filters</b></button>
+        </div>
 
-        <div class="user-manager-result-bar">
+        <div class="user-manager-result-bar user-manager-result-bar-v349">
           <span id="userManagerResultsSummary">Showing ${escapeHtml(users.length)} user${users.length === 1 ? "" : "s"}</span>
           <span>Expand one account at a time to keep the workspace focused.</span>
         </div>
@@ -27029,6 +28368,107 @@ function userManagerModalHtml() {
       </section>
     </section>
   `;
+}
+
+function userCreateDialogHtml() {
+  return `
+    <header class="user-create-modal-header-v340">
+      <div>
+        <small>User Access Management</small>
+        <h2 id="userCreateModalTitleV340">Create New User</h2>
+        <p>Create the user profile here. Roles contain permissions; this form only assigns an existing starting role to the new user.</p>
+      </div>
+      <button type="button" class="gui-close-button" data-user-create-close aria-label="Close Create New User">×</button>
+    </header>
+    <form id="createUserFormModal" class="user-create-modal-form-v340">
+      <section class="user-manager-create-section is-profile">
+        <header>
+          <span class="user-manager-create-section-icon icon-user" aria-hidden="true"></span>
+          <div><strong>Account details</strong><small>Identity and sign-in information for the new profile.</small></div>
+        </header>
+        <div class="user-manager-create-profile-grid">
+          <label class="user-manager-field is-wide">
+            <span>BFS email</span>
+            <input id="newUserEmailModal" type="email" autocomplete="off" placeholder="name@barefootandcompany.com">
+            <small>Used for sign-in and account identification.</small>
+          </label>
+          <label class="user-manager-field">
+            <span>Username</span>
+            <input id="newUserNameModal" type="text" autocomplete="off" placeholder="Defaults to BFS email">
+            <small>Optional when the BFS email is used as the username.</small>
+          </label>
+          <label class="user-manager-field">
+            <span>Display name</span>
+            <input id="newUserDisplayModal" type="text" autocomplete="off" placeholder="First and last name">
+            <small>Shown throughout the scanner app.</small>
+          </label>
+          <label class="user-manager-field is-wide">
+            <span>Temporary password <b class="required-mark-v340" aria-hidden="true">*</b></span>
+            <input id="newUserPasswordModal" type="password" autocomplete="new-password" placeholder="Enter a secure temporary password" required>
+            <small>Give this password to the user through an approved internal channel.</small>
+          </label>
+        </div>
+      </section>
+      <section class="user-manager-create-section is-access">
+        <header>
+          <span class="user-manager-create-section-icon icon-shield" aria-hidden="true"></span>
+          <div><strong>Starting access</strong><small>Choose an existing role and first workstation assignment.</small></div>
+        </header>
+        <div class="user-manager-create-access-grid">
+          <label class="user-manager-field">
+            <span>Starting role <b class="required-mark-v340" aria-hidden="true">*</b></span>
+            <select id="newUserRoleModal" required>${availableRoleNames().map((role) => `<option>${escapeHtml(role)}</option>`).join("")}</select>
+            <small>The role controls permissions; edit role contents in Roles &amp; Permissions.</small>
+          </label>
+          <label class="user-manager-field">
+            <span>Starting station</span>
+            <select id="newUserStationModal">
+              <option value="">No assigned station</option>
+              ${state.stations.map((station) => `<option value="${escapeHtml(station)}">${escapeHtml(station)}</option>`).join("")}
+            </select>
+            <small>Additional station assignments can be maintained after creation.</small>
+          </label>
+        </div>
+        <div class="user-manager-create-guidance"><strong>Access model</strong><span>User → assigned Role → Role permissions. Editing this user never changes the permissions stored inside the role.</span></div>
+      </section>
+      <footer class="user-create-modal-actions-v340">
+        <span id="createUserModalStatus">Required: username or BFS email, plus a password and starting role.</span>
+        <div>
+          <button type="button" class="user-create-cancel-v340 app-cancel-action-v343" data-user-create-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="submit" class="app-primary-button user-manager-create-button-v340"><span class="user-action-icon icon-user-add" aria-hidden="true"></span><span>Create User</span></button>
+        </div>
+      </footer>
+    </form>`;
+}
+
+function closeUserCreateModal() {
+  document.getElementById("userCreateModalV340")?.remove();
+  document.getElementById("userCreateBackdropV340")?.remove();
+  updateModalScrollLock();
+}
+
+function openUserCreateModal() {
+  closeUserCreateModal();
+  const backdrop = document.createElement("div");
+  backdrop.id = "userCreateBackdropV340";
+  backdrop.className = "admin-child-modal-backdrop-v340";
+  const dialog = document.createElement("section");
+  dialog.id = "userCreateModalV340";
+  dialog.className = "admin-child-modal-v340 user-create-modal-v340";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-labelledby", "userCreateModalTitleV340");
+  dialog.innerHTML = userCreateDialogHtml();
+  document.body.append(backdrop, dialog);
+  backdrop.addEventListener("click", closeUserCreateModal);
+  dialog.addEventListener("click", (event) => {
+    if (event.target.closest("[data-user-create-close]")) closeUserCreateModal();
+  });
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeUserCreateModal();
+  });
+  updateModalScrollLock();
+  window.requestAnimationFrame(() => dialog.querySelector("#newUserEmailModal")?.focus());
 }
 
 /**
@@ -27090,16 +28530,12 @@ function wireUserManagerControls(saved = {}) {
   search?.addEventListener("input", applyUserManagerFilters);
   status?.addEventListener("change", applyUserManagerFilters);
   role?.addEventListener("change", applyUserManagerFilters);
-
-  const createToggle = shell.querySelector("#userManagerCreateToggle");
-  const createForm = shell.querySelector("#createUserFormModal");
-  createToggle?.addEventListener("click", () => {
-    const expanded = createToggle.getAttribute("aria-expanded") === "true";
-    createToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
-    createToggle.closest(".user-manager-create-card")?.classList.toggle("is-open", !expanded);
-    if (createForm) createForm.hidden = expanded;
-    void playAppSound(expanded ? "collapse_close" : "collapse_open");
-    if (!expanded) window.setTimeout(() => shell.querySelector("#newUserEmailModal")?.focus(), 120);
+  shell.querySelector("[data-clear-user-manager-filters]")?.addEventListener("click", () => {
+    if (search) search.value = "";
+    if (status) status.value = "";
+    if (role) role.value = "";
+    applyUserManagerFilters();
+    search?.focus();
   });
 
   applyUserManagerFilters();
@@ -27198,7 +28634,7 @@ function confirmWebAppAction({
         ` : ""}
 
         <div class="action-confirm-actions">
-          <button type="button" class="action-confirm-cancel" data-action-confirm-cancel>${escapeHtml(cancelLabel)}</button>
+          <button type="button" class="action-confirm-cancel app-cancel-action-v343" data-action-confirm-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${escapeHtml(cancelLabel)}</span></button>
           <button type="button" class="action-confirm-confirm" data-action-confirm-confirm ${requiresTypedConfirmation ? "disabled" : ""}>${escapeHtml(confirmLabel)}</button>
         </div>
       </section>
@@ -27305,7 +28741,7 @@ function promptWebAppAction({
           <input type="text" data-action-prompt-input value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off">
         </label>
         <div class="action-confirm-actions">
-          <button type="button" class="action-confirm-cancel" data-action-prompt-cancel>${escapeHtml(cancelLabel)}</button>
+          <button type="button" class="action-confirm-cancel app-cancel-action-v343" data-action-prompt-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${escapeHtml(cancelLabel)}</span></button>
           <button type="button" class="action-confirm-confirm" data-action-prompt-confirm>${escapeHtml(confirmLabel)}</button>
         </div>
       </section>
@@ -27385,7 +28821,7 @@ function confirmDeactivateUser(username) {
         </div>
 
         <div class="user-deactivate-actions">
-          <button type="button" class="user-deactivate-cancel" data-user-deactivate-cancel>Cancel</button>
+          <button type="button" class="user-deactivate-cancel app-cancel-action-v343" data-user-deactivate-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button type="button" class="user-deactivate-confirm" data-user-deactivate-confirm>Deactivate User</button>
         </div>
       </section>
@@ -27434,18 +28870,8 @@ function confirmDeactivateUser(username) {
 function renderAdminUsers() {
   if (!els.adminUsers) return;
 
-  const previewLimit = 6;
-  const totalUsers = state.adminUsers.length;
-  const hiddenCount = Math.max(totalUsers - previewLimit, 0);
-
-  els.adminUsers.innerHTML = `
-    ${renderAdminUsersTable(false, previewLimit)}
-    ${
-      hiddenCount
-        ? `<button type="button" class="link-button admin-preview-more-button" data-admin-modal="users">View ${escapeHtml(hiddenCount)} more user${hiddenCount === 1 ? "" : "s"}</button>`
-        : ""
-    }
-  `;
+  const previewLimit = 10;
+  els.adminUsers.innerHTML = renderAdminUsersTable(false, previewLimit);
 }
 
 /**
@@ -27474,7 +28900,6 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                 <div>
                   <strong>${escapeHtml(user.displayName)}</strong>
                   <span>${escapeHtml(user.email || user.username)} · ${escapeHtml((user.roles || []).join(", ") || "No role")}</span>
-                  <small>${escapeHtml(user.username)}${user.email ? ` · ${escapeHtml(user.email)}` : ""}</small>
                   <small>${escapeHtml(permissionSummaryForUser(user))}</small>
                   <small>Station: ${escapeHtml(userAssignedStation(user) || "No assigned station")}</small>
                 </div>
@@ -27564,7 +28989,7 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                     <label class="user-manager-field user-admin-role">
                       <span>Role</span>
                       ${
-                        hasPermission("manage_roles")
+                        hasPermission("manage_user_assignments")
                           ? `<select data-user-role-select="${escapeHtml(username)}">
                               ${availableRoleNames().map((role) => `<option value="${escapeHtml(role)}" ${roles.includes(role) ? "selected" : ""}>${escapeHtml(role)}</option>`).join("")}
                             </select>`
@@ -27579,7 +29004,7 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                       <b>${escapeHtml(assignedStations.length)}</b>
                     </div>
                     ${
-                      hasPermission("manage_roles")
+                      hasPermission("manage_user_assignments")
                         ? `<div class="station-assignment-list" data-user-station-list="${escapeHtml(username)}">
                             ${state.stations
                               .map((station) => `
@@ -27600,7 +29025,7 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                   </div>
 
                   ${
-                    hasPermission("manage_roles")
+                    hasPermission("manage_user_assignments")
                       ? `<div class="user-manager-panel-actions">
                           ${userManagerActionButtonHtml({
                             tone: "primary",
@@ -27620,7 +29045,7 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                   </header>
 
                   ${
-                    hasPermission("update_user_passwords")
+                    hasPermission("manage_user_access")
                       ? `<label class="user-manager-field user-manager-password-field">
                           <span>New temporary password</span>
                           <input data-user-password="${escapeHtml(username)}" type="password" autocomplete="new-password" placeholder="Enter or generate a new password">
@@ -27663,7 +29088,7 @@ function renderAdminUsersTable(editable = false, limit = 5) {
 
                   <div class="user-manager-account-actions">
                     ${
-                      active && hasPermission("deactivate_users")
+                      active && hasPermission("manage_user_access")
                         ? userManagerActionButtonHtml({
                             tone: "warning",
                             attr: `data-deactivate-user="${escapeHtml(username)}"`,
@@ -27673,7 +29098,7 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                         : ""
                     }
                     ${
-                      !active && hasPermission("reactivate_users")
+                      !active && hasPermission("manage_user_access")
                         ? userManagerActionButtonHtml({
                             tone: "success",
                             attr: `data-reactivate-user="${escapeHtml(username)}"`,
@@ -27725,7 +29150,7 @@ function renderAdminStationsList(editable = false, limit = 6) {
       <div class="station-row">
         ${editable ? `<input data-station-name="${escapeHtml(station)}" type="text" value="${escapeHtml(station)}">` : `<strong>${escapeHtml(station)}</strong><span>Online</span>`}
         ${editable && hasPermission("manage_stations") ? `<button type="button" data-rename-station="${escapeHtml(station)}">Save</button>` : ""}
-        ${editable && hasPermission("remove_stations") && !DEFAULT_STATIONS.includes(station) ? `<button type="button" data-remove-station="${escapeHtml(station)}">Remove</button>` : ""}
+        ${editable && hasPermission("manage_stations") && !DEFAULT_STATIONS.includes(station) ? `<button type="button" data-remove-station="${escapeHtml(station)}">Remove</button>` : ""}
       </div>
     `)
     .join("") || `<div class="admin-empty">No stations loaded.</div>`;
@@ -27834,10 +29259,128 @@ function customerRouteOptionsHtml(selectedRoute = "CPU") {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function customerRouteRuleRowsHtml(editable = false, limit = 0) {
-  const rules = limit ? state.adminCustomerRouteRules.slice(0, limit) : state.adminCustomerRouteRules;
+function customerRouteVisualColorV347(routeCode = "") {
+  const route = customerRouteValue(routeCode);
+  const palette = {
+    CPU: "#d77a1f",
+    DTC: "#b93f78",
+    GNV: "#0f8f9c",
+    "INDIAN-TRAIL": "#2f8f55",
+    AIRPORT: "#315f9e",
+  };
+  if (palette[route]) return palette[route];
 
-  if (!rules.length) {
+  // Custom route codes receive one stable color without storing UI-only data.
+  const fallback = ["#315f9e", "#2f8f55", "#0f8f9c", "#7154ad", "#b93f78", "#a06a2a"];
+  const hash = [...route].reduce((value, char) => ((value * 31) + char.charCodeAt(0)) >>> 0, 0);
+  return fallback[hash % fallback.length];
+}
+
+
+const CUSTOMER_ROUTE_PRIMARY_TABS_V350 = Object.freeze(["CPU", "DTC", "GNV"]);
+
+/** Return the compact route label used by the v0.350 CPU / DTC / GRN tab rails. */
+function customerRouteTabLabelV350(routeCode = "") {
+  const route = customerRouteValue(routeCode);
+  if (route === "GNV") return "GRN";
+  return route || "Route";
+}
+
+/**
+ * Keep the three maintained route tabs first while preserving any configured
+ * custom routes so the tabbed manager never hides an existing rule.
+ */
+function customerRouteTabCodesV350() {
+  const configured = [...new Set((state.adminCustomerRouteRules || []).map((rule) => customerRouteValue(rule.route)).filter(Boolean))];
+  const custom = configured.filter((route) => !CUSTOMER_ROUTE_PRIMARY_TABS_V350.includes(route)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  return [...CUSTOMER_ROUTE_PRIMARY_TABS_V350, ...custom];
+}
+
+function customerRouteRulesForRouteV350(routeCode = "CPU") {
+  const route = customerRouteValue(routeCode);
+  return customerRouteSortedRulesV348().filter((rule) => customerRouteValue(rule.route) === route);
+}
+
+function customerRouteTabsHtmlV350(activeRoute = "CPU", { overview = false } = {}) {
+  const active = customerRouteValue(activeRoute);
+  return `<div class="customer-route-tab-rail-v350 customer-route-tab-rail-v351${overview ? " is-overview" : ""}" role="tablist" aria-label="Customer route rules">
+    ${customerRouteTabCodesV350().map((routeCode) => {
+      const count = customerRouteRulesForRouteV350(routeCode).length;
+      const selected = routeCode === active;
+      const routeColor = customerRouteVisualColorV347(routeCode);
+      return `<button type="button" role="tab" aria-selected="${selected}" class="customer-route-tab-v350 customer-route-tab-v351${selected ? " is-active" : ""}" style="--customer-route-color:${escapeHtml(routeColor)}" data-customer-route-${overview ? "overview-" : ""}tab-v350="${escapeHtml(routeCode)}"><span>${escapeHtml(customerRouteTabLabelV350(routeCode))}</span><b>${escapeHtml(count)}</b></button>`;
+    }).join("")}
+  </div>`;
+}
+
+function customerRouteSortedRulesV348() {
+  const routeRank = new Map(CUSTOMER_ROUTE_OPTIONS.map((option, index) => [option.value, index]));
+  return [...(state.adminCustomerRouteRules || [])].sort((left, right) => {
+    const leftRoute = customerRouteValue(left.route);
+    const rightRoute = customerRouteValue(right.route);
+    const leftRank = routeRank.has(leftRoute) ? routeRank.get(leftRoute) : CUSTOMER_ROUTE_OPTIONS.length;
+    const rightRank = routeRank.has(rightRoute) ? routeRank.get(rightRoute) : CUSTOMER_ROUTE_OPTIONS.length;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    if (leftRoute !== rightRoute) return leftRoute.localeCompare(rightRoute, undefined, { numeric: true, sensitivity: "base" });
+    return String(left.customerPattern || "").localeCompare(String(right.customerPattern || ""), undefined, { numeric: true, sensitivity: "base" });
+  });
+}
+
+function customerRouteRuleRowHtmlV348(rule, editable = false) {
+  const routeCode = customerRouteValue(rule.route);
+  const routeLabel = customerRouteDisplay(rule.route);
+  const addressText = customerRouteAddressStatus(rule);
+  const addressClass = routeCode === "DTC" && !customerRouteAddress(rule) ? " needs-address" : "";
+
+  return `
+    <article class="customer-route-rule-row ${editable ? "is-editable" : ""}" data-route-code="${escapeHtml(routeCode)}" style="--customer-route-color:${escapeHtml(customerRouteVisualColorV347(routeCode))}">
+      <div class="customer-route-row-fields">
+        <label class="customer-route-customer-field">
+          <span>Customer / match text</span>
+          ${
+            editable
+              ? `<input data-customer-route-pattern="${escapeHtml(rule.id)}" type="text" value="${escapeHtml(rule.customerPattern)}" aria-label="Customer route customer">`
+              : `<strong>${escapeHtml(rule.customerPattern)}</strong>`
+          }
+        </label>
+
+        <label class="customer-route-route-field">
+          <span>Route</span>
+          ${
+            editable
+              ? `<select data-customer-route-route="${escapeHtml(rule.id)}" aria-label="Customer route code">
+                  ${customerRouteOptionsHtml(rule.route)}
+                </select>`
+              : `<em class="customer-route-badge">${escapeHtml(routeLabel)}</em>`
+          }
+        </label>
+
+        <label class="customer-route-address-field${addressClass}">
+          <span>Destination address</span>
+          ${
+            editable
+              ? `<input data-customer-route-address="${escapeHtml(rule.id)}" type="text" value="${escapeHtml(customerRouteAddress(rule))}" aria-label="Customer route destination address" placeholder="Required for DTC customers">`
+              : `<small>${escapeHtml(addressText)}</small>`
+          }
+        </label>
+      </div>
+
+      ${
+        editable
+          ? `<div class="customer-route-row-actions customer-route-row-actions-v346">
+              <button type="button" class="customer-route-action-v346 is-save" data-save-customer-route-rule="${escapeHtml(rule.id)}" title="Save route" aria-label="Save route"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4M8 16h8"/></svg></button>
+              <button type="button" class="customer-route-action-v346 is-delete" data-remove-customer-route-rule="${escapeHtml(rule.id)}" title="Delete route" aria-label="Delete route"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10l-1 11H8zM9 8V5h6v3M5 8h14M10 11v5M14 11v5"/></svg></button>
+            </div>`
+          : ""
+      }
+    </article>`;
+}
+
+function customerRouteRuleRowsHtml(editable = false, limit = 0) {
+  const rules = customerRouteSortedRulesV348();
+  const visibleRules = limit ? rules.slice(0, limit) : rules;
+
+  if (!visibleRules.length) {
     return `
       <div class="customer-route-empty">
         <strong>No customer route rules</strong>
@@ -27846,58 +29389,50 @@ function customerRouteRuleRowsHtml(editable = false, limit = 0) {
     `;
   }
 
-  return rules
-    .map((rule) => {
-      const routeCode = customerRouteValue(rule.route);
-      const routeLabel = customerRouteDisplay(rule.route);
-      const addressText = customerRouteAddressStatus(rule);
-      const addressClass = routeCode === "DTC" && !customerRouteAddress(rule) ? " needs-address" : "";
+  return visibleRules.map((rule) => customerRouteRuleRowHtmlV348(rule, editable)).join("");
+}
 
+/**
+ * Purpose: Group Customer Route rules by their maintained route so the Admin
+ * manager and dashboard overview use one consistent operational hierarchy.
+ */
+function customerRouteRuleGroupsHtmlV348(editable = false, limit = 0, { collapsed = false } = {}) {
+  const sortedRules = customerRouteSortedRulesV348();
+  const visibleRules = limit ? sortedRules.slice(0, limit) : sortedRules;
+  if (!visibleRules.length) return customerRouteRuleRowsHtml(editable, limit);
+
+  const groups = new Map();
+  visibleRules.forEach((rule) => {
+    const routeCode = customerRouteValue(rule.route);
+    if (!groups.has(routeCode)) groups.set(routeCode, []);
+    groups.get(routeCode).push(rule);
+  });
+
+  return [...groups.entries()].map(([routeCode, rules]) => {
+    const routeColor = customerRouteVisualColorV347(routeCode);
+    const body = `<div class="customer-route-group-rules-v348">${rules.map((rule) => customerRouteRuleRowHtmlV348(rule, editable)).join("")}</div>`;
+    if (collapsed) {
       return `
-        <article class="customer-route-rule-row ${editable ? "is-editable" : ""}">
-          <div class="customer-route-row-fields">
-            <label class="customer-route-customer-field">
-              <span>Customer / match text</span>
-              ${
-                editable
-                  ? `<input data-customer-route-pattern="${escapeHtml(rule.id)}" type="text" value="${escapeHtml(rule.customerPattern)}" aria-label="Customer route customer">`
-                  : `<strong>${escapeHtml(rule.customerPattern)}</strong>`
-              }
-            </label>
-
-            <label class="customer-route-route-field">
-              <span>Route</span>
-              ${
-                editable
-                  ? `<select data-customer-route-route="${escapeHtml(rule.id)}" aria-label="Customer route code">
-                      ${customerRouteOptionsHtml(rule.route)}
-                    </select>`
-                  : `<em class="customer-route-badge">${escapeHtml(routeLabel)}</em>`
-              }
-            </label>
-
-            <label class="customer-route-address-field${addressClass}">
-              <span>Destination address</span>
-              ${
-                editable
-                  ? `<input data-customer-route-address="${escapeHtml(rule.id)}" type="text" value="${escapeHtml(customerRouteAddress(rule))}" aria-label="Customer route destination address" placeholder="Required for DTC customers">`
-                  : `<small>${escapeHtml(addressText)}</small>`
-              }
-            </label>
-          </div>
-
-          ${
-            editable
-              ? `<div class="customer-route-row-actions">
-                  <button type="button" class="icon-only icon-save" data-save-customer-route-rule="${escapeHtml(rule.id)}" title="Save route" aria-label="Save route"></button>
-                  <button type="button" class="icon-only icon-trash danger" data-remove-customer-route-rule="${escapeHtml(rule.id)}" title="Delete route" aria-label="Delete route"></button>
-                </div>`
-              : ""
-          }
-        </article>
-      `;
-    })
-    .join("");
+        <details class="customer-route-group-v348 customer-route-group-v349 is-collapsible${editable ? " is-editable" : ""}" data-route-group="${escapeHtml(routeCode)}" style="--customer-route-color:${escapeHtml(routeColor)}">
+          <summary class="customer-route-group-heading-v348 customer-route-group-summary-v349">
+            <span class="customer-route-group-dot-v348" aria-hidden="true"></span>
+            <strong>${escapeHtml(customerRouteDisplay(routeCode))}</strong>
+            <b>${escapeHtml(rules.length)} rule${rules.length === 1 ? "" : "s"}</b>
+            <span class="customer-route-group-chevron-v349" aria-hidden="true"></span>
+          </summary>
+          ${body}
+        </details>`;
+    }
+    return `
+      <section class="customer-route-group-v348 customer-route-group-v349${editable ? " is-editable" : ""}" data-route-group="${escapeHtml(routeCode)}" style="--customer-route-color:${escapeHtml(routeColor)}">
+        <header class="customer-route-group-heading-v348">
+          <span class="customer-route-group-dot-v348" aria-hidden="true"></span>
+          <strong>${escapeHtml(customerRouteDisplay(routeCode))}</strong>
+          <b>${escapeHtml(rules.length)} rule${rules.length === 1 ? "" : "s"}</b>
+        </header>
+        ${body}
+      </section>`;
+  }).join("");
 }
 
 /**
@@ -27907,52 +29442,97 @@ function customerRouteRuleRowsHtml(editable = false, limit = 0) {
  */
 function customerRouteRulesModalHtml() {
   const ruleCount = state.adminCustomerRouteRules.length;
+  const availableRoutes = customerRouteTabCodesV350();
+  let activeRoute = customerRouteValue(state.customerRouteManagerRouteV350 || "CPU");
+  if (!availableRoutes.includes(activeRoute)) activeRoute = availableRoutes[0] || "CPU";
+  state.customerRouteManagerRouteV350 = activeRoute;
+  const rules = customerRouteRulesForRouteV350(activeRoute);
 
   return `
-    <div class="customer-route-modal-shell customer-route-modern">
-      <section class="customer-route-modal-intro">
-        <div>
-          <span>Customer Route Rules</span>
-          <strong>Match customers to the route they should import into.</strong>
-          <p>New custom routes become their own stage during import when a customer matches that route.</p>
+    <div class="customer-route-modal-shell customer-route-modern customer-route-modern-v344 customer-route-modern-v349 customer-route-modern-v350 customer-route-modern-v351">
+      <section class="customer-route-modal-list customer-route-library-v344">
+        <div class="customer-route-modal-list-heading customer-route-list-heading-v344 customer-route-list-heading-v346 customer-route-list-heading-v349">
+          <span class="customer-route-heading-icon-v346 customer-route-heading-icon-v347" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21V4"/><path d="M12 6H6L3 9l3 3h6"/><path d="M12 11h6l3 3-3 3h-6"/><circle cx="12" cy="3" r="1.5"/></svg></span>
+          <div><strong>Route rules</strong><span>Customer matching is evaluated during import. Save changes on the row you edit.</span></div>
+          <b>${escapeHtml(ruleCount)} total</b>
+          <button type="button" class="app-primary-button customer-route-create-launch-v344 customer-route-create-launch-v349" data-open-customer-route-create>
+            <span class="customer-route-create-plus-v344" aria-hidden="true"></span>
+            <span>Create New Customer Route</span>
+          </button>
         </div>
-        <b>${escapeHtml(ruleCount)} active rule${ruleCount === 1 ? "" : "s"}</b>
+        ${customerRouteTabsHtmlV350(activeRoute)}
+        <div class="customer-route-list-v344 customer-route-tab-content-v350" data-customer-route-tab-panel-v350="${escapeHtml(activeRoute)}">
+          ${rules.length ? rules.map((rule) => customerRouteRuleRowHtmlV348(rule, true)).join("") : `<div class="customer-route-empty"><strong>No ${escapeHtml(customerRouteTabLabelV350(activeRoute))} customer rules</strong><span>Create a rule to route matching customers here.</span></div>`}
+        </div>
       </section>
-
-      <form id="customerRouteRuleFormModal" class="customer-route-modal-form">
-        <label>
-          <span>New customer / job match text</span>
-          <input id="customerRoutePatternInputModal" type="text" autocomplete="off" placeholder="Example: Lowe's, CPU AIR, Greenville">
-        </label>
-
-        <label>
-          <span>New route code</span>
-          <input id="customerRouteSelectModal" type="text" list="customerRouteCodes" autocomplete="off" placeholder="CPU, DTC, GNV, or custom route">
-        </label>
-
-        <label class="customer-route-form-address">
-          <span>Destination address</span>
-          <input id="customerRouteAddressInputModal" type="text" autocomplete="off" placeholder="Required for DTC customers">
-        </label>
-        <datalist id="customerRouteCodes">
-          ${customerRouteOptionsHtml("CPU")}
-        </datalist>
-
-        <div class="customer-route-modal-actions">
-          <button id="customerRouteSubmitBtnModal" type="submit">Add Customer Route</button>
-        </div>
-      </form>
-
-      <div class="customer-route-modal-list">
-        <div class="customer-route-modal-list-heading">
-          <strong>Current customer rules</strong>
-          <span>Change the route dropdown, then use the save icon on that row.</span>
-        </div>
-
-        ${customerRouteRuleRowsHtml(true)}
-      </div>
     </div>
   `;
+}
+
+function customerRouteCreateDialogHtml() {
+  return `
+    <header class="role-create-modal-header-v340 customer-route-create-header-v344">
+      <div>
+        <small>Customer Routes</small>
+        <h2 id="customerRouteCreateTitleV344">Create New Customer Route</h2>
+        <p>Match a customer or job phrase to the route that should receive that work during import.</p>
+      </div>
+      <button type="button" class="gui-close-button" data-customer-route-create-close aria-label="Close Create New Customer Route">×</button>
+    </header>
+    <form id="customerRouteRuleFormModal" class="customer-route-create-form-v344">
+      <section class="customer-route-create-grid-v344">
+        <label>
+          <span>Customer / job match text <b class="required-mark-v340" aria-hidden="true">*</b></span>
+          <input id="customerRoutePatternInputModal" type="text" autocomplete="off" placeholder="Example: Lowe's, CPU AIR, Greenville" required>
+          <small>Use the most specific customer or job wording that consistently appears in A+W.</small>
+        </label>
+        <label>
+          <span>Route code <b class="required-mark-v340" aria-hidden="true">*</b></span>
+          <input id="customerRouteSelectModal" type="text" list="customerRouteCodesV344" autocomplete="off" placeholder="CPU, DTC, GNV, or custom route" required>
+          <small>A new custom code becomes its own maintained route stage when matched.</small>
+        </label>
+        <label class="customer-route-create-address-v344">
+          <span>Destination address</span>
+          <input id="customerRouteAddressInputModal" type="text" autocomplete="off" placeholder="Required for DTC customers">
+          <small>DTC requires an address. Other routes can leave this blank unless an address is useful operationally.</small>
+        </label>
+        <datalist id="customerRouteCodesV344">${customerRouteOptionsHtml("CPU")}</datalist>
+      </section>
+      <section class="customer-route-create-guidance-v344">
+        <span class="customer-route-create-guidance-icon-v344" aria-hidden="true"></span>
+        <div><strong>Import behavior</strong><p>The new rule affects future route resolution. Existing delivery-list rows are not silently reassigned by creating a rule.</p></div>
+      </section>
+      <footer class="customer-route-create-actions-v344">
+        <button type="button" class="customer-route-create-cancel-v344 app-cancel-action-v343" data-customer-route-create-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+        <button id="customerRouteSubmitBtnModal" type="submit" class="app-primary-button customer-route-create-submit-v344"><span class="customer-route-create-plus-v344" aria-hidden="true"></span><span>Create Customer Route</span></button>
+      </footer>
+    </form>`;
+}
+
+function closeCustomerRouteCreateModal() {
+  document.getElementById("customerRouteCreateModalV344")?.remove();
+  document.getElementById("customerRouteCreateBackdropV344")?.remove();
+  updateModalScrollLock();
+}
+
+function openCustomerRouteCreateModal() {
+  closeCustomerRouteCreateModal();
+  const backdrop = document.createElement("div");
+  backdrop.id = "customerRouteCreateBackdropV344";
+  backdrop.className = "admin-child-modal-backdrop-v340 customer-route-create-backdrop-v344";
+  backdrop.dataset.customerRouteCreateClose = "1";
+
+  const dialog = document.createElement("section");
+  dialog.id = "customerRouteCreateModalV344";
+  dialog.className = "admin-child-modal-v340 customer-route-create-modal-v344";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-labelledby", "customerRouteCreateTitleV344");
+  dialog.innerHTML = customerRouteCreateDialogHtml();
+
+  document.body.append(backdrop, dialog);
+  updateModalScrollLock();
+  requestAnimationFrame(() => document.getElementById("customerRoutePatternInputModal")?.focus());
 }
 
 /**
@@ -27990,45 +29570,18 @@ function setCustomerRouteEditForm(ruleId = "") {
 function renderCustomerRouteRules() {
   if (!els.customerRouteRules) return;
 
-  const rules = state.adminCustomerRouteRules || [];
-  const previewLimit = 6;
-  const hiddenCount = Math.max(rules.length - previewLimit, 0);
-
-  const routeStats = customerRouteOptionList()
-    .map((option) => {
-      const count = rules.filter((rule) => customerRouteValue(rule.route) === option.value).length;
-      if (!count) return "";
-
-      return `
-        <div class="customer-route-stat">
-          <small>${escapeHtml(option.label)}</small>
-          <strong>${escapeHtml(count)}</strong>
-        </div>
-      `;
-    })
-    .filter(Boolean)
-    .join("");
+  const availableRoutes = customerRouteTabCodesV350();
+  let activeRoute = customerRouteValue(state.customerRouteOverviewRouteV350 || "CPU");
+  if (!availableRoutes.includes(activeRoute)) activeRoute = availableRoutes[0] || "CPU";
+  state.customerRouteOverviewRouteV350 = activeRoute;
+  const routeRules = customerRouteRulesForRouteV350(activeRoute);
 
   els.customerRouteRules.innerHTML = `
-    <div class="customer-route-overview">
-      <div class="customer-route-overview-heading">
-        <strong>${escapeHtml(rules.length)} customer route rule${rules.length === 1 ? "" : "s"}</strong>
-        <span>Quick view of customers that will be split to special/custom stages during import.</span>
+    <div class="customer-route-overview customer-route-overview-v349 customer-route-overview-v350">
+      ${customerRouteTabsHtmlV350(activeRoute, { overview: true })}
+      <div class="customer-route-overview-customers-v350" data-customer-route-overview-panel-v350="${escapeHtml(activeRoute)}">
+        ${routeRules.length ? routeRules.map((rule) => `<article class="customer-route-overview-rule-v351" style="--customer-route-color:${escapeHtml(customerRouteVisualColorV347(activeRoute))}"><span class="customer-route-overview-dot-v350" aria-hidden="true"></span><div><strong>${escapeHtml(rule.customerPattern)}</strong><small>${escapeHtml(customerRouteAddressStatus(rule))}</small></div><em>${escapeHtml(customerRouteTabLabelV350(activeRoute))}</em></article>`).join("") : `<div class="admin-empty">No ${escapeHtml(customerRouteTabLabelV350(activeRoute))} customer rules are configured.</div>`}
       </div>
-
-      <div class="customer-route-stat-grid">
-        ${routeStats || `<div class="customer-route-stat"><small>No route rules yet</small><strong>0</strong></div>`}
-      </div>
-
-      <div class="customer-route-preview-list">
-        ${customerRouteRuleRowsHtml(false, previewLimit)}
-      </div>
-
-      ${
-        hiddenCount
-          ? `<button type="button" class="link-button customer-route-more-button" data-admin-modal="customerRoutes">View ${escapeHtml(hiddenCount)} more rule${hiddenCount === 1 ? "" : "s"}</button>`
-          : ""
-      }
     </div>
   `;
 }
@@ -28054,11 +29607,13 @@ function refreshCustomerRouteModal() {
 function renderBayScannerRuleOverview() {
   if (!els.bayScannerRuleOverview) return;
   const settings = state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
+  const auto = state.bayAutoAssignSettings || {};
   const manualRules = settings.manualRules || [];
   const barcodeRules = settings.barcodeRules || [];
+  const manualTypes = auto.manualAssignTypes || [];
   els.bayScannerRuleOverview.innerHTML = `
-    <div><strong>${escapeHtml(manualRules.length)} remembered manual input${manualRules.length === 1 ? "" : "s"}</strong><span>Known phrases and odd labels that will not ask for confirmation.</span></div>
-    <div><strong>${escapeHtml(barcodeRules.length)} accepted bay barcode rule${barcodeRules.length === 1 ? "" : "s"}</strong><span>Extra barcode formats accepted only on the Bay Map scanner.</span></div>
+    <div><strong>${escapeHtml(manualRules.length + barcodeRules.length)} scanner rule${manualRules.length + barcodeRules.length === 1 ? "" : "s"}</strong><span>${escapeHtml(manualRules.length)} remembered manual · ${escapeHtml(barcodeRules.length)} barcode format${barcodeRules.length === 1 ? "" : "s"}.</span></div>
+    <div><strong>${escapeHtml(auto.tallMinInches ?? 60)}" tall / ${escapeHtml(auto.oversizeMinInches ?? 96)}" oversize</strong><span>${escapeHtml(manualTypes.length)} categor${manualTypes.length === 1 ? "y" : "ies"} require manual bay assignment.</span></div>
   `;
 }
 
@@ -28067,11 +29622,6 @@ function renderBayScannerRuleOverview() {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function autoAssignTypeOptions(selected = "") {
-  const values = ["Standard", "Tall", "Oversize", "Mirror", "Framed Mirror", "CPU"];
-  return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
-}
-
 /**
  * Purpose: Render the render bay auto assign overview workflow using the existing shared UI state.
  * Effects: Updates visible dom state, may update shared client state.
@@ -28103,30 +29653,22 @@ function renderCrossDateScanOverview() {
   const target = document.getElementById("crossDateScanOverview");
   if (!target) return;
   const settings = state.crossDateScanSettings || { mode: "auto_unique", pastDays: 7, futureDays: 30 };
+  const overrideMinutes = Number(state.bayScannerSettings?.destinationOverrideMinutes || 15);
   target.innerHTML = `
-    <div><strong>${escapeHtml(crossDateScanModeLabel(settings.mode))}</strong><span>Current handling when a scan is found on another active date.</span></div>
-    <div><strong>${escapeHtml(settings.pastDays)} days back / ${escapeHtml(settings.futureDays)} days forward</strong><span>Search remains limited to the same valid stage and accessible delivery lists.</span></div>
+    <div><strong>${escapeHtml(crossDateScanModeLabel(settings.mode))}</strong><span>${escapeHtml(settings.pastDays)} days back / ${escapeHtml(settings.futureDays)} days forward.</span></div>
+    <div><strong>${escapeHtml(overrideMinutes)} minute mixed-destination window</strong><span>Temporary Bay Map rack mismatch approval.</span></div>
   `;
 }
 
-/** Build the Admin editor for cross-delivery-date scanner settings. */
-function crossDateScanSettingsModalHtml() {
+/** Build the Cross-Date tab inside the combined Scan Page Settings GUI. */
+function crossDateSettingsTabHtmlV350() {
   const settings = state.crossDateScanSettings || { mode: "auto_unique", pastDays: 7, futureDays: 30 };
   return `
-    <div class="cross-date-settings-shell">
-      <section class="cross-date-settings-intro">
-        <div>
-          <small>Scanner safety</small>
-          <strong>Cross-delivery-date matching</strong>
-          <p>The selected delivery list is always checked first. Other active dates are searched only after the current list has no unique match.</p>
-        </div>
-        <span>Every match and switch is audited</span>
-      </section>
-
-      <form id="crossDateScanSettingsForm" class="cross-date-settings-form">
-        <section class="cross-date-settings-card">
-          <header><strong>Switch behavior</strong><span>Automatic switching is allowed only for one safe, incomplete match.</span></header>
-          <label>
+    <div class="cross-date-settings-shell cross-date-settings-v346 cross-date-settings-v347 scan-page-settings-v350">
+      <form id="crossDateScanSettingsForm" class="cross-date-settings-form cross-date-settings-form-v346 cross-date-settings-form-v347">
+        <section class="cross-date-settings-card cross-date-mode-card-v346">
+          <header><span class="cross-date-card-icon-v346 is-mode" aria-hidden="true"></span><div><strong>Switch behavior</strong></div></header>
+          <label class="cross-date-primary-field-v346">
             <span>Cross-date handling</span>
             <select id="crossDateScanMode">
               <option value="disabled" ${settings.mode === "disabled" ? "selected" : ""}>Disabled</option>
@@ -28134,26 +29676,58 @@ function crossDateScanSettingsModalHtml() {
               <option value="auto_unique" ${settings.mode === "auto_unique" ? "selected" : ""}>Automatically switch unique matches</option>
             </select>
           </label>
-          <p>Multiple matches, completed lines, and scans requiring a rack, destination, bay, or outbound override always require operator review.</p>
         </section>
 
-        <section class="cross-date-settings-card">
-          <header><strong>Search window</strong><span>Limits are measured from the currently selected delivery date.</span></header>
+        <section class="cross-date-settings-card cross-date-window-card-v346">
+          <header><span class="cross-date-card-icon-v346 is-window" aria-hidden="true"></span><div><strong>Search window</strong></div></header>
           <div class="cross-date-settings-window">
-            <label><span>Past delivery dates</span><input id="crossDatePastDays" type="number" min="0" max="365" step="1" value="${escapeHtml(settings.pastDays)}"></label>
-            <label><span>Future delivery dates</span><input id="crossDateFutureDays" type="number" min="0" max="365" step="1" value="${escapeHtml(settings.futureDays)}"></label>
+            <label><span>Past delivery dates</span><div class="cross-date-number-field-v346"><input id="crossDatePastDays" type="number" min="0" max="365" step="1" value="${escapeHtml(settings.pastDays)}"><b>days</b></div></label>
+            <label><span>Future delivery dates</span><div class="cross-date-number-field-v346"><input id="crossDateFutureDays" type="number" min="0" max="365" step="1" value="${escapeHtml(settings.futureDays)}"><b>days</b></div></label>
           </div>
         </section>
 
-        <section class="cross-date-settings-safeguards">
-          <strong>Preserved safeguards</strong>
-          <span>Stage permissions, duplicate prevention, outbound gates, rack destination checks, bay assignment rules, undo/redo, and audit history remain authoritative after a date switch.</span>
-        </section>
-
-        <div class="cross-date-settings-actions"><button type="submit">Save Cross-Date Settings</button></div>
+        <div class="cross-date-settings-actions cross-date-settings-actions-v346"><button type="submit" class="app-primary-button"><span class="lookup-row-action-icon-v346 is-save" aria-hidden="true"></span><span>Save Cross-Date Settings</span></button></div>
       </form>
-    </div>
-  `;
+    </div>`;
+}
+
+/** Render the Bay Scanner mixed-destination approval window as a Scan Page setting. */
+function mixedDestinationSettingsHtmlV350() {
+  const settings = state.bayScannerSettings || { destinationOverrideMinutes: 15 };
+  const minutes = Number(settings.destinationOverrideMinutes || 15);
+  return `
+    <div class="scan-page-mixed-destination-v350 scan-page-mixed-destination-v351">
+      <section class="mixed-destination-card-v351">
+        <header class="mixed-destination-header-v351">
+          <span class="mixed-destination-icon-v351" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h10M11 4l3 3-3 3M20 17H10M13 14l-3 3 3 3"/><circle cx="5" cy="17" r="2"/><circle cx="19" cy="7" r="2"/></svg></span>
+          <div><small>Mixed Destination</small><strong>Temporary rack approval</strong><span>Choose how long an approved destination mismatch remains valid for Bay Map scanning.</span></div>
+          <b>${escapeHtml(minutes)} min</b>
+        </header>
+        <form id="bayOverrideWindowForm" class="mixed-destination-form-v351">
+          <label class="mixed-destination-window-v351">
+            <span>Approval window</span>
+            <div><input id="bayDestinationOverrideMinutes" type="number" min="1" max="120" step="1" value="${escapeHtml(minutes)}"><b>minutes</b></div>
+            <small>Enter 1–120 minutes.</small>
+          </label>
+          <aside class="mixed-destination-note-v351"><span aria-hidden="true">i</span><div><strong>What this changes</strong><p>Only the temporary Bay Map mixed-destination approval window. It does not change route assignment, rack status, or normal scan validation.</p></div></aside>
+          <footer><button type="submit" class="app-primary-button"><span class="lookup-row-action-icon-v346 is-save" aria-hidden="true"></span><span>Save Mixed Destination</span></button></footer>
+        </form>
+      </section>
+    </div>`;
+}
+
+/** Render whichever Scan Page Settings top-level workspace is active. */
+function crossDateScanSettingsModalHtml() {
+  return state.scanPageSettingsActiveTab === "mixedDestination"
+    ? mixedDestinationSettingsHtmlV350()
+    : crossDateSettingsTabHtmlV350();
+}
+
+function renderScanPageSettingsModalV350() {
+  if (!els.adminModalBody || els.adminModal?.dataset.kind !== "crossDateScanning") return;
+  els.adminModalBody.innerHTML = crossDateScanSettingsModalHtml();
+  configureAdminModalSectionTabsV345("crossDateScanning");
+  applyLanguageToRoot(els.adminModalBody);
 }
 
 async function saveCrossDateScanSettings() {
@@ -28168,63 +29742,92 @@ async function saveCrossDateScanSettings() {
   });
   state.crossDateScanSettings = saved || payload;
   renderCrossDateScanOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = crossDateScanSettingsModalHtml();
+  renderScanPageSettingsModalV350();
   showSaveConfirmation("Cross-delivery-date scan settings were saved.");
 }
 
 function bayAutoAssignerModalHtml() {
   const settings = state.bayAutoAssignSettings || {};
   const manual = new Set(settings.manualAssignTypes || []);
-  const typeRows = [
-    ["standardBayType", "Standard glass", settings.standardBayType || "Standard"],
-    ["tallBayType", "Tall glass", settings.tallBayType || "Tall"],
-    ["oversizeBayType", "Oversize glass", settings.oversizeBayType || "Oversize"],
-    ["mirrorBayType", "Mirror", settings.mirrorBayType || "Mirror"],
-    ["framedMirrorBayType", "Framed mirror", settings.framedMirrorBayType || "Framed Mirror"],
-    ["cpuBayType", "CPU route", settings.cpuBayType || "CPU"],
+  // Auto assignment only runs after an Outbound scan for Indian Trail work.
+  // Keep legacy mapping values intact for upgraded databases, but do not expose
+  // arbitrary remapping in the everyday GUI because classification-to-bay-type
+  // changes can silently send glass to the wrong physical bay family.
+  const policyRows = [
+    {
+      label: "Standard glass",
+      target: settings.standardBayType || "Standard",
+      note: `Largest dimension below ${settings.tallMinInches ?? 60}\".`,
+    },
+    {
+      label: "Tall glass",
+      target: settings.tallBayType || "Tall",
+      note: `${settings.tallMinInches ?? 60}\" to under ${settings.oversizeMinInches ?? 96}\".`,
+    },
+    {
+      label: "Oversize glass",
+      target: settings.oversizeBayType || "Oversize",
+      note: `Largest dimension at or above ${settings.oversizeMinInches ?? 96}\".`,
+    },
+    {
+      label: "Mirror",
+      target: settings.mirrorBayType || "Mirror",
+      note: "Unframed mirror products use the Mirror bay family.",
+    },
+    {
+      label: "Framed mirror",
+      target: settings.framedMirrorBayType || "Framed Mirror",
+      note: "Framed mirror products use the Framed Mirror bay family.",
+    },
   ];
+  const manualCount = policyRows.filter((row) => manual.has(row.target)).length;
+
   return `
-    <div class="bay-auto-assigner-shell">
-      <section class="customer-email-intro">
-        <div>
-          <strong>Indian Trail bay auto-assigner</strong>
-          <p>Control how the system classifies glass for bay preassignment. Categories marked Manual Assign will be left for a user to place instead of being auto-assigned.</p>
-        </div>
-        <span class="email-smtp-badge is-live">Indian Trail</span>
+    <div class="bay-auto-assigner-shell bay-auto-assigner-shell-v352">
+      <section class="bay-auto-summary-v352">
+        <span class="bay-auto-summary-icon-v352" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h3v4H8zM15 9h2v6h-2z"/><path d="M12 4v16"/></svg></span>
+        <div><small>Outbound → Indian Trail</small><strong>Reserve the right empty bay before receiving</strong><span>When qualifying Indian Trail glass is scanned Outbound, the system classifies the order and can reserve the first empty bay in the matching physical bay family.</span></div>
+        <div class="bay-auto-summary-stats-v352"><span><b>${escapeHtml(settings.tallMinInches ?? 60)}&quot;</b><small>Tall starts</small></span><span><b>${escapeHtml(settings.oversizeMinInches ?? 96)}&quot;</b><small>Oversize</small></span><span><b>${escapeHtml(manualCount)}</b><small>Manual groups</small></span></div>
       </section>
 
-      <form id="bayAutoAssignerForm" class="bay-auto-assigner-form">
-        <section class="bay-auto-card">
-          <header><strong>Size thresholds</strong><span>Largest glass dimension controls Standard / Tall / Oversize.</span></header>
-          <div class="bay-auto-grid">
-            <label><span>Tall starts at inches</span><input id="bayAutoTallMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.tallMinInches ?? 60)}"></label>
-            <label><span>Oversize starts at inches</span><input id="bayAutoOversizeMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.oversizeMinInches ?? 96)}"></label>
+      <form id="bayAutoAssignerForm" class="bay-auto-assigner-form bay-auto-assigner-form-v352">
+        <section class="bay-auto-card bay-auto-purpose-v352">
+          <header><span class="bay-auto-card-step-v352">1</span><div><strong>What Auto Assignment actually does</strong><span>It reserves a bay for the whole Order Nr. during the Outbound workflow; it does not move glass that is already in a bay.</span></div></header>
+          <div class="bay-auto-flow-v352" aria-label="Auto assignment flow">
+            <div><b>1</b><span><strong>Outbound scan</strong><small>Only Indian Trail destination work enters this workflow.</small></span></div>
+            <i aria-hidden="true">→</i>
+            <div><b>2</b><span><strong>Classify order</strong><small>Mirror type is checked first; other glass uses the largest dimension.</small></span></div>
+            <i aria-hidden="true">→</i>
+            <div><b>3</b><span><strong>Reserve empty bay</strong><small>The first available bay of that type is preassigned to the entire order.</small></span></div>
+          </div>
+          <aside class="bay-auto-safety-v352"><strong>Built-in safeguards</strong><span>Existing order assignments are reused, one physical bay cannot mix Order Nrs., Manual categories stop before reservation, and a full matching bay family never falls back to Standard.</span></aside>
+        </section>
+
+        <section class="bay-auto-card bay-auto-thresholds-v352">
+          <header><span class="bay-auto-card-step-v352">2</span><div><strong>Size classification</strong><span>Only two dimensions need tuning. Standard is everything below the Tall threshold.</span></div></header>
+          <div class="bay-auto-threshold-grid-v352">
+            <label><span>Tall starts at</span><div class="bay-auto-unit-field-v352"><input id="bayAutoTallMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.tallMinInches ?? 60)}"><b>inches</b></div><small>Standard glass stays below this value.</small></label>
+            <label><span>Oversize starts at</span><div class="bay-auto-unit-field-v352"><input id="bayAutoOversizeMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.oversizeMinInches ?? 96)}"><b>inches</b></div><small>Tall glass remains between the two thresholds.</small></label>
           </div>
         </section>
 
-        <section class="bay-auto-card">
-          <header><strong>Bay type mapping</strong><span>Match each classification to one of your bay groups/types.</span></header>
-          <div class="bay-auto-type-list">
-            ${typeRows.map(([field, label, selected]) => `
-              <label>
-                <span>${escapeHtml(label)}</span>
-                <select data-bay-auto-field="${escapeHtml(field)}">${autoAssignTypeOptions(selected)}</select>
+        <section class="bay-auto-card bay-auto-policy-card-v352">
+          <header><span class="bay-auto-card-step-v352">3</span><div><strong>Auto vs. manual placement</strong><span>Leave routine categories on Auto. Mark a category Manual when an operator should choose the physical bay intentionally.</span></div></header>
+          <div class="bay-auto-policy-list-v352">
+            ${policyRows.map((row) => `
+              <label class="bay-auto-policy-row-v352">
+                <input type="checkbox" value="${escapeHtml(row.target)}" ${manual.has(row.target) ? "checked" : ""}>
+                <span class="bay-auto-policy-copy-v352"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.note)}</small></span>
+                <span class="bay-auto-target-v352">Bay type: <b>${escapeHtml(row.target)}</b></span>
+                <span class="bay-auto-policy-state-v352"><span class="is-auto">Auto preassign</span><span class="is-manual">Manual placement</span></span>
               </label>
             `).join("")}
           </div>
         </section>
 
-        <section class="bay-auto-card">
-          <header><strong>Manual assignment categories</strong><span>Checked categories will not be auto-preassigned. They will require manual placement.</span></header>
-          <div class="bay-auto-manual-list">
-            ${["Standard", "Tall", "Oversize", "Mirror", "Framed Mirror", "CPU"].map((type) => `
-              <label><input type="checkbox" value="${escapeHtml(type)}" ${manual.has(type) ? "checked" : ""}> <span>${escapeHtml(type)}</span></label>
-            `).join("")}
-          </div>
-        </section>
-
-        <div class="bay-auto-actions">
-          <button type="submit">Save Auto Assigner</button>
+        <div class="bay-auto-actions bay-auto-actions-v352">
+          <span>These settings affect future Outbound preassignment only. Existing bay assignments and historical records are never rewritten.</span>
+          <button type="submit" class="app-primary-button"><span class="lookup-row-action-icon-v346 is-save" aria-hidden="true"></span><span>Save Auto Assignment</span></button>
         </div>
       </form>
     </div>
@@ -28240,8 +29843,9 @@ async function refreshBayAutoAssigner(openModal = false) {
   const payload = await fetchJson("/api/admin/bay-auto-assigner");
   state.bayAutoAssignSettings = payload || state.bayAutoAssignSettings;
   renderBayAutoAssignOverview();
-  if (openModal && els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "bayAutoAssigner" && els.adminModalBody) {
-    els.adminModalBody.innerHTML = bayAutoAssignerModalHtml();
+  if (openModal && els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "bayScannerRules" && els.adminModalBody) {
+    state.bayScannerRulesActiveTab = "auto";
+    renderBayScannerRulesModalV349();
   }
   return payload;
 }
@@ -28252,19 +29856,27 @@ async function refreshBayAutoAssigner(openModal = false) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function saveBayAutoAssignerSettings() {
+  const current = state.bayAutoAssignSettings || {};
   const payload = {
     tallMinInches: Number(document.getElementById("bayAutoTallMin")?.value || 60),
     oversizeMinInches: Number(document.getElementById("bayAutoOversizeMin")?.value || 96),
-    manualAssignTypes: [...document.querySelectorAll(".bay-auto-manual-list input:checked")].map((input) => input.value),
+    manualAssignTypes: [...new Set([...document.querySelectorAll(".bay-auto-policy-list-v352 input:checked")].map((input) => input.value))],
+    // Preserve established mapping keys for upgraded installations. v0.352
+    // intentionally removes arbitrary remapping from the normal GUI because
+    // those mappings are implementation details, not routine operator choices.
+    standardBayType: current.standardBayType || "Standard",
+    tallBayType: current.tallBayType || "Tall",
+    oversizeBayType: current.oversizeBayType || "Oversize",
+    mirrorBayType: current.mirrorBayType || "Mirror",
+    framedMirrorBayType: current.framedMirrorBayType || "Framed Mirror",
+    cpuBayType: current.cpuBayType || "CPU",
   };
-  document.querySelectorAll("[data-bay-auto-field]").forEach((select) => {
-    payload[select.dataset.bayAutoField] = select.value;
-  });
   const saved = await fetchJson("/api/admin/bay-auto-assigner", { method: "POST", body: JSON.stringify(payload) });
   state.bayAutoAssignSettings = saved || payload;
   renderBayAutoAssignOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = bayAutoAssignerModalHtml();
-  showSaveConfirmation("Bay auto-assigner settings were saved.");
+  renderBayScannerRuleOverview();
+  renderBayScannerRulesModalV349();
+  showSaveConfirmation("Bay auto-assignment settings were saved.");
 }
 
 /**
@@ -28276,55 +29888,36 @@ function bayScannerRulesModalHtml() {
   const settings = state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
   const manualRules = settings.manualRules || [];
   const barcodeRules = settings.barcodeRules || [];
+  const activeTab = ["rules", "auto"].includes(state.bayScannerRulesActiveTab) ? state.bayScannerRulesActiveTab : "rules";
+
+  if (activeTab === "auto") {
+    return `<div class="bay-config-auto-wrapper-v350">${bayAutoAssignerModalHtml()}</div>`;
+  }
+
+  const ruleSection = (kind, title, description, rules, formHtml) => `
+    <section class="bay-scanner-rule-library-v349 is-${escapeHtml(kind)}">
+      <header><span class="bay-scanner-rule-icon-v349" aria-hidden="true">${kind === "manual" ? '<svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM7 10h5M7 14h8"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M4 5v14M7 5v14M11 5v14M14 5v14M19 5v14"/></svg>'}</span><div><small>${kind === "manual" ? "Remembered input" : "Barcode format"}</small><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span></div><b>${escapeHtml(rules.length)}</b></header>
+      ${formHtml}
+      <div class="bay-scanner-rule-list-v349">
+        ${rules.length ? rules.map((rule) => `<article><div><strong>${escapeHtml(rule.pattern)}</strong><span>${escapeHtml(kind === "manual" ? `${rule.matchType}${rule.label ? ` · ${rule.label}` : ""}` : (rule.label || "Accepted bay barcode"))}</span></div><button class="bay-scanner-rule-remove-v349" type="button" ${kind === "manual" ? `data-remove-bay-manual-rule="${escapeHtml(rule.id)}"` : `data-remove-bay-barcode-rule="${escapeHtml(rule.id)}"`} aria-label="Remove rule"><span class="icon-trash" aria-hidden="true"></span><b>Remove</b></button></article>`).join("") : `<div class="admin-empty">No ${escapeHtml(kind === "manual" ? "remembered inputs" : "extra barcode formats")} yet.</div>`}
+      </div>
+    </section>`;
+
   return `
-    <div class="bay-scanner-rules-shell">
-      <section class="customer-email-intro">
-        <div>
-          <strong>Bay Map scanner and manual assignment rules</strong>
-          <p>These rules only apply to Indian Trail Bay Map scanning/manual assign. They do not change the main delivery-list scanner.</p>
-        </div>
-        <span class="email-smtp-badge is-live">Bay Map only</span>
-      </section>
+    <div class="bay-scanner-management-v349 is-rules bay-config-rules-v350">
+      <section class="bay-scanner-rule-intro-v349"><div><small>Bay Rules &amp; Auto Assignment</small><strong>Accepted Bay Map inputs</strong><span>Maintain remembered manual text and additional barcode formats independently.</span></div><span><b>${escapeHtml(manualRules.length)}</b> manual</span><span><b>${escapeHtml(barcodeRules.length)}</b> barcode</span></section>
+      <div class="bay-scanner-rule-grid-v349">
+        ${ruleSection("manual", "Manual input rules", "Text that the Bay Map can accept without another confirmation.", manualRules, `<form id="bayManualRuleForm" class="bay-scanner-rule-form-v349"><label><span>Match type</span><select id="bayManualRuleType"><option value="exact">Exact text</option><option value="contains">Contains text</option><option value="regex">Regex pattern</option></select></label><label class="is-wide"><span>Text / pattern</span><input id="bayManualRulePattern" type="text" autocomplete="off" placeholder="Example: Sample rack label or ^WOOD-[0-9]+$"></label><label><span>Label</span><input id="bayManualRuleLabel" type="text" autocomplete="off" placeholder="Optional label"></label><button type="submit" class="app-primary-button">Add Manual Rule</button></form>`)}
+        ${ruleSection("barcode", "Barcode rules", "Additional regular-expression formats accepted when scanning into a target bay.", barcodeRules, `<form id="bayBarcodeRuleForm" class="bay-scanner-rule-form-v349"><label class="is-wide"><span>Regex pattern</span><input id="bayBarcodeRulePattern" type="text" autocomplete="off" placeholder="Example: ^BOX-[A-Z0-9-]+$"></label><label><span>Label</span><input id="bayBarcodeRuleLabel" type="text" autocomplete="off" placeholder="Box label"></label><button type="submit" class="app-primary-button">Add Barcode Rule</button></form>`)}
+      </div>
+    </div>`;
+}
 
-      <section class="bay-rule-card bay-override-window-card">
-        <header><strong>Mixed-destination rack override window</strong><span>How long one approved override keeps that rack open to other destinations.</span></header>
-        <form id="bayOverrideWindowForm" class="bay-rule-form bay-override-window-form">
-          <label><span>Override minutes</span><input id="bayDestinationOverrideMinutes" type="number" min="1" max="120" step="1" value="${escapeHtml(settings.destinationOverrideMinutes || 15)}"></label>
-          <div class="bay-override-window-copy"><strong>Current behavior</strong><span>After a user confirms one destination mismatch, that rack accepts mixed destinations for this many minutes without another walk back to the computer.</span></div>
-          <button type="submit">Save Override Time</button>
-        </form>
-      </section>
-
-      <section class="bay-rule-card">
-        <header><strong>Remembered manual inputs</strong><span>Accepted without asking for confirmation.</span></header>
-        <form id="bayManualRuleForm" class="bay-rule-form">
-          <label><span>Match type</span><select id="bayManualRuleType"><option value="exact">Exact text</option><option value="contains">Contains text</option><option value="regex">Regex pattern</option></select></label>
-          <label class="is-wide"><span>Text / pattern</span><input id="bayManualRulePattern" type="text" autocomplete="off" placeholder="Example: Sample rack label or ^WOOD-[0-9]+$"></label>
-          <label><span>Label</span><input id="bayManualRuleLabel" type="text" autocomplete="off" placeholder="Optional label"></label>
-          <button type="submit">Add Memory</button>
-        </form>
-        <div class="bay-rule-list">
-          ${manualRules.length ? manualRules.map((rule) => `
-            <article><div><strong>${escapeHtml(rule.pattern)}</strong><span>${escapeHtml(rule.matchType)}${rule.label ? ` - ${escapeHtml(rule.label)}` : ""}</span></div><button class="icon-only icon-trash danger" type="button" data-remove-bay-manual-rule="${escapeHtml(rule.id)}" aria-label="Remove remembered manual input"></button></article>
-          `).join("") : `<div class="admin-empty">No remembered manual inputs yet.</div>`}
-        </div>
-      </section>
-
-      <section class="bay-rule-card">
-        <header><strong>Accepted bay scanner barcode formats</strong><span>Use regex for extra labels/barcodes that can be scanned into a target bay.</span></header>
-        <form id="bayBarcodeRuleForm" class="bay-rule-form">
-          <label class="is-wide"><span>Regex pattern</span><input id="bayBarcodeRulePattern" type="text" autocomplete="off" placeholder="Example: ^BOX-[A-Z0-9-]+$"></label>
-          <label><span>Label</span><input id="bayBarcodeRuleLabel" type="text" autocomplete="off" placeholder="Box label"></label>
-          <button type="submit">Add Barcode Rule</button>
-        </form>
-        <div class="bay-rule-list">
-          ${barcodeRules.length ? barcodeRules.map((rule) => `
-            <article><div><strong>${escapeHtml(rule.pattern)}</strong><span>${escapeHtml(rule.label || "Accepted bay barcode")}</span></div><button class="icon-only icon-trash danger" type="button" data-remove-bay-barcode-rule="${escapeHtml(rule.id)}" aria-label="Remove bay barcode rule"></button></article>
-          `).join("") : `<div class="admin-empty">No extra bay barcode formats yet.</div>`}
-        </div>
-      </section>
-    </div>
-  `;
+function renderBayScannerRulesModalV349() {
+  if (!els.adminModalBody || els.adminModal?.dataset.kind !== "bayScannerRules") return;
+  els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  configureAdminModalSectionTabsV345("bayScannerRules");
+  applyLanguageToRoot(els.adminModalBody);
 }
 
 /**
@@ -28337,7 +29930,10 @@ async function refreshBayScannerRules(openModal = false) {
   state.bayScannerSettings = payload || { manualRules: [], barcodeRules: [] };
   renderBayScannerRuleOverview();
   if (openModal && els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "bayScannerRules" && els.adminModalBody) {
-    els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+    renderBayScannerRulesModalV349();
+  }
+  if (els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "crossDateScanning" && state.scanPageSettingsActiveTab === "mixedDestination") {
+    renderScanPageSettingsModalV350();
   }
   return payload;
 }
@@ -28354,9 +29950,9 @@ async function saveBayOverrideWindow() {
     body: JSON.stringify({ destinationOverrideMinutes }),
   });
   state.bayScannerSettings = payload || state.bayScannerSettings;
-  renderBayScannerRuleOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
-  showSaveConfirmation(`Rack destination overrides will remain active for ${destinationOverrideMinutes} minutes.`);
+  renderCrossDateScanOverview();
+  renderScanPageSettingsModalV350();
+  showSaveConfirmation(`Mixed-destination approvals will remain active for ${destinationOverrideMinutes} minutes.`);
 }
 
 async function saveBayManualRule() {
@@ -28366,7 +29962,7 @@ async function saveBayManualRule() {
   const payload = await fetchJson("/api/admin/bay-scanner-rules/manual", { method: "POST", body: JSON.stringify({ matchType, pattern, label }) });
   state.bayScannerSettings = payload || state.bayScannerSettings;
   renderBayScannerRuleOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  renderBayScannerRulesModalV349();
   showSaveConfirmation("The manual Bay Map scanner rule was saved.");
 }
 
@@ -28381,7 +29977,7 @@ async function saveBayBarcodeRule() {
   const payload = await fetchJson("/api/admin/bay-scanner-rules/barcode", { method: "POST", body: JSON.stringify({ pattern, label }) });
   state.bayScannerSettings = payload || state.bayScannerSettings;
   renderBayScannerRuleOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  renderBayScannerRulesModalV349();
   showSaveConfirmation("The Bay Map barcode rule was saved.");
 }
 
@@ -28394,7 +29990,7 @@ async function removeBayScannerRule(kind, id) {
   const payload = await fetchJson(`/api/admin/bay-scanner-rules/${kind}/remove`, { method: "POST", body: JSON.stringify({ id }) });
   state.bayScannerSettings = payload || state.bayScannerSettings;
   renderBayScannerRuleOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = bayScannerRulesModalHtml();
+  renderBayScannerRulesModalV349();
   playAppSound("destructive_action", { force: true });
 }
 
@@ -28470,8 +30066,6 @@ function customerEmailRulesModalHtml() {
   const contacts = settings.contacts || [];
   const cc = settings.cc || [];
   const outbox = settings.outbox || [];
-  const drafts = outbox.filter((email) => ["draft", "queued", "failed"].includes(String(email.status || "").toLowerCase()));
-  const sent = outbox.filter((email) => String(email.status || "").toLowerCase() === "sent");
   const smtp = settings.smtpConfig || {};
   const graph = settings.graphConfig || {};
   const emailConfigured = Boolean(settings.emailConfigured ?? settings.smtpConfigured);
@@ -28479,123 +30073,222 @@ function customerEmailRulesModalHtml() {
   const transportLabel = settings.emailTransportLabel || (settings.smtpConfigured ? "SMTP" : "Draft mode");
   const testRecipient = settings.emailTestRecipient || "brandon.m.smith@bldr.com";
   const sender = settings.emailFrom || graph.sender || smtp.from || "Not set";
-  const authLabel = graph.authMode === "managed-identity" ? "Managed identity" : "App registration";
-  const graphCredentialReady = graph.authMode === "managed-identity" ? graph.managedIdentityAvailable : graph.clientSecretSet;
+  const sentCount = outbox.filter((email) => String(email.status || "").toLowerCase() === "sent").length;
+  const attentionCount = outbox.filter((email) => ["draft", "queued", "failed"].includes(String(email.status || "").toLowerCase())).length;
+  const activeTab = ["rules", "test", "activity"].includes(state.customerEmailActiveTab)
+    ? state.customerEmailActiveTab
+    : "rules";
 
-  return `
-    <div class="customer-email-modal-shell customer-email-modal-shell-v34">
-      <section class="customer-email-intro">
-        <div>
-          <strong>Customer manifest and ready-notice emails</strong>
-          <p>Match customers to email addresses. Import/update creates a manifest draft, and staging completion creates a ready notice after all pieces for that customer/date are scanned.</p>
-        </div>
-        <span class="email-smtp-badge ${emailConfigured ? "is-live" : "is-draft"}">${emailConfigured ? `${escapeHtml(transportLabel)} live` : "Draft mode"}</span>
-      </section>
+  const ruleQuery = String(state.customerEmailRuleSearch || "").trim().toLowerCase();
+  const visibleContacts = contacts.filter((contact) => {
+    if (!ruleQuery) return true;
+    return `${contact.customerPattern || ""} ${contact.email || ""}`.toLowerCase().includes(ruleQuery);
+  });
 
-      <section class="customer-email-draft-control">
-        <div>
-          <strong>Email Drafts</strong>
-          <span>${escapeHtml(drafts.length)} open draft${drafts.length === 1 ? "" : "s"} / ${escapeHtml(sent.length)} sent recently</span>
-        </div>
-        <p>Draft mode keeps every generated email inside this webapp until Microsoft Graph or SMTP is configured. Open a draft to review, copy it, or launch it in the default email app.</p>
-      </section>
+  const activityFilter = ["all", "attention", "sent"].includes(state.customerEmailActivityFilter)
+    ? state.customerEmailActivityFilter
+    : "all";
+  const activityQuery = String(state.customerEmailActivitySearch || "").trim().toLowerCase();
+  const visibleOutbox = outbox.filter((email) => {
+    const status = String(email.status || "draft").toLowerCase();
+    if (activityFilter === "attention" && !["draft", "queued", "failed"].includes(status)) return false;
+    if (activityFilter === "sent" && status !== "sent") return false;
+    if (!activityQuery) return true;
+    return [
+      email.subject,
+      email.emailType,
+      email.customerName,
+      email.deliveryDate,
+      emailAddressListText(email.toEmails),
+      emailAddressListText(email.ccEmails),
+      status,
+    ].some((value) => String(value || "").toLowerCase().includes(activityQuery));
+  });
 
-      <section class="customer-email-smtp-section">
-        <header>
-          <div>
-            <strong>${transport === "graph" ? "Microsoft Graph setup readiness" : "Email delivery setup"}</strong>
-            <span>Credentials remain server-side and are never returned to the browser.</span>
-          </div>
-          <em class="email-smtp-badge ${emailConfigured ? "is-live" : "is-draft"}">${emailConfigured ? "Ready to send" : "Saving drafts"}</em>
-        </header>
-        ${transport === "graph" ? `
-          <div class="smtp-config-grid email-graph-config-grid">
-            <span><small>Transport</small><b>Microsoft Graph</b></span>
-            <span><small>From</small><b>${escapeHtml(sender)}</b></span>
-            <span><small>Authentication</small><b>${escapeHtml(authLabel)}</b></span>
-            <span><small>Tenant ID</small><b>${graph.tenantIdSet ? "Configured" : "Not configured"}</b></span>
-            <span><small>Client ID</small><b>${escapeHtml(graph.clientId || "Not configured")}</b></span>
-            <span><small>${graph.authMode === "managed-identity" ? "Managed identity" : "Client secret"}</small><b>${graphCredentialReady ? "Configured" : "Not configured"}</b></span>
-            <span><small>Save to Sent Items</small><b>${graph.saveToSentItems === false ? "No" : "Yes"}</b></span>
-          </div>
-        ` : `
-          <div class="smtp-config-grid">
-            <span><small>Transport</small><b>${escapeHtml(transportLabel)}</b></span>
-            <span><small>Host</small><b>${escapeHtml(smtp.host || "Not set")}</b></span>
-            <span><small>Port</small><b>${escapeHtml(smtp.port || "587")}</b></span>
-            <span><small>From</small><b>${escapeHtml(smtp.from || "Not set")}</b></span>
-            <span><small>User</small><b>${escapeHtml(smtp.user || "Not set")}</b></span>
-            <span><small>SSL</small><b>${smtp.ssl ? "Yes" : "No / TLS"}</b></span>
-          </div>
-        `}
-      </section>
-
-      <section class="customer-email-test-section">
-        <header><strong>Send test email</strong><span>If email delivery is not configured, this creates a draft you can open below.</span></header>
-        <form id="customerEmailTestForm" class="customer-email-test-form">
-          <label><span>Send test to</span><input id="customerEmailTestToInput" type="email" autocomplete="off" value="${escapeHtml(testRecipient)}" placeholder="you@example.com"></label>
-          <label><span>CC optional</span><input id="customerEmailTestCcInput" type="text" autocomplete="off" placeholder="manager@example.com, lead@example.com"></label>
-          <label><span>Subject</span><input id="customerEmailTestSubjectInput" type="text" autocomplete="off" value="Delivery Scanner test email"></label>
-          <label class="is-wide"><span>Body</span><textarea id="customerEmailTestBodyInput" rows="4">This is a test email from the Delivery List Scanner customer email system.</textarea></label>
-          <button type="submit">Send Test Email</button>
-        </form>
-      </section>
-
-      <form id="customerEmailContactForm" class="customer-email-form">
-        <input id="customerEmailEditIdInput" type="hidden">
-        <label><span>Customer match text</span><input id="customerEmailPatternInput" type="text" autocomplete="off" placeholder="Example: LENNAR HOMES"></label>
-        <label><span>Email address</span><input id="customerEmailAddressInput" type="email" autocomplete="off" placeholder="customer@example.com"></label>
-        <button id="customerEmailSubmitBtn" type="submit">Add Customer Email</button>
+  const ccPanel = `
+    <section class="customer-email-cc-card-v343 customer-email-cc-card-v344">
+      <header><span class="customer-email-section-icon-v343 is-cc" aria-hidden="true"></span><div><strong>Global CC recipients</strong><small>Every generated customer manifest and ready notice also goes to these addresses.</small></div><b>${escapeHtml(cc.length)}</b></header>
+      <form id="customerEmailCcForm" class="customer-email-cc-form-v343 customer-email-cc-form-v344">
+        <label><span>Add CC address</span><input id="customerEmailCcInput" type="email" autocomplete="off" placeholder="manager@example.com" required></label>
+        <button type="submit" class="app-primary-button"><span class="customer-email-action-icon-v343 is-add" aria-hidden="true"></span><span>Add CC</span></button>
       </form>
+      <div class="customer-email-cc-list-v343">
+        ${cc.length ? cc.map((row) => `<span><i class="customer-email-mini-mail-v343" aria-hidden="true"></i><b>${escapeHtml(row.email)}</b><button type="button" data-remove-customer-email-cc="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.email)}" title="Remove CC">×</button></span>`).join("") : `<em>No global CC addresses configured.</em>`}
+      </div>
+    </section>`;
 
-      <section class="customer-email-list-section">
-        <header><strong>Customer email rules</strong><span>${escapeHtml(contacts.length)} active rule${contacts.length === 1 ? "" : "s"}</span></header>
-        <div class="customer-email-rule-list">
-          ${contacts.length ? contacts.map((contact) => `
-            <article class="customer-email-row">
-              <div><strong>${escapeHtml(contact.customerPattern)}</strong><span>${escapeHtml(contact.email)}</span></div>
-              <span class="customer-email-row-actions">
-                <button class="icon-only icon-pencil" type="button" data-edit-customer-email="${escapeHtml(contact.id)}" title="Edit customer email" aria-label="Edit customer email"></button>
-                <button class="icon-only icon-trash danger" type="button" data-remove-customer-email="${escapeHtml(contact.id)}" title="Remove customer email" aria-label="Remove customer email"></button>
-              </span>
-            </article>
-          `).join("") : `<div class="admin-empty">No customer emails yet.</div>`}
+  const rulesPanel = `
+    <section class="customer-email-panel-v343 ${activeTab === "rules" ? "is-active" : ""}" data-customer-email-panel="rules" ${activeTab === "rules" ? "" : "hidden"}>
+      <div class="customer-email-rules-grid-v343 customer-email-rules-grid-v344">
+        <div class="customer-email-rules-left-v344">
+          <form id="customerEmailContactForm" class="customer-email-editor-v343">
+            <input id="customerEmailEditIdInput" type="hidden">
+            <header>
+              <span class="customer-email-section-icon-v343 is-rule" aria-hidden="true"></span>
+              <div><strong>Add or edit a customer rule</strong><small>Match customer text from A+W to the primary recipient address.</small></div>
+            </header>
+            <label><span>Customer match text <b class="required-mark-v340" aria-hidden="true">*</b></span><input id="customerEmailPatternInput" type="text" autocomplete="off" placeholder="Example: LENNAR HOMES" required></label>
+            <label><span>Email address <b class="required-mark-v340" aria-hidden="true">*</b></span><input id="customerEmailAddressInput" type="email" autocomplete="off" placeholder="customer@example.com" required></label>
+            <div class="customer-email-editor-actions-v343">
+              <button id="customerEmailSubmitBtn" class="app-primary-button customer-email-save-v343" type="submit"><span class="customer-email-action-icon-v343 is-save" aria-hidden="true"></span><span>Add Customer Rule</span></button>
+            </div>
+            <p id="customerEmailEditorHintV343">Customer match is fuzzy and case-insensitive. Use the most specific customer wording available.</p>
+          </form>
+          ${ccPanel}
         </div>
-      </section>
 
-      <section class="customer-email-cc-section">
-        <header><strong>CC on all customer emails</strong><span>These addresses receive every customer manifest and ready notice.</span></header>
-        <form id="customerEmailCcForm" class="customer-email-cc-form">
-          <input id="customerEmailCcInput" type="email" autocomplete="off" placeholder="manager@example.com">
-          <button type="submit">Add CC</button>
+        <section class="customer-email-library-v343 customer-email-library-v344">
+          <header>
+            <div><strong>Customer recipient rules</strong><small>${escapeHtml(contacts.length)} active rule${contacts.length === 1 ? "" : "s"}</small></div>
+            <label class="customer-email-search-v343"><span class="customer-email-search-icon-v343" aria-hidden="true"></span><input type="search" value="${escapeHtml(state.customerEmailRuleSearch || "")}" data-customer-email-rule-search placeholder="Search customer or email" aria-label="Search customer email rules"></label>
+          </header>
+          <div class="customer-email-rule-list-v343">
+            ${contacts.map((contact) => {
+              const searchText = `${contact.customerPattern || ""} ${contact.email || ""}`.toLowerCase();
+              const hidden = Boolean(ruleQuery && !searchText.includes(ruleQuery));
+              return `
+              <article class="customer-email-rule-row-v343" data-customer-email-rule-row data-customer-email-rule-search-text="${escapeHtml(searchText)}" ${hidden ? "hidden" : ""}>
+                <span class="customer-email-rule-avatar-v343" aria-hidden="true">${escapeHtml(String(contact.customerPattern || "?").trim().slice(0, 1).toUpperCase() || "?")}</span>
+                <div><strong>${escapeHtml(contact.customerPattern)}</strong><span>${escapeHtml(contact.email)}</span></div>
+                <span class="customer-email-row-actions-v343">
+                  <button class="icon-only icon-pencil" type="button" data-edit-customer-email="${escapeHtml(contact.id)}" title="Edit customer email" aria-label="Edit customer email"></button>
+                  <button class="icon-only icon-trash danger" type="button" data-remove-customer-email="${escapeHtml(contact.id)}" title="Remove customer email" aria-label="Remove customer email"></button>
+                </span>
+              </article>`;
+            }).join("")}
+            <div class="customer-email-empty-v343" data-customer-email-rule-empty ${visibleContacts.length ? "hidden" : ""}><strong>${contacts.length ? "No rules match this search" : "No customer rules configured"}</strong><span>${contacts.length ? "Try a different customer or email address." : "Add the first rule using the form on the left."}</span></div>
+          </div>
+        </section>
+      </div>
+    </section>`;
+
+  const testPanel = `
+    <section class="customer-email-panel-v343 ${activeTab === "test" ? "is-active" : ""}" data-customer-email-panel="test" ${activeTab === "test" ? "" : "hidden"}>
+      <section class="customer-email-test-card-v343 customer-email-test-card-v344">
+        <header><span class="customer-email-section-icon-v343 is-test" aria-hidden="true"></span><div><strong>Send a test email</strong><small>Validate formatting and delivery without waiting for a delivery-list event.</small></div></header>
+        <div class="customer-email-readiness-v344 ${emailConfigured ? "is-ready" : "is-draft"}">
+          <span class="customer-email-readiness-icon-v344" aria-hidden="true"></span>
+          <div><strong>${emailConfigured ? `${escapeHtml(transportLabel)} delivery is ready` : "Draft-only delivery"}</strong><small>From: ${escapeHtml(sender)} · ${emailConfigured ? "Credentials are configured server-side." : "Messages are retained in Email Activity until a server-side transport is configured."}</small></div>
+          <b>${emailConfigured ? "Ready" : "Draft"}</b>
+        </div>
+        <form id="customerEmailTestForm" class="customer-email-test-form-v343">
+          <label><span>Send test to <b class="required-mark-v340" aria-hidden="true">*</b></span><input id="customerEmailTestToInput" type="email" autocomplete="off" value="${escapeHtml(testRecipient)}" placeholder="you@example.com" required></label>
+          <label><span>CC optional</span><input id="customerEmailTestCcInput" type="text" autocomplete="off" placeholder="manager@example.com, lead@example.com"></label>
+          <label class="is-wide"><span>Subject</span><input id="customerEmailTestSubjectInput" type="text" autocomplete="off" value="Delivery Scanner test email"></label>
+          <label class="is-wide"><span>Body</span><textarea id="customerEmailTestBodyInput" rows="7">This is a test email from the Delivery List Scanner customer email system.</textarea></label>
+          <footer><span>${emailConfigured ? `The message will use ${escapeHtml(transportLabel)}.` : "No live transport is configured, so this test will be saved as a draft."}</span><button type="submit" class="app-primary-button"><span class="customer-email-action-icon-v343 is-send" aria-hidden="true"></span><span>Send Test Email</span></button></footer>
         </form>
-        <div class="customer-email-cc-list">
-          ${cc.length ? cc.map((row) => `<span>${escapeHtml(row.email)} <button type="button" data-remove-customer-email-cc="${escapeHtml(row.id)}">&times;</button></span>`).join("") : `<em>No CC addresses configured.</em>`}
-        </div>
       </section>
+    </section>`;
 
-      <section class="customer-email-outbox-section email-drafts-section">
-        <header><strong>Internal email drafts</strong><span>Open drafts here before SMTP is configured or after a send error.</span></header>
-        <div class="customer-email-outbox-list email-draft-list">
-          ${outbox.length ? outbox.map((email) => `
-            <article class="email-outbox-row status-${escapeHtml(email.status)}">
-              <div>
-                <strong>${escapeHtml(email.subject)}</strong>
-                <span>${escapeHtml(emailStatusLabel(email.status))} - ${escapeHtml(email.emailType)} - ${escapeHtml(email.customerName || "Customer email")} - ${escapeHtml(formatDisplayDate(email.deliveryDate))}</span>
-                <small>To: ${escapeHtml(emailAddressListText(email.toEmails))}${email.ccEmails?.length ? ` | CC: ${escapeHtml(emailAddressListText(email.ccEmails))}` : ""}</small>
+  const activityPanel = `
+    <section class="customer-email-panel-v343 ${activeTab === "activity" ? "is-active" : ""}" data-customer-email-panel="activity" ${activeTab === "activity" ? "" : "hidden"}>
+      <section class="customer-email-activity-card-v343 customer-email-activity-card-v344">
+        <header>
+          <div><span class="customer-email-section-icon-v343 is-activity" aria-hidden="true"></span><span><strong>Email activity</strong><small>Open retained drafts, failed sends, and sent customer messages.</small></span></div>
+          <label class="customer-email-search-v343"><span class="customer-email-search-icon-v343" aria-hidden="true"></span><input type="search" value="${escapeHtml(state.customerEmailActivitySearch || "")}" data-customer-email-activity-search placeholder="Search subject, customer, date, recipient" aria-label="Search customer email activity"></label>
+        </header>
+        <nav class="customer-email-activity-filters-v343" aria-label="Email activity status">
+          <button type="button" class="${activityFilter === "all" ? "is-active" : ""}" data-customer-email-activity-filter="all">All <b>${escapeHtml(outbox.length)}</b></button>
+          <button type="button" class="${activityFilter === "attention" ? "is-active" : ""}" data-customer-email-activity-filter="attention">Needs attention <b>${escapeHtml(attentionCount)}</b></button>
+          <button type="button" class="${activityFilter === "sent" ? "is-active" : ""}" data-customer-email-activity-filter="sent">Sent <b>${escapeHtml(sentCount)}</b></button>
+        </nav>
+        <div class="customer-email-activity-list-v343 customer-email-activity-list-v344">
+          ${outbox.map((email) => {
+            const status = String(email.status || "draft").toLowerCase();
+            const activityText = [email.subject, email.emailType, email.customerName, email.deliveryDate, emailAddressListText(email.toEmails), emailAddressListText(email.ccEmails), status].join(" ").toLowerCase();
+            const statusMatches = activityFilter === "all" || (activityFilter === "attention" && ["draft", "queued", "failed"].includes(status)) || (activityFilter === "sent" && status === "sent");
+            const queryMatches = !activityQuery || activityText.includes(activityQuery);
+            return `<article class="customer-email-activity-row-v343 customer-email-activity-row-v344 status-${escapeHtml(status)}" data-customer-email-activity-row data-customer-email-activity-status="${escapeHtml(status)}" data-customer-email-activity-search-text="${escapeHtml(activityText)}" ${statusMatches && queryMatches ? "" : "hidden"}>
+              <span class="customer-email-activity-status-icon-v343" aria-hidden="true"></span>
+              <div class="customer-email-activity-copy-v343">
+                <strong>${escapeHtml(email.subject || "Customer email")}</strong>
+                <span>${escapeHtml(email.customerName || "Customer email")} · ${escapeHtml(formatDisplayDate(email.deliveryDate))} · ${escapeHtml(email.emailType || "email")}</span>
+                <small>To: ${escapeHtml(emailAddressListText(email.toEmails) || "No recipient")}${email.ccEmails?.length ? ` · CC: ${escapeHtml(emailAddressListText(email.ccEmails))}` : ""}</small>
                 ${email.error ? `<small class="email-error-text">${escapeHtml(email.error)}</small>` : ""}
               </div>
-              <span class="email-outbox-actions">
+              <span class="customer-email-activity-actions-v343 customer-email-activity-actions-v344">
                 <em>${escapeHtml(emailStatusLabel(email.status))}</em>
-                <button type="button" data-open-email-draft="${escapeHtml(email.id)}">Open</button>
+                <button type="button" class="customer-email-open-v344" data-open-email-draft="${escapeHtml(email.id)}">Open</button>
                 <button type="button" data-email-manifest-pdf="${escapeHtml(email.id)}">PDF</button>
+                ${status === "draft" ? `<button type="button" class="customer-email-delete-draft-v349" data-delete-email-draft="${escapeHtml(email.id)}">Delete</button>` : ""}
               </span>
-            </article>
-          `).join("") : `<div class="admin-empty">No customer email drafts yet.</div>`}
+            </article>`;
+          }).join("")}
+          <div class="customer-email-empty-v343" data-customer-email-activity-empty ${visibleOutbox.length ? "hidden" : ""}><strong>No email activity matches these filters</strong><span>Change the status filter or search text to broaden the results.</span></div>
         </div>
       </section>
-    </div>
-  `;
+    </section>`;
+
+  const activePanel = activeTab === "test" ? testPanel : activeTab === "activity" ? activityPanel : rulesPanel;
+  return `
+    <div class="customer-email-workspace-v343 customer-email-workspace-v344 customer-email-workspace-v345">
+      <div class="customer-email-content-v343 customer-email-content-v344 customer-email-content-v345">
+        ${activePanel}
+      </div>
+    </div>`;
+}
+
+/** Re-render the Customer Email workspace without losing its active tab/filter state. */
+function renderCustomerEmailModal() {
+  if (!els.adminModalBody || els.adminModal?.dataset.kind !== "customerEmails") return;
+  els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  applyLanguageToRoot(els.adminModalBody);
+  configureAdminModalSectionTabsV345("customerEmails");
+}
+
+/** Clear the customer-rule editor while retaining the current rules library/filter. */
+function clearCustomerEmailEditor() {
+  const form = document.getElementById("customerEmailContactForm");
+  if (!form) return;
+  form.reset();
+  const idInput = document.getElementById("customerEmailEditIdInput");
+  if (idInput) idInput.value = "";
+  const submitButton = document.getElementById("customerEmailSubmitBtn");
+  if (submitButton) submitButton.innerHTML = `<span class="customer-email-action-icon-v343 is-save" aria-hidden="true"></span><span>Add Customer Rule</span>`;
+  const hint = document.getElementById("customerEmailEditorHintV343");
+  if (hint) hint.textContent = "Customer match is fuzzy and case-insensitive. Use the most specific customer wording available.";
+  document.getElementById("customerEmailPatternInput")?.focus();
+}
+
+
+/** Filter customer recipient rules in-place so typing never destroys input focus. */
+function filterCustomerEmailRuleRows(query = "") {
+  const clean = String(query || "").trim().toLowerCase();
+  state.customerEmailRuleSearch = query;
+  const rows = [...document.querySelectorAll("[data-customer-email-rule-row]")];
+  let visible = 0;
+  rows.forEach((row) => {
+    const matches = !clean || String(row.dataset.customerEmailRuleSearchText || "").includes(clean);
+    row.hidden = !matches;
+    if (matches) visible += 1;
+  });
+  const empty = document.querySelector("[data-customer-email-rule-empty]");
+  if (empty) empty.hidden = visible > 0;
+}
+
+/** Filter retained email activity without another server request or modal rebuild. */
+function filterCustomerEmailActivity() {
+  const filter = ["all", "attention", "sent"].includes(state.customerEmailActivityFilter)
+    ? state.customerEmailActivityFilter
+    : "all";
+  const query = String(state.customerEmailActivitySearch || "").trim().toLowerCase();
+  const rows = [...document.querySelectorAll("[data-customer-email-activity-row]")];
+  let visible = 0;
+  rows.forEach((row) => {
+    const status = String(row.dataset.customerEmailActivityStatus || "draft");
+    const statusMatches = filter === "all" || (filter === "attention" && ["draft", "queued", "failed"].includes(status)) || (filter === "sent" && status === "sent");
+    const queryMatches = !query || String(row.dataset.customerEmailActivitySearchText || "").includes(query);
+    row.hidden = !(statusMatches && queryMatches);
+    if (!row.hidden) visible += 1;
+  });
+  document.querySelectorAll("[data-customer-email-activity-filter]").forEach((button) => {
+    const active = button.dataset.customerEmailActivityFilter === filter;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  const empty = document.querySelector("[data-customer-email-activity-empty]");
+  if (empty) empty.hidden = visible > 0;
 }
 
 /**
@@ -28605,30 +30298,37 @@ function customerEmailRulesModalHtml() {
  */
 function emailDraftPreviewHtml(email) {
   if (!email) return "";
+  const status = String(email.status || "draft").toLowerCase();
   return `
-    <div class="modal-backdrop email-draft-preview-backdrop" data-close-email-draft></div>
-    <section class="modal-panel email-draft-preview-panel" role="dialog" aria-modal="true" aria-label="Email draft preview">
-      <header>
+    <div class="email-activity-detail-backdrop-v344" data-close-email-draft></div>
+    <section class="email-activity-detail-v344 status-${escapeHtml(status)}" role="dialog" aria-modal="true" aria-labelledby="emailActivityDetailTitleV344">
+      <header class="email-activity-detail-header-v344">
         <div>
-          <small>${escapeHtml(emailStatusLabel(email.status))} email</small>
-          <h2>${escapeHtml(email.subject || "Email draft")}</h2>
-          <span>${escapeHtml(email.emailType || "email")} - ${escapeHtml(email.customerName || "Customer email")}</span>
+          <small>Email Activity · ${escapeHtml(emailStatusLabel(email.status))}</small>
+          <h2 id="emailActivityDetailTitleV344">${escapeHtml(email.subject || "Customer email")}</h2>
+          <p>${escapeHtml(email.customerName || "Customer email")} · ${escapeHtml(formatDisplayDate(email.deliveryDate))} · ${escapeHtml(email.emailType || "email")}</p>
         </div>
-        <button class="modal-close-x gui-close-button" type="button" data-close-email-draft aria-label="Close">&times;</button>
+        <button class="gui-close-button" type="button" data-close-email-draft aria-label="Close Email Activity">×</button>
       </header>
-      <div class="email-draft-meta-grid">
-        <span><small>To</small><b>${escapeHtml(emailAddressListText(email.toEmails) || "-")}</b></span>
-        <span><small>CC</small><b>${escapeHtml(emailAddressListText(email.ccEmails) || "-")}</b></span>
-        <span><small>Created</small><b>${escapeHtml(formatDateTime(email.createdAt) || "-")}</b></span>
-        <span><small>Status</small><b>${escapeHtml(emailStatusLabel(email.status))}</b></span>
+      <div class="email-activity-detail-meta-v344">
+        <span><small>To</small><b>${escapeHtml(emailAddressListText(email.toEmails) || "No recipient")}</b></span>
+        <span><small>CC</small><b>${escapeHtml(emailAddressListText(email.ccEmails) || "None")}</b></span>
+        <span><small>Created</small><b>${escapeHtml(formatDateTime(email.createdAt) || "—")}</b></span>
+        <span><small>Status</small><b class="email-activity-detail-status-v344">${escapeHtml(emailStatusLabel(email.status))}</b></span>
       </div>
-      ${email.error ? `<div class="email-draft-error"><strong>Send status</strong><span>${escapeHtml(email.error)}</span></div>` : ""}
-      <pre class="email-draft-body">${escapeHtml(email.body || "")}</pre>
-      <footer class="email-draft-actions">
-        <button type="button" data-email-manifest-pdf="${escapeHtml(email.id)}">Generate PDF</button>
-        <button type="button" data-copy-email-draft="${escapeHtml(email.id)}">Copy Body</button>
-        <button type="button" data-mailto-email-draft="${escapeHtml(email.id)}">Open in Email App</button>
-        <button type="button" data-close-email-draft>Close</button>
+      ${email.error ? `<div class="email-activity-detail-error-v344"><strong>Delivery issue</strong><span>${escapeHtml(email.error)}</span></div>` : ""}
+      <section class="email-activity-detail-message-v344">
+        <header><strong>Message body</strong><span>Stored customer communication</span></header>
+        <pre>${escapeHtml(email.body || "")}</pre>
+      </section>
+      <footer class="email-activity-detail-actions-v344">
+        <button type="button" class="app-cancel-action-v343 email-activity-close-v344" data-close-email-draft><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Close</span></button>
+        <span class="email-activity-detail-action-group-v344">
+          ${status === "draft" ? `<button type="button" class="customer-email-delete-draft-v349" data-delete-email-draft="${escapeHtml(email.id)}">Delete Draft</button>` : ""}
+          <button type="button" data-email-manifest-pdf="${escapeHtml(email.id)}">Generate PDF</button>
+          <button type="button" data-copy-email-draft="${escapeHtml(email.id)}">Copy Body</button>
+          <button type="button" class="app-primary-button" data-mailto-email-draft="${escapeHtml(email.id)}">Open in Email App</button>
+        </span>
       </footer>
     </section>
   `;
@@ -28650,7 +30350,7 @@ function openEmailDraftPreview(id) {
   closeEmailDraftPreview();
   const shell = document.createElement("div");
   shell.id = "emailDraftPreviewShell";
-  shell.className = "email-draft-preview-shell";
+  shell.className = "email-activity-detail-shell-v344";
   shell.innerHTML = emailDraftPreviewHtml(email);
   document.body.appendChild(shell);
   updateModalScrollLock();
@@ -28671,6 +30371,28 @@ function closeEmailDraftPreview() {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+async function deleteCustomerEmailDraftV349(id) {
+  const email = (state.customerEmailSettings?.outbox || []).find((row) => String(row.id) === String(id));
+  if (!email || String(email.status || "").toLowerCase() !== "draft") return;
+  const confirmed = await confirmWebAppAction({
+    title: "Delete this email draft?",
+    message: email.subject || "Customer email draft",
+    details: "Only this unsent draft will be removed. Sent email activity is retained.",
+    confirmLabel: "Delete Draft",
+    danger: true,
+  });
+  if (!confirmed) return;
+  const payload = await fetchJson("/api/admin/customer-emails/draft/delete", {
+    method: "POST",
+    body: JSON.stringify({ id: Number(id || 0) }),
+  });
+  state.customerEmailSettings = payload || state.customerEmailSettings;
+  closeEmailDraftPreview();
+  renderCustomerEmailOverview();
+  renderCustomerEmailModal();
+  showSaveConfirmation("The unsent email draft was deleted.");
+}
+
 async function copyEmailDraftBody(id) {
   /**
    * Purpose: Run the email workflow for the browser application.
@@ -28725,8 +30447,8 @@ function openEmailDraftMailto(id) {
 async function refreshCustomerEmailSettings(openModal = false) {
   const payload = await fetchJson("/api/admin/customer-emails");
   state.customerEmailSettings = payload || { contacts: [], cc: [], outbox: [] };
-  if (openModal && els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "customerEmails" && els.adminModalBody) {
-    els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  if (openModal && els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === "customerEmails") {
+    renderCustomerEmailModal();
   }
   return payload;
 }
@@ -28751,7 +30473,9 @@ function startCustomerEmailEdit(id) {
   if (idInput) idInput.value = contact.id;
   if (patternInput) patternInput.value = contact.customerPattern || "";
   if (emailInput) emailInput.value = contact.email || "";
-  if (submitButton) submitButton.textContent = "Save Customer Email";
+  if (submitButton) submitButton.innerHTML = `<span class="customer-email-action-icon-v343 is-save" aria-hidden="true"></span><span>Save Customer Rule</span>`;
+  const hint = document.getElementById("customerEmailEditorHintV343");
+  if (hint) hint.textContent = `Editing ${contact.customerPattern}. Save to update this rule or Cancel to leave it unchanged.`;
   patternInput?.focus();
 }
 
@@ -28770,7 +30494,7 @@ async function saveCustomerEmailContact() {
   });
   state.customerEmailSettings = payload || state.customerEmailSettings;
   renderCustomerEmailOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  renderCustomerEmailModal();
   showSaveConfirmation(`Customer email settings were saved for ${pattern || email}.`);
 }
 
@@ -28787,7 +30511,7 @@ async function saveCustomerEmailCc() {
   });
   state.customerEmailSettings = payload || state.customerEmailSettings;
   renderCustomerEmailOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  renderCustomerEmailModal();
   showSaveConfirmation(`Customer email CC address ${email} was saved.`);
 }
 
@@ -28807,7 +30531,7 @@ async function sendCustomerEmailTest() {
   });
   state.customerEmailSettings = payload || state.customerEmailSettings;
   renderCustomerEmailOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  renderCustomerEmailModal();
   const result = payload.testResult || {};
   const message = result.status === "sent"
     ? `Test email sent to ${result.toEmail} through ${result.transport === "graph" ? "Microsoft Graph" : "SMTP"}.`
@@ -28828,7 +30552,7 @@ async function removeCustomerEmailContact(id) {
   });
   state.customerEmailSettings = payload || state.customerEmailSettings;
   renderCustomerEmailOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  renderCustomerEmailModal();
   playAppSound("destructive_action", { force: true });
 }
 
@@ -28844,7 +30568,7 @@ async function removeCustomerEmailCc(id) {
   });
   state.customerEmailSettings = payload || state.customerEmailSettings;
   renderCustomerEmailOverview();
-  if (els.adminModalBody) els.adminModalBody.innerHTML = customerEmailRulesModalHtml();
+  renderCustomerEmailModal();
   playAppSound("destructive_action", { force: true });
 }
 
@@ -28911,6 +30635,7 @@ async function saveCustomerRouteRule() {
   if (patternInput) patternInput.value = "";
   if (routeInput) routeInput.value = "";
   if (addressInput) addressInput.value = "";
+  closeCustomerRouteCreateModal();
   refreshCustomerRouteModal();
   showSaveConfirmation(`Customer route saved for ${customerPattern}.`);
 }
@@ -29042,6 +30767,7 @@ async function createUserFromForm(form = document.getElementById("createUserForm
       method: "POST",
       body: JSON.stringify({ username, email, displayName, password, roles: [role], station }),
     });
+    closeUserCreateModal();
     await refreshAdminUsersUi();
     showSaveConfirmation(`User ${displayName} was created.`);
   } catch (error) {
@@ -29075,7 +30801,7 @@ async function runManualEditSearch() {
  */
 function renderManualEditResults(results) {
   if (!els.manualEditResults) return;
-  els.manualEditResults.innerHTML = manualEditResultsHtml(results);
+  els.manualEditResults.innerHTML = manualEditResultsHtml(results, 1, results.length);
 }
 
 const MANUAL_EDIT_CUSTOM_VALUE = "__manual_edit_custom__";
@@ -29674,17 +31400,24 @@ function manualEditChangedFields(row, data) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.length) {
-  const visibleRows = results.slice(0, Math.max(Number(visibleCount || 20), 20));
-  const totalRows = Math.max(Number(totalCount || 0), results.filter((item) => !item._manualEditFilterMismatch).length);
+function manualEditResultsHtml(results, page = state.manualEditPage, totalCount = results.length, showPager = false) {
+  const visibleRows = Array.isArray(results) ? results : [];
+  const totalRows = Math.max(Number(totalCount || 0), visibleRows.filter((item) => !item._manualEditFilterMismatch).length);
   const pinnedRows = visibleRows.filter((item) => item._manualEditFilterMismatch).length;
   const matchingVisibleRows = Math.max(visibleRows.length - pinnedRows, 0);
-  const remainingRows = Math.max(totalRows - matchingVisibleRows, 0);
+  const totalPages = Math.max(1, Math.ceil(totalRows / MANUAL_EDIT_PAGE_SIZE));
+  const currentPage = Math.min(Math.max(Number(page || 1), 1), totalPages);
+  const firstRow = totalRows && matchingVisibleRows ? ((currentPage - 1) * MANUAL_EDIT_PAGE_SIZE) + 1 : 0;
+  const lastRow = totalRows && matchingVisibleRows ? Math.min(firstRow + matchingVisibleRows - 1, totalRows) : 0;
+  const pagerHtml = showPager && totalPages > 1 ? `
+    <nav class="manual-edit-pager-v334 app-numbered-pager-v337" aria-label="Editable order pages">
+      ${sharedNumberedPagerMarkup(currentPage, totalPages, "data-manual-edit-page")}
+    </nav>` : "";
 
   return results.length
     ? `
       <div class="manual-edit-result-summary">
-        <span>Showing ${escapeHtml(matchingVisibleRows)} of ${escapeHtml(totalRows)} matching row${totalRows === 1 ? "" : "s"}${pinnedRows ? ` + ${escapeHtml(pinnedRows)} recently updated` : ""}</span>
+        <span>${totalRows ? `Showing ${escapeHtml(firstRow)}-${escapeHtml(lastRow)} of ${escapeHtml(totalRows)} matching rows` : "No matching rows"}${pinnedRows ? ` + ${escapeHtml(pinnedRows)} recently updated` : ""}</span>
         <small>${pinnedRows ? "The saved row remains visible until the next search or filter change." : "Rows start collapsed. Expand one to edit it."}</small>
       </div>
 
@@ -29744,20 +31477,20 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
                   </div>
 
                   <div class="manual-edit-row-actions">
-                    <button
+                    ${hasPermission("edit_delivery_list_items") ? `<button
                       type="button"
                       class="icon-only icon-save manual-edit-action-button"
                       data-save-line-item="${escapeHtml(item.lineItemId)}"
                       title="Save ${escapeHtml(rowLabel)}"
                       aria-label="Save ${escapeHtml(rowLabel)}"
-                    ></button>
-                    <button
+                    ></button>` : ""}
+                    ${hasPermission("delete_delivery_list_items") ? `<button
                       type="button"
                       class="icon-only icon-trash danger manual-edit-action-button"
                       data-delete-line-item="${escapeHtml(item.lineItemId)}"
                       title="Delete ${escapeHtml(rowLabel)}"
                       aria-label="Delete ${escapeHtml(rowLabel)}"
-                    ></button>
+                    ></button>` : ""}
                   </div>
                   <span class="manual-edit-card-chevron" aria-hidden="true"></span>
                 </summary>
@@ -29850,12 +31583,7 @@ function manualEditResultsHtml(results, visibleCount = 20, totalCount = results.
           })
           .join("")}
       </div>
-      ${remainingRows ? `
-        <div class="manual-edit-load-more">
-          <button type="button" data-manual-edit-load-more>Load 20 more</button>
-          <span>${escapeHtml(remainingRows)} row${remainingRows === 1 ? "" : "s"} remaining</span>
-        </div>
-      ` : ""}
+      ${pagerHtml}
     `
     : `<div class="admin-empty">No editable rows found.</div>`;
 }
@@ -29942,8 +31670,14 @@ async function saveManualLineItem(lineItemId, sourceButton = null) {
 
     const preferredListId = payload.destinationListId || payloadListId || state.activeListId;
     await loadDeliveryLists(preferredListId);
-    const refreshLimit = Math.max(state.manualEditResultRows.filter((item) => !item._manualEditFilterMismatch).length, 20);
-    const refreshed = await fetchManualEditBatch(state.manualEditQuery, state.manualEditListId, refreshLimit, 0, state.manualEditFilters);
+    const refreshOffset = (Math.max(Number(state.manualEditPage || 1), 1) - 1) * MANUAL_EDIT_PAGE_SIZE;
+    const refreshed = await fetchManualEditBatch(
+      state.manualEditQuery,
+      state.manualEditListId,
+      MANUAL_EDIT_PAGE_SIZE,
+      refreshOffset,
+      state.manualEditFilters,
+    );
     const verifiedItem = payload.updatedItem && Object.keys(payload.updatedItem).length
       ? { ...payload.updatedItem }
       : {
@@ -29991,7 +31725,7 @@ async function saveManualLineItem(lineItemId, sourceButton = null) {
     state.manualEditTotalRows = refreshed.total;
     state.manualEditVisibleCount = state.manualEditResultRows.length;
     const resultsTarget = document.getElementById("manualEditModalResults");
-    if (resultsTarget) resultsTarget.innerHTML = manualEditResultsHtml(state.manualEditResultRows, state.manualEditVisibleCount, state.manualEditTotalRows);
+    if (resultsTarget) resultsTarget.innerHTML = manualEditResultsHtml(state.manualEditResultRows, state.manualEditPage, state.manualEditTotalRows, true);
 
     state.manualEditDirty = false;
     await refreshOpenModalActionHistory().catch(() => {});
@@ -30008,11 +31742,13 @@ async function saveManualLineItem(lineItemId, sourceButton = null) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function deleteManualLineItem(lineItemId) {
+  const item = state.manualEditResultRows.find((row) => String(row.lineItemId || "") === String(lineItemId || ""));
+  const itemLabel = item ? `Order ${item.order || "?"} / Item ${item.item || "?"}` : "this order item";
   const confirmed = await confirmWebAppAction({
-    title: "Delete delivery-list item?",
-    message: "Delete this line item from its delivery list?",
-    details: "This removes the line from the selected delivery-list stage.",
-    confirmLabel: "Delete Line Item",
+    title: "Delete order item from every stage?",
+    message: `Delete ${itemLabel} from every stage on this delivery date?`,
+    details: "The same logical order/item is kept synchronized across Staging, Outbound, Indian Trail, CPU, Greenville, DTC, and any other stage copies. This removes all matching stage rows together.",
+    confirmLabel: "Delete From All Stages",
   });
   if (!confirmed) return;
   const payload = await fetchJson("/api/admin/line-item/delete", {
@@ -30021,11 +31757,15 @@ async function deleteManualLineItem(lineItemId) {
   });
   if (payload.meta?.id === state.activeListId) applyBackendPayload(payload);
   await loadDeliveryLists(state.activeListId);
-  if (!els.adminModal?.hidden && state.manualEditListId) await runManualEditModalSearch(!state.manualEditQuery);
+  if (!els.adminModal?.hidden && state.manualEditListId) await runManualEditModalSearch(false, state.manualEditPage);
   else await runManualEditSearch();
   state.manualEditDirty = false;
   renderScanPage();
   playAppSound("destructive_action", { force: true });
+  const deletedCount = Number(payload.deletedLineItemCount || 0);
+  if (deletedCount) {
+    showSaveConfirmation(`${payload.deletedOrderItem || "Order item"} was deleted from ${deletedCount} stage row${deletedCount === 1 ? "" : "s"}.`);
+  }
 }
 
 /**
@@ -30058,7 +31798,7 @@ function exportStaticCsv() {
 const OPERATIONS_MODAL_PROFILES = {
   "rack-details": {
     controlCenter: true,
-    showStatus: true,
+    showStatus: false,
     eyebrow: "Rack Operations",
     description: "Review assigned pieces, current rack status, packing actions, and controlled rack recovery from one live workspace.",
     context: "Individual rack workspace",
@@ -30092,6 +31832,12 @@ function applyOperationsModalProfile(kind, options = {}) {
     const statusPill = els.operationsModalStatusText.closest(".operations-modal-health-pill");
     if (statusPill) statusPill.hidden = !Boolean(profile.showStatus);
   }
+  if (els.operationsModalRackStatus) {
+    const showRackStatus = kind === "rack-details" && Boolean(profile.rackStatus);
+    els.operationsModalRackStatus.hidden = !showRackStatus;
+    els.operationsModalRackStatus.textContent = showRackStatus ? profile.rackStatus : "";
+    els.operationsModalRackStatus.className = `operations-modal-rack-status-v326 ${escapeHtml(profile.rackStatusClass || "open")}`;
+  }
   if (els.rejectOperationsTabs) els.rejectOperationsTabs.hidden = kind !== "reject-log";
   if (els.operationsRackTabs) els.operationsRackTabs.hidden = kind !== "rack-details";
   if (els.operationsRackRecordsTabs) els.operationsRackRecordsTabs.hidden = kind !== "rack-history";
@@ -30114,6 +31860,8 @@ function openOperationsModal({
   status = "",
   showStatus = null,
   group = "",
+  rackStatus = "",
+  rackStatusClass = "",
   body = "",
 } = {}) {
   if (!els.operationsModal || !els.operationsModalBody) return;
@@ -30127,6 +31875,8 @@ function openOperationsModal({
     ...(status ? { status } : {}),
     ...(showStatus !== null ? { showStatus: Boolean(showStatus) } : {}),
     ...(group ? { group } : {}),
+    ...(rackStatus ? { rackStatus } : {}),
+    ...(rackStatusClass ? { rackStatusClass } : {}),
   });
   els.operationsModalBody.innerHTML = body;
   els.operationsModalBody.hidden = false;
@@ -30202,6 +31952,17 @@ function closeOperationsModal() {
 function compactRackItemHtml(item, currentRackCode = state.selectedRackOverviewCode) {
   const rackItemId = String(item.rackItemId || "");
   const itemLabel = `${item.order}-${item.item}`;
+  const sourceRack = state.racks.find((rack) => String(rack.code) === String(currentRackCode));
+  const sourceOnTheWay = String(sourceRack?.status || "").trim().toLowerCase() === "in transit";
+  const sourceBlockedReason = sourceOnTheWay
+    ? `${rackOptionLabel(sourceRack)} is On the Way. Mark it Not On The Way or Returned before moving or clearing its contents.`
+    : "";
+  const blockedAttrs = sourceBlockedReason
+    ? `class="icon-only icon-move rack-scope-move-button is-blocked" aria-disabled="true" data-blocked-reason="${escapeHtml(sourceBlockedReason)}" title="${escapeHtml(sourceBlockedReason)}"`
+    : `class="icon-only icon-move rack-scope-move-button" title="Move item"`;
+  const clearBlockedAttrs = sourceBlockedReason
+    ? `class="icon-only icon-trash danger is-blocked" aria-disabled="true" data-blocked-reason="${escapeHtml(sourceBlockedReason)}" title="${escapeHtml(sourceBlockedReason)}"`
+    : `class="icon-only icon-trash danger" title="Clear item"`;
   return `
     <article class="rack-modal-line">
       <div class="rack-modal-line-primary">
@@ -30217,12 +31978,12 @@ function compactRackItemHtml(item, currentRackCode = state.selectedRackOverviewC
       ${item.rackAddedAt ? `<small class="rack-modal-line-time">Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}</small>` : ""}
       ${hasPermission("manage_racks") ? `
         <div class="rack-modal-line-actions">
-          <button class="icon-only icon-move rack-scope-move-button" type="button"
+          <button ${blockedAttrs} type="button"
             data-rack-modal-move-item="${escapeHtml(rackItemId)}"
             data-source-rack="${escapeHtml(currentRackCode)}"
             data-rack-item-label="${escapeHtml(itemLabel)}"
-            title="Move item" aria-label="Move ${escapeHtml(itemLabel)}"></button>
-          <button class="icon-only icon-trash danger" type="button" data-rack-modal-clear-item="${escapeHtml(rackItemId)}" data-rack-modal-clear-label="${escapeHtml(itemLabel)}" title="Clear item" aria-label="Clear ${escapeHtml(itemLabel)}"></button>
+            aria-label="Move ${escapeHtml(itemLabel)}"></button>
+          <button ${clearBlockedAttrs} type="button" data-rack-modal-clear-item="${escapeHtml(rackItemId)}" data-rack-modal-clear-label="${escapeHtml(itemLabel)}" aria-label="Clear ${escapeHtml(itemLabel)}"></button>
         </div>` : ""}
     </article>`;
 }
@@ -30245,12 +32006,21 @@ function rackModalHeaderActionsHtml(rack) {
   const canTransfer = hasPermission("transfer_rack_contents") || hasPermission("manage_racks");
   const transferOptions = rackTransferOptions(rack.code);
   const printLabel = isTruck ? "Print Truck Packing Slip" : "Print Packing Slip";
+  const sourceOnTheWay = statusLower === "in transit";
+  const moveBlockedReason = sourceOnTheWay
+    ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before moving its contents.`
+    : !transferOptions
+      ? "No open destination racks are available for this transfer."
+      : "";
+  const moveBlockedAttrs = moveBlockedReason
+    ? `aria-disabled="true" data-blocked-reason="${escapeHtml(moveBlockedReason)}" title="${escapeHtml(moveBlockedReason)}"`
+    : `title="Move all rack contents"`;
   return `
     ${hasItems && statusLower === "open" ? `<button class="app-primary-button" type="button" data-rack-modal-complete="${escapeHtml(rack.code)}">Complete Rack</button>` : ""}
     ${hasItems && statusLower === "closed" ? `<button class="app-primary-button" type="button" data-rack-modal-uncomplete="${escapeHtml(rack.code)}">Uncomplete Rack</button>` : ""}
-    ${statusLower === "in transit" ? `<button class="app-primary-button" type="button" data-rack-modal-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" class="secondary" data-rack-modal-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>` : ""}
-    <button class="app-primary-button" type="button" data-rack-modal-print="${escapeHtml(rack.code)}" ${hasItems && ["closed", "in transit"].includes(statusLower) ? "" : "disabled"}>${printLabel}</button>
-    ${canTransfer && hasItems ? `<button class="icon-only icon-move rack-scope-move-button rack-move-all-icon" type="button" data-rack-modal-move-all="${escapeHtml(rack.code)}" ${transferOptions ? "" : "disabled"} title="Move all rack contents" aria-label="Move all contents from rack ${escapeHtml(rack.code)}"></button>` : ""}`;
+    ${statusLower === "in transit" ? `<button class="app-primary-button" type="button" data-rack-modal-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" class="secondary rack-not-on-way-button-v326" data-rack-modal-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>` : ""}
+    <button class="app-primary-button" type="button" data-rack-modal-print="${escapeHtml(rack.code)}" ${hasItems && ["closed", "in transit"].includes(statusLower) ? "" : `aria-disabled="true" data-blocked-reason="${escapeHtml(hasItems ? "Complete the rack before printing its packing slip." : "Add pieces to the rack before printing its packing slip.")}"`}>${printLabel}</button>
+    ${canTransfer && hasItems ? `<button class="icon-only icon-move rack-scope-move-button rack-move-all-icon${moveBlockedReason ? " is-blocked" : ""}" type="button" data-rack-modal-move-all="${escapeHtml(rack.code)}" ${moveBlockedAttrs} aria-label="Move all contents from rack ${escapeHtml(rack.code)}"></button>` : ""}`;
 }
 
 function updateRackModalHeaderActions(rack) {
@@ -30266,6 +32036,12 @@ function rackDetailsModalHtml(rack) {
   const items = rack.items || [];
   const canTransfer = hasPermission("transfer_rack_contents") || hasPermission("manage_racks");
   const transferOptions = rackTransferOptions(rack.code);
+  const sourceOnTheWay = String(rack.status || "").trim().toLowerCase() === "in transit";
+  const moveBlockedReason = sourceOnTheWay
+    ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before moving its contents.`
+    : !transferOptions
+      ? "No open destination racks are available for this transfer."
+      : "";
   const dateGroups = new Map();
   for (const item of items) {
     const key = String(item.deliveryDate || "No delivery date");
@@ -30281,21 +32057,15 @@ function rackDetailsModalHtml(rack) {
           <summary>
             <strong>${escapeHtml(deliveryDate === "No delivery date" ? deliveryDate : formatDisplayDate(deliveryDate))}</strong>
             <span>${escapeHtml(rows.length)} lines · ${escapeHtml(pieceQty)} pcs</span>
-            ${canTransfer && deliveryDate !== "No delivery date" ? `<button class="icon-only icon-move rack-scope-move-button" type="button" data-rack-modal-move-date="${escapeHtml(deliveryDate)}" data-source-rack="${escapeHtml(rack.code)}" ${transferOptions ? "" : "disabled"} title="Move this delivery date" aria-label="Move all items for ${escapeHtml(formatDisplayDate(deliveryDate))}"></button>` : ""}
+            ${canTransfer && deliveryDate !== "No delivery date" ? `<button class="icon-only icon-move rack-scope-move-button${moveBlockedReason ? " is-blocked" : ""}" type="button" data-rack-modal-move-date="${escapeHtml(deliveryDate)}" data-source-rack="${escapeHtml(rack.code)}" ${moveBlockedReason ? `aria-disabled="true" data-blocked-reason="${escapeHtml(moveBlockedReason)}" title="${escapeHtml(moveBlockedReason)}"` : `title="Move this delivery date"`} aria-label="Move all items for ${escapeHtml(formatDisplayDate(deliveryDate))}"></button>` : ""}
           </summary>
           <div class="rack-modal-date-lines">${rows.map((item) => compactRackItemHtml(item, rack.code)).join("")}</div>
         </details>`;
     }).join("");
 
-  const statusLabel = rackStatusLabel(rack);
   const statusClass = rackStatusClassName(rack);
-  const destinationText = rack.destination ? ` · ${rackDestinationLabel(rack.destination)}` : "";
   return `
     <section class="rack-details-modal-shell rack-details-modal-v184 ${escapeHtml(statusClass)}">
-      <div class="rack-details-status-banner-v308 ${escapeHtml(statusClass)}">
-        <span aria-hidden="true"></span>
-        <div><small>Rack status</small><strong>${escapeHtml(statusLabel)}</strong><p>${escapeHtml(Number(rack.qty || 0))} pieces${escapeHtml(destinationText)}</p></div>
-      </div>
       <div class="rack-details-modal-list" aria-label="Assigned rack pieces">${itemHtml || `<div class="admin-empty">No pieces are assigned.</div>`}</div>
     </section>`;
 }
@@ -30344,7 +32114,7 @@ function chooseRackTransferDestination(sourceRackCode, options = {}) {
           </div>
         </div>
         <div class="rack-transfer-dialog-actions">
-          <button type="button" class="secondary" data-rack-transfer-cancel>Cancel</button>
+          <button type="button" class="secondary app-cancel-action-v343" data-rack-transfer-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button type="button" data-rack-transfer-confirm disabled>Continue</button>
         </div>
       </section>`;
@@ -30363,7 +32133,7 @@ function chooseRackTransferDestination(sourceRackCode, options = {}) {
     };
     const close = (value = "") => {
       shell.remove();
-      document.body.classList.remove("modal-scroll-locked");
+      updateModalScrollLock();
       resolve(value);
     };
     trigger?.addEventListener("click", () => setMenuOpen(menu?.hidden !== false));
@@ -30391,7 +32161,7 @@ function chooseRackTransferDestination(sourceRackCode, options = {}) {
       }
     });
     document.body.appendChild(shell);
-    document.body.classList.add("modal-scroll-locked");
+    updateModalScrollLock();
     trigger?.focus();
   });
 }
@@ -30426,9 +32196,10 @@ function openRackDetailsModal(rackCode) {
     kind: "rack-details",
     eyebrow: rackGroupLabel(rack),
     title: isTruckRack(rack) ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : `Rack ${rack.code}`,
-    description: `${rack.name || rack.type || rackGroupLabel(rack)} · ${rackStatusLabel(rack)} · ${Number(rack.qty || 0)} pieces`,
+    description: `${Number(rack.qty || 0)} pieces${rack.destination ? ` · ${rackDestinationLabel(rack.destination)}` : ""}`,
     context: isTruckRack(rack) ? `${rackDisplayLabelFromParts(rack.code, rack.name, rack.type)} loading workspace` : `${rack.type || "Rack"} workspace`,
-    status: rackStatusLabel(rack),
+    rackStatus: rackStatusLabel(rack),
+    rackStatusClass: rackStatusClassName(rack),
     body: rackDetailsModalHtml(rack),
   });
   applyRackOperationsVisual(rack);
@@ -30443,9 +32214,10 @@ async function refreshOpenRackDetails(rackCode = state.selectedRackOverviewCode)
     applyOperationsModalProfile("rack-details", {
       eyebrow: rackGroupLabel(rack),
       title: isTruckRack(rack) ? rackDisplayLabelFromParts(rack.code, rack.name, rack.type) : `Rack ${rack.code}`,
-      description: `${rack.name || rack.type || rackGroupLabel(rack)} · ${rackStatusLabel(rack)} · ${Number(rack.qty || 0)} pieces`,
+      description: `${Number(rack.qty || 0)} pieces${rack.destination ? ` · ${rackDestinationLabel(rack.destination)}` : ""}`,
       context: isTruckRack(rack) ? `${rackDisplayLabelFromParts(rack.code, rack.name, rack.type)} loading workspace` : `${rack.type || "Rack"} workspace`,
-      status: rackStatusLabel(rack),
+      rackStatus: rackStatusLabel(rack),
+      rackStatusClass: rackStatusClassName(rack),
     });
     applyRackOperationsVisual(rack);
     els.operationsModalBody.innerHTML = rackDetailsModalHtml(rack);
@@ -30755,10 +32527,8 @@ function rackHistoryFilterMarkup() {
       </div>
       <div class="rack-history-filter-footer">
         <span id="rackHistoryResultCount"></span>
-        <div class="rack-history-pager" aria-label="Rack history pages">
-          <button type="button" class="secondary" data-rack-history-page="${Math.max(Number(state.rackHistoryPage || 1) - 1, 1)}" ${Number(state.rackHistoryPage || 1) <= 1 ? "disabled" : ""}>Previous</button>
-          <strong>Page ${escapeHtml(state.rackHistoryPage || 1)} of ${escapeHtml(state.rackHistoryTotalPages || 1)}</strong>
-          <button type="button" class="secondary" data-rack-history-page="${Number(state.rackHistoryPage || 1) + 1}" ${Number(state.rackHistoryPage || 1) >= Number(state.rackHistoryTotalPages || 1) ? "disabled" : ""}>Next</button>
+        <div class="rack-history-pager app-numbered-pager-v337" aria-label="Rack history pages">
+          ${sharedNumberedPagerMarkup(state.rackHistoryPage, state.rackHistoryTotalPages, "data-rack-history-page")}
         </div>
         <button type="button" class="secondary" data-rack-history-clear ${rackHistoryFiltersActive(filters) ? "" : "disabled"}>Clear filters</button>
       </div>
@@ -31073,7 +32843,7 @@ function rejectLogModalHtml({ catalogLoading = false, catalogError = "" } = {}) 
 
       <footer class="reject-log-actions reject-log-actions-v182">
         <span id="rejectLogStatus" class="${catalogError || (!catalogReady && !catalogLoading) ? "is-warning" : catalogLoading ? "is-loading" : ""}">${escapeHtml(catalogMessage)}</span>
-        <div class="reject-log-action-buttons"><button class="secondary" type="button" data-operations-close>Cancel</button><button class="primary reject-log-submit-v182" type="submit" ${submitDisabled ? "disabled" : ""}><span aria-hidden="true"></span><span>Submit Reject</span></button></div>
+        <div class="reject-log-action-buttons"><button class="secondary app-cancel-action-v343" type="button" data-operations-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button><button class="primary reject-log-submit-v182" type="submit" ${submitDisabled ? "disabled" : ""}><span aria-hidden="true"></span><span>Submit Reject</span></button></div>
         <small>This action cannot be undone.</small>
       </footer>
     </form>`;
@@ -31277,7 +33047,7 @@ function rejectEditModalHtml(row) {
       <footer class="reject-edit-actions-v154">
         <span id="rejectEditStatus" role="status" aria-live="polite"></span>
         <div>
-          <button class="secondary" type="button" data-operations-close>Cancel</button>
+          <button class="secondary app-cancel-action-v343" type="button" data-operations-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button class="primary" type="submit">Save Reject Changes</button>
         </div>
       </footer>
@@ -31617,18 +33387,52 @@ async function submitRejectLog(form) {
   }
 }
 
+function rejectSettingsIconV347(kind) {
+  if (kind === "location") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s6-5.4 6-11a6 6 0 1 0-12 0c0 5.6 6 11 6 11Z"/><circle cx="12" cy="10" r="2"/></svg>';
+  }
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3.5 19h17Z"/><path d="M12 8v5M12 16h.01"/></svg>';
+}
+
 function rejectSettingsModalHtml() {
   const reasons = state.rejectCatalog.reasons || [];
   const locations = state.rejectCatalog.locations || [];
   const section = (kind, title, description, rows) => `
-    <section class="reject-settings-column reject-settings-${escapeHtml(kind)}">
-      <header><span class="reject-settings-type-icon" aria-hidden="true"></span><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(description)}</small></div><b>${escapeHtml(rows.length)} active</b></header>
-      <form class="reject-catalog-add" data-reject-catalog-form="${escapeHtml(kind)}"><label><span>New ${escapeHtml(kind)}</span><input name="label" required autocomplete="off" placeholder="Enter a clear ${escapeHtml(kind)} label..."></label><button type="submit">Add ${escapeHtml(kind)}</button></form>
-      <div class="reject-catalog-list">
-        ${rows.map((row) => `<article><span class="reject-catalog-row-icon" aria-hidden="true"></span><div><strong>${escapeHtml(row.label)}</strong><small>Available in the Add Internal Reject form</small></div><button class="icon-only icon-trash danger" type="button" data-reject-catalog-remove="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.label)}"></button></article>`).join("") || `<div class="admin-empty">No active ${escapeHtml(kind)} values.</div>`}
+    <section class="reject-settings-library-v347 is-${escapeHtml(kind)}">
+      <header class="reject-settings-library-header-v347">
+        <span class="reject-settings-library-icon-v347" aria-hidden="true">${rejectSettingsIconV347(kind)}</span>
+        <div><small>${kind === "reason" ? "Reason library" : "Location library"}</small><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span></div>
+        <b>${escapeHtml(rows.length)}</b>
+      </header>
+      <form class="reject-catalog-add reject-catalog-add-v347" data-reject-catalog-form="${escapeHtml(kind)}">
+        <label><span>Add ${escapeHtml(kind === "reason" ? "reject reason" : "break location")}</span><input name="label" required autocomplete="off" placeholder="${escapeHtml(kind === "reason" ? "Example: Scratch / surface defect" : "Example: Tempering Line 2")}"></label>
+        <button type="submit" class="app-primary-button reject-catalog-add-button-v347"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add</span></button>
+      </form>
+      <div class="reject-catalog-list reject-catalog-list-v347">
+        ${rows.map((row, index) => `
+          <article>
+            <span class="reject-catalog-row-number-v347">${escapeHtml(index + 1)}</span>
+            <div><strong>${escapeHtml(row.label)}</strong><small>Available immediately in Add Internal Reject</small></div>
+            <div class="reject-catalog-row-actions-v349">
+              <button class="reject-catalog-edit-v349 reject-catalog-icon-action-v350 is-edit" type="button" data-reject-catalog-edit="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" data-reject-catalog-label="${escapeHtml(row.label)}" aria-label="Edit ${escapeHtml(row.label)}" title="Edit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 16-1 4 4-1L18 9l-3-3Z"/><path d="m13.5 7.5 3 3"/></svg></button>
+              <button class="reject-catalog-remove-v347 reject-catalog-icon-action-v350 is-delete" type="button" data-reject-catalog-remove="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" aria-label="Delete ${escapeHtml(row.label)}" title="Delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M8 10v7M12 10v7M16 10v7M7 7l1 13h8l1-13"/></svg></button>
+            </div>
+          </article>`).join("") || `<div class="admin-empty reject-settings-empty-v347">No active ${escapeHtml(kind)} values.</div>`}
       </div>
     </section>`;
-  return `<div class="reject-settings-shell reject-settings-shell-v184"><section class="reject-settings-intro"><div><span>Internal Reject Configuration</span><strong>Reasons &amp; Break Locations</strong><p>Keep choices concise and floor-friendly. Changes appear immediately in the Add Internal Reject form.</p></div><div><b>${escapeHtml(reasons.length)}</b><small>Reasons</small><b>${escapeHtml(locations.length)}</b><small>Locations</small></div></section>${section("reason", "Reject Reasons", "Why the piece was rejected.", reasons)}${section("location", "Break Locations", "Where the defect or break occurred.", locations)}</div>`;
+
+  return `
+    <div class="reject-settings-shell-v347">
+      <section class="reject-settings-overview-v347">
+        <span class="reject-settings-overview-icon-v347" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6z"/><path d="M9 12h6M12 9v6"/></svg></span>
+        <div><small>Reject Tracking Setup</small><strong>Reasons &amp; Break Locations</strong><span>Maintain the two floor-facing libraries used when an internal reject is recorded.</span></div>
+        <div class="reject-settings-stats-v347"><span><b>${escapeHtml(reasons.length)}</b><small>Reasons</small></span><span><b>${escapeHtml(locations.length)}</b><small>Locations</small></span></div>
+      </section>
+      <div class="reject-settings-grid-v347">
+        ${section("reason", "Reject Reasons", "Why the piece was rejected.", reasons)}
+        ${section("location", "Break Locations", "Where the defect or break occurred.", locations)}
+      </div>
+    </div>`;
 }
 
 async function loadRejectSettingsModal() {
@@ -31639,18 +33443,118 @@ async function loadRejectSettingsModal() {
   }
 }
 
+function manualOrderCreateDialogHtml() {
+  const selected = document.getElementById("manualEditModalStage")?.value || state.manualEditListId || state.activeListId || "";
+  const deliveryDate = manualEditDeliveryDateForList(selected);
+  const deliveryDateLabel = deliveryDate ? formatNumericDeliveryDate(deliveryDate) : "No date selected";
+
+  return `
+    <header class="manual-order-modal-header-v338">
+      <div>
+        <small>Manual Delivery List Edit</small>
+        <h2 id="manualOrderCreateTitle">Create New Order</h2>
+        <p>Create the order once and keep its workflow copies synchronized across Airport and the selected route.</p>
+      </div>
+      <button type="button" class="gui-close-button manual-order-modal-close-v338" data-manual-order-close aria-label="Close Create New Order">×</button>
+    </header>
+    <form id="manualOrderCreateForm" class="manual-order-create-form-v337 manual-order-create-dialog-form-v338" data-list-id="${escapeHtml(selected)}">
+      <section class="manual-order-create-destination-v337 manual-order-create-destination-v338">
+        <div>
+          <small>Workflow destination</small>
+          <strong data-manual-order-route-preview>Airport Road · Staging + Outbound</strong>
+          <span>The order is always created in both Airport stages and in the selected route stage.</span>
+        </div>
+        <b>${escapeHtml(deliveryDateLabel)}</b>
+      </section>
+
+      <div class="manual-order-form-grid manual-order-form-grid-v337">
+        <label class="manual-order-field-v337"><span>Order # <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="order" inputmode="numeric" required placeholder="Order number"></label>
+        <label class="manual-order-field-v337"><span>Item # <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="item" inputmode="numeric" required placeholder="Item"></label>
+        <label class="manual-order-field-v337"><span>Qty <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="qty" type="number" min="1" value="1" required></label>
+        <label class="manual-order-field-v337 manual-order-route-field-v337"><span>Route <b class="required-mark-v340" aria-hidden="true">*</b></span><select name="route" required><option value="">Choose route...</option><option value="IT">Indian Trail</option><option value="CPU">Customer Pickup</option><option value="DTC">Deliver to Customer</option><option value="GNV">Greenville</option></select></label>
+        <label class="manual-order-field-v337 manual-order-customer-field-v337"><span>Customer <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="customer" required placeholder="Customer name"></label>
+        <label class="manual-order-field-v337"><span>Job Nr.</span><input name="job" placeholder="Optional job number"></label>
+        <label class="manual-order-field-v337"><span>Glass / Product <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="product" required placeholder="Glass or product"></label>
+        <label class="manual-order-field-v337"><span>Dimensions <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="dimensions" placeholder='Example: 72" x 36"' required></label>
+        <label class="manual-order-field-v337 manual-order-note-field-v337"><span>Process note</span><input name="processState" placeholder="Optional workflow note"></label>
+      </div>
+
+      <div class="manual-order-create-options-v337">
+        <label class="manual-order-only-toggle"><input name="manualOnly" type="checkbox"><span><strong>Manual scanning item only</strong><small>Use when this order cannot be scanned by barcode.</small></span></label>
+        <label class="manual-order-only-toggle"><input name="protectFromAwImport" type="checkbox" checked><span><strong>Protect from A+W import</strong><small>Keep this manual order separate if A+W later publishes the same order and item.</small></span></label>
+      </div>
+
+      <footer class="manual-order-modal-actions-v338">
+        <span id="manualOrderCreateStatus">Complete the required fields, then create the workflow copies.</span>
+        <div>
+          <button type="button" class="manual-order-cancel-button-v339" data-manual-order-close><span class="manual-order-cancel-icon-v339" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="submit" class="app-primary-button manual-order-create-submit-v337"><span class="manual-order-create-submit-icon-v337" aria-hidden="true"></span><span>Create Order</span></button>
+        </div>
+      </footer>
+    </form>`;
+}
+
+function closeManualOrderCreateModal() {
+  document.getElementById("manualOrderCreateModalV338")?.remove();
+  document.getElementById("manualOrderCreateBackdropV338")?.remove();
+}
+
+function openManualOrderCreateModal() {
+  closeManualOrderCreateModal();
+  const backdrop = document.createElement("div");
+  backdrop.id = "manualOrderCreateBackdropV338";
+  backdrop.className = "manual-order-modal-backdrop-v338";
+  const dialog = document.createElement("section");
+  dialog.id = "manualOrderCreateModalV338";
+  dialog.className = "manual-order-modal-v338";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-labelledby", "manualOrderCreateTitle");
+  dialog.innerHTML = manualOrderCreateDialogHtml();
+  document.body.append(backdrop, dialog);
+  backdrop.addEventListener("click", closeManualOrderCreateModal);
+  dialog.addEventListener("click", (event) => {
+    if (event.target.closest("[data-manual-order-close]")) closeManualOrderCreateModal();
+  });
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeManualOrderCreateModal();
+  });
+  syncManualOrderCreateRoutePreview(dialog.querySelector("#manualOrderCreateForm"));
+  window.requestAnimationFrame(() => dialog.querySelector("input[name='order']")?.focus());
+}
+
+const MANUAL_ORDER_CREATE_ROUTE_LABELS_V337 = Object.freeze({
+  IT: "Indian Trail",
+  CPU: "Customer Pickup",
+  DTC: "Deliver to Customer",
+  GNV: "Greenville",
+});
+
+function syncManualOrderCreateRoutePreview(form = document.getElementById("manualOrderCreateForm")) {
+  if (!form) return;
+  const route = String(form.elements.route?.value || "").trim().toUpperCase();
+  const preview = form.querySelector("[data-manual-order-route-preview]");
+  if (!preview) return;
+  const routeLabel = MANUAL_ORDER_CREATE_ROUTE_LABELS_V337[route] || "selected route";
+  preview.textContent = route
+    ? `Airport Road · Staging + Outbound · ${routeLabel}`
+    : "Airport Road · Staging + Outbound";
+}
+
 async function submitManualOrderForm(form) {
   const data = Object.fromEntries(new FormData(form).entries());
-  data.listId = document.getElementById("manualEditModalStage")?.value || state.manualEditListId;
+  data.listId = form.dataset.listId || document.getElementById("manualEditModalStage")?.value || state.manualEditListId;
   data.qty = Number(data.qty || 0);
   data.manualOnly = form.elements.manualOnly.checked;
   data.protectFromAwImport = form.elements.protectFromAwImport.checked;
-  const status = document.getElementById("manualOrderCreateStatus");
+  const status = form.querySelector("#manualOrderCreateStatus") || document.getElementById("manualOrderCreateStatus");
   if (status) status.textContent = "Checking automatic import window...";
   const payload = await fetchJson("/api/admin/manual-order", { method: "POST", body: JSON.stringify(data) });
   if (status) status.textContent = payload.message || "Order added.";
   form.reset();
   if (form.elements.qty) form.elements.qty.value = "1";
+  syncManualOrderCreateRoutePreview(form);
+  closeManualOrderCreateModal();
   window.DLSLineUpdates?.clearCache?.();
   await loadDeliveryLists(state.activeListId);
   await runManualEditModalSearch(true);
@@ -31934,9 +33838,8 @@ function renderAdminImportRunBrowser(imports = []) {
   const pager = totalPages > 1 ? `
     <nav class="admin-import-run-pager" aria-label="Today's import run pages">
       <span>Runs ${pageStart + 1}-${Math.min(pageStart + pageSize, groups.length)} of ${groups.length} · Page ${state.adminImportRunPage} of ${totalPages}</span>
-      <span class="admin-import-run-pager-actions">
-        <button type="button" class="app-primary-button admin-pager-primary" data-admin-import-page="${state.adminImportRunPage - 1}" ${state.adminImportRunPage <= 1 ? "disabled" : ""}>Previous</button>
-        <button type="button" class="app-primary-button admin-pager-primary" data-admin-import-page="${state.adminImportRunPage + 1}" ${state.adminImportRunPage >= totalPages ? "disabled" : ""}>Next</button>
+      <span class="admin-import-run-pager-actions app-numbered-pager-v337">
+        ${sharedNumberedPagerMarkup(state.adminImportRunPage, totalPages, "data-admin-import-page")}
       </span>
     </nav>` : "";
   const changedDates = new Set(selected.entries.map((entry) => entry.deliveryDate).filter(Boolean)).size;
@@ -32177,6 +34080,7 @@ function enhanceAutomationImportHistoryResults(results) {
     const runKey = String(entry.dataset.historyRunId || rawTimestamp || `run-${index}`);
     if (!days.has(dayKey)) {
       days.set(dayKey, {
+        dayKey,
         label: automationHistoryDayLabel(rawTimestamp),
         timestamp: parsed?.getTime() || 0,
         runs: new Map(),
@@ -32193,29 +34097,69 @@ function enhanceAutomationImportHistoryResults(results) {
     day.runs.get(runKey).entries.push(entry);
   });
 
-  const fragment = document.createDocumentFragment();
-  [...days.values()]
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .forEach((dayData, dayIndex) => {
-      const runValues = [...dayData.runs.values()].sort((a, b) => b.timestamp - a.timestamp);
-      const dayEntries = runValues.flatMap((run) => run.entries);
-      const dayStatus = automationHistoryStatus(dayEntries);
-      const dayDates = new Set(dayEntries.map((entry) => entry.dataset.historyDeliveryDate).filter(Boolean)).size;
-      const day = document.createElement("details");
-      day.className = `automation-history-day automation-history-day-v249 ${dayStatus.className}`;
-      day.open = dayIndex === 0;
-      day.innerHTML = `<summary>
+  // v0.337: organize activity dates into the same Monday-Friday week bands
+  // used by Home and Edit Delivery Lists. Date/category/run/result disclosures
+  // remain collapsed so the added week structure improves scanning without
+  // increasing initial visual density.
+  const buildDayElement = (dayData) => {
+    const runValues = [...dayData.runs.values()].sort((a, b) => b.timestamp - a.timestamp);
+    const dayEntries = runValues.flatMap((run) => run.entries);
+    const dayStatus = automationHistoryStatus(dayEntries);
+    const dayDates = new Set(dayEntries.map((entry) => entry.dataset.historyDeliveryDate).filter(Boolean)).size;
+    const noChangeCount = dayEntries.filter((entry) => entry.classList.contains("is-no-changes")).length;
+    const activityCount = dayEntries.length - noChangeCount;
+    const day = document.createElement("details");
+    day.className = `automation-history-day automation-history-day-v249 ${dayStatus.className}`;
+    day.open = false;
+    day.innerHTML = `<summary>
+      <span class="automation-history-chevron" aria-hidden="true"></span>
+      <div class="automation-history-summary-copy">
+        <small>Import activity</small>
+        <strong>${escapeHtml(dayData.label)}</strong>
+        <span>${runValues.length} run${runValues.length === 1 ? "" : "s"} · ${activityCount} changed/exception result${activityCount === 1 ? "" : "s"} · ${noChangeCount} no-change result${noChangeCount === 1 ? "" : "s"} · ${dayDates} delivery date${dayDates === 1 ? "" : "s"}</span>
+      </div>
+      <b>${escapeHtml(dayStatus.label)}</b>
+    </summary><div class="automation-history-day-body"></div>`;
+    const dayBody = day.querySelector(".automation-history-day-body");
+
+    const categories = [
+      {
+        key: "activity",
+        label: "New / Updated / Exceptions",
+        description: "Imports with delivery-list changes or a result that needs attention.",
+        predicate: (entry) => !entry.classList.contains("is-no-changes"),
+      },
+      {
+        key: "no-changes",
+        label: "No New / Updated Lists",
+        description: "Successful imports that found no new or updated delivery-list content.",
+        predicate: (entry) => entry.classList.contains("is-no-changes"),
+      },
+    ];
+
+    categories.forEach((categoryData) => {
+      const categoryRuns = runValues
+        .map((run) => ({ ...run, entries: run.entries.filter(categoryData.predicate) }))
+        .filter((run) => run.entries.length > 0);
+      const categoryEntries = categoryRuns.flatMap((run) => run.entries);
+      if (!categoryEntries.length) return;
+
+      const categoryStatus = automationHistoryStatus(categoryEntries);
+      const category = document.createElement("details");
+      category.className = `automation-history-category is-${categoryData.key} ${categoryStatus.className}`;
+      category.open = false;
+      category.innerHTML = `<summary>
         <span class="automation-history-chevron" aria-hidden="true"></span>
         <div class="automation-history-summary-copy">
-          <small>Import activity</small>
-          <strong>${escapeHtml(dayData.label)}</strong>
-          <span>${runValues.length} run${runValues.length === 1 ? "" : "s"} · ${dayEntries.length} file result${dayEntries.length === 1 ? "" : "s"} · ${dayDates} delivery date${dayDates === 1 ? "" : "s"}</span>
+          <small>${categoryData.key === "no-changes" ? "Quiet imports" : "Import results"}</small>
+          <strong>${escapeHtml(categoryData.label)}</strong>
+          <span>${escapeHtml(categoryData.description)}</span>
         </div>
-        <b>${escapeHtml(dayStatus.label)}</b>
-      </summary><div class="automation-history-day-body"></div>`;
-      const dayBody = day.querySelector(".automation-history-day-body");
+        <b>${categoryEntries.length}</b>
+      </summary><div class="automation-history-category-body"></div>`;
+      const categoryBody = category.querySelector(".automation-history-category-body");
 
-      runValues.forEach((runData, runIndex) => {
+      categoryRuns.forEach((runData) => {
         const runStatus = automationHistoryStatus(runData.entries);
         const runDates = new Set(runData.entries.map((entry) => entry.dataset.historyDeliveryDate).filter(Boolean)).size;
         const updatedPieces = runData.entries.reduce(
@@ -32228,7 +34172,7 @@ function enhanceAutomationImportHistoryResults(results) {
         );
         const run = document.createElement("details");
         run.className = `automation-history-run automation-history-run-v249 ${runStatus.className}`;
-        run.open = dayIndex === 0 && runIndex === 0;
+        run.open = false;
         run.innerHTML = `<summary>
           <span class="automation-history-chevron" aria-hidden="true"></span>
           <div class="automation-history-summary-copy">
@@ -32244,9 +34188,47 @@ function enhanceAutomationImportHistoryResults(results) {
         </summary><div class="automation-history-run-body"></div>`;
         const runBody = run.querySelector(".automation-history-run-body");
         runData.entries.forEach((entry) => runBody.append(entry));
-        dayBody.append(run);
+        categoryBody.append(run);
       });
-      fragment.append(day);
+
+      dayBody.append(category);
+    });
+    return day;
+  };
+
+  const orderedDays = [...days.values()].sort((a, b) => b.timestamp - a.timestamp);
+  const weekGroups = new Map();
+  orderedDays.forEach((dayData) => {
+    const weekStart = deliveryBusinessWeekStart(dayData.dayKey);
+    const weekKey = deliveryDateKey(weekStart) || `unknown-${dayData.dayKey}`;
+    if (!weekGroups.has(weekKey)) weekGroups.set(weekKey, []);
+    weekGroups.get(weekKey).push(dayData);
+  });
+
+  const fragment = document.createDocumentFragment();
+  [...weekGroups.entries()]
+    .sort(([left], [right]) => right.localeCompare(left))
+    .forEach(([weekKey, weekDays]) => {
+      const week = document.createElement("section");
+      week.className = "automation-history-week-v337";
+      week.dataset.automationHistoryWeek = weekKey;
+      const activityCount = weekDays.reduce(
+        (sum, dayData) => sum + [...dayData.runs.values()].reduce((runSum, run) => runSum + run.entries.length, 0),
+        0,
+      );
+      const label = weekKey.startsWith("unknown-")
+        ? "Unknown activity week"
+        : adminDeliveryListWeekLabel(weekKey);
+      week.innerHTML = `<header class="automation-history-week-heading-v337">
+        <div>
+          <small>Import history</small>
+          <strong>${escapeHtml(label)}</strong>
+        </div>
+        <span>${weekDays.length} activity date${weekDays.length === 1 ? "" : "s"} · ${activityCount} result${activityCount === 1 ? "" : "s"}</span>
+      </header><div class="automation-history-week-days-v337"></div>`;
+      const weekBody = week.querySelector(".automation-history-week-days-v337");
+      weekDays.forEach((dayData) => weekBody.append(buildDayElement(dayData)));
+      fragment.append(week);
     });
 
   results.replaceChildren(fragment);
@@ -32478,6 +34460,31 @@ function wireV135OperationsEvents() {
     const clearItem = event.target.closest("[data-rack-modal-clear-item]");
     if (clearItem) {
       clearRackItem(clearItem.dataset.rackModalClearItem, clearItem.dataset.rackModalClearLabel).then(() => refreshOpenRackDetails()).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const editCatalog = event.target.closest("[data-reject-catalog-edit]");
+    if (editCatalog) {
+      const currentLabel = String(editCatalog.dataset.rejectCatalogLabel || "").trim();
+      const kind = editCatalog.dataset.rejectCatalogEdit === "location" ? "location" : "reason";
+      const noun = kind === "location" ? "Break Location" : "Reject Reason";
+      promptWebAppAction({
+        title: `Edit ${noun}`,
+        message: `Update the floor-facing ${noun.toLowerCase()} label. Existing reject history keeps the text that was recorded at the time.`,
+        label: noun,
+        value: currentLabel,
+        confirmLabel: `Save ${noun}`,
+      }).then((label) => {
+        const cleanLabel = String(label || "").trim();
+        if (!cleanLabel || cleanLabel === currentLabel) return;
+        return fetchJson("/api/rejects/catalog/update", {
+          method: "POST",
+          body: JSON.stringify({ kind, id: Number(editCatalog.dataset.rejectCatalogId || 0), label: cleanLabel }),
+        }).then((payload) => {
+          state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [] };
+          if (els.adminModalBody) els.adminModalBody.innerHTML = rejectSettingsModalHtml();
+          showSaveConfirmation(`${noun} was updated.`);
+        });
+      }).catch((error) => showInlineError(error.message, true));
       return;
     }
     const removeCatalog = event.target.closest("[data-reject-catalog-remove]");
@@ -33261,6 +35268,11 @@ function wireEvents() {
     renderHome();
   });
   document.addEventListener("input", (event) => {
+    if (event.target.closest("#glassProfileFormV349")) {
+      syncGlassProfilePreviewV349();
+      return;
+    }
+
     if (event.target.closest("#manualLookupForm")) {
       syncLookupManagerFormGuidance();
       return;
@@ -33269,6 +35281,21 @@ function wireEvents() {
     const lookupSearch = event.target.closest("#lookupManagerSearchInput");
     if (lookupSearch) {
       filterLookupManagerLibrary(lookupSearch.value);
+      const clearButton = lookupSearch.closest(".lookup-library-search-v351")?.querySelector("[data-lookup-search-clear-v351]");
+      if (clearButton) clearButton.disabled = !lookupSearch.value;
+      return;
+    }
+
+    const customerEmailRuleSearch = event.target.closest("[data-customer-email-rule-search]");
+    if (customerEmailRuleSearch) {
+      filterCustomerEmailRuleRows(customerEmailRuleSearch.value);
+      return;
+    }
+
+    const customerEmailActivitySearch = event.target.closest("[data-customer-email-activity-search]");
+    if (customerEmailActivitySearch) {
+      state.customerEmailActivitySearch = customerEmailActivitySearch.value;
+      filterCustomerEmailActivity();
       return;
     }
 
@@ -33276,7 +35303,7 @@ function wireEvents() {
     if (!modalSearch) return;
 
     const target = document.getElementById("adminDeliveryListModalResults");
-    const searchBox = modalSearch.closest(".admin-modal-search");
+    const searchBox = modalSearch.closest(".admin-standard-search-v340");
     const query = modalSearch.value.trim();
 
     window.clearTimeout(state.adminListSearchTimer);
@@ -33285,18 +35312,8 @@ function wireEvents() {
     target?.classList.add("is-searching");
 
     state.adminListSearchTimer = window.setTimeout(() => {
-      if (!query) state.adminDeliveryListVisiblePastDays = ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS;
-
-      const searchPromise = query ? searchAdminDeliveryLists(query) : Promise.resolve(state.lists);
-
-      searchPromise
-        .then((filtered) => {
-          const stillCurrent = document.getElementById("adminDeliveryListModalSearch")?.value.trim() === query;
-
-          if (target && stillCurrent) {
-            renderAdminDeliveryListModalResults(filtered, query);
-          }
-        })
+      state.adminDeliveryListWeekPage = 1;
+      loadAdminDeliveryListCatalogPage(1, query)
         .catch((error) => {
           if (target) {
             target.innerHTML = `<div class="admin-empty">Search failed: ${escapeHtml(error.message)}</div>`;
@@ -33304,13 +35321,12 @@ function wireEvents() {
         })
         .finally(() => {
           const stillCurrent = document.getElementById("adminDeliveryListModalSearch")?.value.trim() === query;
-
           if (stillCurrent) {
             searchBox?.classList.remove("is-searching");
             target?.classList.remove("is-searching");
           }
         });
-    }, 180);
+    }, 220);
   });
   els.homeStageFilter?.addEventListener("change", () => {
     state.homeStageFilter = els.homeStageFilter.value;
@@ -33975,9 +35991,19 @@ function wireEvents() {
       saveRackInlineEdit().catch((error) => showInlineError(error.message, true));
       return;
     }
+    if (event.target.closest("#glassProfileFormV349")) {
+      event.preventDefault();
+      saveGlassProfileV349().catch((error) => showInlineError(error.message, true));
+      return;
+    }
     if (event.target.closest("#manualLookupForm")) {
       event.preventDefault();
       saveManualEditLookup().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#stageDefinitionFormV346")) {
+      event.preventDefault();
+      saveStageDefinitionV346().catch((error) => showInlineError(error.message, true));
       return;
     }
 
@@ -34082,6 +36108,18 @@ function wireEvents() {
   });
 
   document.addEventListener("change", async (event) => {
+    const supersededRemovalChoice = event.target.closest('input[type="radio"][name^="superseded-remove-"]');
+    if (supersededRemovalChoice) {
+      const card = supersededRemovalChoice.closest(".superseded-review-card");
+      card?.querySelectorAll(".superseded-review-choice-v328").forEach((choice) => {
+        const radio = choice.querySelector('input[type="radio"]');
+        choice.classList.toggle("is-selected", Boolean(radio?.checked));
+      });
+      const approveButton = card?.querySelector('[data-superseded-decision="approve"]');
+      if (approveButton) approveButton.textContent = `Approve removal of order ${supersededRemovalChoice.value}`;
+      return;
+    }
+
     const customerRouteCodeField = event.target.closest("#customerRouteSelectModal, [data-customer-route-route]");
 
     if (customerRouteCodeField) {
@@ -34144,6 +36182,12 @@ function wireEvents() {
         manualEditValidateRow(row);
       }
 
+      return;
+    }
+
+    const manualOrderRoute = event.target.closest('#manualOrderCreateForm select[name="route"]');
+    if (manualOrderRoute) {
+      syncManualOrderCreateRoutePreview(manualOrderRoute.form);
       return;
     }
 
@@ -34739,11 +36783,42 @@ function wireEvents() {
       }
     });
 
-    const lookupTypeButton = event.target.closest("[data-lookup-manager-type]");
-    if (lookupTypeButton) {
-      state.lookupManagerActiveType = lookupTypeButton.dataset.lookupManagerType || "product";
+    const lookupSearchClearV351 = event.target.closest("[data-lookup-search-clear-v351]");
+    if (lookupSearchClearV351) {
+      state.lookupManagerSearch = "";
+      const searchInput = document.getElementById("lookupManagerSearchInput");
+      if (searchInput) searchInput.value = "";
+      filterLookupManagerLibrary("");
+      lookupSearchClearV351.disabled = true;
+      searchInput?.focus();
+      return;
+    }
+
+    const glassFamilyTabV350 = event.target.closest("[data-glass-family-tab-v350]");
+    if (glassFamilyTabV350) {
+      state.lookupGlassFamilyV350 = glassFamilyTabV350.dataset.glassFamilyTabV350 || "Annealed";
       state.lookupManagerSearch = "";
       renderLookupManagerModal();
+      return;
+    }
+
+    const glassProfileEditButtonV349 = event.target.closest("[data-glass-profile-edit-v349]");
+    if (glassProfileEditButtonV349) {
+      editGlassProfileV349(glassProfileEditButtonV349.dataset.glassProfileEditV349 || "");
+      return;
+    }
+
+    const glassProfileRemoveButtonV349 = event.target.closest("[data-glass-profile-remove-v349]");
+    if (glassProfileRemoveButtonV349) {
+      removeGlassProfileV349(
+        glassProfileRemoveButtonV349.dataset.glassProfileRemoveV349 || "",
+        glassProfileRemoveButtonV349.dataset.glassProfileLabelV349 || glassProfileRemoveButtonV349.dataset.glassProfileRemoveV349 || "",
+      ).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    if (event.target.closest("[data-glass-profile-clear-v349]")) {
+      clearGlassProfileFormV349();
       return;
     }
 
@@ -34753,8 +36828,53 @@ function wireEvents() {
       return;
     }
 
+    const stageUseButtonV346 = event.target.closest("[data-stage-use-key-v346]");
+    if (stageUseButtonV346) {
+      useStageDefinitionInEditorV346(stageUseButtonV346.dataset.stageUseKeyV346 || "");
+      return;
+    }
+
+    const removeLookupButtonV346 = event.target.closest("[data-remove-lookup-type][data-remove-lookup-value]");
+    if (removeLookupButtonV346) {
+      removeManualEditLookupV346(
+        removeLookupButtonV346.dataset.removeLookupType || "",
+        removeLookupButtonV346.dataset.removeLookupValue || "",
+        removeLookupButtonV346.dataset.removeLookupLabel || removeLookupButtonV346.dataset.removeLookupValue || "",
+      ).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    if (event.target.closest("[data-stage-definition-clear-v346]")) {
+      clearStageDefinitionFormV346();
+      return;
+    }
+
     if (event.target.closest("[data-lookup-clear-form]")) {
       clearLookupManagerForm();
+      return;
+    }
+
+    const clearDeliveryListSearch = event.target.closest("[data-admin-delivery-search-clear]");
+    if (clearDeliveryListSearch) {
+      const input = document.getElementById("adminDeliveryListModalSearch");
+      if (input) {
+        input.value = "";
+        state.adminDeliveryListWeekPage = 1;
+        await loadAdminDeliveryListCatalogPage(1, "");
+        input.focus();
+      }
+      return;
+    }
+
+    if (event.target.closest("[data-open-create-role]")) {
+      if (!hasPermission("manage_roles")) return;
+      openRoleCreateModal();
+      return;
+    }
+
+    if (event.target.closest("[data-open-create-user]")) {
+      if (!hasPermission("manage_users") || !hasPermission("manage_user_assignments")) return;
+      openUserCreateModal();
       return;
     }
 
@@ -34816,9 +36936,18 @@ function wireEvents() {
           .then(() => openAdminModal("supersededOrders"))
           .catch((error) => showInlineError(error.message, true));
       } else if (modalKind === "deliveryLists" || modalKind === "deliveryActions") {
-        loadDeliveryLists(state.activeListId)
-          .then(() => openAdminModal(modalKind))
-          .catch((error) => showInlineError(error.message, true));
+        // v0.339: open immediately and request only the visible three-week Admin
+        // catalog page. The rich Home/scanner catalog is intentionally not
+        // reloaded here because its per-list metrics made this button feel hung.
+        state.adminDeliveryListWeekPage = 1;
+        state.adminDeliveryListCatalog = null;
+        openAdminModal(modalKind, { body: adminDeliveryListModalLoadingHtml() });
+        loadAdminDeliveryListCatalogPage(1, "", { showLoading: false })
+          .catch((error) => {
+            const target = document.getElementById("adminDeliveryListModalResults");
+            if (target) target.innerHTML = `<div class="admin-empty review"><strong>Delivery lists could not be loaded.</strong><span>${escapeHtml(error.message)}</span></div>`;
+            showInlineError(error.message, true);
+          });
       } else {
         openAdminModal(modalKind);
       }
@@ -34830,7 +36959,14 @@ function wireEvents() {
       const input = document.getElementById("newStationInputModal");
       if (els.newStationInput && input) els.newStationInput.value = input.value;
       addStationFromInput()
-        .then(() => openAdminModal("stations"))
+        .then(() => {
+          if (els.adminModal?.dataset.kind === "lookups" && state.lookupManagerActiveType === "station") {
+            renderLookupManagerModal();
+            configureAdminModalSectionTabsV345("lookups");
+          } else {
+            openAdminModal("stations");
+          }
+        })
         .catch((error) => showInlineError(error.message));
       return;
     }
@@ -35004,15 +37140,7 @@ function wireEvents() {
     }
     if (event.target.closest("[data-manual-order-toggle]")) {
       event.preventDefault();
-      const panel = document.getElementById("manualOrderCreatePanel");
-      if (panel) {
-        panel.open = true;
-        panel.classList.add("is-requested-open");
-        const results = document.getElementById("manualEditModalResults");
-        if (results) results.scrollTop = 0;
-        panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        window.setTimeout(() => panel.querySelector("input[name='order']")?.focus(), 180);
-      }
+      openManualOrderCreateModal();
       return;
     }
     const manualModalSearchButton = event.target.closest("#manualEditModalSearchBtn");
@@ -35027,9 +37155,23 @@ function wireEvents() {
       runManualEditModalSearch(true).catch((error) => showInlineError(error.message, true));
       return;
     }
-    if (event.target.closest("[data-manual-edit-load-more]")) {
+    const manualEditPageButton = event.target.closest("[data-manual-edit-page]");
+    if (manualEditPageButton && !manualEditPageButton.disabled) {
       event.preventDefault();
-      loadMoreManualEditRows().catch((error) => showInlineError(error.message, true));
+      if (state.manualEditDirty) {
+        const confirmed = await confirmWebAppAction({
+          title: "Change pages without saving?",
+          message: "You have unsaved manual delivery-list edits.",
+          details: "Changing pages will discard those unsaved changes.",
+          confirmLabel: "Discard and change page",
+          cancelLabel: "Keep editing",
+          danger: false,
+        });
+        if (!confirmed) return;
+        state.manualEditDirty = false;
+      }
+      goToManualEditPage(Number(manualEditPageButton.dataset.manualEditPage || 1))
+        .catch((error) => showInlineError(error.message, true));
       return;
     }
     const adminReportButton = event.target.closest("[data-admin-report]");
@@ -35037,6 +37179,15 @@ function wireEvents() {
       openPrintOptions({ date: dashboardDateKey(), listIds: state.lists.map((list) => list.id) });
       return;
     }
+    const adminDeliveryWeekPageButton = event.target.closest("[data-admin-delivery-week-page]");
+    if (adminDeliveryWeekPageButton && !adminDeliveryWeekPageButton.disabled) {
+      const page = Math.max(Number(adminDeliveryWeekPageButton.dataset.adminDeliveryWeekPage || 1), 1);
+      const query = document.getElementById("adminDeliveryListModalSearch")?.value.trim() || "";
+      await loadAdminDeliveryListCatalogPage(page, query);
+      document.getElementById("adminDeliveryListModalResults")?.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
     const adminDeliveryLoadMoreButton = event.target.closest("[data-admin-delivery-load-more]");
     if (adminDeliveryLoadMoreButton) {
       state.adminDeliveryListVisiblePastDays += ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS;
@@ -35237,6 +37388,10 @@ function wireEvents() {
           state.stations = uniqueText([...(payload.stations || [])]);
           renderStationOptions();
           renderAdminStations();
+          if (els.adminModal?.dataset.kind === "lookups" && state.lookupManagerActiveType === "station") {
+            renderLookupManagerModal();
+            configureAdminModalSectionTabsV345("lookups");
+          }
           showSaveConfirmation(`Station ${oldName} was renamed to ${input?.value || oldName}.`);
         })
         .catch((error) => showInlineError(error.message));
@@ -35416,6 +37571,33 @@ function wireEvents() {
       deleteManualLineItem(deleteLineItemButton.dataset.deleteLineItem).catch((error) => showInlineError(error.message, true));
       return;
     }
+    const customerRouteManagerTabV350 = event.target.closest("[data-customer-route-tab-v350]");
+    if (customerRouteManagerTabV350) {
+      state.customerRouteManagerRouteV350 = customerRouteValue(customerRouteManagerTabV350.dataset.customerRouteTabV350 || "CPU");
+      if (els.adminModalBody) els.adminModalBody.innerHTML = customerRouteRulesModalHtml();
+      return;
+    }
+
+    const customerRouteOverviewTabV350 = event.target.closest("[data-customer-route-overview-tab-v350]");
+    if (customerRouteOverviewTabV350) {
+      state.customerRouteOverviewRouteV350 = customerRouteValue(customerRouteOverviewTabV350.dataset.customerRouteOverviewTabV350 || "CPU");
+      renderCustomerRouteRules();
+      return;
+    }
+
+
+    const openCustomerRouteCreateButton = event.target.closest("[data-open-customer-route-create]");
+    if (openCustomerRouteCreateButton) {
+      openCustomerRouteCreateModal();
+      return;
+    }
+
+    const closeCustomerRouteCreateButton = event.target.closest("[data-customer-route-create-close]");
+    if (closeCustomerRouteCreateButton) {
+      closeCustomerRouteCreateModal();
+      return;
+    }
+
     const saveCustomerRouteButton = event.target.closest("[data-save-customer-route-rule]");
     if (saveCustomerRouteButton) {
       saveCustomerRouteRuleRow(saveCustomerRouteButton.dataset.saveCustomerRouteRule).catch((error) => showInlineError(error.message, true));
@@ -35425,6 +37607,13 @@ function wireEvents() {
     const removeCustomerRouteButton = event.target.closest("[data-remove-customer-route-rule]");
     if (removeCustomerRouteButton) {
       removeCustomerRouteRule(removeCustomerRouteButton.dataset.removeCustomerRouteRule).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const customerEmailActivityFilterButton = event.target.closest("[data-customer-email-activity-filter]");
+    if (customerEmailActivityFilterButton) {
+      state.customerEmailActivityFilter = customerEmailActivityFilterButton.dataset.customerEmailActivityFilter || "all";
+      filterCustomerEmailActivity();
       return;
     }
 
@@ -35455,6 +37644,12 @@ function wireEvents() {
     const removeCustomerEmailCcButton = event.target.closest("[data-remove-customer-email-cc]");
     if (removeCustomerEmailCcButton) {
       removeCustomerEmailCc(removeCustomerEmailCcButton.dataset.removeCustomerEmailCc).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const deleteEmailDraftButton = event.target.closest("[data-delete-email-draft]");
+    if (deleteEmailDraftButton) {
+      deleteCustomerEmailDraftV349(deleteEmailDraftButton.dataset.deleteEmailDraft).catch((error) => showInlineError(error.message, true));
       return;
     }
 
@@ -35582,11 +37777,12 @@ init().catch((error) => {
   let recentImportsRefreshTimer = null;
   let importHistoryModal = null;
   let importHistorySearchTimer = null;
+  let importHistoryRequestId = 0;
+  let importHistoryAbortController = null;
   let lastImportHistoryPayload = null;
   let importHistoryHasNewResults = false;
   const importHistoryState = {
     page: 1,
-    pageSize: 20,
     query: "",
     classification: "",
     dateFrom: "",
@@ -35598,6 +37794,7 @@ init().catch((error) => {
   let lastDeliveryCatalogSignature = "";
   let lastLatestImportSignature = "";
   let autoFollowLog = true;
+  let automationLogResizeObserver = null;
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -35958,21 +38155,62 @@ init().catch((error) => {
   }
 
   function renderStageSummaries(item = {}) {
-    const stages = Array.isArray(item.stageSummaries) ? item.stageSummaries : [];
-    if (!stages.length) {
+    const routes = condenseImportStageSummariesByRoute(item.stageSummaries || []);
+    if (!routes.length) {
       return `<div class="automation-import-stage-empty">${escapeHtml(recentImportMessage(item))}</div>`;
     }
+
+    const routeQuantityState = (routeSummary = {}) => {
+      const afterQty = Number(routeSummary.totalQty ?? routeSummary.updatedQty ?? 0);
+      const removedQty = Number(routeSummary.removedPieceQty || 0);
+      const recordedAddedQty = Number(routeSummary.addedPieceQty || routeSummary.newPieceQty || 0);
+      const changedQty = Number(routeSummary.changedPieceQty || 0);
+      const created = Boolean(routeSummary.created || routeSummary.reactivated);
+      const explicitBefore = routeSummary.originalQty ?? routeSummary.originalPieceQty ?? routeSummary.previousQty ?? routeSummary.oldQty ?? routeSummary.beforeQty;
+      let beforeQty = explicitBefore === undefined || explicitBefore === null || explicitBefore === ""
+        ? Math.max(afterQty - recordedAddedQty + removedQty, 0)
+        : Number(explicitBefore || 0);
+
+      // Historical no-change rows occasionally recorded originalQty=0 even
+      // though totalQty already represented the existing route. Treat that as
+      // unchanged rather than making the route appear newly created.
+      if (!created && beforeQty <= 0 && afterQty > 0 && !recordedAddedQty && !changedQty && !removedQty) {
+        beforeQty = afterQty;
+      }
+
+      const addedQty = recordedAddedQty || Math.max(afterQty + removedQty - beforeQty, 0);
+      return { beforeQty, afterQty, addedQty, removedQty };
+    };
+
     return `
-      <div class="automation-import-stage-list">
-        ${stages.map((stage) => {
-          const status = stageSummaryStatus(stage);
+      <div class="automation-import-route-table-v333" role="table" aria-label="Delivery-list route results">
+        <div class="automation-import-route-heading-v333" role="row">
+          <span role="columnheader">Route</span>
+          <span role="columnheader">Before</span>
+          <span role="columnheader">Changes</span>
+          <span role="columnheader">After</span>
+          <span role="columnheader">Status</span>
+        </div>
+        ${routes.map((routeSummary) => {
+          const status = stageSummaryStatus(routeSummary);
+          const quantities = routeQuantityState(routeSummary);
+          const routeDescription = routeSummary.routeGroupKey === "airport"
+            ? "All orders for this delivery date"
+            : stageSummaryMessage(routeSummary);
+          const changes = [
+            quantities.addedQty ? `+${quantities.addedQty}` : "",
+            quantities.removedQty ? `-${quantities.removedQty}` : "",
+          ].filter(Boolean).join(" / ") || "—";
           return `
-            <div class="automation-import-stage-row ${status.className}">
-              <div class="automation-import-stage-copy">
-                <strong>${escapeHtml(stageSummaryLabel(stage))}</strong>
-                <small>${escapeHtml(stageSummaryMessage(stage))}</small>
+            <div class="automation-import-route-row-v333 ${status.className}" role="row">
+              <div class="automation-import-route-copy-v333" role="cell">
+                <strong>${escapeHtml(routeSummary.routeGroupLabel || stageSummaryLabel(routeSummary))}</strong>
+                <small>${escapeHtml(routeDescription)}</small>
               </div>
-              <span class="automation-import-stage-pill">${escapeHtml(status.label)}</span>
+              <span class="automation-import-route-qty-v333" role="cell">${escapeHtml(quantities.beforeQty)} pcs</span>
+              <span class="automation-import-route-change-v333 ${quantities.removedQty ? "has-removals" : ""}" role="cell">${escapeHtml(changes)}${changes === "—" ? "" : " pcs"}</span>
+              <strong class="automation-import-route-qty-v333 is-after" role="cell">${escapeHtml(quantities.afterQty)} pcs</strong>
+              <span class="automation-import-stage-pill" role="cell">${escapeHtml(status.label)}</span>
             </div>`;
         }).join("")}
       </div>`;
@@ -35984,6 +38222,42 @@ init().catch((error) => {
     if (adminLastUpdated && payload.lastCheckedAt) {
       adminLastUpdated.textContent = `Last updated: ${formatTimestamp(payload.lastCheckedAt)}`;
     }
+  }
+
+  /** Keep the delivery-date filter pair valid and reflect its bounds in the native date pickers. */
+  function normalizeImportHistoryDateRange(changedField = "") {
+    if (!importHistoryModal) return;
+    const fromInput = importHistoryModal.querySelector("#importHistoryDateFrom");
+    const toInput = importHistoryModal.querySelector("#importHistoryDateTo");
+    if (!fromInput || !toInput) return;
+
+    let from = String(fromInput.value || "");
+    let to = String(toInput.value || "");
+    if (from && to && from > to) {
+      if (changedField === "to") {
+        from = to;
+        fromInput.value = from;
+      } else {
+        to = from;
+        toInput.value = to;
+      }
+    }
+
+    fromInput.max = to || "";
+    toInput.min = from || "";
+    importHistoryState.dateFrom = from;
+    importHistoryState.dateTo = to;
+  }
+
+  /** Update the Import History refresh control without replacing its icon markup. */
+  function setImportHistoryRefreshButtonState(label = "Refresh", hasNewResults = false, busy = false) {
+    const button = importHistoryModal?.querySelector("#importHistoryRefreshBtn") || modal?.querySelector("#importHistoryRefreshBtn");
+    if (!button) return;
+    const text = button.querySelector("[data-import-history-refresh-label]");
+    if (text) text.textContent = label;
+    button.classList.toggle("has-new-results", Boolean(hasNewResults));
+    button.classList.toggle("is-loading", Boolean(busy));
+    button.disabled = Boolean(busy);
   }
 
   // Import history is part of the main control center. It refreshes only when
@@ -36005,6 +38279,7 @@ init().catch((error) => {
       importHistoryModal.querySelector("#importHistoryStatusFilter").value = "";
       importHistoryModal.querySelector("#importHistoryDateFrom").value = "";
       importHistoryModal.querySelector("#importHistoryDateTo").value = "";
+      normalizeImportHistoryDateRange();
       refreshImportHistory(false);
     });
 
@@ -36021,25 +38296,24 @@ init().catch((error) => {
       importHistoryState.classification = event.target.value;
       refreshImportHistory(false);
     });
-    importHistoryModal.querySelector("#importHistoryDateFrom").addEventListener("change", (event) => {
+    importHistoryModal.querySelector("#importHistoryDateFrom").addEventListener("change", () => {
       importHistoryState.page = 1;
-      importHistoryState.dateFrom = event.target.value;
+      normalizeImportHistoryDateRange("from");
       refreshImportHistory(false);
     });
-    importHistoryModal.querySelector("#importHistoryDateTo").addEventListener("change", (event) => {
+    importHistoryModal.querySelector("#importHistoryDateTo").addEventListener("change", () => {
       importHistoryState.page = 1;
-      importHistoryState.dateTo = event.target.value;
+      normalizeImportHistoryDateRange("to");
       refreshImportHistory(false);
     });
-    importHistoryModal.querySelector("#importHistoryPageSize").addEventListener("change", (event) => {
-      importHistoryState.page = 1;
-      importHistoryState.pageSize = Number(event.target.value || 20);
-      refreshImportHistory(false);
-    });
+    normalizeImportHistoryDateRange();
+    wireOwnedVerticalScroll(importHistoryModal.querySelector("#importHistoryResults"));
     importHistoryModal.querySelector("#importHistoryPager").addEventListener("click", (event) => {
       const button = event.target.closest("button[data-history-page]");
       if (!button || button.disabled) return;
       importHistoryState.page = Number(button.dataset.historyPage || 1);
+      const results = importHistoryModal.querySelector("#importHistoryResults");
+      if (results) results.scrollTop = 0;
       refreshImportHistory(false);
     });
   }
@@ -36047,7 +38321,7 @@ init().catch((error) => {
   function importHistoryRequestPath() {
     const params = new URLSearchParams({
       page: String(importHistoryState.page),
-      pageSize: String(importHistoryState.pageSize),
+      pageMode: "control_center",
     });
     if (importHistoryState.query) params.set("q", importHistoryState.query);
     if (importHistoryState.classification) params.set("classification", importHistoryState.classification);
@@ -36056,30 +38330,23 @@ init().catch((error) => {
     return `/recent-imports?${params.toString()}`;
   }
 
-  function historyPageNumbers(page, totalPages) {
-    const values = new Set([1, totalPages, page - 2, page - 1, page, page + 1, page + 2]);
-    return [...values].filter((value) => value >= 1 && value <= totalPages).sort((a, b) => a - b);
-  }
-
   function renderImportHistoryPager(payload = {}) {
     const pager = importHistoryModal?.querySelector("#importHistoryPager");
-    const pageSummary = importHistoryModal?.querySelector("#importHistoryPageSummary");
-    if (!pager || !pageSummary) return;
+    if (!pager) return;
+
     const page = Number(payload.page || 1);
     const totalPages = Math.max(1, Number(payload.totalPages || 1));
-    pageSummary.textContent = `Page ${page} of ${totalPages}`;
-    const pageNumbers = historyPageNumbers(page, totalPages);
-    const buttons = [
-      `<button type="button" data-history-page="${Math.max(1, page - 1)}"${page <= 1 ? " disabled" : ""}>Previous</button>`,
-    ];
-    let previousNumber = 0;
-    pageNumbers.forEach((number) => {
-      if (previousNumber && number - previousNumber > 1) buttons.push('<span class="import-history-page-gap">…</span>');
-      buttons.push(`<button type="button" data-history-page="${number}" class="${number === page ? "is-active" : ""}"${number === page ? ' aria-current="page"' : ""}>${number}</button>`);
-      previousNumber = number;
-    });
-    buttons.push(`<button type="button" data-history-page="${Math.min(totalPages, page + 1)}"${page >= totalPages ? " disabled" : ""}>Next</button>`);
-    pager.innerHTML = buttons.join("");
+    const pageStart = payload.pageStart ? formatNumericDeliveryDate(payload.pageStart) : "";
+    const pageEnd = payload.pageEnd ? formatNumericDeliveryDate(payload.pageEnd) : "";
+    const pageDateCount = Number(payload.pageDateCount || 0);
+    const filteredPaging = Boolean(payload.filteredPaging);
+    const range = pageStart && pageEnd ? `${pageStart} - ${pageEnd}` : "";
+    const summary = filteredPaging
+      ? `Page ${page} of ${totalPages} · ${pageDateCount} matching date${pageDateCount === 1 ? "" : "s"}${range ? ` · ${range}` : ""}`
+      : `Page ${page} of ${totalPages}${range ? ` · ${range}` : ""}`;
+
+    pager.setAttribute("aria-label", `${summary}. Import history pages`);
+    pager.innerHTML = sharedNumberedPagerMarkup(page, totalPages, "data-history-page");
   }
 
   function renderImportHistory(payload = {}) {
@@ -36092,12 +38359,14 @@ init().catch((error) => {
       ? payload.imports
       : (Array.isArray(payload.recentImports) ? payload.recentImports : []);
     const totalCount = Number(payload.totalCount ?? imports.length);
-    const page = Number(payload.page || 1);
-    const pageSize = Number(payload.pageSize || importHistoryState.pageSize);
-    const first = totalCount ? ((page - 1) * pageSize) + 1 : 0;
-    const last = totalCount ? Math.min(page * pageSize, totalCount) : 0;
+    const pageStart = payload.pageStart ? formatNumericDeliveryDate(payload.pageStart) : "";
+    const pageEnd = payload.pageEnd ? formatNumericDeliveryDate(payload.pageEnd) : "";
+    const pageDateCount = Number(payload.pageDateCount || 0);
+    const filteredPaging = Boolean(payload.filteredPaging);
     resultSummary.textContent = totalCount
-      ? `Showing ${first}-${last} of ${totalCount} import result${totalCount === 1 ? "" : "s"}`
+      ? filteredPaging
+        ? `${totalCount} matching import result${totalCount === 1 ? "" : "s"} · showing every result across ${pageDateCount} date${pageDateCount === 1 ? "" : "s"} on this page`
+        : `${imports.length} import result${imports.length === 1 ? "" : "s"}${pageStart && pageEnd ? ` · ${pageStart} - ${pageEnd}` : ""}`
       : "No import results match these filters";
     lastChecked.textContent = payload.lastCheckedAt
       ? `Last automation check ${formatTimestamp(payload.lastCheckedAt)}`
@@ -36164,24 +38433,34 @@ init().catch((error) => {
     createModal();
     importHistoryModal = modal;
     if (resetPage) importHistoryState.page = 1;
+    normalizeImportHistoryDateRange();
+
+    const requestId = ++importHistoryRequestId;
+    importHistoryAbortController?.abort();
+    importHistoryAbortController = new AbortController();
+
     const results = importHistoryModal.querySelector("#importHistoryResults");
     const previousScrollTop = results.scrollTop;
     results.innerHTML = '<div class="import-history-loading"><span></span><strong>Loading import history...</strong></div>';
+    setImportHistoryRefreshButtonState("Refreshing...", importHistoryHasNewResults, true);
+
     try {
-      const payload = await api(importHistoryRequestPath());
+      const payload = await api(importHistoryRequestPath(), { signal: importHistoryAbortController.signal });
+      if (requestId !== importHistoryRequestId) return;
       importHistoryState.page = Number(payload.page || importHistoryState.page);
-      importHistoryState.pageSize = Number(payload.pageSize || importHistoryState.pageSize);
       renderImportHistory(payload);
       results.scrollTop = resetPage ? 0 : previousScrollTop;
       importHistoryHasNewResults = false;
-      const refreshButton = importHistoryModal.querySelector("#importHistoryRefreshBtn");
-      if (refreshButton) {
-        refreshButton.textContent = "Refresh";
-        refreshButton.classList.remove("has-new-results");
-      }
+      setImportHistoryRefreshButtonState("Refresh", false, false);
       if (Array.isArray(payload.lists)) publishDeliveryCatalog(payload.lists, "import-history", true);
     } catch (error) {
+      if (error?.name === "AbortError" || requestId !== importHistoryRequestId) return;
       results.innerHTML = `<div class="import-history-empty is-error"><strong>Import history could not be loaded</strong><span>${escapeHtml(error.message)}</span></div>`;
+      setImportHistoryRefreshButtonState("Try Again", importHistoryHasNewResults, false);
+    } finally {
+      if (requestId === importHistoryRequestId && importHistoryAbortController?.signal.aborted === false) {
+        setImportHistoryRefreshButtonState(importHistoryHasNewResults ? "Refresh - new results" : "Refresh", importHistoryHasNewResults, false);
+      }
     }
   }
 
@@ -36242,6 +38521,21 @@ init().catch((error) => {
           <span class="automation-card-tag">${tag}</span>
         </span>
       </label>`;
+  }
+
+  function scrollLiveAutomationLogToNewest() {
+    if (!modal) return;
+    const viewport = modal.querySelector("#automationLogViewport");
+    if (!viewport) return;
+
+    // The log is a dedicated bounded viewport in v0.332. Two animation frames
+    // allow both text wrapping and the Status grid to settle before resolving
+    // the true bottom, including the explicit end-of-log clearance marker.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        viewport.scrollTop = viewport.scrollHeight;
+      });
+    });
   }
 
   function createModal() {
@@ -36338,27 +38632,27 @@ init().catch((error) => {
           </div>
 
           <section class="automation-settings-panel">
-            <div class="automation-settings-section">
+            <div class="automation-settings-section automation-schedule-row-v328">
               <div class="automation-settings-section-heading">
                 <strong>Incremental schedule</strong>
-                <span>The frequent lightweight check used during the workday.</span>
+                <span>Frequent workday check</span>
               </div>
               <div class="automation-settings-grid">
                 <label><span>Run every</span><div class="automation-number-unit"><input id="automationInterval" type="number" min="5" max="1440" step="5"><b>minutes</b></div></label>
-                <label><span>Past delivery days</span><input id="automationPastDays" type="number" min="0" max="365"></label>
-                <label><span>Future delivery days</span><input id="automationFutureDays" type="number" min="0" max="365"></label>
+                <label><span>Past days</span><input id="automationPastDays" type="number" min="0" max="365"></label>
+                <label><span>Future days</span><input id="automationFutureDays" type="number" min="0" max="365"></label>
               </div>
             </div>
 
-            <div class="automation-settings-section">
+            <div class="automation-settings-section automation-schedule-row-v328">
               <div class="automation-settings-section-heading">
                 <strong>Daily full refresh</strong>
-                <span>The broader safety sweep that catches older and far-future changes.</span>
+                <span>Broader safety sweep</span>
               </div>
               <div class="automation-settings-grid">
-                <label><span>Full refresh time</span><input id="automationFullTime" type="time"></label>
-                <label><span>Past delivery days</span><input id="automationFullPastDays" type="number" min="0" max="365"></label>
-                <label><span>Future delivery days</span><input id="automationFullFutureDays" type="number" min="0" max="365"></label>
+                <label><span>Run at</span><input id="automationFullTime" type="time"></label>
+                <label><span>Past days</span><input id="automationFullPastDays" type="number" min="0" max="365"></label>
+                <label><span>Future days</span><input id="automationFullFutureDays" type="number" min="0" max="365"></label>
               </div>
             </div>
 
@@ -36383,7 +38677,7 @@ init().catch((error) => {
           </section>
         </section>
 
-        <section class="delivery-automation-tab" data-automation-panel="status" role="tabpanel">
+        <section class="delivery-automation-tab automation-status-workspace-v328" data-automation-panel="status" role="tabpanel">
           <div class="automation-section-heading">
             <div><small>Runtime health</small><h3>Latest automation result</h3></div>
             <button type="button" class="automation-text-button" id="automationRefreshStatusBtn">Refresh Status</button>
@@ -36396,21 +38690,25 @@ init().catch((error) => {
           </section>
 
           <div id="automationStatusSummary" class="automation-status-summary"></div>
-          <details class="automation-log-details" id="automationLogDetails" open>
-            <summary>
+          <section class="automation-log-panel-v332" id="automationLogDetails" aria-label="Live command log">
+            <header class="automation-log-header-v332">
               <span>Live command log</span>
               <small id="automationLogLineCount">0 lines</small>
-            </summary>
+            </header>
             <div class="automation-log-toolbar">
               <div class="automation-log-location">
                 <small>Log file</small>
                 <span id="automationLogPath">No log file recorded yet.</span>
               </div>
               <label class="automation-log-follow"><input id="automationLogFollow" type="checkbox" checked><span>Follow newest activity</span></label>
+              <button type="button" class="automation-text-button" id="automationJumpLogBtn">Newest</button>
               <button type="button" class="automation-text-button" id="automationCopyLogBtn">Copy Full Log</button>
             </div>
-            <pre id="automationStatusLog" tabindex="0">No command output yet.</pre>
-          </details>
+            <div class="automation-log-viewport-v332" id="automationLogViewport" tabindex="0" aria-label="Automation command output">
+              <pre id="automationStatusLog">No command output yet.</pre>
+              <span class="automation-log-end-v332" id="automationLogEnd" aria-hidden="true"></span>
+            </div>
+          </section>
         </section>
 
         <section class="delivery-automation-tab import-history-workspace import-history-workspace-v249" data-automation-panel="history" role="tabpanel">
@@ -36418,49 +38716,43 @@ init().catch((error) => {
             <div>
               <small>Delivery List Management</small>
               <h3>Import Audit History</h3>
-              <p>Review the newest imports first, then search or filter older delivery-list results.</p>
+              <p>Normal browsing shows three business weeks per page. Filters show every matching import for up to 25 activity dates per page.</p>
             </div>
-            <button class="automation-secondary-button" id="importHistoryRefreshBtn" type="button">Refresh</button>
+            <button class="automation-secondary-button automation-refresh-button-v334" id="importHistoryRefreshBtn" type="button"><span class="automation-refresh-icon-v334" aria-hidden="true"></span><span data-import-history-refresh-label>Refresh</span></button>
           </div>
 
-          <section class="import-history-toolbar" aria-label="Import history filters">
-            <label class="import-history-search search-box">
-              <span class="search-icon" aria-hidden="true"></span>
-              <input id="importHistorySearch" type="search" autocomplete="off" placeholder="Search date, filename, stage, user, status...">
-            </label>
-            <label>
-              <span>Status</span>
-              <select id="importHistoryStatusFilter">
-                <option value="">All statuses</option>
-                <option value="new">New</option>
-                <option value="updated">Updated</option>
-                <option value="new_updated">New + Updated</option>
-                <option value="no_changes">No Changes</option>
-                <option value="failed">Failed</option>
-              </select>
-            </label>
-            <label><span>Delivery date from</span><input id="importHistoryDateFrom" type="date"></label>
-            <label><span>Delivery date through</span><input id="importHistoryDateTo" type="date"></label>
-            <label>
-              <span>Rows per page</span>
-              <select id="importHistoryPageSize">
-                <option value="20">20</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-              </select>
-            </label>
-            <button class="automation-text-button import-history-clear" id="importHistoryClearBtn" type="button">Clear filters</button>
+          <section class="modal-action-history-filters import-history-toolbar import-history-action-filters-v339" aria-label="Import history filters">
+            <div class="modal-action-history-filter-grid import-history-filter-grid-v339">
+              <label class="modal-action-history-filter-search">
+                <span>Search history</span>
+                <input id="importHistorySearch" type="search" autocomplete="off" placeholder="Search dates, routes, files, users, or status...">
+              </label>
+              <label>
+                <span>Status</span>
+                <select id="importHistoryStatusFilter">
+                  <option value="">All statuses</option>
+                  <option value="new">New</option>
+                  <option value="updated">Updated</option>
+                  <option value="new_updated">New + Updated</option>
+                  <option value="no_changes">No Changes</option>
+                  <option value="failed">Failed</option>
+                </select>
+              </label>
+              <label><span>From date</span><input id="importHistoryDateFrom" type="date"></label>
+              <label><span>Through date</span><input id="importHistoryDateTo" type="date"></label>
+            </div>
+            <div class="modal-action-history-filter-footer import-history-filter-footer-v339">
+              <span>Filters use import activity dates and can be combined.</span>
+              <button class="secondary import-history-clear" id="importHistoryClearBtn" type="button">Clear filters</button>
+            </div>
           </section>
 
-          <section class="import-history-status-row">
-            <strong id="importHistoryResultSummary">Open Import History to load results.</strong>
-            <span id="importHistoryLastChecked">Waiting for current status</span>
+          <section class="modal-action-history-filter-footer import-history-paging-bar-v338" aria-label="Import history paging">
+            <span id="importHistoryResultSummary">Open Import History to load results.</span>
+            <nav class="modal-action-history-pager app-numbered-pager-v337" id="importHistoryPager" aria-label="Import history pages"></nav>
+            <span class="import-history-last-checked-v338" id="importHistoryLastChecked">Waiting for current status</span>
           </section>
           <div class="import-history-results" id="importHistoryResults" aria-live="polite"></div>
-          <footer class="import-history-footer">
-            <span id="importHistoryPageSummary">Page 1 of 1</span>
-            <nav class="import-history-pager" id="importHistoryPager" aria-label="Import history pages"></nav>
-          </footer>
         </section>
       </div>`;
 
@@ -36493,13 +38785,41 @@ init().catch((error) => {
     modal.querySelector("#automationRemoveScheduleBtn").addEventListener("click", removeSchedule);
     modal.querySelector("#automationRefreshStatusBtn").addEventListener("click", refreshDashboard);
     modal.querySelector("#automationCopyLogBtn").addEventListener("click", copyFullLog);
-    modal.querySelector("#automationLogFollow").addEventListener("change", (event) => {
+    const automationLog = modal.querySelector("#automationLogViewport");
+    const automationLogContent = modal.querySelector("#automationStatusLog");
+    const automationLogFollow = modal.querySelector("#automationLogFollow");
+    automationLogFollow.addEventListener("change", (event) => {
       autoFollowLog = event.target.checked;
-      if (autoFollowLog) {
-        const log = modal.querySelector("#automationStatusLog");
-        log.scrollTop = log.scrollHeight;
-      }
+      if (autoFollowLog) scrollLiveAutomationLogToNewest();
     });
+    modal.querySelector("#automationJumpLogBtn").addEventListener("click", () => {
+      autoFollowLog = true;
+      automationLogFollow.checked = true;
+      scrollLiveAutomationLogToNewest();
+      automationLog.focus({ preventScroll: true });
+    });
+    automationLog.addEventListener("scroll", () => {
+      // A manual move away from the newest line must win over live polling. The
+      // scroll event covers mouse, keyboard, touch, and scrollbar-thumb input.
+      const distanceFromBottom = automationLog.scrollHeight - automationLog.scrollTop - automationLog.clientHeight;
+      if (autoFollowLog && distanceFromBottom > 48) {
+        autoFollowLog = false;
+        automationLogFollow.checked = false;
+      }
+    }, { passive: true });
+    automationLog.addEventListener("wheel", (event) => {
+      // The dedicated viewport owns wheel movement while hovered; do not let the
+      // parent Status workspace consume the same gesture at the log boundary.
+      event.stopPropagation();
+    }, { passive: true });
+
+    if (typeof ResizeObserver === "function") {
+      automationLogResizeObserver?.disconnect();
+      automationLogResizeObserver = new ResizeObserver(() => {
+        if (autoFollowLog) scrollLiveAutomationLogToNewest();
+      });
+      automationLogResizeObserver.observe(automationLogContent);
+    }
 
     modal.querySelector("#automationDateFrom").value = localDateIso();
     modal.querySelector("#automationDateTo").value = localDateIso();
@@ -36520,6 +38840,11 @@ init().catch((error) => {
     if (name === "history") {
       refreshImportHistory(false);
       window.setTimeout(() => modal.querySelector("#importHistorySearch")?.focus(), 30);
+    }
+    if (name === "status" && autoFollowLog) {
+      // The Status panel may have been hidden while output arrived. Re-resolve
+      // the dedicated log viewport only after the tab is visible again.
+      scrollLiveAutomationLogToNewest();
     }
   }
 
@@ -36557,6 +38882,7 @@ init().catch((error) => {
     backdrop.hidden = false;
     modal.hidden = false;
     document.body.classList.add("modal-open");
+    updateModalScrollLock();
     refreshDashboard();
     scheduleRecentImportsRefresh(0);
     const activeTab = modal.querySelector("[data-automation-tab].is-active")?.dataset.automationTab || "manual";
@@ -36569,6 +38895,7 @@ init().catch((error) => {
     backdrop.hidden = true;
     modal.hidden = true;
     document.body.classList.remove("modal-open");
+    updateModalScrollLock();
     refreshRecentImports({ refreshHistoryWindow: false });
     if (pollTimer) {
       clearTimeout(pollTimer);
@@ -36667,13 +38994,11 @@ init().catch((error) => {
 
     const output = last.commandOutput || [last.stdout, last.stderr, last.error].filter(Boolean).join("\n\n");
     const logElement = modal.querySelector("#automationStatusLog");
-    const wasNearBottom = logElement.scrollHeight - logElement.scrollTop - logElement.clientHeight < 48;
     logElement.textContent = output || "No command output yet.";
     const lineCount = Number(last.outputLineCount || (output ? output.split(/\r?\n/).length : 0));
     modal.querySelector("#automationLogLineCount").textContent = `${lineCount} line${lineCount === 1 ? "" : "s"}${running ? " - live" : ""}`;
     modal.querySelector("#automationLogPath").textContent = last.logPath || "No log file recorded yet.";
-    if (autoFollowLog || wasNearBottom) logElement.scrollTop = logElement.scrollHeight;
-    if (running || succeeded === false) modal.querySelector("#automationLogDetails").open = true;
+    if (autoFollowLog) scrollLiveAutomationLogToNewest();
     modal.querySelector("#automationManualHeading").textContent = running ? "Update in progress" : succeeded === false ? "Last update failed" : "Ready to run";
     modal.querySelector("#automationManualMessage").textContent = running
       ? "The automation is running in the background. Status refreshes automatically."
@@ -36805,11 +39130,9 @@ init().catch((error) => {
 
   document.addEventListener("dls:delivery-list-import-history-changed", () => {
     importHistoryHasNewResults = true;
-    const refreshButton = modal?.querySelector("#importHistoryRefreshBtn");
     const historyPanel = modal?.querySelector('[data-automation-panel="history"]');
-    if (refreshButton && modal && !modal.hidden && historyPanel?.classList.contains("is-active")) {
-      refreshButton.textContent = "Refresh - new results";
-      refreshButton.classList.add("has-new-results");
+    if (modal && !modal.hidden && historyPanel?.classList.contains("is-active")) {
+      setImportHistoryRefreshButtonState("Refresh - new results", true, false);
     }
     scheduleRecentImportsRefresh(100, { refreshHistoryWindow: false });
   });

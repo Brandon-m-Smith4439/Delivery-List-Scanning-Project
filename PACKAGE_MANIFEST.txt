@@ -1,0 +1,60 @@
+Delivery List Scanner - Best-Known Full Source Snapshot
+Application release: v0.354
+SQLite schema: 11
+Snapshot assembled: 2026-08-21
+
+Purpose
+-------
+This one-time bundle consolidates the newest source code currently available in this ChatGPT project workspace. It overlays the maintained v0.319 through v0.354 changed-file releases in order, then adds the newest unchanged source files the user supplied separately.
+
+Newest maintained files included
+--------------------------------
+- README.md / README_CHANGELOG.md
+- index.html
+- server.py
+- backend/automation_control.py
+- backend/operations.py
+- backend/store.py
+- database/contract.py
+- static/js/app.js
+- static/css/admin.css
+- static/css/bays.css
+- static/css/home.css
+- static/css/mobile.css
+- static/css/print.css
+- static/css/racks.css
+- static/css/rejects.css
+- static/css/scan.css
+- static/css/shared-ui.css
+- static/css/shell.css
+- static/css/statistics.css
+- static/css/styles.css
+- tests/test_static_structure.py
+- automation/sql_delivery_export runtime files supplied in the project, including the v0.344 review-first importer flow, the maintained v0.332+ diagnostics, and the latest unchanged source bodies for the remaining runtime files. v0.354 additionally normalizes Customer Route overview density and ten-row overflow behavior, restores page scroll chaining over that overview, and removes the obsolete Admin KPI strip.
+
+Packaging rules
+---------------
+- No database files are included.
+- No logs, backups, __pycache__, .pyc, .pyo, pytest cache, or diff files are included.
+- No older duplicate revision copies are included when a newer maintained copy is available.
+- This package advances the maintained application release to v0.354 and preserves the v0.327 source-snapshot structure supplied for the website-version-3 branch. Files listed below as unavailable remain intentionally absent from this revision.
+
+Known project files not present in this workspace as current source bodies
+--------------------------------------------------------------------------
+The user's project inventory references additional files that are not available here as current source files, so this bundle does not invent or backfill them from stale revisions. Examples include:
+- backend/__init__.py
+- backend/config.py
+- backend/import_safety.py
+- database/__init__.py
+- database/azure_compat.py
+- database/azure_schema.sql
+- database/integrity.py
+- database/migrations.py
+- database/migrate_sqlite_to_azure_sql.py
+- root compatibility shims such as delivery_store.py and scanner_config.py
+- Start-DeliveryScannerWebApp.bat / Start-DeliveryScannerWebApp.ps1
+- deployment, diagnostics, assets, sounds, and data files
+- the legacy automation/crystal_delivery_export tree
+- tests/test_auth_passwords.py and tests/test_import_consistency.py
+
+If one of those files is needed for a future revision, provide its current copy before it is edited.

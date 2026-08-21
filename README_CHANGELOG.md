@@ -1,4 +1,323 @@
+## v0.354 - Customer Route Density, Ten-Row Growth, and Admin Dashboard Cleanup
+
+- Updated the **Customer Route Rules overview** so its six-column desktop card grows with the selected route instead of being size-contained to the Customer Emails row height. Up to ten normal route rows are visible before the route list becomes internally scrollable.
+- Normalized **Customer Route overview row density** across CPU, DTC, GRN, and custom-route tabs. Every line item now uses the same compact 56px row geometry; tabs with only one or two rules no longer stretch those rows to fill the available card height.
+- Repaired **Admin-page scroll chaining** over the Customer Route overview by removing the contained overscroll boundary. Wheel/trackpad input can move the route list when it has overflow and naturally continue scrolling the Admin page when the internal list reaches a boundary.
+- Removed the Admin dashboard KPI strip showing **Active Delivery Lists, Scans Today, Line Items, and Active Users**. The `/api/admin/summary` request remains because its response still supplies recent-import data and superseded-order review counts used elsewhere on the page.
+- Removed the no-longer-needed Customer Route **Show More** control from the overview; all configured rules remain in the selected route list and the ten-row CSS threshold owns overflow. The full Customer Routes manager remains available through **Edit customer routes**.
+- Advanced the maintained application release to **v0.354** while keeping SQLite schema version **11**. No migration or database reset is required.
+
+## v0.353 - Exact Route Card Geometry, Canonical Glass Library, and Portable Workflow Guidance
+
+- Restored the **Customer Route Rules overview** to the exact compact dashboard footprint requested. It now uses the same six-column width as Lookup Manager and shares the Customer Emails row height; readable route rules scroll inside the bounded card instead of expanding the dashboard.
+- Strengthened **Glass Type normalization** so Default and Discovered aliases resolve to one canonical physical-glass profile. Matching now ignores casing, quote/punctuation differences, spacing differences such as `Ultra Clear`/`UltraClear`, and common annealed/tempered abbreviations while preserving genuinely distinct Tempered products and Mirror patterns.
+- Added a **combined** source state for glass profiles assembled from multiple underlying lookup sources, replacing the misleading appearance of duplicate Default and Discovered cards.
+- Incorporated the user-supplied **static/css/mobile.css** into the maintained source snapshot and added a mobile GUI readability pass for Admin, Operations, Automation, and Print Preset controls without changing scaled print-document preview typography.
+- Clarified the **portable configuration model** in Lookup Manager: Station = physical scan/work area; Stage = workflow step; preset = behavior; route/station = operational scope. Updated preset display wording to be less facility-specific while preserving all stored preset keys and existing production behavior.
+- Advanced the maintained application release to **v0.353** while keeping SQLite schema version **11**. No migration or database reset is required.
+
+## v0.352 - Bounded Route Overview, Practical Bay Preassignment, and GUI Typography
+
+- Returned the **Customer Route Rules Admin overview** to the normal compact dashboard grid instead of spanning the full page. The larger v0.351 route tabs, customer text, route colors, and 10-customer overview behavior remain intact; the card expands to full width only at the existing responsive breakpoint.
+- Audited the **Bay Auto Assignment** workflow end to end. Its maintained purpose is to preassign an empty Indian Trail bay for an Order Nr. when qualifying glass is scanned Outbound, before the receiving scan occurs. Existing assignments are reused, bays remain one-Order-Nr. spaces, manual categories stop before auto reservation, saved settings never move existing glass, and a full specialized bay family now produces an explicit conflict/manual-placement path instead of silently falling back to Standard.
+- Simplified the **Auto Assignment GUI** around the controls that actually affect that workflow. Admins now tune only the Tall/Oversize thresholds and Auto-vs-Manual policy for Standard, Tall, Oversize, Mirror, and Framed Mirror. Arbitrary destination remapping and the CPU policy control are removed from the routine GUI because CPU work does not enter this Indian Trail preassignment path. Existing stored mapping keys remain preserved for upgrade compatibility.
+- Added a clear **how-it-works flow and safety explanation** to Auto Assignment so the feature communicates when it runs, how classification occurs, and what the resulting bay reservation does.
+- Normalized the **Customer Email Center** typography across all tabs and sections. Headers, labels, fields, search, rule rows, CC recipients, test-email copy, activity filters, status/action text, and retained email-detail content now follow the shared readable GUI scale.
+- Added a shared **full-GUI typography baseline**: 13px for controls/body data and 12px for supporting text across modal panels, native dialogs, Print Options/Presets, Delivery Automation, Notifications, and Admin workspaces. This prevents feature-specific GUIs from drifting back to hard-to-read 8-10px operational text while retaining larger section titles and modal headers.
+- Advanced the maintained application release to **v0.352** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.351 - Customer Route Polish, Mirror Restoration, and Admin Workspace Cleanup
+
+- Enlarged the **Customer Route Rules overview** to use the full Admin dashboard width, increased overview operational text to a minimum of 12px, increased row/tab spacing, and added restrained route-specific color accents to both the dashboard overview and full Customer Routes GUI.
+- Corrected the **Lookup Manager live-preview icon** by removing the obsolete positional transform and mathematically centering the SVG inside its icon tile.
+- Fixed the Lookup Manager **Edit Settings** hover/focus treatment so the pencil stays visible instead of becoming white against the hover background.
+- Completely rebuilt the **Lookup Manager search surface** used by Glass Types, Routes, and Process States with a labeled command area, stronger focus state, 12px search text, contextual placeholders, and a synchronized Clear button.
+- Corrected the v0.350 glass-profile normalization so **Mirror remains a family containing distinct glass products**, not a single merged profile. The maintained defaults for 1/4 Mirror, French Antique, Summer Cloud Antique, Dark Cloud Antique, Rainbow Antique, Hollywood Antique, and Woodford Antique are independently exposed again, while additional imported/discovered mirror names remain independently configurable. Historical imported line-item labels are not rewritten.
+- Completely rebuilt **Scan Page Settings > Mixed Destination** into a focused single-card approval-window workspace with clearer hierarchy, a compact current-value indicator, and simple scope guidance while preserving the existing `bayOverrideWindowForm` / `bayDestinationOverrideMinutes` settings contract.
+- Repaired **Reject Tracking Setup** rows so pencil/trash actions remain side by side and reason/location text wraps within bounded rows without overlapping adjacent entries.
+- Completely rebuilt **Bay Rules & Auto Assignment > Auto Assignment** as a polished three-step workspace covering size thresholds, destination bay-type mapping, and manual-placement exceptions. Existing field IDs, `data-bay-auto-field` mappings, save flow, APIs, and current settings are preserved.
+- Repaired **Action History scrolling across modal GUIs** by wiring the modal history panel as the explicit vertical scroll owner; wheel/trackpad scrolling now works while hovering filters, controls, cards, text, and row content instead of only the empty background.
+- Added maintainability comments around the new route-color, mirror-profile, Action History scroll, and configuration-workspace behavior instead of introducing parallel/duplicate business logic.
+- Advanced the maintained application release to **v0.351** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.350 - Route Tabs, Glass Profile Normalization, and Scanner Settings Consolidation
+
+- Reorganized **Customer Route Rules** around route tabs. The Admin overview now provides compact CPU / DTC / GRN tabs, shows up to 10 matching customers for the selected route, and exposes Show More only when additional rules exist; Show More opens the full Customer Routes manager on the same route. The full manager uses the same route-tab model while preserving configured custom routes so existing custom rules cannot become inaccessible.
+- Normalized Lookup Manager **Glass Types** into operational Annealed / Mirror / Tempered profiles instead of showing discovered aliases as separate settings. Generic non-mirror values such as `1/4 Clear` collapse into the Annealed profile, explicit Tempered values remain separate, and mirror aliases collapse into one Mirror profile. Imported line-item text and historical rows are not rewritten.
+- Extended unified glass profiles so one canonical profile owns display label, cost, and preview color across its discovered aliases. Safe profile removal now tombstones the canonical profile and known aliases together, preventing removed duplicate aliases from immediately reappearing in Lookup Manager.
+- Expanded **Reject Tracking Setup** so both Reject Reasons and Break Locations can be edited. Edit/Delete controls are compact side-by-side icon actions using a pencil and trash can with accessible labels; existing reject history remains immutable and continues to show the text recorded at event time.
+- Consolidated Cross-Date Scanning and the Bay Scanner mixed-destination approval window into **Scan Page Settings**. Permission-aware top tabs expose Cross-Date Scanning and Mixed Destination while retaining the existing cross-date and bay-scanner settings endpoints and Action History sources.
+- Consolidated Scanner Rules and Bay Auto Assigner into **Bay Rules & Auto Assignment**. Scanner Rules and Auto Assignment now share one Admin GUI/top tab rail while preserving their existing APIs, stored settings, and history records. The former standalone Bay Auto Assigner launcher is removed from the Admin overview.
+- Advanced the maintained application release to **v0.350** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.349 - Admin Configuration Consolidation, Route Simplification, and Bay Scanner Management
+
+- Reduced **Customer Routes** visual noise by keeping route grouping/header identity while returning individual rule rows to neutral white surfaces. The Admin overview now renders all maintained customer-route rules inside initially collapsed route groups, and the Create New Customer Route action shares the Route Rules heading row. The Customer Routes signpost receives the requested final +2px right/+2px down alignment correction.
+- Added **customer email draft deletion**. Only retained outbox rows still in Draft status can be deleted; sent/failed history remains protected. Email Activity typography is increased again for kiosk/desktop readability, and draft deletion is available from both the activity row and detail dialog.
+- Consolidated Lookup Manager **Glass Types, Glass Costs, and Glass Colors** into one Glass Types workspace. Selecting one glass type now edits its display label, material cost/SQFT, and preview color together; removing a glass profile deactivates all three active lookup records while preserving historical delivery-list data. The preview icon is shifted 4px right/down as requested.
+- Hardened Delivery List Update Preview glass-color resolution with normalized exact-label matching against Lookup Manager glass colors, then rebuilt order hierarchy markers as neutral gray dots outside the order cards with a vertical connector between orders.
+- Rebuilt the **User Directory** controls into a conventional search-first header plus compact Status/Role filter panel and Clear Filters action, while preserving the existing local filtering behavior and user-card editor.
+- Added **Edit** for active Reject Reasons. Renaming a reason changes the selectable floor-facing catalog value without rewriting historical reject events that already recorded the previous reason text.
+- Combined Bay Scanner administration into one **Bay Scanner Management** GUI using shared top-level Bay Scanner / Scanner Rules tabs beside Action History. Scanner behavior now has a focused mixed-destination override workspace, while remembered manual inputs and barcode formats are organized into independent rule libraries with their existing APIs preserved.
+- Advanced the maintained application release to **v0.349** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.348 - Route Grouping, CPU Orange Identity, and Readability Polish
+
+- Standardized **CPU** on an orange route palette in maintained route-facing Admin/preview views while preserving the existing CPU route code and workflow behavior.
+- Organized **Customer Routes** by route in the full rule manager and the Admin dashboard overview. Added restrained route-colored group headers/stat cards so CPU, DTC, Greenville, and custom route rules are visually separated before editing.
+- Re-centered the Customer Routes signpost glyph inside its icon tile and contained the enhanced Route dropdown hover/focus halo so it no longer spills across the route-gradient card.
+- Increased **Customer Email Activity** typography and row/action readability, including the retained Email Activity detail dialog.
+- Increased **In-Transit / Delivery Manifest** header, summary, rack, glass-group, and table typography for easier standing/kiosk use without changing manifest data or layout behavior.
+- Slightly increased **Delivery List Update Preview order** header height and typography after the v0.345 density pass, while retaining compact item rows and route/glass visual ownership.
+- Advanced the maintained application release to **v0.348** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.347 - Route Gradient Cards, Glass-Family Lookups, Cross-Date Cleanup, and Reject Setup Revamp
+
+- Replaced Customer Route rule left color bars with a subtle full-row gradient based on each route's maintained color. Custom route codes receive a stable visual color, and the Route Rules heading now uses a clearer signpost-style route icon.
+- Revamped the Lookup Manager live-preview icon and organized the right-side **Products, Glass Costs, and Glass Colors** libraries into **Annealed, Mirror, and Tempered** sections. Lookup search continues to work across all sections and hides empty groups while filtering.
+- Clarified Process State semantics in Lookup Manager: **Updated Line** is applied by import reconciliation when an existing A+W source line changes. Manual delivery-list edits are instead saved as `manual_edit` audit events, immediately highlighted in Manual Edit after save, and available through Action History/reporting without silently overwriting the line's process state.
+- Simplified **Cross-Date Scanning** to the actual operator settings requested by Admin: Switch Behavior, Past Delivery Dates, Future Delivery Dates, and Save. Removed the Scanner Safety hero, audit pill, preserved-safeguards panel, and explanatory mode/window copy while preserving the existing save/API contract.
+- Completely rebuilt **Reject Tracking Setup** as a bounded Admin workspace with a compact summary and separate Reject Reasons / Break Locations libraries. Each library has a purpose-specific icon, polished add control, independently scrollable value list, and redesigned Remove action while retaining the existing reject catalog endpoints and data model.
+- Advanced the maintained application release to **v0.347** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.346 - Stage/Station Configuration, Lookup Deletion, Route GUI Repair, and Cross-Date Polish
+
+- Extended **Create New Role** so its permission library fills the remaining modal height down to the action footer. The identity fields and Create/Cancel actions remain fixed while the permission library owns the vertical scrollbar.
+- Corrected **Customer Routes** card geometry so route rules remain isolated instead of visually merging, enlarged/normalized the Create New Customer Route launcher, added a polished Route Rules heading/count strip, and replaced the row Save/Delete glyphs with clearer purpose-built icons.
+- Reworked **Lookup Manager iconography** with restrained outline SVGs, lower-saturation icon backgrounds, and consistent edit/save/remove/add controls across the configuration libraries.
+- Added a **Stations** tab to Lookup Manager. Existing station create, rename, and remove behavior is reused; built-in recovery stations remain protected from deletion.
+- Added administrator removal for **Products, Routes, Process States, Glass Costs, and Glass Colors**. Removal uses an inactive `manual-hidden` tombstone in `admin_lookup_values`, preserving historical delivery-list data while preventing discovered/default values from immediately reappearing.
+- Added a first-class **Stage Editor** backed by the existing `admin_lookup_values` table. Stage definitions have a stable key, editable display name, scanner/area label, optional route code, and an assignable maintained behavior preset: Airport Staging, Airport Outbound, Indian Trail, Greenville, CPU, DTC, or Custom Route.
+- Preserved operational safety for Stage Editor: saving a stage definition updates existing delivery-list metadata that uses the same stable stage key; removing a stage definition stops future import generation but does not destroy historical line items, scan events, or audit history.
+- Routed stage-dependent behavior through the configured preset where maintained code previously depended on English stage names, including list generation, scan categories/global-search progress, manual route membership/manual order targeting, route reconciliation, print/export sheet classification, Airport review scope, rack staging behavior, and import-history canonical Airport selection.
+- Completely redesigned **Cross-Date Scanning** as a polished command center with clearer mode/window controls, live scope explanation, visible scanner safeguards, and responsive layout while preserving the existing `mode`, `pastDays`, and `futureDays` save contract.
+- Advanced the maintained application release to **v0.346** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.345 - Dense Preview, Shared Admin Tabs, Route Rule Polish, and Lookup Manager Revamp
+
+- Refined **Delivery List Update Preview** for denser operational review. Lookup Manager glass hues are desaturated specifically for preview rows, every route header now uses the route's complete maintained color, each order header has a route-colored dot, and order/item spacing is tightened so more orders remain visible at once.
+- Expanded **Create New Role** to use nearly the full available viewport height and lets the permission library stretch through the remaining workspace while preserving its single dedicated scrollbar and fixed role/actions areas.
+- Reworked **Customer Emails** to use the existing Admin modal tab rail rather than a nested tab strip. Customer Rules, Test Email, Email Activity, and Action History now occupy one consistent top-level tab system. Removed the Add/Edit Customer Rule Cancel button and increased contrast on the rule and Global CC section icons.
+- Added further **Customer Routes** visual polish: the Create New Customer Route launcher uses a larger label, editable rule rows receive cleaner card hierarchy and route-aware accents, and fields/actions have clearer hover/focus feedback.
+- Completely refocused **Lookup Manager** around the shared Admin modal tabs. Products, Routes, Process States, Glass Costs, Glass Colors, and Action History now share the existing tab rail; the old hero/KPI section is removed; and the active lookup type uses a polished editor/library workspace with independent scrolling and sticky save/search structure.
+- Advanced the maintained application release to **v0.345** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.344 - Review-First Superseded Candidates, Role Permission Reachability, and Admin GUI Polish
+
+- Strengthened **Delivery List Update Preview** route and order hierarchy. The currently open route receives a high-contrast active header with a visible Viewing marker, and individual order cards have stronger spacing, borders, header accents, and Order Nr. emphasis.
+- Fixed the remaining **Create New Role** clipping shown on desktop/kiosk screens. Static permission-category cards now use intrinsic rows and visible category overflow, while the existing permission-library container remains the one dedicated scrollbar. All permissions in every category are therefore reachable instead of only the top sliver of each group.
+- Replaced the shared dense circle-X Cancel glyph with a cleaner outlined X treatment that remains consistent across maintained Cancel / Cancel Scan actions.
+- Reordered selective SQL reconciliation so detected **superseded-order review candidates are saved before reconciliation**. If candidates exist and the review queue cannot be persisted, the run fails closed before modifying scanner delivery-list membership. Pending candidates remain present until an administrator makes the keep/remove decision; existing durable approvals continue to be honored. Exact repeated Order Nr. + Item Nr. rows inside one source/list remain blocked as malformed duplicate data rather than being auto-selected for removal.
+- Simplified **Customer Emails** from four operational areas to Customer Rules, Test Email, and Email Activity. Removed the oversized communications/stats/Draft-mode hero and separate Delivery Setup tab, placed Global CC recipients alongside the Add/Edit Customer Rule form, and retained transport readiness only as compact Test Email context.
+- Rebuilt the **Email Activity detail dialog** as an independent child layer above Admin without the generic blurred modal classes. The dialog now has a clear header, recipient/status metadata, readable message-body scroller, delivery-error presentation, and explicit Generate PDF / Copy Body / Open in Email App actions.
+- Revamped **Customer Routes** by removing the verbose explanatory/active-rule banner, adding a compact route-library toolbar, and moving new-route creation into a separate polished Create New Customer Route dialog. Existing rules remain editable directly in the manager.
+- Advanced the maintained application release to **v0.344** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.343 - Glass-Color Preview Rows, Role Permission Scrolling, Duplicate Hardening, and Customer Email Center
+
+- Changed Delivery List Update Preview styling so each complete item row inherits its configured **Lookup Manager Glass Type color**. New/Updated semantics remain available in data/class state for audit behavior, but they no longer force every newly imported line to the same green presentation.
+- Repaired **Create New Role** permission reachability. The child dialog now has a definite viewport height, keeps role identity/actions visible, and gives the permission library its own stable vertical scrollbar so every canonical permission can be reached on normal desktop/kiosk screens.
+- Added a shared circle-X icon treatment to maintained **Cancel / Cancel Scan** controls across Admin creation dialogs, confirmation/prompt workflows, calendars, rack tools, reject workflows, outbound/Indian Trail overrides, and cross-date scanning.
+- Completely rebuilt **Customer Emails** into a clearer Customer Email Center with four focused tabs: Customer Rules, Delivery Setup, Test Email, and Email Activity. The workspace adds live rule/sent/attention counts, recipient-rule search, clearer global CC management, server-side transport readiness details, an explained automatic-email workflow, test-message controls, and activity status/search filters while retaining the existing backend email contracts.
+- Hardened duplicate handling around the normalized logical **Order Nr. + Item Nr.** key. Import previews now report duplicate logical rows as blocking errors, import validation refuses them before publication, and stage insertion performs a second defensive duplicate check. Formatting differences such as Item `1` versus `001` normalize to the same identity.
+- Prevented protected manual rows from creating a second active A+W copy for the same logical item. Both the normal store refresh and the maintained safe SQL reconciliation now treat the protected manual row as authoritative while protection is enabled; scanner drift comparison understands that override instead of repeatedly trying to recreate the suppressed source copy.
+- Hardened manual workflows: Create New Order uses normalized numeric comparison across the automation window, and Edit Delivery Lists refuses an Order Nr./Item Nr. change that would collide with another logical item on the same delivery date. Required synchronized sibling copies across Staging, Outbound, and route stages remain intentional and are not treated as duplicates.
+- Advanced the maintained application release to **v0.343** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.342 - Live Scanner-Store Binding and Import/Catalog Recovery
+
+- Fixed a scanner-catalog split that could let SQL automation report a successful/new delivery-list import while the live web server's Scan page and Print / Export tools were reading a different scanner database. The Automation Control Center now persists a safe, non-secret **ScannerStore** identity alongside `ProjectRoot`.
+- For SQLite installations, the PowerShell updater explicitly binds `DLS_DATABASE_PATH` to the exact absolute database path reported by the running web server before launching the Python importer. This makes scheduled and browser-started automation write to the same store the live application reads.
+- Added fail-closed scanner-store validation to `import_delivery_folder.py`. Before schema initialization or delivery-list writes, the importer compares its resolved store mode/database/server with the live-web identity; a mismatch now fails the run instead of producing misleading successful Import History.
+- Added updater diagnostics showing the expected/bound scanner store and the store confirmed by the normalized importer result. No database credentials or SQL connection strings are persisted or logged by this binding.
+- Kept selective SQL reconciliation authoritative: after v0.342 is installed, rerunning an affected date (for example **8/25/2026**) against the correct store sees its missing Staging/Outbound/route lists and recreates them through the maintained importer, restoring Scan-page and Print / Export visibility.
+- Advanced the maintained application release to **v0.342** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.341 - Role-Save Session Repair, Protected Admin Access, and Modal/Print Recovery
+
+- Fixed the role-permission save path that previously deleted every active session assigned to the edited role. Because each authenticated request already resolves the user through `user_roles` and `role_permissions`, role changes now apply immediately without invalidating valid browser sessions or kicking the saving administrator to Sign In.
+- Clarified browser authorization handling: **403 Forbidden** remains inside the current signed-in workspace and surfaces through the shared access-denied feedback, while only a true **401 Unauthorized** session failure redirects to Sign In.
+- Made the built-in **Admin** role a protected full-access recovery role. Security seeding restores any missing canonical Admin permissions on startup, and backend role saves cannot reduce Admin below the full maintained permission catalog. Role Manager visually marks Admin as protected and shows its permission checkboxes read-only.
+- Removed the duplicated small gray `username · email` metadata line from the Admin dashboard Users overview.
+- Corrected Create New Role/Create New User stacking by raising their child backdrops/dialogs above the shared Admin modal while keeping global feedback overlays above the child GUI.
+- Restored Delivery List Management **Print / Export** for dates that just received new/updated orders. The management renderer now retains the authoritative Outbound list ID directly from import history when the main list catalog has not yet refreshed, and Print / Export hydrates missing fixed list IDs on demand.
+- Advanced the maintained application release to **v0.341** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.340 - Access-Control Review, Dedicated User/Role Creation, and Admin Search Polish
+
+- Rebuilt the **All Delivery Lists** search as a conventional Admin search field with a search icon, clear control, normal focus treatment, and restrained loading feedback.
+- Changed required **Create New Order** markers to red asterisks for faster form scanning.
+- Replaced the inline Create Role area with a dedicated **Create New Role** dialog and polished blue launcher. The dialog keeps role definition focused on role name/description plus categorized permission selection; users are assigned to roles separately.
+- Replaced the inline Create User area with a dedicated **Create New User** dialog and polished blue launcher. The form explicitly explains the User → assigned Role → Role permissions model and keeps user creation separate from role-definition editing.
+- Increased the Admin dashboard Users preview to **10 users** and removed the prior incremental one-more-user control.
+- Reviewed every maintained permission gate across the frontend and server. Added granular permissions for delivery-list item editing, manual order creation, synchronized item deletion, list/date deletion, superseded-order approval, user access, user-to-role/station assignments, customer emails, cross-date scanning, bay scanner rules, and bay auto-assignment.
+- Retired the original all-in-one `edit_delivery_lists` role choice and the unused standalone bay-report permission. Legacy names remain migration aliases so existing role assignments are normalized instead of discarded.
+- Added a one-time permission backfill during security seeding so existing custom roles preserve the abilities represented by older broader permissions when v0.340 first introduces the split capabilities. Subsequent administrator edits are not re-granted on restart.
+- Separated **users, roles, and permissions** in enforcement: role creation/permission definition uses `manage_roles`; assigning roles/stations uses `manage_user_assignments`; activation/password controls use `manage_user_access`; user profile creation/deletion uses `manage_users`. Creating a new user requires both profile and assignment authority because it assigns an initial role/station.
+- Restricted shared Action History reads by GUI context so one unrelated Admin permission cannot be used to query another workspace's audit records through the API.
+- Migrated maintained route/UI gates away from legacy permission aliases to canonical v0.340 names and verified every canonical permission has a real authorization/UI gate.
+- Advanced the maintained application release to **v0.340** while keeping SQLite schema version **11**. No schema migration or database reset is required.
+
+## v0.339 - Fast Admin Catalog Loading, Shared History Search, and Create Order Polish
+
+- Replaced the Edit Delivery Lists launch path that reloaded the full scanner delivery-list catalog with a dedicated lightweight `/api/admin/delivery-list-catalog` API. The API first determines the requested three-business-week page and only then aggregates quantity/progress totals for the list IDs that are actually visible.
+- Kept Edit Delivery Lists search server-backed inside the same catalog API. Date/stage/scanner metadata and Order Nr. / Item Nr. / customer / job / route / product / dimensions can be searched without forcing the browser to download every active list first.
+- Preserved the existing Next Week + This Week + Previous Week landing page and three-week older pages while returning page count/range metadata directly from the backend, eliminating the long **Loading delivery lists... / Preparing date range...** wait caused by the richer global catalog refresh.
+- Improved Manual Delivery List Edit startup by fetching the first 20 editable rows in parallel with racks, bays, and lookup data. The relatively static manual lookup library is reused for five minutes between editor opens, while live rack/bay destinations continue refreshing each time.
+- Rebuilt the Automation Control Center **Import History** filter row on the same visual/search control structure used by Action History tabs, including the labeled search field, matching input focus treatment, and shared filter-card/footer hierarchy.
+- Applied a polished secondary treatment to the Create New Order **Cancel** button with an icon, hover/focus lift, and pressed state.
+- Advanced the maintained application release to **v0.339** while keeping SQLite schema version **11**. No database migration or reset is required.
+
+## v0.338 - Unified Header Paging, Reliable Modal Scrolling, and Dedicated Create Order GUI
+
+- Standardized **Edit Delivery Lists** and Automation Control Center **Import History** on the same centered numbered paging layout used by shared Action History tabs. Paging now sits in the controls/header region directly above content instead of using a different bottom-of-content arrangement.
+- Reworked Edit Delivery Lists so its search/paging controls and result list occupy separate grid rows. The modal body no longer scrolls behind the search controls; the delivery-list result region is the single vertical scroll owner.
+- Reworked Import History so its filter controls, centered pager, and last-check/result context are opaque fixed grid rows above the dedicated results viewport. Removed the redundant bottom history footer/pager.
+- Added shared wheel/trackpad scroll ownership for the two affected content viewports so hovering cards, details, or route/date rows cannot trap vertical scrolling. Scroll chaining remains available when the content viewport reaches its edge.
+- Removed the inline expandable **Create New Order** disclosure from Manual Delivery List Edit. The launcher now opens a separate polished Create New Order dialog layered above the editor, with its own close/cancel controls and responsive scrolling.
+- Preserved the v0.337 workflow-safe creation contract: the dialog still creates the manual order/item in **Airport Staging + Airport Outbound + the selected route stage**, and backend validation still blocks incomplete workflow fan-out.
+- Advanced the maintained application release to **v0.338** while keeping SQLite schema version **11**. No database migration or reset is required.
+
+## v0.337 - Weekly Import Organization, Shared Paging, and Workflow-Safe Order Creation
+
+- Organized Automation Control Center **Import History** into the same Monday-Friday operating-week bands used by Home and Edit Delivery Lists. Results on the active three-week page are now visually separated into **Next Week**, **This Week**, and **Previous Week** sections where those activity dates exist, while older pages use their normal week/date ranges. Existing date/category/run/result disclosures remain collapsed.
+- Added one shared compact numbered pager component and applied it to Automation Control Center Import History, Edit Delivery Lists, Manual Edit result pages, and every Admin GUI that uses the shared **Action History** tab. Each data source keeps its existing server-backed page size and filters; only navigation/presentation is standardized.
+- Applied the same numbered paging treatment to Delivery List Management's **Today's import activity** / daily timed-import history while preserving the previously requested five-run page size.
+- Visually polished **Create New Order** in Manual Delivery List Edit with a clearer expandable header, selected delivery date, workflow-destination preview, grouped fields, option cards, stronger focus/hover states, and a primary Create Order action.
+- Tightened manual order fan-out so the selected route is authoritative: every created order/item must be written to both **Airport Staging** and **Airport Outbound**, plus the explicitly selected Indian Trail / Customer Pickup / Deliver to Customer / Greenville stage for the same delivery date. The operation now stops with a readable error if either Airport workflow role or the selected route stage is missing instead of silently creating an incomplete workflow.
+- Expanded `manual_delivery_entry` audit details with the actual target list IDs, target stages, Airport stage roles, route, quantity, and manual-only flag so Action History can verify where the order was created.
+- Advanced the maintained application release to **v0.337** while keeping SQLite schema version **11**. No database migration or reset is required.
+
+## v0.336 - Filter-Aware Import Paging and Delivery List Context Polish
+
+- Reworked Automation Control Center **Import History** pagination around operator intent. With no filters, page 1 covers **Next Week + This Week + Previous Week** and each later page covers exactly three older business weeks.
+- When any Import History search, status, From, or Through filter is active, pagination switches to distinct **import activity dates**: up to 25 matching dates are returned per page and every import/run result for those selected dates stays together.
+- Added **Page X of Y** context to the top status strip of Import History and to the top summary of Edit Delivery Lists, while retaining bottom Previous / Next navigation.
+- Replaced the long Edit Delivery Lists relative-week summary sentence with only the visible numeric delivery-date range.
+- Removed the Edit Delivery Lists **Live delivery data** health pill and Manual Delivery List Edit **Unsaved changes protected** health pill.
+- Restored configured Lookup Manager **Glass colors** in Delivery List Update Preview. Glass Type cells now use the shared glass-color map/fallback palette without changing stored delivery-list data.
+- Advanced the maintained application release to **v0.336** while keeping SQLite schema version **11**. No database migration or reset is required.
+
 # Delivery List Scanner Changelog
+## v0.335 - Accurate Import-Date Filters and Three-Week Delivery List Browsing
+
+- Corrected Automation Control Center **Import History** From/Through filtering so it uses the same local import/run activity date as the tab's Monday-Friday history grouping. Previously the controls filtered `deliveryDate`, which could disagree with the date/week the import actually appeared under.
+- Renamed the Import History range controls to **Import activity from** and **Import activity through** while preserving normalized bounds, combined search/status filtering, request cancellation, and business-week pagination.
+- Reworked **Edit Delivery Lists** paging so its landing page shows the operational window of **Next Week, This Week, and Previous Week** together. Older records are then presented in three-week pages with simple **Previous / Next** controls.
+- Preserved compact `M/D/YYYY` list dates and added Admin-specific **Previous Week** wording without changing the shared Home/date-selector week labels.
+- Removed the generic green health dot from the Edit Delivery Lists header while retaining the useful header status text.
+- Restored **Glass Type** immediately to the right of **Item Nr.** in Delivery List Preview item rows, followed by **Dimensions** and **Quantity**.
+- Reduced the Delivery List Preview desktop width from 1100px to 780px (approximately 29%) and adjusted the item grid so the added glass field remains readable in the narrower review layout.
+- Advanced the maintained application release to **v0.335** while keeping SQLite schema version **11**. No database migration or reset is required.
+
+
+## v0.334 - Automation Controls, Import Filters, and Weekly Delivery List Paging
+
+- Replaced Automation Control Center tab/action icons with crisp vector-mask icons and subtle hover motion while keeping the existing visual language.
+- Upgraded the Import History Refresh button with a dedicated icon, loading feedback, polished hover treatment, and a non-destructive new-results label update.
+- Fixed Import History filtering by making backend search token-based and route-aware, including Airport Road / Indian Trail / Greenville / CPU / DTC aliases and compact dates. Added request cancellation so stale responses cannot overwrite newer search/date-filter results.
+- Kept Import History date ranges valid in the browser by synchronizing From/Through bounds and correcting inverted ranges at the edited edge.
+- Reorganized Edit Delivery Lists into Monday-Friday business-week pages, using compact `M/D/YYYY` dates throughout the list browser.
+- Simplified the Edit Stage selector/current-stage label to `M/D/YYYY - Stage`, gave Search the shared primary-blue format, and replaced accumulating Load More rows with server-backed Previous/Next pages.
+- Advanced the maintained application release to **v0.334** while keeping SQLite schema version **11**. No database migration or reset is required.
+
+
+## v0.333 - Route-Centered Import History and Delivery List Editing Polish
+
+- Reworked Automation Control Center **Import History** delivery-list results from raw stage rows into the maintained route model used by Delivery List Management: **Airport Road**, **Indian Trail**, **Greenville**, **CPU**, and **DTC**. Airport Road deliberately prefers the Outbound stage as its authoritative all-order copy so Staging/Outbound are not double-counted.
+- Added compact route-level **Before / Changes / After / Status** presentation inside each import result. Business-week paging, date/category/run grouping, and the v0.329 default-collapsed disclosures remain intact.
+- Changed the **Edit Delivery Lists** launcher to open its GUI immediately and render an explicit loading state while the current delivery-list catalog refreshes. Opening a selected manual-edit stage also shows loading feedback while lookups/results initialize.
+- Changed Admin line-item deletion to use the existing manual-edit sibling resolver. Deleting one logical **Order Nr. + Item Nr.** now deletes matching synchronized copies from every stage for the same delivery date, cancels related bay assignments, relies on existing rack-item cascade behavior, and audits all affected line/list IDs plus the deletion count.
+- Updated whole-list **Delivery List Update Preview** disclosure behavior: exactly one populated route opens automatically; two or more populated routes start collapsed.
+- Redesigned preview order cards around one left-to-right identity row containing **Order Nr., Job Nr., Customer, and operational Flags**. Item rows directly below now contain **Item Nr., Dimensions, and Quantity** in that order. Redundant order line/QTY/change cells and per-item NEW/UPDATED pills were removed while field-level change diffs remain available for updated records.
+- Advanced the maintained application release to **v0.333** while keeping SQLite schema version **11**. No database migration or reset is required.
+
+## v0.332 - Bounded Live Log and Full Updater Diagnostics
+
+- Rebuilt Automation Control Center **Status & Logs** so the live log is no longer a scrollable `<pre>` nested in `<details>`. A dedicated bounded viewport now owns scrolling inside the Status grid's final `minmax(0, 1fr)` row, preventing growing/wrapped text from extending below the visible modal.
+- Added an explicit end-of-log clearance marker and a **Newest** control. Follow-newest now resolves the bottom after two layout frames and a `ResizeObserver` rechecks it whenever log wrapping changes, while manual scroll input still disables automatic following when the operator moves away from the newest output.
+- Added web-controller preamble/final diagnostics to the same per-run log: validated action/date request, overlap/lock preflight, installed runtime synchronization results, runner/summary/log locations, PowerShell launch, and process exit code.
+- Added structured PowerShell `STEP ##` and `DEBUG` trace lines with elapsed time for configuration validation, working-folder creation, persistent exclusion/override loading, run-lock acquisition, runtime checks, action/date resolution, every delivery-date export invocation, scanner import/reconciliation, retention cleanup, notification publication, run-summary/history persistence, lock release, and total duration.
+- Added subprocess diagnostics around each maintained Python call, including executable/arguments, exit code, duration, and output-line count, without logging SQL connection-string contents or other credentials.
+- Expanded each delivery-date export trace with SQL query timing/row counts, authoritative data fingerprints, previous state/workbook comparisons, staging payload paths and sizes, generated workbook size/validation, published workbook hash, persisted state details, staging cleanup, and exception stack context so updater decisions can be reconstructed from the log.
+- Expanded `import_delivery_folder.py` progress output so the live log shows store initialization, workbook discovery, per-date drift/import decisions, source-coverage verification, superseded-review synchronization, normalized result writing, and final importer duration.
+- Preserved controller-generated preamble lines when PowerShell attaches to an already-created web-GUI log instead of recreating that file.
+- Buffered the earliest PowerShell startup trace until a scheduled run resolves its generated log path, so scheduled logs also begin at the first updater step instead of losing pre-configuration diagnostics.
+- Advanced the maintained application release to **v0.332** while keeping SQLite schema version **11**. No database migration or reset is required.
+
+## v0.331 - Live Log Viewport and Subtle Admin Hover Polish
+
+- Fixed the Automation Control Center **Live command log** viewport at its actual layout boundary. The open log `<details>` element no longer takes `height: 100%` of the entire Status tab on top of the rows above it; it now stretches only within the remaining Status grid row.
+- Changed the Status workspace's log row to `minmax(0, 1fr)` so status text/cards can grow without forcing the log below the visible bottom edge. The log's own `<pre>` remains the dedicated vertical scroller with stable scrollbar space and the existing follow-newest behavior.
+- Softened the shared Admin GUI launcher hover treatment by replacing the animated left-to-right sheen sweep with a stationary, low-opacity highlight that fades gently on hover/focus. Button geometry, focus visibility, hover lift, pressed feedback, and pending-review attention colors remain unchanged.
+- Advanced the maintained application release to **v0.331** while keeping SQLite schema version **11**. No database migration or reset is required.
+
+## v0.330 - Superseded Dimensions, Log Reachability, and Admin Launcher Polish
+
+- Corrected Superseded Orders **Item evidence** dimension display. A+W `PP_BREITE` / `PP_HOEHE` values use the maintained SQL mapping of 32 source units per inch; the review now renders those values as inch/fraction dimensions such as `30" × 74"` instead of exposing raw source-unit numbers.
+- Kept that conversion display-only so existing candidate fingerprints, approved removal decisions, and audit history are not rewritten simply because the UI changed units.
+- Strengthened the Automation Control Center **Live command log** so follow-to-newest runs after the Status layout settles, wheel input stays with the log while hovered, and extra trailing scroll space keeps the final wrapped line fully visible above the modal edge.
+- Standardized all Admin-dashboard GUI launch buttons through one shared launcher selector. The buttons now share sizing, border/gradient treatment, focus visibility, elevation, hover sheen, and pressed feedback instead of mixing special-case formats.
+- Preserved the Superseded Orders pending-review attention state on top of the shared launcher component.
+- Advanced the maintained application release to **v0.330** while keeping SQLite schema version **11**. No database migration or reset is required.
+
+## v0.329 - Automation Log Scrolling and Audit-History Readability
+
+- Fixed **Status & Logs** manual navigation during a live automation run. When the operator scrolls away from the newest command-log line, **Follow newest activity** now turns itself off so the one-second dashboard refresh does not force the log back to the bottom.
+- Constrained the command log to the remaining Status-tab workspace with its own stable vertical scrollbar, horizontal overflow when needed, and contained overscroll behavior.
+- Changed **Import History** so all date, category, run, and file-result `<details>` controls start collapsed rather than auto-opening the newest date/run.
+- Added two groups inside each Import History date: **New / Updated / Exceptions** for meaningful activity and **No New / Updated Lists** for successful no-change results. Runs remain grouped underneath the appropriate category so audit context is preserved.
+- Moved Superseded Orders **Item evidence** directly beneath the suggested-removal panel and expanded it by default, placing the original/replacement comparison before the removal-selection controls.
+- Updated the Superseded approval helper text to direct the reviewer to the visible evidence before confirming a removal.
+- Advanced `APPLICATION_VERSION` to 329 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.328 - Admin Superseded Review and Automation Control Polish
+
+- Condensed **Review Superseded Orders** so the suggested removal is the primary visual decision, the recommended order is preselected, current row/piece/scanned impact is shown directly on each candidate, and detailed item evidence is collapsed until needed.
+- Simplified approval wording so the primary action always states the exact order selected for removal, while retaining the guarded confirmation before any source-owned rows are retired.
+- Fixed the Superseded Orders **Action History** by routing the already-recorded `superseded_order_review` audit events through the shared Admin history context.
+- Added superseded-specific history descriptions showing the delivery date, candidate pair, removed order, retained order, affected rows/pieces, decision reason, user, and timestamp; the history refreshes immediately after a decision.
+- Condensed the Automation Control Center **Incremental schedule** and **Daily full refresh** settings into single-line rows while preserving the existing interval/time and past/future day controls.
+- Reworked **Status & Logs** into a compact status header/summary plus a full-height live-log region with contained scrolling, preventing the lower portion of long logs from being visually clipped.
+- Changed the Automation Control Center **Import History** request to opt into business-week pagination. Every import run for the same Monday-Friday operating week is returned on one page, so high-volume days are never split between pages.
+- Preserved row-count pagination as the backend default for existing callers that do not request business-week mode.
+- Reduced Import History header/filter/status spacing and removed the obsolete Rows Per Page control so more of the weekly audit history is visible.
+- Added regression coverage for complete business-week paging while retaining the legacy row-paging default, and repaired historical changelog assertions so later releases can be prepended without invalidating older feature tests.
+- Advanced `APPLICATION_VERSION` to 328 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.327 - Rack Status Polish and Natural Page Scrolling
+
+- Restyled the individual-rack header lifecycle cell with the exact Rack Overview lifecycle colors for **Incomplete**, **Complete**, **On the Way**, **Received**, and **Empty**.
+- Added a matching lifecycle dot, adaptive content sizing, improved padding/shadow, and responsive title-row wrapping so the status stays visually balanced and its text remains readable next to different rack names.
+- Removed the v0.326 `body * { overscroll-behavior: contain; }` rule that could prevent normal document scrolling whenever the pointer was over ordinary non-scrollable content.
+- Restricted modal overscroll containment to the actual Admin/Operations body scrollers and action-history list instead of static modal shells or generic history/results class names.
+- Removed the broad Scan-page overscroll selectors from non-scrollable scanner/bay panels; true overflow drawers/options continue to keep their existing local containment.
+- Advanced `APPLICATION_VERSION` to 327 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.326 - Global Search, Scroll Containment, and Rack Interaction Polish
+
+- Moved Global Search's latest scan date/time onto the same resolved status/location row and aligned it to the right, while adding a contained vertical scrollbar to Smart Results.
+- Added scroll-boundary containment across nested GUI/results scrollers and expanded the central modal body-lock detector to every visible shared modal plus rack-transfer dialogs, preventing continued wheel/touch input from moving the page behind a GUI.
+- Changed nested rack-transfer close handling to recalculate the shared modal lock instead of blindly unlocking the document while the parent rack workspace is still open.
+- Kept the Scan Date/Stage body-mounted custom-select menus positioned during window scrolling and lowered the sticky main scanner panel beneath the sticky application header.
+- Added a colored individual-rack lifecycle cell immediately beside the rack name and removed the duplicate rack health-dot presentation plus the body-level Rack Status banner.
+- Corrected **Not On The Way** hover/focus styling with a dedicated readable warning palette.
+- Disabled-looking move and clear controls now remain hoverable/clickable for explanation when an **On the Way** rack is lifecycle-locked. A shared blocked-action popup explains the required recovery action.
+- Added backend lifecycle guards for single rack-item moves, individual rack-item clears, and whole-rack clears so direct/stale requests cannot bypass the existing move-all **On the Way** protection.
+- Added a preflight block before clearing an entire rack set when any member rack is On the Way, preventing partial destructive processing.
+- Added explanatory blocked-state behavior to rack/rack-set deletion prerequisites and changed non-Scan errors to the shared action-feedback popup instead of forcing an unrelated Scan-page render.
+- Removed the duplicate **Clear selected rack set** reset control beside the Status/Sort filters.
+- Advanced `APPLICATION_VERSION` to 326 while preserving SQLite schema version 11. No migration or database reset is included.
+
+## v0.325 - Compact Bay Labels and Stage-Aware Location History
+
+- Added one operator-facing bay formatter that collapses canonical internal codes such as `T-BAY12-01` and repeated labels such as `BAY T-BAY12-01` to **Bay 12-01** without mutating the persisted bay code.
+- Changed the Scan-page Location column so only Indian Trail receiving shows bay locations; Staging and Outbound remain rack/truck-oriented.
+- Added latest bay-assignment history to delivery-list payloads and scan-event payloads. After a bay is cleared or cancelled, the former bay remains visible in a muted gray **prior** state instead of disappearing.
+- Replaced the generic **Received** location treatment on Staging/Outbound with the actual rack/truck. After downstream receipt, that transport location is shown in gray as history and is no longer offered as an editable staging rack assignment.
+- Updated Last Scan and Recent Scans to use the same stage-aware Location logic and compact bay labels.
+- Shortened rack destination display values to **IT**, **CPU**, **DTC**, and **GNV** while keeping the existing persisted destination values and route-class behavior intact.
+- Advanced `APPLICATION_VERSION` to 325 while preserving SQLite schema version 11. No migration or database reset is included.
 
 ## v0.324 - Persistent Manual Overrides and Superseded Order Enforcement
 

@@ -2192,3 +2192,31 @@
     grid-column: 1 !important;
   }
 }
+
+
+/* v0.353: align handheld Admin/Operations GUIs with the shared desktop
+   typography baseline. Print document previews are intentionally excluded;
+   their text is scaled as a document rather than used as an application UI. */
+@media (max-width: 760px) {
+  #adminModal:not([hidden]),
+  #operationsModal:not([hidden]),
+  .delivery-automation-modal:not([hidden]),
+  #printPresetModal:not([hidden]) {
+    font-size: 13px !important;
+  }
+
+  #adminModal:not([hidden]) :is(p, small, label, span, em),
+  #operationsModal:not([hidden]) :is(p, small, label, span, em),
+  .delivery-automation-modal:not([hidden]) :is(p, small, label, span, em),
+  #printPresetModal:not([hidden]) :is(p, small, label, span, em) {
+    font-size: max(12px, 1em) !important;
+    line-height: 1.35;
+  }
+
+  #adminModal:not([hidden]) :is(input, select, textarea, button),
+  #operationsModal:not([hidden]) :is(input, select, textarea, button),
+  .delivery-automation-modal:not([hidden]) :is(input, select, textarea, button),
+  #printPresetModal:not([hidden]) :is(input, select, textarea, button) {
+    font-size: 16px !important;
+  }
+}

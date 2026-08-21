@@ -26,6 +26,11 @@ from pathlib import Path
 from typing import Any
 
 
+def progress(message: str) -> None:
+    """Emit a flush-safe updater trace line consumed by the PowerShell live log."""
+    print(f"[IMPORT] {message}", flush=True)
+
+
 def parse_args() -> argparse.Namespace:
     """Parse the project, source folder, date window, audit user, and result path."""
     parser = argparse.ArgumentParser(description="Import automated SQL delivery-list workbooks.")
@@ -59,6 +64,21 @@ def parse_args() -> argparse.Namespace:
             "to verify and forceImportDates that must pass through the maintained importer."
         ),
     )
+    parser.add_argument(
+        "--expected-store-mode",
+        default="",
+        help="Expected live scanner-store mode supplied by the web control plane.",
+    )
+    parser.add_argument(
+        "--expected-store-database",
+        default="",
+        help="Expected live scanner database/path supplied by the web control plane.",
+    )
+    parser.add_argument(
+        "--expected-store-server",
+        default="",
+        help="Expected live scanner database server when using Azure SQL.",
+    )
     return parser.parse_args()
 
 
@@ -68,6 +88,76 @@ def int_value(value: Any) -> int:
         return max(int(value or 0), 0)
     except (TypeError, ValueError):
         return 0
+
+
+def normalized_store_value(mode: str, value: Any) -> str:
+    """Normalize non-secret scanner-store identifiers for reliable comparison."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if str(mode or "").strip().lower() == "sqlite":
+        try:
+            return os.path.normcase(str(Path(text).expanduser().resolve(strict=False)))
+        except (OSError, RuntimeError):
+            return os.path.normcase(os.path.abspath(os.path.expanduser(text)))
+    return text.casefold()
+
+
+def validate_store_identity(store: Any, args: argparse.Namespace) -> dict[str, str]:
+    """Fail closed when the updater resolves a different store than the web app.
+
+    Import History is meaningful only if the updater and browser share one
+    authoritative scanner database. The web control plane passes a safe store
+    identity; this process validates it before schema initialization or writes.
+    """
+    health = dict(store.health() or {})
+    actual_mode = str(health.get("mode") or "").strip().lower()
+    actual_database = str(health.get("database") or "").strip()
+    actual_server = str(health.get("server") or "").strip()
+    expected_mode = str(args.expected_store_mode or "").strip().lower()
+    expected_database = str(args.expected_store_database or "").strip()
+    expected_server = str(args.expected_store_server or "").strip()
+
+    identity = {
+        "mode": actual_mode,
+        "database": actual_database,
+    }
+    if actual_server:
+        identity["server"] = actual_server
+
+    if not expected_mode and not expected_database and not expected_server:
+        progress(
+            "Scanner-store identity validation was not requested; "
+            f"resolved mode={actual_mode or 'unknown'}, database={actual_database or 'unknown'}."
+        )
+        return identity
+
+    mismatches: list[str] = []
+    if expected_mode and actual_mode != expected_mode:
+        mismatches.append(f"mode expected {expected_mode!r} but resolved {actual_mode!r}")
+    comparison_mode = expected_mode or actual_mode
+    if expected_database and normalized_store_value(comparison_mode, actual_database) != normalized_store_value(
+        comparison_mode, expected_database
+    ):
+        mismatches.append(
+            f"database expected {expected_database!r} but resolved {actual_database!r}"
+        )
+    if expected_server and actual_server.casefold() != expected_server.casefold():
+        mismatches.append(f"server expected {expected_server!r} but resolved {actual_server!r}")
+
+    if mismatches:
+        raise RuntimeError(
+            "Scanner-store identity mismatch. Refusing to import into a database that is not "
+            "the live web application's store: " + "; ".join(mismatches)
+        )
+
+    progress(
+        "Scanner-store identity validated against the live web application: "
+        f"mode={actual_mode}, database={actual_database}"
+        + (f", server={actual_server}" if actual_server else "")
+        + "."
+    )
+    return identity
 
 
 def transient_database_busy_error(exc: BaseException) -> bool:
@@ -430,6 +520,25 @@ def normalized_source_tuple(values: Any) -> tuple[Any, ...]:
     )
 
 
+def scanner_logical_order_item_key(store: Any, order_no: Any, item_no: Any) -> str:
+    """Normalize an Order Nr. + Item Nr. key with compatibility for test/legacy stores."""
+    resolver = getattr(store, "logical_order_item_key", None)
+    if callable(resolver):
+        return str(resolver(order_no, item_no))
+
+    def numeric_text(value: Any) -> str:
+        text = str(value or "").strip()
+        try:
+            return str(int(float(text.replace(",", ""))))
+        except (TypeError, ValueError):
+            digits = "".join(character for character in text if character.isdigit())
+            return str(int(digits)) if digits else text
+
+    order_text = numeric_text(order_no)
+    item_text = numeric_text(item_no).zfill(3)
+    return f"{order_text}-{item_text}"
+
+
 def scanner_stage_drift(
     store: Any,
     delivery_date: str,
@@ -440,9 +549,10 @@ def scanner_stage_drift(
     """Compare workbook source rows with active source-owned scanner rows.
 
     Manual-only rows remain excluded when they are unique operator-owned work.
-    A manual row that duplicates an incoming A+W order/item is drift and must be
-    reconciled away. The source comparison is a multiset so duplicate business
-    rows remain detectable.
+    An unprotected manual row that duplicates incoming A+W work is drift and must
+    be reconciled away. A protected manual row is an explicit ownership override,
+    so its source counterpart is excluded from the expected source set. The source
+    comparison remains a multiset so unexpected duplicate business rows are visible.
     """
     verified_excluded_order_items = verified_excluded_order_items or set()
     expected_by_list: dict[str, list[tuple[Any, ...]]] = {}
@@ -456,7 +566,9 @@ def scanner_stage_drift(
             cloned = store.clone_item_for_list(item, list_id, index)
             normalized_row = normalized_source_tuple(cloned)
             normalized.append(normalized_row)
-            order_items.add((str(normalized_row[0]), str(normalized_row[1])))
+            normalized_key = scanner_logical_order_item_key(store, normalized_row[0], normalized_row[1])
+            normalized_order, normalized_item = normalized_key.rsplit("-", 1)
+            order_items.add((normalized_order, normalized_item))
         expected_by_list[list_id] = sorted(normalized)
         expected_order_items_by_list[list_id] = order_items
 
@@ -496,22 +608,34 @@ def scanner_stage_drift(
             source_rows: list[tuple[Any, ...]] = []
             duplicate_manual_found = False
             expected_order_items = expected_order_items_by_list.get(list_id, set())
+            protected_manual_keys: set[tuple[str, str]] = set()
             for row in current_rows:
                 normalized_row = normalized_source_tuple(row)
+                normalized_key = scanner_logical_order_item_key(store, normalized_row[0], normalized_row[1])
+                normalized_order, normalized_item = normalized_key.rsplit("-", 1)
+                order_item_key = (normalized_order, normalized_item)
                 is_manual = bool(int(row["manual_only"] or 0)) or bool(str(row["manual_source"] or "").strip())
                 protected_manual = is_manual and bool(int(row["protect_from_aw_import"] or 0))
                 if is_manual:
-                    if not protected_manual and (str(normalized_row[0]), str(normalized_row[1])) in expected_order_items:
+                    if protected_manual:
+                        protected_manual_keys.add(order_item_key)
+                    elif order_item_key in expected_order_items:
                         duplicate_manual_found = True
                     continue
                 source_rows.append(normalized_row)
             current = sorted(source_rows)
+            effective_expected_rows = sorted(
+                row
+                for row in expected_rows
+                if tuple(scanner_logical_order_item_key(store, row[0], row[1]).rsplit("-", 1))
+                not in protected_manual_keys
+            )
             verified_exclusion_present = any(
                 (str(row[0]), str(row[1])) in verified_excluded_order_items
                 for row in source_rows
             )
             if allow_source_removals:
-                source_mismatch = current != expected_rows
+                source_mismatch = current != effective_expected_rows
             else:
                 # During the schedule-membership investigation, workbook rows must
                 # exist in the scanner but extra source-owned rows are preserved.
@@ -519,7 +643,7 @@ def scanner_stage_drift(
                 # quantities/details without repeatedly trying to retire uncertain
                 # rows that disappeared from the raw delivery-date query.
                 current_counts = Counter(current)
-                expected_counts = Counter(expected_rows)
+                expected_counts = Counter(effective_expected_rows)
                 source_mismatch = any(
                     current_counts[row] < expected_count
                     for row, expected_count in expected_counts.items()
@@ -740,11 +864,17 @@ def import_selected_workbook(
     run_started_at: str = "",
 ) -> dict[str, Any]:
     """Import exactly one selected workbook through maintained store rules."""
+    delivery_date = str(payload.get("deliveryDate") or "")
+    progress(f"Previewing {path.name} for delivery date {delivery_date or 'unknown'}.")
     preview = store.preview_import(payload)
     if not bool(preview.get("valid")):
         errors = [str(value) for value in (preview.get("errors") or []) if str(value).strip()]
         raise ValueError("; ".join(errors) or f"{path.name} did not pass import validation.")
 
+    progress(
+        f"Importing {path.name} through maintained store rules "
+        f"(kind={import_kind}, allowSourceRemovals={bool(allow_source_removals)})."
+    )
     result = store.import_delivery_list(
         {
             "payload": payload,
@@ -777,6 +907,11 @@ def import_selected_workbook(
     )
     duplicate_manual_piece_qty = sum(
         int_value(value.get("duplicateManualPieceQty")) for value in stage_summaries
+    )
+    progress(
+        f"Store import finished for {path.name}: created={int_value(result.get('createdCount'))}, "
+        f"updated={int_value(result.get('updatedCount'))}, removedLines={int_value(result.get('removedLineCount'))}, "
+        f"changedLists={len(changed_list_ids)}."
     )
     return file_result(
         {
@@ -838,8 +973,14 @@ def selective_sql_sync(
     """
     clean_dates = sorted({str(value or "").strip() for value in target_dates if str(value or "").strip()})
     if not clean_dates:
+        progress("Selective SQL sync received no target delivery dates; nothing to verify.")
         return summary_from_files([], folder, "", "")
 
+    progress(
+        "Selective SQL sync starting for "
+        f"{len(clean_dates)} date(s): {', '.join(clean_dates)}. "
+        f"Forced dates: {', '.join(sorted(force_import_dates)) or 'none'}."
+    )
     target_set = set(clean_dates)
     verified_excluded_order_items = verified_excluded_order_items or []
     workbooks = delivery_workbooks_by_date(
@@ -848,14 +989,20 @@ def selective_sql_sync(
         date_reader,
         prefer_canonical=True,
     )
+    progress(
+        f"Workbook discovery completed in {folder}: matched {len(workbooks)} of {len(clean_dates)} requested date(s)."
+    )
     existing_ids = current_list_ids(store)
+    progress(f"Loaded {len(existing_ids)} current scanner delivery-list id(s) for drift comparison.")
     files: list[dict[str, Any]] = []
     recovered_dates: set[str] = set()
     active_list_id = ""
 
     for delivery_date in clean_dates:
+        progress(f"Checking delivery date {delivery_date}.")
         path = workbooks.get(delivery_date)
         if path is None:
+            progress(f"Expected workbook is missing for {delivery_date}; marking this date failed without changing scanner data.")
             files.append(
                 file_result(
                     {
@@ -869,6 +1016,7 @@ def selective_sql_sync(
             continue
 
         try:
+            progress(f"Loading authoritative workbook {path.name} for {delivery_date}.")
             payload = payload_loader(path)
             routed_payload = routed_payload_for_stage_expectations(store, payload)
             expected_definitions = list_builder(routed_payload)
@@ -893,6 +1041,10 @@ def selective_sql_sync(
                 if str(entry.get("orderNumber") or "").strip()
                 and str(entry.get("itemNumber") or "").strip()
             }
+            progress(
+                f"Built {len(expected_definitions)} expected stage definition(s) for {delivery_date}; "
+                f"missingBefore={len(missing_before)}, verifiedExclusions={len(date_verified_entries)}."
+            )
             source_data_drift, drift_list_ids = scanner_stage_drift(
                 store,
                 delivery_date,
@@ -902,8 +1054,14 @@ def selective_sql_sync(
             )
             manually_forced = delivery_date in force_import_dates
             must_import = manually_forced or bool(missing_before) or source_data_drift
+            progress(
+                f"Drift decision for {delivery_date}: manuallyForced={manually_forced}, "
+                f"missingStages={len(missing_before)}, sourceDataDrift={source_data_drift}, "
+                f"driftLists={', '.join(drift_list_ids) or 'none'}, importRequired={must_import}."
+            )
 
             if must_import:
+                progress(f"Authoritative scanner reconciliation starting for {delivery_date} using {path.name}.")
                 imported_file = run_with_database_retry(
                     lambda: import_selected_workbook(
                         store,
@@ -949,6 +1107,9 @@ def selective_sql_sync(
                     )
 
                 imported_file["sourceCoverageVerified"] = True
+                progress(
+                    f"Post-import verification passed for {delivery_date}; expected stages and source-row coverage match."
+                )
                 files.extend(date_files)
                 if missing_before:
                     recovered_dates.add(delivery_date)
@@ -973,6 +1134,7 @@ def selective_sql_sync(
                     if reasons:
                         row["reason"] = " ".join(reasons)
             else:
+                progress(f"No scanner import required for {delivery_date}; workbook and active source-owned rows already match.")
                 items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
                 live_stage_summaries = active_stage_summaries(store, expected_definitions)
                 files.append(
@@ -996,6 +1158,7 @@ def selective_sql_sync(
                     )
                 )
         except Exception as exc:
+            progress(f"Delivery date {delivery_date} failed verification/import: {type(exc).__name__}: {exc}")
             files.append(
                 file_result(
                     {
@@ -1007,7 +1170,7 @@ def selective_sql_sync(
                 )
             )
 
-    return summary_from_files(
+    summary = summary_from_files(
         files,
         folder,
         clean_dates[0],
@@ -1015,17 +1178,31 @@ def selective_sql_sync(
         active_list_id=active_list_id,
         recovered_dates=recovered_dates,
     )
+    progress(
+        "Selective SQL sync complete: "
+        f"new={summary.get('newFileCount', 0)}, updated={summary.get('updatedFileCount', 0)}, "
+        f"unchanged={summary.get('noChangeFileCount', 0)}, failed={summary.get('failedFileCount', 0)}."
+    )
+    return summary
 
 
 def main() -> int:
     """Load the maintained scanner configuration/store and run the requested import."""
+    started_at = time.perf_counter()
     args = parse_args()
+    progress(
+        "Importer started. "
+        f"projectRoot={args.project_root}, folder={args.folder}, dateFrom={args.date_from}, "
+        f"dateTo={args.date_to}, initializeStore={args.initialize_store}, runId={args.run_id or 'none'}."
+    )
     project_root = Path(args.project_root).expanduser().resolve()
     if not project_root.is_dir():
         raise FileNotFoundError(f"Project root not found: {project_root}")
 
+    progress(f"Project root validated: {project_root}.")
     sys.path.insert(0, str(project_root))
 
+    progress("Loading maintained scanner configuration and backend store modules.")
     from backend.config import load_config
     from delivery_import_safety import install_safe_delivery_import
     import backend.store as backend_store_module
@@ -1038,18 +1215,28 @@ def main() -> int:
     )
 
     config = load_config(project_root)
+    progress(f"Scanner configuration loaded; creating configured store ({type(config).__name__}).")
     store = create_store(config)
+    progress(f"Store created: {type(store).__name__}.")
+    scanner_store_identity = validate_store_identity(store, args)
     if args.initialize_store == "true":
+        progress("Initializing/upgrading the scanner store before import.")
         store.initialize()
+        progress("Scanner store initialization completed.")
+    else:
+        progress("Scanner store initialization skipped by request.")
     install_safe_delivery_import(store)
+    progress("Safe delivery-import protection hooks installed.")
     schema_repair_applied = bool(
         getattr(store, "_dls_notice_schema_repaired", False)
         or getattr(store, "_dls_manual_protection_schema_repaired", False)
     )
 
     folder = Path(args.folder).expanduser()
+    progress(f"Using delivery-list source folder: {folder}.")
     sync_request = read_sync_request(args.sync_request_path)
     if sync_request:
+        progress(f"Loaded selective SQL synchronization request: {args.sync_request_path}.")
         target_dates = [str(value) for value in (sync_request.get("targetDates") or [])]
         force_dates = {
             str(value).strip()
@@ -1067,6 +1254,66 @@ def main() -> int:
             for value in (sync_request.get("supersededOrderCandidates") or [])
             if isinstance(value, dict)
         ]
+        progress(
+            f"Selective SQL sync request contains {len(target_dates)} target date(s), "
+            f"{len(force_dates)} forced date(s), {len(verified_excluded_order_items)} verified item exclusion(s), "
+            f"and {len(superseded_order_candidates)} superseded-order candidate(s)."
+        )
+        # Superseded/duplicate-order candidates are persisted before scanner
+        # reconciliation. This guarantees the manual-review queue exists before
+        # any import-side exclusion or defensive validation can affect the date.
+        # Pending candidates remain active in source data; only a prior explicit
+        # Admin approval is allowed to remove one of the candidate orders.
+        candidate_sync: dict[str, Any] = {
+            "ok": True,
+            "candidateCount": 0,
+            "pendingSupersededOrderReviews": 0,
+        }
+        try:
+            progress("Synchronizing superseded-order review candidates before delivery-list reconciliation.")
+            sync_candidate_reviews = getattr(store, "sync_superseded_order_candidates", None)
+            if not callable(sync_candidate_reviews):
+                loaded_store_path = str(getattr(backend_store_module, "__file__", "unknown backend/store.py"))
+                raise RuntimeError(
+                    "The installed backend/store.py does not provide "
+                    "sync_superseded_order_candidates. The automation ProjectRoot may point at an older "
+                    "scanner copy. Restart the current web app so it can repair ProjectRoot, then rerun the date. "
+                    f"Loaded store module: {loaded_store_path}"
+                )
+            candidate_sync = run_with_database_retry(
+                lambda: sync_candidate_reviews(
+                    superseded_order_candidates,
+                    verified_excluded_order_items,
+                    args.user,
+                ),
+                "saving superseded-order review candidates before import",
+            )
+            progress(
+                "Superseded-order review preflight completed: "
+                f"candidates={candidate_sync.get('candidateCount', 0)}, "
+                f"pending={candidate_sync.get('pendingSupersededOrderReviews', 0)}, "
+                f"systemApproved={candidate_sync.get('systemApprovedCount', 0)}. "
+                "No pending candidate is removed automatically."
+            )
+        except Exception as exc:
+            warning = f"{type(exc).__name__}: {exc}"
+            progress(f"Superseded-order review preflight failed: {warning}")
+            # When a candidate exists, queue persistence is a prerequisite. The
+            # user explicitly reviews these orders before any automated action.
+            # Failing closed here prevents an import from getting ahead of review.
+            if superseded_order_candidates:
+                raise RuntimeError(
+                    "Superseded-order candidates were detected but could not be saved for manual review. "
+                    "No delivery-list reconciliation was started. " + warning
+                ) from exc
+            candidate_sync = {
+                "ok": False,
+                "candidateCount": 0,
+                "pendingSupersededOrderReviews": 0,
+                "errors": [warning],
+                "traceback": traceback.format_exc(),
+            }
+
         summary = selective_sql_sync(
             store=store,
             folder=folder,
@@ -1082,48 +1329,17 @@ def main() -> int:
             run_id=args.run_id,
             run_started_at=args.run_started_at,
         )
-        try:
-            sync_candidate_reviews = getattr(store, "sync_superseded_order_candidates", None)
-            if not callable(sync_candidate_reviews):
-                loaded_store_path = str(getattr(backend_store_module, "__file__", "unknown backend/store.py"))
-                raise RuntimeError(
-                    "The installed backend/store.py does not provide "
-                    "sync_superseded_order_candidates. The automation ProjectRoot may point at an older "
-                    "scanner copy. Restart the v0.257 web app so it can repair ProjectRoot, then rerun the date. "
-                    f"Loaded store module: {loaded_store_path}"
-                )
-            candidate_sync = run_with_database_retry(
-                lambda: sync_candidate_reviews(
-                    superseded_order_candidates,
-                    verified_excluded_order_items,
-                    args.user,
-                ),
-                "saving superseded-order review candidates",
+        summary["supersededOrderReview"] = candidate_sync
+        summary["pendingSupersededOrderReviews"] = int_value(
+            candidate_sync.get("pendingSupersededOrderReviews")
+        )
+        if not candidate_sync.get("ok", True):
+            warning = "; ".join(
+                str(value) for value in (candidate_sync.get("errors") or []) if value
             )
-            summary["supersededOrderReview"] = candidate_sync
-            summary["pendingSupersededOrderReviews"] = int_value(
-                candidate_sync.get("pendingSupersededOrderReviews")
-            )
-        except Exception as exc:
-            # Candidate review is advisory. A queue-persistence failure must never
-            # roll back or hide otherwise successful delivery-list imports. Preserve
-            # the full diagnostic in the result so the runner can report it clearly.
-            warning = f"{type(exc).__name__}: {exc}"
-            candidate_sync = {
-                "ok": False,
-                "candidateCount": len(superseded_order_candidates),
-                "insertedCount": 0,
-                "updatedCount": 0,
-                "resetToPendingCount": 0,
-                "systemApprovedCount": 0,
-                "pendingSupersededOrderReviews": 0,
-                "errors": [warning],
-                "traceback": traceback.format_exc(),
-            }
-            summary["supersededOrderReview"] = candidate_sync
-            summary["pendingSupersededOrderReviews"] = 0
             summary["supersededOrderReviewWarning"] = warning
     else:
+        progress("No selective SQL request was supplied; using folder-authoritative import mode.")
         start_date = date.fromisoformat(args.date_from) if args.date_from else date.today() - timedelta(days=7)
         end_date = date.fromisoformat(args.date_to) if args.date_to else start_date
         target_dates: list[str] = []
@@ -1132,18 +1348,22 @@ def main() -> int:
             target_dates.append(cursor.isoformat())
             cursor += timedelta(days=1)
 
+        progress(f"Folder mode target dates: {', '.join(target_dates) or 'none'}.")
         selected = delivery_workbooks_by_date(
             folder,
             set(target_dates),
             delivery_date_from_source_header,
         )
+        progress(f"Folder workbook discovery matched {len(selected)} date(s).")
         files: list[dict[str, Any]] = []
         active_list_id = ""
         for delivery_date in target_dates:
             selected_path = selected.get(delivery_date)
             if selected_path is None:
+                progress(f"No workbook found for {delivery_date}; folder mode leaves existing scanner data unchanged.")
                 continue
             try:
+                progress(f"Folder mode importing {selected_path.name} for {delivery_date}.")
                 selected_payload = load_delivery_source_payload(selected_path)
                 imported_file = run_with_database_retry(
                     lambda path=selected_path, payload=selected_payload: import_selected_workbook(
@@ -1159,7 +1379,9 @@ def main() -> int:
                     f"importing delivery date {delivery_date}",
                 )
                 files.append(imported_file)
+                progress(f"Folder mode import completed for {delivery_date}: {imported_file.get('classification', 'unknown')}.")
             except Exception as exc:
+                progress(f"Folder mode import failed for {delivery_date}: {type(exc).__name__}: {exc}")
                 files.append(
                     file_result(
                         {
@@ -1192,7 +1414,15 @@ def main() -> int:
         row.setdefault("runStartedAt", str(args.run_started_at or ""))
 
     summary["schemaRepairApplied"] = schema_repair_applied
+    summary["scannerStore"] = scanner_store_identity
+    progress(f"Writing normalized importer result: {args.result_path or 'stdout-only result path not configured'}.")
     write_result(args.result_path, summary)
+    progress(
+        "Normalized result persisted. "
+        f"checked={summary.get('checkedFiles', 0)}, new={summary.get('newFileCount', 0)}, "
+        f"updated={summary.get('updatedFileCount', 0)}, unchanged={summary.get('noChangeFileCount', 0)}, "
+        f"failed={summary.get('failedFileCount', 0)}, schemaRepairApplied={schema_repair_applied}."
+    )
 
     failed_details = []
     for row in summary.get("files") or []:
@@ -1222,9 +1452,12 @@ def main() -> int:
         "importedDates": summary["importedDates"],
         "failedDates": summary["failedDates"],
         "schemaRepairApplied": schema_repair_applied,
+        "scannerStore": scanner_store_identity,
         "supersededOrderReviewWarning": str(summary.get("supersededOrderReviewWarning") or ""),
         "resultPath": args.result_path,
     }
+    elapsed_seconds = time.perf_counter() - started_at
+    progress(f"Importer finished in {elapsed_seconds:.3f}s with ok={bool(summary['ok'])}.")
     print(json.dumps(console_summary, separators=(",", ":"), sort_keys=True))
     return 0 if summary["ok"] else 1
 

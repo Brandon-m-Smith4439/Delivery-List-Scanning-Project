@@ -90,6 +90,7 @@ PASSWORD_ITERATIONS = 260000
 SESSION_HOURS = 12
 PASSWORD_RESET_MINUTES = 30
 PERMISSIONS = [
+    # Delivery-list visibility and floor scanning.
     "view_delivery_lists",
     "scan_delivery_lists",
     "use_assigned_stations",
@@ -97,22 +98,38 @@ PERMISSIONS = [
     "correct_scans",
     "reset_delivery_lists",
     "manage_scan_exceptions",
+
+    # Delivery-list import, review, and record maintenance. v0.340 intentionally
+    # separates editing, creation, deletion, and superseded-order approval so a
+    # role can be given only the destructive authority it actually needs.
     "import_delivery_lists",
     "preview_delivery_imports",
     "preview_delivery_updates",
-    "edit_delivery_lists",
+    "edit_delivery_list_items",
+    "create_delivery_list_orders",
+    "delete_delivery_list_items",
+    "delete_delivery_lists",
+    "review_superseded_orders",
     "print_export",
     "global_search",
     "view_reports",
+
+    # Administration and access control. User assignments are separate from
+    # role definitions: roles own permissions, while users are assigned roles.
     "view_admin",
     "manage_users",
     "manage_user_access",
+    "manage_user_assignments",
     "manage_roles",
     "view_sessions",
     "manage_stations",
     "manage_route_rules",
+    "manage_customer_emails",
     "manage_lookup_values",
     "manage_automation",
+    "manage_cross_date_scanning",
+
+    # Indian Trail and physical bay operations.
     "view_indian_trail",
     "receive_indian_trail",
     "view_bays",
@@ -121,12 +138,17 @@ PERMISSIONS = [
     "clear_bay_items",
     "manage_rush_work",
     "run_bay_checks",
-    "view_bay_reports",
     "manage_bay_layout",
+    "manage_bay_scanner_rules",
+    "manage_bay_auto_assigner",
+
+    # Racks and transportation.
     "view_racks",
     "scan_racks",
     "manage_racks",
     "transfer_rack_contents",
+
+    # Internal reject tracking.
     "view_rejects",
     "log_rejects",
     "manage_reject_settings",
@@ -137,6 +159,10 @@ PERMISSIONS = [
 # records store only the maintained names above, while signed-in users receive
 # the matching legacy aliases until every historical call site is migrated.
 LEGACY_PERMISSION_ALIASES = {
+    # v0.340 retires the original all-in-one edit permission. Existing roles
+    # are upgraded once during security seeding and signed-in users continue to
+    # receive this alias so older browser call sites remain compatible.
+    "edit_delivery_lists": "edit_delivery_list_items",
     "scan": "scan_delivery_lists",
     "view_lists": "view_delivery_lists",
     "view_stations": "use_assigned_stations",
@@ -161,7 +187,24 @@ LEGACY_PERMISSION_ALIASES = {
     "mark_sdi": "manage_rush_work",
     "remove_sdi": "manage_rush_work",
     "bay_check": "run_bay_checks",
-    "indian_trail_reports": "view_bay_reports",
+    "view_bay_reports": "view_reports",
+    "indian_trail_reports": "view_reports",
+}
+
+# v0.340 one-time permission expansion. A newly introduced capability inherits
+# the old broader permission only when that capability does not yet exist in the
+# database. This preserves current custom-role behavior on upgrade without
+# continually re-granting permissions an administrator intentionally removes.
+PERMISSION_BACKFILL_SOURCES = {
+    "create_delivery_list_orders": ("edit_delivery_list_items",),
+    "delete_delivery_list_items": ("edit_delivery_list_items",),
+    "delete_delivery_lists": ("edit_delivery_list_items",),
+    "review_superseded_orders": ("edit_delivery_list_items",),
+    "manage_cross_date_scanning": ("edit_delivery_list_items",),
+    "manage_user_assignments": ("manage_roles",),
+    "manage_customer_emails": ("manage_route_rules",),
+    "manage_bay_scanner_rules": ("manage_bay_layout",),
+    "manage_bay_auto_assigner": ("manage_bay_layout",),
 }
 
 
@@ -218,7 +261,7 @@ ROLE_PERMISSIONS = {
         "receive_indian_trail", "view_bays", "global_search", "print_export",
         "correct_scans", "manage_scan_exceptions", "assign_bay_items",
         "move_bay_items", "clear_bay_items", "manage_rush_work", "run_bay_checks",
-        "view_bay_reports", "view_reports", "view_sessions", "view_racks",
+        "view_reports", "view_sessions", "view_racks",
         "scan_racks", "manage_racks", "transfer_rack_contents", "view_rejects", "log_rejects",
     ],
 }
@@ -246,6 +289,78 @@ LIST_PROFILES = [
     ("customer-pickup", "Customer Pickup", "Customer Pickup", "cpu"),
     ("dtc", "DTC - Deliver to Customer", "DTC", "dtc"),
 ]
+
+# v0.346: Stage behavior is now an explicit configurable layer instead of
+# being inferred only from display text. The built-in definitions preserve the
+# existing workflow exactly, while Lookup Manager may rename, disable, clone,
+# or add stages by assigning one of these maintained behavior presets.
+STAGE_PRESET_CATALOG: dict[str, dict[str, str]] = {
+    "airport_staging": {"label": "Airport Staging", "profile": "all", "scanner": "Airport Rd", "category": "staged", "destination": ""},
+    "airport_outbound": {"label": "Airport Outbound", "profile": "all", "scanner": "Airport Rd", "category": "outbound", "destination": ""},
+    "indian_trail": {"label": "Indian Trail Receiving", "profile": "indian_trail", "scanner": "Indian Trail", "category": "received", "destination": "Indian Trail"},
+    "greenville": {"label": "Greenville", "profile": "greenville", "scanner": "Greenville", "category": "greenville", "destination": "Greenville"},
+    "cpu": {"label": "Customer Pickup", "profile": "cpu", "scanner": "Customer Pickup", "category": "pickup", "destination": "CPU"},
+    "dtc": {"label": "Deliver to Customer", "profile": "dtc", "scanner": "DTC", "category": "dtc", "destination": "DTC"},
+    "custom_route": {"label": "Custom Route", "profile": "route", "scanner": "", "category": "staged", "destination": ""},
+}
+
+DEFAULT_STAGE_DEFINITIONS: list[dict[str, Any]] = [
+    {"key": "staging-airport", "displayName": "Staging - Airport Rd", "scanner": "Airport Rd", "preset": "airport_staging", "routeCode": "", "source": "default"},
+    {"key": "outbound-airport", "displayName": "Outbound - Airport Rd", "scanner": "Airport Rd", "preset": "airport_outbound", "routeCode": "", "source": "default"},
+    {"key": "inbound-indian-trail", "displayName": "Inbound - Indian Trail", "scanner": "Indian Trail", "preset": "indian_trail", "routeCode": "", "source": "default"},
+    {"key": "bfs-greenville", "displayName": "BFS Greenville", "scanner": "Greenville", "preset": "greenville", "routeCode": "GNV", "source": "default"},
+    {"key": "customer-pickup", "displayName": "Customer Pickup", "scanner": "Customer Pickup", "preset": "cpu", "routeCode": "CPU", "source": "default"},
+    {"key": "dtc", "displayName": "DTC - Deliver to Customer", "scanner": "DTC", "preset": "dtc", "routeCode": "DTC", "source": "default"},
+]
+
+_STAGE_DEFINITION_CACHE: list[dict[str, Any]] = [dict(item) for item in DEFAULT_STAGE_DEFINITIONS]
+
+def stage_definitions() -> list[dict[str, Any]]:
+    return [dict(item) for item in _STAGE_DEFINITION_CACHE]
+
+def stage_definition_for_text(stage: Any, scanner: Any = "") -> dict[str, Any] | None:
+    stage_text = str(stage or "").strip().lower()
+    scanner_text = str(scanner or "").strip().lower()
+    for definition in _STAGE_DEFINITION_CACHE:
+        display = str(definition.get("displayName") or "").strip().lower()
+        configured_scanner = str(definition.get("scanner") or "").strip().lower()
+        if display and stage_text == display:
+            return definition
+        if display and display in stage_text and (not configured_scanner or configured_scanner in scanner_text or configured_scanner in stage_text):
+            return definition
+    return None
+
+def stage_logic_preset(stage: Any, scanner: Any = "") -> str:
+    definition = stage_definition_for_text(stage, scanner)
+    return str(definition.get("preset") or "") if definition else ""
+
+def stage_profile_selector(definition: dict[str, Any]) -> str:
+    preset = str(definition.get("preset") or "airport_staging")
+    preset_meta = STAGE_PRESET_CATALOG.get(preset, STAGE_PRESET_CATALOG["airport_staging"])
+    profile = preset_meta["profile"]
+    if profile == "route":
+        route_code = str(definition.get("routeCode") or "").strip().upper()
+        return f"route:{route_code}" if route_code else "route:"
+    return profile
+
+
+def stage_definition_for_preset(preset: str, route_code: str = "") -> dict[str, Any] | None:
+    """Return the active stage definition that owns one maintained behavior preset.
+
+    Stage keys and display names are administrator-editable in v0.346, so callers
+    that need a workflow target must resolve by behavior rather than hard-coded
+    English stage text. Custom-route presets additionally match their route code.
+    """
+    clean_preset = str(preset or "").strip().lower()
+    clean_route = str(route_code or "").strip().upper()
+    for definition in _STAGE_DEFINITION_CACHE:
+        if str(definition.get("preset") or "").strip().lower() != clean_preset:
+            continue
+        if clean_preset == "custom_route" and clean_route:
+            if str(definition.get("routeCode") or "").strip().upper() != clean_route:
+                continue
+        return definition
+    return None
 CPU_DESTINATION_ADDRESS = "1709 Airport Rd, Monroe, NC 28110"
 INDIAN_TRAIL_DESTINATION_ADDRESS = "3980 Matthews Indian Trail Rd, Matthews, NC 28104"
 GREENVILLE_DESTINATION_ADDRESS = "Greenville address pending"
@@ -258,7 +373,10 @@ DEFAULT_CUSTOMER_ROUTE_RULES = [
 ]
 
 # Bay auto-assigner settings are intentionally stored as simple key/value
-# pairs in SQLite so future admins can tune thresholds without code changes.
+# pairs in SQLite. The live workflow preassigns Indian Trail orders during an
+# Outbound scan. v0.352 keeps legacy mapping keys for upgrade compatibility,
+# while the routine Admin GUI exposes only thresholds and manual-placement
+# policy because arbitrary category remapping is not an everyday operator task.
 DEFAULT_BAY_AUTO_ASSIGN_SETTINGS = {
     "standardMaxInches": 59.99,
     "tallMinInches": 60.0,
@@ -911,19 +1029,26 @@ def custom_route_codes(base_items: list[dict[str, Any]]) -> list[str]:
 
 
 def route_stage_label(route: str) -> str:
-    """Purpose: Run the route stage label workflow for the delivery-list scanner.
+    """Return the active display name for a route-backed delivery stage.
 
-    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+    v0.346 first consults the Stage Editor cache so route/stage presentation may
+    be renamed without rewriting operational preset logic. Fallback aliases keep
+    old databases and offline verification scripts compatible.
     """
     clean = str(route or "").strip().upper()
-    if clean == "CPU":
+    aliases = {"GRN": "GNV", "GREENVILLE": "GNV"}
+    canonical = aliases.get(clean, clean)
+    for definition in _STAGE_DEFINITION_CACHE:
+        route_code = str(definition.get("routeCode") or "").strip().upper()
+        if route_code and route_code == canonical:
+            return str(definition.get("displayName") or canonical).strip() or canonical
+    if canonical == "CPU":
         return "Customer Pickup"
-    if clean == "DTC":
+    if canonical == "DTC":
         return "Delivery to Customer"
-    if clean in {"GNV", "GRN", "GREENVILLE"}:
+    if canonical == "GNV":
         return "BFS Greenville"
-    return clean
+    return canonical
 
 
 def public_route_label(value: Any) -> str:
@@ -947,11 +1072,12 @@ def public_route_label(value: Any) -> str:
 
 
 def receiving_stage_destination(stage: Any, scanner: Any = "") -> str:
-    """Purpose: Run the receiving stage destination workflow for the delivery-list scanner.
-
-    Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-    Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
-    """
+    """Return the destination implied by a configured stage behavior preset."""
+    preset = stage_logic_preset(stage, scanner)
+    if preset in STAGE_PRESET_CATALOG:
+        destination = STAGE_PRESET_CATALOG[preset].get("destination", "")
+        if destination:
+            return destination
     text = f"{stage or ''} {scanner or ''}".strip().lower()
     if "indian trail" in text or "inbound" in text:
         return "Indian Trail"
@@ -965,7 +1091,10 @@ def receiving_stage_destination(stage: Any, scanner: Any = "") -> str:
 
 
 def scan_stage_category(stage: Any, scanner: Any = "") -> str:
-    """Return the operational scan-stage category used for cross-date matching."""
+    """Return the operational scan category, honoring Stage Editor presets first."""
+    preset = stage_logic_preset(stage, scanner)
+    if preset in STAGE_PRESET_CATALOG:
+        return STAGE_PRESET_CATALOG[preset].get("category", "staged")
     text = f"{stage or ''} {scanner or ''}".strip().lower()
     if "outbound" in text:
         return "outbound"
@@ -1064,7 +1193,19 @@ def build_delivery_lists(sample: dict[str, Any]) -> list[tuple[str, str, str, st
     delivery_date = str(sample.get("deliveryDate") or now_iso()[:10])
     base_items = sample.get("items") or []
     definitions: list[tuple[str, str, str, str, list[dict[str, Any]]]] = []
-    for suffix, stage, scanner, profile in LIST_PROFILES:
+    configured_route_codes: set[str] = set()
+    for definition in stage_definitions():
+        suffix = str(definition.get("key") or "").strip()
+        stage = str(definition.get("displayName") or suffix).strip()
+        preset = str(definition.get("preset") or "airport_staging")
+        preset_meta = STAGE_PRESET_CATALOG.get(preset, STAGE_PRESET_CATALOG["airport_staging"])
+        scanner = str(definition.get("scanner") or preset_meta.get("scanner") or stage).strip()
+        route_code = str(definition.get("routeCode") or "").strip().upper()
+        if route_code:
+            configured_route_codes.add(route_code)
+        profile = stage_profile_selector(definition)
+        if not suffix or (profile == "route:"):
+            continue
         items = items_for_profile(profile, base_items)
         if profile != "all" and not items:
             continue
@@ -1078,6 +1219,8 @@ def build_delivery_lists(sample: dict[str, Any]) -> list[tuple[str, str, str, st
             )
         )
     for route in custom_route_codes(base_items):
+        if route.upper() in configured_route_codes:
+            continue
         suffix = f"route-{re.sub(r'[^a-z0-9]+', '-', route.lower()).strip('-')}"
         stage = route_stage_label(route)
         items = items_for_profile(f"route:{route}", base_items)
@@ -1101,7 +1244,7 @@ def all_profile_list_ids(delivery_date: str) -> list[str]:
     Effects: Performs an in-memory calculation and returns data without intentional external side effects.
     Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
     """
-    return [f"{delivery_date}-{suffix}" for suffix, _, _, _ in LIST_PROFILES]
+    return [f"{delivery_date}-{definition['key']}" for definition in stage_definitions() if definition.get("key")]
 
 
 def parse_int_text(value: Any) -> int | None:
@@ -1606,8 +1749,15 @@ def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
             "rackCode": row_value(row, "rack_code", ""),
             "rackName": row_value(row, "rack_name", ""),
             "rackStatus": row_value(row, "rack_status", ""),
+            "lastRackCode": row_value(row, "last_rack_code", ""),
+            "lastRackName": row_value(row, "last_rack_name", ""),
+            "lastRackType": row_value(row, "last_rack_type", ""),
+            "lastRackItemStatus": row_value(row, "last_rack_item_status", ""),
             "bayCode": row_value(row, "bay_code", ""),
             "bayName": row_value(row, "bay_name", ""),
+            "lastBayCode": row_value(row, "last_bay_code", ""),
+            "lastBayName": row_value(row, "last_bay_name", ""),
+            "lastBayAssignmentStatus": row_value(row, "last_bay_assignment_status", ""),
             "outboundScanned": bool(row_value(row, "outbound_scanned", 0)),
             "listStage": row_value(row, "list_stage", ""),
         }
@@ -1688,6 +1838,21 @@ class BaseDeliveryStore:
 
         Effects: Performs an in-memory calculation and returns data without intentional external side effects.
         Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        """
+        raise NotImplementedError
+
+    def get_admin_delivery_list_catalog(
+        self,
+        page: int = 1,
+        query: str = "",
+        user: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return one lightweight Edit Delivery Lists catalog page.
+
+        The Admin list browser should not need the full scanner catalog, per-list
+        timing metrics, update-notice summaries, or glass libraries just to paint
+        three business weeks. Concrete stores therefore provide a dedicated
+        paged catalog for this GUI.
         """
         raise NotImplementedError
 
@@ -1972,7 +2137,7 @@ class BaseDeliveryStore:
         )
         if preferred is None:
             preferred = next(
-                (row for row in rows if "staging" in stage_text(row) and "airport" in stage_text(row)),
+                (row for row in rows if scan_stage_category(row.get("stage"), row.get("scanner") or row.get("stageProfile")) == "staged"),
                 None,
             )
         if preferred is None:
@@ -1982,7 +2147,7 @@ class BaseDeliveryStore:
             )
         if preferred is None:
             preferred = next(
-                (row for row in rows if "outbound" in stage_text(row) and "airport" in stage_text(row)),
+                (row for row in rows if scan_stage_category(row.get("stage"), row.get("scanner") or row.get("stageProfile")) == "outbound"),
                 None,
             )
         if preferred is None:
@@ -2036,15 +2201,13 @@ class BaseDeliveryStore:
             or int(row.get("removedPieceQty") or 0)
         ]
         created_ids = {str(row.get("listId") or "").strip().lower() for row in created_stages}
-        created_stage_text = {
-            f"{row.get('stage') or ''} {row.get('scanner') or row.get('stageProfile') or ''}".strip().lower()
-            for row in created_stages
-        }
         created_staging = any(value.endswith("-staging-airport") for value in created_ids) or any(
-            "staging" in value and "airport" in value for value in created_stage_text
+            scan_stage_category(row.get("stage"), row.get("scanner") or row.get("stageProfile")) == "staged"
+            for row in created_stages
         )
         created_outbound = any(value.endswith("-outbound-airport") for value in created_ids) or any(
-            "outbound" in value and "airport" in value for value in created_stage_text
+            scan_stage_category(row.get("stage"), row.get("scanner") or row.get("stageProfile")) == "outbound"
+            for row in created_stages
         )
         inferred_new_date = (
             bool(changed_stages)
@@ -3585,25 +3748,20 @@ class BaseDeliveryStore:
             ).fetchall()
 
         def stage_kind(row: sqlite3.Row) -> str:
-            """Purpose: Run the stage kind workflow for the delivery-list scanner.
+            """Resolve search/navigation progress from the configured stage preset.
 
-            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            Display names may be changed in Stage Editor, so current-state ranking
+            must follow the assigned behavior preset rather than English keywords.
             """
-            text = f"{row['stage']} {row['scanner']}".lower()
-            if "outbound" in text:
-                return "outbound"
-            if "indian trail" in text or "inbound" in text:
-                return "indian_trail"
-            if "customer pickup" in text or "cpu" in text:
-                return "cpu"
-            if "greenville" in text or "gnv" in text:
-                return "greenville"
-            if "dtc" in text or "deliver to customer" in text:
-                return "dtc"
-            if "staging" in text:
-                return "staging"
-            return "other"
+            category = scan_stage_category(row["stage"], row["scanner"])
+            return {
+                "received": "indian_trail",
+                "pickup": "cpu",
+                "greenville": "greenville",
+                "dtc": "dtc",
+                "outbound": "outbound",
+                "staged": "staging",
+            }.get(category, "other")
 
         def representative_rank(row: sqlite3.Row) -> tuple[int, str, int]:
             """Rank the navigation row by the actual latest scan event.
@@ -4587,6 +4745,60 @@ class BaseDeliveryStore:
         )
         self.queue_email_message(con, "ready", customer, contacts[0]["customer_pattern"], delivery_date, [row["email"] for row in contacts], self.customer_cc_emails(con), subject, body, {"listId": list_id, "user": user})
 
+    def get_stage_definitions(self) -> list[dict[str, Any]]:
+        """Return active stage definitions used by the v0.346 Stage Editor.
+
+        Built-in definitions are synthesized when no override exists. An inactive
+        ``manual-hidden`` row suppresses that definition without deleting historical
+        delivery-list records that still reference the old stage name.
+        """
+        definitions = {item["key"]: dict(item) for item in DEFAULT_STAGE_DEFINITIONS}
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT id, value, label, category, match_terms, is_active, source
+                FROM admin_lookup_values
+                WHERE type = 'stage_definition'
+                ORDER BY id
+                """
+            ).fetchall()
+        for row in rows:
+            key = str(row["value"] or "").strip().lower()
+            if not key:
+                continue
+            if not int(row["is_active"] or 0):
+                definitions.pop(key, None)
+                continue
+            try:
+                metadata = json.loads(str(row["match_terms"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                metadata = {}
+            preset = str(row["category"] or metadata.get("preset") or "airport_staging").strip()
+            if preset not in STAGE_PRESET_CATALOG:
+                preset = "airport_staging"
+            preset_meta = STAGE_PRESET_CATALOG[preset]
+            definitions[key] = {
+                "id": row["id"],
+                "key": key,
+                "displayName": str(row["label"] or key).strip() or key,
+                "scanner": str(metadata.get("scanner") or preset_meta.get("scanner") or "").strip(),
+                "preset": preset,
+                "routeCode": str(metadata.get("routeCode") or "").strip().upper(),
+                "source": str(row["source"] or "manual"),
+            }
+        default_order = {item["key"]: index for index, item in enumerate(DEFAULT_STAGE_DEFINITIONS)}
+        return sorted(
+            definitions.values(),
+            key=lambda item: (default_order.get(str(item.get("key") or ""), 1000), str(item.get("displayName") or "").lower()),
+        )
+
+    def refresh_stage_definition_cache(self) -> list[dict[str, Any]]:
+        """Refresh the process-wide stage preset cache after startup or Admin edits."""
+        global _STAGE_DEFINITION_CACHE
+        definitions = self.get_stage_definitions()
+        _STAGE_DEFINITION_CACHE = [dict(item) for item in definitions]
+        return definitions
+
     def get_manual_edit_lookups(self) -> dict[str, list[dict[str, Any]]]:
         """Purpose: Read manual edit lookups for the delivery-list scanner workflow.
 
@@ -4893,6 +5105,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 self.seed_bay_auto_assign_settings(con)
                 self.seed_racks(con)
                 self.repair_route_stage_memberships_if_needed(con)
+            self.refresh_stage_definition_cache()
             self.cleanup_old_bay_events(force=True)
             self.write_superseded_order_exclusion_file()
         except Exception as exc:
@@ -5074,9 +5287,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         repaired = 0
         for (delivery_date, _source_key), siblings in grouped.items():
             representative = next(
-                (row for row in siblings if str(row["stage"] or "").lower().startswith("staging")),
+                (row for row in siblings if scan_stage_category(row["stage"], row["scanner"]) == "staged"),
                 next(
-                    (row for row in siblings if str(row["stage"] or "").lower().startswith("outbound")),
+                    (row for row in siblings if scan_stage_category(row["stage"], row["scanner"]) == "outbound"),
                     siblings[0],
                 ),
             )
@@ -5093,8 +5306,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             receiving_before = {
                 str(row["list_id"])
                 for row in siblings
-                if not str(row["stage"] or "").lower().startswith("staging")
-                and not str(row["stage"] or "").lower().startswith("outbound")
+                if scan_stage_category(row["stage"], row["scanner"]) not in {"staged", "outbound"}
             }
             expected_destination = self.destination_for_line_item({**route_source, "route": canonical_route})
             expected_list_id = self.manual_route_profile(delivery_date, expected_destination)[0]
@@ -5987,6 +6199,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             candidate = f"{desired_id}-copy-{suffix}-{attempt}"
         return candidate
 
+    def logical_order_item_key(self, order_no: Any, item_no: Any) -> str:
+        """Return the canonical business key used to prevent duplicate logical items.
+
+        Numeric Order Nr. and Item Nr. values are normalized before comparison so
+        formatting differences such as ``001`` versus ``1`` cannot bypass duplicate
+        detection. Non-numeric fallback text is retained for defensive diagnostics.
+        """
+        order_parsed = parse_int_text(order_no)
+        item_parsed = parse_int_text(item_no)
+        order_text = str(order_parsed) if order_parsed is not None else str(order_no or "").strip()
+        item_text = (
+            str(item_parsed).zfill(3)
+            if item_parsed is not None
+            else str(item_no or "").strip().zfill(3)
+        )
+        return f"{order_text}-{item_text}"
+
     def insert_line_items(self, con: sqlite3.Connection, list_id: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Purpose: Create line items for the delivery-list scanner workflow.
 
@@ -5995,9 +6224,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         row, and returns the inserted records to the import/update preservation workflow.
         """
         cloned_items = []
+        seen_order_items: set[str] = set()
         auto_assign_settings = self.get_bay_auto_assign_settings_con(con)
         for index, item in enumerate(items, start=1):
             cloned = self.clone_item_for_list(item, list_id, index, auto_assign_settings)
+            order_item_key = self.logical_order_item_key(cloned["order_no"], cloned["item_no"])
+            if order_item_key in seen_order_items:
+                raise ValueError(
+                    f"Duplicate Order Nr. / Item Nr. {order_item_key} cannot be inserted into {list_id}."
+                )
+            seen_order_items.add(order_item_key)
             cloned["id"] = self.available_line_item_id(
                 con,
                 str(cloned["id"]),
@@ -6191,8 +6427,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             }
             preserved_rack_items: list[dict[str, Any]] = []
             # DLS_V135_PRESERVE_MANUAL_LINES: keep manually added orders through
-            # every automatic folder/SQL refresh until the source file contains
-            # the same order/item and takes ownership of it.
+            # automatic folder/SQL refreshes. An unprotected manual row yields to
+            # the source when A+W publishes the same logical item; a protected row
+            # stays authoritative and suppresses the colliding source copy.
             preserved_manual_items: list[dict[str, Any]] = []
             original_total_qty = 0
 
@@ -6209,7 +6446,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             for row in con.execute("SELECT * FROM line_items WHERE list_id = ?", (list_id,)).fetchall():
                 scanned_qty = int(row["scanned_qty"] or 0)
                 source_key = str(row["source_id"])
-                order_item_key = f"{row['order_no']}-{str(row['item_no']).zfill(3)}"
+                order_item_key = self.logical_order_item_key(row["order_no"], row["item_no"])
                 line_key = str(row["id"])
                 source_match_key = self.import_order_item_key(source_key, row["order_no"], row["item_no"])
                 previous_payload = {
@@ -6292,7 +6529,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 {
                     "rack_id": row["rack_id"],
                     "source_id": str(row["source_id"] or ""),
-                    "order_item_key": f"{row['order_no']}-{str(row['item_no']).zfill(3)}",
+                    "order_item_key": self.logical_order_item_key(row["order_no"], row["item_no"]),
                     "qty": int(row["qty"] or 1),
                     "added_by": str(row["added_by"] or ""),
                     "added_at": str(row["added_at"] or now_iso()),
@@ -6309,9 +6546,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ).fetchall()
             ]
             incoming_order_keys = {
-                f"{str(item.get('order') or '').strip()}-{str(item.get('item') or '').strip().zfill(3)}"
+                self.logical_order_item_key(item.get("order"), item.get("item"))
                 for item in items
             }
+            protected_manual_keys = {
+                str(record["order_item_key"])
+                for record in preserved_manual_items
+                if record.get("protect_from_aw_import")
+            }
+
+            # v0.343 duplicate hardening: a protected manual line remains the
+            # authoritative copy for its logical Order Nr. + Item Nr. If A+W later
+            # sends the same item while protection is still enabled, suppress that
+            # source row for this stage instead of inserting both copies.
+            source_items = [
+                item
+                for item in items
+                if self.logical_order_item_key(item.get("order"), item.get("item"))
+                not in protected_manual_keys
+            ]
             preserved_manual_total = sum(
                 int(record["clone"]["qty"] or 0)
                 for record in preserved_manual_items
@@ -6320,16 +6573,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     or record.get("protect_from_aw_import")
                 )
             )
-            summary["totalQty"] = sum(int(item.get("qty") or 0) for item in items) + preserved_manual_total
+            summary["totalQty"] = sum(int(item.get("qty") or 0) for item in source_items) + preserved_manual_total
 
             con.execute("DELETE FROM line_items WHERE list_id = ?", (list_id,))
-            cloned_items = self.insert_line_items(con, list_id, items)
+            cloned_items = self.insert_line_items(con, list_id, source_items)
+            restored_manual_keys: set[str] = set()
             for manual_record in preserved_manual_items:
                 if (
                     manual_record["order_item_key"] in incoming_order_keys
                     and not manual_record.get("protect_from_aw_import")
                 ):
                     continue
+                manual_key = str(manual_record["order_item_key"])
+                if manual_key in restored_manual_keys:
+                    # Historical duplicate manual rows are not reintroduced during
+                    # a source refresh. The first surviving logical item remains the
+                    # authoritative stage copy.
+                    continue
+                restored_manual_keys.add(manual_key)
                 cloned = manual_record["clone"]
                 cloned["protect_from_aw_import"] = int(manual_record["protect_from_aw_import"] or 0)
                 con.execute(
@@ -6396,7 +6657,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return (
                     pop_previous("source", source_match_key)
                     or pop_previous("business", self.import_business_key(cloned))
-                    or pop_previous("order_item", f"{cloned['order_no']}-{str(cloned['item_no']).zfill(3)}")
+                    or pop_previous("order_item", self.logical_order_item_key(cloned["order_no"], cloned["item_no"]))
                 )
 
             def preview_snapshot_from_cloned(
@@ -6662,6 +6923,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Effects: This function reads or changes database records.
         Flow: Inspects current state, applies only missing or outdated changes, and leaves repeated runs safe and idempotent.
         """
+        existing_permission_names = {
+            str(row["name"])
+            for row in con.execute("SELECT name FROM permissions").fetchall()
+        }
+        newly_introduced_permissions = set(PERMISSIONS) - existing_permission_names
+
         for permission in PERMISSIONS:
             con.execute(
                 "INSERT OR IGNORE INTO permissions (name, description) VALUES (?, ?)",
@@ -6690,15 +6957,42 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 list(LEGACY_PERMISSION_ALIASES),
             )
 
+        # Expand only roles that actually held the older broad authority, and
+        # only on the first startup where each v0.340 capability exists. This is
+        # deliberately one-time so future Role Manager edits stay authoritative.
+        for permission, source_permissions in PERMISSION_BACKFILL_SOURCES.items():
+            if permission not in newly_introduced_permissions:
+                continue
+            source_placeholders = ",".join("?" for _ in source_permissions)
+            con.execute(
+                f"""
+                INSERT OR IGNORE INTO role_permissions (role_id, permission_name)
+                SELECT DISTINCT role_id, ?
+                FROM role_permissions
+                WHERE permission_name IN ({source_placeholders})
+                """,
+                (permission, *source_permissions),
+            )
+
         for role_name, permissions in ROLE_PERMISSIONS.items():
             existing_role = con.execute(
                 "SELECT id FROM roles WHERE name = ?",
                 (role_name,),
             ).fetchone()
             if existing_role:
-                # Built-in role defaults are bootstrap values only. Once a role
-                # exists, Admin changes in the Role editor are authoritative and
-                # must not be silently re-added when the server restarts.
+                if role_name == "Admin":
+                    # v0.341: Admin is the non-lockout recovery role. Keep it
+                    # synchronized to every canonical permission on every startup
+                    # so permission-model upgrades or an accidental partial save
+                    # can never strand the site's administrators.
+                    for permission in PERMISSIONS:
+                        con.execute(
+                            "INSERT OR IGNORE INTO role_permissions (role_id, permission_name) VALUES (?, ?)",
+                            (existing_role["id"], permission),
+                        )
+                # Built-in role defaults are bootstrap values only. Admin is the
+                # deliberate v0.341 exception above; for every other built-in role,
+                # once it exists, Role Manager edits remain authoritative.
                 continue
             cur = con.execute(
                 "INSERT INTO roles (name, description) VALUES (?, ?)",
@@ -7132,6 +7426,190 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     result.append(meta)
         return result
 
+    def get_admin_delivery_list_catalog(
+        self,
+        page: int = 1,
+        query: str = "",
+        user: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return only the three-week Edit Delivery Lists page the browser needs.
+
+        Performance note: ``get_delivery_lists`` intentionally carries richer
+        scanner/home metrics and historically performs per-list timing work. The
+        Admin editor does not need that payload to choose a date/stage, so this
+        endpoint first reads lightweight list headers, selects the requested
+        business-week page, and aggregates quantities only for those visible
+        list IDs. Search is also resolved server-side so an old Order Nr. can be
+        found without downloading every active delivery list to the browser.
+        """
+        requested_page = max(int(page or 1), 1)
+        clean_query = str(query or "").strip()
+        weeks_per_page = 3
+
+        def parse_delivery_date(value: Any) -> datetime | None:
+            text = str(value or "").strip()
+            if not text:
+                return None
+            try:
+                return datetime.strptime(text[:10], "%Y-%m-%d")
+            except ValueError:
+                return None
+
+        def week_key(value: Any) -> str:
+            parsed = parse_delivery_date(value)
+            if parsed is None:
+                return ""
+            monday = parsed - timedelta(days=parsed.weekday())
+            return monday.strftime("%Y-%m-%d")
+
+        def numeric_query_date(value: str) -> str:
+            match = re.fullmatch(r"\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})\s*", value)
+            if not match:
+                return ""
+            month, day, year = (int(part) for part in match.groups())
+            if year < 100:
+                year += 2000
+            try:
+                return datetime(year, month, day).strftime("%Y-%m-%d")
+            except ValueError:
+                return ""
+
+        with self.connect() as con:
+            params: list[Any] = []
+            search_sql = ""
+            if clean_query:
+                like = f"%{clean_query}%"
+                parsed_query_date = numeric_query_date(clean_query)
+                search_sql = """
+                    AND (
+                        dl.label LIKE ? OR dl.delivery_date LIKE ? OR dl.stage LIKE ? OR dl.scanner LIKE ?
+                        OR EXISTS (
+                            SELECT 1
+                            FROM line_items search_li
+                            WHERE search_li.list_id = dl.id
+                              AND COALESCE(search_li.is_deleted, 0) = 0
+                              AND (
+                                  search_li.order_no LIKE ? OR search_li.item_no LIKE ? OR search_li.source_id LIKE ?
+                                  OR search_li.barcode LIKE ? OR search_li.customer LIKE ? OR search_li.job LIKE ?
+                                  OR search_li.route LIKE ? OR search_li.product LIKE ? OR search_li.dimensions LIKE ?
+                              )
+                        )
+                """
+                params.extend([like, like, like, like, *([like] * 9)])
+                if parsed_query_date:
+                    search_sql += " OR dl.delivery_date = ?"
+                    params.append(parsed_query_date)
+                search_sql += ")"
+
+            header_rows = con.execute(
+                f"""
+                SELECT dl.id, dl.label, dl.delivery_date, dl.stage, dl.scanner
+                FROM delivery_lists dl
+                WHERE dl.status = 'active'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM line_items active_li
+                      WHERE active_li.list_id = dl.id
+                        AND COALESCE(active_li.is_deleted, 0) = 0
+                  )
+                  {search_sql}
+                ORDER BY dl.delivery_date DESC, dl.label
+                """,
+                params,
+            ).fetchall()
+
+            headers = [
+                row for row in header_rows
+                if user is None or user_can_access_stage(
+                    user,
+                    str(row["stage"] or ""),
+                    str(row["scanner"] or ""),
+                )
+            ]
+            weeks: dict[str, list[Any]] = {}
+            for row in headers:
+                key = week_key(row["delivery_date"])
+                if key:
+                    weeks.setdefault(key, []).append(row)
+
+            all_week_keys = sorted(weeks, reverse=True)
+            if clean_query:
+                page_chunks = [
+                    all_week_keys[index:index + weeks_per_page]
+                    for index in range(0, len(all_week_keys), weeks_per_page)
+                ] or [[]]
+            else:
+                today = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+                current_monday = today - timedelta(days=today.weekday())
+                next_key = (current_monday + timedelta(days=7)).strftime("%Y-%m-%d")
+                current_key = current_monday.strftime("%Y-%m-%d")
+                previous_key = (current_monday - timedelta(days=7)).strftime("%Y-%m-%d")
+                landing = [key for key in (next_key, current_key, previous_key) if key in weeks]
+                older = [key for key in all_week_keys if key < previous_key]
+                page_chunks = [landing]
+                page_chunks.extend(
+                    older[index:index + weeks_per_page]
+                    for index in range(0, len(older), weeks_per_page)
+                )
+
+            total_pages = max(len(page_chunks), 1)
+            current_page = min(requested_page, total_pages)
+            selected_week_keys = page_chunks[current_page - 1] if page_chunks else []
+            selected_ids = [
+                str(row["id"])
+                for key in selected_week_keys
+                for row in weeks.get(key, [])
+            ]
+
+            result: list[dict[str, Any]] = []
+            if selected_ids:
+                placeholders = ",".join("?" for _ in selected_ids)
+                rows = con.execute(
+                    f"""
+                    SELECT dl.*,
+                           COALESCE(SUM(li.qty), 0) AS total_qty,
+                           COALESCE(SUM(li.scanned_qty), 0) AS scanned_qty,
+                           COUNT(li.id) AS item_count
+                    FROM delivery_lists dl
+                    LEFT JOIN line_items li
+                      ON li.list_id = dl.id
+                     AND COALESCE(li.is_deleted, 0) = 0
+                    WHERE dl.id IN ({placeholders})
+                      AND dl.status = 'active'
+                    GROUP BY dl.id, dl.label, dl.delivery_date, dl.stage, dl.scanner, dl.status, dl.revision, dl.created_at
+                    HAVING COUNT(li.id) > 0
+                    ORDER BY dl.delivery_date DESC, dl.label
+                    """,
+                    selected_ids,
+                ).fetchall()
+                for row in rows:
+                    meta = list_meta(row)
+                    total_qty = int(row["total_qty"] or 0)
+                    scanned_qty = int(row["scanned_qty"] or 0)
+                    meta.update({
+                        "totalQty": total_qty,
+                        "scannedQty": scanned_qty,
+                        "itemCount": int(row["item_count"] or 0),
+                        "deliveryPercent": (scanned_qty / total_qty * 100) if total_qty else 0,
+                    })
+                    result.append(meta)
+
+        visible_dates = sorted({str(item.get("deliveryDate") or "") for item in result if item.get("deliveryDate")})
+        page_start = visible_dates[0] if visible_dates else ""
+        page_end = visible_dates[-1] if visible_dates else ""
+        return {
+            "lists": result,
+            "page": current_page,
+            "totalPages": total_pages,
+            "weeksPerPage": weeks_per_page,
+            "weekKeys": selected_week_keys,
+            "deliveryDateCount": len(visible_dates),
+            "pageStart": page_start,
+            "pageEnd": page_end,
+            "query": clean_query,
+            "searchActive": bool(clean_query),
+        }
+
     def get_delivery_list_update_preview(self, list_id: str) -> dict[str, Any]:
         """Return the newest import-change batch for one delivery-list stage.
 
@@ -7172,12 +7650,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             else:
                 suffix = clean_list_id[len(delivery_date_value) + 1:] if delivery_date_value and clean_list_id.startswith(f"{delivery_date_value}-") else clean_list_id
                 fallback_stages = {
-                    "staging-airport": ("Staging - Airport Rd", "Airport Rd"),
-                    "outbound-airport": ("Outbound - Airport Rd", "Airport Rd"),
-                    "inbound-indian-trail": ("Inbound - Indian Trail", "Indian Trail"),
-                    "bfs-greenville": ("BFS Greenville", "Greenville"),
-                    "customer-pickup": ("Customer Pickup", "Customer Pickup"),
-                    "dtc": ("DTC - Deliver to Customer", "DTC"),
+                    str(definition.get("key") or ""): (
+                        str(definition.get("displayName") or definition.get("key") or "Historical stage"),
+                        str(definition.get("scanner") or ""),
+                    )
+                    for definition in stage_definitions()
                 }
                 fallback_stage, fallback_scanner = fallback_stages.get(
                     suffix,
@@ -7605,14 +8082,40 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rack_history_by_item = {row["target_id"]: row for row in rack_history_rows}
             bay_rows = con.execute(
                 """
-                SELECT ba.line_item_id, b.bay_code
+                SELECT ba.line_item_id, b.bay_code, b.display_name AS bay_name
                 FROM bay_assignments ba
                 JOIN bays b ON b.id = ba.bay_id
                 WHERE ba.delivery_list_id = ? AND ba.status NOT IN ('Cleared', 'Cancelled')
                 """,
                 (list_id,),
             ).fetchall()
-            bay_by_item = {row["line_item_id"]: row["bay_code"] for row in bay_rows}
+            bay_by_item = {row["line_item_id"]: row for row in bay_rows}
+            bay_history_rows = con.execute(
+                """
+                WITH bay_history AS (
+                    SELECT ba.line_item_id,
+                           b.bay_code,
+                           b.display_name AS bay_name,
+                           ba.status AS bay_assignment_status,
+                           ba.assigned_at,
+                           ba.cleared_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY ba.line_item_id
+                               ORDER BY CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN 0 ELSE 1 END,
+                                        CASE WHEN COALESCE(ba.cleared_at, '') <> '' THEN ba.cleared_at ELSE ba.assigned_at END DESC,
+                                        ba.id DESC
+                           ) AS history_rank
+                    FROM bay_assignments ba
+                    JOIN bays b ON b.id = ba.bay_id
+                    WHERE ba.delivery_list_id = ?
+                )
+                SELECT line_item_id, bay_code, bay_name, bay_assignment_status, assigned_at, cleared_at
+                FROM bay_history
+                WHERE history_rank = 1
+                """,
+                (list_id,),
+            ).fetchall()
+            bay_history_by_item = {row["line_item_id"]: row for row in bay_history_rows}
             for item in items:
                 rack = rack_by_item.get(item["id"])
                 rack_history = rack_history_by_item.get(item["id"])
@@ -7654,8 +8157,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     item["lastRackItemStatus"] = ""
                     item["lastRackAddedAt"] = ""
                     item["lastRackRemovedAt"] = ""
-                if item["id"] in bay_by_item:
-                    item["bayCode"] = bay_by_item[item["id"]]
+                bay = bay_by_item.get(item["id"])
+                if bay:
+                    item["bayCode"] = str(bay["bay_code"] or "")
+                    item["bayName"] = str(bay["bay_name"] or bay["bay_code"] or "")
+                else:
+                    item["bayCode"] = ""
+                    item["bayName"] = ""
+
+                bay_history = bay_history_by_item.get(item["id"])
+                if bay_history:
+                    item["lastBayCode"] = str(bay_history["bay_code"] or "")
+                    item["lastBayName"] = str(bay_history["bay_name"] or bay_history["bay_code"] or "")
+                    item["lastBayAssignmentStatus"] = str(bay_history["bay_assignment_status"] or "")
+                    item["lastBayAssignedAt"] = str(bay_history["assigned_at"] or "")
+                    item["lastBayClearedAt"] = str(bay_history["cleared_at"] or "")
+                else:
+                    item["lastBayCode"] = ""
+                    item["lastBayName"] = ""
+                    item["lastBayAssignmentStatus"] = ""
+                    item["lastBayAssignedAt"] = ""
+                    item["lastBayClearedAt"] = ""
 
             receipt_rows = con.execute(
                 """
@@ -7733,27 +8255,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             item["errorReason"] = error_row["reason"] or error_row["message"] or "Scan failed before this row was completed."
 
         if list_row:
-            stage_text = f"{list_row['stage']} {list_row['scanner']}".lower()
-            should_check_prior_stage = "staging" in stage_text or "outbound" in stage_text
+            current_category = scan_stage_category(list_row["stage"], list_row["scanner"])
+            should_check_prior_stage = current_category in {"staged", "outbound"}
 
             if should_check_prior_stage:
-                inbound_list = con.execute(
+                sibling_lists = con.execute(
                     """
-                    SELECT id
+                    SELECT id, stage, scanner
                     FROM delivery_lists
-                    WHERE delivery_date = ?
-                      AND status = 'active'
-                      AND id <> ?
-                      AND (
-                        LOWER(stage) LIKE '%indian trail%'
-                        OR LOWER(scanner) LIKE '%indian trail%'
-                        OR LOWER(stage) LIKE '%inbound%'
-                      )
+                    WHERE delivery_date = ? AND status = 'active' AND id <> ?
                     ORDER BY id
-                    LIMIT 1
                     """,
                     (list_row["delivery_date"], list_id),
-                ).fetchone()
+                ).fetchall()
+                inbound_list = next(
+                    (row for row in sibling_lists if scan_stage_category(row["stage"], row["scanner"]) == "received"),
+                    None,
+                )
 
                 if inbound_list:
                     inbound_rows = con.execute(
@@ -7846,6 +8364,76 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                        ORDER BY ba.assigned_at DESC, ba.id DESC
                        LIMIT 1
                    ) AS bay_name,
+                   (
+                       SELECT r.rack_code
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                       ORDER BY CASE WHEN ri.status = 'Active' THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ri.removed_at, '') <> '' THEN ri.removed_at ELSE ri.added_at END DESC,
+                                ri.id DESC
+                       LIMIT 1
+                   ) AS last_rack_code,
+                   (
+                       SELECT r.display_name
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                       ORDER BY CASE WHEN ri.status = 'Active' THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ri.removed_at, '') <> '' THEN ri.removed_at ELSE ri.added_at END DESC,
+                                ri.id DESC
+                       LIMIT 1
+                   ) AS last_rack_name,
+                   (
+                       SELECT r.rack_type
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                       ORDER BY CASE WHEN ri.status = 'Active' THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ri.removed_at, '') <> '' THEN ri.removed_at ELSE ri.added_at END DESC,
+                                ri.id DESC
+                       LIMIT 1
+                   ) AS last_rack_type,
+                   (
+                       SELECT ri.status
+                       FROM rack_items ri
+                       JOIN racks r ON r.id = ri.rack_id
+                       WHERE ri.line_item_id = li.id AND r.active = 1
+                       ORDER BY CASE WHEN ri.status = 'Active' THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ri.removed_at, '') <> '' THEN ri.removed_at ELSE ri.added_at END DESC,
+                                ri.id DESC
+                       LIMIT 1
+                   ) AS last_rack_item_status,
+                   (
+                       SELECT b.bay_code
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                       ORDER BY CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ba.cleared_at, '') <> '' THEN ba.cleared_at ELSE ba.assigned_at END DESC,
+                                ba.id DESC
+                       LIMIT 1
+                   ) AS last_bay_code,
+                   (
+                       SELECT b.display_name
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                       ORDER BY CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ba.cleared_at, '') <> '' THEN ba.cleared_at ELSE ba.assigned_at END DESC,
+                                ba.id DESC
+                       LIMIT 1
+                   ) AS last_bay_name,
+                   (
+                       SELECT ba.status
+                       FROM bay_assignments ba
+                       JOIN bays b ON b.id = ba.bay_id
+                       WHERE ba.line_item_id = li.id
+                       ORDER BY CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN 0 ELSE 1 END,
+                                CASE WHEN COALESCE(ba.cleared_at, '') <> '' THEN ba.cleared_at ELSE ba.assigned_at END DESC,
+                                ba.id DESC
+                       LIMIT 1
+                   ) AS last_bay_assignment_status,
                    EXISTS(
                        SELECT 1
                        FROM delivery_lists outbound_list
@@ -8055,6 +8643,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             raise ValueError("role is required")
         if unknown:
             raise ValueError(f"Unknown permission: {unknown[0]}")
+
+        # v0.341: Admin is intentionally non-restrictable. It is the recovery
+        # role for the application and must always retain every maintained
+        # permission, including permissions introduced in later releases.
+        admin_role_locked = clean_role.casefold() == "admin"
+        if admin_role_locked:
+            clean_permissions = list(PERMISSIONS)
+
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             role = con.execute("SELECT id FROM roles WHERE name = ?", (clean_role,)).fetchone()
@@ -8063,18 +8659,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("DELETE FROM role_permissions WHERE role_id = ?", (role["id"],))
             for permission in clean_permissions:
                 con.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_name) VALUES (?, ?)", (role["id"], permission))
-            con.execute(
-                """
-                DELETE FROM sessions
-                WHERE user_id IN (
-                    SELECT user_id FROM user_roles WHERE role_id = ?
-                )
-                """,
-                (role["id"],),
+
+            # Permissions are resolved from role_permissions on every authenticated
+            # request by get_user_by_session(). Do not delete active sessions here:
+            # the old invalidation immediately logged out the administrator who
+            # saved a role even though the session itself was still otherwise valid.
+            self.insert_audit(
+                con,
+                "role",
+                clean_role,
+                "update_role_permissions",
+                updated_by,
+                "",
+                "",
+                {"permissions": clean_permissions, "adminRoleLocked": admin_role_locked},
             )
-            self.insert_audit(con, "role", clean_role, "update_role_permissions", updated_by, "", "", {"permissions": clean_permissions})
             con.commit()
-        return {"roles": self.list_roles(), "permissions": self.get_permissions()}
+        return {
+            "roles": self.list_roles(),
+            "permissions": self.get_permissions(),
+            "adminRoleLocked": admin_role_locked,
+            "sessionRefreshRequired": False,
+        }
 
     def user_from_row(self, con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         """Purpose: Run the user from row workflow for the delivery-list scanner.
@@ -8682,6 +9288,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "glass_cost": {},
             "glass_color": {},
         }
+        hidden_values: dict[str, set[str]] = {kind: set() for kind in buckets}
 
         def add_lookup(
             kind: str,
@@ -8700,6 +9307,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if clean_kind not in buckets or not clean_value:
                 return
             key = clean_value.upper() if clean_kind == "route" else clean_value.lower()
+            if key in hidden_values[clean_kind]:
+                return
             existing = buckets[clean_kind].get(key)
             next_item = {
                 "id": lookup_id,
@@ -8720,6 +9329,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 buckets[clean_kind][key] = next_item
 
         with self.connect() as con:
+            hidden_rows = con.execute(
+                """
+                SELECT type, value
+                FROM admin_lookup_values
+                WHERE is_active = 0 AND source = 'manual-hidden'
+                """
+            ).fetchall()
+            for row in hidden_rows:
+                row_type = str(row["type"] or "").strip().lower()
+                if row_type not in hidden_values:
+                    continue
+                raw_value = str(row["value"] or "").strip()
+                key = raw_value.upper() if row_type == "route" else raw_value.lower()
+                if key:
+                    hidden_values[row_type].add(key)
+
             admin_rows = con.execute(
                 """
                 SELECT id, type, value, label, category, match_terms, source
@@ -8842,6 +9467,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 buckets["glass_color"].values(),
                 key=lambda item: item["label"].lower(),
             ),
+            "stages": self.get_stage_definitions(),
         }
 
     def add_manual_edit_lookup(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
@@ -8854,11 +9480,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         stores the row, then returns the refreshed Lookup Manager libraries.
         """
         lookup_type = str(data.get("type") or "").strip().lower()
-        if lookup_type not in {"product", "route", "process", "glass_cost", "glass_color"}:
-            raise ValueError("Lookup type must be product, route, process, glass cost, or glass color")
+        if lookup_type not in {"product", "route", "process", "glass_cost", "glass_color"} and lookup_type != "stage_definition":
+            raise ValueError("Lookup type must be product, route, process, glass cost, glass color, or stage definition")
         value = str(data.get("value") or "").strip()
         label = str(data.get("label") or value).strip()
-        category = str(data.get("category") or "").strip() if lookup_type == "route" else ""
+        category = str(data.get("category") or "").strip() if lookup_type in {"route", "stage_definition"} else ""
         match_terms = str(data.get("matchTerms") or data.get("match_terms") or "").strip() if lookup_type == "route" else ""
         if not value:
             raise ValueError("Lookup value is required")
@@ -8883,6 +9509,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             category = color
             label = value
             match_terms = ""
+        elif lookup_type == "stage_definition":
+            preset = str(data.get("preset") or data.get("category") or "").strip().lower()
+            if preset not in STAGE_PRESET_CATALOG:
+                raise ValueError("Choose a maintained stage behavior preset")
+            safe_key = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+            if not safe_key:
+                safe_key = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+            if not safe_key:
+                raise ValueError("Stage key is required")
+            value = safe_key
+            scanner = str(data.get("scanner") or STAGE_PRESET_CATALOG[preset].get("scanner") or label).strip()
+            route_code = str(data.get("routeCode") or data.get("route_code") or "").strip().upper()
+            if preset == "custom_route" and not route_code:
+                raise ValueError("Custom Route stages require a route code")
+            category = preset
+            label = label or value
+            match_terms = json.dumps({"scanner": scanner, "routeCode": route_code}, separators=(",", ":"))
 
         value = (value.upper() if lookup_type == "route" else value)[:255]
         label = label[:255]
@@ -8905,11 +9548,47 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 (lookup_type, value, label, category, match_terms, created, created),
             )
+            affected_stage_lists = 0
+            if lookup_type == "stage_definition":
+                # Stage display names and preset assignments take effect immediately
+                # for active/historical list metadata that uses this stable stage key.
+                # Line-item IDs and scan history are untouched.
+                stage_meta = json.loads(match_terms or "{}")
+                scanner_name = str(stage_meta.get("scanner") or STAGE_PRESET_CATALOG[category].get("scanner") or label).strip()
+                list_rows = con.execute(
+                    "SELECT id, delivery_date FROM delivery_lists WHERE id LIKE ?",
+                    (f"%-{value}",),
+                ).fetchall()
+                for list_row in list_rows:
+                    con.execute(
+                        "UPDATE delivery_lists SET stage = ?, scanner = ?, label = ?, updated_at_utc = ? WHERE id = ?",
+                        (
+                            label,
+                            scanner_name,
+                            f"{format_display_date(list_row['delivery_date'])} - {label}",
+                            created,
+                            list_row["id"],
+                        ),
+                    )
+                affected_stage_lists = len(list_rows)
+
             audit_payload: dict[str, Any] = {"label": label, "category": category}
             if lookup_type == "glass_cost":
                 audit_payload = {"glassType": value, "costPerSqft": float(category)}
             elif lookup_type == "glass_color":
                 audit_payload = {"glassType": value, "color": category}
+            elif lookup_type == "stage_definition":
+                try:
+                    stage_meta = json.loads(match_terms or "{}")
+                except json.JSONDecodeError:
+                    stage_meta = {}
+                audit_payload = {
+                    "stageKey": value,
+                    "displayName": label,
+                    "preset": category,
+                    "affectedDeliveryLists": affected_stage_lists,
+                    **stage_meta,
+                }
             self.insert_audit(
                 con,
                 "admin_lookup_value",
@@ -8921,6 +9600,174 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 audit_payload,
             )
             con.commit()
+        if lookup_type == "stage_definition":
+            self.refresh_stage_definition_cache()
+        return self.get_manual_edit_lookups()
+
+    def upsert_glass_profile(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Save one glass type's display name, cost, and visual color atomically.
+
+        Effects: Reuses the existing generic lookup table; no schema change is
+        required. A single transaction keeps Product, Glass Cost, and Glass Color
+        settings synchronized so the combined Lookup Manager editor cannot leave a
+        partially saved glass profile.
+        """
+        value = " ".join(str(data.get("value") or data.get("glassType") or "").split())[:255]
+        label = " ".join(str(data.get("label") or value).split())[:255] or value
+        if not value:
+            raise ValueError("Glass type is required")
+        raw_rate = data.get("rate")
+        rate: float | None = None
+        if raw_rate not in {None, ""}:
+            try:
+                rate = float(raw_rate)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Glass cost per SQFT must be a valid number") from exc
+            if rate < 0:
+                raise ValueError("Glass cost per SQFT cannot be negative")
+        color = str(data.get("color") or "").strip().upper()
+        if color and not re.fullmatch(r"#[0-9A-F]{6}", color):
+            raise ValueError("Glass color must be a six-digit hex color such as #2F80ED")
+
+        now = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+
+            def upsert(kind: str, row_label: str, category: str = "") -> None:
+                con.execute(
+                    """
+                    INSERT INTO admin_lookup_values (type, value, label, category, match_terms, is_active, source, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, '', 1, 'manual', ?, ?)
+                    ON CONFLICT(type, value) DO UPDATE SET
+                        label = excluded.label,
+                        category = excluded.category,
+                        match_terms = '',
+                        is_active = 1,
+                        source = 'manual',
+                        updated_at = excluded.updated_at
+                    """,
+                    (kind, value, row_label, category, now, now),
+                )
+
+            upsert("product", label)
+            if rate is not None:
+                rate_text = f"{rate:.4f}".rstrip("0").rstrip(".")
+                upsert("glass_cost", value, rate_text)
+            if color:
+                upsert("glass_color", value, color)
+
+            self.insert_audit(
+                con,
+                "admin_lookup_value",
+                f"glass_profile:{value}",
+                "upsert_glass_profile",
+                user,
+                "",
+                "",
+                {"glassType": value, "label": label, "costPerSqft": rate, "color": color},
+            )
+            con.commit()
+        return self.get_manual_edit_lookups()
+
+    def remove_glass_profile(self, value: str, user: str, values: Any = None) -> dict[str, list[dict[str, Any]]]:
+        """Hide one normalized glass profile and every source alias it represents.
+
+        Effects: Uses existing manual-hidden tombstones only; historical delivery
+        list rows are untouched. The browser sends aliases only for the same glass
+        profile; distinct mirror products and antique patterns remain independent.
+        """
+        clean_value = " ".join(str(value or "").split())[:255]
+        raw_values = values if isinstance(values, list) else []
+        candidates = [" ".join(str(item or "").split())[:255] for item in raw_values]
+        candidates = [item for item in candidates if item]
+        if clean_value:
+            candidates.append(clean_value)
+        candidates = list(dict.fromkeys(candidates))
+        if not candidates:
+            raise ValueError("Glass type is required")
+        now = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            for candidate in candidates:
+                for kind in ("product", "glass_cost", "glass_color"):
+                    existing = con.execute(
+                        "SELECT label, category, match_terms FROM admin_lookup_values WHERE type = ? AND value = ?",
+                        (kind, candidate),
+                    ).fetchone()
+                    label = str(existing["label"] or candidate) if existing else candidate
+                    category = str(existing["category"] or "") if existing else ""
+                    match_terms = str(existing["match_terms"] or "") if existing else ""
+                    con.execute(
+                        """
+                        INSERT INTO admin_lookup_values (type, value, label, category, match_terms, is_active, source, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, 0, 'manual-hidden', ?, ?)
+                        ON CONFLICT(type, value) DO UPDATE SET
+                            is_active = 0, source = 'manual-hidden', updated_at = excluded.updated_at
+                        """,
+                        (kind, candidate, label, category, match_terms, now, now),
+                    )
+            self.insert_audit(
+                con,
+                "admin_lookup_value",
+                f"glass_profile:{clean_value or candidates[0]}",
+                "remove_glass_profile",
+                user,
+                "",
+                "",
+                {"glassType": clean_value or candidates[0], "sourceValues": candidates},
+            )
+            con.commit()
+        return self.get_manual_edit_lookups()
+
+    def remove_manual_edit_lookup(self, lookup_type: str, value: str, user: str) -> dict[str, list[dict[str, Any]]]:
+        """Hide one Lookup Manager value without destroying historical business rows.
+
+        Discovered/default values are represented by an inactive tombstone so they
+        do not immediately reappear from imported line-item history. Saving the same
+        value later reactivates it normally. Stage definition removal stops future
+        list generation for that definition but intentionally leaves existing lists
+        untouched for audit and operational safety.
+        """
+        clean_type = str(lookup_type or "").strip().lower()
+        if clean_type not in {"product", "route", "process", "glass_cost", "glass_color", "stage_definition"}:
+            raise ValueError("Unsupported lookup type")
+        clean_value = str(value or "").strip()
+        if not clean_value:
+            raise ValueError("Lookup value is required")
+        if clean_type == "route":
+            clean_value = clean_value.upper()
+        now = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            existing = con.execute(
+                "SELECT id, label, category, match_terms FROM admin_lookup_values WHERE type = ? AND value = ?",
+                (clean_type, clean_value),
+            ).fetchone()
+            label = str(existing["label"] or clean_value) if existing else clean_value
+            category = str(existing["category"] or "") if existing else ""
+            match_terms = str(existing["match_terms"] or "") if existing else ""
+            con.execute(
+                """
+                INSERT INTO admin_lookup_values (type, value, label, category, match_terms, is_active, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 0, 'manual-hidden', ?, ?)
+                ON CONFLICT(type, value) DO UPDATE SET
+                    is_active = 0, source = 'manual-hidden', updated_at = excluded.updated_at
+                """,
+                (clean_type, clean_value, label, category, match_terms, now, now),
+            )
+            self.insert_audit(
+                con,
+                "admin_lookup_value",
+                f"{clean_type}:{clean_value}",
+                "remove_manual_edit_lookup",
+                user,
+                "",
+                "",
+                {"type": clean_type, "value": clean_value, "label": label},
+            )
+            con.commit()
+        if clean_type == "stage_definition":
+            self.refresh_stage_definition_cache()
         return self.get_manual_edit_lookups()
 
     def seed_bay_auto_assign_settings(self, con: sqlite3.Connection) -> None:
@@ -9775,21 +10622,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             Effects: Performs an in-memory calculation and returns data without intentional external side effects.
             Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
             """
-            text = f"{row_value(row, 'delivery_stage')} {row_value(row, 'delivery_scanner')}".lower()
-            if "staging" in text:
-                rank = 1
-            elif "outbound" in text:
-                rank = 2
-            elif "indian trail" in text or "inbound" in text:
-                rank = 3
-            elif "greenville" in text or re.search(r"\bgnv\b", text):
-                rank = 4
-            elif "customer pickup" in text or re.search(r"\bcpu\b", text):
-                rank = 5
-            elif "dtc" in text or "deliver to customer" in text:
-                rank = 6
-            else:
-                rank = 7
+            category = scan_stage_category(row_value(row, "delivery_stage"), row_value(row, "delivery_scanner"))
+            rank = {
+                "staged": 1,
+                "outbound": 2,
+                "received": 3,
+                "greenville": 4,
+                "pickup": 5,
+                "dtc": 6,
+            }.get(category, 7)
             return rank, str(row["order_no"] or ""), str(row["item_no"] or "")
 
         return sorted(expanded.values(), key=stage_rank)
@@ -10207,12 +11048,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         items = payload.get("items")
         if not delivery_date or not isinstance(items, list) or not items:
             raise ValueError("Import JSON must include deliveryDate and a non-empty items array")
+        seen_order_items: set[str] = set()
+        duplicate_order_items: list[str] = []
         for item in items:
             if not isinstance(item, dict):
                 raise ValueError("Each imported item must be an object")
             for key in ("order", "item", "qty"):
                 if str(item.get(key, "")).strip() == "":
                     raise ValueError(f"Imported items must include {key}")
+            order_item_key = self.logical_order_item_key(item.get("order"), item.get("item"))
+            if order_item_key in seen_order_items and order_item_key not in duplicate_order_items:
+                duplicate_order_items.append(order_item_key)
+            seen_order_items.add(order_item_key)
+        if duplicate_order_items:
+            preview = ", ".join(duplicate_order_items[:10])
+            remainder = len(duplicate_order_items) - min(len(duplicate_order_items), 10)
+            suffix = f" (+{remainder} more)" if remainder else ""
+            raise ValueError(
+                "Import contains duplicate Order Nr. / Item Nr. rows: "
+                + preview
+                + suffix
+                + ". Duplicate logical items are blocked before delivery-list publication."
+            )
         return payload
 
     def import_delivery_list(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -10901,25 +11758,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return should_print_delivery_item(item, exclude_mirrors=True, include_mirror_remakes=False)
 
         def stage_sheet_kind(meta: dict[str, Any]) -> str:
-            """Purpose: Run the stage sheet kind workflow for the delivery-list scanner.
-
-            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
-            """
-            text = f"{meta.get('stage', '')} {meta.get('scanner', '')} {meta.get('label', '')}".lower()
-            if "customer pickup" in text or " cpu" in f" {text}" or "cpu" in text:
-                return "cpu"
-            if "dtc" in text or "deliver to customer" in text:
-                return "dtc"
-            if "indian trail" in text or "inbound" in text:
-                return "indian-trail"
-            if "greenville" in text or "gnv" in text:
-                return "greenville"
-            if "outbound" in text:
-                return "outbound"
-            if "staging" in text:
-                return "staging"
-            return "regular"
+            """Resolve print/export sheet behavior from the configured stage preset."""
+            category = scan_stage_category(meta.get("stage"), meta.get("scanner"))
+            return {
+                "pickup": "cpu",
+                "dtc": "dtc",
+                "received": "indian-trail",
+                "greenville": "greenville",
+                "outbound": "outbound",
+                "staged": "staging",
+            }.get(category, "regular")
 
         package_lists: list[dict[str, Any]] = []
         seen_list_ids: set[str] = set()
@@ -11833,13 +12681,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             rack_code_for_scan = normalize_rack_code(str(scan_request.get("rackCode") or ""))
             destination_override_requested = str(scan_request.get("destinationOverride") or "").lower() in {"1", "true", "yes"}
-            list_row_for_rack = con.execute("SELECT stage FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+            list_row_for_rack = con.execute("SELECT stage, scanner FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
             rack_for_scan = None
             destination_override = ""
             override_active = False
             override_until = ""
             override_minutes = self.rack_destination_override_minutes_con(con)
-            if rack_code_for_scan and list_row_for_rack and "staging" in str(list_row_for_rack["stage"]).lower():
+            if rack_code_for_scan and list_row_for_rack and scan_stage_category(list_row_for_rack["stage"], list_row_for_rack["scanner"]) == "staged":
                 rack_for_scan = self.get_rack_by_code(con, rack_code_for_scan)
                 rack_lock_message = rack_assignment_lock_message(
                     rack_for_scan["rack_code"],
@@ -12388,9 +13236,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if self.bay_type_requires_manual_assignment(con, bay_type):
                 self.insert_exception(con, inbound["list_id"], None, "manual_bay_assignment_required", f"{bay_type} is configured for manual bay assignment")
                 return ""
-            bay = self.find_bay_for_assignment(con, bay_type) or self.find_bay_for_assignment(con, "Standard")
+            # Never silently downgrade a specialized classification into a
+            # Standard bay. If the matching physical bay family is full or
+            # unavailable, leave the order unassigned and surface the existing
+            # conflict workflow so an operator can make a safe placement.
+            bay = self.find_bay_for_assignment(con, bay_type)
         if not bay:
-            self.insert_exception(con, inbound["list_id"], None, "bay_assignment_conflict", "No empty safe bay available during outbound order preassign")
+            self.insert_exception(
+                con,
+                inbound["list_id"],
+                None,
+                "bay_assignment_conflict",
+                f"No empty {bay_type} bay available during outbound order preassign; manual placement required",
+            )
             return ""
 
         self.ensure_bay_accepts_order(con, bay, inbound["order_no"], group_ids)
@@ -12502,7 +13360,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             row = candidate["row"]
             item_row = con.execute(
                 """
-                SELECT li.*, dl.stage
+                SELECT li.*, dl.stage, dl.scanner
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE li.id = ?
@@ -12517,7 +13375,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return self._get_payload(con, list_id, last)
 
             rack_allocations: list[dict[str, Any]] = []
-            if item_row and "staging" in str(item_row["stage"] or "").lower():
+            if item_row and scan_stage_category(item_row["stage"], row_value(item_row, "scanner", "")) == "staged":
                 rack_rows = con.execute(
                     """
                     SELECT ri.*, r.rack_code, r.status AS rack_status
@@ -12795,11 +13653,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             missing = [key for key in ("order", "item", "qty") if str(item.get(key, "")).strip() == ""]
             if missing:
                 missing_rows.append(index)
-            key = f"{item.get('order', '')}-{item.get('item', '')}"
+                continue
+            key = self.logical_order_item_key(item.get("order"), item.get("item"))
             seen[key] = seen.get(key, 0) + 1
-        duplicates = [key for key, count in seen.items() if key != "-" and count > 1]
+        duplicates = [key for key, count in seen.items() if count > 1]
         if duplicates:
-            warnings.append(f"Duplicate order/item combinations: {', '.join(duplicates[:10])}")
+            errors.append(
+                "Duplicate Order Nr. / Item Nr. rows are blocked: "
+                + ", ".join(duplicates[:10])
+            )
         if missing_rows:
             warnings.append(f"Rows with missing required fields: {', '.join(map(str, missing_rows[:20]))}")
 
@@ -12917,7 +13779,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         "removedLineCount": change_summary.get("removedLineCount", 0) if isinstance(change_summary, dict) else 0,
                         "removedPieceQty": change_summary.get("removedPieceQty", 0) if isinstance(change_summary, dict) else 0,
                         "stageSummaries": normalized_stage_summaries,
-                        "listIds": changed_list_ids if isinstance(changed_list_ids, list) and changed_list_ids else [f"{row['delivery_date']}-{suffix}" for suffix, _, _, _ in LIST_PROFILES],
+                        "listIds": changed_list_ids if isinstance(changed_list_ids, list) and changed_list_ids else all_profile_list_ids(str(row["delivery_date"] or "")),
                     }
                 )
         return {
@@ -13029,25 +13891,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchall()
 
         def stage_kind(row: sqlite3.Row) -> str:
-            """Purpose: Run the stage kind workflow for the delivery-list scanner.
+            """Resolve search/navigation progress from the configured stage preset.
 
-            Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-            Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+            Display names may be changed in Stage Editor, so current-state ranking
+            must follow the assigned behavior preset rather than English keywords.
             """
-            text = f"{row['stage']} {row['scanner']}".lower()
-            if "outbound" in text:
-                return "outbound"
-            if "indian trail" in text or "inbound" in text:
-                return "indian_trail"
-            if "customer pickup" in text or "cpu" in text:
-                return "cpu"
-            if "greenville" in text or "gnv" in text:
-                return "greenville"
-            if "dtc" in text or "deliver to customer" in text:
-                return "dtc"
-            if "staging" in text:
-                return "staging"
-            return "other"
+            category = scan_stage_category(row["stage"], row["scanner"])
+            return {
+                "received": "indian_trail",
+                "pickup": "cpu",
+                "greenville": "greenville",
+                "dtc": "dtc",
+                "outbound": "outbound",
+                "staged": "staging",
+            }.get(category, "other")
 
         def representative_rank(row: sqlite3.Row) -> tuple[int, str, int]:
             """Rank the navigation row by the actual latest scan event.
@@ -13271,22 +14128,42 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ).fetchall()
 
     def manual_route_profile(self, delivery_date: str, destination: str) -> tuple[str, str, str]:
-        """Purpose: Run the manual route profile workflow for the delivery-list scanner.
+        """Resolve the configured receiving stage for a manual route operation.
 
-        Effects: Performs an in-memory calculation and returns data without intentional external side effects.
-        Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
+        v0.346 keeps stage display identity independent from workflow behavior.
+        Manual edits therefore resolve their destination from the active preset
+        library instead of hard-coded stage names, so renamed stages keep working.
         """
-        profiles = {
+        destination_key = str(destination or "").strip()
+        preset_by_destination = {
+            "Indian Trail": ("indian_trail", ""),
+            "CPU": ("cpu", "CPU"),
+            "Greenville": ("greenville", "GNV"),
+            "DTC": ("dtc", "DTC"),
+        }
+        preset, route_code = preset_by_destination.get(destination_key, ("custom_route", destination_key))
+        definition = stage_definition_for_preset(preset, route_code)
+        if definition:
+            suffix = str(definition.get("key") or "").strip()
+            stage = str(definition.get("displayName") or suffix).strip()
+            scanner = str(definition.get("scanner") or STAGE_PRESET_CATALOG[preset].get("scanner") or stage).strip()
+            if suffix:
+                return f"{delivery_date}-{suffix}", stage, scanner
+
+        # Backward-compatible fallback for a custom route without an explicit
+        # Stage Editor definition. Standard destinations retain their historical
+        # IDs only when no configured definition currently owns that preset.
+        legacy_profiles = {
             "Indian Trail": ("inbound-indian-trail", "Inbound - Indian Trail", "Indian Trail"),
             "CPU": ("customer-pickup", "Customer Pickup", "Customer Pickup"),
             "Greenville": ("bfs-greenville", "BFS Greenville", "Greenville"),
             "DTC": ("dtc", "DTC - Deliver to Customer", "DTC"),
         }
-        if destination in profiles:
-            suffix, stage, scanner = profiles[destination]
+        if destination_key in legacy_profiles:
+            suffix, stage, scanner = legacy_profiles[destination_key]
         else:
-            route_code = re.sub(r"[^a-z0-9]+", "-", str(destination or "route").lower()).strip("-") or "route"
-            suffix, stage, scanner = f"route-{route_code}", str(destination or "Route"), str(destination or "Route")
+            safe_route = re.sub(r"[^a-z0-9]+", "-", destination_key.lower()).strip("-") or "route"
+            suffix, stage, scanner = f"route-{safe_route}", destination_key or "Route", destination_key or "Route"
         return f"{delivery_date}-{suffix}", stage, scanner
 
     def ensure_manual_route_list(self, con: sqlite3.Connection, delivery_date: str, destination: str) -> str:
@@ -13379,8 +14256,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         receiving_rows = [
             sibling
             for sibling in siblings
-            if not str(sibling["stage"] or "").lower().startswith("staging")
-            and not str(sibling["stage"] or "").lower().startswith("outbound")
+            if scan_stage_category(sibling["stage"], sibling["scanner"]) not in {"staged", "outbound"}
         ]
         target_row = next((item for item in receiving_rows if item["list_id"] == target_list_id), None)
         if not target_row:
@@ -13390,7 +14266,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 con.execute("UPDATE bay_assignments SET delivery_list_id = ? WHERE line_item_id = ?", (target_list_id, target_row["id"]))
             else:
                 source = next(
-                    (item for item in siblings if str(item["stage"] or "").lower().startswith("staging")),
+                    (item for item in siblings if scan_stage_category(item["stage"], item["scanner"]) == "staged"),
                     siblings[0],
                 )
                 new_id = f"{target_list_id}-manual-{secrets.token_hex(6)}"
@@ -13550,6 +14426,34 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 next_barcode = canonical_barcode(next_order, next_item)
                 if any(str(item["barcode"] or "") != next_barcode for item in siblings):
                     business_updates["barcode"] = next_barcode
+
+            if "order_no" in business_updates or "item_no" in business_updates:
+                next_order = str(business_updates.get("order_no", row["order_no"]) or "")
+                next_item = str(business_updates.get("item_no", row["item_no"]) or "")
+                target_key = self.logical_order_item_key(next_order, next_item)
+                placeholders = ",".join("?" for _ in sibling_ids)
+                collision_rows = con.execute(
+                    f"""
+                    SELECT li.id, li.order_no, li.item_no, dl.stage
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE dl.delivery_date = ?
+                      AND dl.status = 'active'
+                      AND COALESCE(li.is_deleted, 0) = 0
+                      AND li.id NOT IN ({placeholders})
+                    """,
+                    [manual_delivery_date, *sibling_ids],
+                ).fetchall()
+                collision = next(
+                    (candidate for candidate in collision_rows
+                     if self.logical_order_item_key(candidate["order_no"], candidate["item_no"]) == target_key),
+                    None,
+                )
+                if collision:
+                    raise ValueError(
+                        f"Order {target_key} already exists on {manual_delivery_date} "
+                        f"({collision['stage']}). Choose a different Order Nr. / Item Nr. before saving."
+                    )
 
             location_changed = False
             requested_location = str(data.get("location") or "").strip()
@@ -13777,10 +14681,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         raise ValueError(f"Location '{clean}' was not found as an active rack or bay")
 
     def delete_line_item(self, line_item_id: str, user: str) -> dict[str, Any]:
-        """Purpose: Remove line item for the delivery-list scanner workflow.
+        """Delete one logical order/item from every stage copy on its delivery date.
 
-        Effects: This function reads or changes database records.
-        Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
+        Manual edits already synchronize sibling rows by source ID, or by Order Nr.
+        plus Item Nr. when no source ID exists. Deletion uses the same resolver so a
+        stage-specific Admin action cannot leave stale copies in Staging, Outbound,
+        receiving, CPU, Greenville, DTC, or another destination stage.
         """
         clean_id = str(line_item_id or "").strip()
         if not clean_id:
@@ -13790,11 +14696,53 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             row = con.execute("SELECT * FROM line_items WHERE id = ?", (clean_id,)).fetchone()
             if not row:
                 raise ValueError("Line item not found")
-            con.execute("UPDATE bay_assignments SET status = 'Cancelled', reason = 'Line item deleted' WHERE line_item_id = ?", (clean_id,))
-            con.execute("DELETE FROM line_items WHERE id = ?", (clean_id,))
-            self.insert_audit(con, "line_item", clean_id, "delete_line_item", user, "", "Deleted from admin page")
+
+            siblings = self.manual_edit_sibling_rows(con, row)
+            sibling_ids = [str(item["id"]) for item in siblings] or [clean_id]
+            affected_list_ids = sorted({str(item["list_id"]) for item in siblings} or {str(row["list_id"])})
+            delivery_date = str(row_value(siblings[0], "delivery_date", "") or "") if siblings else ""
+            order_no = str(row["order_no"] or "")
+            item_no = str(row["item_no"] or "")
+            placeholders = ",".join("?" for _ in sibling_ids)
+
+            con.execute(
+                f"UPDATE bay_assignments SET status = 'Cancelled', reason = 'Logical order item deleted from all stages' WHERE line_item_id IN ({placeholders})",
+                sibling_ids,
+            )
+            con.execute(f"DELETE FROM line_items WHERE id IN ({placeholders})", sibling_ids)
+            self.insert_audit(
+                con,
+                "line_item",
+                clean_id,
+                "delete_line_item",
+                user,
+                "",
+                "Deleted logical order/item from every stage on the delivery date",
+                {
+                    "deliveryDate": delivery_date,
+                    "order": order_no,
+                    "item": item_no,
+                    "deletedLineItemCount": len(sibling_ids),
+                    "deletedLineItemIds": sibling_ids,
+                    "affectedListIds": affected_list_ids,
+                },
+            )
             con.commit()
-            return self._get_payload(con, row["list_id"])
+
+            preferred_list_id = next(
+                (list_id for list_id in affected_list_ids if list_id != str(row["list_id"])),
+                str(row["list_id"]),
+            )
+            payload = self._get_payload(con, preferred_list_id)
+            payload.update(
+                {
+                    "deletedLineItemCount": len(sibling_ids),
+                    "deletedLineItemIds": sibling_ids,
+                    "deletedOrderItem": f"Order {order_no} / Item {item_no}",
+                    "affectedListIds": affected_list_ids,
+                }
+            )
+            return payload
 
     def delete_delivery_list(self, list_id: str, user: str) -> dict[str, Any]:
         """Purpose: Remove delivery list for the delivery-list scanner workflow.
@@ -14454,6 +15402,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         context_rules: dict[str, tuple[set[str], tuple[str, ...]]] = {
             "deliveryLists": ({"delivery_list", "delivery_date", "delivery_list_updates"}, ("delivery_list", "import", "reset", "delete_delivery")),
             "deliveryActions": ({"delivery_list", "delivery_date"}, ("delivery_list", "reset", "delete_delivery")),
+            # Superseded-order decisions already write immutable audit_events. Route
+            # those records into the shared Admin Action History instead of creating
+            # a second, review-specific history store.
+            "supersededOrders": ({"superseded_order_review"}, ("superseded_order_",)),
             "manualEdit": ({"line_item", "manual_delivery_entry", "admin_lookup_value"}, ("manual_edit", "manual_location", "create_manual", "delete_line_item")),
             "users": ({"user", "session"}, ("user", "password", "session")),
             "roles": ({"role", "permission"}, ("role", "permission")),
@@ -14461,10 +15413,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "stations": ({"station"}, ("station",)),
             "customerRoutes": ({"customer_route_rule"}, ("customer_route",)),
             "customerEmails": ({"customer_email", "email_outbox", "email_cc"}, ("customer_email", "email_", "smtp")),
-            "lookups": ({"admin_lookup_value"}, ("lookup",)),
+            "lookups": ({"admin_lookup_value", "station"}, ("lookup", "station")),
             "rejectSettings": ({"reject_catalog"}, ("reject_catalog",)),
-            "bayScannerRules": ({"bay_manual_input_rule", "bay_scan_barcode_rule", "bay_scanner_settings"}, ("bay_manual", "bay_scan_barcode", "rack_destination_override")),
-            "crossDateScanning": ({"cross_date_scan_settings", "scan", "line_item"}, ("cross_date_scan_", "update_cross_date_scan_settings")),
+            "bayScannerRules": ({"bay_manual_input_rule", "bay_scan_barcode_rule", "bay_auto_assigner"}, ("bay_manual", "bay_scan_barcode", "bay_auto_assign")),
+            "crossDateScanning": ({"cross_date_scan_settings", "scan", "line_item", "bay_scanner_settings"}, ("cross_date_scan_", "update_cross_date_scan_settings", "rack_destination_override")),
             "bayAutoAssigner": ({"bay_auto_assigner"}, ("bay_auto_assign",)),
             "racks": ({"rack", "rack_set"}, ("rack",)),
             "rackForm": ({"rack"}, ("rack",)),
@@ -14686,6 +15638,44 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             rack_code=rack_code,
         )
         return list(payload.get("events") or [])
+
+    def delete_customer_email_draft(self, email_id: int, user: str) -> dict[str, Any]:
+        """Delete one unsent customer-email draft while preserving sent activity.
+
+        Effects: Removes only rows whose current outbox status is ``draft`` and
+        records a durable audit event with the draft metadata before deletion.
+        Flow: Locks the outbox row, validates that it has never been sent, writes
+        the audit event, deletes the draft, then returns refreshed email settings.
+        """
+        clean_id = int(email_id or 0)
+        if clean_id <= 0:
+            raise ValueError("Email draft id is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM email_outbox WHERE id = ?", (clean_id,)).fetchone()
+            if not row:
+                raise ValueError("Email draft not found")
+            status = str(row["status"] or "draft").strip().lower()
+            if status != "draft":
+                raise ValueError("Only unsent email drafts can be deleted")
+            self.insert_audit(
+                con,
+                "customer_email",
+                str(clean_id),
+                "delete_customer_email_draft",
+                user,
+                "",
+                "",
+                {
+                    "subject": row["subject"],
+                    "customer": row["customer_name"],
+                    "deliveryDate": row["delivery_date"],
+                    "emailType": row["email_type"],
+                },
+            )
+            con.execute("DELETE FROM email_outbox WHERE id = ?", (clean_id,))
+            con.commit()
+        return self.get_customer_email_settings()
 
     def get_email_outbox_item(self, email_id: int) -> dict[str, Any]:
         """Purpose: Read email outbox item for the delivery-list scanner workflow.
@@ -15716,10 +16706,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             line_item = con.execute("SELECT * FROM line_items WHERE id = ?", (item["line_item_id"],)).fetchone()
             if not line_item:
                 raise ValueError("Rack line item not found")
-            self.validate_rack_destination_for_item(con, target, line_item)
             old_rack_id = item["rack_id"]
-            source = con.execute("SELECT rack_code FROM racks WHERE id = ?", (old_rack_id,)).fetchone()
+            source = con.execute("SELECT rack_code, status FROM racks WHERE id = ?", (old_rack_id,)).fetchone()
             source_rack_code = str(source["rack_code"] or "") if source else ""
+            if source and str(source["status"] or "").strip().lower() == "in transit":
+                raise ValueError("Return or mark the source rack Not On The Way before moving its contents")
+            self.validate_rack_destination_for_item(con, target, line_item)
             con.execute("UPDATE rack_items SET rack_id = ?, reason = 'Moved between racks' WHERE id = ?", (target["id"], rack_item_id))
             self.refresh_rack_destination(con, old_rack_id)
             self.refresh_rack_destination(con, target["id"])
@@ -15906,7 +16898,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("BEGIN IMMEDIATE")
             item = con.execute(
                 """
-                SELECT ri.*, r.rack_code, li.order_no, li.item_no
+                SELECT ri.*, r.rack_code, r.status AS rack_status, li.order_no, li.item_no
                 FROM rack_items ri
                 JOIN racks r ON r.id = ri.rack_id
                 JOIN line_items li ON li.id = ri.line_item_id
@@ -15918,6 +16910,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchone()
             if not item:
                 raise ValueError("Rack item not found")
+            if str(item["rack_status"] or "").strip().lower() == "in transit":
+                raise ValueError("Return or mark the rack Not On The Way before clearing its contents")
             con.execute(
                 "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Individually cleared from rack' WHERE id = ?",
                 (user, now_iso(), rack_item_id),
@@ -15946,6 +16940,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rack = self.get_rack_by_code(con, rack_code)
+            if str(rack["status"] or "").strip().lower() == "in transit":
+                raise ValueError("Return or mark the rack Not On The Way before clearing its contents")
             con.execute("UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Rack cleared' WHERE rack_id = ? AND status = 'Active'", (user, now_iso(), rack["id"]))
             con.execute("UPDATE racks SET status = 'Open', destination = '', completed_at = '', departed_at = '', returned_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), rack["id"]))
             self.insert_audit(con, "rack", rack["rack_code"], "clear_rack", user, "", "", {})
@@ -18187,16 +19183,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 # Tall and oversize pieces still receive a concrete suggested bay so
                 # the timed placement popup can tell the operator where to put them.
                 # The operator can override that suggestion before the popup closes.
-                target_bay = (
-                    self.find_bay_for_assignment(con, suggested_bay_type)
-                    or self.find_bay_for_assignment(con, "Standard")
-                )
+                target_bay = self.find_bay_for_assignment(con, suggested_bay_type)
                 receive_reason = f"{suggested_bay_type} suggested during receive; verify placement"
             else:
-                target_bay = (
-                    self.find_bay_for_assignment(con, suggested_bay_type)
-                    or self.find_bay_for_assignment(con, "Standard")
-                )
+                # A missing matching bay is safer as an explicit unassigned
+                # exception than an automatic downgrade to Standard. This keeps
+                # Mirror/Tall/Oversize handling aligned with the configured
+                # physical bay family on both preassign and receive paths.
+                target_bay = self.find_bay_for_assignment(con, suggested_bay_type)
                 receive_reason = "Auto suggested during receive"
 
             preassigned_bay_code = str(target_bay["bay_code"] or "") if target_bay else ""
@@ -20087,6 +21081,7 @@ class AzureSqlDeliveryStore(SQLiteDeliveryStore):
             self.seed_bay_auto_assign_settings(con)
             self.seed_racks(con)
             self.repair_route_stage_memberships_if_needed(con)
+        self.refresh_stage_definition_cache()
         self.cleanup_old_bay_events(force=True)
         self.write_superseded_order_exclusion_file()
 

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "324"
+APPLICATION_VERSION = "354"
 # Schema version 11 matches the maintained migration registry. Frontend-only
 # releases advance APPLICATION_VERSION without changing the schema version.
 CURRENT_SCHEMA_VERSION = 11
