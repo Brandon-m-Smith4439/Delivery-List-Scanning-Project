@@ -14,18 +14,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/home.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/print.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/shell.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260821-v0.354">
-    <link rel="stylesheet" href="static/css/mobile.css?v=20260821-v0.354">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/home.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/print.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/shell.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260825-v0.362">
+    <link rel="stylesheet" href="static/css/mobile.css?v=20260825-v0.362">
 </head>
 <body data-page="home">
   <!-- SECTION: Authentication and password reset -->
@@ -36,11 +36,12 @@
     </button>
     <div class="login-shell">
       <aside class="login-hero-card">
-        <img class="login-hero-logo brand-framed-logo" src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
-        <strong hidden>Barefoot &amp; Company</strong>
-        <span>Glass Delivery Scanner</span>
+        <img class="login-hero-logo brand-framed-logo" data-portable-logo-v355 src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot Facility Services logo">
+        <span class="portable-login-brand-badge-v355" data-portable-brand-initials-v355 aria-hidden="true">BFS</span>
+        <strong class="portable-login-company-v355" data-portable-label-v355="companyName">Barefoot Facility Services</strong>
+        <span data-portable-label-v355="loginProductName">Glass Delivery Scanner</span>
         <h1>Production scanning, rack control, and delivery visibility in one place.</h1>
-        <p>Sign in with your BFS email or assigned username to continue.</p>
+        <p>Sign in with your email or assigned username to continue.</p>
         <div class="login-hero-stats">
           <span><b>Live</b>Scan tracking</span>
           <span><b>Safe</b>Rack recovery</span>
@@ -57,8 +58,8 @@
           </div>
         </div>
         <label>
-          <span>BFS Email or Username</span>
-          <input id="loginUsername" name="dls_login_user" type="text" autocomplete="username" value="admin" placeholder="name@bfs.local or admin">
+          <span>Email or Username</span>
+          <input id="loginUsername" name="dls_login_user" type="text" autocomplete="username" value="admin" placeholder="email or assigned username">
         </label>
         <label>
           <span>Password</span>
@@ -79,10 +80,10 @@
             <h2>Reset access</h2>
           </div>
         </div>
-        <p class="password-reset-help">Enter your BFS email or username. In local mode, the reset code will display here so an admin can complete the reset without email delivery.</p>
+        <p class="password-reset-help">Enter your email or assigned username. In local mode, the reset code will display here so an admin can complete the reset without email delivery.</p>
         <label>
-          <span>BFS Email or Username</span>
-          <input id="resetIdentityInput" type="text" autocomplete="username" placeholder="name@bfs.local">
+          <span>Email or Username</span>
+          <input id="resetIdentityInput" type="text" autocomplete="username" placeholder="email or assigned username">
         </label>
         <button id="requestResetCodeBtn" class="app-primary-button" type="button">Request reset code</button>
         <label>
@@ -106,9 +107,10 @@
     <!-- SECTION: Collapsible desktop sidebar, mobile drawer, and global utility header -->
     <aside class="app-sidebar" id="appSidebar" aria-label="Application navigation">
       <div class="sidebar-brand-row">
-        <div class="brand" aria-label="Barefoot & Company Delivery List Scanner">
-          <img class="brand-icon brand-icon-collapsed" src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
-          <img class="brand-combined-logo brand-framed-logo" src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
+        <div class="brand" aria-label="Barefoot Facility Services Delivery List Scanner" data-portable-aria-v355="{companyName} {applicationName}">
+          <img class="brand-icon brand-icon-collapsed" data-portable-logo-v355 src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot Facility Services logo">
+          <img class="brand-combined-logo brand-framed-logo" data-portable-logo-v355 src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot Facility Services logo">
+          <span class="portable-sidebar-brand-v355" aria-hidden="true"><b data-portable-brand-initials-v355>BFS</b><span><strong data-portable-label-v355="companyName">Barefoot Facility Services</strong><small data-portable-label-v355="applicationName">Delivery List Scanner</small></span></span>
         </div>
         <button class="sidebar-toggle-button" id="sidebarToggleBtn" type="button" aria-controls="appSidebar" aria-expanded="true" title="Collapse navigation">
           <span class="sidebar-toggle-icon" aria-hidden="true"></span>
@@ -542,10 +544,10 @@
                       <span>Show one or several destinations</span>
                     </div>
                     <div class="scan-filter-options">
-                      <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button">Indian Trail <span id="countIndianTrailRoute">(0)</span></button>
-                      <button class="tab route-filter-tab" data-filter="cpu-route" type="button">CPU <span id="countCpuRoute">(0)</span></button>
-                      <button class="tab route-filter-tab" data-filter="dtc-route" type="button">DTC <span id="countDtcRoute">(0)</span></button>
-                      <button class="tab route-filter-tab" data-filter="greenville-route" type="button">Greenville <span id="countGreenvilleRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button"><span data-portable-label-v355="receivingSite">Indian Trail</span> <span id="countIndianTrailRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="cpu-route" type="button"><span data-portable-label-v355="cpuRoute">CPU</span> <span id="countCpuRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="dtc-route" type="button"><span data-portable-label-v355="dtcRoute">DTC</span> <span id="countDtcRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="greenville-route" type="button"><span data-portable-label-v355="gnvRoute">Greenville</span> <span id="countGreenvilleRoute">(0)</span></button>
                     </div>
                   </section>
                   <section class="scan-filter-section scan-filter-glass-section" aria-label="Glass type filters">
@@ -688,7 +690,7 @@
               </div>
             </section>
 
-            <section class="scan-bay-override-panel scan-bay-override-panel-compact" id="scanBayOverridePanel" hidden title="Auto uses the suggested bay. Manual sends the selected bay with the next Indian Trail scan.">
+            <section class="scan-bay-override-panel scan-bay-override-panel-compact" id="scanBayOverridePanel" hidden title="Auto uses the suggested bay. Manual sends the selected bay with the next Indian Trail scan." data-portable-title-v355="Auto uses the suggested bay. Manual sends the selected bay with the next {receivingSite} scan.">
               <div class="scan-bay-override-row">
                 <div class="scan-bay-override-copy">
                   <span>Bay Assignment</span>
@@ -696,7 +698,7 @@
                 </div>
                 <label class="bay-override-switch" for="scanBayOverrideMode">
                   <span>Auto</span>
-                  <input id="scanBayOverrideMode" type="checkbox" role="switch" aria-label="Manually select Indian Trail bay">
+                  <input id="scanBayOverrideMode" type="checkbox" role="switch" aria-label="Manually select Indian Trail bay" data-portable-aria-v355="Manually select {receivingSite} bay">
                   <i></i>
                   <span>Manual</span>
                 </label>
@@ -743,7 +745,7 @@
             <section class="manual-assign-panel" id="manualAssignPanel" hidden>
               <div class="section-heading">
                 <h3>Manual Bay Assign</h3>
-                <span>Indian Trail only</span>
+                <span data-portable-template-v355="{receivingSite} only">Indian Trail only</span>
               </div>
               <form id="manualAssignForm" class="manual-scan-row">
                 <label>
@@ -939,7 +941,7 @@
         <!-- Bay Map v16: command-center layout keeps the scanner available while giving users faster search, filters, and bay actions. -->
         <section class="bay-command-center">
           <div class="bay-title-card bay-title-card-wide-v181">
-            <span class="bay-page-eyebrow">Indian Trail Inventory</span>
+            <span class="bay-page-eyebrow" data-portable-template-v355="{receivingSite} Inventory">Indian Trail Inventory</span>
             <h1>Bay Map Command Center</h1>
             <p>Find bays, assign glass, review old orders, and manage the physical bay layout from one page.</p>
           </div>
@@ -1035,7 +1037,7 @@
           </div>
 
           <div class="bay-right-rail">
-            <div class="bay-action-buttons bay-action-buttons-v2 bay-action-buttons-v150" id="bayActionButtons" aria-label="Indian Trail bay actions">
+            <div class="bay-action-buttons bay-action-buttons-v2 bay-action-buttons-v150" id="bayActionButtons" aria-label="Indian Trail bay actions" data-portable-aria-v355="{receivingSite} bay actions">
               <button type="button" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon old"></span>Old Bays<span class="old-bay-attention-count" id="oldBayAttentionCount" hidden aria-label="0 old orders need review">0</span></button>
               <button type="button" data-bay-action="sdi" data-permission-any="manage_rush_work"><span class="bay-action-icon sdi"></span>Rush</button>
               <button type="button" data-bay-action="item-management" data-permission-any="assign_bay_items,move_bay_items,clear_bay_items"><span class="bay-action-icon manage"></span>Manage Items</button>
@@ -1044,7 +1046,7 @@
             </div>
 
             <div class="bay-scanner-sticky-anchor-v155" id="bayScannerStickyAnchor">
-              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v150 bay-scanner-sticky-panel-v155" id="bayScannerPanel" aria-label="Indian Trail bay scanner">
+              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v150 bay-scanner-sticky-panel-v155" id="bayScannerPanel" aria-label="Indian Trail bay scanner" data-portable-aria-v355="{receivingSite} bay scanner">
                 <header class="bay-scanner-header-v150">
                   <div class="bay-scanner-heading-line-v150">
                     <h2>Bay Scanner</h2>
@@ -1052,17 +1054,17 @@
                     <span class="bay-scanner-mode-summary-v150" hidden aria-hidden="true"><b id="bayScannerModeSummary"></b></span>
                   </div>
 
-                  <section class="bay-route-pulse-v150" aria-label="Indian Trail route progress">
+                  <section class="bay-route-pulse-v150" aria-label="Indian Trail route progress" data-portable-aria-v355="{receivingSite} route progress">
                     <header class="bay-route-pulse-heading-v150">
                       <div>
                         <span class="bay-route-pulse-icon-v150" aria-hidden="true"></span>
-                        <span><small>Route pulse</small><strong>Indian Trail progress</strong></span>
+                        <span><small>Route pulse</small><strong data-portable-template-v355="{receivingSite} progress">Indian Trail progress</strong></span>
                       </div>
                       <span class="bay-route-live-v150">Live</span>
                     </header>
                     <div class="bay-panel-route-mini bay-route-metrics-v150" id="bayPanelRouteMini">
                       <div class="bay-panel-route-node outbound"><small>Outbound</small><strong>0/0</strong></div>
-                      <button class="bay-panel-route-lane" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest"><span>0 pieces in transit</span></button>
+                      <button class="bay-panel-route-lane" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest" data-portable-title-v355="Open {receivingSite} in-transit manifest"><span>0 pieces in transit</span></button>
                       <div class="bay-panel-route-node inbound"><small>Received</small><strong>0/0</strong></div>
                       <div class="bay-dual-progress" data-bay-dual-progress>
                         <div class="bay-dual-progress-half is-outbound" role="progressbar" aria-label="Outbound completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i style="width:0%"></i></div>
@@ -1205,7 +1207,7 @@
           <header class="bay-selected-modal-header-v160">
             <span class="bay-selected-modal-icon-v160" aria-hidden="true"></span>
             <div>
-              <small>Indian Trail bay control</small>
+              <small data-portable-template-v355="{receivingSite} bay control">Indian Trail bay control</small>
               <h2>Selected Bay</h2>
               <p>Review bay fulfillment, choose scanner actions, and manage the glass assigned to this location.</p>
             </div>
@@ -1218,7 +1220,7 @@
           <header class="stale-bay-header-v105 stale-bay-header-v181">
             <span class="stale-bay-header-icon-v105" aria-hidden="true"></span>
             <div>
-              <small>Indian Trail inventory control</small>
+              <small data-portable-template-v355="{receivingSite} inventory control">Indian Trail inventory control</small>
               <h2>Old Bay Control Center</h2>
               <p>Review aged assignments, confirm their physical location, and snooze only work that has been checked.</p>
             </div>
@@ -1332,7 +1334,7 @@
                   <label class="sdi-reason"><span>Rush reason</span><input id="sdiReasonInput" type="text" autocomplete="off" value="Same-day install"></label>
                   <label class="checkbox-row sdi-truck-option">
                     <input id="sdiTruckExemptInput" type="checkbox">
-                    <span><strong>Send straight to installer truck</strong><small>Indian Trail Rush only. Skip bay placement.</small></span>
+                    <span><strong>Send straight to installer truck</strong><small data-portable-template-v355="{receivingSite} Rush only. Skip bay placement.">Indian Trail Rush only. Skip bay placement.</small></span>
                   </label>
                   <div class="sdi-actions">
                     <button type="submit" data-sdi-action="mark">Apply Rush</button>
@@ -1355,7 +1357,7 @@
         <div class="modal-backdrop" id="manageItemsBackdrop" hidden></div>
         <section class="modal-panel manage-items-panel manage-items-panel-v182" id="manageItemsPanel" hidden>
           <div class="section-heading manage-items-heading">
-            <div><small>Indian Trail inventory</small><h2>Manage Bay Items</h2><span>Select whole jobs or exact items, see grouped bay locations, and manually split sibling items across bays when needed.</span></div>
+            <div><small data-portable-template-v355="{receivingSite} inventory">Indian Trail inventory</small><h2>Manage Bay Items</h2><span>Select whole jobs or exact items, see grouped bay locations, and manually split sibling items across bays when needed.</span></div>
             <button id="manageItemsCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close manage items window">×</button>
           </div>
           <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Manage Items sections">
@@ -1538,21 +1540,22 @@
     <footer class="desktop-footer desktop-footer-v0163" aria-label="Application footer">
       <div class="footer-brand-v160">
         <span class="footer-brand-mark-v160" aria-hidden="true"></span>
-        <span><strong>Delivery List Scanner</strong><small>Floor operations workspace</small></span>
+        <span><strong data-portable-label-v355="applicationName">Delivery List Scanner</strong><small>Floor operations workspace</small></span>
       </div>
       <button class="scanner-select footer-scanner-v160" type="button" aria-label="Active scanner station">
         <span class="footer-scanner-status-v160" aria-hidden="true"></span>
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.354">
+        <span class="footer-version-v0163" aria-label="Application version 0.362">
           <small>Version</small>
-          <strong>0.354</strong>
+          <strong>0.362</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
-          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.343&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
-          title="Report a Delivery List Scanner bug"
+          data-portable-support-link-v355
+          href="mailto:brandon.m.smith@bldr.com"
+          title="Report a Delivery List Scanner issue"
         >
           <span class="footer-bug-icon-v0163" aria-hidden="true"></span>
           <span>Report Bugs</span>
@@ -1565,7 +1568,7 @@
     <section class="print-options-panel print-options-panel-v197 print-options-panel-v238 print-options-panel-v240" id="printOptionsPanel" hidden>
       <header class="print-options-hero-v197 print-options-hero-v238 print-options-hero-v240">
         <div>
-          <small>Delivery List Scanner</small>
+          <small data-portable-label-v355="applicationName">Delivery List Scanner</small>
           <h2>Print / Export Delivery Lists</h2>
           <p>Select routes, dates, glass types, scan states, and attention filters before generating the document.</p>
         </div>
@@ -1737,7 +1740,7 @@
     <section class="print-preset-modal-v199 print-preset-modal-v200 print-preset-modal-v206 print-preset-modal-v209 print-preset-modal-v227 print-preset-modal-v228 print-preset-modal-v229 print-preset-modal-v232 print-preset-modal-v233 print-preset-modal-v234 print-preset-modal-v238 print-preset-modal-v240 print-preset-modal-v242" id="printPresetModal" role="dialog" aria-modal="true" aria-labelledby="printPresetModalTitle" hidden>
       <header class="print-preset-hero-v227 print-preset-hero-v238 print-preset-hero-v240">
         <div>
-          <small>Delivery List Scanner</small>
+          <small data-portable-label-v355="applicationName">Delivery List Scanner</small>
           <h3 id="printPresetModalTitle">Create Delivery List Preset</h3>
           <p>Save a reusable filter and output setup for delivery lists.</p>
         </div>
@@ -1752,7 +1755,7 @@
               <div><strong>Preset Details</strong></div>
             </header>
             <div class="print-preset-details-grid-v227">
-              <label for="printPresetNameInput"><span>Preset Name</span><input id="printPresetNameInput" type="text" maxlength="50" autocomplete="off" placeholder="Example: Indian Trail Outbound Morning"></label>
+              <label for="printPresetNameInput"><span>Preset Name</span><input id="printPresetNameInput" type="text" maxlength="50" autocomplete="off" placeholder="Example: Indian Trail Outbound Morning" data-portable-placeholder-v355="Example: {receivingSite} {outboundStage} Morning"></label>
               <label class="print-preset-default-toggle-v227" for="printPresetDefaultToggle">
                 <span><strong>Set as default</strong><small>Open Print / Export with this preset.</small></span>
                 <input id="printPresetDefaultToggle" type="checkbox">
@@ -1875,6 +1878,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260821-v0.354"></script>
+  <script src="static/js/app.js?v=20260825-v0.362"></script>
 </body>
 </html>

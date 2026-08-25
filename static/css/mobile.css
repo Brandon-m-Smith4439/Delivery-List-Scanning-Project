@@ -2220,3 +2220,153 @@
     font-size: 16px !important;
   }
 }
+
+/* v0.355: portable identity/station alias editors remain touch-readable. */
+@media (max-width: 760px) {
+  .station-alias-row-v355,
+  .station-alias-row-v355 .lookup-row-main,
+  .presentation-profile-form-v355 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .station-alias-row-v355 .lookup-row-actions-v346 {
+    width: 100% !important;
+    justify-content: flex-end !important;
+  }
+
+  .presentation-profile-form-v355 label.wide,
+  .presentation-profile-form-v355 .stage-preset-note-v346,
+  .presentation-profile-form-v355 footer {
+    grid-column: 1 !important;
+  }
+}
+
+/* v0.355: keep portable text branding authoritative on handheld layouts. */
+@media (max-width: 760px) {
+  body.portable-text-brand-v355 .app-sidebar [data-portable-logo-v355] {
+    display: none !important;
+  }
+
+  body.portable-text-brand-v355 .app-sidebar .portable-sidebar-brand-v355 {
+    position: absolute !important;
+    inset: 0 !important;
+    display: grid !important;
+    grid-template-columns: 56px minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 0 10px !important;
+  }
+
+  body.portable-text-brand-v355 .app-sidebar .portable-sidebar-brand-v355 > b {
+    width: 50px !important;
+    height: 50px !important;
+  }
+
+  body.portable-text-brand-v355 .app-sidebar .portable-sidebar-brand-v355 > span {
+    display: grid !important;
+    gap: 3px !important;
+    text-align: left !important;
+  }
+
+  body.portable-text-brand-v355 .app-sidebar .portable-sidebar-brand-v355 strong {
+    color: #ffffff !important;
+    font-size: 13px !important;
+    font-weight: 950 !important;
+    line-height: 1.15 !important;
+  }
+
+  body.portable-text-brand-v355 .app-sidebar .portable-sidebar-brand-v355 small {
+    color: rgba(231, 240, 252, 0.82) !important;
+    font-size: 10px !important;
+    font-weight: 800 !important;
+  }
+}
+/* v0.358: mobile keeps the installed Presentation logo exclusive as well. */
+@media (max-width: 760px) {
+  body.portable-installed-logo-v358 .app-sidebar .portable-sidebar-brand-v355,
+  body.portable-installed-logo-v358 .app-sidebar .brand [data-portable-brand-initials-v355],
+  body.portable-installed-logo-v358 .app-sidebar .brand [data-portable-label-v355="companyName"],
+  body.portable-installed-logo-v358 .app-sidebar .brand [data-portable-label-v355="applicationName"] {
+    display: none !important;
+  }
+}
+
+
+/* v0.360: Glass Type combine manager remains touch-friendly on handhelds. */
+@media (max-width: 760px) {
+  .glass-combine-panel-v360 {
+    margin: 8px 0 !important;
+    padding: 10px !important;
+  }
+
+  .glass-combine-panel-v360 > header,
+  .glass-combine-panel-v360 > footer {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .glass-combine-panel-v360 > header > button,
+  .glass-combine-panel-v360 > footer > button {
+    width: 100% !important;
+  }
+
+  .glass-combine-options-v360 {
+    max-height: 42dvh !important;
+  }
+
+  .glass-combine-option-v360 {
+    min-height: 52px !important;
+  }
+}
+
+/* v0.361: touch-friendly Glass Type Library multi-select combine. */
+@media (max-width: 760px) {
+  .glass-library-header-actions-v361 {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .glass-library-header-actions-v361 > strong,
+  .glass-library-header-actions-v361 .glass-library-combine-button-v361 {
+    grid-column: 1 / -1 !important;
+  }
+
+  .glass-library-header-actions-v361 button {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+
+  .glass-combine-guidance-v361 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .glass-profile-row-v349.is-combine-selectable-v361 {
+    grid-template-columns: 30px minmax(0, 1fr) !important;
+    min-height: 76px !important;
+  }
+
+  .glass-combine-row-state-v361 {
+    grid-column: 2 !important;
+    justify-items: start !important;
+    min-width: 0 !important;
+    text-align: left !important;
+  }
+}
+
+
+/* v0.362: Uncombine shares the touch-first Glass Type selection geometry. */
+@media (max-width: 760px) {
+  .glass-library-header-actions-v361 :is(.glass-library-combine-button-v361, .glass-library-uncombine-button-v362) {
+    grid-column: 1 / -1 !important;
+  }
+
+  .glass-profile-row-v349:is(.is-uncombine-selectable-v362, .is-uncombine-unavailable-v362) {
+    grid-template-columns: 30px minmax(0, 1fr) !important;
+    min-height: 76px !important;
+  }
+
+  .glass-combine-guidance-v361.is-uncombine-v362 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

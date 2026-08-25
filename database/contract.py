@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "354"
+APPLICATION_VERSION = "362"
 # Schema version 11 matches the maintained migration registry. Frontend-only
 # releases advance APPLICATION_VERSION without changing the schema version.
 CURRENT_SCHEMA_VERSION = 11
@@ -16,7 +16,7 @@ TABLE_DESCRIPTIONS = {
     "stations": "Configured application scanning stations.",
     "customer_route_rules": "Customer-to-route import classification rules.",
     "system_metadata": "Small idempotent system configuration markers.",
-    "admin_lookup_values": "Admin-managed product, route, process, and glass-cost lookups.",
+    "admin_lookup_values": "Admin-managed product, route, process, glass-profile, and reversible glass-alias lookups.",
     "imports": "Delivery-list import batches and source fingerprints.",
     "exceptions": "Resolvable scanning and workflow exceptions.",
     "audit_events": "Immutable append-only administrative history.",

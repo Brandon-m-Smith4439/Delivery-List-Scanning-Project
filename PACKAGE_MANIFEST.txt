@@ -1,11 +1,11 @@
 Delivery List Scanner - Best-Known Full Source Snapshot
-Application release: v0.354
+Application release: v0.362
 SQLite schema: 11
-Snapshot assembled: 2026-08-21
+Snapshot assembled: 2026-08-25
 
 Purpose
 -------
-This one-time bundle consolidates the newest source code currently available in this ChatGPT project workspace. It overlays the maintained v0.319 through v0.354 changed-file releases in order, then adds the newest unchanged source files the user supplied separately.
+This one-time bundle consolidates the newest source code currently available in this ChatGPT project workspace. It overlays the maintained v0.319 through v0.362 changed-file releases in order, then adds the newest unchanged source files the user supplied separately. v0.357 restores the Lookup Manager implementation to its v0.355 baseline after the v0.356 cosmetic overhaul was reverted. v0.358 makes an enabled Presentation logo the exclusive sidebar brand surface while preserving the logo-disabled text fallback. v0.359 completes the Spanish-language coverage audit, including dynamic/accessibility text, surfaced API errors, locale-aware dates/times, native confirmations, and generated print/report documents. v0.360 adds reversible, schema-neutral glass-profile aliases so duplicate imported glass names can be combined under one canonical profile without rewriting history. v0.361 replaces the per-row combine control with a header-driven multi-select workflow and stabilizes Superseded Orders filter rendering. v0.362 fixes language ownership for live combine selection text and adds a header-level multi-select Uncombine Glass Types workflow that deactivates existing aliases without rewriting history.
 
 Newest maintained files included
 --------------------------------
@@ -30,14 +30,14 @@ Newest maintained files included
 - static/css/statistics.css
 - static/css/styles.css
 - tests/test_static_structure.py
-- automation/sql_delivery_export runtime files supplied in the project, including the v0.344 review-first importer flow, the maintained v0.332+ diagnostics, and the latest unchanged source bodies for the remaining runtime files. v0.354 additionally normalizes Customer Route overview density and ten-row overflow behavior, restores page scroll chaining over that overview, and removes the obsolete Admin KPI strip.
+- automation/sql_delivery_export runtime files supplied in the project, including the v0.344 review-first importer flow, the maintained v0.332+ diagnostics, and the latest unchanged source bodies for the remaining runtime files. v0.355 introduces the portable presentation layer for company/application branding, station aliases, stage/route display wording, configurable support email, and text-only brand fallback while preserving stable backend workflow identifiers. v0.357 retains that architecture and fully reverts only the v0.356 Lookup Manager cosmetic overhaul. v0.358 keeps that baseline and prevents sidebar company/application text from appearing while the installed Presentation logo is enabled. v0.359 keeps the same workflow/database baseline and hardens Spanish localization across the maintained browser and generated print/report surfaces. v0.360 keeps schema 11 and adds reversible Glass Type combination aliases that resolve through shared display/color/reporting paths.
 
 Packaging rules
 ---------------
 - No database files are included.
 - No logs, backups, __pycache__, .pyc, .pyo, pytest cache, or diff files are included.
 - No older duplicate revision copies are included when a newer maintained copy is available.
-- This package advances the maintained application release to v0.354 and preserves the v0.327 source-snapshot structure supplied for the website-version-3 branch. Files listed below as unavailable remain intentionally absent from this revision.
+- This package advances the maintained application release to v0.362 and preserves the v0.327 source-snapshot structure supplied for the website-version-3 branch. Files listed below as unavailable remain intentionally absent from this revision.
 
 Known project files not present in this workspace as current source bodies
 --------------------------------------------------------------------------

@@ -1,18 +1,98 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.354**. SQLite remains the active/default backend.
+Current maintained release: **v0.362**. SQLite remains the active/default backend.
 
-v0.354 normalizes Customer Route overview row density across every route tab, lets the overview grow through ten standard rows before using an internal scrollbar, restores Admin-page wheel chaining over that content, and removes the obsolete four-card KPI strip from the Admin dashboard.
+v0.362 fixes language ownership in the Glass Type combine selection states and adds a header-level multi-select **Uncombine Glass Types** workflow.
 
-## Install v0.354
+## Install v0.362
 
 1. Stop the Delivery List Scanner if it is running.
-2. Extract the v0.354 source package directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
+2. Extract the v0.362 source package directly into `C:\Users\brandon.m.smith\My Projects\Delivery List Scanning Project\` and replace the included files.
 3. Preserve the existing `data` folder, database files, and `C:\DeliveryListAutomation` configuration/state folders.
 4. Start the scanner manually with `py -3 server.py`.
-5. Hard-refresh the browser (`Ctrl+F5`) once so the v0.354 cache keys are loaded.
+5. Hard-refresh the browser (`Ctrl+F5`) once so the v0.362 cache keys are loaded.
 
-No schema migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **11**. Existing route rules, line items, bay assignments, bay auto-assignment settings, customer email history, permissions, and audit records are preserved.
+No schema migration or reset is included. `CURRENT_SCHEMA_VERSION` remains **11**. Existing delivery lists, lookup values, glass aliases, stations, stages, route codes, permissions, presentation settings, and audit history are preserved.
+
+
+## v0.362 highlights
+
+- Fixes Combine selection text so English mode stays English after clicking rows; Spanish mode continues to translate the same live states.
+- Adds **Uncombine Glass Types** beside Combine Glass Types in the Glass Type Library header.
+- Lets administrators select one or more manually combined profiles and restore their underlying source names with one **Uncombine selected** action.
+- Makes only genuinely combined profiles selectable during Uncombine mode, reducing accidental operations.
+- Uses the existing schema-neutral `glass_alias` records and leaves historical imported line-item text untouched.
+- Keeps Uncombine reversible: separated glass types can be combined again later.
+- Includes desktop/mobile styling and Spanish coverage for the new workflow.
+- Advances the maintained application release to **v0.362** while keeping SQLite schema version **11** unchanged.
+
+
+## v0.361 highlights
+
+- Moves **Combine Glass Types** to the Glass Type Library header.
+- Turns the library into an explicit multi-select surface while combine mode is active.
+- Uses the **first selected profile as Keep / canonical**, with every later selected profile marked Merge.
+- Combines the selected profiles through the existing reversible `glass_alias` backend without rewriting historical imported glass names or changing schema version 11.
+- Updates row selection in place so selecting multiple entries does not rebuild the Lookup Manager or jump the scroll position.
+- Keeps same-family combine safety for Annealed, Mirror, and Tempered profiles.
+- Removes the Superseded Orders filter repaint flash by updating the filter buttons and review list in place.
+- Gives Superseded review filters stable hover/active/focus states instead of flashing white on click.
+- Includes mobile layout support and Spanish translations for the new combine workflow.
+- Advances the maintained application release to **v0.361** while keeping SQLite schema version **11** unchanged.
+
+
+## v0.360 highlights
+
+- Adds a **Combine** action to every Glass Type profile. The selected row is the canonical profile to keep; administrators can select other same-family profiles that represent the exact same physical glass.
+- Stores combinations as reversible `glass_alias` records in the existing `admin_lookup_values` table, keeping SQLite schema version **11** unchanged and preserving historical imported product text.
+- Resolves combined aliases through the shared glass-label path so filters, glass-aware presentation, and other browser surfaces use the canonical profile rather than showing duplicate names.
+- Delivers the active alias map through the existing Presentation context, allowing ordinary operator screens to use the canonical glass name without granting Lookup Manager access.
+- Applies the same alias map to shared glass-color handling and Statistics material-cost/breakage reporting so combined names group under the selected canonical glass identity.
+- Supports **separating aliases again** by reopening Combine for the canonical profile and unchecking a previously combined alias.
+- Limits Combine candidates to the same Annealed / Mirror / Tempered family to reduce accidental cross-family merges.
+- Keeps the v0.359 Spanish-language guarantee intact by translating the new Combine workflow, instructions, accessibility text, and save feedback.
+- Advances the maintained application release to **v0.360** while keeping SQLite schema version **11**. No migration or database reset is required.
+
+
+## v0.359 highlights
+
+- Expands the maintained Spanish dictionary across the current shell, Home, Statistics, Scan, Racks, Reject Tracking, Bay Map, Admin, Lookup Manager, Customer Email Center, automation, notifications, print/export, dialogs, empty states, validation messages, and other current browser surfaces.
+- Extends live translation ownership beyond normal text nodes to `placeholder`, `title`, `aria-label`, image `alt`, and mobile `data-label` attributes, including attributes changed after Spanish mode is already active.
+- Localizes user-facing dates, times, month/day names, and chart/report number formatting through the selected `en-US` / `es-US` application locale. Recognizable English dates already on screen are converted during a live language switch.
+- Translates backend/API validation and safety messages that can surface directly in browser notifications while preserving technical identifiers, user-entered data, configured company/site names, route codes, and stable workflow keys.
+- Localizes the browser-native automation disable confirmation and translates the separate Statistics report and Delivery List print-package documents before their print dialogs open.
+- Preserves the v0.358 Presentation-logo sidebar behavior and all v0.355 portability architecture. Spanish translation changes presentation only; no workflow, API, permission, database, or automation behavior changes are included.
+- Advances the maintained application release to **v0.359** while keeping SQLite schema version **11**.
+
+
+## v0.358 highlights
+
+- Makes the selected **Presentation logo the exclusive sidebar brand surface**. When `Use installed logo asset` is enabled, the generated initials, company name, and application title are forcibly hidden from the sidebar on desktop and mobile.
+- Preserves the existing portable fallback: disabling the installed logo still shows the configured company/application text and generated company initials.
+- Adds no workflow, API, database, permission, or presentation-profile schema changes. SQLite schema remains **11**.
+- Advances the maintained application release to **v0.358** and refreshes maintained browser cache/version references.
+
+
+## v0.357 highlights
+
+- Fully **reverts the v0.356 Lookup Manager visual overhaul**. Lookup Manager desktop/mobile styling, layout, spacing, card treatment, navigation treatment, search presentation, and cosmetic-only JavaScript/CSS changes return to the v0.355 implementation.
+- Preserves the complete **v0.355 portability architecture**, including Presentation settings, station display aliases, stage display names, route display labels, configurable branding/support email, receiving-site wording, and stable backend identifiers.
+- Makes no workflow, API, database, permission, lookup normalization, or save/remove behavior changes beyond the rollback.
+- Advances the maintained application release to **v0.357** while keeping SQLite schema version **11**. No migration or database reset is required.
+
+
+## v0.355 highlights
+
+- Adds a **Presentation** workspace to Lookup Manager for company/organization name, application name, sign-in product name, support/report email, and installed-logo behavior. These are presentation settings only; workflow identity is not rewritten.
+- Adds safe **Station Display Names**. The database/internal station value remains stable for scan attribution, access rules, historical records, and default seeding, while operators can see a location-specific alias such as `Dock 4` or `Receiving Building A`.
+- Makes **Stage configuration explicitly two-layered**: the Display Name is operator-facing, while the existing stage key, behavior preset, internal station binding, and route code remain stable engine contracts. The Stage editor now uses the maintained internal station list instead of encouraging free-form station renames.
+- Reuses existing **Route lookup labels** as the operator-facing destination names throughout portable route/filter presentation while preserving route codes such as CPU, DTC, and GNV underneath.
+- Loads a lightweight, non-sensitive **presentation context before authentication** so the sign-in screen and normal operator pages can use configured company, station, stage, and route wording without loading Admin-only data.
+- Extends portable wording into the primary **Receiving/Bay and Auto Assignment** surfaces so a renamed receiving site does not continue showing `Indian Trail` cosmetically while the backend continues using its existing internal workflow key.
+- Makes shell branding portable without adding new image files. The current installed Barefoot/BFS logo remains the default; administrators can disable it for another company and the shell automatically falls back to a polished initials/text brand.
+- Makes the **Report Bugs** destination configurable and normalizes authentication/user-management copy from company-specific `BFS email` wording to generic `email` wording. Validation and authentication behavior are unchanged.
+- Applies cosmetic **receiving-role labels** to the built-in `Indian Trail Operator / Lead / Manager` roles. The stored role names remain unchanged for permission logic, while user/role management can follow the configured receiving-site display name.
+- Preserves `APPLICATION_VERSION = 355` with `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is required.
 
 
 ## v0.354 highlights

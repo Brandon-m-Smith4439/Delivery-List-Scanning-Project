@@ -1525,6 +1525,14 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(STORE.health())
             return
 
+        if parsed.path == "/api/presentation-profile":
+            # v0.355 presentation metadata is intentionally non-sensitive so the
+            # sign-in screen and shell can use the configured organization name
+            # before a user session exists. Workflow identifiers are never exposed
+            # or changed through this endpoint.
+            self.send_json(STORE.get_presentation_context())
+            return
+
         if parsed.path == "/api/session":
             user = self.current_user()
             self.send_json({"authenticated": bool(user), "user": user})
@@ -2695,11 +2703,32 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.update_bay_auto_assign_settings(data, user["username"]))
                 return
 
+            if parsed.path == "/api/admin/presentation-profile":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(STORE.update_presentation_profile(data, user["username"]))
+                return
+
             if parsed.path == "/api/admin/manual-edit-lookups/glass-profile":
                 user = self.require_permission("manage_lookup_values")
                 if not user:
                     return
                 self.send_json(STORE.upsert_glass_profile(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/manual-edit-lookups/glass-profile/combine":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(STORE.combine_glass_profiles(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/manual-edit-lookups/glass-profile/uncombine":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(STORE.uncombine_glass_profiles(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/manual-edit-lookups/glass-profile/remove":

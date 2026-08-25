@@ -304,6 +304,19 @@ STAGE_PRESET_CATALOG: dict[str, dict[str, str]] = {
     "custom_route": {"label": "Custom Route", "profile": "route", "scanner": "", "category": "staged", "destination": ""},
 }
 
+# v0.355: Operator-facing branding and organization wording are intentionally
+# stored separately from stable workflow keys. This lets another facility or
+# company re-skin the application without renaming backend identifiers such as
+# ``airport_staging`` or ``indian_trail`` and without a schema migration.
+DEFAULT_PRESENTATION_PROFILE: dict[str, Any] = {
+    "applicationName": "Delivery List Scanner",
+    "companyName": "Barefoot Facility Services",
+    "loginProductName": "Glass Delivery Scanner",
+    "supportEmail": "brandon.m.smith@bldr.com",
+    "useDefaultBrandLogo": True,
+    "stationAliases": {},
+}
+
 DEFAULT_STAGE_DEFINITIONS: list[dict[str, Any]] = [
     {"key": "staging-airport", "displayName": "Staging - Airport Rd", "scanner": "Airport Rd", "preset": "airport_staging", "routeCode": "", "source": "default"},
     {"key": "outbound-airport", "displayName": "Outbound - Airport Rd", "scanner": "Airport Rd", "preset": "airport_outbound", "routeCode": "", "source": "default"},
@@ -827,7 +840,11 @@ def dimensions_square_feet(value: Any) -> float:
     return (width * height) / 144.0
 
 
-def glass_cost_profile(value: Any, pricing: dict[str, float] | None = None) -> tuple[str, float | None]:
+def glass_cost_profile(
+    value: Any,
+    pricing: dict[str, float] | None = None,
+    aliases: dict[str, str] | None = None,
+) -> tuple[str, float | None]:
     """Resolve one product label to the effective glass-cost reference.
 
     Effects: Performs an in-memory lookup only.
@@ -839,8 +856,25 @@ def glass_cost_profile(value: Any, pricing: dict[str, float] | None = None) -> t
     coverage gap rather than silently estimate it.
     """
     raw = " ".join(str(value or "").split()).strip() or "Other Glass"
-    normalized = re.sub(r"[^A-Z0-9]+", "", raw.upper())
     cost_map = pricing if isinstance(pricing, dict) else GLASS_COST_PER_SQFT
+
+    # v0.360: explicit administrator combinations resolve exact imported names
+    # to one canonical glass identity without rewriting historical line items.
+    resolved = raw
+    if isinstance(aliases, dict) and aliases:
+        alias_map = {" ".join(str(key or "").split()).lower(): " ".join(str(target or "").split()).strip() for key, target in aliases.items()}
+        visited: set[str] = set()
+        for _depth in range(12):
+            key = resolved.lower()
+            if not key or key in visited:
+                break
+            visited.add(key)
+            target = alias_map.get(key)
+            if not target or target.lower() == key:
+                break
+            resolved = target
+
+    normalized = re.sub(r"[^A-Z0-9]+", "", resolved.upper())
     candidates = sorted(
         cost_map.items(),
         key=lambda entry: len(re.sub(r"[^A-Z0-9]+", "", entry[0].upper())),
@@ -849,8 +883,10 @@ def glass_cost_profile(value: Any, pricing: dict[str, float] | None = None) -> t
     for label, rate in candidates:
         key = re.sub(r"[^A-Z0-9]+", "", label.upper())
         if key and key in normalized:
-            return label, float(rate)
-    return raw, None
+            # Preserve the administrator-selected canonical label when an alias
+            # was used, while borrowing the best matching configured/default rate.
+            return (resolved if resolved.lower() != raw.lower() else label), float(rate)
+    return resolved, None
 
 
 def route_signal_text(item: dict[str, Any]) -> str:
@@ -4744,6 +4780,168 @@ class BaseDeliveryStore:
             "This is an automated readiness notice from Barefoot Facility Services."
         )
         self.queue_email_message(con, "ready", customer, contacts[0]["customer_pattern"], delivery_date, [row["email"] for row in contacts], self.customer_cc_emails(con), subject, body, {"listId": list_id, "user": user})
+
+    def get_presentation_profile(self) -> dict[str, Any]:
+        """Return the operator-facing branding profile used by the portable UI.
+
+        Stable workflow identifiers remain code-level contracts. This profile is
+        deliberately cosmetic and reuses ``admin_lookup_values`` so deployments can
+        rename the application/company without a schema change.
+        """
+        profile = dict(DEFAULT_PRESENTATION_PROFILE)
+        with self.connect() as con:
+            row = con.execute(
+                """
+                SELECT label, category, match_terms
+                FROM admin_lookup_values
+                WHERE type = 'presentation_profile' AND value = 'default' AND is_active = 1
+                LIMIT 1
+                """
+            ).fetchone()
+        if not row:
+            return profile
+        profile["applicationName"] = str(row["label"] or profile["applicationName"]).strip() or profile["applicationName"]
+        profile["companyName"] = str(row["category"] or profile["companyName"]).strip() or profile["companyName"]
+        try:
+            metadata = json.loads(str(row["match_terms"] or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            metadata = {}
+        product_name = str(metadata.get("loginProductName") or "").strip()
+        if product_name:
+            profile["loginProductName"] = product_name
+        support_email = str(metadata.get("supportEmail") or "").strip()
+        if isinstance(metadata, dict) and "supportEmail" in metadata:
+            # An intentionally blank support email hides the Report Bugs link; do
+            # not silently restore this deployment's default address after save.
+            profile["supportEmail"] = support_email[:160]
+        if isinstance(metadata, dict) and "useDefaultBrandLogo" in metadata:
+            profile["useDefaultBrandLogo"] = bool(metadata.get("useDefaultBrandLogo"))
+        aliases = metadata.get("stationAliases") if isinstance(metadata, dict) else {}
+        if isinstance(aliases, dict):
+            profile["stationAliases"] = {
+                " ".join(str(key or "").split())[:80]: " ".join(str(value or "").split())[:80]
+                for key, value in aliases.items()
+                if " ".join(str(key or "").split()) and " ".join(str(value or "").split())
+            }
+        return profile
+
+    def get_presentation_context(self) -> dict[str, Any]:
+        """Return non-sensitive presentation aliases needed by every signed-in UI.
+
+        The browser uses this lightweight context before loading Admin libraries so
+        renamed stages and route display labels are visible to normal operators too.
+        """
+        profile = self.get_presentation_profile()
+        routes: dict[str, str] = {"CPU": "CPU", "DTC": "DTC", "GNV": "Greenville"}
+        glass_aliases: list[dict[str, str]] = []
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT value, label
+                FROM admin_lookup_values
+                WHERE type = 'route' AND is_active = 1
+                ORDER BY id
+                """
+            ).fetchall()
+            alias_rows = con.execute(
+                """
+                SELECT value, label
+                FROM admin_lookup_values
+                WHERE type = 'glass_alias' AND is_active = 1
+                ORDER BY id
+                """
+            ).fetchall()
+        for row in rows:
+            code = str(row["value"] or "").strip().upper()
+            label = str(row["label"] or code).strip() or code
+            if code:
+                routes[code] = label
+        for row in alias_rows:
+            source = " ".join(str(row["value"] or "").split())
+            target = " ".join(str(row["label"] or "").split())
+            if source and target and source.lower() != target.lower():
+                glass_aliases.append({"value": source, "label": target, "target": target, "source": "presentation"})
+        return {
+            **profile,
+            "stages": self.get_stage_definitions(),
+            "routes": [{"value": code, "label": label, "source": "presentation"} for code, label in routes.items()],
+            # Glass aliases are non-sensitive presentation metadata. Publishing them
+            # here lets every signed-in operator resolve combined glass names without
+            # requiring Lookup Manager permissions or rewriting historical source text.
+            "glassAliases": glass_aliases,
+        }
+
+    def update_presentation_profile(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Persist cosmetic organization wording without changing workflow identity."""
+        application_name = " ".join(str(data.get("applicationName") or "").split())[:80]
+        company_name = " ".join(str(data.get("companyName") or "").split())[:120]
+        login_product_name = " ".join(str(data.get("loginProductName") or "").split())[:80]
+        support_email = " ".join(str(data.get("supportEmail") or "").split())[:160]
+        use_default_brand_logo = bool(data.get("useDefaultBrandLogo", True))
+        if not application_name:
+            raise ValueError("Application name is required")
+        if not company_name:
+            raise ValueError("Company / organization name is required")
+        if not login_product_name:
+            login_product_name = application_name
+        if support_email and ("@" not in support_email or support_email.startswith("@") or support_email.endswith("@")):
+            raise ValueError("Support email must be a valid email address")
+        raw_aliases = data.get("stationAliases")
+        if raw_aliases is None:
+            raw_aliases = self.get_presentation_profile().get("stationAliases", {})
+        station_aliases: dict[str, str] = {}
+        if isinstance(raw_aliases, dict):
+            for raw_key, raw_value in list(raw_aliases.items())[:100]:
+                key = " ".join(str(raw_key or "").split())[:80]
+                value = " ".join(str(raw_value or "").split())[:80]
+                if key and value and key.lower() != value.lower():
+                    station_aliases[key] = value
+        created = now_iso()
+        metadata = json.dumps(
+            {
+                "loginProductName": login_product_name,
+                "supportEmail": support_email,
+                "useDefaultBrandLogo": use_default_brand_logo,
+                "stationAliases": station_aliases,
+            },
+            separators=(",", ":"),
+        )
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                """
+                INSERT INTO admin_lookup_values
+                    (type, value, label, category, match_terms, is_active, source, created_at, updated_at)
+                VALUES ('presentation_profile', 'default', ?, ?, ?, 1, 'manual', ?, ?)
+                ON CONFLICT(type, value) DO UPDATE SET
+                    label = excluded.label,
+                    category = excluded.category,
+                    match_terms = excluded.match_terms,
+                    is_active = 1,
+                    source = 'manual',
+                    updated_at = excluded.updated_at
+                """,
+                (application_name, company_name, metadata, created, created),
+            )
+            self.insert_audit(
+                con,
+                "presentation_profile",
+                "default",
+                "update_presentation_profile",
+                user,
+                "",
+                "",
+                {
+                    "applicationName": application_name,
+                    "companyName": company_name,
+                    "loginProductName": login_product_name,
+                    "supportEmail": support_email,
+                    "useDefaultBrandLogo": use_default_brand_logo,
+                    "stationAliasCount": len(station_aliases),
+                },
+            )
+            con.commit()
+        return self.get_presentation_profile()
 
     def get_stage_definitions(self) -> list[dict[str, Any]]:
         """Return active stage definitions used by the v0.346 Stage Editor.
@@ -8819,7 +9017,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         """
         clean_identity = " ".join(str(identity or "").split())
         if not clean_identity:
-            raise ValueError("BFS email or username is required")
+            raise ValueError("Email or username is required")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = self.get_user_by_username(con, clean_identity)
@@ -8995,7 +9193,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not clean_username or not clean_roles:
             raise ValueError("username and at least one role are required")
         if clean_email and not is_valid_email(clean_email):
-            raise ValueError("Enter a valid BFS email address")
+            raise ValueError("Enter a valid email address")
 
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -9048,7 +9246,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         (clean_email, user_row["id"]),
                     ).fetchone()
                     if duplicate_email:
-                        raise ValueError("That BFS email is already assigned to another user")
+                        raise ValueError("That email is already assigned to another user")
                 con.execute("UPDATE users SET email = ? WHERE id = ?", (clean_email, user_row["id"]))
 
             self.insert_audit(
@@ -9112,9 +9310,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         roles = [str(raw_roles)] if isinstance(raw_roles, str) else [str(role) for role in raw_roles]
         roles = [role.strip() for role in roles if role.strip()]
         if email and not is_valid_email(email):
-            raise ValueError("Enter a valid BFS email address")
+            raise ValueError("Enter a valid email address")
         if not username or not password:
-            raise ValueError("BFS email/username and password are required")
+            raise ValueError("Email/username and password are required")
         if len(password) < 8:
             raise ValueError("Temporary password must be at least 8 characters")
         if not roles:
@@ -9289,6 +9487,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "glass_color": {},
         }
         hidden_values: dict[str, set[str]] = {kind: set() for kind in buckets}
+        glass_aliases: list[dict[str, Any]] = []
 
         def add_lookup(
             kind: str,
@@ -9354,6 +9553,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """
             ).fetchall()
 
+            # v0.360: glass_alias rows are schema-neutral administrator links.
+            # They never rewrite imported product text; callers can resolve the
+            # raw name to the selected canonical profile when displaying/reporting.
+            for row in admin_rows:
+                if str(row["type"] or "").strip().lower() != "glass_alias":
+                    continue
+                source_value = " ".join(str(row["value"] or "").split()).strip()
+                target_value = " ".join(str(row["label"] or "").split()).strip()
+                if source_value and target_value and source_value.lower() != target_value.lower():
+                    glass_aliases.append({
+                        "id": row["id"],
+                        "type": "glass_alias",
+                        "value": source_value,
+                        "label": target_value,
+                        "target": target_value,
+                        "source": row["source"] or "manual",
+                    })
+
             # Defaults remain available even on a fresh database. A saved
             # glass_cost row with the same value overrides the default without
             # changing schema or requiring a migration.
@@ -9406,6 +9623,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             for row in admin_rows:
                 row_type = str(row["type"] or "").strip().lower()
+                if row_type == "glass_alias":
+                    continue
                 if row_type == "glass_cost":
                     try:
                         rate = float(str(row["category"] or "").strip())
@@ -9467,6 +9686,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 buckets["glass_color"].values(),
                 key=lambda item: item["label"].lower(),
             ),
+            "glassAliases": sorted(glass_aliases, key=lambda item: (item["label"].lower(), item["value"].lower())),
             "stages": self.get_stage_definitions(),
         }
 
@@ -9665,6 +9885,132 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "",
                 "",
                 {"glassType": value, "label": label, "costPerSqft": rate, "color": color},
+            )
+            con.commit()
+        return self.get_manual_edit_lookups()
+
+    def combine_glass_profiles(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Persist reversible glass-name aliases for one canonical profile.
+
+        Effects: Reuses ``admin_lookup_values`` with type ``glass_alias``; no
+        schema migration or historical line-item rewrite occurs. Existing alias
+        rows for this target are activated/deactivated to mirror the submitted
+        selection, and selected aliases are reassigned from any prior target.
+        """
+        target = " ".join(str(data.get("target") or data.get("value") or "").split())[:255]
+        raw_values = data.get("values") if isinstance(data.get("values"), list) else []
+        values = []
+        seen: set[str] = set()
+        for raw in raw_values:
+            value = " ".join(str(raw or "").split())[:255]
+            key = value.lower()
+            if not value or key == target.lower() or key in seen:
+                continue
+            seen.add(key)
+            values.append(value)
+        if not target:
+            raise ValueError("Choose a glass profile to keep")
+
+        now = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            existing = con.execute(
+                "SELECT value FROM admin_lookup_values WHERE type = 'glass_alias' AND is_active = 1 AND LOWER(label) = LOWER(?)",
+                (target,),
+            ).fetchall()
+            selected_keys = {value.lower() for value in values}
+            removed: list[str] = []
+            for row in existing:
+                source = str(row["value"] or "").strip()
+                if source and source.lower() not in selected_keys:
+                    con.execute(
+                        "UPDATE admin_lookup_values SET is_active = 0, source = 'manual-hidden', updated_at = ? WHERE type = 'glass_alias' AND value = ?",
+                        (now, source),
+                    )
+                    removed.append(source)
+
+            for source in values:
+                # Flatten aliases that previously pointed at the selected source
+                # so a combine never creates a fragile alias chain.
+                con.execute(
+                    "UPDATE admin_lookup_values SET label = ?, is_active = 1, source = 'manual', updated_at = ? WHERE type = 'glass_alias' AND is_active = 1 AND LOWER(label) = LOWER(?)",
+                    (target, now, source),
+                )
+                con.execute(
+                    """
+                    INSERT INTO admin_lookup_values (type, value, label, category, match_terms, is_active, source, created_at, updated_at)
+                    VALUES ('glass_alias', ?, ?, '', '', 1, 'manual', ?, ?)
+                    ON CONFLICT(type, value) DO UPDATE SET
+                        label = excluded.label,
+                        category = '',
+                        match_terms = '',
+                        is_active = 1,
+                        source = 'manual',
+                        updated_at = excluded.updated_at
+                    """,
+                    (source, target, now, now),
+                )
+
+            self.insert_audit(
+                con,
+                "admin_lookup_value",
+                f"glass_alias:{target}",
+                "combine_glass_profiles",
+                user,
+                "",
+                "",
+                {"targetGlassType": target, "aliases": values, "separatedAliases": removed},
+            )
+            con.commit()
+        return self.get_manual_edit_lookups()
+
+    def uncombine_glass_profiles(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Deactivate manual glass aliases for one or more canonical profiles.
+
+        Effects: Uses the existing ``glass_alias`` rows and schema version 11.
+        Historical/imported glass text is untouched; disabling the alias simply
+        restores each source name as its own Lookup Manager profile.
+        """
+        raw_targets = data.get("targets") if isinstance(data.get("targets"), list) else []
+        targets: list[str] = []
+        seen: set[str] = set()
+        for raw in raw_targets:
+            target = " ".join(str(raw or "").split())[:255]
+            key = target.lower()
+            if not target or key in seen:
+                continue
+            seen.add(key)
+            targets.append(target)
+        if not targets:
+            raise ValueError("Select at least one combined glass type to uncombine.")
+
+        now = now_iso()
+        removed: dict[str, list[str]] = {}
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            for target in targets:
+                rows = con.execute(
+                    "SELECT value FROM admin_lookup_values WHERE type = 'glass_alias' AND is_active = 1 AND LOWER(label) = LOWER(?) ORDER BY value",
+                    (target,),
+                ).fetchall()
+                aliases = [str(row["value"] or "").strip() for row in rows if str(row["value"] or "").strip()]
+                if not aliases:
+                    continue
+                con.execute(
+                    "UPDATE admin_lookup_values SET is_active = 0, source = 'manual-hidden', updated_at = ? WHERE type = 'glass_alias' AND is_active = 1 AND LOWER(label) = LOWER(?)",
+                    (now, target),
+                )
+                removed[target] = aliases
+
+            self.insert_audit(
+                con,
+                "admin_lookup_value",
+                "glass_alias:uncombine",
+                "uncombine_glass_profiles",
+                user,
+                "",
+                "",
+                {"targets": targets, "separatedAliases": removed},
             )
             con.commit()
         return self.get_manual_edit_lookups()
@@ -14922,6 +15268,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if configured_rate >= 0:
                     effective_glass_costs[str(cost_row["value"] or "").strip()] = configured_rate
 
+
+            effective_glass_aliases = {
+                str(row["value"] or "").strip(): str(row["label"] or "").strip()
+                for row in con.execute(
+                    "SELECT value, label FROM admin_lookup_values WHERE is_active = 1 AND type = 'glass_alias' ORDER BY value"
+                ).fetchall()
+                if str(row["value"] or "").strip() and str(row["label"] or "").strip()
+            }
+
             scans_by_user = con.execute(
                 f"""
                 SELECT user_name, COUNT(*) AS scans
@@ -15109,7 +15464,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         for item in physical_items.values():
             qty = max(int(item.get("qty") or 0), 0)
             raw_product = str(item.get("product") or item.get("job") or "Other Glass")
-            glass_label, rate = glass_cost_profile(raw_product, effective_glass_costs)
+            glass_label, rate = glass_cost_profile(raw_product, effective_glass_costs, effective_glass_aliases)
             per_piece_sqft = dimensions_square_feet(item.get("dimensions"))
             sqft = per_piece_sqft * qty
 
@@ -15135,7 +15490,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         for row in reject_rows:
             qty = max(int(row_value(row, "qty", 0) or 0), 0)
             raw_product = str(row_value(row, "resolved_product", "") or row_value(row, "product", "") or "Other Glass")
-            glass_label, rate = glass_cost_profile(raw_product, effective_glass_costs)
+            glass_label, rate = glass_cost_profile(raw_product, effective_glass_costs, effective_glass_aliases)
             per_piece_sqft = dimensions_square_feet(row_value(row, "dimensions", ""))
             sqft = per_piece_sqft * qty
             machine = str(row_value(row, "location_label", "") or "Unknown machine").strip() or "Unknown machine"
