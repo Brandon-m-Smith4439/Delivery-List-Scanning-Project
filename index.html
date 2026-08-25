@@ -14,18 +14,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/home.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/print.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/shell.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260825-v0.385">
-    <link rel="stylesheet" href="static/css/mobile.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/home.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/print.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/shell.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260825-v0.423">
+    <link rel="stylesheet" href="static/css/mobile.css?v=20260825-v0.423">
 </head>
 <body data-page="home">
   <!-- SECTION: Authentication and password reset -->
@@ -36,11 +36,12 @@
     </button>
     <div class="login-shell">
       <aside class="login-hero-card">
-        <img class="login-hero-logo brand-framed-logo" src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
-        <strong hidden>Barefoot &amp; Company</strong>
-        <span>Glass Delivery Scanner</span>
+        <img class="login-hero-logo brand-framed-logo" data-portable-logo-v355 src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot Facility Services logo">
+        <span class="portable-login-brand-badge-v355" data-portable-brand-initials-v355 aria-hidden="true">BFS</span>
+        <strong class="portable-login-company-v355" data-portable-label-v355="companyName">Barefoot Facility Services</strong>
+        <span data-portable-label-v355="loginProductName">Glass Delivery Scanner</span>
         <h1>Production scanning, rack control, and delivery visibility in one place.</h1>
-        <p>Sign in with your BFS email or assigned username to continue.</p>
+        <p>Sign in with your email or assigned username to continue.</p>
         <div class="login-hero-stats">
           <span><b>Live</b>Scan tracking</span>
           <span><b>Safe</b>Rack recovery</span>
@@ -57,8 +58,8 @@
           </div>
         </div>
         <label>
-          <span>BFS Email or Username</span>
-          <input id="loginUsername" name="dls_login_user" type="text" autocomplete="username" value="admin" placeholder="name@bfs.local or admin">
+          <span>Email or Username</span>
+          <input id="loginUsername" name="dls_login_user" type="text" autocomplete="username" value="admin" placeholder="email or assigned username">
         </label>
         <label>
           <span>Password</span>
@@ -79,10 +80,10 @@
             <h2>Reset access</h2>
           </div>
         </div>
-        <p class="password-reset-help">Enter your BFS email or username. In local mode, the reset code will display here so an admin can complete the reset without email delivery.</p>
+        <p class="password-reset-help">Enter your email or assigned username. In local mode, the reset code will display here so an admin can complete the reset without email delivery.</p>
         <label>
-          <span>BFS Email or Username</span>
-          <input id="resetIdentityInput" type="text" autocomplete="username" placeholder="name@bfs.local">
+          <span>Email or Username</span>
+          <input id="resetIdentityInput" type="text" autocomplete="username" placeholder="email or assigned username">
         </label>
         <button id="requestResetCodeBtn" class="app-primary-button" type="button">Request reset code</button>
         <label>
@@ -106,9 +107,10 @@
     <!-- SECTION: Collapsible desktop sidebar, mobile drawer, and global utility header -->
     <aside class="app-sidebar" id="appSidebar" aria-label="Application navigation">
       <div class="sidebar-brand-row">
-        <div class="brand" aria-label="Barefoot & Company Delivery List Scanner">
-          <img class="brand-icon brand-icon-collapsed" src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
-          <img class="brand-combined-logo brand-framed-logo" src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot &amp; Company and Builders FirstSource logos">
+        <div class="brand" aria-label="Barefoot Facility Services Delivery List Scanner" data-portable-aria-v355="{companyName} {applicationName}">
+          <img class="brand-icon brand-icon-collapsed" data-portable-logo-v355 src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot Facility Services logo">
+          <img class="brand-combined-logo brand-framed-logo" data-portable-logo-v355 src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot Facility Services logo">
+          <span class="portable-sidebar-brand-v355" aria-hidden="true"><b data-portable-brand-initials-v355>BFS</b><span><strong data-portable-label-v355="companyName">Barefoot Facility Services</strong><small data-portable-label-v355="applicationName">Delivery List Scanner</small></span></span>
         </div>
         <button class="sidebar-toggle-button" id="sidebarToggleBtn" type="button" aria-controls="appSidebar" aria-expanded="true" title="Collapse navigation">
           <span class="sidebar-toggle-icon" aria-hidden="true"></span>
@@ -122,8 +124,8 @@
         <button data-page-target="scan" type="button" title="Scan"><span class="top-nav-icon scan"></span><span>Scan</span></button>
         <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button" title="Racks"><span class="top-nav-icon racks"></span><span>Racks</span></button>
         <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button" title="Bay Map"><span class="top-nav-icon bays"></span><span>Bay Map</span></button>
-        <button data-page-target="rejects" data-permission-any="view_lists" type="button" title="Reject Tracking"><span class="top-nav-icon rejects"></span><span>Rejects</span></button>
-        <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button" title="Settings"><span class="top-nav-icon admin"></span><span>Settings</span></button>
+        <button data-page-target="rejects" data-permission-any="view_delivery_lists" type="button" title="Reject Tracking"><span class="top-nav-icon rejects"></span><span>Rejects</span></button>
+        <button data-page-target="admin" data-permission-any="view_admin,reset_delivery_lists,import_delivery_lists,edit_delivery_list_items,create_delivery_list_orders,delete_delivery_list_items,delete_delivery_lists,review_superseded_orders,manage_users,manage_user_access,manage_user_assignments,manage_roles,view_sessions,manage_stations,manage_route_rules,manage_customer_emails,manage_lookup_values,manage_automation,manage_cross_date_scanning,manage_reject_settings,manage_bay_layout,manage_bay_scanner_rules,manage_bay_auto_assigner,manage_racks" type="button" title="Settings"><span class="top-nav-icon admin"></span><span>Settings</span></button>
       </nav>
 
       <div class="sidebar-spacer"></div>
@@ -239,10 +241,10 @@
           <button type="button" class="home-quick-action-v358 is-statistics" data-home-hub-action="statistics">
             <span class="home-quick-action-icon-v358" aria-hidden="true"></span><span><strong>Statistics</strong><small>Performance and operational insights</small></span><i aria-hidden="true"></i>
           </button>
-          <button type="button" class="home-quick-action-v358 is-rejects" data-home-hub-action="rejects" data-permission-any="view_lists">
+          <button type="button" class="home-quick-action-v358 is-rejects" data-home-hub-action="rejects" data-permission-any="view_delivery_lists">
             <span class="home-quick-action-icon-v358" aria-hidden="true"></span><span><strong>Rejects</strong><small>Open reject tracking and history</small></span><i aria-hidden="true"></i>
           </button>
-          <button type="button" class="home-quick-action-v358 is-settings" data-home-hub-action="settings" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists">
+          <button type="button" class="home-quick-action-v358 is-settings" data-home-hub-action="settings" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_list_items">
             <span class="home-quick-action-icon-v358" aria-hidden="true"></span><span><strong>Settings</strong><small>System setup, users, and configuration</small></span><i aria-hidden="true"></i>
           </button>
         </nav>
@@ -340,7 +342,7 @@
                   <button id="statisticsCalendarReset" type="button">Reset Range</button>
                   <span id="statisticsCalendarSelectionText">Choose the Date From.</span>
                   <div>
-                    <button id="statisticsCalendarCancel" type="button">Cancel</button>
+                    <button id="statisticsCalendarCancel" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
                     <button id="statisticsCalendarApply" class="primary app-primary-button" type="button" disabled>Apply Dates</button>
                   </div>
                 </footer>
@@ -569,10 +571,10 @@
                       <span>Show one or several destinations</span>
                     </div>
                     <div class="scan-filter-options">
-                      <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button">Indian Trail <span id="countIndianTrailRoute">(0)</span></button>
-                      <button class="tab route-filter-tab" data-filter="cpu-route" type="button">CPU <span id="countCpuRoute">(0)</span></button>
-                      <button class="tab route-filter-tab" data-filter="dtc-route" type="button">DTC <span id="countDtcRoute">(0)</span></button>
-                      <button class="tab route-filter-tab" data-filter="greenville-route" type="button">Greenville <span id="countGreenvilleRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button"><span data-portable-label-v355="receivingSite">Indian Trail</span> <span id="countIndianTrailRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="cpu-route" type="button"><span data-portable-label-v355="cpuRoute">CPU</span> <span id="countCpuRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="dtc-route" type="button"><span data-portable-label-v355="dtcRoute">DTC</span> <span id="countDtcRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="greenville-route" type="button"><span data-portable-label-v355="gnvRoute">Greenville</span> <span id="countGreenvilleRoute">(0)</span></button>
                     </div>
                   </section>
                   <section class="scan-filter-section scan-filter-glass-section" aria-label="Glass type filters">
@@ -715,7 +717,7 @@
               </div>
             </section>
 
-            <section class="scan-bay-override-panel scan-bay-override-panel-compact" id="scanBayOverridePanel" hidden title="Auto uses the suggested bay. Manual sends the selected bay with the next Indian Trail scan.">
+            <section class="scan-bay-override-panel scan-bay-override-panel-compact" id="scanBayOverridePanel" hidden title="Auto uses the suggested bay. Manual sends the selected bay with the next Indian Trail scan." data-portable-title-v355="Auto uses the suggested bay. Manual sends the selected bay with the next {receivingSite} scan.">
               <div class="scan-bay-override-row">
                 <div class="scan-bay-override-copy">
                   <span>Bay Assignment</span>
@@ -723,7 +725,7 @@
                 </div>
                 <label class="bay-override-switch" for="scanBayOverrideMode">
                   <span>Auto</span>
-                  <input id="scanBayOverrideMode" type="checkbox" role="switch" aria-label="Manually select Indian Trail bay">
+                  <input id="scanBayOverrideMode" type="checkbox" role="switch" aria-label="Manually select Indian Trail bay" data-portable-aria-v355="Manually select {receivingSite} bay">
                   <i></i>
                   <span>Manual</span>
                 </label>
@@ -774,7 +776,7 @@
             <section class="manual-assign-panel" id="manualAssignPanel" hidden>
               <div class="section-heading">
                 <h3>Manual Bay Assign</h3>
-                <span>Indian Trail only</span>
+                <span data-portable-template-v355="{receivingSite} only">Indian Trail only</span>
               </div>
               <form id="manualAssignForm" class="manual-scan-row">
                 <label>
@@ -909,7 +911,7 @@
               <span>Clear</span>
             </button>
             <span class="reject-command-spacer-v151" aria-hidden="true"></span>
-            <button id="rejectLogOpenBtn" class="primary reject-log-open-button" type="button" data-permission-any="scan,manual_adjust,resolve_exceptions">
+            <button id="rejectLogOpenBtn" class="primary reject-log-open-button" type="button" data-permission-any="scan_delivery_lists,manage_scan_exceptions">
               <span class="reject-log-open-icon" aria-hidden="true"></span>
               <span>Log Internal Reject</span>
             </button>
@@ -971,7 +973,7 @@
         <!-- Bay Map v16: command-center layout keeps the scanner available while giving users faster search, filters, and bay actions. -->
         <section class="bay-command-center">
           <div class="bay-title-card bay-title-card-wide-v181 app-page-header-v357">
-            <span class="bay-page-eyebrow">Indian Trail Inventory</span>
+            <span class="bay-page-eyebrow" data-portable-template-v355="{receivingSite} Inventory">Indian Trail Inventory</span>
             <h1>Bay Map Command Center</h1>
             <p>Find bays, assign glass, review old orders, and manage the physical bay layout from one page.</p>
           </div>
@@ -996,7 +998,7 @@
             <button class="icon-button undo-redo-icon redo-icon-button app-primary-button app-icon-primary" id="bayLayoutRedoBtn" type="button" title="Redo layout change" aria-label="Redo layout change"><span class="redo-icon"></span><small>Redo</small></button>
             <button id="bayCollapseAllBtn" type="button">Collapse All</button>
             <button id="bayExpandAllBtn" type="button">Expand All</button>
-            <button id="bayLayoutCancelBtn" type="button">Cancel</button>
+            <button id="bayLayoutCancelBtn" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
             <button id="bayLayoutConfirmBtn" type="button">Save Layout</button>
           </div>
         </section>
@@ -1067,16 +1069,16 @@
           </div>
 
           <div class="bay-right-rail">
-            <div class="bay-action-buttons bay-action-buttons-v2 bay-action-buttons-v150" id="bayActionButtons" aria-label="Indian Trail bay actions">
+            <div class="bay-action-buttons bay-action-buttons-v2 bay-action-buttons-v150" id="bayActionButtons" aria-label="Indian Trail bay actions" data-portable-aria-v355="{receivingSite} bay actions">
               <button type="button" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon bay-action-icon-v338 old" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5l3.4 2.1M5.8 5.8 4 4"></path></svg></span>Old Bays<span class="old-bay-attention-count" id="oldBayAttentionCount" hidden aria-label="0 old orders need review">0</span></button>
-              <button type="button" data-bay-action="sdi" data-permission-any="mark_sdi,remove_sdi"><span class="bay-action-icon bay-action-icon-v338 sdi" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m13.2 2.8-7 10h5.2l-.7 8.4 7.1-10.8h-5.1z"></path></svg></span>Rush</button>
-              <button type="button" data-bay-action="item-management" data-permission-any="assign_bay,move_bay,clear_bay"><span class="bay-action-icon bay-action-icon-v338 manage" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 6.5h7v5H4zM13 6.5h7v5h-7zM4 13.5h7v5H4zM13 13.5h7v5h-7z"></path></svg></span>Manage Items</button>
+              <button type="button" data-bay-action="sdi" data-permission-any="manage_rush_work"><span class="bay-action-icon bay-action-icon-v338 sdi" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m13.2 2.8-7 10h5.2l-.7 8.4 7.1-10.8h-5.1z"></path></svg></span>Rush</button>
+              <button type="button" data-bay-action="item-management" data-permission-any="assign_bay_items,move_bay_items,clear_bay_items"><span class="bay-action-icon bay-action-icon-v338 manage" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 6.5h7v5H4zM13 6.5h7v5h-7zM4 13.5h7v5H4zM13 13.5h7v5h-7z"></path></svg></span>Manage Items</button>
               <button type="button" data-bay-action="bay-editor" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-action-icon-v338 bay-edit" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 5h10v10H4zM7.5 8.5h3M7.5 11.5h3M13.7 18.3l5.9-5.9 2 2-5.9 5.9-3 .9z"></path></svg></span>Edit Bays</button>
               <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-action-icon-v338 layout" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m3.5 6 5-2.2 7 2.2 5-2.2v14.3l-5 2.1-7-2.1-5 2.1zM8.5 3.8v14.3M15.5 6v14.2"></path><circle cx="12" cy="10.5" r="1.7"></circle></svg></span>Edit Map</button>
             </div>
 
             <div class="bay-scanner-sticky-anchor-v155" id="bayScannerStickyAnchor">
-              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v150 bay-scanner-sticky-panel-v155" id="bayScannerPanel" aria-label="Indian Trail bay scanner">
+              <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v150 bay-scanner-sticky-panel-v155" id="bayScannerPanel" aria-label="Indian Trail bay scanner" data-portable-aria-v355="{receivingSite} bay scanner">
                 <header class="bay-scanner-header-v150">
                   <div class="bay-scanner-heading-line-v150">
                     <h2>Bay Scanner</h2>
@@ -1084,17 +1086,17 @@
                     <span class="bay-scanner-mode-summary-v150" hidden aria-hidden="true"><b id="bayScannerModeSummary"></b></span>
                   </div>
 
-                  <section class="bay-route-pulse-v150" aria-label="Indian Trail route progress">
+                  <section class="bay-route-pulse-v150" aria-label="Indian Trail route progress" data-portable-aria-v355="{receivingSite} route progress">
                     <header class="bay-route-pulse-heading-v150">
                       <div>
                         <span class="bay-route-pulse-icon-v150" aria-hidden="true"></span>
-                        <span><small>Route pulse</small><strong>Indian Trail progress</strong></span>
+                        <span><small>Route pulse</small><strong data-portable-template-v355="{receivingSite} progress">Indian Trail progress</strong></span>
                       </div>
                       <span class="bay-route-live-v150">Live</span>
                     </header>
                     <div class="bay-panel-route-mini bay-route-metrics-v150" id="bayPanelRouteMini">
                       <div class="bay-panel-route-node outbound"><small>Outbound</small><strong>0/0</strong></div>
-                      <button class="bay-panel-route-lane" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest"><span>0 pieces in transit</span></button>
+                      <button class="bay-panel-route-lane" type="button" data-open-transit-manifest title="Open Indian Trail in-transit manifest" data-portable-title-v355="Open {receivingSite} in-transit manifest"><span>0 pieces in transit</span></button>
                       <div class="bay-panel-route-node inbound"><small>Received</small><strong>0/0</strong></div>
                       <div class="bay-dual-progress" data-bay-dual-progress>
                         <div class="bay-dual-progress-half is-outbound" role="progressbar" aria-label="Outbound completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i style="width:0%"></i></div>
@@ -1237,7 +1239,7 @@
           <header class="bay-selected-modal-header-v160">
             <span class="bay-selected-modal-icon-v160" aria-hidden="true"></span>
             <div>
-              <small>Indian Trail bay control</small>
+              <small data-portable-template-v355="{receivingSite} bay control">Indian Trail bay control</small>
               <h2>Selected Bay</h2>
               <p>Review bay fulfillment, choose scanner actions, and manage the glass assigned to this location.</p>
             </div>
@@ -1250,7 +1252,7 @@
           <header class="stale-bay-header-v105 stale-bay-header-v181">
             <span class="stale-bay-header-icon-v105" aria-hidden="true"></span>
             <div>
-              <small>Indian Trail inventory control</small>
+              <small data-portable-template-v355="{receivingSite} inventory control">Indian Trail inventory control</small>
               <h2>Old Bay Control Center</h2>
               <p>Review aged assignments, confirm their physical location, and snooze only work that has been checked.</p>
             </div>
@@ -1472,7 +1474,7 @@
         <div class="modal-backdrop" id="manageItemsBackdrop" hidden></div>
         <section class="modal-panel manage-items-panel manage-items-panel-v182" id="manageItemsPanel" hidden>
           <div class="section-heading manage-items-heading">
-            <div><small>Indian Trail inventory</small><h2>Manage Bay Items</h2><span>Select whole jobs or exact items, see grouped bay locations, and manually split sibling items across bays when needed.</span></div>
+            <div><small data-portable-template-v355="{receivingSite} inventory">Indian Trail inventory</small><h2>Manage Bay Items</h2><span>Select whole jobs or exact items, see grouped bay locations, and manually split sibling items across bays when needed.</span></div>
             <button id="manageItemsCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close manage items window">×</button>
           </div>
           <nav class="admin-modal-section-tabs bay-operation-tabs" aria-label="Manage Items sections">
@@ -1554,49 +1556,48 @@
           <span class="admin-last-updated" id="adminLastUpdated">Last updated: --</span>
         </div>
 
-        <div id="adminSummary" class="overview-kpis admin-kpi-row"></div>
 
         <div class="admin-layout">
-          <section class="panel admin-import-panel admin-dashboard-card">
+          <section class="panel admin-import-panel admin-dashboard-card" data-permission-any="review_superseded_orders,manage_automation,import_delivery_lists,edit_delivery_list_items,create_delivery_list_orders,delete_delivery_list_items,delete_delivery_lists,reset_delivery_lists">
             <div class="section-heading">
               <h2>Delivery List Management</h2>
               <div class="section-actions admin-delivery-list-actions">
-                <button class="link-button superseded-review-open" type="button" data-admin-modal="supersededOrders">
+                <button class="link-button superseded-review-open" type="button" data-admin-modal="supersededOrders" data-admin-gui-launch data-permission-any="review_superseded_orders">
                   Review superseded orders
                   <span id="supersededOrderReviewCount" class="superseded-review-count" hidden>0</span>
                 </button>
-                <button id="folderImportBtn" class="link-button admin-automation-link" type="button">Edit automated DL import</button>
-                <button class="link-button" type="button" data-admin-modal="deliveryLists">Edit delivery lists</button>
+                <button id="folderImportBtn" class="link-button admin-automation-link" data-admin-gui-launch data-permission-any="manage_automation,import_delivery_lists" type="button">Edit automated DL import</button>
+                <button class="link-button" type="button" data-admin-modal="deliveryLists" data-admin-gui-launch data-permission-any="edit_delivery_list_items,create_delivery_list_orders,delete_delivery_list_items,delete_delivery_lists,reset_delivery_lists">Edit delivery lists</button>
               </div>
             </div>
             <div id="importPreviewBox" class="admin-empty import-status-compact" hidden></div>
             <div id="adminDeliveryLists" class="admin-table admin-preview-table"></div>
           </section>
 
-          <section class="panel admin-users-panel admin-dashboard-card">
+          <section class="panel admin-users-panel admin-dashboard-card" data-permission-any="manage_users,manage_user_access,manage_user_assignments,manage_roles,view_sessions">
             <div class="section-heading">
               <h2>Users & Permissions</h2>
               <div class="section-actions">
-                <button class="link-button" type="button" data-admin-modal="roles">Edit role permissions</button>
-                <button class="link-button" type="button" data-admin-modal="users">Edit users</button>
+                <button class="link-button" type="button" data-admin-modal="roles" data-admin-gui-launch data-permission-any="manage_roles">Edit role permissions</button>
+                <button class="link-button" type="button" data-admin-modal="users" data-admin-gui-launch data-permission-any="manage_users,manage_user_access,manage_user_assignments">Edit users</button>
               </div>
             </div>
             <div id="adminUsers" class="admin-table"></div>
           </section>
 
-          <section class="panel admin-compact-panel admin-dashboard-card">
+          <section class="panel admin-compact-panel admin-dashboard-card customer-route-overview-panel-v351 customer-route-overview-panel-v352 customer-route-overview-panel-v353 customer-route-overview-panel-v354" data-permission-any="manage_route_rules">
             <div class="section-heading">
               <h2>Customer Route Rules</h2>
-              <button class="link-button" type="button" data-admin-modal="customerRoutes">Edit customer routes</button>
+              <button class="link-button" type="button" data-admin-modal="customerRoutes" data-admin-gui-launch>Edit customer routes</button>
             </div>
 
             <div id="customerRouteRules" class="customer-route-rules-overview"></div>
           </section>
 
-          <section class="panel admin-compact-panel admin-dashboard-card">
+          <section class="panel admin-compact-panel admin-dashboard-card customer-email-overview-panel-v354" data-permission-any="manage_customer_emails">
             <div class="section-heading">
               <h2>Customer Emails</h2>
-              <button class="link-button" type="button" data-admin-modal="customerEmails">Edit emails</button>
+              <button class="link-button" type="button" data-admin-modal="customerEmails" data-admin-gui-launch>Edit emails</button>
             </div>
             <div id="customerEmailOverview" class="compact-list email-summary-list">
               <div><strong>Customer manifests</strong><span>Sent after delivery-list import/update when an email match exists.</span></div>
@@ -1604,10 +1605,10 @@
             </div>
           </section>
 
-          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="edit_delivery_lists">
+          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="manage_lookup_values">
             <div class="section-heading">
               <h2>Lookup Manager</h2>
-              <button class="link-button" type="button" data-admin-modal="lookups">Edit lookups</button>
+              <button class="link-button" type="button" data-admin-modal="lookups" data-admin-gui-launch>Edit lookups</button>
             </div>
             <div class="compact-list lookup-summary-list">
               <div><strong>Manual Edit & pricing</strong><span>Products, routes, process options, and glass cost per SQFT.</span></div>
@@ -1615,22 +1616,22 @@
             </div>
           </section>
 
-          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="edit_delivery_lists">
+          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="manage_cross_date_scanning,manage_bay_scanner_rules">
             <div class="section-heading">
-              <h2>Cross-Date Scanning</h2>
-              <button class="link-button" type="button" data-admin-modal="crossDateScanning">Edit scan behavior</button>
+              <h2>Scan Page Settings</h2>
+              <button class="link-button" type="button" data-admin-modal="crossDateScanning" data-admin-gui-launch>Edit scan settings</button>
             </div>
             <div id="crossDateScanOverview" class="compact-list cross-date-scan-overview">
-              <div><strong>Automatically switch unique matches</strong><span>Current-list-first scanning with audited safety checks.</span></div>
-              <div><strong>7 days back / 30 days forward</strong><span>Same-stage active delivery lists only.</span></div>
+              <div><strong>Cross-date scanning</strong><span>Control safe date switching and search windows.</span></div>
+              <div><strong>Mixed-destination approval</strong><span>Control the temporary Bay Map rack mismatch window.</span></div>
             </div>
           </section>
 
 
-          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="view_admin">
+          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="manage_reject_settings">
             <div class="section-heading">
               <h2>Reject Tracking Setup</h2>
-              <button class="link-button" type="button" data-admin-modal="rejectSettings">Edit reasons & locations</button>
+              <button class="link-button" type="button" data-admin-modal="rejectSettings" data-admin-gui-launch>Edit reasons & locations</button>
             </div>
             <div class="compact-list">
               <div><strong>Reject reasons</strong><span>Maintain the choices used when internal rejects are logged.</span></div>
@@ -1638,25 +1639,14 @@
             </div>
           </section>
 
-          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="manage_bay_layout">
+          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="manage_bay_scanner_rules,manage_bay_auto_assigner">
             <div class="section-heading">
-              <h2>Bay Scanner Rules</h2>
-              <button class="link-button" type="button" data-admin-modal="bayScannerRules">Edit rules</button>
+              <h2>Bay Rules &amp; Auto Assignment</h2>
+              <button class="link-button" type="button" data-admin-modal="bayScannerRules" data-admin-gui-launch>Manage bay rules</button>
             </div>
             <div id="bayScannerRuleOverview" class="compact-list bay-scanner-rule-overview">
-              <div><strong>Manual assign memory</strong><span>Known non-standard labels that should not warn.</span></div>
-              <div><strong>Bay barcode formats</strong><span>Extra scan formats for the Bay Map scanner only.</span></div>
-            </div>
-          </section>
-
-          <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="manage_bay_layout">
-            <div class="section-heading">
-              <h2>Bay Auto Assigner</h2>
-              <button class="link-button" type="button" data-admin-modal="bayAutoAssigner">Edit auto assigner</button>
-            </div>
-            <div id="bayAutoAssignOverview" class="compact-list bay-auto-assign-overview">
-              <div><strong>Tall / oversize rules</strong><span>Control thresholds and manual assignment categories.</span></div>
-              <div><strong>Bay type mapping</strong><span>Choose where CPU, mirrors, standard, tall, and oversize glass should go.</span></div>
+              <div><strong>Scanner rules</strong><span>Remembered manual inputs and accepted Bay Map barcode formats.</span></div>
+              <div><strong>Auto assignment</strong><span>Size thresholds, bay-type mapping, and manual placement categories.</span></div>
             </div>
           </section>
 
@@ -1675,20 +1665,21 @@
     <footer class="desktop-footer desktop-footer-v0163" aria-label="Application footer">
       <div class="footer-brand-v160">
         <span class="footer-brand-mark-v160" aria-hidden="true"></span>
-        <span><strong>Delivery List Scanner</strong><small>Floor operations workspace</small></span>
+        <span><strong data-portable-label-v355="applicationName">Delivery List Scanner</strong><small>Floor operations workspace</small></span>
       </div>
       <button class="scanner-select footer-scanner-v160" type="button" aria-label="Active scanner station">
         <span class="footer-scanner-status-v160" aria-hidden="true"></span>
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.385">
+        <span class="footer-version-v0163" aria-label="Application version 0.423">
           <small>Version</small>
-          <strong>0.385</strong>
+          <strong>0.423</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
-          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.385&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
+          data-portable-support-link-v355
+          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.423&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
           title="Report a Delivery List Scanner bug"
         >
           <span class="footer-bug-icon-v0163" aria-hidden="true"></span>
@@ -1702,7 +1693,7 @@
     <section class="print-options-panel print-options-panel-v197 print-options-panel-v238 print-options-panel-v240" id="printOptionsPanel" hidden>
       <header class="print-options-hero-v197 print-options-hero-v238 print-options-hero-v240">
         <div>
-          <small>Delivery List Scanner</small>
+          <small data-portable-label-v355="applicationName">Delivery List Scanner</small>
           <h2>Print / Export Delivery Lists</h2>
           <p>Select routes, dates, glass types, scan states, and attention filters before generating the document.</p>
         </div>
@@ -1745,7 +1736,7 @@
                     <button id="printCalendarReset" type="button">Reset Range</button>
                     <span id="printCalendarSelectionText">Choose the Date From.</span>
                     <div>
-                      <button id="printCalendarCancel" type="button">Cancel</button>
+                      <button id="printCalendarCancel" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
                       <button id="printCalendarApply" class="primary app-primary-button" type="button" disabled>Apply Dates</button>
                     </div>
                   </footer>
@@ -1874,7 +1865,7 @@
     <section class="print-preset-modal-v199 print-preset-modal-v200 print-preset-modal-v206 print-preset-modal-v209 print-preset-modal-v227 print-preset-modal-v228 print-preset-modal-v229 print-preset-modal-v232 print-preset-modal-v233 print-preset-modal-v234 print-preset-modal-v238 print-preset-modal-v240 print-preset-modal-v242" id="printPresetModal" role="dialog" aria-modal="true" aria-labelledby="printPresetModalTitle" hidden>
       <header class="print-preset-hero-v227 print-preset-hero-v238 print-preset-hero-v240">
         <div>
-          <small>Delivery List Scanner</small>
+          <small data-portable-label-v355="applicationName">Delivery List Scanner</small>
           <h3 id="printPresetModalTitle">Create Delivery List Preset</h3>
           <p>Save a reusable filter and output setup for delivery lists.</p>
         </div>
@@ -1889,7 +1880,7 @@
               <div><strong>Preset Details</strong></div>
             </header>
             <div class="print-preset-details-grid-v227">
-              <label for="printPresetNameInput"><span>Preset Name</span><input id="printPresetNameInput" type="text" maxlength="50" autocomplete="off" placeholder="Example: Indian Trail Outbound Morning"></label>
+              <label for="printPresetNameInput"><span>Preset Name</span><input id="printPresetNameInput" type="text" maxlength="50" autocomplete="off" placeholder="Example: Indian Trail Outbound Morning" data-portable-placeholder-v355="Example: {receivingSite} {outboundStage} Morning"></label>
               <label class="print-preset-default-toggle-v227" for="printPresetDefaultToggle">
                 <span><strong>Set as default</strong><small>Open Print / Export with this preset.</small></span>
                 <input id="printPresetDefaultToggle" type="checkbox">
@@ -1923,7 +1914,7 @@
             </header>
             <button id="printPresetSaveOnlyBtn" class="primary app-primary-button" type="button">Save Preset</button>
             <button id="printPresetConfirmBtn" type="button">Save &amp; Apply</button>
-            <button id="printPresetCancelBtn" type="button">Cancel</button>
+            <button id="printPresetCancelBtn" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           </section>
         </aside>
 
@@ -2013,6 +2004,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260825-v0.385"></script>
+  <script src="static/js/app.js?v=20260825-v0.423"></script>
 </body>
 </html>

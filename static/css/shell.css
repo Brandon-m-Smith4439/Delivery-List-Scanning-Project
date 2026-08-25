@@ -178,7 +178,7 @@
   color: #ffffff !important;
   padding: 0 13px;
   box-shadow: 0 6px 16px rgba(1, 18, 35, 0.16) !important;
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+  transition: border-color 140ms ease, *background* 140ms ease, transform 140ms ease;
 }
 
 .desktop-footer-v0163 .scanner-select:hover,
@@ -235,7 +235,7 @@
   line-height: 1;
   text-decoration: none !important;
   white-space: nowrap;
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+  transition: border-color 140ms ease, *background* 140ms ease, transform 140ms ease;
 }
 
 .desktop-footer-v0163 .footer-report-bugs-v0163:hover,
@@ -1440,4 +1440,104 @@
     width: 100%;
     justify-content: space-between;
   }
+}
+/* v0.355: portable organization branding.
+   The installed Barefoot/BFS image remains the default for this deployment,
+   but another company can disable it without replacing any source asset. The
+   shell then uses the configured company name and generated initials only. */
+.portable-login-brand-badge-v355,
+.portable-login-company-v355,
+.portable-sidebar-brand-v355 {
+  display: none;
+}
+
+body.portable-text-brand-v355 [data-portable-logo-v355] {
+  display: none !important;
+}
+
+body.portable-text-brand-v355 .portable-login-brand-badge-v355 {
+  width: 108px;
+  height: 108px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(232, 240, 252, 0.82);
+  border-radius: 16px;
+  background: rgba(4, 43, 84, 0.9);
+  color: #ffffff;
+  font-size: 30px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  box-shadow: 0 10px 24px rgba(0, 14, 45, 0.3);
+}
+
+body.portable-text-brand-v355 .portable-login-company-v355 {
+  display: block;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0.035em;
+  text-transform: none;
+}
+
+body.portable-text-brand-v355 .portable-sidebar-brand-v355 {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  pointer-events: none;
+}
+
+body.portable-text-brand-v355 .portable-sidebar-brand-v355 > b {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(222, 235, 252, 0.66);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 15px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+}
+
+body.portable-text-brand-v355 .portable-sidebar-brand-v355 > span {
+  display: none;
+}
+
+@media (min-width: 961px) {
+  body.portable-text-brand-v355 .app-sidebar:hover .portable-sidebar-brand-v355 > b {
+    display: none;
+  }
+
+  body.portable-text-brand-v355 .app-sidebar:hover .portable-sidebar-brand-v355 > span {
+    width: min(170px, calc(100% - 18px));
+    display: grid;
+    gap: 4px;
+    text-align: center;
+  }
+
+  body.portable-text-brand-v355 .app-sidebar:hover .portable-sidebar-brand-v355 strong {
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 950;
+    line-height: 1.15;
+  }
+
+  body.portable-text-brand-v355 .app-sidebar:hover .portable-sidebar-brand-v355 small {
+    color: rgba(231, 240, 252, 0.82);
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.15;
+  }
+}
+/* v0.358: the selected Presentation logo is the sole sidebar brand surface.
+   Keep the portable text/initials fallback completely hidden while the logo is
+   enabled, even if another responsive rule would otherwise reveal it. */
+body.portable-installed-logo-v358 .app-sidebar .portable-sidebar-brand-v355,
+body.portable-installed-logo-v358 .app-sidebar .brand [data-portable-brand-initials-v355],
+body.portable-installed-logo-v358 .app-sidebar .brand [data-portable-label-v355="companyName"],
+body.portable-installed-logo-v358 .app-sidebar .brand [data-portable-label-v355="applicationName"] {
+  display: none !important;
 }

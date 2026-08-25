@@ -28,6 +28,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:LogPath = $null
+$script:PendingLogLines = New-Object System.Collections.Generic.List[string]
 $script:Config = $null
 $script:LockStream = $null
 $script:CheckedDates = New-Object System.Collections.Generic.List[datetime]
@@ -39,6 +40,8 @@ $script:ImportResults = @()
 $script:ResolvedAction = $RunAction
 $script:StartedAt = (Get-Date).ToUniversalTime().ToString("o")
 $script:RunId = $(if ([string]::IsNullOrWhiteSpace([string]$RequestId)) { "scheduled-$($script:StartedAt)" } else { [string]$RequestId })
+$script:StepNumber = 0
+$script:RunStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $script:SkipSummary = $false
 $script:LastRawDeliveryRowCount = 0
 $script:LastRawRemakeLineCount = 0
@@ -57,7 +60,7 @@ $script:SafetyDeferredDetails = New-Object System.Collections.Generic.List[objec
 function Write-AutomationLog {
     param(
         [Parameter(Mandatory = $true)][string]$Message,
-        [ValidateSet("INFO", "WARN", "ERROR")][string]$Level = "INFO"
+        [ValidateSet("DEBUG", "INFO", "WARN", "ERROR")][string]$Level = "INFO"
     )
 
     $line = "{0} [{1}] {2}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Level, $Message
@@ -65,6 +68,39 @@ function Write-AutomationLog {
     if ($script:LogPath) {
         Add-Content -LiteralPath $script:LogPath -Value $line -Encoding UTF8
     }
+    else {
+        # Scheduled runs do not know their generated log path until the config is
+        # loaded. Buffer those startup lines so the persisted log still begins at
+        # STEP 01 instead of silently losing the earliest diagnostics.
+        $script:PendingLogLines.Add($line)
+    }
+}
+
+function Write-AutomationStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [ValidateSet("INFO", "WARN", "ERROR")][string]$Level = "INFO"
+    )
+
+    $script:StepNumber++
+    $elapsedSeconds = [Math]::Round($script:RunStopwatch.Elapsed.TotalSeconds, 3)
+    Write-AutomationLog -Message ("STEP {0:D2} | +{1:N3}s | {2}" -f $script:StepNumber, $elapsedSeconds, $Message) -Level $Level
+}
+
+function Write-AutomationDebug {
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    $elapsedSeconds = [Math]::Round($script:RunStopwatch.Elapsed.TotalSeconds, 3)
+    Write-AutomationLog -Message ("+{0:N3}s | {1}" -f $elapsedSeconds, $Message) -Level "DEBUG"
+}
+
+function Get-AutomationDateListText {
+    param([Parameter(Mandatory = $false)][AllowEmptyCollection()][datetime[]]$Dates = @())
+
+    if ($null -eq $Dates -or $Dates.Count -eq 0) {
+        return "none"
+    }
+    return (@($Dates | Sort-Object -Unique | ForEach-Object { $_.ToString("yyyy-MM-dd") }) -join ", ")
 }
 
 function Get-RequiredProperty {
@@ -114,6 +150,10 @@ function Initialize-WorkingFolders {
     }
     if (-not (Test-Path -LiteralPath $script:LogPath -PathType Leaf)) {
         [void](New-Item -ItemType File -Path $script:LogPath -Force)
+    }
+    if ($script:PendingLogLines.Count -gt 0) {
+        Add-Content -LiteralPath $script:LogPath -Value $script:PendingLogLines.ToArray() -Encoding UTF8
+        $script:PendingLogLines.Clear()
     }
 }
 
@@ -716,6 +756,16 @@ function Get-DeliveryRows {
     $mapping = $source.Mapping
     $connection = New-SqlConnection -Config $Config
     $table = New-Object System.Data.DataTable
+    $queryTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-AutomationDebug -Message (
+        "Preparing parameterized A+W query for {0}. Join={1}.{2}->{3}.{4} DeliveryDateColumn={5}" -f
+        $Date.ToString("yyyy-MM-dd"),
+        [string]$source.Schema,
+        [string]$source.HeaderJoin,
+        [string]$source.Schema,
+        [string]$source.ItemJoin,
+        [string]$source.DeliveryDate
+    )
     try {
         $connection.Open()
         $command = $connection.CreateCommand()
@@ -762,6 +812,13 @@ ORDER BY
         }
         $connection.Dispose()
     }
+    $queryTimer.Stop()
+    Write-AutomationDebug -Message (
+        "A+W SQL query completed for {0}. ReturnedRows={1} DurationMs={2}" -f
+        $Date.ToString("yyyy-MM-dd"),
+        [int]$table.Rows.Count,
+        [Math]::Round($queryTimer.Elapsed.TotalMilliseconds)
+    )
 
     $remakeMask = [int64](Get-OptionalProperty -Object $mapping -Name "RemakeBitMask" -DefaultValue 128)
     $dateCandidates = @(Get-SupersededOrderCandidates -Rows $table.Rows -Date $Date -RemakeMask $remakeMask)
@@ -983,11 +1040,24 @@ function Invoke-ConfiguredPython {
         $baseArguments = @($Config.Runtime.PythonArguments | ForEach-Object { [string]$_ })
     }
     $allArguments = @($baseArguments + $Arguments)
+    $argumentPreview = @($allArguments | ForEach-Object {
+        $text = [string]$_
+        if ($text -match '\s') { '"{0}"' -f $text.Replace('"', '\"') } else { $text }
+    }) -join " "
+    Write-AutomationDebug -Message ("Launching Python subprocess. Executable={0} Arguments={1}" -f $pythonPath, $argumentPreview)
+    $pythonTimer = [System.Diagnostics.Stopwatch]::StartNew()
     $commandOutput = @(& $pythonPath @allArguments 2>&1)
     $exitCode = $LASTEXITCODE
+    $pythonTimer.Stop()
     foreach ($outputLine in $commandOutput) {
         Write-AutomationLog -Message ("Python: {0}" -f [string]$outputLine)
     }
+    Write-AutomationDebug -Message (
+        "Python subprocess finished. ExitCode={0} DurationMs={1} OutputLines={2}" -f
+        $exitCode,
+        [Math]::Round($pythonTimer.Elapsed.TotalMilliseconds),
+        [int]$commandOutput.Count
+    )
     if ($exitCode -ne 0) {
         $detail = @($commandOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
         if ($detail.Length -gt 4000) {
@@ -1007,11 +1077,13 @@ function Publish-AutomationNotification {
     )
 
     if ($RunMode -eq "RuntimeTest") {
+        Write-AutomationDebug -Message "App notification step skipped for RuntimeTest mode."
         return
     }
 
     $notifications = Get-OptionalProperty -Object $Config -Name "Notifications" -DefaultValue $null
     if ($null -eq $notifications -or -not [bool](Get-OptionalProperty -Object $notifications -Name "Enabled" -DefaultValue $true)) {
+        Write-AutomationDebug -Message "App notification step skipped because notifications are disabled."
         return
     }
 
@@ -1043,6 +1115,7 @@ function Publish-AutomationNotification {
         $hasChanges = $publishedDates.Count -gt 0 -or $hasImportChanges
         $notifyOnNoChanges = [bool](Get-OptionalProperty -Object $notifications -Name "NotifyOnNoChanges" -DefaultValue $true)
         if (-not $hasChanges -and -not $notifyOnNoChanges -and $failedFileCount -eq 0 -and $deferredCount -eq 0) {
+            Write-AutomationDebug -Message "App notification suppressed because the run had no changes and no-change notifications are disabled."
             return
         }
 
@@ -1135,6 +1208,7 @@ function Publish-AutomationNotification {
     $requestPath = Join-Path $Config.WorkingRoot ("State\notification-request-{0}.json" -f [guid]::NewGuid().ToString("N"))
 
     try {
+        Write-AutomationDebug -Message ("Preparing app notification. Type={0} Title={1} RequestFile={2}" -f $notificationType, $title, $requestPath)
         $request | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $requestPath -Encoding UTF8
         [void](Invoke-ConfiguredPython -Config $Config -Arguments @(
             $publisherPath,
@@ -1234,6 +1308,16 @@ function Export-DeliveryDate {
 
     $dateKey = $Date.ToString("yyyy-MM-dd")
     $script:CheckedDates.Add($Date)
+    Write-AutomationDebug -Message (
+        "Export context for {0}. Server={1} Database={2} HeaderTable={3}.{4} ItemTable={3}.{5} QueryTimeoutSeconds={6}" -f
+        $dateKey,
+        [string]$Config.Database.Server,
+        [string]$Config.Database.Database,
+        [string]$Config.SourceMapping.Schema,
+        [string]$Config.SourceMapping.HeaderTable,
+        [string]$Config.SourceMapping.ItemTable,
+        [int]$Config.Database.QueryTimeoutSeconds
+    )
     Write-AutomationLog -Message "Reading A+W delivery rows for $dateKey"
     $rows = @(Get-DeliveryRows -Config $Config -Date $Date)
     $excludedRows = @($script:LastExcludedDeliveryRows)
@@ -1340,7 +1424,16 @@ function Export-DeliveryDate {
     $dataHash = Get-Sha256Text -Text $hashText
     $fileName = [string]::Format([Globalization.CultureInfo]::InvariantCulture, [string]$Config.Report.OutputNameFormat, $Date)
     $destinationPath = Join-Path ([string]$Config.DestinationFolder) $fileName
+    $statePath = Get-StatePath -Config $Config -Date $Date
     $state = Read-DateState -Config $Config -Date $Date
+    Write-AutomationDebug -Message (
+        "Computed authoritative source fingerprint for {0}. DataHash={1} Destination={2} StateFile={3} PreviousStatePresent={4}" -f
+        $dateKey,
+        $dataHash,
+        $destinationPath,
+        $statePath,
+        [bool]($null -ne $state)
+    )
 
     $stateHash = if ($null -ne $state -and $state.PSObject.Properties.Name -contains "dataHash") { [string]$state.dataHash } else { "" }
     $stateImported = if ($null -ne $state -and $state.PSObject.Properties.Name -contains "imported") { [bool]$state.imported } else { $false }
@@ -1360,10 +1453,23 @@ function Export-DeliveryDate {
         -not [string]::IsNullOrWhiteSpace($stateWorkbookHash) -and
         $currentWorkbookHash -eq $stateWorkbookHash
     )
+    Write-AutomationDebug -Message (
+        "Workbook/state comparison for {0}. DataUnchanged={1} WorkbookExists={2} WorkbookHashMatches={3} FormatVersion={4} PreviouslyImported={5}" -f
+        $dateKey,
+        [bool]($stateHash -eq $dataHash),
+        [bool](Test-Path -LiteralPath $destinationPath -PathType Leaf),
+        [bool]$workbookIsCurrent,
+        $(if ([string]::IsNullOrWhiteSpace($stateFormatVersion)) { "none" } else { $stateFormatVersion }),
+        [bool]$stateImported
+    )
     if ($RunMode -ne "Test" -and $stateHash -eq $dataHash -and $workbookIsCurrent) {
         Write-AutomationLog -Message "Unchanged: $fileName"
         if (-not $stateImported) {
+            Write-AutomationDebug -Message "Source/workbook are unchanged but scanner import state is incomplete; queueing $dateKey for reconciliation."
             $script:PendingImportDates.Add($Date)
+        }
+        else {
+            Write-AutomationDebug -Message "Source/workbook and scanner import state are already current for $dateKey; no rebuild is required."
         }
         return
     }
@@ -1376,6 +1482,15 @@ function Export-DeliveryDate {
     $xlsxPath = Join-Path $Config.WorkingRoot ("Staging\$runToken.xlsx")
     $builderPath = Join-Path $PSScriptRoot "build_delivery_workbook.py"
     $payload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+    $payloadBytes = (Get-Item -LiteralPath $jsonPath).Length
+    Write-AutomationDebug -Message (
+        "Staging payload ready for {0}. Input={1} Output={2} PayloadBytes={3} DimensionUnitsPerInch={4}" -f
+        $dateKey,
+        $jsonPath,
+        $xlsxPath,
+        [int64]$payloadBytes,
+        $dimensionUnitsPerInch
+    )
 
     try {
         Write-AutomationLog -Message "Building workbook for $dateKey in the staging folder."
@@ -1389,17 +1504,24 @@ function Export-DeliveryDate {
             throw "Workbook builder did not create $xlsxPath"
         }
         $length = (Get-Item -LiteralPath $xlsxPath).Length
+        Write-AutomationDebug -Message ("Workbook builder produced {0} bytes for {1}." -f [int64]$length, $dateKey)
         if ($length -lt [int]$Config.MinimumWorkbookBytes) {
             throw "Generated workbook is unexpectedly small: $length bytes"
         }
         Write-AutomationLog -Message "Validating generated workbook for $dateKey."
         [void](Invoke-ConfiguredPython -Config $Config -Arguments @($builderPath, "--validate", $xlsxPath))
+        Write-AutomationDebug -Message "Workbook validation completed for $dateKey; publishing validated file to the delivery-list destination."
         Publish-Workbook -SourcePath $xlsxPath -DestinationPath $destinationPath
         $publishedWorkbookHash = (Get-FileHash -LiteralPath $destinationPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        Write-AutomationDebug -Message ("Published workbook verification for {0}. SHA256={1}" -f $dateKey, $publishedWorkbookHash)
 
         $sourceDataChanged = ($null -eq $state -or $stateHash -ne $dataHash)
         $nextImportedState = (-not $sourceDataChanged -and $stateImported)
         Write-DateState -Config $Config -Date $Date -Hash $dataHash -WorkbookPath $destinationPath -WorkbookHash $publishedWorkbookHash -RowCount $rows.Count -PieceCount $pieceCount -Imported $nextImportedState
+        Write-AutomationDebug -Message (
+            "Persisted delivery-date state for {0}. Rows={1} Pieces={2} Imported={3} StateFile={4}" -f
+            $dateKey, [int]$rows.Count, [int]$pieceCount, [bool]$nextImportedState, $statePath
+        )
         $script:PublishedDates.Add($Date)
         if ($sourceDataChanged -or -not $stateImported) {
             $script:PendingImportDates.Add($Date)
@@ -1407,6 +1529,8 @@ function Export-DeliveryDate {
         Write-AutomationLog -Message "Published $fileName with $($rows.Count) line items and $pieceCount pieces."
     }
     catch {
+        Write-AutomationLog -Message ("Delivery-date export failed for {0}. {1}: {2}" -f $dateKey, $_.Exception.GetType().Name, $_.Exception.Message) -Level "ERROR"
+        Write-AutomationDebug -Message ("Failure script stack for {0}: {1}" -f $dateKey, [string]$_.ScriptStackTrace)
         $failedFolder = Join-Path $Config.WorkingRoot "Failed"
         if (Test-Path -LiteralPath $jsonPath -PathType Leaf) {
             Copy-Item -LiteralPath $jsonPath -Destination (Join-Path $failedFolder ([IO.Path]::GetFileName($jsonPath))) -Force -ErrorAction SilentlyContinue
@@ -1419,6 +1543,7 @@ function Export-DeliveryDate {
     finally {
         Remove-Item -LiteralPath $jsonPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $xlsxPath -Force -ErrorAction SilentlyContinue
+        Write-AutomationDebug -Message ("Cleaned staging files for {0}. Input={1} Output={2}" -f $dateKey, $jsonPath, $xlsxPath)
     }
 }
 
@@ -1449,12 +1574,54 @@ function Invoke-ScannerImport {
 
     $targetDates = @($Dates | Sort-Object -Unique)
     $forcedDates = @($ForceDates | Sort-Object -Unique)
+    Write-AutomationDebug -Message (
+        "Scanner import request. ImportMode={0} Force={1} SelectiveSqlSync={2} TargetDates=[{3}] ForceDates=[{4}]" -f
+        $importMode,
+        [bool]$Force,
+        [bool]$SelectiveSqlSync,
+        (Get-AutomationDateListText -Dates $targetDates),
+        (Get-AutomationDateListText -Dates $forcedDates)
+    )
     Write-AutomationLog -Message ("Scanner project root for import: {0}" -f $projectRoot)
+
+    # Bind the detached updater process to the exact scanner store used by the
+    # live web server. This prevents Import History from reporting a successful
+    # import into one SQLite database while Scan/Print are reading another.
+    $scannerStore = Get-OptionalProperty -Object $Config -Name "ScannerStore" -DefaultValue $null
+    $expectedStoreMode = ""
+    $expectedStoreDatabase = ""
+    $expectedStoreServer = ""
+    if ($null -ne $scannerStore) {
+        $expectedStoreMode = ([string](Get-OptionalProperty -Object $scannerStore -Name "Mode" -DefaultValue "")).Trim().ToLowerInvariant()
+        $expectedStoreDatabase = ([string](Get-OptionalProperty -Object $scannerStore -Name "Database" -DefaultValue "")).Trim()
+        $expectedStoreServer = ([string](Get-OptionalProperty -Object $scannerStore -Name "Server" -DefaultValue "")).Trim()
+    }
+    if ($expectedStoreMode -eq "sqlite") {
+        if ([string]::IsNullOrWhiteSpace($expectedStoreDatabase)) {
+            throw "ScannerStore.Database is required when ScannerStore.Mode is sqlite."
+        }
+        $expectedStoreDatabase = [System.IO.Path]::GetFullPath($expectedStoreDatabase)
+        $env:DLS_DATABASE_PATH = $expectedStoreDatabase
+        Write-AutomationLog -Message ("Bound scanner importer to live SQLite database: {0}" -f $expectedStoreDatabase)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($expectedStoreMode)) {
+        Write-AutomationLog -Message (
+            "Scanner importer will validate live store identity. Mode={0} Database={1} Server={2}" -f
+            $expectedStoreMode,
+            $expectedStoreDatabase,
+            $expectedStoreServer
+        )
+    }
+    else {
+        Write-AutomationLog -Message "Scanner-store identity was not supplied by the web control plane; importer mismatch protection is unavailable for this run." -Level "WARN"
+    }
+
     $importerPath = Join-Path $PSScriptRoot "import_delivery_folder.py"
     $dateFrom = ($targetDates | Select-Object -First 1).ToString("yyyy-MM-dd")
     $dateTo = ($targetDates | Select-Object -Last 1).ToString("yyyy-MM-dd")
     $resultPath = Join-Path $Config.WorkingRoot ("State\import-result-{0}.json" -f [guid]::NewGuid().ToString("N"))
     $syncRequestPath = Join-Path $Config.WorkingRoot ("State\import-sync-request-{0}.json" -f [guid]::NewGuid().ToString("N"))
+    Write-AutomationDebug -Message ("Scanner import temporary files. Result={0} SyncRequest={1}" -f $resultPath, $syncRequestPath)
 
     if ($SelectiveSqlSync) {
         Write-AutomationLog -Message "Verifying generated workbooks and scanner stage lists for $dateFrom through $dateTo"
@@ -1476,6 +1643,15 @@ function Invoke-ScannerImport {
             "--initialize-store", ([bool](Get-OptionalProperty -Object $Config.Import -Name "InitializeStore" -DefaultValue $true)).ToString().ToLowerInvariant(),
             "--result-path", $resultPath
         )
+        if (-not [string]::IsNullOrWhiteSpace($expectedStoreMode)) {
+            $arguments += @("--expected-store-mode", $expectedStoreMode)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($expectedStoreDatabase)) {
+            $arguments += @("--expected-store-database", $expectedStoreDatabase)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($expectedStoreServer)) {
+            $arguments += @("--expected-store-server", $expectedStoreServer)
+        }
         if ($SelectiveSqlSync) {
             $syncRequest = [ordered]@{
                 targetDates = @($targetDates | ForEach-Object { $_.ToString("yyyy-MM-dd") })
@@ -1516,6 +1692,30 @@ function Invoke-ScannerImport {
             throw "Scanner import verification completed without producing its result summary."
         }
         $result = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $resolvedScannerStore = Get-OptionalProperty -Object $result -Name "scannerStore" -DefaultValue $null
+        if ($null -ne $resolvedScannerStore) {
+            Write-AutomationLog -Message (
+                "Scanner import store confirmed. Mode={0} Database={1} Server={2}" -f
+                [string](Get-OptionalProperty -Object $resolvedScannerStore -Name "mode" -DefaultValue ""),
+                [string](Get-OptionalProperty -Object $resolvedScannerStore -Name "database" -DefaultValue ""),
+                [string](Get-OptionalProperty -Object $resolvedScannerStore -Name "server" -DefaultValue "")
+            )
+        }
+        Write-AutomationDebug -Message (
+            "Normalized scanner result loaded. Files={0} ImportedDates={1} FailedDates={2}" -f
+            [int]@($result.files).Count,
+            [int]@($result.importedDates).Count,
+            [int]@($result.failedDates).Count
+        )
+        foreach ($fileResultDebug in @($result.files)) {
+            Write-AutomationDebug -Message (
+                "Import result. File={0} DeliveryDate={1} Classification={2} Reason={3}" -f
+                [string](Get-OptionalProperty -Object $fileResultDebug -Name "fileName" -DefaultValue ""),
+                [string](Get-OptionalProperty -Object $fileResultDebug -Name "deliveryDate" -DefaultValue ""),
+                [string](Get-OptionalProperty -Object $fileResultDebug -Name "classification" -DefaultValue ""),
+                [string](Get-OptionalProperty -Object $fileResultDebug -Name "reason" -DefaultValue "")
+            )
+        }
         $lastImportResultPath = Join-Path $Config.WorkingRoot "State\last-import-result.json"
         Copy-Item -LiteralPath $resultPath -Destination $lastImportResultPath -Force
         $script:ImportResults = @($script:ImportResults + @($result.files))
@@ -1661,6 +1861,7 @@ function Invoke-ScannerImport {
         )
     }
     finally {
+        Write-AutomationDebug -Message "Removing scanner-import temporary request/result files."
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $syncRequestPath -Force -ErrorAction SilentlyContinue
     }
@@ -1670,12 +1871,30 @@ function Remove-OldAutomationFiles {
     param([Parameter(Mandatory = $true)]$Config)
 
     $cutoff = (Get-Date).AddDays(-[int]$Config.LogRetentionDays)
+    $removedCount = 0
+    Write-AutomationDebug -Message (
+        "Retention cleanup scanning Logs/Staging/Failed for files older than {0:o}. RetentionDays={1}" -f
+        $cutoff,
+        [int]$Config.LogRetentionDays
+    )
     foreach ($folderName in @("Logs", "Staging", "Failed")) {
         $folder = Join-Path $Config.WorkingRoot $folderName
-        Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue | Where-Object {
+        $staleFiles = @(Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue | Where-Object {
             $_.LastWriteTime -lt $cutoff
-        } | Remove-Item -Force -ErrorAction SilentlyContinue
+        })
+        Write-AutomationDebug -Message ("Retention folder scan. Folder={0} StaleFiles={1}" -f $folder, [int]$staleFiles.Count)
+        foreach ($staleFile in $staleFiles) {
+            try {
+                Remove-Item -LiteralPath $staleFile.FullName -Force -ErrorAction Stop
+                $removedCount++
+                Write-AutomationDebug -Message ("Retention removed file: {0}" -f $staleFile.FullName)
+            }
+            catch {
+                Write-AutomationLog -Message ("Retention cleanup could not remove {0}: {1}" -f $staleFile.FullName, $_.Exception.Message) -Level "WARN"
+            }
+        }
     }
+    Write-AutomationDebug -Message ("Retention cleanup finished. RemovedFiles={0}" -f $removedCount)
 }
 
 function Write-LastRunSummary {
@@ -1725,6 +1944,15 @@ function Write-LastRunSummary {
         [void](New-Item -ItemType Directory -Path $summaryFolder -Force)
     }
     $temporaryPath = "{0}.{1}.tmp" -f $path, [guid]::NewGuid().ToString("N")
+    Write-AutomationDebug -Message (
+        "Writing run summary. Path={0} Succeeded={1} CheckedDates={2} PublishedDates={3} ImportedDates={4} ImportResults={5}" -f
+        $path,
+        [bool]$Succeeded,
+        [int]$script:CheckedDates.Count,
+        [int]$script:PublishedDates.Count,
+        [int]$script:ImportedDates.Count,
+        [int]$importResultSnapshot.Count
+    )
     try {
         $summary | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
         Move-Item -LiteralPath $temporaryPath -Destination $path -Force
@@ -1745,6 +1973,7 @@ function Write-LastRunSummary {
         try {
             $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $historyTemporaryPath -Encoding UTF8
             Move-Item -LiteralPath $historyTemporaryPath -Destination $historyPath -Force
+            Write-AutomationDebug -Message ("Archived immutable run summary: {0}" -f $historyPath)
         }
         finally {
             Remove-Item -LiteralPath $historyTemporaryPath -Force -ErrorAction SilentlyContinue
@@ -1767,13 +1996,55 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($requestedLogFolder)) {
             [void](New-Item -ItemType Directory -Path $requestedLogFolder -Force)
         }
-        [void](New-Item -ItemType File -Path $requestedLogPath -Force)
+        if (-not (Test-Path -LiteralPath $requestedLogPath -PathType Leaf)) {
+            [void](New-Item -ItemType File -Path $requestedLogPath -Force)
+        }
         $script:LogPath = $requestedLogPath
     }
-    Write-AutomationLog -Message "PowerShell automation runner accepted the request."
+    Write-AutomationStep -Message "PowerShell automation runner accepted the request. Per-run log initialized."
+    Write-AutomationDebug -Message (
+        "Request context. RequestId={0} RunId={1} Mode={2} RequestedAction={3} DeliveryDate={4} DateFrom={5} DateTo={6} FailIfBusy={7}" -f
+        [string]$RequestId,
+        [string]$script:RunId,
+        [string]$Mode,
+        [string]$RunAction,
+        [string]$DeliveryDate,
+        [string]$DateFrom,
+        [string]$DateTo,
+        [bool]$FailIfBusy
+    )
+    Write-AutomationDebug -Message (
+        "Runtime context. Machine={0} User={1} PID={2} PowerShell={3} ScriptRoot={4} CurrentDirectory={5} ConfigPath={6} LogPath={7} SummaryPath={8}" -f
+        [Environment]::MachineName,
+        [Environment]::UserName,
+        $PID,
+        $PSVersionTable.PSVersion.ToString(),
+        $PSScriptRoot,
+        (Get-Location).Path,
+        [IO.Path]::GetFullPath($ConfigPath),
+        [string]$script:LogPath,
+        [string]$SummaryPath
+    )
 
+    Write-AutomationStep -Message "Reading and validating automation configuration."
     $script:Config = Read-AutomationConfig -Path $ConfigPath
+    Write-AutomationDebug -Message (
+        "Configuration loaded. Version={0} WorkingRoot={1} DestinationFolder={2} ProjectRoot={3} DatabaseServer={4} Database={5} AuthenticationMode={6} PythonPath={7}" -f
+        [string](Get-OptionalProperty -Object $script:Config -Name "Version" -DefaultValue ""),
+        [string]$script:Config.WorkingRoot,
+        [string]$script:Config.DestinationFolder,
+        [string](Get-OptionalProperty -Object $script:Config -Name "ProjectRoot" -DefaultValue ""),
+        [string](Get-OptionalProperty -Object $script:Config.Database -Name "Server" -DefaultValue ""),
+        [string](Get-OptionalProperty -Object $script:Config.Database -Name "Database" -DefaultValue ""),
+        [string](Get-OptionalProperty -Object $script:Config.Database -Name "AuthenticationMode" -DefaultValue "configured connection settings"),
+        [string](Get-OptionalProperty -Object $script:Config.Runtime -Name "PythonPath" -DefaultValue "python")
+    )
+
+    Write-AutomationStep -Message "Creating/verifying runtime working folders and log destination."
     Initialize-WorkingFolders -Config $script:Config
+    Write-AutomationDebug -Message ("Working folders ready under {0}. ActiveLog={1}" -f [string]$script:Config.WorkingRoot, [string]$script:LogPath)
+
+    Write-AutomationStep -Message "Loading persistent source exclusions, superseded approvals, and manual overrides."
     $script:VerifiedSourceExclusions = @(Read-VerifiedSourceExclusions -Config $script:Config)
     $script:VerifiedSourceOrderExclusions = @(Read-VerifiedSourceOrderExclusions -Config $script:Config)
     $script:VerifiedSourceManualOverrides = @(Read-VerifiedSourceManualOverrides -Config $script:Config)
@@ -1785,22 +2056,28 @@ try {
         [int]$script:VerifiedSourceManualOverrides.Count
     )
 
+    Write-AutomationStep -Message "Acquiring the single-run automation lock."
     if (-not (Acquire-AutomationLock -Config $script:Config -FailWhenBusy ([bool]$FailIfBusy))) {
         $runSucceeded = $true
         exit 0
     }
+    Write-AutomationDebug -Message ("Automation lock acquired. LockFile={0}" -f (Join-Path $script:Config.WorkingRoot "State\run.lock"))
 
     if ($Mode -eq "RuntimeTest") {
+        Write-AutomationStep -Message "Running automation runtime preflight checks."
         $automationConfig = Get-OptionalProperty -Object $script:Config -Name "Automation" -DefaultValue $null
         $configuredMode = [string](Get-OptionalProperty -Object $automationConfig -Name "Mode" -DefaultValue "sql-export-and-import")
         if ($configuredMode -in @("sql-export-only", "sql-export-and-import")) {
+            Write-AutomationStep -Message "Testing A+W SQL connectivity and mapped source columns."
             Test-SqlRuntime -Config $script:Config
             $builderPath = Join-Path $PSScriptRoot "build_delivery_workbook.py"
+            Write-AutomationStep -Message "Running the workbook builder self-test."
             Invoke-ConfiguredPython -Config $script:Config -Arguments @($builderPath, "--self-test")
         }
         else {
             Write-AutomationLog -Message "SQL connectivity test skipped because the configured mode is $configuredMode."
         }
+        Write-AutomationStep -Message "Testing destination-folder write access."
         Test-DestinationWriteAccess -Config $script:Config
         $projectRoot = [string]$script:Config.ProjectRoot
         if (-not [string]::IsNullOrWhiteSpace($projectRoot)) {
@@ -1811,11 +2088,13 @@ try {
                 }
             }
             $compatibilityPath = Join-Path $PSScriptRoot "validate_scanner_compatibility.py"
+            Write-AutomationStep -Message "Validating scanner/backend compatibility."
             Invoke-ConfiguredPython -Config $script:Config -Arguments @(
                 $compatibilityPath,
                 "--project-root", $projectRoot
             )
         }
+        Write-AutomationStep -Message "Runtime preflight completed successfully."
         Write-AutomationLog -Message "Runtime test passed."
         $runSucceeded = $true
         exit 0
@@ -1833,6 +2112,8 @@ try {
         }
     }
     $script:ResolvedAction = $resolvedAction
+    Write-AutomationStep -Message ("Resolved updater action to {0}." -f $resolvedAction)
+    Write-AutomationDebug -Message ("RequestedAction={0} ResolvedAction={1}" -f [string]$RunAction, [string]$resolvedAction)
 
     if ($resolvedAction -eq "Disabled") {
         Write-AutomationLog -Message "Configured automation mode is disabled. No files were queried or imported." -Level "WARN"
@@ -1841,16 +2122,25 @@ try {
         exit 0
     }
 
+    Write-AutomationStep -Message "Resolving the delivery-date window for this run."
     $dates = @(Get-DateRange -Config $script:Config -RunMode $Mode -RequestedDate $DeliveryDate -RequestedDateFrom $DateFrom -RequestedDateTo $DateTo)
+    Write-AutomationDebug -Message ("Resolved {0} delivery date(s): {1}" -f [int]$dates.Count, (Get-AutomationDateListText -Dates $dates))
 
     if ($resolvedAction -eq "FolderImportOnly") {
+        Write-AutomationStep -Message "Starting scanner folder verification/import without querying A+W SQL."
         Invoke-ScannerImport -Config $script:Config -Dates $dates -Force $true
     }
     else {
         foreach ($date in $dates) {
+            $dateKey = $date.ToString("yyyy-MM-dd")
+            Write-AutomationStep -Message ("Processing A+W export for delivery date {0}." -f $dateKey)
+            $dateTimer = [System.Diagnostics.Stopwatch]::StartNew()
             Export-DeliveryDate -Config $script:Config -Date $date -RunMode $Mode
+            $dateTimer.Stop()
+            Write-AutomationDebug -Message ("Finished delivery date {0}. DurationMs={1}" -f $dateKey, [Math]::Round($dateTimer.Elapsed.TotalMilliseconds))
         }
         if ($resolvedAction -eq "SqlExportAndImport") {
+            Write-AutomationStep -Message "Preparing scanner reconciliation for exported A+W delivery dates."
             $sourceDates = @($script:SourceDates | Sort-Object -Unique)
             # A browser-started Custom run is an explicit operator request to reconcile
             # the scanner with A+W, even when the exported workbook hash is unchanged.
@@ -1864,6 +2154,12 @@ try {
                 $forceImportDates = @($script:PendingImportDates | Sort-Object -Unique)
             }
             if ($sourceDates.Count -gt 0) {
+                Write-AutomationDebug -Message (
+                    "Scanner reconciliation dates. SourceDates=[{0}] ForceImportDates=[{1}]" -f
+                    (Get-AutomationDateListText -Dates $sourceDates),
+                    (Get-AutomationDateListText -Dates $forceImportDates)
+                )
+                Write-AutomationStep -Message "Running scanner verification/import for the selected SQL dates."
                 Invoke-ScannerImport `
                     -Config $script:Config `
                     -Dates $sourceDates `
@@ -1882,6 +2178,7 @@ try {
             Write-AutomationLog -Message "SQL export-only action completed. Generated workbooks remain in the Temp Delivery Lists folder until imported."
         }
     }
+    Write-AutomationStep -Message "Applying automation retention cleanup."
     Remove-OldAutomationFiles -Config $script:Config
     $completedFailureCount = @($script:ImportResults | Where-Object { [string]$_.classification -eq "failed" }).Count
     $safetyDeferredCount = [int]$script:SafetyDeferredDates.Count
@@ -1897,7 +2194,16 @@ try {
     else {
         Write-AutomationLog -Message "Automation run completed successfully."
     }
+    Write-AutomationStep -Message "Publishing the final in-app automation notification when configured."
     Publish-AutomationNotification -Config $script:Config -RunMode $Mode -Succeeded $true
+    Write-AutomationStep -Message (
+        "Run workflow finished. CheckedDates={0} SourceDates={1} PublishedDates={2} ImportedDates={3} ImportResults={4}." -f
+        [int]$script:CheckedDates.Count,
+        [int]$script:SourceDates.Count,
+        [int]$script:PublishedDates.Count,
+        [int]$script:ImportedDates.Count,
+        [int]$script:ImportResults.Count
+    )
     $runSucceeded = $true
 }
 catch {
@@ -1907,6 +2213,7 @@ catch {
         $runErrorDetail = $runError
     }
     try {
+        Write-AutomationStep -Message "Automation workflow failed; recording full exception details." -Level "ERROR"
         Write-AutomationLog -Message $runErrorDetail -Level "ERROR"
         if ($null -ne $script:Config) {
             $lastErrorPath = Join-Path $script:Config.WorkingRoot "State\last-error.txt"
@@ -1936,10 +2243,34 @@ catch {
 finally {
     if ($null -ne $script:Config -and -not $script:SkipSummary) {
         try {
+            Write-AutomationStep -Message "Writing the final run summary and immutable history record."
             Write-LastRunSummary -Config $script:Config -RunMode $Mode -Succeeded $runSucceeded -ErrorMessage $runError
         }
         catch {
+            try {
+                Write-AutomationLog -Message ("Final run summary could not be written: {0}" -f $_.Exception.Message) -Level "ERROR"
+            }
+            catch {
+            }
         }
     }
+    try {
+        if ($null -ne $script:LockStream) {
+            Write-AutomationDebug -Message "Releasing the single-run automation lock."
+        }
+    }
+    catch {
+    }
     Release-AutomationLock
+    try {
+        $script:RunStopwatch.Stop()
+        Write-AutomationLog -Message (
+            "Automation runner exiting. Succeeded={0} TotalDurationMs={1} StepsLogged={2}" -f
+            [bool]$runSucceeded,
+            [Math]::Round($script:RunStopwatch.Elapsed.TotalMilliseconds),
+            [int]$script:StepNumber
+        ) -Level $(if ($runSucceeded) { "INFO" } else { "ERROR" })
+    }
+    catch {
+    }
 }

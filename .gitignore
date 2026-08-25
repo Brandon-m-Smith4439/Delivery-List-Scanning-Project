@@ -23,6 +23,10 @@ tmp*/
 *.log
 *.tmp
 
+# SQLite runtime sidecars
+*.db-wal
+*.db-shm
+
 # Excel temporary/lock files
 ~$*.xlsm
 ~$*.xlsx

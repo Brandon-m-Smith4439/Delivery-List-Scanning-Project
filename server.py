@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import html
+import gzip
+import io
 import os
 import re
 import secrets
@@ -49,6 +51,69 @@ STORE = create_store(CONFIG)
 install_safe_delivery_import(STORE)
 OPERATIONS = OperationsFeatureService(STORE, CONFIG, ROOT)
 DELIVERY_AUTOMATION = DeliveryAutomationController(ROOT, CONFIG, STORE)
+
+# v0.340: the Admin shell may be opened by a purpose-built role without the
+# broad view_admin permission. Keep dashboard access aligned with every current
+# Admin tool while each endpoint below still enforces its own narrower action.
+ADMIN_DASHBOARD_PERMISSIONS = (
+    "view_admin",
+    "reset_delivery_lists",
+    "import_delivery_lists",
+    "edit_delivery_list_items",
+    "create_delivery_list_orders",
+    "delete_delivery_list_items",
+    "delete_delivery_lists",
+    "review_superseded_orders",
+    "manage_users",
+    "manage_user_access",
+    "manage_user_assignments",
+    "manage_roles",
+    "view_sessions",
+    "manage_stations",
+    "manage_route_rules",
+    "manage_customer_emails",
+    "manage_lookup_values",
+    "manage_automation",
+    "manage_cross_date_scanning",
+    "manage_reject_settings",
+    "manage_bay_layout",
+    "manage_bay_scanner_rules",
+    "manage_bay_auto_assigner",
+    "manage_racks",
+)
+
+# Action History is not one global security capability. Each GUI history endpoint
+# must be readable only by a role that can legitimately access that GUI. This
+# closes the old avenue where any single Admin-like permission could query a
+# different workspace's audit records by changing the context query string.
+ACTION_HISTORY_CONTEXT_PERMISSIONS = {
+    "deliveryLists": ("edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items", "delete_delivery_lists", "reset_delivery_lists", "import_delivery_lists"),
+    "deliveryActions": ("reset_delivery_lists", "delete_delivery_lists"),
+    "supersededOrders": ("view_admin", "review_superseded_orders"),
+    "manualEdit": ("edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items"),
+    "users": ("manage_users", "manage_user_access", "manage_user_assignments"),
+    "roles": ("manage_roles",),
+    "sessions": ("view_sessions",),
+    "stations": ("manage_stations",),
+    "customerRoutes": ("manage_route_rules",),
+    "customerEmails": ("manage_customer_emails",),
+    "lookups": ("manage_lookup_values",),
+    "rejectSettings": ("manage_reject_settings",),
+    "bayScannerRules": ("manage_bay_scanner_rules", "manage_bay_auto_assigner"),
+    "crossDateScanning": ("manage_cross_date_scanning", "manage_bay_scanner_rules"),
+    "bayAutoAssigner": ("manage_bay_auto_assigner",),
+    "racks": ("view_racks", "scan_racks", "manage_racks", "transfer_rack_contents"),
+    "rackForm": ("manage_racks",),
+    "rackSetForm": ("manage_racks",),
+    "recentScans": ("view_scan_history", "correct_scans"),
+    "rack-details": ("view_racks", "scan_racks", "manage_racks", "transfer_rack_contents"),
+    "racks-history": ("view_racks", "scan_racks", "manage_racks", "transfer_rack_contents"),
+    "packing-history": ("view_racks", "print_export"),
+    "oldBays": ("view_bays", "run_bay_checks", "clear_bay_items"),
+    "rush": ("view_bays", "manage_rush_work"),
+    "manageBayItems": ("view_bays", "assign_bay_items", "move_bay_items", "clear_bay_items"),
+    "editBays": ("manage_bay_layout",),
+}
 
 
 PRINT_PACKAGE_SESSION_TTL_SECONDS = 15 * 60
@@ -1541,6 +1606,9 @@ def summarize_print_package(package: dict, requested_stage_count: int = 0) -> di
 
 
 class Handler(SimpleHTTPRequestHandler):
+    _compressed_asset_cache: dict[tuple[str, int, int], bytes] = {}
+    _compressed_asset_lock = threading.Lock()
+
     def __init__(self, *args, **kwargs):
         """Purpose: Initialize a handler instance and its required state.
 
@@ -1555,10 +1623,48 @@ class Handler(SimpleHTTPRequestHandler):
         Effects: This function reads or updates shared application state.
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
+        request_path = urlparse(self.path).path
+        if request_path.startswith(("/static/", "/assets/", "/sounds/")):
+            # Asset URLs carry a release cache key in index.html. Retaining them
+            # avoids re-downloading several megabytes on every page visit while
+            # the next release still invalidates the browser cache immediately.
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        else:
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
         super().end_headers()
+
+    def send_head(self):
+        """Serve versioned text assets compressed, then reuse the process cache."""
+        request_path = urlparse(self.path).path
+        accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "").lower()
+        compressible_asset = (
+            request_path.startswith(("/static/", "/assets/"))
+            and Path(request_path).suffix.lower() in {".css", ".js", ".json", ".svg"}
+        )
+        if self.command in {"GET", "HEAD"} and accepts_gzip and compressible_asset:
+            source = Path(self.translate_path(request_path))
+            if source.is_file():
+                stat = source.stat()
+                cache_key = (str(source), stat.st_mtime_ns, stat.st_size)
+                with self._compressed_asset_lock:
+                    body = self._compressed_asset_cache.get(cache_key)
+                    if body is None:
+                        body = gzip.compress(source.read_bytes(), compresslevel=6, mtime=0)
+                        stale_keys = [key for key in self._compressed_asset_cache if key[0] == str(source)]
+                        for stale_key in stale_keys:
+                            self._compressed_asset_cache.pop(stale_key, None)
+                        self._compressed_asset_cache[cache_key] = body
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", self.guess_type(str(source)))
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Last-Modified", self.date_time_string(stat.st_mtime))
+                self.end_headers()
+                return io.BytesIO(body)
+        return super().send_head()
 
     def send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
         """Purpose: Send JSON for the delivery-list scanner workflow.
@@ -1566,10 +1672,16 @@ class Handler(SimpleHTTPRequestHandler):
         Effects: This function reads or updates shared application state.
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
-        body = json.dumps(payload, indent=2).encode("utf-8")
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        use_gzip = len(body) >= 1024 and "gzip" in self.headers.get("Accept-Encoding", "").lower()
+        if use_gzip:
+            body = gzip.compress(body, compresslevel=4, mtime=0)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        if use_gzip:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -1654,6 +1766,26 @@ class Handler(SimpleHTTPRequestHandler):
             return None
         return user
 
+    def require_all_permissions(self, *permissions: str) -> dict | None:
+        """Require every named permission for an operation that crosses security domains.
+
+        v0.340 uses this for new-user creation because that workflow creates a
+        profile *and* assigns its initial role/station. Keeping the check here
+        prevents a profile-management role from silently becoming an access-
+        assignment role through a combined endpoint.
+        """
+        user = self.current_user()
+        if not user:
+            self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+            return None
+        granted = {canonical_permission_name(value) for value in user.get("permissions", [])}
+        requested = [canonical_permission_name(permission) for permission in permissions]
+        missing = [permission for permission in requested if permission not in granted]
+        if missing:
+            self.send_json({"error": "Permission denied", "permissions": requested, "missingPermissions": missing}, HTTPStatus.FORBIDDEN)
+            return None
+        return user
+
 
     def require_admin_role(self) -> dict | None:
         """Require the built-in Admin role for destructive reject management."""
@@ -1686,7 +1818,7 @@ class Handler(SimpleHTTPRequestHandler):
         }
         administrative_review_permissions = {
             canonical_permission_name("view_admin"),
-            canonical_permission_name("edit_delivery_lists"),
+            canonical_permission_name("edit_delivery_list_items"),
             canonical_permission_name("preview_delivery_updates"),
         }
         if administrative_review_permissions.issubset(granted):
@@ -1757,6 +1889,14 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(STORE.health())
             return
 
+        if parsed.path == "/api/presentation-profile":
+            # v0.355 presentation metadata is intentionally non-sensitive so the
+            # sign-in screen and shell can use the configured organization name
+            # before a user session exists. Workflow identifiers are never exposed
+            # or changed through this endpoint.
+            self.send_json(STORE.get_presentation_context())
+            return
+
         if parsed.path == "/api/session":
             user = self.current_user()
             self.send_json({"authenticated": bool(user), "user": user})
@@ -1778,7 +1918,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"notifications": STORE.get_notification_history(user["username"], int(limit or 50))})
             return
         if parsed.path == "/api/delivery-list-updates":
-            user = self.require_permission("view_lists")
+            user = self.require_permission("view_delivery_lists")
             if not user:
                 return
             list_id = str(parse_qs(parsed.query).get("listId", [""])[0] or "").strip()
@@ -1792,7 +1932,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         # DLS_V135_OPERATIONS_ROUTES: per-user line flags, rejects, and packing history.
         if parsed.path == "/api/operations/line-flags":
-            user = self.require_permission("view_lists")
+            user = self.require_permission("view_delivery_lists")
             if not user:
                 return
             list_id = str(parse_qs(parsed.query).get("listId", [""])[0] or "").strip()
@@ -1841,13 +1981,13 @@ class Handler(SimpleHTTPRequestHandler):
 
         packing_history_print_match = re.match(r"^/api/racks/packing-history/(\d+)/print$", parsed.path)
         if packing_history_print_match:
-            if not self.require_any_permission("view_racks", "export_reports"):
+            if not self.require_any_permission("view_racks", "print_export"):
                 return
             self.send_html(OPERATIONS.packing_history_print_html(int(packing_history_print_match.group(1))))
             return
 
         if parsed.path == "/api/racks/packing-history":
-            if not self.require_any_permission("view_racks", "export_reports"):
+            if not self.require_any_permission("view_racks", "print_export"):
                 return
             limit = int(parse_qs(parsed.query).get("limit", ["250"])[0] or 250)
             self.send_json(OPERATIONS.packing_history(limit))
@@ -1873,6 +2013,7 @@ class Handler(SimpleHTTPRequestHandler):
                     classification=params.get("classification", [""])[0],
                     date_from=params.get("dateFrom", [""])[0],
                     date_to=params.get("dateTo", [""])[0],
+                    page_mode=params.get("pageMode", ["rows"])[0],
                 )
             )
             return
@@ -1883,28 +2024,52 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(DELIVERY_AUTOMATION.get_latest_import_result())
             return
 
+        if parsed.path == "/api/admin/delivery-list-catalog":
+            user = self.require_any_permission(
+                "edit_delivery_list_items",
+                "create_delivery_list_orders",
+                "delete_delivery_list_items",
+                "delete_delivery_lists",
+                "reset_delivery_lists",
+            )
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            try:
+                page = max(int(params.get("page", ["1"])[0] or 1), 1)
+            except (TypeError, ValueError):
+                page = 1
+            self.send_json(
+                STORE.get_admin_delivery_list_catalog(
+                    page=page,
+                    query=params.get("q", [""])[0],
+                    user=user,
+                )
+            )
+            return
+
         if parsed.path == "/api/delivery-lists":
-            user = self.require_permission("view_lists")
+            user = self.require_permission("view_delivery_lists")
             if not user:
                 return
             self.send_json({"lists": STORE.get_delivery_lists(user)})
             return
 
         if parsed.path == "/api/stations":
-            if not self.require_permission("view_stations"):
+            if not self.require_permission("use_assigned_stations"):
                 return
             self.send_json({"stations": STORE.get_stations()})
             return
 
         if parsed.path == "/api/exceptions":
-            if not self.require_permission("view_exceptions"):
+            if not self.require_permission("manage_scan_exceptions"):
                 return
             filters = {key: values[0] for key, values in parse_qs(parsed.query).items()}
             self.send_json({"exceptions": STORE.get_exceptions(filters)})
             return
 
         if parsed.path == "/api/admin/summary":
-            if not self.require_permission("view_admin"):
+            if not self.require_any_permission(*ADMIN_DASHBOARD_PERMISSIONS):
                 return
             summary = dict(STORE.admin_summary() or {})
             latest_import = DELIVERY_AUTOMATION.get_latest_import_result()
@@ -1918,14 +2083,14 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/superseded-order-reviews/summary":
-            user = self.require_any_permission("view_admin", "edit_delivery_lists")
+            user = self.require_any_permission("view_admin", "review_superseded_orders")
             if not user:
                 return
             self.send_json(STORE.superseded_order_review_summary())
             return
 
         if parsed.path == "/api/admin/superseded-order-reviews":
-            user = self.require_any_permission("view_admin", "edit_delivery_lists")
+            user = self.require_any_permission("view_admin", "review_superseded_orders")
             if not user:
                 return
             params = parse_qs(parsed.query)
@@ -1938,20 +2103,20 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/users":
-            if not self.require_permission("manage_users"):
+            if not self.require_any_permission("manage_users", "manage_user_access", "manage_user_assignments"):
                 return
             self.send_json({"users": STORE.list_users()})
             return
 
         if parsed.path == "/api/admin/customer-route-rules":
-            if not self.require_permission("manage_customer_route_rules"):
+            if not self.require_permission("manage_route_rules"):
                 return
             self.send_json({"rules": STORE.get_customer_route_rules()})
             return
 
         email_manifest_match = re.match(r"^/api/admin/customer-emails/(\d+)/manifest-pdf$", parsed.path)
         if email_manifest_match:
-            if not self.require_permission("manage_customer_route_rules"):
+            if not self.require_permission("manage_customer_emails"):
                 return
             html_body = render_customer_email_manifest_pdf_page(STORE.get_email_outbox_item(int(email_manifest_match.group(1))))
             self.send_response(HTTPStatus.OK)
@@ -1961,25 +2126,25 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/customer-emails":
-            if not self.require_permission("manage_customer_route_rules"):
+            if not self.require_permission("manage_customer_emails"):
                 return
             self.send_json(STORE.get_customer_email_settings())
             return
 
         if parsed.path == "/api/admin/bay-scanner-rules":
-            if not self.require_permission("manage_bay_layout"):
+            if not self.require_permission("manage_bay_scanner_rules"):
                 return
             self.send_json(STORE.get_bay_scan_settings())
             return
 
         if parsed.path == "/api/admin/cross-date-scan-settings":
-            if not self.require_permission("edit_delivery_lists"):
+            if not self.require_permission("manage_cross_date_scanning"):
                 return
             self.send_json(STORE.get_cross_date_scan_settings())
             return
 
         if parsed.path == "/api/admin/bay-auto-assigner":
-            if not self.require_permission("manage_bay_layout"):
+            if not self.require_permission("manage_bay_auto_assigner"):
                 return
             self.send_json(STORE.get_bay_auto_assign_settings())
             return
@@ -1996,7 +2161,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/manual-edit-lookups":
-            if not self.require_any_permission("manage_lookup_values", "edit_delivery_lists"):
+            if not self.require_any_permission("manage_lookup_values", "edit_delivery_list_items", "create_delivery_list_orders"):
                 return
             self.send_json(STORE.get_manual_edit_lookups())
             return
@@ -2008,13 +2173,13 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/roles":
-            if not self.require_permission("manage_roles"):
+            if not self.require_any_permission("manage_roles", "manage_user_assignments", "manage_users"):
                 return
             self.send_json({"roles": STORE.list_roles(), "permissions": STORE.get_permissions()})
             return
 
         if parsed.path == "/api/admin/delivery-list-update-preview":
-            user = self.require_any_permission("preview_delivery_updates", "edit_delivery_lists", "preview_import")
+            user = self.require_any_permission("preview_delivery_updates", "edit_delivery_list_items", "preview_delivery_imports")
             if not user:
                 return
             list_id = str(parse_qs(parsed.query).get("listId", [""])[0] or "").strip()
@@ -2037,7 +2202,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/line-items/search":
-            if not self.require_permission("edit_delivery_lists"):
+            if not self.require_any_permission("edit_delivery_list_items", "delete_delivery_list_items", "create_delivery_list_orders"):
                 return
             query_values = parse_qs(parsed.query)
             query = query_values.get("q", [""])[0]
@@ -2055,32 +2220,12 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/action-history":
-            user = self.require_any_permission(
-                "view_admin",
-                "edit_delivery_lists",
-                "import_delivery_lists",
-                "manage_users",
-                "manage_roles",
-                "manage_stations",
-                "manage_customer_route_rules",
-                "manage_bay_layout",
-                "manage_racks",
-                "view_racks",
-                "scan_racks",
-                "view_active_sessions",
-                "view_own_scans",
-                "view_bays",
-                "assign_bay",
-                "move_bay",
-                "clear_bay",
-                "mark_sdi",
-                "remove_sdi",
-                "bay_check",
-            )
+            query_values = parse_qs(parsed.query)
+            context = str(query_values.get("context", [""])[0] or "").strip()
+            context_permissions = ACTION_HISTORY_CONTEXT_PERMISSIONS.get(context, ("view_admin",))
+            user = self.require_any_permission(*context_permissions)
             if not user:
                 return
-            query_values = parse_qs(parsed.query)
-            context = query_values.get("context", [""])[0]
             rack_code = query_values.get("rackCode", [""])[0]
             rack_codes = [
                 value
@@ -2107,7 +2252,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/sessions":
-            if not self.require_permission("view_active_sessions"):
+            if not self.require_permission("view_sessions"):
                 return
             self.send_json({"sessions": STORE.list_active_sessions()})
             return
@@ -2255,7 +2400,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path.startswith("/api/delivery-lists/"):
-            user = self.require_permission("view_lists")
+            user = self.require_permission("view_delivery_lists")
             if not user:
                 return
             list_id = unquote(parsed.path.rsplit("/", 1)[-1])
@@ -2268,7 +2413,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/export.csv":
-            user = self.require_permission("export_reports")
+            user = self.require_permission("print_export")
             if not user:
                 return
             list_id = parse_qs(parsed.query).get("listId", [""])[0]
@@ -2285,7 +2430,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/export.xlsx":
-            user = self.require_permission("export_reports")
+            user = self.require_permission("print_export")
             if not user:
                 return
             list_id = parse_qs(parsed.query).get("listId", [""])[0]
@@ -2302,7 +2447,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/print/package-preview":
-            user = self.require_permission("export_reports")
+            user = self.require_permission("print_export")
             if not user:
                 return
             params = parse_qs(parsed.query)
@@ -2320,7 +2465,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/export/package.xlsx":
-            user = self.require_permission("export_reports")
+            user = self.require_permission("print_export")
             if not user:
                 return
             params = parse_qs(parsed.query)
@@ -2348,7 +2493,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/export/package.csv":
-            user = self.require_permission("export_reports")
+            user = self.require_permission("print_export")
             if not user:
                 return
             params = parse_qs(parsed.query)
@@ -2376,7 +2521,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/print/package":
-            user = self.require_permission("export_reports")
+            user = self.require_permission("print_export")
             if not user:
                 return
             params = parse_qs(parsed.query)
@@ -2411,7 +2556,7 @@ class Handler(SimpleHTTPRequestHandler):
             data = self.read_json()
 
             if parsed.path == "/api/print/package-preview":
-                user = self.require_permission("export_reports")
+                user = self.require_permission("print_export")
                 if not user:
                     return
                 list_ids, filters, _copies, _orientation = normalize_print_package_request(data)
@@ -2420,7 +2565,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/print/package-session":
-                user = self.require_permission("export_reports")
+                user = self.require_permission("print_export")
                 if not user:
                     return
                 list_ids, filters, copies, orientation = normalize_print_package_request(data)
@@ -2498,7 +2643,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(STORE.mark_all_notifications_read(user["username"]))
                 return
             if parsed.path == "/api/delivery-list-updates/acknowledge":
-                user = self.require_permission("view_lists")
+                user = self.require_permission("view_delivery_lists")
                 if not user:
                     return
                 list_id = str(data.get("listId") or "").strip()
@@ -2514,7 +2659,7 @@ class Handler(SimpleHTTPRequestHandler):
 
             # DLS_V135_OPERATIONS_POST_ROUTES
             if parsed.path == "/api/operations/line-flags/acknowledge":
-                user = self.require_permission("view_lists")
+                user = self.require_permission("view_delivery_lists")
                 if not user:
                     return
                 list_id = str(data.get("listId") or "").strip()
@@ -2562,6 +2707,20 @@ class Handler(SimpleHTTPRequestHandler):
                 )
                 return
 
+            if parsed.path == "/api/rejects/catalog/update":
+                user = self.require_permission("manage_reject_settings")
+                if not user:
+                    return
+                self.send_json(
+                    OPERATIONS.update_reject_catalog(
+                        str(data.get("kind") or ""),
+                        int(data.get("id") or 0),
+                        str(data.get("label") or ""),
+                        user["username"],
+                    )
+                )
+                return
+
             if parsed.path == "/api/rejects/catalog/remove":
                 user = self.require_permission("manage_reject_settings")
                 if not user:
@@ -2576,7 +2735,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/admin/superseded-order-reviews/decision":
-                user = self.require_permission("edit_delivery_lists")
+                user = self.require_permission("review_superseded_orders")
                 if not user:
                     return
                 self.send_json(
@@ -2591,21 +2750,21 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/admin/manual-order":
-                user = self.require_permission("edit_delivery_lists")
+                user = self.require_permission("create_delivery_list_orders")
                 if not user:
                     return
                 self.send_json(OPERATIONS.create_manual_order(data, user["username"]))
                 return
 
             if parsed.path == "/api/racks/packing-history":
-                user = self.require_any_permission("view_racks", "export_reports")
+                user = self.require_any_permission("view_racks", "print_export")
                 if not user:
                     return
                 self.send_json(OPERATIONS.record_packing_print(data, user["username"]))
                 return
 
             if parsed.path == "/api/scans":
-                user = self.require_permission("scan")
+                user = self.require_permission("scan_delivery_lists")
                 if not user:
                     return
                 if not STORE.user_can_access_list(user, str(data.get("listId") or "")):
@@ -2617,7 +2776,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/reset":
-                user = self.require_permission("reset_lists")
+                user = self.require_permission("reset_delivery_lists")
                 if not user:
                     return
                 if not STORE.user_can_access_list(user, str(data.get("listId") or "")):
@@ -2635,7 +2794,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/undo":
-                user = self.require_permission("undo_scan")
+                user = self.require_permission("correct_scans")
                 if not user:
                     return
                 if not STORE.user_can_access_list(user, str(data.get("listId") or "")):
@@ -2651,7 +2810,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/redo":
-                user = self.require_permission("undo_scan")
+                user = self.require_permission("correct_scans")
                 if not user:
                     return
                 if not STORE.user_can_access_list(user, str(data.get("listId") or "")):
@@ -2673,7 +2832,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/stations/remove":
-                if not self.require_permission("remove_stations"):
+                if not self.require_permission("manage_stations"):
                     return
                 self.send_json(STORE.remove_station(str(data.get("name") or "")))
                 return
@@ -2729,34 +2888,34 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/import/preview":
-                if not self.require_permission("preview_import"):
+                if not self.require_permission("preview_delivery_imports"):
                     return
                 self.send_json(STORE.preview_import(data.get("payload") or data))
                 return
 
             if parsed.path == "/api/exceptions/resolve":
-                user = self.require_permission("resolve_exceptions")
+                user = self.require_permission("manage_scan_exceptions")
                 if not user:
                     return
                 self.send_json(STORE.resolve_exception(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/users":
-                user = self.require_permission("manage_users")
+                user = self.require_all_permissions("manage_users", "manage_user_assignments")
                 if not user:
                     return
                 self.send_json({"user": STORE.create_user(data, created_by=user["username"])})
                 return
 
             if parsed.path == "/api/admin/users/deactivate":
-                user = self.require_permission("deactivate_users")
+                user = self.require_permission("manage_user_access")
                 if not user:
                     return
                 self.send_json(STORE.deactivate_user(str(data.get("username") or ""), deactivated_by=user["username"]))
                 return
 
             if parsed.path == "/api/admin/users/reactivate":
-                user = self.require_permission("reactivate_users")
+                user = self.require_permission("manage_user_access")
                 if not user:
                     return
                 self.send_json(STORE.reactivate_user(str(data.get("username") or ""), activated_by=user["username"]))
@@ -2770,14 +2929,14 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/admin/users/password":
-                user = self.require_permission("update_user_passwords")
+                user = self.require_permission("manage_user_access")
                 if not user:
                     return
                 self.send_json(STORE.update_user_password(str(data.get("username") or ""), str(data.get("password") or ""), updated_by=user["username"]))
                 return
 
             if parsed.path == "/api/admin/users/roles":
-                user = self.require_permission("manage_roles")
+                user = self.require_permission("manage_user_assignments")
                 if not user:
                     return
                 self.send_json(
@@ -2806,126 +2965,181 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/admin/line-item":
-                user = self.require_permission("edit_delivery_lists")
+                user = self.require_permission("edit_delivery_list_items")
                 if not user:
                     return
                 self.send_json(STORE.update_line_item(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/line-item/delete":
-                user = self.require_permission("edit_delivery_lists")
+                user = self.require_permission("delete_delivery_list_items")
                 if not user:
                     return
                 self.send_json(STORE.delete_line_item(str(data.get("lineItemId") or ""), user["username"]))
                 return
 
             if parsed.path == "/api/admin/customer-route-rules":
-                user = self.require_permission("manage_customer_route_rules")
+                user = self.require_permission("manage_route_rules")
                 if not user:
                     return
                 self.send_json(STORE.add_customer_route_rule(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/customer-route-rules/remove":
-                user = self.require_permission("manage_customer_route_rules")
+                user = self.require_permission("manage_route_rules")
                 if not user:
                     return
                 self.send_json(STORE.remove_customer_route_rule(int(data.get("ruleId") or 0), user["username"]))
                 return
 
             if parsed.path == "/api/admin/customer-emails":
-                user = self.require_permission("manage_customer_route_rules")
+                user = self.require_permission("manage_customer_emails")
                 if not user:
                     return
                 self.send_json(STORE.upsert_customer_email_contact(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/customer-emails/remove":
-                user = self.require_permission("manage_customer_route_rules")
+                user = self.require_permission("manage_customer_emails")
                 if not user:
                     return
                 self.send_json(STORE.remove_customer_email_contact(int(data.get("id") or 0), user["username"]))
                 return
 
+            if parsed.path == "/api/admin/customer-emails/draft/delete":
+                user = self.require_permission("manage_customer_emails")
+                if not user:
+                    return
+                self.send_json(STORE.delete_customer_email_draft(int(data.get("id") or 0), user["username"]))
+                return
+
             if parsed.path == "/api/admin/customer-emails/test":
-                user = self.require_permission("manage_customer_route_rules")
+                user = self.require_permission("manage_customer_emails")
                 if not user:
                     return
                 self.send_json(STORE.queue_customer_email_test(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/customer-emails/cc":
-                user = self.require_permission("manage_customer_route_rules")
+                user = self.require_permission("manage_customer_emails")
                 if not user:
                     return
                 self.send_json(STORE.upsert_customer_email_cc(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/customer-emails/cc/remove":
-                user = self.require_permission("manage_customer_route_rules")
+                user = self.require_permission("manage_customer_emails")
                 if not user:
                     return
                 self.send_json(STORE.remove_customer_email_cc(int(data.get("id") or 0), user["username"]))
                 return
 
             if parsed.path == "/api/admin/bay-scanner-rules/settings":
-                user = self.require_permission("manage_bay_layout")
+                user = self.require_permission("manage_bay_scanner_rules")
                 if not user:
                     return
                 self.send_json(STORE.update_bay_scan_settings(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/cross-date-scan-settings":
-                user = self.require_permission("edit_delivery_lists")
+                user = self.require_permission("manage_cross_date_scanning")
                 if not user:
                     return
                 self.send_json(STORE.update_cross_date_scan_settings(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/bay-scanner-rules/manual":
-                user = self.require_permission("manage_bay_layout")
+                user = self.require_permission("manage_bay_scanner_rules")
                 if not user:
                     return
                 self.send_json(STORE.upsert_bay_manual_input_rule(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/bay-scanner-rules/manual/remove":
-                user = self.require_permission("manage_bay_layout")
+                user = self.require_permission("manage_bay_scanner_rules")
                 if not user:
                     return
                 self.send_json(STORE.remove_bay_manual_input_rule(int(data.get("id") or 0), user["username"]))
                 return
 
             if parsed.path == "/api/admin/bay-scanner-rules/barcode":
-                user = self.require_permission("manage_bay_layout")
+                user = self.require_permission("manage_bay_scanner_rules")
                 if not user:
                     return
                 self.send_json(STORE.upsert_bay_scan_barcode_rule(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/bay-scanner-rules/barcode/remove":
-                user = self.require_permission("manage_bay_layout")
+                user = self.require_permission("manage_bay_scanner_rules")
                 if not user:
                     return
                 self.send_json(STORE.remove_bay_scan_barcode_rule(int(data.get("id") or 0), user["username"]))
                 return
 
             if parsed.path == "/api/admin/bay-auto-assigner":
-                user = self.require_permission("manage_bay_layout")
+                user = self.require_permission("manage_bay_auto_assigner")
                 if not user:
                     return
                 self.send_json(STORE.update_bay_auto_assign_settings(data, user["username"]))
                 return
 
+            if parsed.path == "/api/admin/presentation-profile":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(STORE.update_presentation_profile(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/manual-edit-lookups/glass-profile":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(STORE.upsert_glass_profile(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/manual-edit-lookups/glass-profile/combine":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(STORE.combine_glass_profiles(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/manual-edit-lookups/glass-profile/uncombine":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(STORE.uncombine_glass_profiles(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/manual-edit-lookups/glass-profile/remove":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(STORE.remove_glass_profile(str(data.get("value") or ""), user["username"], data.get("values")))
+                return
+
             if parsed.path == "/api/admin/manual-edit-lookups":
-                user = self.require_any_permission("manage_lookup_values", "edit_delivery_lists")
+                user = self.require_permission("manage_lookup_values")
                 if not user:
                     return
                 self.send_json(STORE.add_manual_edit_lookup(data, user["username"]))
                 return
 
+            if parsed.path == "/api/admin/manual-edit-lookups/remove":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(
+                    STORE.remove_manual_edit_lookup(
+                        str(data.get("type") or ""),
+                        str(data.get("value") or ""),
+                        user["username"],
+                    )
+                )
+                return
+
             if parsed.path == "/api/admin/delete-list":
-                user = self.require_permission("edit_delivery_lists")
+                user = self.require_permission("delete_delivery_lists")
                 if not user:
                     return
                 if not self.require_confirmation_text(data, "DELETE"):
@@ -2934,7 +3148,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/admin/delete-date":
-                user = self.require_permission("edit_delivery_lists")
+                user = self.require_permission("delete_delivery_lists")
                 if not user:
                     return
                 if not self.require_confirmation_text(data, "DELETE"):
@@ -2943,7 +3157,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/indian-trail/receive":
-                user = self.require_permission("indian_trail_receive")
+                user = self.require_permission("receive_indian_trail")
                 if not user:
                     return
                 if data.get("listId") and not STORE.user_can_access_list(user, str(data.get("listId") or "")):
@@ -2955,56 +3169,56 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/indian-trail/manual-assign":
-                user = self.require_permission("assign_bay")
+                user = self.require_permission("assign_bay_items")
                 if not user:
                     return
                 self.send_json(STORE.manual_assign_bay_item(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/assign":
-                user = self.require_permission("assign_bay")
+                user = self.require_permission("assign_bay_items")
                 if not user:
                     return
                 self.send_json(STORE.assign_bay(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/move":
-                user = self.require_any_permission("move_bay", "indian_trail_receive")
+                user = self.require_any_permission("move_bay_items", "receive_indian_trail")
                 if not user:
                     return
                 self.send_json(STORE.move_bay_assignment(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/clear":
-                user = self.require_permission("clear_bay")
+                user = self.require_permission("clear_bay_items")
                 if not user:
                     return
                 self.send_json(STORE.clear_bay(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/clear-assignment":
-                user = self.require_any_permission("clear_bay", "indian_trail_receive")
+                user = self.require_any_permission("clear_bay_items", "receive_indian_trail")
                 if not user:
                     return
                 self.send_json(STORE.clear_bay_assignment(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/restore-assignment":
-                user = self.require_any_permission("clear_bay", "indian_trail_receive")
+                user = self.require_any_permission("clear_bay_items", "receive_indian_trail")
                 if not user:
                     return
                 self.send_json(STORE.restore_bay_assignment(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/bay-status":
-                user = self.require_permission("clear_bay")
+                user = self.require_permission("clear_bay_items")
                 if not user:
                     return
                 self.send_json(STORE.set_bay_status(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/scan-out":
-                user = self.require_any_permission("clear_bay", "indian_trail_receive")
+                user = self.require_any_permission("clear_bay_items", "receive_indian_trail")
                 if not user:
                     return
                 self.send_json(STORE.scan_out_bay_item(data, user["username"]))
@@ -3044,7 +3258,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/indian-trail/priority-intake":
-                user = self.require_permission("mark_sdi")
+                user = self.require_permission("manage_rush_work")
                 if not user:
                     return
                 if str(data.get("requestId") or "").strip():
@@ -3054,28 +3268,28 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/indian-trail/priority-intake/cancel":
-                user = self.require_permission("remove_sdi")
+                user = self.require_permission("manage_rush_work")
                 if not user:
                     return
                 self.send_json(STORE.cancel_priority_intake_request(str(data.get("requestId") or ""), user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/mark-sdi":
-                user = self.require_permission("mark_sdi")
+                user = self.require_permission("manage_rush_work")
                 if not user:
                     return
                 self.send_json(STORE.mark_sdi(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/remove-sdi":
-                user = self.require_permission("remove_sdi")
+                user = self.require_permission("manage_rush_work")
                 if not user:
                     return
                 self.send_json(STORE.remove_sdi(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/bay-check":
-                user = self.require_permission("bay_check")
+                user = self.require_permission("run_bay_checks")
                 if not user:
                     return
                 self.send_json(STORE.bay_check(data, user["username"]))

@@ -245,22 +245,35 @@ class OperationsFeatureService:
             "items": values,
         }
 
-    @staticmethod
-    def _airport_review_scope(stage: Any, scanner: Any) -> bool:
-        """Return True for the shared Airport Rd staging/outbound review scope.
+    def _stage_definition(self, stage: Any, scanner: Any) -> dict[str, Any] | None:
+        """Resolve one active Stage Editor definition by its current display identity."""
+        stage_text = clean_text(stage, 160).lower()
+        scanner_text = clean_text(scanner, 160).lower()
+        try:
+            definitions = self.store.get_stage_definitions()
+        except Exception:
+            definitions = []
+        for definition in definitions:
+            display = clean_text(definition.get("displayName"), 160).lower()
+            configured_scanner = clean_text(definition.get("scanner"), 160).lower()
+            if display and display == stage_text:
+                return definition
+            if display and display in stage_text and (not configured_scanner or configured_scanner in scanner_text or configured_scanner in stage_text):
+                return definition
+        return None
 
-        Staging and Outbound are the complete Airport Rd view for a delivery date.
-        Reviewing either one therefore owns the full current update batch across
-        downstream routes. Route-specific stages remain independent when reviewed
-        directly so Indian Trail, CPU, DTC, or Greenville cannot clear one another.
-        """
+    def _stage_preset(self, stage: Any, scanner: Any) -> str:
+        definition = self._stage_definition(stage, scanner)
+        return clean_text((definition or {}).get("preset"), 80).lower()
+
+    def _airport_review_scope(self, stage: Any, scanner: Any) -> bool:
+        """Return True when the configured stage carries an Airport behavior preset."""
+        preset = self._stage_preset(stage, scanner)
+        if preset in {"airport_staging", "airport_outbound"}:
+            return True
         stage_text = clean_text(stage, 120).lower()
         scanner_text = clean_text(scanner, 120).lower()
-        return (
-            scanner_text == "airport rd"
-            or stage_text.startswith("staging")
-            or stage_text.startswith("outbound")
-        )
+        return scanner_text == "airport rd" or stage_text.startswith("staging") or stage_text.startswith("outbound")
 
     def acknowledge_line_updates(self, list_id: str, notice_ids: list[Any], username: str) -> dict[str, Any]:
         """Mark reviewed updates read for one user using the maintained stage scope.
@@ -400,6 +413,46 @@ class OperationsFeatureService:
                 (clean_label, username, utc_now(), utc_now()),
             )
             self._audit(con, "reject_catalog", clean_kind, "upsert_reject_catalog", username, {"label": clean_label})
+            con.commit()
+        return self.reject_catalog()
+
+    def update_reject_catalog(self, kind: str, catalog_id: int, label: str, username: str) -> dict[str, Any]:
+        """Rename one active reject reason or break location in place.
+
+        Historical reject records retain their stored labels; this changes the
+        active floor-facing choice used for future rejects only.
+        """
+        self._require_sqlite()
+        clean_kind = str(kind or "").strip().lower()
+        if clean_kind not in {"reason", "location"}:
+            raise ValueError("Reject catalog kind must be reason or location")
+        clean_id = int(catalog_id or 0)
+        clean_label = " ".join(str(label or "").split())[:160]
+        if clean_id <= 0:
+            raise ValueError("Reject catalog id is required")
+        if not clean_label:
+            raise ValueError("Reject catalog label is required")
+        table = "reject_reasons" if clean_kind == "reason" else "reject_locations"
+        with self.store.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(f"SELECT id, label FROM {table} WHERE id = ? AND active = 1", (clean_id,)).fetchone()
+            if not row:
+                raise ValueError("Reject catalog value not found")
+            duplicate = con.execute(
+                f"SELECT id FROM {table} WHERE active = 1 AND lower(label) = lower(?) AND id <> ?",
+                (clean_label, clean_id),
+            ).fetchone()
+            if duplicate:
+                raise ValueError(f"{clean_label} already exists")
+            con.execute(f"UPDATE {table} SET label = ?, updated_at = ? WHERE id = ?", (clean_label, utc_now(), clean_id))
+            self._audit(
+                con,
+                "reject_catalog",
+                str(clean_id),
+                "update_reject_catalog",
+                username,
+                {"kind": clean_kind, "from": row["label"], "to": clean_label},
+            )
             con.commit()
         return self.reject_catalog()
 
@@ -862,17 +915,82 @@ class OperationsFeatureService:
                 continue
         return (today - timedelta(days=past_days)).isoformat(), (today + timedelta(days=future_days)).isoformat()
 
-    @staticmethod
-    def _route_matches_stage(route: str, stage: str, scanner: str) -> bool:
-        text = f"{stage} {scanner}".lower()
-        if "staging" in text or "outbound" in text:
+    def _manual_order_airport_stage_role(self, stage: str | None = None, scanner: str = "") -> str:
+        """Return the Airport workflow role represented by one configured stage.
+
+        The flexible call shape preserves the lightweight classifier contract used
+        by older diagnostics/tests while production calls continue to resolve the
+        current Stage Editor preset through this service instance.
+        """
+        if isinstance(self, OperationsFeatureService):
+            clean_stage = clean_text(stage, 160)
+            clean_scanner = clean_text(scanner, 160)
+            preset = self._stage_preset(clean_stage, clean_scanner)
+        else:
+            # Backward-compatible unbound call: Class._method(stage, scanner).
+            clean_stage = clean_text(self, 160)
+            clean_scanner = clean_text(stage, 160)
+            preset = ""
+        if preset == "airport_staging":
+            return "staging"
+        if preset == "airport_outbound":
+            return "outbound"
+        text = f"{clean_stage} {clean_scanner}".lower()
+        if "staging" in text:
+            return "staging"
+        if "outbound" in text:
+            return "outbound"
+        return ""
+
+    def _route_matches_stage(
+        self,
+        route: str | None = None,
+        stage: str | None = None,
+        scanner: str = "",
+    ) -> bool:
+        """Match a manual-order destination against the Stage Editor behavior preset.
+
+        Older diagnostic callers invoke this helper directly on the class. Keep
+        that text classifier available while instance calls use configured stage
+        definitions first.
+        """
+        if isinstance(self, OperationsFeatureService):
+            clean_route = clean_text(route, 80).upper()
+            clean_stage = clean_text(stage, 160)
+            clean_scanner = clean_text(scanner, 160)
+            definition = self._stage_definition(clean_stage, clean_scanner)
+            preset = clean_text((definition or {}).get("preset"), 80).lower()
+            route_code = clean_text((definition or {}).get("routeCode"), 80).upper()
+        else:
+            # Backward-compatible unbound call: Class._method(route, stage, scanner).
+            clean_route = clean_text(self, 80).upper()
+            clean_stage = clean_text(route, 160)
+            clean_scanner = clean_text(stage, 160)
+            preset = ""
+            route_code = ""
+
+        if preset in {"airport_staging", "airport_outbound"}:
+            return False
+        if clean_route == "CPU" and preset == "cpu":
             return True
-        route = route.upper()
-        if route == "CPU":
+        if clean_route == "DTC" and preset == "dtc":
+            return True
+        if clean_route in {"GNV", "GREENVILLE"} and preset == "greenville":
+            return True
+        if clean_route == "IT" and preset == "indian_trail":
+            return True
+        if preset == "custom_route" and route_code:
+            return route_code == ("GNV" if clean_route == "GREENVILLE" else clean_route)
+
+        # Backward-compatible fallback for lists created before Stage Editor.
+        text = f"{clean_stage} {clean_scanner}".lower()
+        if "staging" in text or "outbound" in text:
+            return False
+        if clean_route == "CPU":
             return "pickup" in text or "cpu" in text
-        if route == "DTC":
+        if clean_route == "DTC":
             return "dtc" in text or "deliver to customer" in text
-        if route in {"GNV", "GREENVILLE"}:
+        if clean_route in {"GNV", "GREENVILLE"}:
             return "greenville" in text
         return "indian trail" in text or "inbound" in text
 
@@ -915,7 +1033,8 @@ class OperationsFeatureService:
                 FROM line_items li JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE dl.status = 'active' AND dl.delivery_date BETWEEN ? AND ?
                   AND COALESCE(li.is_deleted, 0) = 0
-                  AND li.order_no = ? AND li.item_no = ?
+                  AND CAST(li.order_no AS INTEGER) = CAST(? AS INTEGER)
+                  AND CAST(li.item_no AS INTEGER) = CAST(? AS INTEGER)
                 ORDER BY dl.delivery_date, dl.stage LIMIT 1
                 """,
                 (date_from, date_to, order, item),
@@ -930,9 +1049,45 @@ class OperationsFeatureService:
                 "SELECT * FROM delivery_lists WHERE delivery_date = ? AND status = 'active' ORDER BY stage, id",
                 (delivery_date,),
             ).fetchall()
-            target_lists = [row for row in candidates if self._route_matches_stage(route, str(row["stage"]), str(row["scanner"]))]
-            if not any(str(row["id"]) == selected_list_id for row in target_lists):
-                target_lists.append(selected)
+
+            # A manual order represents one logical order/item across the delivery
+            # workflow. Always create both Airport copies first (Staging + Outbound)
+            # and then the explicitly selected route copy. Do not silently append
+            # the stage that happened to be open in the editor; the route selector
+            # is the authoritative destination choice.
+            airport_targets = [
+                row
+                for row in candidates
+                if self._manual_order_airport_stage_role(str(row["stage"]), str(row["scanner"]))
+            ]
+            airport_roles = {
+                self._manual_order_airport_stage_role(str(row["stage"]), str(row["scanner"]))
+                for row in airport_targets
+            }
+            missing_airport_roles = [role.title() for role in ("staging", "outbound") if role not in airport_roles]
+            if missing_airport_roles:
+                raise ValueError(
+                    "Cannot create the workflow order because the delivery date is missing Airport "
+                    + " and ".join(missing_airport_roles)
+                    + "."
+                )
+
+            route_targets = [
+                row
+                for row in candidates
+                if self._route_matches_stage(route, str(row["stage"]), str(row["scanner"]))
+            ]
+            if not route_targets:
+                route_label = {
+                    "IT": "Indian Trail",
+                    "CPU": "Customer Pickup",
+                    "DTC": "Deliver to Customer",
+                    "GNV": "Greenville",
+                    "GREENVILLE": "Greenville",
+                }.get(route, route)
+                raise ValueError(f"Cannot create the workflow order because the {route_label} stage was not found for {delivery_date}.")
+
+            target_lists = [*airport_targets, *route_targets]
             unique_targets = {str(row["id"]): row for row in target_lists}
             created_at = utc_now()
             source_id = f"manual:{delivery_date}:{order}:{item}:{created_at}"
@@ -1005,15 +1160,32 @@ class OperationsFeatureService:
                 f"{delivery_date}:{order}:{item}",
                 "create_manual_delivery_entry",
                 username,
-                {"targetListIds": sorted(unique_targets), "manualOnly": manual_only, "route": route, "qty": qty},
+                {
+                    "targetListIds": sorted(unique_targets),
+                    "targetStages": [str(row["stage"] or row["scanner"] or row["id"]) for row in unique_targets.values()],
+                    "airportStageRoles": sorted(airport_roles),
+                    "manualOnly": manual_only,
+                    "route": route,
+                    "qty": qty,
+                },
             )
             con.commit()
+        route_label = {
+            "IT": "Indian Trail",
+            "CPU": "Customer Pickup",
+            "DTC": "Deliver to Customer",
+            "GNV": "Greenville",
+            "GREENVILLE": "Greenville",
+        }.get(route, route)
         return {
             "ok": True,
-            "message": f"Manual order {order}-{item} was added to {len(inserted_ids)} workflow stage(s).",
+            "message": f"Manual order {order}-{item} was added to Airport Staging, Airport Outbound, and {route_label}.",
             "lineItemIds": inserted_ids,
             "listIds": sorted(unique_targets),
             "deliveryDate": delivery_date,
+            "route": route,
+            "routeLabel": route_label,
+            "airportStages": sorted(airport_roles),
         }
 
     def record_packing_print(self, data: dict[str, Any], username: str) -> dict[str, Any]:

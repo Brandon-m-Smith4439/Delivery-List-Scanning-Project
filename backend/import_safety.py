@@ -1210,6 +1210,13 @@ def _ensure_manual_protection_schema(store: Any) -> bool:
             setattr(store, "_dls_manual_protection_schema_repaired", False)
             return False
 
+        if not _table_exists(connection, "line_items"):
+            # A brand-new database receives the complete schema from the
+            # numbered migrations during normal store initialization.
+            setattr(store, "_dls_manual_protection_schema_checked", True)
+            setattr(store, "_dls_manual_protection_schema_repaired", False)
+            return False
+
         repaired = False
         line_columns = _column_names(connection, "line_items")
         if "protect_from_aw_import" not in line_columns:

@@ -40,6 +40,23 @@ _CORE_LINE_COLUMNS = (
 )
 
 
+def _logical_order_item_key(store: Any, order_no: Any, item_no: Any) -> str:
+    """Use the maintained duplicate key with a legacy/test-store fallback."""
+    resolver = getattr(store, "logical_order_item_key", None)
+    if callable(resolver):
+        return str(resolver(order_no, item_no))
+
+    def numeric_text(value: Any) -> str:
+        text = str(value or "").strip()
+        try:
+            return str(int(float(text.replace(",", ""))))
+        except (TypeError, ValueError):
+            digits = "".join(character for character in text if character.isdigit())
+            return str(int(digits)) if digits else text
+
+    return f"{numeric_text(order_no)}-{numeric_text(item_no).zfill(3)}"
+
+
 def _row_value(row: Any, name: str, default: Any = "") -> Any:
     try:
         return row[name] if name in row.keys() else default
@@ -381,20 +398,32 @@ def _safe_reconcile_delivery_list(
             "id": line_id,
             "source_key": source_key,
             "business_key": store.import_business_key(row),
-            "order_item_key": f"{order_no}-{item_no}",
+            "order_item_key": _logical_order_item_key(store, order_no, item_no),
             "was_deleted": was_deleted,
             "manual": manual_only or bool(manual_source),
             "protected_manual": (manual_only or bool(manual_source)) and protect_from_aw_import,
         }
         previous_by_id[line_id] = record
-        # Protected manual rows stay independent even when A+W later publishes
-        # the same order/item. Do not make them eligible as source-row matches.
+        # Protected manual rows are not eligible as source-row matches. If A+W
+        # later publishes the same logical item, the import loop below suppresses
+        # the source copy so protection never creates a duplicate active row.
         if not record["protected_manual"]:
             add_pool("source", source_key, record)
             add_pool("business", record["business_key"], record)
             add_pool("order_item", record["order_item_key"], record)
         if not was_deleted:
             original_total_qty += int(_row_value(row, "qty", 0) or 0)
+
+    protected_manual_keys = {
+        str(record["order_item_key"])
+        for record in previous_by_id.values()
+        if record.get("protected_manual") and not record.get("was_deleted")
+    }
+    protected_manual_total = sum(
+        int(_row_value(record["row"], "qty", 0) or 0)
+        for record in previous_by_id.values()
+        if record.get("protected_manual") and not record.get("was_deleted")
+    )
 
     used_previous_ids: set[str] = set()
     incoming_source_keys: set[str] = set()
@@ -433,7 +462,15 @@ def _safe_reconcile_delivery_list(
         "removedLineIds": [],
         "changeItems": [],
         "originalQty": original_total_qty,
-        "totalQty": sum(int(item.get("qty") or 0) for item in items),
+        "totalQty": (
+            sum(
+                int(item.get("qty") or 0)
+                for item in items
+                if _logical_order_item_key(store, item.get("order"), item.get("item"))
+                not in protected_manual_keys
+            )
+            + protected_manual_total
+        ),
     }
 
     auto_assign_settings = store.get_bay_auto_assign_settings_con(connection)
@@ -444,10 +481,18 @@ def _safe_reconcile_delivery_list(
             cloned["source_id"], cloned["order_no"], cloned["item_no"]
         )
         business_key = store.import_business_key(cloned)
-        order_item_key = f"{cloned['order_no']}-{str(cloned['item_no']).zfill(3)}"
+        order_item_key = _logical_order_item_key(store, cloned["order_no"], cloned["item_no"])
         incoming_source_keys.add(source_key)
         incoming_business_keys.add(business_key)
         incoming_order_item_keys.add(order_item_key)
+
+        # v0.343 duplicate hardening: while a manual line is explicitly protected
+        # from A+W ownership, keep that one logical stage row authoritative and
+        # suppress the incoming source copy. This preserves the operator override
+        # without allowing two active rows for the same Order Nr. + Item Nr.
+        if order_item_key in protected_manual_keys:
+            continue
+
         exact = previous_by_id.get(desired_id)
         if exact and exact.get("protected_manual"):
             exact = None

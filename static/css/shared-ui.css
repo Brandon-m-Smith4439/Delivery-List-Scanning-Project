@@ -18,6 +18,11 @@
   --shared-primary-shadow: rgba(4, 31, 77, .30);
   --shared-close-size: 49px;
   --shared-close-icon-size: 20px;
+
+  /* v0.352: One readable type scale for full-screen and popup GUIs. */
+  --shared-gui-body-size: 13px;
+  --shared-gui-supporting-size: 12px;
+  --shared-gui-section-title-size: 15px;
 }
 
 /* Three specificity anchors keep one reusable component authoritative even
@@ -57,7 +62,7 @@ body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):i
   -webkit-tap-highlight-color: transparent !important;
   appearance: none !important;
   -webkit-appearance: none !important;
-  transition: transform 130ms ease, background 130ms ease, border-color 130ms ease, box-shadow 130ms ease, filter 130ms ease !important;
+  transition: transform 130ms ease, *background* 130ms ease, border-color 130ms ease, box-shadow 130ms ease, filter 130ms ease !important;
 }
 
 body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *) > * {
@@ -169,7 +174,7 @@ body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sh
   appearance: none !important;
   -webkit-appearance: none !important;
   transform: none !important;
-  transition: transform 130ms ease, background 130ms ease, border-color 130ms ease, box-shadow 130ms ease !important;
+  transition: transform 130ms ease, *background* 130ms ease, border-color 130ms ease, box-shadow 130ms ease !important;
 }
 
 body button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *)::before {
@@ -348,4 +353,77 @@ body :is(
   --gui-close-bottom: auto;
   --gui-close-left: auto;
   --gui-close-z-index: 5;
+}
+
+/* v0.352 FULL-GUI TYPOGRAPHY OWNERSHIP ---------------------------------------
+   Full application GUIs share one restrained type floor. Page-level cards and
+   dense operational tables keep their own sizing; only modal/dialog surfaces
+   are normalized here so feature-specific CSS cannot drift back to 8-10px
+   operational copy. Customer Email Center receives additional hierarchy in
+   admin.css, but uses the same shared 12/13px baseline. */
+body :is(
+  .modal-panel,
+  dialog,
+  .print-options-panel,
+  #printPresetModal,
+  .delivery-automation-modal,
+  .notification-center-panel
+) {
+  font-size: var(--shared-gui-body-size) !important;
+}
+
+body :is(
+  .modal-panel,
+  dialog,
+  .print-options-panel,
+  #printPresetModal,
+  .delivery-automation-modal,
+  .notification-center-panel
+) :where(input, select, textarea, button:not(.icon-only):not(.gui-close-button)) {
+  font-size: var(--shared-gui-body-size) !important;
+}
+
+body :is(
+  .modal-panel,
+  dialog,
+  .print-options-panel,
+  #printPresetModal,
+  .delivery-automation-modal,
+  .notification-center-panel
+) :where(p, label, small, em, th, .admin-empty) {
+  font-size: var(--shared-gui-supporting-size) !important;
+  line-height: 1.4;
+}
+
+body :is(
+  .modal-panel,
+  dialog,
+  .print-options-panel,
+  #printPresetModal,
+  .delivery-automation-modal,
+  .notification-center-panel
+) :where(td) {
+  font-size: var(--shared-gui-body-size) !important;
+}
+
+body :is(
+  .modal-panel,
+  dialog,
+  .print-options-panel,
+  #printPresetModal,
+  .delivery-automation-modal,
+  .notification-center-panel
+) span:not([aria-hidden="true"]) {
+  font-size: var(--shared-gui-supporting-size) !important;
+}
+
+body :is(
+  .modal-panel,
+  dialog,
+  .print-options-panel,
+  #printPresetModal,
+  .delivery-automation-modal,
+  .notification-center-panel
+) button:not(.icon-only):not(.gui-close-button) > span:not([aria-hidden="true"]) {
+  font-size: inherit !important;
 }

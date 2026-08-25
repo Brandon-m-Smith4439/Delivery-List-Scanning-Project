@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -88,7 +88,12 @@ class DeliveryAutomationController:
         self.project_root = Path(project_root).resolve()
         self.scanner_config = scanner_config
         self.scanner_store = scanner_store
+        # Cache the live scanner-store identity once per web-server process.
+        # The automation runtime uses this safe metadata (never credentials) to
+        # prove it is importing into the same database the Scan page is reading.
+        self._scanner_store_identity_cache: dict[str, str] = {}
         self._state_lock = threading.Lock()
+        self._config_lock = threading.Lock()
         self._active_process: subprocess.Popen[str] | None = None
         self._active_status: dict[str, Any] = {}
         self._runtime_sync_status: dict[str, Any] = {
@@ -132,7 +137,54 @@ class DeliveryAutomationController:
                 return path
         return self._candidate_config_paths()[0]
 
-    def _read_config(self, required: bool = True) -> dict[str, Any]:
+    def _scanner_store_identity(self) -> dict[str, str]:
+        """Return safe, stable metadata that identifies the live scanner store.
+
+        The SQL updater runs in a separate PowerShell/Python process. Merely
+        sharing ProjectRoot is not sufficient when an environment variable or
+        service account can make that process resolve a different SQLite/Azure
+        store. Persisting this non-secret identity lets the updater bind to and
+        validate the same store before it is allowed to report an import as
+        successful.
+        """
+        if self._scanner_store_identity_cache:
+            return dict(self._scanner_store_identity_cache)
+        store = self.scanner_store
+        if store is None:
+            return {}
+        try:
+            health = store.health() or {}
+        except Exception:
+            return {}
+
+        mode = str(health.get("mode") or "").strip().lower()
+        database = str(health.get("database") or "").strip()
+        server = str(health.get("server") or "").strip()
+        environment = str(health.get("environment") or "").strip()
+        if not mode or not database:
+            return {}
+
+        if mode == "sqlite":
+            try:
+                database_path = Path(database).expanduser()
+                if not database_path.is_absolute():
+                    database_path = self.project_root / database_path
+                database = str(database_path.resolve())
+            except (OSError, RuntimeError):
+                database = str(database)
+
+        identity = {
+            "Mode": mode,
+            "Database": database,
+        }
+        if server:
+            identity["Server"] = server
+        if environment:
+            identity["Environment"] = environment
+        self._scanner_store_identity_cache = dict(identity)
+        return identity
+
+    def _read_config(self, required: bool = True, persist_repairs: bool = True) -> dict[str, Any]:
         path = self.config_path()
         if not path.is_file():
             if required:
@@ -144,35 +196,60 @@ class DeliveryAutomationController:
         if not isinstance(payload, dict):
             raise ValueError("Automation configuration is not a JSON object")
 
-        # The SQL automation configuration can outlive a renamed/copied web-app
-        # folder. Scheduled tasks then keep importing into the obsolete project
-        # database even though the browser is running this project. Keep the
-        # automation's ProjectRoot pinned to the server instance that owns this
-        # controller so scanner verification, Superseded Order Review, printing,
-        # and the Scan page all read and write the same store.
+        # The installed automation can outlive a renamed/copied project folder
+        # or inherit a different DLS_DATABASE_PATH than the web server. Keep both
+        # the project root and safe scanner-store identity pinned to this live
+        # server so Import History can never report success against one database
+        # while Scan/Print are reading another.
+        changed = False
         configured_root = str(payload.get("ProjectRoot") or "").strip()
         current_root = str(self.project_root)
         configured_key = configured_root.replace("\\", "/").rstrip("/").lower()
         current_key = current_root.replace("\\", "/").rstrip("/").lower()
         if configured_key != current_key:
             payload["ProjectRoot"] = current_root
-            temporary = path.with_suffix(path.suffix + ".tmp")
-            temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-            os.replace(temporary, path)
+            changed = True
             self._runtime_sync_status = {
                 **self._runtime_sync_status,
                 "projectRootRepaired": True,
                 "previousProjectRoot": configured_root,
                 "projectRoot": current_root,
             }
+
+        scanner_identity = self._scanner_store_identity()
+        configured_scanner = payload.get("ScannerStore")
+        if scanner_identity and configured_scanner != scanner_identity:
+            payload["ScannerStore"] = scanner_identity
+            changed = True
+            self._runtime_sync_status = {
+                **self._runtime_sync_status,
+                "scannerStoreBound": True,
+                "scannerStore": scanner_identity,
+            }
+
+        if changed and persist_repairs:
+            with self._config_lock:
+                self._replace_json_file(path, payload)
         return payload
+
+    @staticmethod
+    def _replace_json_file(path: Path, payload: dict[str, Any]) -> None:
+        """Atomically replace one JSON file without sharing a temporary filename."""
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
     def _write_config(self, payload: dict[str, Any]) -> None:
         path = self.config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        os.replace(temporary, path)
+        with self._config_lock:
+            self._replace_json_file(path, payload)
 
     def _set_schedule_enabled_in_config_path(self, path: Path, enabled: bool) -> None:
         """Persist the scheduler flag to an explicit config without resetting it."""
@@ -269,6 +346,9 @@ class DeliveryAutomationController:
         payload = json.loads(json.dumps(config))
         payload["ProjectRoot"] = str(self.project_root)
         payload["WorkingRoot"] = str(paths["working_root"])
+        scanner_identity = self._scanner_store_identity()
+        if scanner_identity:
+            payload["ScannerStore"] = scanner_identity
         runtime = payload.setdefault("Runtime", {})
         if not str(runtime.get("PowerShellPath") or "").strip():
             runtime["PowerShellPath"] = self._power_shell(payload)
@@ -435,6 +515,17 @@ class DeliveryAutomationController:
         except OSError:
             return ""
 
+    def _append_run_log_line(self, path: Path, message: str, level: str = "DEBUG") -> None:
+        """Append a controller-side diagnostic to the same log PowerShell streams."""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(f"{timestamp} [{level}] CONTROLLER | {message}\n")
+        except OSError:
+            # Logging must never prevent a delivery-list update from starting.
+            return
+
     def _attach_complete_log(self, status: dict[str, Any]) -> dict[str, Any]:
         """Attach the full per-run log used by scheduled and browser-started runs."""
         enriched = dict(status or {})
@@ -472,7 +563,7 @@ class DeliveryAutomationController:
         return True
 
     def get_dashboard(self) -> dict[str, Any]:
-        config = self._read_config(required=False)
+        config = self._read_config(required=False, persist_repairs=False)
         if config:
             self._refresh_runtime_scripts_if_safe(config)
         path = self.config_path()
@@ -674,7 +765,7 @@ class DeliveryAutomationController:
         gap for unchanged checks, failures, and runs that happened while an older
         ProjectRoot was still configured.
         """
-        config = self._read_config(required=False)
+        config = self._read_config(required=False, persist_repairs=False)
         if not config:
             return []
         history_dir = self._runtime_paths(config)["run_history_dir"]
@@ -832,7 +923,7 @@ class DeliveryAutomationController:
         audit-history result so every checked workbook receives the same current
         run timestamp and classification.
         """
-        config = self._read_config(required=False)
+        config = self._read_config(required=False, persist_repairs=False)
         if not config:
             return [], {}
         runtime_paths = self._runtime_paths(config)
@@ -1003,6 +1094,7 @@ class DeliveryAutomationController:
 
     @staticmethod
     def _history_search_text(item: dict[str, Any]) -> str:
+        """Build a route-aware search document for one import-history result."""
         delivery_date = str(item.get("deliveryDate") or "")[:10]
         display_date = ""
         try:
@@ -1010,19 +1102,52 @@ class DeliveryAutomationController:
             display_date = f"{parsed_date.month}/{parsed_date.day}/{parsed_date.year}"
         except ValueError:
             display_date = delivery_date
+
+        activity_text = str(
+            item.get("runStartedAt")
+            or item.get("runCompletedAt")
+            or item.get("importedAt")
+            or item.get("checkedAt")
+            or ""
+        )
+        activity_date = activity_text[:10]
+        activity_display = ""
+        try:
+            parsed_activity = datetime.fromisoformat(activity_text.replace("Z", "+00:00"))
+            activity_display = f"{parsed_activity.month}/{parsed_activity.day}/{parsed_activity.year}"
+        except ValueError:
+            activity_display = activity_date
+
         stage_parts: list[str] = []
+        route_aliases: set[str] = set()
         for stage in item.get("stageSummaries") or []:
             if not isinstance(stage, dict):
                 continue
-            stage_parts.extend(
+            stage_text = " ".join(
                 str(stage.get(key) or "")
-                for key in ("label", "stage", "scanner", "listLabel", "listId")
+                for key in ("label", "stage", "scanner", "listLabel", "listId", "route", "routeCode")
             )
+            stage_parts.append(stage_text)
+            normalized = stage_text.lower()
+            if "outbound" in normalized or "staging" in normalized or "airport" in normalized:
+                route_aliases.update({"airport", "airport road", "airport rd", "all orders"})
+            if "indian trail" in normalized or "receiv" in normalized or " it " in f" {normalized} ":
+                route_aliases.update({"indian trail", "it"})
+            if "greenville" in normalized or "gnv" in normalized:
+                route_aliases.update({"greenville", "gnv"})
+            if "customer pickup" in normalized or "cpu" in normalized:
+                route_aliases.update({"cpu", "customer pickup"})
+            if "deliver to customer" in normalized or "dtc" in normalized:
+                route_aliases.update({"dtc", "deliver to customer"})
+
         return " ".join(
             [
                 delivery_date,
                 display_date,
+                activity_date,
+                activity_display,
                 str(item.get("sourceName") or ""),
+                str(item.get("fileName") or ""),
                 str(item.get("importedBy") or ""),
                 str(item.get("classification") or ""),
                 str(item.get("classificationLabel") or ""),
@@ -1030,6 +1155,7 @@ class DeliveryAutomationController:
                 " ".join(str(value) for value in (item.get("errors") or [])),
                 " ".join(str(value) for value in (item.get("changedListIds") or [])),
                 " ".join(stage_parts),
+                " ".join(sorted(route_aliases)),
             ]
         ).lower()
 
@@ -1087,11 +1213,23 @@ class DeliveryAutomationController:
         classification: str = "",
         date_from: str = "",
         date_to: str = "",
+        page_mode: str = "rows",
     ) -> dict[str, Any]:
-        """Return searchable, filterable, newest-first import audit history."""
+        """Return searchable, filterable, newest-first import audit history.
+
+        The maintained Automation Control Center requests ``control_center``
+        pagination. Unfiltered browsing uses fixed three-week operating windows;
+        filtered browsing keeps up to 25 matching activity dates together per
+        page so a busy import day is never split. Legacy callers retain the
+        existing row-count and one-business-week modes unless they opt in.
+        """
         clean_page = max(1, int(page or 1))
         clean_page_size = max(10, min(int(page_size or 20), 2000))
+        clean_page_mode = str(page_mode or "rows").strip().lower().replace("-", "_")
+        if clean_page_mode not in {"rows", "business_week", "control_center"}:
+            raise ValueError("Choose a valid import-history page mode")
         clean_query = str(query or "").strip().lower()[:200]
+        query_terms = [term for term in clean_query.split() if term]
         clean_classification = str(classification or "").strip().lower()
         allowed_classifications = {"", "new", "updated", "new_updated", "no_changes", "failed"}
         if clean_classification not in allowed_classifications:
@@ -1118,6 +1256,32 @@ class DeliveryAutomationController:
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=timezone.utc)
             return parsed.astimezone(timezone.utc)
+
+        def history_activity_date(item: dict[str, Any]) -> date:
+            """Return the local activity date used by both filters and week paging.
+
+            Import History is organized by when the updater/import actually ran,
+            so its From/Through controls must filter that same timeline rather
+            than the delivery date contained inside the workbook.
+            """
+            timestamp = (
+                item.get("runStartedAt")
+                or item.get("runCompletedAt")
+                or item.get("importedAt")
+                or item.get("checkedAt")
+                or item.get("updatedAt")
+            )
+            parsed = parsed_timestamp(timestamp)
+            if parsed is not None:
+                return parsed.astimezone().date()
+            fallback_text = str(timestamp or item.get("deliveryDate") or "")[:10]
+            try:
+                return date.fromisoformat(fallback_text)
+            except ValueError:
+                return date.min
+
+        filter_start = date.fromisoformat(clean_date_from) if clean_date_from else None
+        filter_end = date.fromisoformat(clean_date_to) if clean_date_to else None
 
         def import_signature(item: dict[str, Any]) -> tuple[Any, ...]:
             return (
@@ -1234,22 +1398,120 @@ class DeliveryAutomationController:
         filtered: list[dict[str, Any]] = []
         for item in merged:
             item_classification = str(item.get("classification") or "no_changes").lower()
-            delivery_date = str(item.get("deliveryDate") or "")[:10]
+            activity_date = history_activity_date(item)
             if clean_classification and item_classification != clean_classification:
                 continue
-            if clean_date_from and delivery_date and delivery_date < clean_date_from:
+            if (filter_start or filter_end) and activity_date == date.min:
                 continue
-            if clean_date_to and delivery_date and delivery_date > clean_date_to:
+            if filter_start and activity_date < filter_start:
                 continue
-            if clean_query and clean_query not in self._history_search_text(item):
+            if filter_end and activity_date > filter_end:
                 continue
+            if query_terms:
+                search_text = self._history_search_text(item)
+                if not all(term in search_text for term in query_terms):
+                    continue
             filtered.append(item)
 
         total_count = len(filtered)
-        total_pages = max(1, (total_count + clean_page_size - 1) // clean_page_size)
-        clean_page = min(clean_page, total_pages)
-        start = (clean_page - 1) * clean_page_size
-        page_items = filtered[start:start + clean_page_size]
+        week_start_text = ""
+        week_end_text = ""
+        page_start_text = ""
+        page_end_text = ""
+        page_date_count = 0
+        page_unit = "rows"
+        filters_active = bool(clean_query or clean_classification or clean_date_from or clean_date_to)
+
+        if clean_page_mode == "control_center":
+            if filters_active:
+                # Filtered history is paged by distinct activity date, not rows.
+                # Every import result for the selected dates stays on the same
+                # page; only after 25 matching dates do we create another page.
+                activity_dates = sorted(
+                    {history_activity_date(item) for item in filtered if history_activity_date(item) != date.min},
+                    reverse=True,
+                )
+                dates_per_page = 25
+                total_pages = max(1, (len(activity_dates) + dates_per_page - 1) // dates_per_page)
+                clean_page = min(clean_page, total_pages)
+                start = (clean_page - 1) * dates_per_page
+                selected_dates = activity_dates[start:start + dates_per_page]
+                selected_date_set = set(selected_dates)
+                page_items = [item for item in filtered if history_activity_date(item) in selected_date_set]
+                page_date_count = len(selected_dates)
+                clean_page_size = dates_per_page
+                page_unit = "dates"
+                if selected_dates:
+                    page_start_text = min(selected_dates).isoformat()
+                    page_end_text = max(selected_dates).isoformat()
+                    week_start_text = page_start_text
+                    week_end_text = page_end_text
+            else:
+                # Normal browsing is anchored around the operating calendar:
+                # page 1 = Next Week + This Week + Previous Week. Each later
+                # page moves backward exactly three business weeks.
+                today = date.today()
+                current_week_start = today - timedelta(days=today.weekday())
+                history_weeks = [
+                    activity - timedelta(days=activity.weekday())
+                    for item in filtered
+                    if (activity := history_activity_date(item)) != date.min
+                ]
+                if history_weeks:
+                    oldest_week = min(history_weeks)
+                    oldest_age_weeks = max(0, (current_week_start - oldest_week).days // 7)
+                    total_pages = 1 if oldest_age_weeks <= 1 else 1 + ((oldest_age_weeks - 2) // 3 + 1)
+                else:
+                    total_pages = 1
+                clean_page = min(clean_page, total_pages)
+
+                if clean_page == 1:
+                    window_start = current_week_start - timedelta(days=7)
+                    window_end = current_week_start + timedelta(days=11)
+                else:
+                    newest_age_weeks = 2 + ((clean_page - 2) * 3)
+                    oldest_age_weeks = newest_age_weeks + 2
+                    window_start = current_week_start - timedelta(days=oldest_age_weeks * 7)
+                    window_end = current_week_start - timedelta(days=newest_age_weeks * 7) + timedelta(days=4)
+
+                page_items = [
+                    item for item in filtered
+                    if window_start <= history_activity_date(item) <= window_end
+                ]
+                page_date_count = len({history_activity_date(item) for item in page_items if history_activity_date(item) != date.min})
+                page_unit = "weeks"
+                page_start_text = window_start.isoformat()
+                page_end_text = window_end.isoformat()
+                week_start_text = page_start_text
+                week_end_text = page_end_text
+        elif clean_page_mode == "business_week":
+            # Legacy one-week mode: keep every result from a Monday-Friday
+            # operating week together, including multiple runs on the same day.
+            week_groups: dict[date, list[dict[str, Any]]] = {}
+            for item in filtered:
+                activity_date = history_activity_date(item)
+                week_start = activity_date - timedelta(days=activity_date.weekday())
+                week_groups.setdefault(week_start, []).append(item)
+
+            week_keys = sorted(week_groups, reverse=True)
+            total_pages = max(1, len(week_keys))
+            clean_page = min(clean_page, total_pages)
+            if week_keys:
+                selected_week_start = week_keys[clean_page - 1]
+                page_items = week_groups[selected_week_start]
+                week_start_text = selected_week_start.isoformat()
+                week_end_text = (selected_week_start + timedelta(days=4)).isoformat()
+                page_start_text = week_start_text
+                page_end_text = week_end_text
+                page_date_count = len({history_activity_date(item) for item in page_items})
+                page_unit = "weeks"
+            else:
+                page_items = []
+        else:
+            total_pages = max(1, (total_count + clean_page_size - 1) // clean_page_size)
+            clean_page = min(clean_page, total_pages)
+            start = (clean_page - 1) * clean_page_size
+            page_items = filtered[start:start + clean_page_size]
         last_checked_at = str(
             latest_summary.get("completedAt") or latest_summary.get("startedAt") or ""
         )
@@ -1274,6 +1536,15 @@ class DeliveryAutomationController:
             "lastCheckedAt": last_checked_at,
             "page": clean_page,
             "pageSize": clean_page_size,
+            "pageItemCount": len(page_items),
+            "pageMode": clean_page_mode,
+            "pageUnit": page_unit,
+            "pageStart": page_start_text,
+            "pageEnd": page_end_text,
+            "pageDateCount": page_date_count,
+            "filteredPaging": filters_active if clean_page_mode == "control_center" else False,
+            "weekStart": week_start_text,
+            "weekEnd": week_end_text,
             "totalCount": total_count,
             "totalPages": total_pages,
             "filters": {
@@ -1281,6 +1552,7 @@ class DeliveryAutomationController:
                 "classification": clean_classification,
                 "dateFrom": clean_date_from,
                 "dateTo": clean_date_to,
+                "dateBasis": "import_activity",
             },
             "latestRun": {
                 "completedAt": last_checked_at,
@@ -1397,6 +1669,25 @@ class DeliveryAutomationController:
                 summary_path.unlink()
             except FileNotFoundError:
                 pass
+
+            synchronized_text = ", ".join(synchronized_files) if synchronized_files else "none (runtime already current)"
+            self._append_run_log_line(
+                log_path,
+                (
+                    f"Web request accepted. User={user} Action={action} RangeMode={range_mode} "
+                    f"DateFrom={date_from or 'automatic'} DateTo={date_to or 'automatic'} RunMode={run_mode}."
+                ),
+                "INFO",
+            )
+            self._append_run_log_line(log_path, "Browser-run overlap and scheduled-run lock preflight passed.")
+            self._append_run_log_line(
+                log_path,
+                f"Installed runtime synchronization completed. UpdatedFiles={synchronized_text}.",
+            )
+            self._append_run_log_line(
+                log_path,
+                f"Run files prepared. Runner={paths['runner']} Summary={summary_path} Log={log_path}.",
+            )
             status = {
                 "taskId": task_id,
                 "running": True,
@@ -1446,6 +1737,13 @@ class DeliveryAutomationController:
                 command.extend(["-DateFrom", date_from])
             if date_to:
                 command.extend(["-DateTo", date_to])
+            self._append_run_log_line(
+                log_path,
+                (
+                    f"Launching PowerShell process. Executable={command[0]} Runner={paths['runner']} "
+                    f"TaskId={task_id} SummaryPath={summary_path}."
+                ),
+            )
             try:
                 process = subprocess.Popen(
                     command,
@@ -1459,6 +1757,7 @@ class DeliveryAutomationController:
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
             except Exception as exc:
+                self._append_run_log_line(log_path, f"PowerShell process launch failed: {type(exc).__name__}: {exc}", "ERROR")
                 failed_status = {
                     **status,
                     "running": False,
@@ -1532,6 +1831,14 @@ class DeliveryAutomationController:
             stdout, stderr = process.communicate()
             output_lines.extend(str(stdout or "").splitlines())
             output_lines.extend(str(stderr or "").splitlines())
+
+        log_path_text = str(initial_status.get("logPath") or "").strip()
+        if log_path_text:
+            self._append_run_log_line(
+                Path(log_path_text),
+                f"PowerShell process exited with code {int(process.returncode or 0)}; reading final runtime summary.",
+                "INFO" if int(process.returncode or 0) == 0 else "ERROR",
+            )
 
         summary_path_text = str(initial_status.get("summaryPath") or "").strip()
         runtime_summary = self._read_json_file(Path(summary_path_text)) if summary_path_text else {}
