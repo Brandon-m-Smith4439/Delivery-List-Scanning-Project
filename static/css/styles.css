@@ -26306,3 +26306,459 @@ body.modal-scroll-locked :is(.modal-panel, .print-options-panel, [class*="print-
     font-size: clamp(27px, 7vw, 32px) !important;
   }
 }
+
+/* ========================================================================== */
+/* v0.379 Shared Lookup Manager glass-type gradient language                  */
+/* -------------------------------------------------------------------------- */
+/* The actual hue is supplied by app.js from the Lookup Manager. Components  */
+/* consume the same variables so one saved glass color stays consistent       */
+/* across Scan, racks, Bay Map, In Transit, Manage Items, rejects, and stats. */
+/* ========================================================================== */
+.glass-tone-inline,
+.glass-tone-chip,
+.glass-tone-card,
+.glass-tone-group {
+  --glass-type-color: #5d86ad;
+  --glass-type-border: rgba(93, 134, 173, .34);
+  --glass-type-soft: rgba(93, 134, 173, .085);
+  --glass-type-soft-strong: rgba(93, 134, 173, .16);
+  --glass-type-ring: rgba(93, 134, 173, .14);
+}
+
+.glass-tone-inline {
+  border: 1px solid var(--glass-type-border) !important;
+  border-left: 3px solid var(--glass-type-color) !important;
+  border-radius: 7px;
+  background: linear-gradient(105deg, var(--glass-type-soft-strong) 0%, var(--glass-type-soft) 48%, rgba(255,255,255,.84) 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.48);
+}
+
+.glass-tone-chip {
+  border-color: var(--glass-type-border) !important;
+  background: linear-gradient(135deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,.96) 76%) !important;
+  box-shadow: inset 3px 0 0 var(--glass-type-color), 0 2px 6px var(--glass-type-ring) !important;
+}
+
+.glass-tone-chip:hover,
+.glass-tone-chip:focus-visible {
+  border-color: var(--glass-type-color) !important;
+  box-shadow: inset 3px 0 0 var(--glass-type-color), 0 0 0 3px var(--glass-type-ring) !important;
+}
+
+.glass-tone-chip.is-active {
+  border-color: var(--glass-type-color) !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--glass-type-color) 84%, #fff) 0%, var(--glass-type-color) 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 6px 13px var(--glass-type-ring) !important;
+}
+
+.glass-tone-card {
+  border-color: var(--glass-type-border) !important;
+  background-image: linear-gradient(125deg, var(--glass-type-soft) 0%, rgba(255,255,255,.97) 44%, rgba(255,255,255,1) 100%) !important;
+}
+
+.glass-tone-group > td,
+.glass-tone-row > td:first-child {
+  border-left-color: var(--glass-type-color) !important;
+}
+
+/* v0.379 Glass tone lists -------------------------------------------------- */
+/* Multi-product notices use the same Lookup Manager hues without forcing a
+   single mixed notification to inherit one arbitrary glass color. */
+.glass-tone-list-v379 {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.glass-tone-list-v379 .glass-tone-inline { display: inline-flex; }
+
+
+/* ========================================================================== */
+/* v0.380 Restrained Lookup Manager glass language and contrast cleanup       */
+/* ========================================================================== */
+.glass-tone-inline,
+.glass-tone-chip,
+.glass-tone-card,
+.glass-tone-group {
+  --glass-type-color: #5d86ad;
+  --glass-type-accent: rgba(93, 134, 173, .50);
+  --glass-type-border: rgba(93, 134, 173, .16);
+  --glass-type-soft: rgba(93, 134, 173, .024);
+  --glass-type-soft-strong: rgba(93, 134, 173, .052);
+  --glass-type-ring: rgba(93, 134, 173, .055);
+}
+.glass-tone-inline {
+  border-color: var(--glass-type-border) !important;
+  border-left: 2px solid var(--glass-type-accent) !important;
+  background: linear-gradient(105deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,.96) 68%) !important;
+  box-shadow: none !important;
+  color: inherit !important;
+}
+.glass-tone-chip {
+  border-color: var(--glass-type-border) !important;
+  background: linear-gradient(135deg, var(--glass-type-soft) 0%, rgba(255,255,255,.985) 74%) !important;
+  box-shadow: inset 2px 0 0 var(--glass-type-accent) !important;
+  color: #294b67 !important;
+}
+.glass-tone-chip:hover,
+.glass-tone-chip:focus-visible {
+  border-color: var(--glass-type-accent) !important;
+  background: linear-gradient(135deg, var(--glass-type-soft-strong) 0%, #fff 78%) !important;
+  box-shadow: inset 2px 0 0 var(--glass-type-accent), 0 0 0 2px var(--glass-type-ring) !important;
+}
+.glass-tone-chip.is-active {
+  border-color: var(--glass-type-border) !important;
+  background: linear-gradient(135deg, var(--glass-type-soft-strong) 0%, #fff 80%) !important;
+  color: #21445f !important;
+  box-shadow: inset 3px 0 0 var(--glass-type-accent), 0 0 0 2px var(--glass-type-ring) !important;
+}
+.glass-tone-card {
+  border-color: var(--glass-type-border) !important;
+  background-image: linear-gradient(115deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,.985) 38%, #fff 100%) !important;
+}
+.glass-tone-group > td,
+.glass-tone-row > td:first-child { border-left-color: var(--glass-type-accent) !important; }
+
+/* Rack line items: glass identity is explicit and the whole row receives only a whisper of hue. */
+body .racks-page .rack-item.glass-tone-card,
+body .rack-item.glass-tone-card {
+  border-color: var(--glass-type-border) !important;
+  border-left: 2px solid var(--glass-type-accent) !important;
+  background: linear-gradient(100deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,.985) 40%, #fff 100%) !important;
+  box-shadow: none !important;
+}
+body .rack-item .rack-item-glass-v380 {
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0 2px;
+  padding: 3px 7px !important;
+  font-size: 10.5px;
+}
+body .rack-item .rack-item-glass-v380 > small {
+  color: #708090 !important;
+  font-size: 8px !important;
+  font-weight: 950 !important;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+body .rack-item .rack-item-glass-v380 > b { color: #29475e !important; font-size: 10.5px !important; }
+body .rack-item .rack-item-job-v380 { color: #526b80 !important; }
+body .rack-item .rack-item-piece-meta-v380 { color: #61778a !important; }
+
+/* Legacy Print/Export category colors are no longer glass-color authorities. */
+.print-glass-group-mirror,
+.print-glass-group-annealed,
+.print-glass-group-tempered,
+.print-glass-group-other {
+  --glass-accent: #aebfce !important;
+  --glass-soft: #f6f9fb !important;
+  --glass-border: #d9e2ea !important;
+  --glass-fg: #36516a !important;
+  border-left-color: #b7c7d5 !important;
+}
+.print-glass-choice.glass-tone-chip,
+.print-filter-chip-v197.glass-tone-chip {
+  border-color: var(--glass-type-border) !important;
+  background: linear-gradient(120deg, var(--glass-type-soft-strong) 0%, #fff 78%) !important;
+  color: #294b67 !important;
+}
+
+/* Targeted contrast audit: dark controls never inherit dark foreground text. */
+#globalPrintExportBtn:hover,
+#globalPrintExportBtn:focus-visible,
+.app button.app-primary-button:hover:not(:disabled),
+.app button.primary:hover:not(:disabled),
+.app button.primary-tool:hover:not(:disabled) { color: #fff !important; }
+
+/* ========================================================================== */
+/* v0.381 Rack detail glass identity and Print / Export contrast cleanup      */
+/* ========================================================================== */
+
+/* The individual-rack details GUI now exposes glass type explicitly and uses
+   only the same restrained Lookup Manager tint already used by rack rows. */
+body .rack-details-modal-v184 .rack-modal-line-v381.glass-tone-card {
+  border-color: var(--glass-type-border) !important;
+  border-left: 2px solid var(--glass-type-accent) !important;
+  background: linear-gradient(100deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,.99) 42%, #fff 100%) !important;
+  box-shadow: none !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v381 {
+  display: grid !important;
+  grid-template-columns: minmax(120px, 1fr) minmax(130px, .9fr) minmax(150px, 1.15fr) minmax(115px, .85fr) minmax(125px, .9fr) !important;
+  gap: 7px !important;
+  align-items: stretch !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v381 > span {
+  min-width: 0 !important;
+  display: grid !important;
+  align-content: center !important;
+  gap: 2px !important;
+  padding: 5px 7px !important;
+  border: 1px solid rgba(187, 202, 216, .58) !important;
+  border-radius: 7px !important;
+  background: rgba(255,255,255,.72) !important;
+  color: #315069 !important;
+  overflow: hidden !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v381 > span > small {
+  color: #718397 !important;
+  font-size: 8px !important;
+  font-weight: 950 !important;
+  letter-spacing: .04em !important;
+  text-transform: uppercase !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v381 > span > b {
+  min-width: 0 !important;
+  color: #29475e !important;
+  font-size: 10.5px !important;
+  font-weight: 900 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v381 .rack-modal-glass-type-v381.glass-tone-inline {
+  border-color: var(--glass-type-border) !important;
+  border-left: 2px solid var(--glass-type-accent) !important;
+  background: linear-gradient(105deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,.96) 72%) !important;
+}
+
+/* Print / Export glass controls always keep deliberate text/background
+   contrast. Exact glass colors remain subtle; All Glass Types uses one clear
+   neutral/selected state rather than inheriting a generated glass hue. */
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.glass-tone-chip,
+#printOptionsGlassType .print-filter-chip-v197.glass-tone-chip {
+  color: #294b67 !important;
+}
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.glass-tone-chip > span,
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.glass-tone-chip > b,
+#printOptionsGlassType .print-filter-chip-v197.glass-tone-chip > span,
+#printOptionsGlassType .print-filter-chip-v197.glass-tone-chip > b {
+  color: inherit !important;
+}
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:has(input:checked):not(.is-glass-all),
+#printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:has(input:checked):not(.is-glass-all) {
+  border-color: var(--glass-type-border) !important;
+  background: linear-gradient(120deg, var(--glass-type-soft-strong) 0%, #fff 80%) !important;
+  color: #21445f !important;
+  box-shadow: inset 3px 0 0 var(--glass-type-accent), 0 0 0 2px var(--glass-type-ring) !important;
+}
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.is-glass-all,
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all {
+  border-color: #c1cfdd !important;
+  background: linear-gradient(180deg, #fff 0%, #f3f7fb 100%) !important;
+  color: #294b67 !important;
+  box-shadow: none !important;
+}
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked),
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked) {
+  border-color: #245f98 !important;
+  background: linear-gradient(180deg, #316faa 0%, #245d92 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 10px rgba(36, 93, 146, .14) !important;
+}
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked) > b,
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked) > b {
+  min-width: 28px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 999px !important;
+  background: rgba(255,255,255,.15) !important;
+  color: #fff !important;
+  padding: 2px 6px !important;
+}
+
+@media (max-width: 980px) {
+  body .rack-details-modal-v184 .rack-modal-line-details-v381 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Keep hover/focus contrast deterministic even if older Print / Export rules
+   apply a stronger hover background later in the legacy cascade. */
+#printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:hover,
+#printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:focus-within {
+  border-color: var(--glass-type-accent) !important;
+  background: linear-gradient(120deg, var(--glass-type-soft-strong) 0%, #fff 82%) !important;
+  color: #21445f !important;
+}
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:hover,
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:focus-within {
+  border-color: #8eacc9 !important;
+  background: #edf4fa !important;
+  color: #21445f !important;
+}
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked):hover,
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked):focus-within {
+  border-color: #174d82 !important;
+  background: linear-gradient(180deg, #2c689f 0%, #1f5688 100%) !important;
+  color: #fff !important;
+}
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked):hover > b,
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked):focus-within > b {
+  color: #fff !important;
+}
+
+/* ========================================================================== */
+/* v0.382 Individual Rack detail readability                                 */
+/* ========================================================================== */
+/* Rack detail rows remain neutral. Only the Glass Type field carries the
+   Lookup Manager tint; the remaining data reads as one clean aligned row. */
+body .rack-details-modal-v184 .rack-modal-line-v382 {
+  border-color: #d7e1eb !important;
+  border-left-color: #d7e1eb !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 {
+  grid-template-columns:
+    minmax(150px, 1.35fr)
+    minmax(135px, 1fr)
+    minmax(155px, 1.15fr)
+    minmax(125px, .9fr)
+    minmax(135px, 1fr) !important;
+  gap: 0 !important;
+  align-items: center !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 > span {
+  min-width: 0 !important;
+  min-height: 42px !important;
+  display: grid !important;
+  align-content: center !important;
+  gap: 3px !important;
+  padding: 4px 12px !important;
+  border: 0 !important;
+  border-right: 1px solid #e5ecf3 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  overflow: hidden !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 > span:first-child {
+  padding-left: 2px !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 > span:last-child {
+  border-right: 0 !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 > span > small {
+  font-size: 8.5px !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 > span > b {
+  font-size: 11px !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 .rack-modal-glass-type-v382.glass-tone-inline {
+  margin: 2px 8px !important;
+  min-height: 38px !important;
+  padding: 5px 10px !important;
+  border: 1px solid var(--glass-type-border) !important;
+  border-left: 3px solid var(--glass-type-accent) !important;
+  border-radius: 8px !important;
+  background: linear-gradient(105deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,.97) 78%) !important;
+}
+@media (max-width: 980px) {
+  body .rack-details-modal-v184 .rack-modal-line-details-v382 {
+    grid-template-columns: repeat(2, minmax(150px, 1fr)) !important;
+    gap: 8px 0 !important;
+  }
+  body .rack-details-modal-v184 .rack-modal-line-details-v382 > span:nth-child(even) {
+    border-right: 0 !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.383 Rack detail balance and unmistakable Print / Export glass selection */
+/* ========================================================================== */
+/* The Rack detail content returns to a calm app-blue surface instead of a
+   stark white sheet. Glass hue remains localized to Glass Type only. */
+body .rack-details-modal-v184 .rack-details-modal-list {
+  padding: 7px 8px 7px 7px !important;
+  border: 1px solid #d3dfeb !important;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, #eef4f9 0%, #e9f0f7 100%) !important;
+}
+body .rack-details-modal-v184 .rack-modal-date-group {
+  border-color: #c8d6e4 !important;
+  background: #f8fbfd !important;
+}
+body .rack-details-modal-v184 .rack-modal-date-group > summary {
+  background: linear-gradient(180deg, #edf4fa 0%, #e4edf6 100%) !important;
+  color: #284b6b !important;
+}
+body .rack-details-modal-v184 .rack-modal-date-lines {
+  background: #f4f8fb !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-v382 {
+  border-color: #d0dce7 !important;
+  background: linear-gradient(180deg, #fbfdff 0%, #f4f8fb 100%) !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-primary {
+  background: linear-gradient(90deg, rgba(222,235,247,.72) 0%, rgba(244,248,252,.25) 80%) !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 {
+  grid-template-columns:
+    minmax(145px, 1.15fr)
+    minmax(220px, 1.65fr)
+    minmax(165px, 1.15fr)
+    minmax(130px, .85fr) !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 .rack-modal-job-v383 {
+  padding-left: 14px !important;
+  padding-right: 16px !important;
+}
+body .rack-details-modal-v184 .rack-modal-line-details-v382 .rack-modal-glass-type-v383.glass-tone-inline {
+  margin: 2px 8px !important;
+}
+@media (max-width: 980px) {
+  body .rack-details-modal-v184 .rack-modal-line-details-v382 {
+    grid-template-columns: repeat(2, minmax(170px, 1fr)) !important;
+  }
+}
+
+/* Print / Export: checked glass filters get a neutral application-blue
+   selection frame and check badge. Glass hues stay faint inside that frame. */
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:has(input:checked),
+#printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:has(input:checked) {
+  position: relative !important;
+  border: 2px solid #4f7eab !important;
+  background: linear-gradient(120deg, var(--glass-type-soft-strong) 0%, #f8fbff 80%) !important;
+  color: #173f66 !important;
+  box-shadow: inset 3px 0 0 var(--glass-type-accent), 0 0 0 2px rgba(79,126,171,.12) !important;
+}
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:has(input:checked)::after,
+#printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:has(input:checked)::after {
+  content: "\2713" !important;
+  position: absolute !important;
+  top: 4px !important;
+  right: 5px !important;
+  width: 17px !important;
+  height: 17px !important;
+  display: grid !important;
+  place-items: center !important;
+  border-radius: 999px !important;
+  background: #2f6da7 !important;
+  color: #fff !important;
+  font-size: 10px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+}
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:has(input:checked) > b,
+#printOptionsGlassType .print-filter-chip-v197.glass-tone-chip:has(input:checked) > b {
+  margin-right: 18px !important;
+}
+/* All Glass Types remains visually stronger and always readable when selected. */
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked),
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked) {
+  border: 2px solid #174d82 !important;
+  background: linear-gradient(180deg, #3475b0 0%, #245c91 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 2px rgba(36,93,146,.12), 0 5px 12px rgba(36,93,146,.14) !important;
+}
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked)::after,
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked)::after {
+  background: rgba(255,255,255,.18) !important;
+  color: #fff !important;
+}

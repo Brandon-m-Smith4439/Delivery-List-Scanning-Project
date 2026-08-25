@@ -1,4 +1,289 @@
+## v0.385 - Dynamic Today Stages, Rack Selector Parity, Rush Date Traceability, and Fade Polish
+
+- Changed Home **Today's Delivery** from a fixed four-column stage grid to a live count-driven grid so every active stage shares one row and automatically expands/shrinks with the number of stages present.
+- Updated the successful-scan **Correct rack / truck** selector to use the same rack-set color language and compact selected label as the Scan Location column while preserving the editable dropdown and full operational option summaries.
+- Improved Truck rack iconography with a more recognizable box-truck silhouette across the shared Rack visual system.
+- Reworked cleared/historical Rack Location presentation so **PRIOR** is a contained status pill inside the rack cell rather than a loose suffix that can overflow the colored location box.
+- Added Rush delivery-date move traceability using the existing `priority_delivery_date` field: source-date rows show an orange move ribbon, and the corresponding target-date stage receives a separate reference ribbon so the order is discoverable on both dates without duplicating quantities or scan state.
+- Added read-only Rush move references to delivery-list payloads; no schema migration is required because the existing priority-delivery-date column remains the source of truth.
+- Lengthened the established opacity-only page transition to 230ms while keeping all transform/movement animation disabled.
+- Preserved v0.384 Forward View sizing/layout, Airport Rd staging counts, Scan selection stability, physical Bay Map colors, permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.385.
+
+## v0.384 - Compact Forward View and Left-Aligned Piece Total
+
+- Reduced the Home **Forward View** section by approximately 15% so the five-date strip occupies less vertical space without losing its existing information hierarchy.
+- Tightened Forward View card height, padding, gaps, progress-bar height, and piece-summary sizing rather than shrinking the entire Home page or changing navigation behavior.
+- Moved the Airport Rd staging scanned/total piece amount to the **bottom-left** of each date card.
+- Preserved the stage-count badge in the **top-right** of each date card and retained the existing Airport Rd staging source-of-truth calculation.
+- Preserved v0.383 Rack details, Print / Export glass selection, Scan selection stability, physical Bay Map colors, Home artwork, permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.384.
+
+## v0.383 - Rack Detail Balance, Print Glass Selection, and Forward View Layout
+
+- Removed the Delivery Date column from the individual Rack details GUI and redistributed the row so Job Nr. has substantially more room.
+- Restored a calmer application-blue visual surface to the Rack details content area, reducing the bright white sheet effect while continuing to reserve Lookup Manager glass gradients for the Glass Type field only.
+- Strengthened selected Print / Export glass filters with a clear neutral app-blue frame and check badge, without increasing the intensity of the underlying glass hue.
+- Preserved a deliberate white-on-blue selected treatment for **All Glass Types** so its text/count remain readable in every selected/hover state.
+- Restored each Forward View date card's stage count to the top-right.
+- Kept Airport Rd staging scanned/total pieces in the bottom-right and removed the **Airport Rd pieces** helper text.
+- Preserved v0.382 Scan selection stability, Bay Map physical colors and stage-card polish, Home artwork, page transitions, permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.383.
+
+## v0.382 - Stable Scan Selection, Glass Filter Clarity, Rack Detail Cleanup, and Bay Stage Polish
+
+- Corrected the Scan-page selection jump caused by background refreshes falling back to the latest scanned item whenever no explicit selection existed. Polling now preserves an existing valid selection and otherwise leaves the list unselected; only a real successful scan can opt into focusing its scanned line.
+- Strengthened selected glass-type filter visibility with a consistent app-blue outline/check indicator while leaving the glass-type color itself as a restrained Lookup Manager background tint.
+- Reworked individual Rack detail rows so Customer, Job Nr., Size, and Delivery are clean unboxed columns; the full line remains neutral and only the Glass Type field carries the saved subtle gradient.
+- Increased Rack detail column spacing and standardized field labels for better readability in the shared rack operations GUI.
+- Added the established directional Outbound and Inbound stage icons to the Bay Map top route cards, changed their action wording from Open list to **Open Stage**, and polished card/action hover treatment without changing the physical Bay Map colors.
+- Removed the **Staging source** label from Forward View while preserving Airport Rd staging scanned/total calculations and card behavior.
+- Preserved v0.381 All Scans glass-type presentation, row-selection toggle, Bay Map physical colors, Scan filters layout, Home artwork, page transitions, permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.382.
+
+## v0.381 - Home Stage Cleanup, Bay Color Restore, Rack/Scan Glass Identity, and Selection Polish
+
+- Removed the temporary **Open Stage** text/buttons from Today's Delivery, preserving the cleaner whole-card stage navigation.
+- Restored the physical Bay Map to its established category/status color system by removing Lookup Manager glass tinting from physical bay slots and selected-bay item detail rows; In Transit and other glass-aware workspaces remain unchanged.
+- Added an explicit Glass Type field to each line in the individual Rack details GUI and applied the same restrained, low-opacity Lookup Manager glass tint to the complete rack line.
+- Corrected Print / Export glass-control contrast, including a stable neutral state and a white-on-blue selected state for **All Glass Types**, and renamed the control consistently.
+- Corrected the Scan Filters **All Glass Types** selected state so its piece count remains visible in a small contrasting count badge.
+- Made the Scan table's Job Nr. / Glass Type gradient surface fill the full first-column width for consistent row-to-row sizing.
+- Added a dedicated Glass Type column to **All Scans** with a subtle exact-glass tint.
+- Made Scan line selection toggleable by clicking the selected line again and softened the desktop/mobile selected-row border, background, and accent rail.
+- Preserved current Airport Rd Forward View calculations, scan-success rack correction, In Transit, packing-list, Home artwork, page-transition, permission, and database behavior.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.381; SQLite schema remains version 11.
+
+## v0.380 - Home Stage Actions, Softer Glass Colors, Rack Glass Rows, and Filter Readability
+
+- Added small **Open Stage** affordances to the Today's Delivery cards with smooth stage-accent hover/focus feedback while retaining the existing whole-card open behavior.
+- Reduced Lookup Manager glass presentation strength across the application by lowering border, background, gradient, and focus-ring opacity and replacing saturated active glass controls with subtle light-tint active states.
+- Reasserted the Lookup Manager palette over older hard-coded glass colors in In Transit and populated Bay Map slots, and neutralized legacy Print/Export category accents so saved exact glass colors are the active visual source.
+- Enlarged and reflowed the Scan Filters drawer into a clearer two-column desktop layout with larger typography, controls, glass choices, and vertical space.
+- Fixed the All Glass Types active button so dark backgrounds always use white text, and added targeted dark-control contrast repairs found during the formatting sweep.
+- Added a labeled Glass Type field to every individual rack item and applied the same very subtle Lookup Manager gradient to the complete rack item row.
+- Added saved glass gradients to populated Bay Map slots while keeping empty bays visually neutral.
+- Preserved current scanning, Airport Rd Forward View, rack correction, packing-list, permissions, Home, and SQLite schema version 11 behavior.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.380.
+
+## v0.379 - Airport Staging Progress, Glass-Type Gradients, Scan Filters, In Transit, and Packing Lists
+
+- Changed Forward View workload/completion to the single Airport Rd **Staging** source instead of aggregating equivalent pieces across all stage copies. Each date now shows Airport staging `scanned / total` pieces (for example `0 / 45`) with the staging completion percentage on the progress bar.
+- Corrected the successful Scan confirmation rack/truck selector so the rack submitted by the scan, backend-returned rack, or live item assignment is selected immediately; the selector remains editable for operator correction.
+- Rebuilt the Scan Filters drawer into a smaller, denser app-styled workspace and explicitly removed inherited duplicate pseudo-icons from Rush, Remake, and Internal Reject attention filters.
+- Added an authenticated read-only `/api/glass-type-colors` endpoint so all operators can use the Lookup Manager glass palette without receiving Lookup Manager edit permissions.
+- Introduced reusable glass-type CSS variables and subtle gradients, applying the Lookup Manager color language across Scan filters and rows, rack items, In Transit, Manage Items, selected Bay details, Missing Glass, Old Bays, Rejects, Statistics breakage-by-glass rows, and Print/Export glass controls.
+- Refined the In Transit interface with cleaner rack/glass cards, tighter summaries, app-consistent blue surfaces, and glass-specific gradient accents.
+- Rebuilt the rack Packing List print presentation to mirror the maintained Delivery List document style with a cleaner white/navy header, compact rack metadata, check-off fields, light table headers, grouped glass-type bands, and landscape print sizing while retaining the scannable Code 39 rack barcode.
+- Preserved Home artwork, stable opacity-only page transitions, current workflows/permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.379.
+
+## v0.378 - Forward View Progress and Piece Summary Polish
+
+- Removed the separate open-piece metric from each Forward View date card so the five-date strip focuses on total workload and completion.
+- Rebuilt the card flow as date, progress bar, and total-pieces summary, matching the established progress-first pattern used in expanded Delivery Library stage cards.
+- Moved the completion percentage onto the progress bar and retained a true empty track when completion is 0%.
+- Added a polished soft-blue piece-count summary with a piece/cube icon, stronger quantity hierarchy, and the stage count balanced on the opposite side.
+- Increased Forward View typography slightly for weekday labels, numeric dates, completion percentages, piece counts, and stage counts while preserving the existing five-card layout and date drill-through.
+- Preserved Home artwork, opacity-only page transitions, application workflows, permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.378.
+
+## v0.377 - Rebalanced Background Home Artwork
+
+- Reduced the v0.376 Home delivery illustration from the oversized treatment to a more balanced width and height that better supports the header rather than dominating it.
+- Faded the transparent truck/warehouse scene to a restrained background opacity so it feels integrated with the hero surface.
+- Lowered the artwork and reduced the reserved header height so the stage-card row intentionally overlaps a small portion of the illustration's lower edge; stage cards remain layered above the artwork and retain all interactions.
+- Kept the transparent maintained image asset and matching Home hero gradient unchanged, preserving the seamless edge treatment.
+- Preserved the stable opacity-only navigation fade, Bay Map initial transit reveal, Settings/Admin initial reveal, reduced-motion support, and all application workflows.
+- SQLite schema remains version 11; no migration or reset is included.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.377.
+
+## v0.376 - Stable Page Fades, Bay Transit Entry, and Larger Home Artwork
+
+- Removed the v0.375 4px vertical page-entry movement and replaced it with an opacity-only transition so navigation no longer visibly drops and rises.
+- Changed page switching to prepare the incoming page at zero opacity before removing `hidden`, eliminating the one-frame flash/jitter at the beginning of navigation.
+- Kept the page transition short at 180ms and preserved reduced-motion behavior.
+- Corrected the Bay Map initial in-transit animation order: the `is-entering` pause/hide state is now removed before the moving truck is restarted, and the refreshed route panel receives its own short opacity reveal.
+- Ensured the Settings/Admin header is part of the prepared page before the reveal begins so its initial presentation is consistent with the other pages.
+- Increased the transparent Home delivery illustration substantially in both width and height on desktop and rebalanced responsive sizing so the truck/warehouse scene is much more prominent.
+- Preserved all application data flow, permissions, APIs, and SQLite schema version 11 behavior.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.376.
+
+## v0.375 - Seamless Home Artwork and Page Entry Motion
+
+- Converted the approved Home delivery illustration into a transparent-background maintained asset so its truck, warehouse, trees, and road blend directly into the Today's Delivery hero instead of carrying the generated image backdrop.
+- Retuned the Home hero background to a matching pale-blue gradient and repositioned the transparent artwork for a cleaner seamless edge and stronger visual integration.
+- Added a shared, deliberately subtle page-entry animation: 190ms fade-in with a 4px vertical settle whenever a main page becomes visible, including the initial Home page reveal after sign-in.
+- Added `prefers-reduced-motion` handling so the motion is removed automatically for users who request it.
+- Kept the animation limited to page entry rather than recurring content refreshes so it does not interfere with scan speed or operator focus.
+- Preserved all application workflow, data, permissions, and SQLite schema version 11 behavior.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.375.
+
+## v0.374 - Supplied Home Header Image Integration
+
+- Added the user-supplied polished delivery-truck/warehouse illustration as the maintained image asset `static/images/home-delivery-header-v0374.png`.
+- Replaced the v0.373 CSS-drawn Home decoration with the supplied PNG so the header uses the approved visual directly rather than approximating it with inline SVG shapes.
+- Positioned the illustration in the upper-right of Today's Delivery, using the image's built-in negative space to keep the greeting readable while presenting the truck and warehouse strongly on the right.
+- Kept the illustration above and separate from the live stage-card area, with responsive sizing and mobile removal when available width becomes too tight.
+- Preserved the clean undecorated headers on the rest of the application and left all workflow/data behavior unchanged.
+- SQLite schema remains version 11; no migration or reset is included.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.374.
+
+## v0.373 - Home Illustration Polish
+
+- Substantially improved the Home **Today's Delivery** decorative illustration with a more polished truck, warehouse, landscape, and road composition so the scene feels more intentional and readable.
+- Reworked the truck proportions and detail treatment to better define the cargo body, cab, window, wheel placement, and delivery stance while keeping the illustration consistent with the application theme.
+- Refined the surrounding facility and landscape elements so the artwork reads as a cleaner delivery environment rather than a loose collection of shapes.
+- Kept the illustration fully confined to the upper-right Home greeting zone so it stays out of the stage-card content area.
+- Preserved the removal of decorative header artwork from the other major pages so Home remains the only page with header decoration.
+- Kept all existing workflows, APIs, permissions, Delivery Library behavior, and SQLite schema version 11 unchanged.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.373.
+
+## v0.371 - Home Hero Containment and Shared Page Header Decorations
+
+- Refined the Home **Today's Delivery** hero illustration so the truck/tree decoration stays confined to the upper-right greeting area instead of drifting behind the stage cards.
+- Replaced the translucent/ghosted decoration treatment with solid soft-blue fills so the artwork stays visually consistent with the rest of the application theme.
+- Preserved clear content layering across the greeting and stage grid by isolating the decoration behind only the hero header zone.
+- Added matching top-right decorative illustrations to the major application page headers, giving Statistics, Scan, Racks, Rejects, Bay Map, and Settings a more polished and consistent header presentation.
+- Kept all existing Home layout structure, stage drill-through, Delivery Library behavior, permissions, and SQLite schema version 11 unchanged.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.371.
+
+## v0.370 - Home Scale, Stage Icons, Zero Progress, and Delivery Illustration
+
+- Increased the complete Home **Today's Delivery** hero by approximately 30% so the greeting/date and live stage cards remain the dominant first-view workspace.
+- Replaced the previous basic truck/tree watermark with a more detailed right-aligned delivery illustration featuring a defined box truck, cab/window, wheels, cargo-panel detail, road line, layered trees, and subtle landscape depth.
+- Gave **Greenville** and **DTC** distinct destination-specific icons instead of sharing the generic truck glyph: Greenville now uses a facility/warehouse symbol and DTC uses a customer-home delivery symbol.
+- Corrected zero-progress rendering so a stage at exactly 0% produces no colored header segment or stage fill, eliminating the small false-progress sliver.
+- Added deliberate hover/focus feedback to Today's stage cards and Delivery Library Open Stage controls using accent color, border, shadow, and icon emphasis without restoring janky whole-card translation.
+- Normalized Forward View typography and moved weekday labels such as Fri/Mon into the same application blue used by Home section eyebrows.
+- Preserved Inbound wording/icon behavior, Home navigation and drill-through, Delivery Library grouping/search/paging, permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.370.
+
+## v0.369 - Contained Delivery Library Stage Progress
+
+- Corrected the expanded Delivery Library stage-card layout shown in narrow stage rows where the v0.368 progress column could visually extend past the card boundary.
+- Rebuilt each stage card as a stable two-column layout with the stage identity/progress content on the left and the Open Stage action isolated on the right.
+- Moved the stage-colored progress bar directly beneath the stage title/support copy, keeping the bar physically owned by that stage instead of a competing sibling grid column.
+- Preserved the stage icon, Inbound/Outbound icon language, stage-specific gradient/accent, percentage-on-bar, and `scanned / total` piece count.
+- Added responsive containment so smaller cards stack the Open Stage action below without allowing progress overflow.
+- Preserved Delivery Library data flow, search/filtering, business-week grouping, permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.369.
+
+## v0.368 - Delivery Library Header, Stage Cards, and Inbound Presentation
+
+- Rebuilt each Delivery Library date summary around a substantially larger full-width overall progress track so the header progress is easy to read at a glance instead of collapsing into a tiny legacy progress control.
+- Replaced the plain right-side piece number with a polished Total Pieces summary card using a compact piece icon, label, and stronger quantity hierarchy.
+- Completely restructured expanded Delivery Library stages into one stable three-part row: stage identity/icon, stage-colored progress, and a dedicated Open Stage action. This removes the competing nested grid rules that made the v0.367 stage layout look misaligned.
+- Increased stage progress height, kept the percentage inside the progress bar, and retained only the requested `scanned / total` piece count beneath the bar.
+- Renamed the user-facing Received stage to **Inbound** while preserving the underlying Indian Trail/received stage identity and backend behavior.
+- Replaced the Received checkmark with a diagonal down-right Inbound arrow that visually mirrors the Outbound arrow direction. The icon is shared by Today's Delivery and expanded Delivery Library stage cards.
+- Added the Inbound Spanish UI label (`Entrada`) while leaving stored stage values unchanged.
+- Preserved Delivery Library search/filtering, business-week paging, list drill-through, permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.368.
+
+## v0.367 - Home Delivery Library Progress and Interaction Refinement
+
+- Repositioned the Today's Delivery truck/tree watermark to the far-right edge and cropped its paint box so the artwork cannot drift into the greeting side of the hero.
+- Removed the Forward View explanatory sentence and increased each Forward View date card from 108px to 130px minimum height (about 20%) while retaining the five-date layout and current data.
+- Removed the Quick Destinations explanatory sentence and replaced stacked translate/lift hover effects across Home with short border/background/shadow transitions for smoother pointer tracking.
+- Rebuilt expanded Delivery Library stage cards around the same stage icon language used in Today's Delivery, with a subtle stage-colored gradient and stage-specific accent rail.
+- Replaced separate Scanned/Open/Pieces metrics with one stage-colored progress track, percentage displayed on the track, and a compact `scanned / total` count beneath it.
+- Reformatted delivery-date summaries to show the weekday above the numeric delivery date and shifted the overall stacked date-progress bar left for a more centered summary line.
+- Preserved Delivery Library search, business-week grouping, paging, stage filtering, list drill-through, permissions, and SQLite schema version 11.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.367.
+
+## v0.366 - Screenshot-Matched Home Operations Hub
+
+- Reworked the Home page to visually match the approved screenshot reference while retaining all existing live data and navigation hooks.
+- Restyled Today's Delivery as a pale blue/white hero with a subtle delivery-truck watermark, larger greeting/date hierarchy, and four evenly spaced stage cards.
+- Rebuilt stage-card presentation around stage-specific icon tiles, colored left rails, normalized scanned/total typography, slim progress tracks, and compact completion percentages.
+- Rebalanced Forward View to the reference proportions with five equal timeline cards, screenshot-matched spacing, and a rectangular `View all delivery lists` action.
+- Enlarged the six destination actions into the approved tall icon-card format with color-specific icon tiles, circular arrow controls, soft tinting, and dotted corner texture.
+- Softened Delivery Library into a pale blue discovery surface with an integrated heading and white search/stage controls.
+- Preserved Home permissions, destination actions, delivery-list drill-through, timeline behavior, Delivery Library search/paging, and SQLite schema version 11.
+
 # README Changelog
+
+## v0.365 - Home First-View Hierarchy, Forward View Order, and Destination Icon Cards
+
+- Promoted the Home local-time greeting/operator line to the page H1 and enlarged the greeting/date hierarchy so Today's Delivery is the first and largest information surface operators see after sign-in.
+- Added a final v0.365 typography owner for Today stage cards so stage labels, scanned quantity, total quantity, and completion percentages remain visually consistent instead of inheriting mismatched sizes from older Home passes.
+- Reordered Home so **Forward View / Upcoming Delivery Timeline** sits directly beneath Today's Delivery, followed by navigation destinations and then the Delivery Library. No Forward View data or date drill-through behavior changed.
+- Reworked the six destination actions into polished icon cards with larger accent icons, clearer workspace copy, stronger card depth, and focused hover/focus states while preserving the existing `data-home-hub-action` hooks and page permissions.
+- Kept the v0.364 light-blue/navy Home palette, single-theme presentation, compact Forward View dimensions, and existing Delivery Library behavior.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.365. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.364 - Lighter Today Surface, Larger Greeting, and Forward View Rebalance
+
+- Rebalanced Home **Today's Delivery** from the stronger v0.363 medium/dark banner to a lighter layered blue surface that matches the application's established light blue/navy visual language.
+- Increased the local-time greeting/operator typography from 21px to 30px and the delivery date from 17px to 23px on desktop, with corresponding mobile increases.
+- Returned stage cards to raised white/light-blue surfaces with navy text, restrained blue progress bars, and the existing exact stage progress/click-through behavior.
+- Increased Forward View by approximately 20% from the v0.363 compressed state: desktop cards rise from 76px to 91px and supporting spacing, typography, controls, and progress bars scale proportionally while remaining significantly more compact than the older 125px layout.
+- Kept the v0.363 single-theme presentation; Dark mode remains fully removed.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.364. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.363 - Home Color Hierarchy, Compact Forward View, and Dark Mode Removal
+
+- Rebalanced Home color hierarchy: Today's Delivery now uses a stronger medium/dark blue surface, while Delivery Library uses a lighter blue header with dark readable typography.
+- Increased the local-time greeting/operator and delivery-date typography in Today's Delivery while preserving the simple greeting → date → stage-card workflow.
+- Compressed Forward View into a genuinely compact five-date strip with 76px desktop cards, tighter padding/gaps, smaller metrics, and a reduced heading footprint; no timeline data or drill-through behavior was removed.
+- Completely removed the per-user Light/Dark appearance feature from the maintained UI and runtime. The profile Appearance section, local-storage theme preference, theme switching functions/listeners, and `theme.css` stylesheet reference are gone. The former theme stylesheet is intentionally inert for safe changed-files overlay installs.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.363. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.362 - Compact Home Progress and Dark Navy Mode 3.0
+
+- Reverted the Home delivery-progress area from the v0.361 KPI-heavy command surface to a simpler operator view: local-time greeting/operator name, today's delivery date, then the live stage cards. Removed the extra title/description, four KPI summary cards, and secondary stage heading.
+- Restored the compact pre-v0.361 stage-card structure while preserving exact stage progress and click-through into each delivery list.
+- Restored Forward View to its v0.358 vertical geometry with 15px section padding and 125px timeline cards, undoing the later height increase.
+- Reworked Dark mode into **Dark Navy Mode 3.0**. Neutral backgrounds, generated workspaces, modals, forms, menus, tables, and controls now use layered navy/blue elevations rather than near-black surfaces.
+- Preserved established page accents plus rack, bay, route, warning, success, reject, and completion colors so Dark mode looks like the existing application in a darker blue palette instead of a separate black theme.
+- Preserved the existing per-user appearance preference and no-backdrop-blur performance safeguards.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.362. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.361 - Today's Delivery Command Surface and Dark Mode 2.0
+
+- Completely rebuilt the Home **Today's Delivery** progress surface. The previous greeting/title/date/stage banner is replaced by a calmer operations summary with local-time greeting, delivery date/live-update metadata, four live KPIs (overall completion, scanned pieces, remaining pieces, and completed stages), and cleaner stage cards showing open work, piece counts, progress, and completion state.
+- Reduced the Home progress surface's visual weight in Light mode with a neutral blue-gray background, quieter borders, clearer hierarchy, and more readable date/status chips.
+- Rebuilt Dark mode as a true low-glare application theme instead of a partial set of dark component overrides. The v0.361 theme owns page backgrounds, generated/legacy panels and cards, modal workspaces, filters/toolbars, inputs, menus, tables, neutral buttons, text hierarchy, and major page work areas so hard-coded white surfaces do not leak through.
+- Added darker raised/hover/input layers and more consistent table striping while preserving semantic rack, bay, route, success, warning, reject, and completion accents. Physical Bay colors remain recognizable but are luminance-reduced in Dark mode.
+- Kept the v0.354 modal performance safeguards intact: Dark mode uses opaque low-cost surfaces and does not restore backdrop blur or other continuous compositing effects.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.361. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.360 - Home Greeting, Lighter Stage Progress, and Per-User Dark Mode
+
+- Removed the redundant Home page header block (`Delivery operations`, `Operations Hub`, and signed-in copy) so live Delivery Progress is now the first Home surface.
+- Added browser-local time-of-day greeting copy: **Good morning**, **Good afternoon**, or **Good evening**, followed by the current operator display name.
+- Reworked the Delivery Progress surface from the very dark navy treatment to a lighter blue command surface with explicit high-contrast date/title styling and brighter stage cards.
+- Added an **Appearance** section beneath Application Sound in the sidebar profile menu with Light and Dark selections.
+- Added a per-user browser preference key so each signed-in user's selected theme restores independently. Logging out returns the sign-in shell to the default light presentation without deleting the saved user preference.
+- Added `static/css/theme.css` as a dedicated, last-loaded application theme layer. Dark mode overrides global tokens plus maintained shell, table, panel, modal, form, Home, Statistics, Scan, Racks, Rejects, Bay Map, Settings, and shared-control surfaces while leaving print output unaffected.
+- Kept the theme switch lightweight: applying a theme only changes the root theme attribute and control state; it does not rerender page data or reopen GUIs.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.360. SQLite schema remains version 11; no migration or reset is included.
+
+## v0.359 - Simplified Operations Hub, Dark Stage Progress, Rejects/Settings Destinations, and Delivery Library Polish
+
+- Simplified Home around the work surfaces operators actually use. Removed the v0.358 Floor Command Center/Operational Pulse, Needs Attention Action Queue, Common Workspaces Navigation card, and the Priority Work / Print-Export Home destination buttons.
+- Moved **Delivery Progress by Stage** directly below the Home page header and rebuilt it as the primary live operational surface with a deep navy gradient, live-floor indicator, compact translucent stage cards, and preserved click-through to each live delivery list.
+- Reworked the Home destination strip to six direct pages: **Scan, Racks, Bay Map, Statistics, Rejects, and Settings**. Rejects uses its existing list-view permission and Settings keeps the existing Admin permission gate.
+- Renamed the user-facing top-level Admin navigation/page presentation to **Settings** / **Settings Page** without changing the stable `admin` page route, permissions, APIs, Admin modal identifiers, or backend contracts.
+- Removed the Home two-column side-rail layout so **Forward View / Upcoming Delivery Timeline** spans the full application content width. The existing five-date timeline, progress metrics, and jump-to-date behavior are preserved.
+- Restyled **Find a Delivery List** as a richer Delivery Library with a dark navy header, stronger blue search/filter surface, polished week bands, and clearer open-date borders while preserving the existing business-week grouping, paging, stage filter, search, and exact list opening behavior.
+- Kept Home lightweight by continuing to render from the existing delivery catalog rather than adding a new recurring Home API or background report query.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.359. SQLite schema remains version 11; no migration or reset is included.
+
+
+## v0.358 - Operations Hub Home Redesign
+
+- Completely rebuilt the Home page as an **Operations Hub**. The old page was primarily a delivery-list finder; v0.358 gives Home a command-center role with live operational context, one-click navigation, attention surfacing, and delivery-date awareness while retaining the full finder below.
+- Added a six-button **Quick Actions** strip for Scan, Racks, Bay Map, Priority Work, Print / Export, and Statistics. Racks, Bay Map, Priority Work, and Print / Export continue to honor the application's existing permission model.
+- Added a lightweight **Operational Pulse** generated from the already-loaded delivery catalog: current completion, open pieces, late pieces, and next delivery workload render without adding another recurring backend request.
+- Added **Needs Attention** prioritization for late pieces, overdue open delivery lists, today's remaining work, under-50% next-day work, pending Priority Work already loaded in client state, and known Old Bay assignments. Attention rows route directly to the exact delivery list or relevant workspace.
+- Added a five-date **Upcoming Delivery Timeline** showing date, stage count, pieces, open pieces, and completion. Clicking a timeline date clears Home filters, calculates the correct Delivery Library page, expands that date, and scrolls it into view.
+- Preserved today's per-stage delivery progress as a distinct hub section and added compact Common Workspaces navigation for repeat operator tasks.
+- Moved detailed delivery-list discovery into a dedicated lower **Delivery Library** card with the existing search, stage filter, business-week grouping, date expansion, and pagination behavior intact.
+- Added purpose-built responsive v0.358 Home styles so the command center, pulse, quick actions, timeline, attention queue, and delivery library collapse cleanly without inheriting unrelated legacy dashboard geometry.
+- Added v0.358 regression coverage for hub structure/actions, pulse and attention rendering, timeline drill-through, Delivery Library preservation, cache/version references, and schema continuity.
+- Advanced application/cache references and `APPLICATION_VERSION` to v0.358. SQLite schema remains version 11; no migration or reset is included.
 
 ## v0.357 - Move Rack Layering, Five-Week Packing History, and Shared Page Headers
 

@@ -535,7 +535,28 @@ def render_rack_packing_list(payload: dict) -> str:
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
         rows = []
-        for item in items:
+        sorted_items = sorted(
+            items or [],
+            key=lambda item: (
+                str(item.get("product") or item.get("job") or "Other Glass").lower(),
+                str(item.get("job") or ""),
+                str(item.get("order") or ""),
+                str(item.get("item") or ""),
+            ),
+        )
+        current_glass = None
+        for item in sorted_items:
+            glass_type = str(item.get("product") or item.get("job") or "Other Glass").strip() or "Other Glass"
+            if glass_type != current_glass:
+                current_glass = glass_type
+                group_qty = sum(
+                    int(row.get("rackQty") or row.get("qty") or 0)
+                    for row in sorted_items
+                    if str(row.get("product") or row.get("job") or "Other Glass").strip() == glass_type
+                )
+                rows.append(
+                    f'<tr class="packing-glass-group"><td colspan="10"><strong>{esc(glass_type)}</strong><span>{esc(group_qty)} pcs</span></td></tr>'
+                )
             rows.append(
                 f"""
                 <tr>
@@ -596,7 +617,7 @@ def render_rack_packing_list(payload: dict) -> str:
         <div class="packing-document-accent"></div>
         <header class="packing-header">
           <div class="packing-logo-box">
-            <img class="packing-logo" src="/static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260821-v0.357" alt="Barefoot & Company" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+            <img class="packing-logo" src="/static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260825-v0.385" alt="Barefoot & Company" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
             <span class="packing-logo-fallback" style="display:none;">Barefoot &amp; Company</span>
           </div>
           <div class="packing-title">
@@ -606,8 +627,9 @@ def render_rack_packing_list(payload: dict) -> str:
               <span><b>Rack Type</b>{esc(rack.get("type"))}</span>
               <span><b>Destination</b>{esc(destination)}</span>
               <span><b>Status</b>{esc(rack.get("status"))}</span>
-              <span><b>Qty</b>{esc(qty or rack.get("qty"))}</span>
+              <span><b>Total Pieces</b>{esc(qty or rack.get("qty"))}</span>
             </div>
+            <div class="packing-checkoff"><span>Checked By <i></i></span><span>Date <i></i></span></div>
           </div>
           <div class="barcode-box">
             {code39_svg(str(barcode))}
@@ -634,53 +656,64 @@ def render_rack_packing_list(payload: dict) -> str:
       <link rel="icon" href="/assets/delivery-list-scanner-icon.ico" sizes="any">
       <style>
         * {{ box-sizing: border-box; }}
-        body {{ font-family: Arial, sans-serif; color: #071633; margin: 22px; background: #eef3f8; }}
-        button {{ margin-bottom: 12px; border: 0; border-radius: 8px; background: #135cff; color: #fff; padding: 9px 16px; font-weight: 900; cursor: pointer; }}
-        .packing-sheet {{ page-break-after: always; overflow: hidden; border: 1px solid #c4d1df; border-radius: 14px; background: #fff; box-shadow: 0 18px 42px rgba(9,34,64,.12); }}
+        body {{ margin: 0; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #f6f8fb; }}
+        button {{ margin: 12px 18px 0; border: 0; border-radius: 7px; background: #072a63; color: #fff; padding: 9px 16px; font-weight: 900; cursor: pointer; }}
+        .packing-sheet {{ width: min(1460px, calc(100% - 32px)); margin: 16px auto; padding: 18px 20px 14px; background: #fff; border: 1px solid #444; break-inside: avoid; page-break-inside: avoid; }}
         .packing-sheet:last-child {{ page-break-after: auto; }}
-        .packing-document-accent {{ height: 7px; background: linear-gradient(90deg, #071f3f, #135cff 55%, #0f8a85); }}
-        .packing-header {{ display: grid; grid-template-columns: 210px minmax(260px, 1fr) 300px; gap: 14px; align-items: start; border-bottom: 3px solid #071633; padding: 16px 18px 14px; }}
-        .packing-logo-box {{ min-height: 112px; display: grid; align-content: start; gap: 6px; }}
-        .packing-logo {{ width: 200px; max-width: 100%; max-height: 112px; object-fit: contain; object-position: left top; display: block; }}
-        .packing-logo-fallback {{ color: #071633; font-size: 15px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; text-shadow: 0 3px 6px rgba(5, 22, 48, 0.18); }}
-        .packing-title small {{ display: block; color: #526078; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }}
-        h1 {{ margin: 3px 0 10px; font-size: 28px; line-height: 1.05; overflow-wrap: anywhere; }}
-        p {{ margin: 4px 0; }}
-        .rack-meta {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }}
-        .rack-meta span {{ border: 1px solid #d6deeb; border-radius: 8px; background: linear-gradient(180deg, #fff, #f6f9fc); padding: 7px 9px; font-size: 12px; }}
-        .rack-meta b {{ display: block; color: #526078; font-size: 10px; text-transform: uppercase; }}
-        .barcode-box {{ width: 100%; text-align: center; border: 1px solid #cbd7e5; border-radius: 10px; background: #fff; padding: 10px; box-shadow: inset 0 1px 0 #fff, 0 5px 14px rgba(7,31,63,.06); }}
-        .rack-barcode {{ width: 100%; height: 72px; display: block; }}
-        .barcode-text {{ margin-top: 5px; font-size: 18px; font-weight: 900; letter-spacing: 1px; }}
-        .destination-card {{ margin: 14px 18px 0; display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 1.2fr); gap: 12px; border: 1px solid #b9c8d8; border-left: 5px solid #0f8a85; border-radius: 10px; background: linear-gradient(90deg, #f6fbfb, #fff); padding: 10px 12px; }}
-        .destination-card.destination-card-single {{ grid-template-columns: minmax(0, 1fr); }}
-        .destination-card small {{ display: block; color: #526078; font-size: 10px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }}
-        .destination-card strong {{ display: block; font-size: 18px; margin-top: 2px; }}
-        .destination-card span {{ display: block; font-size: 15px; font-weight: 800; margin-top: 2px; }}
-        .destination-card-main {{ min-width: 0; }}
-        .destination-stops {{ display: grid; gap: 5px; }}
-        .destination-stop {{ border-left: 4px solid #071633; padding-left: 8px; }}
-        .destination-stop strong {{ font-size: 13px; }}
-        .destination-stop span {{ font-size: 12px; }}
-        table {{ width: calc(100% - 36px); border-collapse: separate; border-spacing: 0; margin: 16px 18px 0; font-size: 12px; table-layout: fixed; border: 1px solid #9fb0c3; border-radius: 9px; overflow: hidden; }}
-        th, td {{ border: 0; border-top: 1px solid #d5dee8; padding: 7px 6px; text-align: left; vertical-align: top; overflow: hidden; text-overflow: ellipsis; }}
-        thead th {{ border-top: 0; background: #071f3f; color: #fff; font-size: 10px; letter-spacing: .025em; text-transform: uppercase; }}
-        tbody tr:nth-child(even) td {{ background: #f8fafc; }}
-        th:nth-child(1), td:nth-child(1) {{ width: 12%; white-space: nowrap; }}
-        th:nth-child(2), td:nth-child(2) {{ width: 15%; }}
+        .packing-document-accent {{ height: 4px; margin: -18px -20px 14px; background: #072a63; }}
+        .packing-header {{ display: grid; grid-template-columns: 190px minmax(320px, 1fr) 285px; gap: 18px; align-items: center; border-bottom: 3px solid #072a63; padding-bottom: 10px; margin-bottom: 10px; }}
+        .packing-logo-box {{ min-height: 90px; display: grid; align-content: center; }}
+        .packing-logo {{ width: 176px; max-width: 100%; max-height: 82px; object-fit: contain; object-position: left center; display: block; }}
+        .packing-logo-fallback {{ color: #071633; font-size: 15px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }}
+        .packing-title small {{ display: block; color: #526078; font-size: 10px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }}
+        h1 {{ margin: 4px 0 8px; color: #041a3d; font-size: 26px; line-height: 1.12; text-transform: uppercase; overflow-wrap: anywhere; }}
+        .rack-meta {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 7px; }}
+        .rack-meta span {{ min-width: 0; border: 1px solid #d9e1ee; background: #f8fafc; padding: 6px 7px; color: #263550; font-size: 11px; font-weight: 800; }}
+        .rack-meta b {{ display: block; color: #526078; font-size: 8.5px; text-transform: uppercase; letter-spacing: .04em; }}
+        .packing-checkoff {{ display: flex; gap: 12px; margin-top: 7px; color: #41506c; font-size: 9px; font-weight: 850; }}
+        .packing-checkoff span {{ display: inline-flex; align-items: end; gap: 5px; }}
+        .packing-checkoff i {{ width: 88px; height: 12px; border-bottom: 1px solid #56647a; }}
+        .barcode-box {{ width: 100%; text-align: center; border: 1px solid #aebccc; background: #fff; padding: 8px 10px; }}
+        .rack-barcode {{ width: 100%; height: 65px; display: block; }}
+        .barcode-text {{ margin-top: 4px; font-size: 15px; font-weight: 900; letter-spacing: 1px; }}
+        .destination-card {{ margin: 10px 0 0; border: 1px solid #c6d1df; border-left: 4px solid #2f7ab5; background: #f8fbfd; padding: 8px 10px; }}
+        .destination-card small {{ display: block; color: #526078; font-size: 8.5px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }}
+        .destination-card strong {{ display: block; color: #173b65; font-size: 15px; margin-top: 2px; }}
+        .destination-card span {{ display: block; color: #526078; font-size: 11px; font-weight: 750; margin-top: 1px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11.5px; line-height: 1.22; table-layout: fixed; }}
+        th, td {{ border: 1px solid #d9e1ee; padding: 6px 7px; text-align: left; vertical-align: top; overflow: hidden; text-overflow: ellipsis; }}
+        th {{ background: #f1f1f1; color: #041a3d; font-size: 10.5px; font-weight: 900; }}
+        tr, td, th {{ break-inside: avoid; page-break-inside: avoid; }}
+        .packing-glass-group td {{ background: #e9e9e9 !important; color: #173b65; padding-top: 6px; padding-bottom: 6px; font-size: 10.5px; font-weight: 900; text-transform: uppercase; }}
+        .packing-glass-group td {{ display: table-cell; }}
+        .packing-glass-group strong {{ float: left; }}
+        .packing-glass-group span {{ float: right; color: #526078; font-size: 9px; }}
+        tbody tr:nth-child(even):not(.packing-glass-group) td {{ background: #fbfcfd; }}
+        th:nth-child(1), td:nth-child(1) {{ width: 11%; white-space: nowrap; }}
+        th:nth-child(2), td:nth-child(2) {{ width: 16%; }}
         th:nth-child(3), td:nth-child(3) {{ width: 9%; }}
         th:nth-child(4), td:nth-child(4) {{ width: 7%; }}
         th:nth-child(5), td:nth-child(5) {{ width: 5%; text-align: center; }}
-        th:nth-child(6), td:nth-child(6) {{ width: 13%; }}
-        th:nth-child(7), td:nth-child(7) {{ width: 17%; }}
-        th:nth-child(8), td:nth-child(8) {{ width: 7%; }}
+        th:nth-child(6), td:nth-child(6) {{ width: 14%; }}
+        th:nth-child(7), td:nth-child(7) {{ width: 18%; }}
+        th:nth-child(8), td:nth-child(8) {{ width: 8%; }}
         th:nth-child(9), td:nth-child(9) {{ width: 5%; text-align: center; }}
         th:nth-child(10), td:nth-child(10) {{ width: 5%; text-align: center; }}
-        .check-cell {{ text-align: center; font-size: 20px; }}
-        .signature-section {{ margin: 18px; display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }}
-        .signature-section div {{ min-height: 58px; border: 1px solid #222; padding: 8px; }}
-        .signature-section span {{ display: block; height: 28px; border-bottom: 1px solid #222; margin-top: 12px; }}
-        @media print {{ body {{ margin: 0.25in; background: #fff; }} button {{ display: none; }} .packing-sheet {{ border: 0; border-radius: 0; box-shadow: none; }} .packing-header {{ grid-template-columns: 190px minmax(250px, 1fr) 280px; gap: 7px; }} .packing-logo {{ width: 185px; max-height: 105px; }} .packing-logo-box {{ min-height: 105px; }} .barcode-box {{ padding: 8px; }} }}
+        .check-cell {{ text-align: center; font-size: 17px; }}
+        .signature-section {{ margin-top: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }}
+        .signature-section div {{ min-height: 52px; border: 1px solid #444; padding: 7px; font-size: 10px; }}
+        .signature-section span {{ display: block; height: 25px; border-bottom: 1px solid #444; margin-top: 9px; }}
+        @page {{ size: letter landscape; margin: 0.25in; }}
+        @media print {{
+          body {{ background: #fff; }}
+          button {{ display: none; }}
+          .packing-sheet {{ width: auto; margin: 0; padding: .04in .06in .03in; border: 0; page-break-after: always; }}
+          .packing-sheet:last-child {{ page-break-after: auto; }}
+          .packing-document-accent {{ margin: -.04in -.06in 10px; }}
+          .packing-header {{ grid-template-columns: 165px minmax(300px, 1fr) 250px; gap: 10px; }}
+          .packing-logo {{ width: 158px; max-height: 72px; }}
+          .rack-barcode {{ height: 58px; }}
+        }}
       </style>
     </head>
     <body>
@@ -1117,7 +1150,7 @@ def render_stale_bay_report(rows: list[dict]) -> str:
   <div class="toolbar"><button type="button" onclick="window.print()">Print Investigation List</button></div>
   <main class="sheet">
     <header class="report-header">
-      <div class="logo-box"><img src="/static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260821-v0.357" alt="Barefoot & Company / Builders FirstSource" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><span class="logo-fallback">Barefoot &amp; Company</span></div>
+      <div class="logo-box"><img src="/static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260825-v0.385" alt="Barefoot & Company / Builders FirstSource" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><span class="logo-fallback">Barefoot &amp; Company</span></div>
       <div class="title-block"><small>Indian Trail inventory control</small><h1>Old Bay Investigation List</h1><p>Print mirror of the Old Bays Control Center. Review each physical bay, verify the complete order, then record investigation notes before moving, clearing, or extending a snooze.</p></div>
       <div><div class="inspection-box"><strong>Walkthrough verification</strong><span class="inspection-line"><span>Checked by</span><i></i></span><span class="inspection-line"><span>Date</span><i></i></span><span class="inspection-line"><span>Area / shift</span><i></i></span></div><div class="report-meta">Generated {esc(printed_at)}</div></div>
     </header>
@@ -1949,6 +1982,17 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_permission("manage_bay_layout"):
                 return
             self.send_json(STORE.get_bay_auto_assign_settings())
+            return
+
+        if parsed.path == "/api/glass-type-colors":
+            # v0.379: Glass colors are presentation metadata, not an admin-only secret.
+            # Every authenticated operator needs the same Lookup Manager palette so
+            # Scan, Bay Map, racks, rejects, and other workflows stay visually consistent.
+            if not self.current_user():
+                self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+                return
+            lookups = STORE.get_manual_edit_lookups() or {}
+            self.send_json({"glassColors": lookups.get("glassColors", [])})
             return
 
         if parsed.path == "/api/admin/manual-edit-lookups":

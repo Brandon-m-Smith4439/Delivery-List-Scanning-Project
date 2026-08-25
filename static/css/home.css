@@ -3984,3 +3984,4362 @@
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
+
+/* ========================================================================== */
+/* v0.358 Operations Hub                                                      */
+/* Home is now the application launch surface: live pulse, direct actions,     */
+/* attention queue, upcoming dates, stage progress, and delivery discovery.    */
+/* ========================================================================== */
+.home-operations-hub-v358 {
+  --home-hub-navy: #062f59;
+  --home-hub-navy-strong: #041f42;
+  --home-hub-blue: #1766b1;
+  --home-hub-line: #c8d8e9;
+  --home-hub-muted: #65778d;
+  --home-hub-soft: #eef5fb;
+  display: grid;
+  align-content: start;
+  gap: 15px;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(21, 96, 164, .10), transparent 25%),
+    linear-gradient(180deg, #f6f9fc 0%, #edf3f8 100%);
+}
+
+.home-operations-hub-v358 > .app-page-header-v357 {
+  margin-bottom: 0 !important;
+}
+
+.home-live-status-v358 {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #bed0e3;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .88);
+  color: #445a74;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+  box-shadow: 0 6px 14px rgba(18, 49, 84, .06);
+}
+
+.home-live-status-v358 > i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2fa84f;
+  box-shadow: 0 0 0 4px rgba(47, 168, 79, .12);
+}
+
+.home-command-center-v358 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(330px, .82fr) minmax(620px, 1.18fr);
+  align-items: stretch;
+  gap: 18px;
+  overflow: hidden;
+  border: 1px solid #174f7f;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 88% 4%, rgba(102, 174, 226, .20), transparent 27%),
+    linear-gradient(118deg, #052b52 0%, #073962 53%, #0a4d82 100%);
+  color: #fff;
+  padding: 20px;
+  box-shadow: 0 17px 36px rgba(5, 43, 82, .18);
+}
+
+.home-command-copy-v358 {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  padding: 2px 5px;
+}
+
+.home-command-eyebrow-v358 {
+  color: #9fd1f0;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+
+.home-command-copy-v358 h2 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(26px, 2.6vw, 35px);
+  font-weight: 950;
+  letter-spacing: -.035em;
+  line-height: 1.05;
+}
+
+.home-command-copy-v358 > p {
+  max-width: 590px;
+  margin: 0;
+  color: rgba(255, 255, 255, .76);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.5;
+}
+
+.home-command-meta-v358 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.home-command-meta-v358 span {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .09);
+  color: rgba(255, 255, 255, .88);
+  padding: 0 10px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.home-pulse-grid-v358 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(125px, 1fr));
+  gap: 9px;
+}
+
+.home-pulse-card-v358 {
+  min-width: 0;
+  min-height: 116px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-top: 4px solid var(--pulse-accent, #8ebee4);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .10);
+  padding: 11px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+
+.home-pulse-card-v358.is-primary { --pulse-accent: #78b7ed; }
+.home-pulse-card-v358.is-success { --pulse-accent: #54d48a; }
+.home-pulse-card-v358.is-warning { --pulse-accent: #f5bd45; }
+.home-pulse-card-v358.is-critical { --pulse-accent: #f27683; }
+.home-pulse-card-v358.is-neutral { --pulse-accent: #b0c5d9; }
+
+.home-pulse-card-v358 small,
+.home-pulse-card-v358 strong,
+.home-pulse-card-v358 span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-pulse-card-v358 small {
+  color: rgba(255, 255, 255, .66);
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .065em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.home-pulse-card-v358 strong {
+  color: #fff;
+  font-size: 25px;
+  font-weight: 950;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+
+.home-pulse-card-v358 span {
+  color: rgba(255, 255, 255, .74);
+  font-size: 10px;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.home-quick-actions-v358 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.home-quick-action-v358 {
+  --home-action-accent: #1766b1;
+  position: relative;
+  min-width: 0;
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 15px;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  border: 1px solid #c9d7e6;
+  border-left: 4px solid var(--home-action-accent);
+  border-radius: 13px;
+  background: linear-gradient(180deg, #fff 0%, #f7faff 100%);
+  color: #12375f;
+  padding: 10px 10px 10px 11px;
+  text-align: left;
+  box-shadow: 0 7px 18px rgba(20, 48, 84, .055);
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.home-quick-action-v358.is-scan { --home-action-accent: #1766b1; }
+.home-quick-action-v358.is-racks { --home-action-accent: #d79016; }
+.home-quick-action-v358.is-bays { --home-action-accent: #2d8c56; }
+.home-quick-action-v358.is-priority { --home-action-accent: #bc4050; }
+.home-quick-action-v358.is-print { --home-action-accent: #6d5caf; }
+.home-quick-action-v358.is-statistics { --home-action-accent: #168f98; }
+
+.home-quick-action-v358:hover,
+.home-quick-action-v358:focus-visible {
+  outline: none;
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--home-action-accent) 55%, #c9d7e6);
+  background: color-mix(in srgb, var(--home-action-accent) 4%, #fff);
+  box-shadow: 0 10px 22px rgba(20, 48, 84, .10);
+}
+
+.home-quick-action-icon-v358 {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--home-action-accent) 12%, #fff);
+  color: var(--home-action-accent);
+}
+
+.home-quick-action-icon-v358::before {
+  content: "";
+  width: 21px;
+  height: 21px;
+  background: currentColor;
+  -webkit-mask: var(--home-action-icon) center / contain no-repeat;
+  mask: var(--home-action-icon) center / contain no-repeat;
+}
+
+.home-quick-action-v358.is-scan { --home-action-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 4h5v2H6v3H4V4Zm11 0h5v5h-2V6h-3V4ZM4 15h2v3h3v2H4v-5Zm14 0h2v5h-5v-2h3v-3ZM7 11h10v2H7v-2Z'/%3E%3C/svg%3E"); }
+.home-quick-action-v358.is-racks { --home-action-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5h18v3H3V5Zm2 5h14v9H5v-9Zm2 2v5h3v-5H7Zm5 0v5h5v-5h-5Z'/%3E%3C/svg%3E"); }
+.home-quick-action-v358.is-bays { --home-action-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 4h18v16H3V4Zm2 2v5h6V6H5Zm8 0v5h6V6h-6ZM5 13v5h6v-5H5Zm8 0v5h6v-5h-6Z'/%3E%3C/svg%3E"); }
+.home-quick-action-v358.is-priority { --home-action-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m13 2-8 11h6l-1 9 9-13h-6l0-7Z'/%3E%3C/svg%3E"); }
+.home-quick-action-v358.is-print { --home-action-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 3h12v5H6V3Zm-1 7h14a3 3 0 0 1 3 3v5h-4v3H6v-3H2v-5a3 3 0 0 1 3-3Zm3 6v3h8v-3H8Zm10-3h2v2h-2v-2Z'/%3E%3C/svg%3E"); }
+.home-quick-action-v358.is-statistics { --home-action-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 19h16v2H4v-2Zm1-2V9h3v8H5Zm5 0V4h3v13h-3Zm5 0v-6h3v6h-3Z'/%3E%3C/svg%3E"); }
+
+.home-quick-action-v358 > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.home-quick-action-v358 strong {
+  color: #11365e;
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.15;
+}
+
+.home-quick-action-v358 small {
+  color: #6a7b90;
+  font-size: 9.5px;
+  font-weight: 780;
+  line-height: 1.25;
+}
+
+.home-quick-action-v358 > i {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #7990aa;
+  border-bottom: 2px solid #7990aa;
+  transform: rotate(-45deg);
+}
+
+.home-hub-layout-v358 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(315px, .62fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.home-hub-primary-v358,
+.home-hub-side-v358 {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.home-hub-card-v358,
+.home-delivery-explorer-v358 {
+  min-width: 0;
+  border: 1px solid #cbd9e7 !important;
+  border-radius: 16px !important;
+  background: linear-gradient(180deg, #fff 0%, #fbfdff 100%) !important;
+  box-shadow: 0 11px 26px rgba(20, 48, 84, .065) !important;
+}
+
+.home-hub-card-v358 {
+  padding: 15px;
+}
+
+.home-hub-card-heading-v358,
+.home-explorer-heading-v358 {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.home-hub-card-heading-v358 > div,
+.home-explorer-heading-v358 > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.home-hub-card-heading-v358 > div > span,
+.home-explorer-heading-v358 > div > span {
+  color: #2973ad;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .085em;
+  text-transform: uppercase;
+}
+
+.home-hub-card-heading-v358 h2,
+.home-explorer-heading-v358 h2 {
+  margin: 0;
+  color: #0d325b;
+  font-size: 17px;
+  font-weight: 950;
+  letter-spacing: -.015em;
+}
+
+.home-hub-card-heading-v358 p,
+.home-explorer-heading-v358 p {
+  margin: 0;
+  color: #6a7b90;
+  font-size: 10.5px;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.home-hub-link-v358 {
+  min-height: 33px;
+  flex: 0 0 auto;
+  border: 1px solid #b8cbdf;
+  border-radius: 999px;
+  background: #f6f9fc;
+  color: #174f87;
+  padding: 0 12px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.home-hub-link-v358:hover,
+.home-hub-link-v358:focus-visible {
+  outline: none;
+  border-color: #174f87;
+  background: #174f87;
+  color: #fff;
+}
+
+.home-delivery-timeline-v358 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.home-timeline-card-v358 {
+  min-width: 0;
+  min-height: 125px;
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  border: 1px solid #d2deeb;
+  border-radius: 12px;
+  background: #f9fbfd;
+  color: #173d66;
+  padding: 10px;
+  text-align: left;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.home-timeline-card-v358.is-today {
+  border-color: #5d93c6;
+  background: linear-gradient(180deg, #f4f9ff 0%, #eaf4ff 100%);
+  box-shadow: inset 0 0 0 1px rgba(23, 102, 177, .08);
+}
+
+.home-timeline-card-v358:hover,
+.home-timeline-card-v358:focus-visible {
+  outline: none;
+  transform: translateY(-1px);
+  border-color: #7ca5cb;
+  box-shadow: 0 8px 18px rgba(20, 48, 84, .09);
+}
+
+.home-timeline-date-v358,
+.home-timeline-metrics-v358,
+.home-timeline-progress-v358 {
+  min-width: 0;
+}
+
+.home-timeline-date-v358 {
+  display: grid;
+  gap: 1px;
+}
+
+.home-timeline-date-v358 small,
+.home-timeline-stage-count-v358,
+.home-timeline-metrics-v358 small {
+  color: #6b7e93;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.home-timeline-date-v358 strong {
+  color: #0b315b;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.home-timeline-metrics-v358 {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  align-items: baseline;
+  gap: 3px 5px;
+}
+
+.home-timeline-metrics-v358 b {
+  color: #123d69;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.home-timeline-metrics-v358 small {
+  text-transform: none;
+}
+
+.home-timeline-progress-v358 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.home-timeline-progress-v358 > i {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dce6ef;
+}
+
+.home-timeline-progress-v358 > i > b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2c75b4;
+}
+
+.home-timeline-progress-v358 > strong {
+  color: #204e78;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.home-timeline-stage-count-v358 {
+  text-transform: none;
+}
+
+.home-today-panel-v358 {
+  margin: 0 !important;
+  border-radius: 16px !important;
+}
+
+.home-today-panel-v358 .today-progress-heading {
+  display: flex !important;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.home-today-helper-v358 {
+  color: #708197;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.home-attention-count-v358 {
+  min-width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dfbcc1;
+  border-radius: 999px;
+  background: #fff4f5;
+  color: #a73545;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.home-attention-list-v358 {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.home-attention-item-v358 {
+  --attention-accent: #6a8aaa;
+  width: 100%;
+  min-width: 0;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #d5e0eb;
+  border-radius: 11px;
+  background: #fbfcfe;
+  color: #153b65;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.home-attention-item-v358.is-critical { --attention-accent: #c83d4c; }
+.home-attention-item-v358.is-warning { --attention-accent: #dc941c; }
+.home-attention-item-v358.is-notice { --attention-accent: #407da8; }
+
+.home-attention-item-v358 > i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--attention-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--attention-accent) 12%, transparent);
+}
+
+.home-attention-item-v358 > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.home-attention-item-v358 strong {
+  color: #14395f;
+  font-size: 10.5px;
+  font-weight: 920;
+  line-height: 1.25;
+}
+
+.home-attention-item-v358 small {
+  color: #6b7d91;
+  font-size: 9.5px;
+  font-weight: 760;
+  line-height: 1.3;
+}
+
+.home-attention-item-v358 > b {
+  color: #7890a8;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.home-attention-item-v358:hover,
+.home-attention-item-v358:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--attention-accent) 48%, #d5e0eb);
+  background: color-mix(in srgb, var(--attention-accent) 4%, #fff);
+}
+
+.home-attention-clear-v358 {
+  min-height: 132px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  border: 1px dashed #b9d6c1;
+  border-radius: 12px;
+  background: #f3faf5;
+  padding: 18px;
+  text-align: center;
+}
+
+.home-attention-clear-v358 > span {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #2fa84f;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.home-attention-clear-v358 strong { color: #245f36; font-size: 12px; }
+.home-attention-clear-v358 small { max-width: 260px; color: #617b69; font-size: 9.5px; font-weight: 760; line-height: 1.35; }
+
+.home-navigation-list-v358 {
+  display: grid;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.home-navigation-list-v358 button {
+  min-width: 0;
+  min-height: 49px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  border: 1px solid #d6e1ec;
+  border-radius: 10px;
+  background: #f9fbfd;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.home-navigation-list-v358 button:hover,
+.home-navigation-list-v358 button:focus-visible {
+  outline: none;
+  border-color: #91b2d0;
+  background: #f1f7fc;
+}
+
+.home-navigation-list-v358 span {
+  color: #163f68;
+  font-size: 10.5px;
+  font-weight: 920;
+}
+
+.home-navigation-list-v358 small {
+  color: #718298;
+  font-size: 9.5px;
+  font-weight: 760;
+}
+
+.home-hub-empty-v358 {
+  grid-column: 1 / -1;
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  border: 1px dashed #c5d5e5;
+  border-radius: 12px;
+  background: #f8fbfd;
+  text-align: center;
+}
+
+.home-hub-empty-v358 strong { color: #234b72; font-size: 12px; }
+.home-hub-empty-v358 span { color: #718298; font-size: 10px; font-weight: 750; }
+
+.home-delivery-explorer-v358 {
+  width: 100%;
+  padding: 17px !important;
+  scroll-margin-top: 126px;
+}
+
+.home-explorer-heading-v358 {
+  margin-bottom: 12px;
+}
+
+.home-explorer-heading-v358 > b {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #c7d7e7;
+  border-radius: 999px;
+  background: #f5f8fc;
+  color: #345879;
+  padding: 0 11px;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.home-finder-toolbar-v358 {
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 250px) !important;
+  gap: 9px !important;
+  margin: 0 !important;
+  padding: 10px !important;
+}
+
+@media (max-width: 1320px) {
+  .home-command-center-v358 {
+    grid-template-columns: minmax(300px, .72fr) minmax(0, 1.28fr);
+  }
+
+  .home-pulse-grid-v358 {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
+  .home-quick-actions-v358 {
+    grid-template-columns: repeat(3, minmax(190px, 1fr));
+  }
+
+  .home-delivery-timeline-v358 {
+    grid-template-columns: repeat(3, minmax(140px, 1fr));
+  }
+}
+
+@media (max-width: 1040px) {
+  .home-command-center-v358,
+  .home-hub-layout-v358 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-command-center-v358 {
+    gap: 14px;
+  }
+
+  .home-pulse-grid-v358 {
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+  }
+
+  .home-hub-side-v358 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .home-operations-hub-v358 {
+    gap: 10px;
+  }
+
+  .home-live-status-v358 {
+    width: fit-content;
+  }
+
+  .home-command-center-v358 {
+    padding: 15px;
+    border-radius: 15px;
+  }
+
+  .home-pulse-grid-v358,
+  .home-quick-actions-v358,
+  .home-hub-side-v358,
+  .home-delivery-timeline-v358,
+  .home-finder-toolbar-v358 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .home-quick-action-v358 {
+    min-height: 68px;
+  }
+
+  .home-hub-card-heading-v358,
+  .home-explorer-heading-v358,
+  .home-today-panel-v358 .today-progress-heading {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    align-items: start !important;
+  }
+
+  .home-hub-link-v358,
+  .home-today-helper-v358,
+  .home-explorer-heading-v358 > b {
+    justify-self: start;
+    text-align: left;
+  }
+
+  .home-delivery-explorer-v358 {
+    padding: 11px !important;
+  }
+}
+
+@media (max-width: 470px) {
+  .home-pulse-grid-v358 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .home-pulse-card-v358 {
+    min-height: 104px;
+  }
+}
+
+/* ========================================================================== */
+/* v0.359 Home Hub simplification                                             */
+/* The Home page keeps the useful drill-through surfaces from v0.358 while    */
+/* removing secondary dashboard layers. Stage progress is the primary live     */
+/* surface, Forward View is full-width, and the Delivery Library has stronger  */
+/* visual hierarchy.                                                          */
+/* ========================================================================== */
+.home-operations-hub-v359 {
+  gap: 14px;
+}
+
+/* Primary live stage surface */
+.home-page .home-stage-command-v359 {
+  position: relative;
+  overflow: hidden;
+  margin: 0 !important;
+  padding: 17px !important;
+  border: 1px solid #174f7f !important;
+  border-radius: 17px !important;
+  background:
+    radial-gradient(circle at 94% 0%, rgba(94, 165, 218, .22), transparent 27%),
+    linear-gradient(118deg, #041f42 0%, #062f59 52%, #0a4b7f 100%) !important;
+  box-shadow: 0 15px 32px rgba(4, 35, 72, .20) !important;
+}
+
+.home-page .home-stage-command-v359::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, rgba(255,255,255,.045), transparent 32%, rgba(255,255,255,.025));
+}
+
+.home-stage-command-v359 .today-progress-heading {
+  position: relative;
+  z-index: 1;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.home-stage-command-v359 .today-progress-heading-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.home-stage-command-v359 .today-progress-heading-copy > span {
+  width: fit-content;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255,255,255,.20);
+  border-radius: 999px;
+  background: rgba(255,255,255,.09);
+  color: #b9dcf4;
+  padding: 0 9px;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.home-stage-command-v359 .today-progress-heading h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 950;
+  letter-spacing: -.02em;
+}
+
+.home-stage-command-v359 .today-progress-heading p {
+  margin: 0;
+  color: rgba(255,255,255,.70);
+  font-size: 10.5px;
+  font-weight: 740;
+  line-height: 1.35;
+}
+
+.home-stage-live-v359 {
+  flex: 0 0 auto;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(255,255,255,.20);
+  border-radius: 999px;
+  background: rgba(2, 25, 50, .32);
+  color: rgba(255,255,255,.88);
+  padding: 0 10px;
+  font-size: 9.5px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.home-stage-live-v359 > i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #54d48a;
+  box-shadow: 0 0 0 4px rgba(84, 212, 138, .14);
+}
+
+.home-stage-command-v359 .today-stage-grid {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 9px;
+}
+
+.home-page .home-stage-command-v359 .today-stage-card {
+  min-width: 0;
+  min-height: 94px;
+  display: grid;
+  align-content: space-between;
+  gap: 9px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-top: 3px solid rgba(141, 196, 238, .80);
+  border-radius: 12px;
+  background: rgba(255,255,255,.09);
+  color: #fff;
+  padding: 10px 11px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter: none;
+}
+
+.home-page .home-stage-command-v359 .today-stage-card:hover,
+.home-page .home-stage-command-v359 .today-stage-card:focus-visible {
+  outline: none;
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,.42);
+  background: rgba(255,255,255,.14);
+  box-shadow: 0 9px 18px rgba(1, 20, 42, .20);
+}
+
+.home-stage-command-v359 .today-stage-card :is(b, strong, .today-stage-name, .today-stage-percent) {
+  color: #fff !important;
+}
+
+.home-stage-command-v359 .today-stage-card small {
+  color: rgba(255,255,255,.66) !important;
+}
+
+.home-stage-command-v359 .today-stage-card .list-card-progress {
+  background: rgba(255,255,255,.18) !important;
+}
+
+.home-stage-command-v359 .today-stage-card .list-card-progress > span {
+  background: #8fc8f2 !important;
+}
+
+/* One clean destination strip: Scan, Racks, Bays, Statistics, Rejects, Settings. */
+.home-destinations-v359 {
+  grid-template-columns: repeat(6, minmax(145px, 1fr));
+}
+
+.home-quick-action-v358.is-rejects { --home-action-accent: #b43a4b; }
+.home-quick-action-v358.is-settings { --home-action-accent: #526c8a; }
+
+.home-quick-action-v358.is-rejects {
+  --home-action-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-3Zm1 15h-2v-2h2v2Zm0-4h-2V7h2v6Z'/%3E%3C/svg%3E");
+}
+
+.home-quick-action-v358.is-settings {
+  --home-action-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M19.4 13a7.7 7.7 0 0 0 .05-1 7.7 7.7 0 0 0-.05-1l2.1-1.64-2-3.46-2.55 1.03a7.6 7.6 0 0 0-1.72-1L14.85 3h-4l-.38 2.93a7.6 7.6 0 0 0-1.72 1L6.2 5.9l-2 3.46L6.3 11a7.7 7.7 0 0 0-.05 1 7.7 7.7 0 0 0 .05 1L4.2 14.64l2 3.46 2.55-1.03a7.6 7.6 0 0 0 1.72 1l.38 2.93h4l.38-2.93a7.6 7.6 0 0 0 1.72-1l2.55 1.03 2-3.46L19.4 13ZM12.85 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z'/%3E%3C/svg%3E");
+}
+
+/* Forward View owns the full page width now that the side rail was removed. */
+.home-forward-view-v359 {
+  width: 100%;
+  padding: 17px !important;
+  border-color: #bfd1e4 !important;
+  background:
+    radial-gradient(circle at 96% 0%, rgba(29, 106, 172, .08), transparent 24%),
+    linear-gradient(180deg, #fff 0%, #f7fbff 100%) !important;
+}
+
+.home-forward-view-v359 .home-delivery-timeline-v358 {
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+}
+
+.home-forward-view-v359 .home-timeline-card-v358 {
+  min-height: 132px;
+  border-color: #c6d8e9;
+  background: linear-gradient(180deg, #fff 0%, #f4f8fc 100%);
+}
+
+.home-forward-view-v359 .home-timeline-card-v358.is-today {
+  border-color: #4f8dc5;
+  background: linear-gradient(180deg, #f0f7ff 0%, #e4f1ff 100%);
+  box-shadow: inset 0 0 0 1px rgba(23, 102, 177, .10), 0 8px 18px rgba(20,48,84,.07);
+}
+
+/* More visual hierarchy for the detailed finder without making its rows noisy. */
+.home-page .home-delivery-library-v359 {
+  overflow: hidden;
+  border: 1px solid #afc7df !important;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(23,102,177,.07), transparent 24%),
+    linear-gradient(180deg, #f8fbff 0%, #eef5fb 100%) !important;
+  box-shadow: 0 14px 30px rgba(20, 48, 84, .09) !important;
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 {
+  margin: -17px -17px 13px;
+  padding: 15px 17px;
+  border-bottom: 1px solid #174f7f;
+  background:
+    radial-gradient(circle at 91% 0%, rgba(101, 174, 226, .18), transparent 30%),
+    linear-gradient(115deg, #052b52 0%, #073a65 66%, #0b4c7e 100%);
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 > div > span {
+  color: #9fd1f0;
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 h2 {
+  color: #fff;
+  font-size: 19px;
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 p {
+  color: rgba(255,255,255,.72);
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 > b {
+  border-color: rgba(255,255,255,.23);
+  background: rgba(255,255,255,.11);
+  color: #fff;
+}
+
+.home-delivery-library-v359 .home-finder-toolbar-v358 {
+  border-color: #bdd0e3 !important;
+  background: linear-gradient(180deg, #f4f9fe 0%, #e8f2fb 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.82);
+}
+
+.home-delivery-library-v359 .home-delivery-week-heading {
+  border-radius: 10px;
+  background: linear-gradient(90deg, #e4eff9 0%, #f3f8fd 100%);
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.home-delivery-library-v359 .delivery-date-group {
+  border-color: #c4d5e5 !important;
+}
+
+.home-delivery-library-v359 .delivery-date-group[open] {
+  border-color: #6f99c0 !important;
+}
+
+@media (max-width: 1320px) {
+  .home-destinations-v359 {
+    grid-template-columns: repeat(3, minmax(190px, 1fr));
+  }
+
+  .home-forward-view-v359 .home-delivery-timeline-v358 {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .home-stage-command-v359 .today-progress-heading {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-stage-live-v359 {
+    justify-self: start;
+  }
+
+  .home-forward-view-v359 .home-delivery-timeline-v358 {
+    grid-template-columns: repeat(2, minmax(145px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .home-destinations-v359,
+  .home-forward-view-v359 .home-delivery-timeline-v358 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .home-page .home-stage-command-v359,
+  .home-forward-view-v359 {
+    padding: 12px !important;
+  }
+
+  .home-delivery-library-v359 .home-explorer-heading-v358 {
+    margin: -11px -11px 11px;
+    padding: 13px 11px;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.360 Home greeting + lighter stage command surface                       */
+/* The redundant page intro is removed. Today's live progress is now the first */
+/* visual surface, with a locally timed greeting and higher-contrast date.      */
+/* ========================================================================== */
+.home-operations-hub-v359 {
+  padding-top: 16px !important;
+}
+
+.home-page .home-stage-command-v360 {
+  margin-top: 0 !important;
+  padding: 20px !important;
+  border-color: #8fb7d7 !important;
+  background:
+    radial-gradient(circle at 96% 0%, rgba(38, 118, 181, .12), transparent 28%),
+    linear-gradient(118deg, #eaf5ff 0%, #dcecf9 54%, #cfe5f5 100%) !important;
+  box-shadow: 0 13px 28px rgba(31, 79, 118, .13) !important;
+}
+
+.home-page .home-stage-command-v360::after {
+  background: linear-gradient(105deg, rgba(255,255,255,.40), transparent 34%, rgba(255,255,255,.16));
+}
+
+.home-stage-command-v360 .today-progress-heading {
+  align-items: flex-start !important;
+  margin-bottom: 15px;
+}
+
+.home-stage-command-v360 .today-progress-heading-copy {
+  gap: 5px;
+}
+
+.home-stage-command-v360 .home-time-greeting-v360 {
+  width: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #2f668f;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .025em;
+  text-transform: none;
+}
+
+.home-stage-title-row-v360 {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.home-stage-command-v360 .home-stage-title-row-v360 h1 {
+  margin: 0;
+  color: #082b4c !important;
+  font-size: clamp(24px, 2.35vw, 31px);
+  font-weight: 950;
+  letter-spacing: -.03em;
+  line-height: 1.05;
+}
+
+.home-stage-date-v360 {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #8eb5d4 !important;
+  border-radius: 999px !important;
+  background: #f7fbff !important;
+  color: #0a416e !important;
+  padding: 0 10px !important;
+  font-size: 10px !important;
+  font-weight: 950 !important;
+  letter-spacing: .025em !important;
+  text-transform: uppercase !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+}
+
+.home-stage-command-v360 .today-progress-heading p {
+  color: #486980 !important;
+  font-size: 11px;
+}
+
+.home-stage-command-v360 .home-stage-live-v359 {
+  border-color: #96b9d4;
+  background: rgba(255,255,255,.66);
+  color: #21506f;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.82);
+}
+
+.home-page .home-stage-command-v360 .today-stage-card {
+  min-height: 98px;
+  border-color: #afc9df;
+  border-top-color: #4b89ba;
+  background: rgba(255,255,255,.76);
+  color: #0b3154;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.86), 0 6px 14px rgba(31,79,118,.06);
+}
+
+.home-page .home-stage-command-v360 .today-stage-card:hover,
+.home-page .home-stage-command-v360 .today-stage-card:focus-visible {
+  border-color: #6d9fc5;
+  background: #fff;
+  box-shadow: 0 10px 20px rgba(31,79,118,.12);
+}
+
+.home-stage-command-v360 .today-stage-card :is(b, strong, .today-stage-name, .today-stage-percent) {
+  color: #0a355a !important;
+}
+
+.home-stage-command-v360 .today-stage-card small {
+  color: #637d91 !important;
+}
+
+.home-stage-command-v360 .today-stage-card .list-card-progress {
+  background: #d3e2ee !important;
+}
+
+.home-stage-command-v360 .today-stage-card .list-card-progress > span {
+  background: #347db5 !important;
+}
+
+@media (max-width: 760px) {
+  .home-operations-hub-v359 { padding-top: 10px !important; }
+  .home-page .home-stage-command-v360 { padding: 14px !important; }
+  .home-stage-title-row-v360 { display: grid; gap: 7px; }
+  .home-stage-date-v360 { width: fit-content; }
+}
+
+/* ========================================================================== */
+/* v0.362 Compact Today's Delivery + Forward View restoration                 */
+/* Returns Home to the lighter pre-KPI stage presentation: greeting, date,    */
+/* then live stage cards. Forward View also returns to its v0.358 geometry.    */
+/* ========================================================================== */
+.home-page .home-stage-command-v362 {
+  display: grid;
+  gap: 11px;
+  margin: 0 !important;
+  padding: 15px !important;
+  overflow: hidden;
+  border: 1px solid #a9c5dc !important;
+  border-radius: 15px !important;
+  background:
+    radial-gradient(circle at 96% 0%, rgba(39, 112, 169, .09), transparent 27%),
+    linear-gradient(180deg, #edf6fd 0%, #dcecf8 100%) !important;
+  box-shadow: 0 11px 24px rgba(31, 79, 118, .10) !important;
+}
+
+.home-page .home-stage-command-v362::after {
+  content: none !important;
+}
+
+.home-stage-simple-header-v362 {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px 2px;
+}
+
+.home-stage-simple-copy-v362 {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.home-stage-command-v362 .home-stage-greeting-v362 {
+  color: #2d638b !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  letter-spacing: .015em !important;
+}
+
+.home-stage-command-v362 .home-stage-date-simple-v362 {
+  width: fit-content;
+  min-height: 0;
+  display: block;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #0b3558 !important;
+  padding: 0 !important;
+  font-size: 18px !important;
+  font-weight: 950 !important;
+  letter-spacing: -.015em !important;
+  text-transform: none !important;
+  box-shadow: none !important;
+}
+
+.home-stage-grid-v362 {
+  grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)) !important;
+  gap: 9px !important;
+}
+
+.home-page .home-stage-command-v362 .today-stage-card {
+  min-height: 94px !important;
+  border-color: #afc9df !important;
+  background: rgba(255,255,255,.78) !important;
+  color: #0b3154 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.84), 0 5px 13px rgba(31,79,118,.055) !important;
+}
+
+.home-page .home-stage-command-v362 .today-stage-card:hover,
+.home-page .home-stage-command-v362 .today-stage-card:focus-visible {
+  border-color: #6d9fc5 !important;
+  background: #fff !important;
+  box-shadow: 0 9px 19px rgba(31,79,118,.11) !important;
+}
+
+.home-stage-command-v362 .today-stage-card :is(b, strong, .today-stage-name, .today-stage-percent) {
+  color: #0a355a !important;
+}
+
+.home-stage-command-v362 .today-stage-card small {
+  color: #637d91 !important;
+}
+
+.home-stage-command-v362 .today-stage-card .list-card-progress {
+  background: #d3e2ee !important;
+}
+
+.home-stage-command-v362 .today-stage-card .list-card-progress > span {
+  background: #347db5 !important;
+}
+
+/* v0.358 dimensions were more compact than the later full-width polish. */
+.home-forward-view-v359 {
+  padding: 15px !important;
+}
+
+.home-forward-view-v359 .home-delivery-timeline-v358 {
+  margin-top: 13px;
+}
+
+.home-forward-view-v359 .home-timeline-card-v358 {
+  min-height: 125px !important;
+  padding: 10px !important;
+  gap: 9px !important;
+}
+
+@media (max-width: 760px) {
+  .home-page .home-stage-command-v362 { padding: 12px !important; }
+  .home-stage-grid-v362 { grid-template-columns: minmax(0, 1fr) !important; }
+  .home-forward-view-v359 { padding: 12px !important; }
+}
+
+/* ========================================================================== */
+/* v0.363 Home color hierarchy and compact Forward View                       */
+/* The Home page returns to one light theme. Today's delivery is the stronger  */
+/* blue surface, Delivery Library is intentionally lighter, and Forward View   */
+/* is compressed so it behaves as a glanceable strip instead of a tall panel. */
+/* ========================================================================== */
+.home-page .home-stage-command-v362 {
+  gap: 12px !important;
+  padding: 16px !important;
+  border-color: #0d527f !important;
+  background:
+    radial-gradient(circle at 94% 0%, rgba(112, 188, 234, .22), transparent 29%),
+    linear-gradient(120deg, #0b4775 0%, #105d90 56%, #1777ad 100%) !important;
+  box-shadow: 0 12px 26px rgba(7, 57, 97, .18) !important;
+}
+
+.home-stage-command-v362 .home-stage-greeting-v362 {
+  color: #ffffff !important;
+  font-size: 21px !important;
+  font-weight: 950 !important;
+  line-height: 1.12 !important;
+  letter-spacing: -.015em !important;
+}
+
+.home-stage-command-v362 .home-stage-date-simple-v362 {
+  color: #dceefa !important;
+  font-size: 17px !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+  letter-spacing: -.005em !important;
+}
+
+.home-page .home-stage-command-v362 .today-stage-card {
+  min-height: 88px !important;
+  border-color: rgba(255,255,255,.24) !important;
+  border-top-color: rgba(185, 224, 249, .92) !important;
+  background: rgba(255,255,255,.115) !important;
+  color: #fff !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 5px 12px rgba(3, 37, 66, .10) !important;
+}
+
+.home-page .home-stage-command-v362 .today-stage-card:hover,
+.home-page .home-stage-command-v362 .today-stage-card:focus-visible {
+  border-color: rgba(255,255,255,.46) !important;
+  background: rgba(255,255,255,.17) !important;
+  box-shadow: 0 8px 17px rgba(3, 37, 66, .17) !important;
+}
+
+.home-stage-command-v362 .today-stage-card :is(b, strong, .today-stage-name, .today-stage-percent) {
+  color: #fff !important;
+}
+
+.home-stage-command-v362 .today-stage-card small {
+  color: rgba(239,248,255,.75) !important;
+}
+
+.home-stage-command-v362 .today-stage-card .list-card-progress {
+  background: rgba(255,255,255,.22) !important;
+}
+
+.home-stage-command-v362 .today-stage-card .list-card-progress > span {
+  background: #a9dcfb !important;
+}
+
+/* Delivery Library should read as the light-blue discovery workspace. */
+.home-page .home-delivery-library-v359 {
+  border-color: #b6d2e8 !important;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(68, 145, 198, .08), transparent 24%),
+    linear-gradient(180deg, #f7fbff 0%, #edf6fc 100%) !important;
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 {
+  border-bottom-color: #9fc5df !important;
+  background:
+    radial-gradient(circle at 91% 0%, rgba(255,255,255,.48), transparent 30%),
+    linear-gradient(115deg, #dceefa 0%, #c9e3f5 58%, #b9d9ef 100%) !important;
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 > div > span {
+  color: #3b7197 !important;
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 h2 {
+  color: #0b3558 !important;
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 p {
+  color: #456983 !important;
+}
+
+.home-delivery-library-v359 .home-explorer-heading-v358 > b {
+  border-color: #9ebfd8 !important;
+  background: rgba(255,255,255,.72) !important;
+  color: #164e77 !important;
+}
+
+/* Forward View is intentionally a compact five-date glance strip. */
+.home-forward-view-v359 {
+  padding: 10px 12px !important;
+}
+
+.home-forward-view-v359 .home-hub-card-heading-v358 {
+  gap: 9px !important;
+}
+
+.home-forward-view-v359 .home-hub-card-heading-v358 h2 {
+  font-size: 16px !important;
+  line-height: 1.1 !important;
+}
+
+.home-forward-view-v359 .home-hub-card-heading-v358 p {
+  margin-top: 1px !important;
+  font-size: 9px !important;
+  line-height: 1.2 !important;
+}
+
+.home-forward-view-v359 .home-hub-link-v358 {
+  min-height: 29px !important;
+  padding: 0 10px !important;
+  font-size: 9px !important;
+}
+
+.home-forward-view-v359 .home-delivery-timeline-v358 {
+  gap: 7px !important;
+  margin-top: 7px !important;
+}
+
+.home-forward-view-v359 .home-timeline-card-v358 {
+  min-height: 76px !important;
+  gap: 3px !important;
+  padding: 6px 8px !important;
+  border-radius: 9px !important;
+}
+
+.home-forward-view-v359 .home-timeline-date-v358 {
+  gap: 0 !important;
+}
+
+.home-forward-view-v359 .home-timeline-date-v358 small,
+.home-forward-view-v359 .home-timeline-stage-count-v358,
+.home-forward-view-v359 .home-timeline-metrics-v358 small {
+  font-size: 7.5px !important;
+  line-height: 1.05 !important;
+}
+
+.home-forward-view-v359 .home-timeline-date-v358 strong {
+  font-size: 12.5px !important;
+  line-height: 1.05 !important;
+}
+
+.home-forward-view-v359 .home-timeline-metrics-v358 {
+  gap: 2px 4px !important;
+}
+
+.home-forward-view-v359 .home-timeline-metrics-v358 b {
+  font-size: 11px !important;
+  line-height: 1 !important;
+}
+
+.home-forward-view-v359 .home-timeline-progress-v358 {
+  gap: 5px !important;
+}
+
+.home-forward-view-v359 .home-timeline-progress-v358 > i {
+  height: 5px !important;
+}
+
+.home-forward-view-v359 .home-timeline-progress-v358 > strong {
+  font-size: 8.5px !important;
+}
+
+@media (max-width: 760px) {
+  .home-stage-command-v362 .home-stage-greeting-v362 { font-size: 19px !important; }
+  .home-stage-command-v362 .home-stage-date-simple-v362 { font-size: 16px !important; }
+  .home-forward-view-v359 { padding: 9px !important; }
+  .home-forward-view-v359 .home-timeline-card-v358 { min-height: 72px !important; }
+}
+
+/* ========================================================================== */
+/* v0.364 Home color alignment and Forward View rebalance                     */
+/* Today's Delivery now follows the application's established light-blue      */
+/* surface language instead of behaving like a standalone dark banner. The    */
+/* greeting/date are intentionally oversized for fast recognition, while      */
+/* Forward View restores about 20% of the v0.363 card height without returning */
+/* to the oversized pre-compaction geometry.                                  */
+/* ========================================================================== */
+.home-page .home-stage-command-v362 {
+  gap: 13px !important;
+  padding: 17px !important;
+  border-color: #a9c4df !important;
+  background:
+    radial-gradient(circle at 94% 0%, rgba(83, 145, 201, .10), transparent 31%),
+    linear-gradient(120deg, #eaf3fb 0%, #dceaf7 56%, #cfdfef 100%) !important;
+  box-shadow: 0 10px 24px rgba(25, 69, 109, .09) !important;
+}
+
+.home-stage-command-v362 .home-stage-greeting-v362 {
+  color: #0a3158 !important;
+  font-size: 30px !important;
+  font-weight: 950 !important;
+  line-height: 1.08 !important;
+  letter-spacing: -.025em !important;
+}
+
+.home-stage-command-v362 .home-stage-date-simple-v362 {
+  color: #315f86 !important;
+  font-size: 23px !important;
+  font-weight: 900 !important;
+  line-height: 1.12 !important;
+  letter-spacing: -.012em !important;
+}
+
+.home-page .home-stage-command-v362 .today-stage-card {
+  min-height: 90px !important;
+  border-color: #bfd0e2 !important;
+  border-top-color: #88acd0 !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f3f8fd 100%) !important;
+  color: #0a3158 !important;
+  box-shadow: 0 5px 13px rgba(24, 67, 108, .075) !important;
+}
+
+.home-page .home-stage-command-v362 .today-stage-card:hover,
+.home-page .home-stage-command-v362 .today-stage-card:focus-visible {
+  border-color: #7ea7cf !important;
+  background: linear-gradient(180deg, #ffffff 0%, #eaf3fb 100%) !important;
+  box-shadow: 0 8px 17px rgba(24, 67, 108, .12) !important;
+}
+
+.home-stage-command-v362 .today-stage-card :is(b, strong, .today-stage-name, .today-stage-percent) {
+  color: #0a3158 !important;
+}
+
+.home-stage-command-v362 .today-stage-card small {
+  color: #60758c !important;
+}
+
+.home-stage-command-v362 .today-stage-card .list-card-progress {
+  background: #dce8f4 !important;
+}
+
+.home-stage-command-v362 .today-stage-card .list-card-progress > span {
+  background: #3f7fb8 !important;
+}
+
+/* v0.363 compressed the five-date strip to 76px cards. Restore roughly 20%   */
+/* of that vertical space while keeping the timeline distinctly compact. */
+.home-forward-view-v359 {
+  padding: 12px 14px !important;
+}
+
+.home-forward-view-v359 .home-hub-card-heading-v358 {
+  gap: 10px !important;
+}
+
+.home-forward-view-v359 .home-hub-card-heading-v358 h2 {
+  font-size: 17px !important;
+}
+
+.home-forward-view-v359 .home-hub-card-heading-v358 p {
+  font-size: 10px !important;
+  line-height: 1.25 !important;
+}
+
+.home-forward-view-v359 .home-hub-link-v358 {
+  min-height: 32px !important;
+  padding: 0 11px !important;
+  font-size: 10px !important;
+}
+
+.home-forward-view-v359 .home-delivery-timeline-v358 {
+  gap: 8px !important;
+  margin-top: 8px !important;
+}
+
+.home-forward-view-v359 .home-timeline-card-v358 {
+  min-height: 91px !important;
+  gap: 4px !important;
+  padding: 7px 9px !important;
+}
+
+.home-forward-view-v359 .home-timeline-date-v358 small,
+.home-forward-view-v359 .home-timeline-stage-count-v358,
+.home-forward-view-v359 .home-timeline-metrics-v358 small {
+  font-size: 8.5px !important;
+}
+
+.home-forward-view-v359 .home-timeline-date-v358 strong {
+  font-size: 14px !important;
+}
+
+.home-forward-view-v359 .home-timeline-metrics-v358 b {
+  font-size: 12px !important;
+}
+
+.home-forward-view-v359 .home-timeline-progress-v358 > i {
+  height: 6px !important;
+}
+
+.home-forward-view-v359 .home-timeline-progress-v358 > strong {
+  font-size: 9.5px !important;
+}
+
+@media (max-width: 760px) {
+  .home-stage-command-v362 .home-stage-greeting-v362 { font-size: 25px !important; }
+  .home-stage-command-v362 .home-stage-date-simple-v362 { font-size: 20px !important; }
+  .home-forward-view-v359 { padding: 10px !important; }
+  .home-forward-view-v359 .home-timeline-card-v358 { min-height: 86px !important; }
+}
+
+/* ========================================================================== */
+/* v0.365 Home first-view hierarchy and destination cards                     */
+/* Today's Delivery is the primary Home header. Typography is owned here so   */
+/* legacy Home passes cannot make stage labels/counts drift in size. Forward  */
+/* View follows live progress, then destination actions render as real cards.  */
+/* ========================================================================== */
+.home-page .home-stage-command-v365 {
+  gap: 15px !important;
+  padding: 22px 24px !important;
+  border-radius: 17px !important;
+  box-shadow: 0 14px 30px rgba(24, 67, 108, .105) !important;
+}
+
+.home-stage-command-v365 .home-stage-simple-header-v362 {
+  align-items: end !important;
+  padding: 1px 3px 4px !important;
+}
+
+.home-stage-command-v365 .home-stage-simple-copy-v362 {
+  gap: 5px !important;
+}
+
+.home-stage-command-v365 .home-stage-greeting-v362 {
+  margin: 0 !important;
+  color: #082f55 !important;
+  font-size: 38px !important;
+  font-weight: 950 !important;
+  line-height: 1.02 !important;
+  letter-spacing: -.035em !important;
+}
+
+.home-stage-command-v365 .home-stage-date-simple-v362 {
+  color: #315f86 !important;
+  font-size: 27px !important;
+  font-weight: 900 !important;
+  line-height: 1.08 !important;
+  letter-spacing: -.018em !important;
+}
+
+.home-stage-command-v365 .home-stage-grid-v362 {
+  gap: 10px !important;
+}
+
+.home-page .home-stage-command-v365 .today-stage-card {
+  min-height: 98px !important;
+  padding: 12px 14px !important;
+  gap: 9px !important;
+  border-radius: 13px !important;
+}
+
+.home-stage-command-v365 .today-stage-card .today-stage-card-heading {
+  min-width: 0;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+}
+
+.home-stage-command-v365 .today-stage-name {
+  min-width: 0;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  font-size: 15px !important;
+  font-weight: 950 !important;
+  line-height: 1.1 !important;
+}
+
+.home-stage-command-v365 .today-stage-name b {
+  font-size: 15px !important;
+  font-weight: 950 !important;
+  line-height: 1.1 !important;
+}
+
+.home-stage-command-v365 .today-stage-card-heading > strong {
+  display: inline-flex !important;
+  align-items: baseline !important;
+  gap: 3px !important;
+  font-size: 18px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.home-stage-command-v365 .today-stage-card-heading > strong > b {
+  font-size: 18px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+}
+
+.home-stage-command-v365 .today-stage-card-heading > strong > small {
+  font-size: 12px !important;
+  font-weight: 850 !important;
+  line-height: 1 !important;
+}
+
+.home-stage-command-v365 .today-stage-percent {
+  font-size: 12px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+}
+
+/* Forward View is deliberately the second Home surface, directly after the
+   current-day operational status. v0.364 dimensions remain unchanged. */
+.home-forward-view-v365 {
+  order: initial;
+}
+
+/* Destination actions should read as workspaces, not select-style controls. */
+.home-destination-section-v365 {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #c1d3e5;
+  border-radius: 15px;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5fb 100%);
+  box-shadow: 0 10px 24px rgba(20, 48, 84, .065);
+}
+
+.home-destination-heading-v365 {
+  min-width: 0;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 1px 2px 0;
+}
+
+.home-destination-heading-v365 > div {
+  min-width: 0;
+}
+
+.home-destination-heading-v365 span {
+  display: block;
+  margin-bottom: 2px;
+  color: #4d789c;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.home-destination-heading-v365 h2 {
+  margin: 0;
+  color: #0b3558;
+  font-size: 17px;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.home-destination-heading-v365 p {
+  margin: 3px 0 0;
+  color: #60758c;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.home-destination-cards-v365 {
+  grid-template-columns: repeat(6, minmax(145px, 1fr));
+  gap: 9px !important;
+}
+
+.home-destination-cards-v365 .home-quick-action-v358 {
+  min-height: 108px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-template-rows: 50px auto !important;
+  align-items: start !important;
+  gap: 7px 9px !important;
+  border: 1px solid #c7d7e7 !important;
+  border-top: 4px solid var(--home-action-accent) !important;
+  border-left-width: 1px !important;
+  border-radius: 14px !important;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-action-accent) 8%, transparent), transparent 42%),
+    linear-gradient(180deg, #fff 0%, #f6faff 100%) !important;
+  padding: 11px 12px !important;
+  box-shadow: 0 7px 17px rgba(20, 48, 84, .065) !important;
+}
+
+.home-destination-cards-v365 .home-quick-action-v358:hover,
+.home-destination-cards-v365 .home-quick-action-v358:focus-visible {
+  transform: translateY(-2px) !important;
+  border-color: color-mix(in srgb, var(--home-action-accent) 54%, #c7d7e7) !important;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--home-action-accent) 12%, transparent), transparent 44%),
+    linear-gradient(180deg, #fff 0%, #f1f7fd 100%) !important;
+  box-shadow: 0 12px 23px rgba(20, 48, 84, .115) !important;
+}
+
+.home-destination-cards-v365 .home-quick-action-icon-v358 {
+  grid-column: 1;
+  grid-row: 1;
+  width: 48px !important;
+  height: 48px !important;
+  border: 1px solid color-mix(in srgb, var(--home-action-accent) 24%, #d4e0ed);
+  border-radius: 13px !important;
+  background: color-mix(in srgb, var(--home-action-accent) 10%, #fff) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
+}
+
+.home-destination-cards-v365 .home-quick-action-icon-v358::before {
+  width: 25px !important;
+  height: 25px !important;
+}
+
+.home-destination-cards-v365 .home-quick-action-v358 > span:nth-child(2) {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  gap: 3px !important;
+}
+
+.home-destination-cards-v365 .home-quick-action-v358 strong {
+  color: #10395f !important;
+  font-size: 14px !important;
+  font-weight: 950 !important;
+  line-height: 1.1 !important;
+}
+
+.home-destination-cards-v365 .home-quick-action-v358 small {
+  color: #64778d !important;
+  font-size: 10px !important;
+  font-weight: 760 !important;
+  line-height: 1.3 !important;
+}
+
+.home-destination-cards-v365 .home-quick-action-v358 > i {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  width: 9px !important;
+  height: 9px !important;
+  border-color: color-mix(in srgb, var(--home-action-accent) 72%, #637b94) !important;
+}
+
+@media (max-width: 1180px) {
+  .home-destination-cards-v365 {
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .home-page .home-stage-command-v365 {
+    padding: 17px !important;
+  }
+
+  .home-stage-command-v365 .home-stage-greeting-v362 {
+    font-size: 30px !important;
+  }
+
+  .home-stage-command-v365 .home-stage-date-simple-v362 {
+    font-size: 22px !important;
+  }
+
+  .home-destination-section-v365 {
+    padding: 11px;
+  }
+
+  .home-destination-cards-v365 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .home-stage-command-v365 .home-stage-greeting-v362 {
+    font-size: 27px !important;
+  }
+
+  .home-stage-command-v365 .home-stage-date-simple-v362 {
+    font-size: 20px !important;
+  }
+
+  .home-destination-cards-v365 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.366 Screenshot-led Home reference layout                                */
+/* This final ownership layer intentionally mirrors the approved Home visual: */
+/* greeting/date hero, four icon stage cards, compact five-date Forward View, */
+/* six colored workspace cards, and a soft-blue Delivery Library.             */
+/* ========================================================================== */
+.home-reference-v366 {
+  gap: 16px !important;
+  padding-top: 18px !important;
+  padding-inline: 20px !important;
+  background:
+    radial-gradient(circle at 94% 0%, rgba(61, 124, 198, .07), transparent 26%),
+    linear-gradient(180deg, #f6f9fd 0%, #eef4fa 100%) !important;
+}
+
+/* Today's Delivery hero ---------------------------------------------------- */
+.home-page .home-stage-reference-v366 {
+  position: relative;
+  isolation: isolate;
+  min-height: 220px !important;
+  gap: 18px !important;
+  overflow: hidden;
+  padding: 24px 18px 18px !important;
+  border: 1px solid #c6d8eb !important;
+  border-radius: 15px !important;
+  background:
+    radial-gradient(circle at 93% 8%, rgba(95, 153, 214, .14), transparent 25%),
+    linear-gradient(118deg, #ffffff 0%, #f7fbff 54%, #edf5ff 100%) !important;
+  box-shadow: 0 10px 25px rgba(31, 69, 115, .07) !important;
+}
+
+/* Decorative floor-delivery watermark. It is presentation-only and cannot
+   intercept clicks or become part of the accessibility tree. */
+.home-page .home-stage-reference-v366::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 8px;
+  right: 10px;
+  width: min(430px, 36vw);
+  height: 105px;
+  pointer-events: none;
+  opacity: .34;
+  background: center / contain no-repeat url("data:image/svg+xml,%3Csvg viewBox='0 0 430 110' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%238eb7df' stroke-width='2' opacity='.72'%3E%3Cpath d='M0 88h430'/%3E%3Cpath d='M220 76h118V35h-88v41'/%3E%3Cpath d='M338 76h53V50l-18-17h-35z'/%3E%3Ccircle cx='257' cy='80' r='9'/%3E%3Ccircle cx='365' cy='80' r='9'/%3E%3Cpath d='M346 48h24l13 13h-37z'/%3E%3Cpath d='M266 42h58M266 50h58M266 58h58M266 66h58' opacity='.5'/%3E%3C/g%3E%3Cg fill='%239fc1e5' opacity='.48'%3E%3Cpath d='M54 83V49h3v34z'/%3E%3Cellipse cx='55.5' cy='39' rx='9' ry='24'/%3E%3Cpath d='M126 84V57h3v27z'/%3E%3Cellipse cx='127.5' cy='49' rx='7' ry='18'/%3E%3Cpath d='M404 84V52h3v32z'/%3E%3Cellipse cx='405.5' cy='43' rx='8' ry='22'/%3E%3Cpath d='M167 85V63h3v22z'/%3E%3Cellipse cx='168.5' cy='56' rx='6' ry='15'/%3E%3C/g%3E%3Cpath d='M15 87c58-7 109-7 167 0M383 87c18-4 31-4 45 0' fill='none' stroke='%23b8d2eb' stroke-width='2' opacity='.55'/%3E%3C/svg%3E") !important;
+}
+
+.home-stage-reference-v366 .home-stage-simple-header-v362,
+.home-stage-reference-v366 .home-stage-grid-v362 {
+  position: relative;
+  z-index: 1;
+}
+
+.home-stage-reference-v366 .home-stage-simple-header-v362 {
+  min-height: 65px;
+  display: flex !important;
+  align-items: start !important;
+  padding: 0 8px !important;
+}
+
+.home-stage-reference-v366 .home-stage-simple-copy-v362 {
+  gap: 4px !important;
+}
+
+.home-stage-reference-v366 .home-stage-greeting-v362 {
+  color: #08295a !important;
+  font-size: 34px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+  letter-spacing: -.035em !important;
+}
+
+.home-stage-reference-v366 .home-stage-date-simple-v362 {
+  color: #3a6997 !important;
+  font-size: 21px !important;
+  font-weight: 900 !important;
+  line-height: 1.08 !important;
+  letter-spacing: -.015em !important;
+}
+
+.home-stage-reference-v366 .home-stage-grid-v362 {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+}
+
+.home-page .home-stage-reference-v366 .today-stage-card {
+  min-width: 0;
+  min-height: 94px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-template-rows: auto auto !important;
+  align-content: center !important;
+  gap: 10px 11px !important;
+  padding: 12px 15px !important;
+  border: 1px solid #ccd9e9 !important;
+  border-left: 3px solid var(--today-stage-accent) !important;
+  border-top-width: 1px !important;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(249,251,254,.99) 100%) !important;
+  box-shadow: 0 6px 15px rgba(26, 61, 104, .055) !important;
+}
+
+.home-page .home-stage-reference-v366 .today-stage-card:hover,
+.home-page .home-stage-reference-v366 .today-stage-card:focus-visible {
+  transform: translateY(-1px) !important;
+  border-color: color-mix(in srgb, var(--today-stage-accent) 48%, #ccd9e9) !important;
+  border-left-color: var(--today-stage-accent) !important;
+  box-shadow: 0 10px 21px rgba(26, 61, 104, .095) !important;
+}
+
+.home-stage-reference-v366 .today-stage-card-heading {
+  grid-column: 1 / -1 !important;
+  grid-row: 1 !important;
+  min-width: 0;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+
+.home-stage-reference-v366 .today-stage-name {
+  min-width: 0;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  color: #0d2e5d !important;
+}
+
+.home-stage-reference-v366 .today-stage-name > i {
+  --home-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 21 7v10l-9 5-9-5V7l9-5Zm0 2.3L5.4 8 12 11.7 18.6 8 12 4.3ZM5 10v5.8l6 3.3v-5.8L5 10Zm8 9.1 6-3.3V10l-6 3.3v5.8Z'/%3E%3C/svg%3E");
+  position: relative;
+  width: 38px !important;
+  min-width: 38px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--today-stage-accent) 72%, #fff), var(--today-stage-accent)) !important;
+  box-shadow: 0 5px 11px color-mix(in srgb, var(--today-stage-accent) 24%, transparent) !important;
+}
+
+.home-stage-reference-v366 .today-stage-name > i::before {
+  content: "";
+  width: 21px;
+  height: 21px;
+  display: block;
+  background: #fff;
+  -webkit-mask: var(--home-stage-icon) center / contain no-repeat;
+  mask: var(--home-stage-icon) center / contain no-repeat;
+}
+
+.home-stage-reference-v366 .today-stage-card.outbound .today-stage-name > i {
+  --home-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 17 17 7h-7V5h10v10h-2V8.4L8.4 18 7 17Z'/%3E%3C/svg%3E");
+}
+.home-stage-reference-v366 .today-stage-card.received .today-stage-name > i {
+  --home-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m9.2 17.2-5-5 1.7-1.7 3.3 3.3 8.9-8.9 1.7 1.7-10.6 10.6Z'/%3E%3C/svg%3E");
+}
+.home-stage-reference-v366 .today-stage-card.pickup .today-stage-name > i {
+  --home-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z'/%3E%3C/svg%3E");
+}
+.home-stage-reference-v366 .today-stage-card.greenville .today-stage-name > i,
+.home-stage-reference-v366 .today-stage-card.dtc .today-stage-name > i {
+  --home-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5h11v9h2l2-3h3v6h-2a3 3 0 0 1-6 0H9a3 3 0 0 1-6 0H2V6a1 1 0 0 1 1-1Zm3 14a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm10 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z'/%3E%3C/svg%3E");
+}
+
+.home-stage-reference-v366 .today-stage-name b {
+  color: #0b2c59 !important;
+  font-size: 14px !important;
+  font-weight: 950 !important;
+  line-height: 1.1 !important;
+}
+
+.home-stage-reference-v366 .today-stage-card-heading > strong,
+.home-stage-reference-v366 .today-stage-card-heading > strong > b {
+  color: #08295a !important;
+  font-size: 18px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+}
+
+.home-stage-reference-v366 .today-stage-card-heading > strong > small {
+  color: #64778d !important;
+  font-size: 11px !important;
+  font-weight: 850 !important;
+}
+
+.home-stage-reference-v366 .today-stage-card .list-card-progress {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  width: 100%;
+  height: 8px !important;
+  align-self: center;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: #e7edf5 !important;
+  box-shadow: none !important;
+}
+
+.home-stage-reference-v366 .today-stage-card .list-card-progress > span {
+  background: var(--today-stage-accent) !important;
+}
+
+.home-stage-reference-v366 .today-stage-percent {
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  align-self: center;
+  justify-self: end;
+  color: #092b59 !important;
+  font-size: 11px !important;
+  font-weight: 950 !important;
+}
+
+/* Forward View ------------------------------------------------------------- */
+.home-page .home-forward-reference-v366 {
+  padding: 14px 18px 16px !important;
+  border: 1px solid #d4dfec !important;
+  border-radius: 14px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+  box-shadow: 0 8px 20px rgba(27, 61, 103, .055) !important;
+}
+
+.home-forward-reference-v366 .home-hub-card-heading-v358 > div > span {
+  color: #1760bb !important;
+  font-size: 9px !important;
+}
+
+.home-forward-reference-v366 .home-hub-card-heading-v358 h2 {
+  color: #0a2b59 !important;
+  font-size: 16px !important;
+}
+
+.home-forward-reference-v366 .home-hub-card-heading-v358 p {
+  color: #5f7289 !important;
+  font-size: 10px !important;
+}
+
+.home-forward-reference-v366 .home-hub-link-v358 {
+  min-height: 34px !important;
+  border: 1px solid #c6d7ea !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  color: #174b8b !important;
+  padding: 0 13px !important;
+  font-size: 9px !important;
+  box-shadow: 0 3px 9px rgba(30, 65, 107, .04);
+}
+
+.home-forward-reference-v366 .home-delivery-timeline-v358 {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+  margin-top: 11px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-card-v358 {
+  min-height: 108px !important;
+  gap: 6px !important;
+  padding: 9px 11px !important;
+  border: 1px solid #d3dfec !important;
+  border-radius: 9px !important;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%) !important;
+  box-shadow: none !important;
+}
+
+.home-forward-reference-v366 .home-timeline-card-v358.is-today {
+  border-color: #397ee8 !important;
+  box-shadow: inset 0 0 0 1px rgba(57, 126, 232, .10) !important;
+}
+
+.home-forward-reference-v366 .home-timeline-date-v358 small,
+.home-forward-reference-v366 .home-timeline-stage-count-v358,
+.home-forward-reference-v366 .home-timeline-metrics-v358 small {
+  font-size: 8.5px !important;
+  color: #5f748b !important;
+}
+
+.home-forward-reference-v366 .home-timeline-date-v358 strong {
+  font-size: 14px !important;
+  color: #092b59 !important;
+}
+
+.home-forward-reference-v366 .home-timeline-metrics-v358 b {
+  font-size: 11px !important;
+  color: #123d6c !important;
+}
+
+.home-forward-reference-v366 .home-timeline-progress-v358 > i {
+  height: 7px !important;
+  background: #e7edf5 !important;
+}
+
+.home-forward-reference-v366 .home-timeline-progress-v358 > strong {
+  color: #164d91 !important;
+  font-size: 9px !important;
+}
+
+/* Quick Destinations ------------------------------------------------------- */
+.home-page .home-destination-reference-v366 {
+  gap: 11px !important;
+  padding: 13px 18px 18px !important;
+  border: 1px solid #d6e1ed !important;
+  border-radius: 14px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+  box-shadow: 0 8px 20px rgba(27, 61, 103, .05) !important;
+}
+
+.home-destination-reference-v366 .home-destination-heading-v365 {
+  padding: 0 !important;
+}
+
+.home-destination-reference-v366 .home-destination-heading-v365 span {
+  color: #1760bb !important;
+  font-size: 9px !important;
+}
+
+.home-destination-reference-v366 .home-destination-heading-v365 h2 {
+  color: #092b59 !important;
+  font-size: 16px !important;
+}
+
+.home-destination-reference-v366 .home-destination-heading-v365 p {
+  color: #5e7188 !important;
+  font-size: 10px !important;
+}
+
+.home-destination-reference-v366 .home-destination-cards-v365 {
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-v358 {
+  min-height: 150px !important;
+  grid-template-columns: minmax(0, 1fr) 42px !important;
+  grid-template-rows: 62px minmax(0, 1fr) !important;
+  gap: 7px 10px !important;
+  overflow: hidden !important;
+  padding: 12px 13px 13px !important;
+  border: 1px solid color-mix(in srgb, var(--home-action-accent) 26%, #d4dfeb) !important;
+  border-top: 2px solid var(--home-action-accent) !important;
+  border-radius: 11px !important;
+  background:
+    radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--home-action-accent) 8%, transparent), transparent 45%),
+    linear-gradient(180deg, #ffffff 0%, color-mix(in srgb, var(--home-action-accent) 4%, #f8fbff) 100%) !important;
+  box-shadow: 0 5px 14px rgba(24, 56, 95, .055) !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-v358::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  bottom: -5px;
+  width: 82px;
+  height: 48px;
+  opacity: .28;
+  pointer-events: none;
+  background-image: radial-gradient(circle, var(--home-action-accent) 1.15px, transparent 1.4px);
+  background-size: 8px 8px;
+  -webkit-mask-image: linear-gradient(135deg, transparent 3%, #000 62%);
+  mask-image: linear-gradient(135deg, transparent 3%, #000 62%);
+}
+
+.home-destination-reference-v366 .home-quick-action-v358:hover,
+.home-destination-reference-v366 .home-quick-action-v358:focus-visible {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 10px 22px rgba(24, 56, 95, .105) !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-icon-v358 {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  width: 58px !important;
+  height: 58px !important;
+  border: 1px solid color-mix(in srgb, var(--home-action-accent) 22%, #d8e3ef) !important;
+  border-radius: 12px !important;
+  background: color-mix(in srgb, var(--home-action-accent) 9%, #fff) !important;
+  color: var(--home-action-accent) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.88) !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-icon-v358::before {
+  width: 29px !important;
+  height: 29px !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-v358 > span:nth-child(2) {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+  align-self: start;
+  gap: 5px !important;
+  padding-right: 2px;
+}
+
+.home-destination-reference-v366 .home-quick-action-v358 strong {
+  color: #0a2b59 !important;
+  font-size: 15px !important;
+  font-weight: 950 !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-v358 small {
+  max-width: 180px;
+  color: #5f7187 !important;
+  font-size: 9.5px !important;
+  font-weight: 760 !important;
+  line-height: 1.35 !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-v358 > i {
+  position: relative;
+  z-index: 1;
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  align-self: center !important;
+  justify-self: end !important;
+  width: 38px !important;
+  height: 38px !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 1px solid color-mix(in srgb, var(--home-action-accent) 20%, #d7e2ee) !important;
+  border-radius: 50% !important;
+  background: color-mix(in srgb, var(--home-action-accent) 7%, #fff) !important;
+  transform: none !important;
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--home-action-accent) 10%, transparent) !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-v358 > i::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid color-mix(in srgb, var(--home-action-accent) 76%, #28496b);
+  border-bottom: 2px solid color-mix(in srgb, var(--home-action-accent) 76%, #28496b);
+  transform: rotate(-45deg) translate(-1px, -1px);
+}
+
+/* Delivery Library --------------------------------------------------------- */
+.home-page .home-delivery-library-v366 {
+  border: 1px solid #d7e3ef !important;
+  border-radius: 14px !important;
+  background: linear-gradient(180deg, #f1f7ff 0%, #eaf3fc 100%) !important;
+  box-shadow: 0 8px 20px rgba(27, 61, 103, .055) !important;
+}
+
+.home-delivery-library-v366 .home-explorer-heading-v358 {
+  margin: -17px -17px 12px !important;
+  padding: 14px 18px 12px !important;
+  border-bottom: 0 !important;
+  background: transparent !important;
+}
+
+.home-delivery-library-v366 .home-explorer-heading-v358 > div > span {
+  color: #1760bb !important;
+  font-size: 9px !important;
+}
+
+.home-delivery-library-v366 .home-explorer-heading-v358 h2 {
+  color: #092b59 !important;
+  font-size: 17px !important;
+}
+
+.home-delivery-library-v366 .home-explorer-heading-v358 p {
+  color: #5f7188 !important;
+  font-size: 10px !important;
+}
+
+.home-delivery-library-v366 .home-explorer-heading-v358 > b {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cbdcf0 !important;
+  border-radius: 999px !important;
+  background: rgba(255,255,255,.72) !important;
+  color: #154b8c !important;
+  padding: 0 11px !important;
+  font-size: 9px !important;
+}
+
+.home-delivery-library-v366 .home-finder-toolbar-v358 {
+  gap: 12px !important;
+  margin-bottom: 12px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.home-delivery-library-v366 .home-finder-toolbar-v358 .search-box,
+.home-delivery-library-v366 .home-finder-toolbar-v358 select {
+  min-height: 43px !important;
+  border: 1px solid #cbd9e8 !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  box-shadow: 0 3px 9px rgba(31, 68, 111, .035) !important;
+}
+
+@media (max-width: 1280px) {
+  .home-stage-reference-v366 .home-stage-grid-v362 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .home-destination-reference-v366 .home-destination-cards-v365 {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .home-reference-v366 {
+    padding-inline: 12px !important;
+  }
+  .home-page .home-stage-reference-v366::before {
+    opacity: .18;
+    width: 310px;
+  }
+  .home-forward-reference-v366 .home-delivery-timeline-v358 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .home-reference-v366 {
+    padding-top: 10px !important;
+    gap: 11px !important;
+  }
+  .home-page .home-stage-reference-v366 {
+    min-height: 0 !important;
+    padding: 17px 13px 14px !important;
+  }
+  .home-stage-reference-v366 .home-stage-greeting-v362 {
+    font-size: 28px !important;
+  }
+  .home-stage-reference-v366 .home-stage-date-simple-v362 {
+    font-size: 18px !important;
+  }
+  .home-stage-reference-v366 .home-stage-grid-v362,
+  .home-forward-reference-v366 .home-delivery-timeline-v358,
+  .home-destination-reference-v366 .home-destination-cards-v365 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .home-destination-reference-v366 .home-quick-action-v358 {
+    min-height: 132px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.367 Home refinement                                                     */
+/* Keeps the approved screenshot-led Home hierarchy while refining the        */
+/* delivery hero, Forward View, workspace interactions, and expanded library. */
+/* ========================================================================== */
+
+/* Keep the floor-delivery watermark anchored to the far-right edge. The
+   narrower paint box intentionally crops the left side of the source artwork
+   so the truck/trees cannot drift into the greeting area at wide viewports. */
+.home-page .home-stage-reference-v366::before {
+  left: auto !important;
+  right: -16px !important;
+  top: 5px !important;
+  width: 350px !important;
+  height: 110px !important;
+  background-position: right center !important;
+  background-size: 430px 110px !important;
+  transform: none !important;
+}
+
+/* Forward View: +20% height from the v0.366 card geometry, with the descriptive
+   sentence removed in markup so the added height belongs to the dates/data. */
+.home-page .home-forward-reference-v366 {
+  padding-top: 15px !important;
+  padding-bottom: 18px !important;
+}
+
+.home-forward-reference-v366 .home-delivery-timeline-v358 {
+  margin-top: 12px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-card-v358 {
+  min-height: 130px !important;
+  padding: 12px 13px !important;
+  gap: 8px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-date-v358 strong {
+  font-size: 15px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-metrics-v358 b {
+  font-size: 12px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-progress-v358 > i {
+  height: 8px !important;
+}
+
+/* Home hover ownership. Older Home passes used stacked translate animations;
+   keep interactions responsive through color/border/shadow only so the pointer
+   never appears to outrun the card during rapid navigation. */
+.home-page :is(
+  .today-stage-card,
+  .home-timeline-card-v358,
+  .home-quick-action-v358,
+  .delivery-date-group,
+  .delivery-list-card-v367
+) {
+  transition:
+    border-color 135ms ease,
+    background-color 135ms ease,
+    box-shadow 135ms ease,
+    color 135ms ease !important;
+}
+
+.home-page :is(
+  .today-stage-card,
+  .home-timeline-card-v358,
+  .home-quick-action-v358,
+  .delivery-date-group,
+  .delivery-list-card-v367
+):is(:hover, :focus-visible) {
+  transform: none !important;
+}
+
+.home-page .home-stage-reference-v366 .today-stage-card:hover,
+.home-page .home-stage-reference-v366 .today-stage-card:focus-visible {
+  background: color-mix(in srgb, var(--today-stage-accent) 4%, #fff) !important;
+  box-shadow: 0 8px 17px rgba(26, 61, 104, .085) !important;
+}
+
+.home-forward-reference-v366 .home-timeline-card-v358:hover,
+.home-forward-reference-v366 .home-timeline-card-v358:focus-visible {
+  border-color: #9fbbda !important;
+  background: #f7fbff !important;
+  box-shadow: 0 7px 16px rgba(28, 64, 106, .07) !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-v358:hover,
+.home-destination-reference-v366 .home-quick-action-v358:focus-visible {
+  border-color: color-mix(in srgb, var(--home-action-accent) 48%, #d4dfeb) !important;
+  background:
+    radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--home-action-accent) 10%, transparent), transparent 45%),
+    linear-gradient(180deg, #ffffff 0%, color-mix(in srgb, var(--home-action-accent) 7%, #f8fbff) 100%) !important;
+  box-shadow: 0 8px 18px rgba(24, 56, 95, .085) !important;
+}
+
+.home-destination-reference-v366 .home-quick-action-v358:hover > i,
+.home-destination-reference-v366 .home-quick-action-v358:focus-visible > i {
+  background: color-mix(in srgb, var(--home-action-accent) 13%, #fff) !important;
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--home-action-accent) 13%, transparent) !important;
+  transform: none !important;
+}
+
+/* Delivery Library date header ------------------------------------------- */
+.home-delivery-library-v366 .delivery-date-group-v367 {
+  overflow: hidden;
+  border: 1px solid #d3e0ee !important;
+  background: #fff !important;
+  box-shadow: 0 6px 16px rgba(24, 58, 98, .045) !important;
+}
+
+.home-delivery-library-v366 .delivery-date-group-v367:hover {
+  border-color: #b4c9df !important;
+  box-shadow: 0 8px 18px rgba(24, 58, 98, .065) !important;
+}
+
+.home-delivery-library-v366 .delivery-date-group-v367[open] {
+  border-color: #91acd0 !important;
+  box-shadow: 0 10px 22px rgba(24, 58, 98, .08) !important;
+}
+
+.home-delivery-library-v366 .delivery-date-group-v367 > summary {
+  min-height: 82px !important;
+  grid-template-columns: 30px minmax(0, 1fr) 94px !important;
+  gap: 12px !important;
+  padding: 11px 14px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%) !important;
+}
+
+.home-date-summary-main-v367 {
+  min-width: 0 !important;
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns: 112px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 15px !important;
+}
+
+.home-library-date-v367 {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 1px;
+  padding-right: 14px;
+  border-right: 1px solid #dbe5f0;
+}
+
+.home-library-date-v367 > small {
+  color: #2f6db1 !important;
+  font-size: 11px !important;
+  font-weight: 950 !important;
+  letter-spacing: .075em !important;
+  text-transform: uppercase;
+}
+
+.home-library-date-v367 > strong {
+  color: #092b59 !important;
+  font-size: 18px !important;
+  font-weight: 950 !important;
+  line-height: 1.08 !important;
+  letter-spacing: -.02em !important;
+  white-space: nowrap;
+}
+
+.home-library-date-progress-v367 {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 7px;
+}
+
+.home-library-date-progress-v367 > small {
+  color: #63778e !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+}
+
+.home-delivery-library-v366 .home-date-progress-v367 {
+  width: min(720px, 94%) !important;
+  min-width: 0 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 42px !important;
+  align-items: center !important;
+  gap: 9px !important;
+  justify-self: start !important;
+  margin: 0 !important;
+  transform: translateX(-2%) !important;
+}
+
+.home-delivery-library-v366 .home-date-progress-v367 .list-card-progress {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 9px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: #e6edf5 !important;
+  overflow: hidden !important;
+  box-shadow: inset 0 1px 2px rgba(22, 55, 95, .07) !important;
+}
+
+.home-delivery-library-v366 .home-date-progress-v367 > strong {
+  color: #154c8e !important;
+  font-size: 10px !important;
+  font-weight: 950 !important;
+  text-align: right;
+}
+
+.home-delivery-library-v366 .delivery-date-total {
+  min-width: 88px !important;
+  padding: 6px 8px !important;
+  border-color: #d7e2ee !important;
+  border-radius: 9px !important;
+  background: rgba(255,255,255,.92) !important;
+  box-shadow: none !important;
+}
+
+.home-delivery-library-v366 .delivery-date-total small {
+  font-size: 9px !important;
+}
+
+.home-delivery-library-v366 .delivery-date-total strong {
+  font-size: 17px !important;
+}
+
+/* Expanded stage cards ---------------------------------------------------- */
+.home-delivery-library-v366 .delivery-stage-list {
+  display: grid !important;
+  gap: 9px !important;
+  padding: 11px !important;
+  border-top: 1px solid #dde7f2;
+  background: #f6f9fd !important;
+}
+
+.home-delivery-library-v366 .delivery-list-card-v367 {
+  --delivery-stage-accent: #326ce5;
+  --delivery-stage-soft: #edf4ff;
+  min-width: 0;
+  min-height: 92px;
+  display: grid !important;
+  grid-template-columns: minmax(210px, .8fr) minmax(320px, 1.2fr) !important;
+  align-items: center !important;
+  gap: 18px !important;
+  overflow: hidden;
+  padding: 12px 14px !important;
+  border: 1px solid color-mix(in srgb, var(--delivery-stage-accent) 21%, #d6e1ed) !important;
+  border-left: 4px solid var(--delivery-stage-accent) !important;
+  border-radius: 11px !important;
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--delivery-stage-accent) 7%, #fff) 0%, #fff 56%, color-mix(in srgb, var(--delivery-stage-accent) 3%, #fff) 100%) !important;
+  box-shadow: 0 4px 11px rgba(24, 57, 97, .045) !important;
+  cursor: pointer;
+}
+
+.home-delivery-library-v366 .delivery-list-card-v367.outbound {
+  --delivery-stage-accent: #e19b19;
+  --delivery-stage-soft: #fff6e4;
+}
+.home-delivery-library-v366 .delivery-list-card-v367.received {
+  --delivery-stage-accent: #35a967;
+  --delivery-stage-soft: #eaf8f0;
+}
+.home-delivery-library-v366 .delivery-list-card-v367.pickup {
+  --delivery-stage-accent: #8d64d8;
+  --delivery-stage-soft: #f3edff;
+}
+.home-delivery-library-v366 .delivery-list-card-v367.greenville {
+  --delivery-stage-accent: #1497a6;
+  --delivery-stage-soft: #e8f9fb;
+}
+.home-delivery-library-v366 .delivery-list-card-v367.dtc {
+  --delivery-stage-accent: #d44a8d;
+  --delivery-stage-soft: #fff0f7;
+}
+
+.home-delivery-library-v366 .delivery-list-card-v367:hover,
+.home-delivery-library-v366 .delivery-list-card-v367:focus-visible {
+  outline: none !important;
+  border-color: color-mix(in srgb, var(--delivery-stage-accent) 40%, #d6e1ed) !important;
+  border-left-color: var(--delivery-stage-accent) !important;
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--delivery-stage-accent) 10%, #fff) 0%, #fff 56%, color-mix(in srgb, var(--delivery-stage-accent) 5%, #fff) 100%) !important;
+  box-shadow: 0 7px 16px rgba(24, 57, 97, .075) !important;
+}
+
+.delivery-card-main-v367 {
+  min-width: 0;
+  display: grid !important;
+  grid-template-columns: 42px minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 11px !important;
+}
+
+.delivery-stage-icon-v367 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 21 7v10l-9 5-9-5V7l9-5Zm0 2.3L5.4 8 12 11.7 18.6 8 12 4.3ZM5 10v5.8l6 3.3v-5.8L5 10Zm8 9.1 6-3.3V10l-6 3.3v5.8Z'/%3E%3C/svg%3E");
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--delivery-stage-accent) 25%, #d8e3ee);
+  border-radius: 10px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--delivery-stage-accent) 66%, #fff), var(--delivery-stage-accent));
+  box-shadow: 0 4px 9px color-mix(in srgb, var(--delivery-stage-accent) 18%, transparent);
+}
+
+.delivery-stage-icon-v367::before {
+  content: "";
+  width: 21px;
+  height: 21px;
+  display: block;
+  background: #fff;
+  -webkit-mask: var(--delivery-stage-icon) center / contain no-repeat;
+  mask: var(--delivery-stage-icon) center / contain no-repeat;
+}
+
+.delivery-list-card-v367.outbound .delivery-stage-icon-v367 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 17 17 7h-7V5h10v10h-2V8.4L8.4 18 7 17Z'/%3E%3C/svg%3E");
+}
+.delivery-list-card-v367.received .delivery-stage-icon-v367 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m9.2 17.2-5-5 1.7-1.7 3.3 3.3 8.9-8.9 1.7 1.7-10.6 10.6Z'/%3E%3C/svg%3E");
+}
+.delivery-list-card-v367.pickup .delivery-stage-icon-v367 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z'/%3E%3C/svg%3E");
+}
+.delivery-list-card-v367.greenville .delivery-stage-icon-v367,
+.delivery-list-card-v367.dtc .delivery-stage-icon-v367 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5h11v9h2l2-3h3v6h-2a3 3 0 0 1-6 0H9a3 3 0 0 1-6 0H2V6a1 1 0 0 1 1-1Zm3 14a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm10 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z'/%3E%3C/svg%3E");
+}
+
+.delivery-card-title-copy-v367 {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.delivery-card-title-copy-v367 > strong {
+  color: #0a2c59 !important;
+  font-size: 14px !important;
+  font-weight: 950 !important;
+}
+
+.delivery-card-title-copy-v367 > small {
+  color: #62758b !important;
+  font-size: 9.5px !important;
+  font-weight: 800 !important;
+}
+
+.delivery-card-action-v367 {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--delivery-stage-accent) 78%, #173b68);
+  font-size: 9px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: .045em;
+  white-space: nowrap;
+}
+
+.delivery-card-action-v367 > i {
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+.delivery-stage-progress-v367 {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.delivery-stage-progress-track-v367 {
+  position: relative;
+  width: 100%;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--delivery-stage-accent) 18%, #d9e3ed);
+  border-radius: 999px;
+  background: #e8eef5;
+  box-shadow: inset 0 1px 2px rgba(14, 48, 88, .08);
+}
+
+.delivery-stage-progress-track-v367 > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--delivery-stage-accent) 82%, #fff), var(--delivery-stage-accent));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28);
+}
+
+.delivery-stage-progress-track-v367 > b {
+  position: absolute;
+  z-index: 1;
+  inset: 0 8px 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: #173a65;
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.delivery-stage-progress-count-v367 {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.delivery-stage-progress-count-v367 > strong {
+  color: #0c315f;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.delivery-stage-progress-count-v367 > small {
+  color: #6b7d91;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+@media (max-width: 1000px) {
+  .home-delivery-library-v366 .delivery-list-card-v367 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 11px !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .home-page .home-stage-reference-v366::before {
+    right: -80px !important;
+    opacity: .13 !important;
+  }
+
+  .home-forward-reference-v366 .home-timeline-card-v358 {
+    min-height: 112px !important;
+  }
+
+  .home-delivery-library-v366 .delivery-date-group-v367 > summary {
+    grid-template-columns: 28px minmax(0, 1fr) !important;
+  }
+
+  .home-date-summary-main-v367 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .home-library-date-v367 {
+    padding-right: 0;
+    padding-bottom: 7px;
+    border-right: 0;
+    border-bottom: 1px solid #dbe5f0;
+  }
+
+  .home-delivery-library-v366 .home-date-progress-v367 {
+    width: 100% !important;
+    transform: none !important;
+  }
+
+  .home-delivery-library-v366 .delivery-date-total {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+/* ========================================================================== */
+/* v0.368 Delivery Library header + stage-card ownership                      */
+/* -------------------------------------------------------------------------- */
+/* The v0.367 library mixed legacy card/grid ownership with the new progress  */
+/* treatment. This final layer gives the date header and expanded stages one  */
+/* explicit layout contract so widths remain stable at every delivery count.  */
+/* ========================================================================== */
+
+.home-delivery-library-v366 .delivery-date-group-v367 > summary {
+  min-height: 96px !important;
+  grid-template-columns: 32px minmax(0, 1fr) 144px !important;
+  gap: 14px !important;
+  padding: 12px 15px !important;
+}
+
+.home-date-summary-main-v367 {
+  grid-template-columns: 118px minmax(0, 1fr) !important;
+  gap: 18px !important;
+}
+
+.home-library-date-progress-v367 {
+  gap: 8px !important;
+}
+
+.home-library-date-progress-v367 > small {
+  color: #58708b !important;
+  font-size: 10.5px !important;
+  letter-spacing: .005em;
+}
+
+/* Do not reuse the legacy progress-line grid here. The date header needs a
+   full-width, clearly visible progress control with its percentage embedded. */
+.home-date-progress-v368 {
+  width: 100%;
+  min-width: 0;
+}
+
+.home-date-progress-track-v368 {
+  position: relative;
+  width: 100%;
+  min-width: 220px;
+  height: 17px;
+  overflow: hidden;
+  border: 1px solid #cad8e7;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #edf3f9 0%, #e2eaf3 100%);
+  box-shadow:
+    inset 0 1px 3px rgba(19, 52, 91, .10),
+    0 1px 0 rgba(255,255,255,.95);
+}
+
+.home-date-progress-segments-v368 {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.home-date-progress-segments-v368 > .stage-segment {
+  height: 100%;
+  flex: 0 0 auto;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35);
+}
+
+.home-date-progress-track-v368 > strong {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: 7px;
+  transform: translateY(-50%);
+  min-width: 32px;
+  color: #123e74;
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 1;
+  text-align: right;
+  text-shadow: 0 1px 0 rgba(255,255,255,.85);
+}
+
+/* The piece total is a compact summary card rather than a floating number. */
+.home-delivery-library-v366 .home-date-piece-summary-v368 {
+  min-width: 132px !important;
+  min-height: 58px !important;
+  display: grid !important;
+  grid-template-columns: 34px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 9px !important;
+  margin: 0 !important;
+  padding: 8px 10px !important;
+  border: 1px solid #cad9e8 !important;
+  border-radius: 11px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f2f7fc 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    0 4px 10px rgba(23, 57, 96, .055) !important;
+  text-align: left !important;
+}
+
+.home-date-piece-summary-v368 > i {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: linear-gradient(145deg, #e8f1fb, #dbe9f7);
+  color: #2d65a5;
+}
+
+.home-date-piece-summary-v368 > i::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  display: block;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 21 7v10l-9 5-9-5V7l9-5Zm0 2.3L5.4 8 12 11.7 18.6 8 12 4.3ZM5 10v5.8l6 3.3v-5.8L5 10Zm8 9.1 6-3.3V10l-6 3.3v5.8Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 21 7v10l-9 5-9-5V7l9-5Zm0 2.3L5.4 8 12 11.7 18.6 8 12 4.3ZM5 10v5.8l6 3.3v-5.8L5 10Zm8 9.1 6-3.3V10l-6 3.3v5.8Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.home-date-piece-summary-v368 > span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.home-delivery-library-v366 .home-date-piece-summary-v368 small {
+  color: #6b7d91 !important;
+  font-size: 8.5px !important;
+  font-weight: 900 !important;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.home-delivery-library-v366 .home-date-piece-summary-v368 strong {
+  color: #092d5c !important;
+  font-size: 20px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+}
+
+/* Expanded delivery stages ------------------------------------------------ */
+.home-delivery-library-v366 .delivery-stage-list {
+  gap: 10px !important;
+  padding: 12px !important;
+  background: linear-gradient(180deg, #f6f9fd 0%, #f1f6fb 100%) !important;
+}
+
+.home-delivery-library-v366 .delivery-list-card-v368 {
+  --delivery-stage-accent: #326ce5;
+  --delivery-stage-soft: #edf4ff;
+  min-width: 0;
+  min-height: 94px;
+  display: grid !important;
+  grid-template-columns: minmax(205px, .72fr) minmax(360px, 1.45fr) 104px !important;
+  align-items: center !important;
+  gap: 18px !important;
+  padding: 13px 14px !important;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--delivery-stage-accent) 24%, #d6e1ed) !important;
+  border-left: 5px solid var(--delivery-stage-accent) !important;
+  border-radius: 12px !important;
+  background:
+    radial-gradient(circle at 100% 50%, color-mix(in srgb, var(--delivery-stage-accent) 7%, transparent), transparent 30%),
+    linear-gradient(98deg, color-mix(in srgb, var(--delivery-stage-accent) 8%, #fff) 0%, #fff 48%, color-mix(in srgb, var(--delivery-stage-accent) 3%, #fff) 100%) !important;
+  box-shadow: 0 5px 13px rgba(24, 57, 97, .055) !important;
+  cursor: pointer;
+  transition: border-color 130ms ease, background-color 130ms ease, box-shadow 130ms ease !important;
+}
+
+.home-delivery-library-v366 .delivery-list-card-v368.outbound {
+  --delivery-stage-accent: #e19b19;
+  --delivery-stage-soft: #fff6e4;
+}
+.home-delivery-library-v366 .delivery-list-card-v368.received {
+  --delivery-stage-accent: #35a967;
+  --delivery-stage-soft: #eaf8f0;
+}
+.home-delivery-library-v366 .delivery-list-card-v368.pickup {
+  --delivery-stage-accent: #8d64d8;
+  --delivery-stage-soft: #f3edff;
+}
+.home-delivery-library-v366 .delivery-list-card-v368.greenville {
+  --delivery-stage-accent: #1497a6;
+  --delivery-stage-soft: #e8f9fb;
+}
+.home-delivery-library-v366 .delivery-list-card-v368.dtc {
+  --delivery-stage-accent: #d44a8d;
+  --delivery-stage-soft: #fff0f7;
+}
+
+.home-delivery-library-v366 .delivery-list-card-v368:hover,
+.home-delivery-library-v366 .delivery-list-card-v368:focus-visible {
+  outline: none !important;
+  border-color: color-mix(in srgb, var(--delivery-stage-accent) 42%, #cbd9e7) !important;
+  border-left-color: var(--delivery-stage-accent) !important;
+  background:
+    radial-gradient(circle at 100% 50%, color-mix(in srgb, var(--delivery-stage-accent) 10%, transparent), transparent 32%),
+    linear-gradient(98deg, color-mix(in srgb, var(--delivery-stage-accent) 11%, #fff) 0%, #fff 48%, color-mix(in srgb, var(--delivery-stage-accent) 5%, #fff) 100%) !important;
+  box-shadow: 0 8px 18px rgba(24, 57, 97, .08) !important;
+}
+
+.delivery-stage-identity-v368 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.delivery-stage-icon-v368 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 21 7v10l-9 5-9-5V7l9-5Zm0 2.3L5.4 8 12 11.7 18.6 8 12 4.3ZM5 10v5.8l6 3.3v-5.8L5 10Zm8 9.1 6-3.3V10l-6 3.3v5.8Z'/%3E%3C/svg%3E");
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--delivery-stage-accent) 28%, #d7e2ed);
+  border-radius: 12px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--delivery-stage-accent) 64%, #fff), var(--delivery-stage-accent));
+  box-shadow: 0 5px 11px color-mix(in srgb, var(--delivery-stage-accent) 20%, transparent);
+}
+
+.delivery-stage-icon-v368::before {
+  content: "";
+  width: 24px;
+  height: 24px;
+  display: block;
+  background: #fff;
+  -webkit-mask: var(--delivery-stage-icon) center / contain no-repeat;
+  mask: var(--delivery-stage-icon) center / contain no-repeat;
+}
+
+.delivery-list-card-v368.outbound .delivery-stage-icon-v368 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 17 17 7h-7V5h10v10h-2V8.4L8.4 18 7 17Z'/%3E%3C/svg%3E");
+}
+
+/* Inbound mirrors Outbound diagonally: upper-left toward lower-right. */
+.delivery-list-card-v368.received .delivery-stage-icon-v368,
+.home-stage-reference-v366 .today-stage-card.received .today-stage-name > i {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 5 17 15.1V8h2v11H8v-2h7.1L5 7 7 5Z'/%3E%3C/svg%3E");
+  --home-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 5 17 15.1V8h2v11H8v-2h7.1L5 7 7 5Z'/%3E%3C/svg%3E");
+}
+
+.delivery-list-card-v368.pickup .delivery-stage-icon-v368 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z'/%3E%3C/svg%3E");
+}
+.delivery-list-card-v368.greenville .delivery-stage-icon-v368,
+.delivery-list-card-v368.dtc .delivery-stage-icon-v368 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5h11v9h2l2-3h3v6h-2a3 3 0 0 1-6 0H9a3 3 0 0 1-6 0H2V6a1 1 0 0 1 1-1Zm3 14a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm10 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z'/%3E%3C/svg%3E");
+}
+
+.delivery-stage-copy-v368 {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.delivery-stage-copy-v368 > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #0a2c59;
+  font-size: 15px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.delivery-stage-copy-v368 > small {
+  color: #6a7c91;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.delivery-stage-progress-v368 {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.delivery-stage-progress-track-v368 {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 21px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--delivery-stage-accent) 20%, #d6e1eb);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #edf2f7 0%, #e4ebf3 100%);
+  box-shadow: inset 0 1px 2px rgba(17, 47, 83, .09);
+}
+
+.delivery-stage-progress-track-v368 > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--delivery-stage-accent) 78%, #fff), var(--delivery-stage-accent));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.32);
+}
+
+.delivery-stage-progress-track-v368 > b {
+  position: absolute;
+  z-index: 2;
+  inset: 0 9px 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: #173b69;
+  font-size: 9.5px;
+  font-weight: 950;
+  text-shadow: 0 1px 0 rgba(255,255,255,.8);
+}
+
+.delivery-stage-progress-count-v368 {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.delivery-stage-progress-count-v368 > strong {
+  color: #0b315f;
+  font-size: 13px;
+  font-weight: 950;
+}
+.delivery-stage-progress-count-v368 > small {
+  color: #6b7d91;
+  font-size: 9.5px;
+  font-weight: 800;
+}
+
+.delivery-stage-open-v368 {
+  min-width: 96px;
+  min-height: 37px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  justify-self: end;
+  border: 1px solid color-mix(in srgb, var(--delivery-stage-accent) 30%, #d1dce8);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--delivery-stage-accent) 7%, #fff);
+  color: color-mix(in srgb, var(--delivery-stage-accent) 78%, #173b68);
+  padding: 0 11px;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.delivery-stage-open-v368 > i {
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+@media (max-width: 1050px) {
+  .home-delivery-library-v366 .delivery-list-card-v368 {
+    grid-template-columns: minmax(190px, .85fr) minmax(260px, 1.2fr) 92px !important;
+    gap: 12px !important;
+  }
+}
+
+@media (max-width: 820px) {
+  .home-delivery-library-v366 .delivery-date-group-v367 > summary {
+    grid-template-columns: 28px minmax(0, 1fr) !important;
+  }
+
+  .home-delivery-library-v366 .home-date-piece-summary-v368 {
+    grid-column: 2;
+    justify-self: start;
+    min-width: 132px !important;
+  }
+
+  .home-date-summary-main-v367 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 9px !important;
+  }
+
+  .home-library-date-v367 {
+    padding-right: 0;
+    padding-bottom: 7px;
+    border-right: 0;
+    border-bottom: 1px solid #dbe5f0;
+  }
+
+  .home-delivery-library-v366 .delivery-list-card-v368 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+  }
+
+  .delivery-stage-open-v368 {
+    justify-self: start;
+  }
+}
+
+/* v0.369 Expanded Delivery Library stage containment ----------------------
+   Keep each stage's progress physically attached to its title/identity block.
+   The v0.368 three-column row could let the progress column visually outrun
+   narrow cards. This two-column owner makes the stage content self-contained:
+   icon + title + progress on the left, Open Stage action on the right. */
+.home-delivery-library-v366 .delivery-list-card-v369 {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-template-rows: auto !important;
+  align-items: center !important;
+  gap: 16px !important;
+  min-height: 108px !important;
+  padding: 14px 15px !important;
+}
+
+.home-delivery-library-v366 .delivery-stage-identity-v369 {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.home-delivery-library-v366 .delivery-stage-copy-v369 {
+  width: 100%;
+  min-width: 0;
+  gap: 3px;
+}
+
+.home-delivery-library-v366 .delivery-stage-progress-v369 {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.home-delivery-library-v366 .delivery-stage-progress-track-v369 {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 18px;
+  box-sizing: border-box;
+}
+
+.home-delivery-library-v366 .delivery-stage-progress-count-v369 {
+  min-width: 0;
+  gap: 4px;
+  line-height: 1;
+}
+
+.home-delivery-library-v366 .delivery-stage-open-v369 {
+  align-self: center;
+  justify-self: end;
+  min-width: 96px;
+}
+
+@media (max-width: 820px) {
+  .home-delivery-library-v366 .delivery-list-card-v369 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+  }
+
+  .home-delivery-library-v366 .delivery-stage-open-v369 {
+    justify-self: start;
+    margin-left: 58px;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.370 Home scale, stage interaction, icon, and progress refinements      */
+/* -------------------------------------------------------------------------- */
+/* This layer keeps the approved v0.366+ structure but gives Today's Delivery */
+/* more first-view presence, removes false 0% progress, improves stage icons, */
+/* and replaces the basic delivery watermark with a clearer floor scene.      */
+/* ========================================================================== */
+
+/* Today's Delivery grows approximately 30% as one cohesive first-view hero. */
+.home-page .home-stage-reference-v366 {
+  min-height: 286px !important;
+  gap: 22px !important;
+  padding: 29px 22px 23px !important;
+}
+
+.home-page .home-stage-reference-v366::before {
+  top: 5px !important;
+  right: 2px !important;
+  width: min(540px, 41vw) !important;
+  height: 158px !important;
+  opacity: .46 !important;
+  background: right center / contain no-repeat url("data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%20560%20170%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%0A%3Cdefs%3E%0A%20%3ClinearGradient%20id%3D%22truck%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%238fbce6%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%235f94c9%22%2F%3E%3C%2FlinearGradient%3E%0A%20%3ClinearGradient%20id%3D%22glass%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%23d9edff%22%20stop-opacity%3D%22.92%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%239fc8ec%22%20stop-opacity%3D%22.72%22%2F%3E%3C%2FlinearGradient%3E%0A%3C%2Fdefs%3E%0A%3Cg%20opacity%3D%22.92%22%3E%0A%20%3Cpath%20d%3D%22M12%20139C92%20128%20167%20132%20232%20140s139%207%20210-2%2085-7%20106-2%22%20fill%3D%22none%22%20stroke%3D%22%23b8d4ee%22%20stroke-width%3D%223%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%3Cpath%20d%3D%22M0%20146h560%22%20stroke%3D%22%23d4e4f3%22%20stroke-width%3D%222%22%2F%3E%0A%20%3Cg%20fill%3D%22%23a8c9e8%22%20opacity%3D%22.72%22%3E%0A%20%20%3Cpath%20d%3D%22M50%20139V75h5v64z%22%2F%3E%3Cpath%20d%3D%22M91%20140V91h4v49z%22%2F%3E%3Cpath%20d%3D%22M483%20140V81h5v59z%22%2F%3E%3Cpath%20d%3D%22M522%20140V101h4v39z%22%2F%3E%0A%20%3C%2Fg%3E%0A%20%3Cg%20fill%3D%22%239fc3e4%22%20opacity%3D%22.54%22%3E%0A%20%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2264%22%20r%3D%2224%22%2F%3E%3Ccircle%20cx%3D%2238%22%20cy%3D%2272%22%20r%3D%2215%22%2F%3E%3Ccircle%20cx%3D%2267%22%20cy%3D%2273%22%20r%3D%2217%22%2F%3E%0A%20%20%3Ccircle%20cx%3D%2293%22%20cy%3D%2282%22%20r%3D%2219%22%2F%3E%3Ccircle%20cx%3D%2282%22%20cy%3D%2289%22%20r%3D%2212%22%2F%3E%3Ccircle%20cx%3D%22105%22%20cy%3D%2291%22%20r%3D%2213%22%2F%3E%0A%20%20%3Ccircle%20cx%3D%22485%22%20cy%3D%2269%22%20r%3D%2223%22%2F%3E%3Ccircle%20cx%3D%22469%22%20cy%3D%2279%22%20r%3D%2215%22%2F%3E%3Ccircle%20cx%3D%22500%22%20cy%3D%2280%22%20r%3D%2217%22%2F%3E%0A%20%20%3Ccircle%20cx%3D%22524%22%20cy%3D%2293%22%20r%3D%2217%22%2F%3E%3Ccircle%20cx%3D%22513%22%20cy%3D%22101%22%20r%3D%2211%22%2F%3E%3Ccircle%20cx%3D%22536%22%20cy%3D%22102%22%20r%3D%2212%22%2F%3E%0A%20%3C%2Fg%3E%0A%20%3Cg%20transform%3D%22translate%28178%2031%29%22%3E%0A%20%20%3Cpath%20d%3D%22M19%2018h205c8%200%2014%206%2014%2014v77H19z%22%20fill%3D%22url%28%23truck%29%22%20opacity%3D%22.48%22%20stroke%3D%22%236b9ecc%22%20stroke-width%3D%222.5%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M238%2054h65l40%2038v17H238z%22%20fill%3D%22%2372a4d1%22%20opacity%3D%22.55%22%20stroke%3D%22%235d91c0%22%20stroke-width%3D%222.5%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M252%2061h43l28%2027h-71z%22%20fill%3D%22url%28%23glass%29%22%20stroke%3D%22%2379a9d3%22%20stroke-width%3D%222%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M252%2095h82v14h-82z%22%20fill%3D%22%236f9fca%22%20opacity%3D%22.44%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M43%2036h166M43%2055h166M43%2074h166M43%2093h166%22%20stroke%3D%22%23d9eafd%22%20stroke-width%3D%222%22%20opacity%3D%22.55%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M82%2018v91M123%2018v91M164%2018v91%22%20stroke%3D%22%23d7e8f8%22%20stroke-width%3D%222%22%20opacity%3D%22.44%22%2F%3E%0A%20%20%3Crect%20x%3D%226%22%20y%3D%22107%22%20width%3D%22342%22%20height%3D%228%22%20rx%3D%224%22%20fill%3D%22%235f8fbd%22%20opacity%3D%22.52%22%2F%3E%0A%20%20%3Cg%20fill%3D%22%23edf6ff%22%20stroke%3D%22%235d8fbd%22%20stroke-width%3D%224%22%3E%0A%20%20%20%3Ccircle%20cx%3D%2275%22%20cy%3D%22116%22%20r%3D%2217%22%2F%3E%3Ccircle%20cx%3D%2275%22%20cy%3D%22116%22%20r%3D%227%22%20fill%3D%22%236c9ac5%22%20stroke%3D%22none%22%2F%3E%0A%20%20%20%3Ccircle%20cx%3D%22277%22%20cy%3D%22116%22%20r%3D%2217%22%2F%3E%3Ccircle%20cx%3D%22277%22%20cy%3D%22116%22%20r%3D%227%22%20fill%3D%22%236c9ac5%22%20stroke%3D%22none%22%2F%3E%0A%20%20%3C%2Fg%3E%0A%20%20%3Cpath%20d%3D%22M332%2090h12v11h-12%22%20fill%3D%22%23f1c75b%22%20opacity%3D%22.72%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M19%2028h-9v74h9%22%20fill%3D%22none%22%20stroke%3D%22%236f9fc9%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M25%20109h318%22%20stroke%3D%22%23527fab%22%20stroke-width%3D%223%22%20opacity%3D%22.5%22%2F%3E%0A%20%3C%2Fg%3E%0A%20%3Cg%20fill%3D%22%23a7c7e5%22%20opacity%3D%22.38%22%3E%0A%20%20%3Cpath%20d%3D%22M132%20140%20165%20106l33%2034z%22%2F%3E%3Cpath%20d%3D%22M424%20140%20449%20113l26%2027z%22%2F%3E%0A%20%3C%2Fg%3E%0A%3C%2Fg%3E%0A%3C%2Fsvg%3E") !important;
+}
+
+.home-stage-reference-v366 .home-stage-simple-header-v362 {
+  min-height: 82px !important;
+  padding: 0 10px !important;
+}
+
+.home-stage-reference-v366 .home-stage-simple-copy-v362 { gap: 7px !important; }
+
+.home-stage-reference-v366 .home-stage-greeting-v362 {
+  font-size: 42px !important;
+  line-height: 1.02 !important;
+}
+
+.home-stage-reference-v366 .home-stage-date-simple-v362 {
+  font-size: 27px !important;
+  line-height: 1.06 !important;
+}
+
+.home-stage-reference-v366 .home-stage-grid-v362 { gap: 16px !important; }
+
+.home-page .home-stage-reference-v366 .today-stage-card {
+  min-height: 122px !important;
+  gap: 13px 14px !important;
+  padding: 16px 19px !important;
+  cursor: pointer;
+  transition: border-color 145ms ease, background 145ms ease, box-shadow 145ms ease !important;
+}
+
+.home-page .home-stage-reference-v366 .today-stage-card:hover,
+.home-page .home-stage-reference-v366 .today-stage-card:focus-visible {
+  transform: none !important;
+  outline: none !important;
+  border-color: color-mix(in srgb, var(--today-stage-accent) 62%, #c5d4e4) !important;
+  border-left-color: var(--today-stage-accent) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--today-stage-accent) 5%, #fff) 0%, #fff 100%) !important;
+  box-shadow: 0 11px 24px color-mix(in srgb, var(--today-stage-accent) 13%, rgba(26, 61, 104, .08)) !important;
+}
+
+.home-stage-reference-v366 .today-stage-name > i {
+  width: 46px !important;
+  min-width: 46px !important;
+  height: 46px !important;
+  min-height: 46px !important;
+  border-radius: 12px !important;
+  transition: box-shadow 145ms ease, filter 145ms ease !important;
+}
+
+.home-stage-reference-v366 .today-stage-name > i::before { width: 25px !important; height: 25px !important; }
+.home-stage-reference-v366 .today-stage-card:hover .today-stage-name > i,
+.home-stage-reference-v366 .today-stage-card:focus-visible .today-stage-name > i {
+  filter: saturate(1.08);
+  box-shadow: 0 7px 15px color-mix(in srgb, var(--today-stage-accent) 31%, transparent) !important;
+}
+
+.home-stage-reference-v366 .today-stage-name b { font-size: 15.5px !important; }
+.home-stage-reference-v366 .today-stage-card-heading > strong,
+.home-stage-reference-v366 .today-stage-card-heading > strong > b { font-size: 21px !important; }
+.home-stage-reference-v366 .today-stage-card-heading > strong > small { font-size: 12.5px !important; }
+.home-stage-reference-v366 .today-stage-card .list-card-progress { height: 10px !important; }
+.home-stage-reference-v366 .today-stage-percent { font-size: 12.5px !important; }
+
+/* A real 0% state has no colored fill at all. */
+.home-stage-reference-v366 .today-stage-card .list-card-progress.is-zero > span,
+.home-date-progress-segments-v368 > .stage-segment[style^="width:0"],
+.delivery-stage-progress-track-v368 > span[style^="width:0"] { display: none !important; }
+
+/* Greenville is a destination facility; DTC is a residential/customer drop. */
+.home-stage-reference-v366 .today-stage-card.greenville .today-stage-name > i {
+  --home-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 9.2 12 4l9 5.2V21H3V9.2Zm2 1.2V19h3v-5h8v5h3v-8.6l-7-4-7 4ZM10 16v3h4v-3h-4Zm-3-5h2v2H7v-2Zm4 0h2v2h-2v-2Zm4 0h2v2h-2v-2Z'/%3E%3C/svg%3E") !important;
+}
+.home-stage-reference-v366 .today-stage-card.dtc .today-stage-name > i {
+  --home-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m12 3 9 7h-2v10h-6v-6h-2v6H5V10H3l9-7Zm0 2.5L7 9.4V18h2v-6h6v6h2V9.4l-5-3.9Zm7.2 7.1 1.4 1.4-4.1 4.1-2.1-2.1 1.4-1.4.7.7 2.7-2.7Z'/%3E%3C/svg%3E") !important;
+}
+.delivery-list-card-v368.greenville .delivery-stage-icon-v368 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 9.2 12 4l9 5.2V21H3V9.2Zm2 1.2V19h3v-5h8v5h3v-8.6l-7-4-7 4ZM10 16v3h4v-3h-4Zm-3-5h2v2H7v-2Zm4 0h2v2h-2v-2Zm4 0h2v2h-2v-2Z'/%3E%3C/svg%3E") !important;
+}
+.delivery-list-card-v368.dtc .delivery-stage-icon-v368 {
+  --delivery-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m12 3 9 7h-2v10h-6v-6h-2v6H5V10H3l9-7Zm0 2.5L7 9.4V18h2v-6h6v6h2V9.4l-5-3.9Zm7.2 7.1 1.4 1.4-4.1 4.1-2.1-2.1 1.4-1.4.7.7 2.7-2.7Z'/%3E%3C/svg%3E") !important;
+}
+
+/* Open Stage feels clickable without moving the whole stage card. */
+.home-delivery-library-v366 .delivery-stage-open-v368 {
+  transition: border-color 130ms ease, background 130ms ease, color 130ms ease, box-shadow 130ms ease !important;
+}
+.home-delivery-library-v366 .delivery-list-card-v368:hover .delivery-stage-open-v368,
+.home-delivery-library-v366 .delivery-list-card-v368:focus-visible .delivery-stage-open-v368 {
+  border-color: var(--delivery-stage-accent) !important;
+  background: var(--delivery-stage-accent) !important;
+  color: #fff !important;
+  box-shadow: 0 6px 13px color-mix(in srgb, var(--delivery-stage-accent) 23%, transparent) !important;
+}
+.home-delivery-library-v366 .delivery-list-card-v368:hover .delivery-stage-open-v368 > i,
+.home-delivery-library-v366 .delivery-list-card-v368:focus-visible .delivery-stage-open-v368 > i {
+  transform: rotate(-45deg) translate(1px, 1px);
+}
+
+/* Forward View typography has one deliberate scale; weekday labels use the */
+/* same application blue as section eyebrows rather than muted gray. */
+.home-forward-reference-v366 .home-timeline-date-v358 small {
+  color: #1760bb !important;
+  font-size: 10px !important;
+  font-weight: 950 !important;
+  letter-spacing: .045em !important;
+}
+.home-forward-reference-v366 .home-timeline-date-v358 strong {
+  color: #092b59 !important;
+  font-size: 15px !important;
+  font-weight: 950 !important;
+}
+.home-forward-reference-v366 .home-timeline-metrics-v358 b {
+  color: #123d6c !important;
+  font-size: 12px !important;
+  font-weight: 950 !important;
+}
+.home-forward-reference-v366 .home-timeline-metrics-v358 small,
+.home-forward-reference-v366 .home-timeline-stage-count-v358 {
+  color: #64788e !important;
+  font-size: 10px !important;
+  font-weight: 850 !important;
+}
+.home-forward-reference-v366 .home-timeline-progress-v358 > strong { font-size: 10px !important; }
+
+@media (max-width: 1180px) {
+  .home-page .home-stage-reference-v366 { min-height: 268px !important; }
+  .home-stage-reference-v366 .home-stage-greeting-v362 { font-size: 38px !important; }
+  .home-stage-reference-v366 .home-stage-date-simple-v362 { font-size: 24px !important; }
+}
+
+@media (max-width: 760px) {
+  .home-page .home-stage-reference-v366 { min-height: 0 !important; padding: 18px 12px !important; }
+  .home-page .home-stage-reference-v366::before { right: -125px !important; width: 420px !important; height: 125px !important; opacity: .18 !important; }
+  .home-stage-reference-v366 .home-stage-simple-header-v362 { min-height: 72px !important; }
+  .home-stage-reference-v366 .home-stage-greeting-v362 { font-size: 31px !important; }
+  .home-stage-reference-v366 .home-stage-date-simple-v362 { font-size: 21px !important; }
+  .home-page .home-stage-reference-v366 .today-stage-card { min-height: 108px !important; padding: 13px 14px !important; }
+}
+
+/* ========================================================================== */
+/* v0.373 Home illustration polish                                           */
+/* -------------------------------------------------------------------------- */
+/* Home remains the only page with decorative header artwork. This revision  */
+/* substantially refines the delivery scene so it reads as a cleaner, more   */
+/* intentional truck/facility landscape while staying fully above the stage   */
+/* cards and fully opaque in the application blue palette.                   */
+/* ========================================================================== */
+
+.home-page .home-stage-reference-v366 {
+  position: relative !important;
+  overflow: hidden !important;
+  isolation: isolate !important;
+}
+
+.home-page .home-stage-reference-v366::before {
+  content: "" !important;
+  position: absolute !important;
+  top: 8px !important;
+  right: 18px !important;
+  width: min(500px, 39vw) !important;
+  height: 122px !important;
+  opacity: 1 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  background: right center / contain no-repeat url("data:image/svg+xml,%3Csvg viewBox='0 0 560 138' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='truckBody' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%2399c7ef'/%3E%3Cstop offset='1' stop-color='%236b95ca'/%3E%3C/linearGradient%3E%3ClinearGradient id='truckCab' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%238ebce6'/%3E%3Cstop offset='1' stop-color='%235d87b8'/%3E%3C/linearGradient%3E%3ClinearGradient id='building' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23edf5fc'/%3E%3Cstop offset='1' stop-color='%23d7e7f6'/%3E%3C/linearGradient%3E%3ClinearGradient id='hill' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop stop-color='%23dbe9f6'/%3E%3Cstop offset='1' stop-color='%23edf4fb'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M18 118c49-5 98-8 146-8 72 0 147 7 222 7 41 0 79-2 156-10v8H18z' fill='url(%23hill)'/%3E%3Cpath d='M18 118h520' fill='none' stroke='%23d4e3f3' stroke-width='4' stroke-linecap='round'/%3E%3Cg transform='translate(28 18)'%3E%3Crect x='0' y='44' width='6' height='56' rx='2' fill='%239cbddd'/%3E%3Cg fill='%23a8c7e5' stroke='%238db2d5' stroke-width='2'%3E%3Ccircle cx='14' cy='28' r='16'/%3E%3Ccircle cx='2' cy='35' r='11'/%3E%3Ccircle cx='26' cy='35' r='12'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(100 26)'%3E%3Cpath d='M0 92h185v-14h34V28h-56V12h-74v24H44v18H0z' fill='url(%23building)' stroke='%2394b9dc' stroke-width='3'/%3E%3Cpath d='M42 78h44V52H42zM102 78h44V52h-44zM160 78h26V44h-26z' fill='%23f8fbfe' stroke='%23a8c8e4' stroke-width='2'/%3E%3Cpath d='M52 24h33v12H52zM97 24h33v12H97z' fill='%23f8fbfe' stroke='%23a8c8e4' stroke-width='2'/%3E%3Cpath d='M201 40h18M201 54h18M201 68h18' stroke='%23aac6df' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M0 92 20 74 40 92' fill='%23c7dbef' stroke='%23a9c5df' stroke-width='2'/%3E%3C/g%3E%3Cg transform='translate(250 28)'%3E%3Cellipse cx='136' cy='84' rx='132' ry='10' fill='%23dce9f6'/%3E%3Crect x='0' y='14' width='192' height='60' rx='12' fill='url(%23truckBody)' stroke='%23658fbe' stroke-width='3'/%3E%3Cpath d='M192 34h44l32 25v15h-76z' fill='url(%23truckCab)' stroke='%235981b0' stroke-width='3'/%3E%3Cpath d='M205 39h29l20 18h-49z' fill='%23edf6fd' stroke='%237ca7d1' stroke-width='2'/%3E%3Cg stroke='%23e6f0fa' stroke-width='2'%3E%3Cpath d='M18 30h150M18 44h150M18 58h150'/%3E%3Cpath d='M48 14v60M83 14v60M118 14v60M153 14v60'/%3E%3C/g%3E%3Cpath d='M12 74h257' stroke='%23577ea8' stroke-width='7' stroke-linecap='round'/%3E%3Cg%3E%3Ccircle cx='50' cy='86' r='15' fill='%23f8fbfe' stroke='%235b84b2' stroke-width='4'/%3E%3Ccircle cx='50' cy='86' r='5' fill='%236d97c2'/%3E%3Ccircle cx='180' cy='86' r='15' fill='%23f8fbfe' stroke='%235b84b2' stroke-width='4'/%3E%3Ccircle cx='180' cy='86' r='5' fill='%236d97c2'/%3E%3Ccircle cx='223' cy='86' r='15' fill='%23f8fbfe' stroke='%235b84b2' stroke-width='4'/%3E%3Ccircle cx='223' cy='86' r='5' fill='%236d97c2'/%3E%3C/g%3E%3Crect x='256' y='56' width='10' height='8' rx='2' fill='%23f0c86a'/%3E%3Cpath d='M24 6h40' stroke='%2385add1' stroke-width='3' stroke-linecap='round'/%3E%3C/g%3E%3Cg transform='translate(503 22)'%3E%3Crect x='0' y='50' width='6' height='46' rx='2' fill='%239cbddd'/%3E%3Cg fill='%23a8c7e5' stroke='%238db2d5' stroke-width='2'%3E%3Ccircle cx='14' cy='35' r='16'/%3E%3Ccircle cx='3' cy='42' r='11'/%3E%3Ccircle cx='26' cy='42' r='12'/%3E%3C/g%3E%3C/g%3E%3Cpath d='M455 118l18-17 18 17' fill='%23c3d9ec' stroke='%23a5c2dd' stroke-width='2'/%3E%3C/svg%3E") !important;
+}
+
+.home-page .home-stage-reference-v366 > * {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+  min-height: 120px !important;
+  padding-right: min(440px, 39vw) !important;
+}
+
+@media (max-width: 1180px) {
+  .home-page .home-stage-reference-v366::before {
+    width: min(410px, 37vw) !important;
+    height: 108px !important;
+    right: 12px !important;
+  }
+
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    padding-right: min(350px, 35vw) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .home-page .home-stage-reference-v366::before {
+    width: 286px !important;
+    height: 84px !important;
+    top: 12px !important;
+    right: 8px !important;
+  }
+
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 96px !important;
+    padding-right: 198px !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .home-page .home-stage-reference-v366::before {
+    display: none !important;
+  }
+
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 72px !important;
+    padding-right: 0 !important;
+  }
+}
+
+
+
+/* ========================================================================== */
+/* v0.374 Supplied Home header image integration                              */
+/* -------------------------------------------------------------------------- */
+/* The approved truck/warehouse artwork is now a real maintained PNG asset.  */
+/* The image's negative space protects the greeting; the visual subject stays */
+/* on the right and remains completely above the live stage-card grid.        */
+/* ========================================================================== */
+
+.home-page .home-stage-reference-v366::before {
+  content: "" !important;
+  position: absolute !important;
+  top: 4px !important;
+  right: 6px !important;
+  width: min(690px, 51vw) !important;
+  height: 142px !important;
+  opacity: 1 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  background-image: url("../images/home-delivery-header-v0374.png") !important;
+  background-repeat: no-repeat !important;
+  background-position: right center !important;
+  background-size: contain !important;
+}
+
+.home-page .home-stage-reference-v366 > * {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+  min-height: 126px !important;
+  padding-right: min(470px, 39vw) !important;
+}
+
+@media (max-width: 1320px) {
+  .home-page .home-stage-reference-v366::before {
+    width: min(590px, 49vw) !important;
+    height: 128px !important;
+    right: 4px !important;
+  }
+
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    padding-right: min(390px, 36vw) !important;
+  }
+}
+
+@media (max-width: 1040px) {
+  .home-page .home-stage-reference-v366::before {
+    width: 420px !important;
+    height: 108px !important;
+    top: 10px !important;
+  }
+
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 108px !important;
+    padding-right: 270px !important;
+  }
+}
+
+@media (max-width: 820px) {
+  .home-page .home-stage-reference-v366::before {
+    width: 300px !important;
+    height: 88px !important;
+  }
+
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 92px !important;
+    padding-right: 170px !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .home-page .home-stage-reference-v366::before {
+    display: none !important;
+  }
+
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 72px !important;
+    padding-right: 0 !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.375 Seamless transparent Home artwork + subtle page entry motion        */
+/* -------------------------------------------------------------------------- */
+/* The approved header image now has its generated backdrop removed so the    */
+/* truck/facility scene blends directly into the live Home hero background.   */
+/* Main page views also get a short, low-motion fade/settle on entry.          */
+/* ========================================================================== */
+
+.home-page .home-stage-reference-v366 {
+  background:
+    radial-gradient(circle at 84% 8%, rgba(162, 202, 240, .24), transparent 31%),
+    linear-gradient(118deg, #ffffff 0%, #f7fbff 49%, #e8f3fe 100%) !important;
+}
+
+.home-page .home-stage-reference-v366::before {
+  top: 2px !important;
+  right: 8px !important;
+  width: min(700px, 52vw) !important;
+  height: 148px !important;
+  opacity: 1 !important;
+  background-image: url("../images/home-delivery-header-v0375-transparent.png") !important;
+  background-repeat: no-repeat !important;
+  background-position: right bottom !important;
+  background-size: contain !important;
+  filter: drop-shadow(0 5px 8px rgba(69, 113, 158, .08));
+}
+
+.home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+  min-height: 130px !important;
+  padding-right: min(485px, 40vw) !important;
+}
+
+/* Deliberately subtle: enough to remove the hard snap without slowing work. */
+@keyframes appPageEnterV0375 {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-view.is-page-entering-v0375 {
+  animation: appPageEnterV0375 190ms cubic-bezier(.2, .72, .24, 1) both;
+  will-change: opacity, transform;
+}
+
+@media (max-width: 1320px) {
+  .home-page .home-stage-reference-v366::before {
+    width: min(600px, 50vw) !important;
+    height: 134px !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    padding-right: min(405px, 37vw) !important;
+  }
+}
+
+@media (max-width: 1040px) {
+  .home-page .home-stage-reference-v366::before {
+    width: 430px !important;
+    height: 112px !important;
+    top: 8px !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 112px !important;
+    padding-right: 280px !important;
+  }
+}
+
+@media (max-width: 820px) {
+  .home-page .home-stage-reference-v366::before {
+    width: 305px !important;
+    height: 90px !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 94px !important;
+    padding-right: 175px !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .home-page .home-stage-reference-v366::before {
+    display: none !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 72px !important;
+    padding-right: 0 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-view.is-page-entering-v0375 {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.376 Stable opacity-only page transitions + larger Home artwork          */
+/* -------------------------------------------------------------------------- */
+/* Removes vertical transform from page entry so navigation cannot dip/jump.  */
+/* The incoming page is prepared at opacity 0 before it is unhidden, then     */
+/* fades cleanly to 1. The Home artwork also gets substantially more visual   */
+/* width/height while remaining in the greeting zone above the stage cards.   */
+/* ========================================================================== */
+
+/* Retire the v0.375 transform animation if a stale class survives an overlay. */
+.page-view.is-page-entering-v0375 {
+  animation: none !important;
+  transform: none !important;
+}
+
+.page-view.is-page-fading-v0376 {
+  opacity: 0;
+  transition: opacity 180ms cubic-bezier(.22, .61, .36, 1);
+  will-change: opacity;
+}
+
+.page-view.is-page-fading-v0376.is-page-visible-v0376 {
+  opacity: 1;
+}
+
+/* Bay route data is asynchronous. Keep the center route hidden until its
+   initial refresh finishes, then reveal it after the truck has been reset. */
+#bayFlowPanel.is-route-fading-v0376 {
+  opacity: 0;
+  transition: opacity 170ms ease-out;
+  will-change: opacity;
+}
+
+#bayFlowPanel.is-route-fading-v0376.is-route-visible-v0376 {
+  opacity: 1;
+}
+
+.home-page .home-stage-reference-v366::before {
+  top: -18px !important;
+  right: -2px !important;
+  width: min(1050px, 69vw) !important;
+  height: 250px !important;
+  background-position: right bottom !important;
+  background-size: contain !important;
+  filter: drop-shadow(0 7px 10px rgba(69, 113, 158, .08));
+}
+
+.home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+  min-height: 222px !important;
+  padding-right: min(620px, 49vw) !important;
+}
+
+@media (max-width: 1320px) {
+  .home-page .home-stage-reference-v366::before {
+    top: -12px !important;
+    width: min(830px, 63vw) !important;
+    height: 210px !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 188px !important;
+    padding-right: min(505px, 43vw) !important;
+  }
+}
+
+@media (max-width: 1040px) {
+  .home-page .home-stage-reference-v366::before {
+    top: 0 !important;
+    width: 610px !important;
+    height: 166px !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 154px !important;
+    padding-right: 355px !important;
+  }
+}
+
+@media (max-width: 820px) {
+  .home-page .home-stage-reference-v366::before {
+    width: 420px !important;
+    height: 122px !important;
+    right: -4px !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 116px !important;
+    padding-right: 220px !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .home-page .home-stage-reference-v366::before {
+    display: none !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 72px !important;
+    padding-right: 0 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-view.is-page-fading-v0376,
+  #bayFlowPanel.is-route-fading-v0376 {
+    opacity: 1 !important;
+    transition: none !important;
+    will-change: auto !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.377 Rebalanced faded Home artwork with gentle stage overlap             */
+/* -------------------------------------------------------------------------- */
+/* Keeps the v0.376 stable opacity-only page transition untouched. The Home   */
+/* scene is smaller and softer, sits slightly lower in the hero, and extends  */
+/* just behind the top edge of the stage row so the cards visually layer over */
+/* the decoration without losing readability or interaction.                 */
+/* ========================================================================== */
+
+.home-page .home-stage-reference-v366::before {
+  top: 5px !important;
+  right: 4px !important;
+  width: min(800px, 56vw) !important;
+  height: 210px !important;
+  opacity: .52 !important;
+  background-position: right bottom !important;
+  background-size: contain !important;
+  filter: drop-shadow(0 4px 8px rgba(69, 113, 158, .045)) !important;
+}
+
+.home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+  min-height: 145px !important;
+  padding-right: min(515px, 43vw) !important;
+}
+
+/* The stage grid already owns z-index: 1, so this creates a deliberate small
+   visual overlap while the decorative pseudo-element remains non-interactive. */
+.home-page .home-stage-reference-v366 .home-stage-grid-v362 {
+  position: relative !important;
+  z-index: 2 !important;
+}
+
+@media (max-width: 1320px) {
+  .home-page .home-stage-reference-v366::before {
+    top: 7px !important;
+    width: min(680px, 54vw) !important;
+    height: 180px !important;
+    opacity: .48 !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 130px !important;
+    padding-right: min(440px, 40vw) !important;
+  }
+}
+
+@media (max-width: 1040px) {
+  .home-page .home-stage-reference-v366::before {
+    top: 10px !important;
+    width: 510px !important;
+    height: 145px !important;
+    opacity: .44 !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 112px !important;
+    padding-right: 315px !important;
+  }
+}
+
+@media (max-width: 820px) {
+  .home-page .home-stage-reference-v366::before {
+    top: 12px !important;
+    right: -2px !important;
+    width: 360px !important;
+    height: 108px !important;
+    opacity: .38 !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 94px !important;
+    padding-right: 195px !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .home-page .home-stage-reference-v366::before {
+    display: none !important;
+  }
+  .home-page .home-stage-reference-v366 .home-stage-simple-header-v362 {
+    min-height: 72px !important;
+    padding-right: 0 !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.378 Forward View progress-first card polish                             */
+/* -------------------------------------------------------------------------- */
+/* Removes redundant open-piece metrics, places total pieces below the        */
+/* completion bar like the Delivery Library stage cards, and gives the       */
+/* five-date strip a clearer, slightly larger type hierarchy.                */
+/* ========================================================================== */
+.home-forward-reference-v366 .home-timeline-card-v378 {
+  min-height: 140px !important;
+  gap: 10px !important;
+  padding: 13px 14px !important;
+  align-content: start !important;
+}
+
+.home-forward-reference-v366 .home-timeline-card-v378 .home-timeline-date-v358 {
+  gap: 2px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-card-v378 .home-timeline-date-v358 small {
+  color: #1760bb !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 950 !important;
+  letter-spacing: .045em !important;
+}
+
+.home-forward-reference-v366 .home-timeline-card-v378 .home-timeline-date-v358 strong {
+  color: #092b59 !important;
+  font-size: 17px !important;
+  line-height: 1.08 !important;
+  font-weight: 950 !important;
+}
+
+.home-forward-reference-v366 .home-timeline-progress-v378 {
+  display: block !important;
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.home-forward-reference-v366 .home-timeline-progress-v378 > i {
+  position: relative;
+  width: 100%;
+  height: 18px !important;
+  display: block;
+  overflow: hidden;
+  border: 1px solid #d4dfeb;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #eef3f8 0%, #e4ebf3 100%) !important;
+  box-shadow: inset 0 1px 2px rgba(17, 47, 83, .08);
+}
+
+.home-forward-reference-v366 .home-timeline-progress-v378 > i > b {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6ba7dd 0%, #2d76b6 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28);
+}
+
+.home-forward-reference-v366 .home-timeline-progress-v378 > i > strong {
+  position: absolute;
+  z-index: 2;
+  inset: 0 8px 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: #173b69 !important;
+  font-size: 10.5px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+  text-shadow: 0 1px 0 rgba(255,255,255,.85);
+}
+
+.home-forward-reference-v366 .home-timeline-summary-v378 {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.home-forward-reference-v366 .home-timeline-pieces-v378 {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px 5px 6px;
+  border: 1px solid #d5e2ef;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #f8fbff 0%, #edf5fc 100%);
+  box-shadow: 0 3px 8px rgba(24, 61, 105, .045);
+}
+
+.home-forward-reference-v366 .home-timeline-pieces-v378 > i {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 22px;
+  border-radius: 7px;
+  background: #dcecff;
+}
+
+.home-forward-reference-v366 .home-timeline-pieces-v378 > i::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  display: block;
+  background: #327bc1;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 21 7v10l-9 5-9-5V7l9-5Zm0 2.3L5.4 8 12 11.7 18.6 8 12 4.3ZM5 10v5.8l6 3.3v-5.8L5 10Zm8 9.1 6-3.3V10l-6 3.3v5.8Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2 21 7v10l-9 5-9-5V7l9-5Zm0 2.3L5.4 8 12 11.7 18.6 8 12 4.3ZM5 10v5.8l6 3.3v-5.8L5 10Zm8 9.1 6-3.3V10l-6 3.3v5.8Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.home-forward-reference-v366 .home-timeline-pieces-v378 > strong {
+  color: #0b315b;
+  font-size: 15px !important;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.home-forward-reference-v366 .home-timeline-pieces-v378 > small {
+  color: #5f748b !important;
+  font-size: 10.5px !important;
+  font-weight: 850 !important;
+  line-height: 1;
+  text-transform: none !important;
+}
+
+.home-forward-reference-v366 .home-timeline-card-v378 .home-timeline-stage-count-v358 {
+  color: #64788e !important;
+  font-size: 10.5px !important;
+  font-weight: 850 !important;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .home-forward-reference-v366 .home-timeline-card-v378 {
+    min-height: 132px !important;
+    padding: 11px 12px !important;
+  }
+
+  .home-forward-reference-v366 .home-timeline-card-v378 .home-timeline-date-v358 strong {
+    font-size: 16px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.379 Forward View Airport Rd staging source                              */
+/* -------------------------------------------------------------------------- */
+/* Forward View now reports the Airport Rd staging source of truth rather     */
+/* than summing duplicated stage copies. The chip reads scanned / total.      */
+/* ========================================================================== */
+.home-forward-reference-v366 .home-timeline-airport-pieces-v379 {
+  min-width: 148px;
+  padding-right: 9px !important;
+  border-color: #c9dbea !important;
+  background: linear-gradient(180deg, #f8fbff 0%, #eaf3fb 100%) !important;
+}
+.home-forward-reference-v366 .home-timeline-airport-pieces-v379 > strong {
+  font-size: 15.5px !important;
+  letter-spacing: -.01em;
+}
+.home-forward-reference-v366 .home-timeline-airport-pieces-v379 > small {
+  color: #52708e !important;
+  font-size: 9.5px !important;
+  white-space: nowrap;
+}
+.home-forward-reference-v366 .home-timeline-card-v378 .home-timeline-stage-count-v358 {
+  color: #6b7f92 !important;
+  font-size: 9.5px !important;
+  text-transform: uppercase;
+  letter-spacing: .035em;
+}
+
+/* v0.382 Forward View source-label cleanup */
+.home-forward-reference-v366 .home-timeline-summary-v382 {
+  justify-content: flex-start !important;
+}
+
+
+/* ========================================================================== */
+/* v0.383 Forward View stage count and compact piece total                    */
+/* ========================================================================== */
+.home-forward-reference-v366 .home-timeline-card-v378 {
+  position: relative !important;
+}
+.home-forward-reference-v366 .home-timeline-stage-count-v383 {
+  position: absolute !important;
+  top: 11px !important;
+  right: 12px !important;
+  z-index: 2 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 23px !important;
+  padding: 0 8px !important;
+  border: 1px solid #d4e0ec !important;
+  border-radius: 999px !important;
+  background: rgba(248,251,255,.94) !important;
+  color: #597087 !important;
+  font-size: 9.5px !important;
+  font-weight: 900 !important;
+  letter-spacing: .015em !important;
+  text-transform: none !important;
+}
+.home-forward-reference-v366 .home-timeline-summary-v383 {
+  justify-content: flex-end !important;
+  margin-top: auto !important;
+}
+.home-forward-reference-v366 .home-timeline-pieces-v383 {
+  min-width: 0 !important;
+  margin-left: auto !important;
+  padding: 5px 8px 5px 6px !important;
+}
+.home-forward-reference-v366 .home-timeline-pieces-v383 > strong {
+  font-size: 15.5px !important;
+}
+@media (max-width: 760px) {
+  .home-forward-reference-v366 .home-timeline-stage-count-v383 {
+    top: 10px !important;
+    right: 10px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.384 Compact Forward View and left-aligned piece total                  */
+/* -------------------------------------------------------------------------- */
+/* Tighten the complete Forward View surface by roughly 15% without scaling  */
+/* the whole element (which would blur text). Piece totals now anchor left.  */
+/* ========================================================================== */
+.home-page .home-forward-reference-v366 {
+  padding-top: 13px !important;
+  padding-bottom: 15px !important;
+}
+
+.home-forward-reference-v366 .home-delivery-timeline-v358 {
+  gap: 9px !important;
+  margin-top: 10px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-card-v378 {
+  min-height: 119px !important;
+  gap: 8px !important;
+  padding: 11px 12px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-progress-v378 > i {
+  height: 15px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-progress-v378 > i > strong {
+  font-size: 10px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-stage-count-v383 {
+  top: 9px !important;
+  right: 10px !important;
+  min-height: 21px !important;
+  padding: 0 7px !important;
+  font-size: 9px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-summary-v383 {
+  justify-content: flex-start !important;
+  margin-top: auto !important;
+}
+
+.home-forward-reference-v366 .home-timeline-pieces-v383 {
+  margin-left: 0 !important;
+  margin-right: auto !important;
+  padding: 4px 7px 4px 5px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-pieces-v378 > i {
+  width: 19px !important;
+  height: 19px !important;
+  flex-basis: 19px !important;
+  border-radius: 6px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-pieces-v378 > i::before {
+  width: 11px !important;
+  height: 11px !important;
+}
+
+.home-forward-reference-v366 .home-timeline-pieces-v383 > strong {
+  font-size: 14px !important;
+}
+
+@media (max-width: 760px) {
+  .home-forward-reference-v366 .home-timeline-card-v378 {
+    min-height: 112px !important;
+    padding: 10px 11px !important;
+  }
+
+  .home-forward-reference-v366 .home-timeline-stage-count-v383 {
+    top: 8px !important;
+    right: 8px !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.385 Dynamic Today stage row + slightly longer page fade                 */
+/* -------------------------------------------------------------------------- */
+/* The live stage count now owns the Today grid. All active stages remain on */
+/* one row and divide the available width evenly instead of assuming four.    */
+/* ========================================================================== */
+.home-page .home-stage-reference-v366 .home-stage-grid-v362 {
+  grid-template-columns: repeat(var(--home-stage-count, 4), minmax(0, 1fr)) !important;
+}
+
+.home-page .home-stage-grid-v362[data-stage-count="5"] .today-stage-card,
+.home-page .home-stage-grid-v362[data-stage-count="6"] .today-stage-card,
+.home-page .home-stage-grid-v362[data-stage-count="7"] .today-stage-card,
+.home-page .home-stage-grid-v362[data-stage-count="8"] .today-stage-card {
+  gap: 8px 9px !important;
+  padding-inline: 11px !important;
+}
+
+.home-page .home-stage-grid-v362[data-stage-count="5"] .today-stage-name,
+.home-page .home-stage-grid-v362[data-stage-count="6"] .today-stage-name,
+.home-page .home-stage-grid-v362[data-stage-count="7"] .today-stage-name,
+.home-page .home-stage-grid-v362[data-stage-count="8"] .today-stage-name {
+  gap: 8px !important;
+}
+
+.home-page .home-stage-grid-v362[data-stage-count="6"] .today-stage-name > i,
+.home-page .home-stage-grid-v362[data-stage-count="7"] .today-stage-name > i,
+.home-page .home-stage-grid-v362[data-stage-count="8"] .today-stage-name > i {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+}
+
+.home-page .home-stage-grid-v362[data-stage-count="6"] .today-stage-name b,
+.home-page .home-stage-grid-v362[data-stage-count="7"] .today-stage-name b,
+.home-page .home-stage-grid-v362[data-stage-count="8"] .today-stage-name b {
+  font-size: 12.5px !important;
+}
+
+.home-page .home-stage-grid-v362[data-stage-count="7"] .today-stage-card-heading > strong,
+.home-page .home-stage-grid-v362[data-stage-count="8"] .today-stage-card-heading > strong {
+  font-size: 16px !important;
+}
+
+/* Keep the proven no-transform transition; only extend the opacity timing. */
+.page-view.is-page-fading-v0376 {
+  transition-duration: 230ms !important;
+}

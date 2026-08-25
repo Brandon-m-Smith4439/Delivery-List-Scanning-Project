@@ -1765,6 +1765,95 @@ class BaseDeliveryStore:
         """
         raise NotImplementedError
 
+    def _rush_move_references(self, con: Any, meta_row: Any, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Return traceability-only Rush date-move references for the active stage.
+
+        The physical/source line remains owned by its original delivery list. A
+        target-date reference is returned separately so the UI can show the order
+        on both dates without duplicating quantities, scan state, or rack/bay state.
+        """
+        if not meta_row:
+            return []
+        current_list_id = str(row_value(meta_row, "id") or "").strip()
+        current_date = str(row_value(meta_row, "delivery_date") or "").strip()
+        current_stage = str(row_value(meta_row, "stage") or "").strip()
+        current_scanner = str(row_value(meta_row, "scanner") or "").strip()
+        if not current_list_id or not current_date:
+            return []
+
+        rows = con.execute(
+            """
+            SELECT li.*,
+                   dl.id AS original_list_id,
+                   dl.label AS original_list_label,
+                   dl.delivery_date AS original_delivery_date,
+                   dl.stage AS original_stage,
+                   dl.scanner AS original_scanner
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            WHERE dl.status = 'active'
+              AND COALESCE(li.is_deleted, 0) = 0
+              AND COALESCE(li.priority_delivery_date, '') <> ''
+              AND li.priority_delivery_date <> dl.delivery_date
+              AND (dl.id = ? OR li.priority_delivery_date = ?)
+            ORDER BY CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER), li.id
+            """,
+            (current_list_id, current_date),
+        ).fetchall()
+
+        references: list[dict[str, Any]] = []
+        current_category = scan_stage_category(current_stage, current_scanner)
+        for row in rows:
+            if not is_rush_item(item_from_row(row)):
+                continue
+            original_list_id = str(row_value(row, "original_list_id") or "").strip()
+            original_date = str(row_value(row, "original_delivery_date") or "").strip()
+            target_date = str(row_value(row, "priority_delivery_date") or "").strip()
+            original_stage = str(row_value(row, "original_stage") or "").strip()
+            original_scanner = str(row_value(row, "original_scanner") or "").strip()
+
+            if original_list_id == current_list_id:
+                direction = "out"
+            elif target_date == current_date:
+                # Prefer the corresponding stage/scanner on the target date. If
+                # one side has a blank scanner, fall back to the maintained stage
+                # category so legacy list labels still resolve correctly.
+                exact_stage = original_stage.casefold() == current_stage.casefold()
+                exact_scanner = original_scanner.casefold() == current_scanner.casefold()
+                same_category = scan_stage_category(original_stage, original_scanner) == current_category
+                same_stage = exact_stage and exact_scanner
+                if not same_stage and same_category:
+                    same_stage = exact_stage or exact_scanner or not original_scanner or not current_scanner
+                if not same_stage:
+                    continue
+                if user is not None and not user_can_access_stage(user, original_stage, original_scanner):
+                    continue
+                direction = "in"
+            else:
+                continue
+
+            references.append(
+                {
+                    "id": f"rush-move:{row['id']}:{direction}",
+                    "lineItemId": str(row["id"] or ""),
+                    "originalListId": original_list_id,
+                    "originalListLabel": str(row_value(row, "original_list_label") or ""),
+                    "originalDeliveryDate": original_date,
+                    "targetDeliveryDate": target_date,
+                    "direction": direction,
+                    "order": str(row_value(row, "order_no") or ""),
+                    "item": str(row_value(row, "item_no") or ""),
+                    "job": str(row_value(row, "job") or ""),
+                    "customer": str(row_value(row, "customer") or ""),
+                    "product": str(row_value(row, "product") or ""),
+                    "dimensions": str(row_value(row, "dimensions") or ""),
+                    "route": str(row_value(row, "route") or ""),
+                    "qty": int(row_value(row, "qty", 0) or 0),
+                    "processState": str(row_value(row, "process_state") or ""),
+                }
+            )
+        return references
+
     def get_delivery_list(self, list_id: str, last_scan: dict[str, Any] | None = None, user: dict[str, Any] | None = None) -> dict[str, Any]:
         """Purpose: Read delivery list for the delivery-list scanner workflow.
 
@@ -8156,6 +8245,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if user is not None and not user_can_access_stage(user, meta["stage"], meta["scanner"]):
             raise PermissionError("You do not have access to this delivery-list stage")
         items = self._get_line_items(con, list_id)
+        rush_move_references = self._rush_move_references(con, meta_row, user=user)
 
         def is_manual_item(item: dict[str, Any]) -> bool:
             return bool(item.get("manualOnly")) or bool(str(item.get("manualSource") or "").strip())
@@ -8199,6 +8289,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "recent": self._get_scan_events(con, list_id),
             "errors": self._get_scan_events(con, list_id, only_errors=True),
             "lastScan": last_scan,
+            "rushMoveReferences": rush_move_references,
         }
 
     def user_can_access_list(self, user: dict[str, Any], list_id: str) -> bool:

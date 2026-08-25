@@ -7148,3 +7148,22 @@ body .operations-modal-panel[data-rack-icon="warehouse"] .operations-modal-visua
   z-index: 60000 !important;
   isolation: isolate;
 }
+
+/* ========================================================================== */
+/* v0.385 Refined truck rack icon                                             */
+/* -------------------------------------------------------------------------- */
+/* Give the Truck rack set a clearer box-truck silhouette with a defined cab */
+/* and wheelbase everywhere the shared rack-set icon language is used.        */
+/* ========================================================================== */
+body .rack-set-card[data-rack-icon="truck"] .rack-set-icon::before,
+.rack-set-visual-icon-v269[data-rack-icon="truck"]::before,
+body .operations-modal-panel[data-rack-icon="truck"] .operations-modal-visual-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 32 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' d='M2 4h17v12h2V9h5.2L30 14v5h-2.4a4.2 4.2 0 0 1-8.2 0H11a4.2 4.2 0 0 1-8.2 0H1V6a2 2 0 0 1 1-2Zm21 7v4h5l-2.8-4H23ZM7 17a2.2 2.2 0 1 0 0 4.4A2.2 2.2 0 0 0 7 17Zm16.5 0a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4Z'/%3E%3Cpath d='M5 7h11v2H5V7Zm0 4h11v2H5v-2Z'/%3E%3C/svg%3E") !important;
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 32 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' d='M2 4h17v12h2V9h5.2L30 14v5h-2.4a4.2 4.2 0 0 1-8.2 0H11a4.2 4.2 0 0 1-8.2 0H1V6a2 2 0 0 1 1-2Zm21 7v4h5l-2.8-4H23ZM7 17a2.2 2.2 0 1 0 0 4.4A2.2 2.2 0 0 0 7 17Zm16.5 0a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4Z'/%3E%3Cpath d='M5 7h11v2H5V7Zm0 4h11v2H5v-2Z'/%3E%3C/svg%3E") !important;
+  -webkit-mask-position: center !important;
+  mask-position: center !important;
+  -webkit-mask-size: contain !important;
+  mask-size: contain !important;
+  -webkit-mask-repeat: no-repeat !important;
+  mask-repeat: no-repeat !important;
+}

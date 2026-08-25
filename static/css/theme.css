@@ -1,0 +1,8 @@
+/* File: static/css/theme.css
+ * v0.363: Dark mode was removed from the maintained application.
+ *
+ * This file is intentionally inert so overlaying the changed-files package on
+ * a v0.360-v0.362 installation also neutralizes any stale cached theme asset.
+ * index.html no longer loads this stylesheet, and the browser UI/JavaScript no
+ * longer exposes or persists an appearance preference.
+ */

@@ -27925,3 +27925,206 @@ body.bay-move-mode .bay-layout-drop-zone {
       ". metrics metrics";
   }
 }
+
+
+/* v0.376 Bay Map initial transit reveal ----------------------------------- */
+/* showPage removes is-entering before restarting the truck. Keeping this
+   state explicit prevents a hidden/paused first animation cycle. */
+#bayFlowPanel.is-entering .transit-moving-truck {
+  opacity: 0;
+  animation-play-state: paused;
+}
+
+#bayFlowPanel:not(.is-entering) .transit-moving-truck {
+  animation-play-state: running;
+}
+
+/* ========================================================================== */
+/* v0.379 In-Transit polish and Lookup Manager glass gradients                */
+/* ========================================================================== */
+.transit-manifest-panel {
+  border-color: #a8bed2 !important;
+  background: linear-gradient(180deg, #edf3f8 0%, #f7f9fb 100%) !important;
+  box-shadow: 0 26px 76px rgba(10, 36, 66, .28) !important;
+}
+.transit-manifest-panel .transit-manifest-header,
+.transit-manifest-panel > header:first-child {
+  min-height: 102px !important;
+  background:
+    radial-gradient(circle at 92% 5%, rgba(117, 184, 224, .20), transparent 27%),
+    linear-gradient(135deg, #0a315c 0%, #145d89 62%, #0d7180 100%) !important;
+}
+.transit-manifest-panel .transit-summary-row-v31 {
+  gap: 8px !important;
+  margin: 10px 12px 0 !important;
+}
+.transit-manifest-panel .transit-summary-row-v31 article {
+  min-height: 64px !important;
+  border-left-width: 3px !important;
+  border-color: #cedbe7 !important;
+  border-left-color: #3c82b7 !important;
+  border-radius: 10px !important;
+  background: linear-gradient(180deg, #fff 0%, #f6f9fc 100%) !important;
+  box-shadow: 0 3px 9px rgba(20, 55, 90, .04) !important;
+}
+.transit-manifest-panel .transit-rack-group-card {
+  border-color: #c4d4e2 !important;
+  border-radius: 13px !important;
+  box-shadow: 0 7px 18px rgba(16, 51, 85, .055) !important;
+}
+.transit-manifest-panel .transit-rack-group-head {
+  min-height: 76px !important;
+  background: linear-gradient(180deg, #fff 0%, #f0f5f9 100%) !important;
+}
+.transit-manifest-panel .transit-rack-glass-stack {
+  display: grid;
+  gap: 8px;
+  padding: 9px !important;
+  background: #edf2f6 !important;
+}
+.transit-manifest-panel .transit-glass-card.glass-tone-card {
+  overflow: hidden;
+  border: 1px solid var(--glass-type-border) !important;
+  border-left: 4px solid var(--glass-type-color) !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  box-shadow: 0 4px 11px var(--glass-type-ring) !important;
+}
+.transit-manifest-panel .transit-glass-card.glass-tone-card .transit-glass-ribbon {
+  min-height: 58px !important;
+  background: linear-gradient(105deg, var(--glass-type-soft-strong) 0%, var(--glass-type-soft) 52%, #fff 100%) !important;
+}
+.transit-manifest-panel .transit-glass-card.glass-tone-card .transit-glass-ribbon strong {
+  color: color-mix(in srgb, var(--glass-type-color) 70%, #173c5d) !important;
+}
+.transit-manifest-panel .transit-glass-card.glass-tone-card[open] .transit-glass-ribbon {
+  box-shadow: inset 0 -1px 0 var(--glass-type-border);
+}
+.transit-manifest-panel .transit-glass-table th {
+  background: #edf2f6 !important;
+  color: #345570 !important;
+}
+.transit-manifest-panel .transit-glass-table tbody tr:hover td {
+  background: var(--glass-type-soft) !important;
+}
+
+/* Manage Items, Missing Glass, and Old Bays share the saved glass hue without
+   recoloring the physical Bay Map itself. */
+#manageItemsPanel .manage-inventory-glass-v355.glass-tone-inline,
+#manageItemsPanel .manage-selection-line-v355 .glass-tone-inline,
+#sdiPanel .missing-glass-item-description-v356.glass-tone-inline,
+.stale-bay-line-description-v353.glass-tone-inline {
+  min-width: 0;
+  padding: 4px 7px !important;
+}
+#manageItemsPanel .manage-inventory-glass-v355.glass-tone-inline {
+  align-self: stretch;
+  align-content: center;
+}
+#manageItemsPanel .manage-selection-line-v355 .glass-tone-inline {
+  display: block;
+  margin-top: 3px;
+}
+#manageItemsPanel .manage-inventory-line-v355:hover .manage-inventory-glass-v355.glass-tone-inline,
+#manageItemsPanel .manage-inventory-line-v355.is-selected .manage-inventory-glass-v355.glass-tone-inline {
+  border-color: var(--glass-type-color) !important;
+  box-shadow: 0 0 0 2px var(--glass-type-ring) !important;
+}
+
+
+/* ========================================================================== */
+/* v0.380 Legacy glass-color replacement and Bay contrast polish              */
+/* ========================================================================== */
+/* Once a card has Lookup Manager variables, legacy type-showers/mirror/etc.
+   palettes are intentionally ignored. */
+.transit-manifest-panel .transit-glass-card.glass-tone-card {
+  --glass-accent: var(--glass-type-accent) !important;
+  --glass-bg: var(--glass-type-soft) !important;
+  --glass-fg: #315069 !important;
+  border: 1px solid var(--glass-type-border) !important;
+  border-left: 2px solid var(--glass-type-accent) !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+.transit-manifest-panel .transit-glass-card.glass-tone-card .transit-glass-ribbon {
+  background: linear-gradient(105deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,.985) 72%) !important;
+}
+.transit-manifest-panel .transit-glass-card.glass-tone-card .transit-glass-ribbon strong { color: #315069 !important; }
+.transit-manifest-panel .transit-glass-table tbody tr:hover td { background: var(--glass-type-soft) !important; }
+
+/* Known dark-hover contrast repair from the control sweep. */
+.bay-scanner-panel-v2 .bay-manual-row-v37 button:hover:not(:disabled),
+.bay-scanner-panel-v2 .bay-manual-row-v37 button:focus-visible:not(:disabled) { color: #fff !important; }
+
+
+
+/* ========================================================================== */
+/* v0.382 Bay Map stage-card icon and action polish                          */
+/* ========================================================================== */
+/* The top Outbound/Inbound cards now use the same directional stage language
+   as the rest of the application and expose a compact Open Stage affordance. */
+.bay-flow-side-card.flow-card-v2 {
+  min-height: 142px !important;
+  border-radius: 15px !important;
+  box-shadow: 0 8px 20px rgba(8, 38, 90, .055) !important;
+  transform: none !important;
+}
+.bay-flow-side-card.outbound {
+  background: linear-gradient(145deg, rgba(255, 249, 231, .72) 0%, #fff 48%, #f9fbfd 100%) !important;
+}
+.bay-flow-side-card.inbound {
+  background: linear-gradient(145deg, rgba(238, 250, 241, .74) 0%, #fff 48%, #f9fbfd 100%) !important;
+}
+.bay-flow-side-card.is-actionable:hover,
+.bay-flow-side-card.is-actionable:focus-visible {
+  transform: none !important;
+  box-shadow: 0 12px 26px rgba(8, 38, 90, .10), 0 0 0 2px rgba(37, 91, 145, .07) !important;
+}
+.bay-flow-side-card .flow-card-icon {
+  display: grid !important;
+  place-items: center !important;
+}
+.bay-flow-side-card .flow-card-icon::before {
+  inset: auto !important;
+  width: 22px !important;
+  height: 22px !important;
+  border: 0 !important;
+  background: currentColor !important;
+  transform: none !important;
+  -webkit-mask: var(--bay-stage-icon) center / contain no-repeat !important;
+  mask: var(--bay-stage-icon) center / contain no-repeat !important;
+}
+.bay-flow-side-card .flow-card-icon.outbound {
+  --bay-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 17 17 7h-7V5h10v10h-2V8.4L8.4 18 7 17Z'/%3E%3C/svg%3E");
+}
+.bay-flow-side-card .flow-card-icon.inbound {
+  --bay-stage-icon: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 5 17 15.1V8h2v11H8v-2h7.1L5 7 7 5Z'/%3E%3C/svg%3E");
+}
+.bay-flow-side-card .flow-card-open {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+  width: fit-content !important;
+  min-height: 30px !important;
+  justify-self: end !important;
+  justify-content: center !important;
+  gap: 7px !important;
+  border: 1px solid #c9d7e5 !important;
+  border-radius: 8px !important;
+  background: rgba(255,255,255,.88) !important;
+  padding: 5px 10px !important;
+  color: #365a7c !important;
+  font-size: 10.5px !important;
+  box-shadow: 0 2px 5px rgba(22, 59, 94, .045) !important;
+}
+.bay-flow-side-card.outbound.is-actionable:hover .flow-card-open,
+.bay-flow-side-card.outbound.is-actionable:focus-visible .flow-card-open {
+  border-color: #d7ad4c !important;
+  background: #fff9e9 !important;
+  color: #7c5708 !important;
+}
+.bay-flow-side-card.inbound.is-actionable:hover .flow-card-open,
+.bay-flow-side-card.inbound.is-actionable:focus-visible .flow-card-open {
+  border-color: #75b887 !important;
+  background: #f0faf3 !important;
+  color: #256d38 !important;
+}

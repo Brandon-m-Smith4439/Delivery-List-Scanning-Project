@@ -14,18 +14,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/home.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/print.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/shell.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260821-v0.357">
-    <link rel="stylesheet" href="static/css/mobile.css?v=20260821-v0.357">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/home.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/print.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/shell.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260825-v0.385">
+    <link rel="stylesheet" href="static/css/mobile.css?v=20260825-v0.385">
 </head>
 <body data-page="home">
   <!-- SECTION: Authentication and password reset -->
@@ -123,7 +123,7 @@
         <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button" title="Racks"><span class="top-nav-icon racks"></span><span>Racks</span></button>
         <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button" title="Bay Map"><span class="top-nav-icon bays"></span><span>Bay Map</span></button>
         <button data-page-target="rejects" data-permission-any="view_lists" type="button" title="Reject Tracking"><span class="top-nav-icon rejects"></span><span>Rejects</span></button>
-        <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button" title="Admin"><span class="top-nav-icon admin"></span><span>Admin</span></button>
+        <button data-page-target="admin" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists" type="button" title="Settings"><span class="top-nav-icon admin"></span><span>Settings</span></button>
       </nav>
 
       <div class="sidebar-spacer"></div>
@@ -198,67 +198,92 @@
     </header>
 
     <main>
-      <!-- SECTION: Home dashboard and delivery-list overview -->
-      <section class="page-view home-page" id="homePage">
-        <div class="page-heading app-page-header-v357">
-          <div>
-            <span class="page-eyebrow app-page-eyebrow-v357">Delivery operations</span>
-            <h1>Delivery List Overview</h1>
-            <p id="homeWelcome">Signed in</p>
+      <!-- SECTION: Home operations hub, stage progress, quick destinations, and delivery-list discovery -->
+      <section class="page-view home-page home-operations-hub-v358 home-operations-hub-v359 home-reference-v366" id="homePage">
+        <section class="today-progress-panel home-today-panel-v358 home-stage-command-v359 home-stage-command-v360 home-stage-command-v362 home-stage-command-v365 home-stage-reference-v366" aria-label="Today's delivery progress">
+          <header class="home-stage-simple-header-v362">
+            <div class="home-stage-simple-copy-v362">
+              <h1 class="home-time-greeting-v360 home-stage-greeting-v362" id="homeGreeting">Good morning</h1>
+              <strong class="home-stage-date-v360 home-stage-date-simple-v362" id="todayDateLabel">Today</strong>
+            </div>
+          </header>
+          <div class="today-stage-grid home-stage-grid-v362" id="todayStageGrid"></div>
+        </section>
+
+        <section class="home-hub-card-v358 home-upcoming-card-v358 home-forward-view-v359 home-forward-view-v365 home-forward-reference-v366">
+          <header class="home-hub-card-heading-v358">
+            <div><span>Forward view</span><h2>Upcoming Delivery Timeline</h2></div>
+            <button type="button" class="home-hub-link-v358" data-home-scroll-to-lists>View all delivery lists</button>
+          </header>
+          <div class="home-delivery-timeline-v358" id="homeDeliveryTimeline"></div>
+        </section>
+
+        <section class="home-destination-section-v365 home-destination-reference-v366" aria-labelledby="homeDestinationHeading">
+          <header class="home-destination-heading-v365">
+            <div>
+              <span>Quick destinations</span>
+              <h2 id="homeDestinationHeading">Open a Workspace</h2>
+              
+            </div>
+          </header>
+        <nav class="home-quick-actions-v358 home-destinations-v359 home-destination-cards-v365" aria-label="Destination shortcuts">
+          <button type="button" class="home-quick-action-v358 is-scan" data-home-hub-action="scan">
+            <span class="home-quick-action-icon-v358" aria-hidden="true"></span><span><strong>Scan</strong><small>Open live delivery scanning</small></span><i aria-hidden="true"></i>
+          </button>
+          <button type="button" class="home-quick-action-v358 is-racks" data-home-hub-action="racks" data-permission-any="view_racks,scan_racks,manage_racks">
+            <span class="home-quick-action-icon-v358" aria-hidden="true"></span><span><strong>Racks</strong><small>Packing, status, and rack history</small></span><i aria-hidden="true"></i>
+          </button>
+          <button type="button" class="home-quick-action-v358 is-bays" data-home-hub-action="bays" data-permission-any="view_bays,view_indian_trail">
+            <span class="home-quick-action-icon-v358" aria-hidden="true"></span><span><strong>Bay Map</strong><small>Indian Trail bay operations</small></span><i aria-hidden="true"></i>
+          </button>
+          <button type="button" class="home-quick-action-v358 is-statistics" data-home-hub-action="statistics">
+            <span class="home-quick-action-icon-v358" aria-hidden="true"></span><span><strong>Statistics</strong><small>Performance and operational insights</small></span><i aria-hidden="true"></i>
+          </button>
+          <button type="button" class="home-quick-action-v358 is-rejects" data-home-hub-action="rejects" data-permission-any="view_lists">
+            <span class="home-quick-action-icon-v358" aria-hidden="true"></span><span><strong>Rejects</strong><small>Open reject tracking and history</small></span><i aria-hidden="true"></i>
+          </button>
+          <button type="button" class="home-quick-action-v358 is-settings" data-home-hub-action="settings" data-permission-any="view_admin,manage_users,manage_stations,edit_delivery_lists">
+            <span class="home-quick-action-icon-v358" aria-hidden="true"></span><span><strong>Settings</strong><small>System setup, users, and configuration</small></span><i aria-hidden="true"></i>
+          </button>
+        </nav>
+        </section>
+
+        <section class="panel home-delivery-explorer-v358 home-delivery-library-v359 home-delivery-library-v366" id="homeDeliveryExplorer">
+          <div class="home-explorer-heading-v358">
+            <div><span>Delivery library</span><h2>Find a Delivery List</h2><p>Search by delivery date, route, or stage and open the exact list you need.</p></div>
+            <b id="homeListCount">0 lists</b>
           </div>
-          <div class="page-heading-actions home-heading-actions"></div>
-        </div>
-
-        <div class="home-grid">
-          <section class="panel">
-            <section class="today-progress-panel">
-              <div class="section-heading today-progress-heading">
-                <div class="today-progress-heading-copy">
-                  <span id="todayDateLabel">Today</span>
-                  <h2>Today's Delivery Progress</h2>
-                </div>
-              </div>
-              <div class="today-stage-grid" id="todayStageGrid"></div>
-            </section>
-
-            <div class="section-heading">
-              <h2>Find Delivery List</h2>
-              <span id="homeListCount">0 lists</span>
-            </div>
-            <div class="finder-toolbar">
-              <label class="search-box">
-                <span class="search-icon"></span>
-                <input id="homeListSearch" type="search" autocomplete="off" placeholder="Search date, stage, route...">
-              </label>
-              <select id="homeStageFilter">
-                <option value="all">All stages</option>
-                <option value="Airport Rd">Airport Rd</option>
-                <option value="Indian Trail">Indian Trail</option>
-                <option value="Greenville">Greenville</option>
-                <option value="Customer Pickup">Customer Pickup</option>
-                <option value="DTC">DTC</option>
+          <div class="finder-toolbar home-finder-toolbar-v358">
+            <label class="search-box">
+              <span class="search-icon"></span>
+              <input id="homeListSearch" type="search" autocomplete="off" placeholder="Search date, stage, route...">
+            </label>
+            <select id="homeStageFilter">
+              <option value="all">All stages</option>
+              <option value="Airport Rd">Airport Rd</option>
+              <option value="Indian Trail">Indian Trail</option>
+              <option value="Greenville">Greenville</option>
+              <option value="Customer Pickup">Customer Pickup</option>
+              <option value="DTC">DTC</option>
+            </select>
+          </div>
+          <div class="home-pager-row home-pager-top">
+            <span>Delivery list pages</span>
+            <div class="pager" id="homePagerTop"></div>
+          </div>
+          <div class="delivery-list-grid" id="homeListGrid"></div>
+          <div class="home-pager-row">
+            <label class="page-size">
+              <span>Lists</span>
+              <select id="homePageSize">
+                <option>25</option>
+                <option>50</option>
+                <option>100</option>
               </select>
-            </div>
-            <div class="home-pager-row home-pager-top">
-              <span>Delivery list pages</span>
-              <div class="pager" id="homePagerTop"></div>
-            </div>
-            <div class="delivery-list-grid" id="homeListGrid"></div>
-            <div class="home-pager-row">
-              <label class="page-size">
-                <span>Lists</span>
-                <select id="homePageSize">
-                  <option>25</option>
-                  <option>50</option>
-                  <option>100</option>
-                </select>
-              </label>
-              <div class="pager" id="homePager"></div>
-            </div>
-          </section>
-
-
-        </div>
+            </label>
+            <div class="pager" id="homePager"></div>
+          </div>
+        </section>
       </section>
 
       <!-- SECTION: Dedicated statistics and performance insights -->
@@ -1522,8 +1547,8 @@
       <section class="page-view admin-page" id="adminPage" hidden>
         <div class="page-heading admin-dashboard-heading app-page-header-v357">
           <div>
-            <span class="page-eyebrow app-page-eyebrow-v357">System administration</span>
-            <h1>Admin Dashboard</h1>
+            <span class="page-eyebrow app-page-eyebrow-v357">System configuration</span>
+            <h1>Settings Page</h1>
             <p>Manage system settings, users, stations, imports, racks, and plant operations.</p>
           </div>
           <span class="admin-last-updated" id="adminLastUpdated">Last updated: --</span>
@@ -1657,13 +1682,13 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.357">
+        <span class="footer-version-v0163" aria-label="Application version 0.385">
           <small>Version</small>
-          <strong>0.357</strong>
+          <strong>0.385</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
-          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.357&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
+          href="mailto:brandon.m.smith@bldr.com?subject=Delivery%20List%20Scanner%20Bug%20Report%20-%20v0.385&amp;body=Page%20or%20screen%3A%0D%0AWhat%20happened%3A%0D%0AWhat%20you%20expected%3A%0D%0ASteps%20to%20repeat%20the%20problem%3A%0D%0A"
           title="Report a Delivery List Scanner bug"
         >
           <span class="footer-bug-icon-v0163" aria-hidden="true"></span>
@@ -1988,6 +2013,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260821-v0.357"></script>
+  <script src="static/js/app.js?v=20260825-v0.385"></script>
 </body>
 </html>

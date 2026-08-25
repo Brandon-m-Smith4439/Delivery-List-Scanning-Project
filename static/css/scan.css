@@ -4267,3 +4267,542 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 .scan-page .scanner-panel:not(.bay-scanner-panel) .last-bay-location-v321.has-rack-color-v355:not(.is-history) b {
   color: color-mix(in srgb, var(--last-scan-location-accent) 82%, #102f46) !important;
 }
+
+/* ========================================================================== */
+/* v0.379 Compact Scan filters and shared glass-type gradients                */
+/* -------------------------------------------------------------------------- */
+/* This final owner removes inherited attention icons, reduces the drawer     */
+/* footprint, and uses the Lookup Manager glass color variables consistently. */
+/* ========================================================================== */
+.scan-page .scan-filter-drawer > summary {
+  min-width: 238px !important;
+  min-height: 36px !important;
+  justify-content: flex-start !important;
+  gap: 6px !important;
+  border-color: #bfd0e2 !important;
+  border-radius: 9px !important;
+  background: linear-gradient(180deg, #fff 0%, #f6f9fc 100%) !important;
+  padding: 0 9px !important;
+  font-size: 12px !important;
+}
+
+.scan-page .scan-filter-glance { gap: 4px !important; margin-left: auto !important; }
+.scan-page .scan-filter-glance-badge {
+  min-width: 29px !important;
+  height: 20px !important;
+  gap: 3px !important;
+  padding: 0 5px !important;
+  font-size: 9px !important;
+}
+.scan-page .scan-filter-glance-badge i { font-size: 8px !important; }
+.scan-page .scan-filter-glance-badge b { font-size: 9px !important; }
+
+.scan-page .scan-filter-drawer-panel {
+  width: min(790px, calc(100vw - 54px)) !important;
+  max-height: min(68vh, 610px) !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  border-color: #b9ccdf !important;
+  border-radius: 13px !important;
+  background: linear-gradient(180deg, #f9fbfd 0%, #f2f6fa 100%) !important;
+  padding: 10px !important;
+  box-shadow: 0 18px 48px rgba(8, 38, 76, .20), 0 0 0 1px rgba(255,255,255,.72) inset !important;
+}
+
+.scan-page .scan-filter-panel-header {
+  gap: 10px !important;
+  padding: 0 1px 8px !important;
+}
+.scan-page .scan-filter-panel-icon {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 9px !important;
+  background: linear-gradient(145deg, #2c72b6, #0c3d72) !important;
+  box-shadow: 0 5px 12px rgba(12, 61, 114, .16) !important;
+}
+.scan-page .scan-filter-panel-icon::before { width: 16px !important; height: 16px !important; }
+.scan-page .scan-filter-panel-header strong { font-size: 14px !important; }
+.scan-page .scan-filter-panel-header span { font-size: 10px !important; }
+.scan-page .scan-filter-panel-header > button { min-height: 31px !important; padding: 0 9px !important; font-size: 10px !important; }
+
+/* The original explanatory strips made the compact drawer needlessly tall. */
+.scan-page .scan-filter-guidance,
+.scan-page .scan-filter-panel-footer { display: none !important; }
+
+.scan-page .scan-filter-section {
+  gap: 7px !important;
+  border-color: #d2deea !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  padding: 9px !important;
+  box-shadow: 0 3px 10px rgba(18, 52, 88, .035) !important;
+}
+.scan-page .scan-filter-section h3 { color: #153f69 !important; font-size: 10px !important; }
+.scan-page .scan-filter-section-heading > span { font-size: 8.5px !important; }
+.scan-page .scan-filter-options { gap: 5px !important; }
+.scan-page .scan-filter-options .tab {
+  min-height: 31px !important;
+  gap: 5px !important;
+  border-radius: 8px !important;
+  padding: 0 8px !important;
+  color: #2c4d6b !important;
+  font-size: 10.5px !important;
+  font-weight: 850 !important;
+  transform: none !important;
+}
+.scan-page .scan-filter-options .priority-tab {
+  min-width: 0 !important;
+  justify-content: center !important;
+}
+.scan-page .scan-filter-options .tab:hover,
+.scan-page .scan-filter-options .tab:focus-visible {
+  transform: none !important;
+  border-color: #6d9bc4 !important;
+  background: #f1f6fb !important;
+  box-shadow: 0 0 0 2px rgba(45, 116, 180, .09) !important;
+}
+.scan-page .scan-filter-options .tab.is-active:not(.glass-filter-tab) {
+  border-color: #2e73b1 !important;
+  background: linear-gradient(180deg, #397fbd 0%, #2667a3 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 10px rgba(38, 103, 163, .18) !important;
+}
+
+/* Remove the inherited OK / warning / IR pseudo-icons from attention filters. */
+.scan-page .scan-filter-options > button.priority-tab::before,
+.scan-page .scan-filter-options > button[data-filter="remakes"]::before,
+.scan-page .scan-filter-options > button[data-filter="rushes"]::before,
+.scan-page .scan-filter-options > button[data-filter="internal-rejects"]::before {
+  content: none !important;
+  display: none !important;
+}
+
+.scan-page .scan-filter-glass-section { grid-column: 1 / -1 !important; }
+.scan-page .scan-filter-glass-section .glass-filter-tabs {
+  max-height: 170px !important;
+  gap: 5px !important;
+  padding: 2px !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab {
+  min-height: 29px !important;
+  padding: 0 8px !important;
+  font-size: 10px !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab::before {
+  width: 7px !important;
+  height: 7px !important;
+  flex: 0 0 7px !important;
+  border-color: color-mix(in srgb, var(--glass-type-color) 68%, #fff) !important;
+  background: var(--glass-type-color) !important;
+}
+
+/* The list itself carries the same subtle glass hue as the filter controls. */
+.scan-page .delivery-table tr.glass-tone-row .job-cell-v157 {
+  background: linear-gradient(90deg, var(--glass-type-soft-strong) 0%, var(--glass-type-soft) 45%, rgba(255,255,255,0) 100%) !important;
+}
+.scan-page .delivery-table tr.glass-tone-row .job-copy-v157.glass-tone-inline {
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 7px !important;
+}
+.scan-page .glass-group-row.glass-tone-group > td {
+  border-left: 4px solid var(--glass-type-color) !important;
+  background: linear-gradient(90deg, var(--glass-type-soft-strong) 0%, #f5f8fb 70%) !important;
+}
+.scan-page .glass-group-row.glass-tone-group button {
+  color: #214766 !important;
+}
+.scan-page .mobile-list-card.glass-tone-card {
+  border-left: 4px solid var(--glass-type-color) !important;
+  background: linear-gradient(135deg, var(--glass-type-soft) 0%, #fff 44%) !important;
+}
+
+/* Success popup rack selector keeps the selected live rack obvious. */
+.scan-result-rack-field-compact .custom-select-trigger,
+.scan-result-rack-field-compact select {
+  border-color: #a9bfd6 !important;
+  background: linear-gradient(180deg, #fff 0%, #f5f9fd 100%) !important;
+}
+.scan-result-rack-field-compact small { color: #526e88 !important; font-weight: 800 !important; }
+
+@media (max-width: 900px) {
+  .scan-page .scan-filter-drawer-panel { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 620px) {
+  .scan-page .scan-filter-drawer > summary { min-width: 0 !important; }
+  .scan-page .scan-filter-drawer-panel { width: calc(100vw - 28px) !important; grid-template-columns: 1fr !important; }
+}
+
+
+/* ========================================================================== */
+/* v0.380 Readable Scan filters and restrained glass-tone presentation       */
+/* ========================================================================== */
+.scan-page .scan-filter-drawer-panel {
+  width: min(990px, calc(100vw - 54px)) !important;
+  max-height: min(78vh, 740px) !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  padding: 14px !important;
+}
+.scan-page .scan-filter-panel-header {
+  grid-column: 1 / -1 !important;
+  padding-bottom: 11px !important;
+}
+.scan-page .scan-filter-panel-icon { width: 38px !important; height: 38px !important; }
+.scan-page .scan-filter-panel-header strong { font-size: 16px !important; }
+.scan-page .scan-filter-panel-header span { font-size: 11.5px !important; }
+.scan-page .scan-filter-panel-header > button { min-height: 35px !important; font-size: 11px !important; }
+.scan-page .scan-filter-section {
+  gap: 9px !important;
+  border-radius: 11px !important;
+  padding: 12px !important;
+}
+.scan-page .scan-filter-section h3 { font-size: 12.5px !important; }
+.scan-page .scan-filter-section-heading > span { font-size: 10.5px !important; line-height: 1.35 !important; }
+.scan-page .scan-filter-options { gap: 7px !important; }
+.scan-page .scan-filter-options .tab {
+  min-height: 38px !important;
+  padding: 0 11px !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tabs {
+  max-height: 245px !important;
+  gap: 7px !important;
+  padding: 3px !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab {
+  min-height: 36px !important;
+  padding: 5px 10px !important;
+  font-size: 11.5px !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab::before {
+  width: 6px !important;
+  height: 6px !important;
+  flex-basis: 6px !important;
+  border-color: var(--glass-type-border) !important;
+  background: var(--glass-type-accent) !important;
+}
+/* Exact saved glass colors should be a background hint, never a saturated button. */
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active {
+  border-color: var(--glass-type-border) !important;
+  background: linear-gradient(135deg, var(--glass-type-soft-strong) 0%, #fff 80%) !important;
+  color: #244862 !important;
+  box-shadow: inset 3px 0 0 var(--glass-type-accent), 0 0 0 2px var(--glass-type-ring) !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active span { color: #5d7184 !important; }
+/* All Glass Types is neutral; when active its dark background always owns white text. */
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"] {
+  border-color: #c3d2df !important;
+  background: #fff !important;
+  color: #294b67 !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"]::before { display: none !important; }
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active {
+  border-color: #245f98 !important;
+  background: linear-gradient(180deg, #316faa 0%, #245d92 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 10px rgba(36,93,146,.14) !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active span { color: #fff !important; }
+
+/* Replace the v0.379 stronger row treatments with a much quieter saved hue. */
+.scan-page .delivery-table tr.glass-tone-row .job-cell-v157 {
+  background: linear-gradient(90deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,0) 74%) !important;
+}
+.scan-page .glass-group-row.glass-tone-group > td {
+  border-left: 2px solid var(--glass-type-accent) !important;
+  background: linear-gradient(90deg, var(--glass-type-soft-strong) 0%, #f7f9fb 78%) !important;
+}
+.scan-page .mobile-list-card.glass-tone-card {
+  border-left: 2px solid var(--glass-type-accent) !important;
+  background: linear-gradient(135deg, var(--glass-type-soft) 0%, #fff 58%) !important;
+}
+
+@media (max-width: 920px) {
+  .scan-page .scan-filter-drawer-panel { width: calc(100vw - 34px) !important; grid-template-columns: 1fr !important; }
+}
+
+/* ========================================================================== */
+/* v0.381 Scan selection, equal glass cells, filter counts, and All Scans    */
+/* ========================================================================== */
+
+/* Keep every Job Nr. / Glass Type surface the same width so the very subtle
+   glass gradient reads as a consistent column rather than uneven pills. */
+.scan-page .delivery-table td.job-cell-v157 {
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+.scan-page .delivery-table .job-copy-v157.glass-tone-inline {
+  width: 100% !important;
+  min-height: 44px !important;
+  display: grid !important;
+  align-content: center !important;
+  box-sizing: border-box !important;
+  padding: 5px 8px !important;
+  border-radius: 7px !important;
+}
+
+/* Selection stays obvious but no longer uses a bright heavy blue outline. */
+.scan-page .delivery-table tbody tr.is-selected,
+.scan-page .delivery-table tbody tr.selected {
+  outline: 1px solid rgba(84, 137, 198, .38) !important;
+  outline-offset: -1px !important;
+  background: #f4f8fd !important;
+  box-shadow: inset 3px 0 0 rgba(61, 120, 188, .62) !important;
+}
+.scan-page .mobile-list-card.is-selected {
+  border-color: rgba(84, 137, 198, .46) !important;
+  background: #f5f9fd !important;
+  box-shadow: inset 3px 0 0 rgba(61, 120, 188, .58) !important;
+}
+
+/* The All Glass Types total stays visible even on the dark selected state. */
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"] > span {
+  min-width: 30px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-left: 2px !important;
+  border-radius: 999px !important;
+  background: #edf3f8 !important;
+  color: #526d87 !important;
+  padding: 2px 6px !important;
+  font-size: 10px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active > span {
+  background: rgba(255,255,255,.16) !important;
+  color: #fff !important;
+}
+
+/* All Scans now owns an explicit Glass Type column. */
+.full-scans-modal .all-scans-table {
+  min-width: 1450px !important;
+}
+.all-scans-table col.all-scans-col-glass { width: 150px; }
+.all-scans-table .all-scans-glass-type-v381 {
+  width: 100% !important;
+  min-height: 30px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  color: #294b67 !important;
+  font-size: 10px !important;
+  font-weight: 850 !important;
+}
+.all-scans-table .all-scans-glass-type-v381.is-empty {
+  justify-content: center !important;
+  color: #8b99a8 !important;
+}
+/* Re-index the focused column rules after inserting Glass Type as column 4. */
+.all-scans-table th:nth-child(4),
+.all-scans-table td:nth-child(4),
+.all-scans-table th:nth-child(10),
+.all-scans-table td:nth-child(10) {
+  text-align: left !important;
+}
+.all-scans-table th:nth-child(5),
+.all-scans-table td:nth-child(5),
+.all-scans-table th:nth-child(11),
+.all-scans-table td:nth-child(11) {
+  text-align: center !important;
+}
+.all-scans-table th:nth-child(7),
+.all-scans-table td:nth-child(7) {
+  white-space: nowrap !important;
+}
+.all-scans-table td:nth-child(8) {
+  white-space: normal !important;
+}
+
+/* ========================================================================== */
+/* v0.382 Scan selection stability and unmistakable glass-filter selection   */
+/* ========================================================================== */
+/* Exact glass colors stay deliberately faint, but selection itself uses one
+   consistent app-blue outline/check so operators can immediately tell which
+   glass filters are active regardless of the saved glass hue. */
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active {
+  position: relative !important;
+  border: 2px solid #7194b7 !important;
+  background: linear-gradient(135deg, var(--glass-type-soft-strong) 0%, #fff 76%) !important;
+  color: #173f61 !important;
+  padding-right: 38px !important;
+  box-shadow:
+    inset 4px 0 0 var(--glass-type-accent),
+    0 0 0 2px rgba(48, 101, 151, .11) !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active::after {
+  content: "\2713" !important;
+  position: absolute !important;
+  right: 9px !important;
+  top: 50% !important;
+  width: 20px !important;
+  height: 20px !important;
+  display: grid !important;
+  place-items: center !important;
+  transform: translateY(-50%) !important;
+  border-radius: 999px !important;
+  background: #2f669d !important;
+  color: #fff !important;
+  font-size: 11px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+  box-shadow: 0 2px 5px rgba(28, 71, 112, .16) !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active:hover,
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active:focus-visible {
+  border-color: #557ea7 !important;
+  background: linear-gradient(135deg, var(--glass-type-soft-strong) 0%, #f8fbfe 76%) !important;
+  box-shadow:
+    inset 4px 0 0 var(--glass-type-accent),
+    0 0 0 3px rgba(48, 101, 151, .12) !important;
+}
+
+/* ========================================================================== */
+/* v0.385 Rack selector parity, Prior containment, and Rush date-move ribbons */
+/* ========================================================================== */
+
+/* The success confirmation now looks like the maintained Location column:    */
+/* rack-set color owns the quiet tint/left rail while the native custom        */
+/* selector remains fully keyboard accessible.                                */
+.scan-result-rack-field-compact .custom-select-trigger.scan-result-location-rack-select-v385 {
+  min-height: 42px !important;
+  padding: 7px 34px 7px 11px !important;
+  border: 1px solid color-mix(in srgb, var(--rack-location-color, #7890a3) 42%, #cbd7e0) !important;
+  border-left: 4px solid var(--rack-location-color, #7890a3) !important;
+  border-radius: 8px !important;
+  background:
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--rack-location-color, #7890a3) 18%, #fff) 0%,
+      color-mix(in srgb, var(--rack-location-color, #7890a3) 8%, #fff) 54%,
+      #fff 100%) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rack-location-color, #7890a3) 8%, transparent) !important;
+}
+.scan-result-rack-field-compact .custom-select-trigger.scan-result-location-rack-select-v385 .custom-select-value {
+  color: color-mix(in srgb, var(--rack-location-color, #365365) 64%, #17384d) !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+  text-transform: uppercase;
+}
+.scan-result-rack-field-compact .custom-select-trigger.scan-result-location-rack-select-v385:hover:not(:disabled),
+.scan-result-rack-field-compact .custom-select-trigger.scan-result-location-rack-select-v385:focus-visible,
+.scan-result-rack-field-compact .custom-select-shell.is-open > .custom-select-trigger.scan-result-location-rack-select-v385 {
+  border-color: color-mix(in srgb, var(--rack-location-color, #7890a3) 66%, #9fb2c4) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rack-location-color, #7890a3) 12%, transparent) !important;
+}
+
+/* Historical rack locations used to append a loose "prior" word after the   */
+/* badge, which could escape the colored Location cell. Keep it as a small     */
+/* contained status pill instead.                                             */
+.scan-page .delivery-table .location-rack-cell-v349 {
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+.scan-page .delivery-table .location-badge.is-rack-history,
+.scan-page .delivery-table .location-badge.is-location-history {
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis !important;
+  font-size: 11px !important;
+}
+.scan-page .delivery-table .location-badge.is-rack-history::after,
+.scan-page .delivery-table .location-badge.is-location-history::after {
+  content: "PRIOR" !important;
+  flex: 0 0 auto !important;
+  margin: 0 0 0 2px !important;
+  padding: 2px 4px !important;
+  border: 1px solid #c2cad3 !important;
+  border-radius: 999px !important;
+  background: #f8fafb !important;
+  color: #72808e !important;
+  font-size: 7.5px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+  letter-spacing: .055em !important;
+}
+
+/* Rush delivery-date changes are traceability metadata, not duplicate pieces. */
+/* Render them as orange ribbons above the source row and as a reference on    */
+/* the corresponding stage on the target date.                                */
+.scan-page .delivery-table .rush-date-move-row-v385 > td {
+  padding: 5px 8px 3px !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+.rush-date-move-ribbon-v385 {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid #efc27a;
+  border-left: 4px solid #df861b;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #fff7e9 0%, #fffaf2 62%, #fff 100%);
+  box-shadow: 0 3px 8px rgba(130, 78, 13, .055);
+}
+.rush-date-move-ribbon-v385.is-target {
+  border-color: #e8b460;
+  background: linear-gradient(90deg, #fff3da 0%, #fff9ed 66%, #fff 100%);
+}
+.rush-date-move-icon-v385 {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #e69124;
+}
+.rush-date-move-icon-v385::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  display: block;
+  background: #fff;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 7h11V4l5 5-5 5v-3H6v5h5v2H4V7Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 7h11V4l5 5-5 5v-3H6v5h5v2H4V7Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.rush-date-move-ribbon-v385 > span:last-child {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 2px;
+}
+.rush-date-move-ribbon-v385 small {
+  color: #ad6214;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: .09em;
+  white-space: nowrap;
+}
+.rush-date-move-ribbon-v385 strong {
+  min-width: 0;
+  color: #7a4510;
+  font-size: 11.5px;
+  font-weight: 950;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rush-date-move-ribbon-v385 em {
+  grid-column: 2;
+  color: #8a6a43;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 750;
+}
